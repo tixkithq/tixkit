@@ -505,7 +505,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
       next_retry_at: null,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('fails and persists a bounded error when the endpoint response is too large', async () => {
@@ -536,7 +535,6 @@ describe('deliverWebhookActivity', () => {
     expect(dbState.deliveries[0]?.response).not.toContain('x'.repeat(1024));
     expect(dbState.deliveries[0]?.next_retry_at).toBeInstanceOf(Date);
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('accepts endpoint responses at the configured size cap', async () => {
@@ -561,7 +559,6 @@ describe('deliverWebhookActivity', () => {
       next_retry_at: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('enforces a hard request deadline for slow streaming responses', async () => {
@@ -653,7 +650,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('throws when a final failed HTTP response cannot be dead-lettered', async () => {
@@ -681,7 +677,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('reuses the existing delivery row and stable header when the same attempt is retried', async () => {
@@ -728,7 +723,6 @@ describe('deliverWebhookActivity', () => {
     expect(httpsState.requests[1]?.options.headers).toMatchObject({
       'X-Tixkit-Delivery': 'whd_1',
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
   it('does not send a duplicate request while the same attempt is already in progress', async () => {
@@ -785,7 +779,6 @@ describe('deliverWebhookActivity', () => {
       status: 'delivered',
       status_code: 204,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
   it('does not send a duplicate request while a failed same-attempt retry is in progress', async () => {
@@ -855,7 +848,6 @@ describe('deliverWebhookActivity', () => {
       status_code: 204,
       response: '',
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
   it('does not send a failed same-attempt retry before its scheduled retry time', async () => {
@@ -900,7 +892,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
       next_retry_at: retryAt,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('does not overwrite a delivered row when a stale held request completes', async () => {
@@ -943,7 +934,6 @@ describe('deliverWebhookActivity', () => {
       next_retry_at: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('does not overwrite a dead-lettered row when a stale held request completes', async () => {
@@ -988,7 +978,6 @@ describe('deliverWebhookActivity', () => {
       next_retry_at: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('returns terminal delivered attempts without creating a second row or sending again', async () => {
@@ -1019,7 +1008,6 @@ describe('deliverWebhookActivity', () => {
     expect(httpsState.request).not.toHaveBeenCalled();
     expect(dbState.deliveries).toHaveLength(1);
     expect(dbState.updateCalls).toBe(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('replays a delivered attempt with a replay-scoped delivery key', async () => {
@@ -1060,7 +1048,6 @@ describe('deliverWebhookActivity', () => {
       status: 'delivered',
       status_code: 204,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('dead-letters inactive endpoints without sending a request', async () => {
@@ -1097,7 +1084,6 @@ describe('deliverWebhookActivity', () => {
       next_retry_at: null,
     });
     expect(dbState.updateCalls).toBe(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('throws when inactive endpoint dead-letter creation cannot be persisted', async () => {
@@ -1121,7 +1107,6 @@ describe('deliverWebhookActivity', () => {
 
     expect(httpsState.request).not.toHaveBeenCalled();
     expect(dbState.deliveries).toHaveLength(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('throws when an existing inactive endpoint delivery cannot be repaired to dead-lettered', async () => {
@@ -1165,7 +1150,6 @@ describe('deliverWebhookActivity', () => {
       response: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('does not dead-letter an inactive endpoint over an unexpired in-flight lease', async () => {
@@ -1212,7 +1196,6 @@ describe('deliverWebhookActivity', () => {
       response: null,
     });
     expect(dbState.updateCalls).toBe(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('dead-letters missing endpoints without sending a request', async () => {
@@ -1246,7 +1229,6 @@ describe('deliverWebhookActivity', () => {
       next_retry_at: null,
     });
     expect(dbState.updateCalls).toBe(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('throws when missing endpoint dead-letter creation cannot be persisted', async () => {
@@ -1265,7 +1247,6 @@ describe('deliverWebhookActivity', () => {
 
     expect(httpsState.request).not.toHaveBeenCalled();
     expect(dbState.deliveries).toHaveLength(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('throws when an existing missing endpoint delivery cannot be repaired to dead-lettered', async () => {
@@ -1304,7 +1285,6 @@ describe('deliverWebhookActivity', () => {
       response: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('does not follow redirects and dead-letters a final redirect response', async () => {
@@ -1341,7 +1321,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
       next_retry_at: null,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -1391,7 +1370,6 @@ describe('deliverWebhookActivity', () => {
         delivered_at: null,
         next_retry_at: null,
       });
-      expect(dbState.destroy).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -1431,7 +1409,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
       next_retry_at: null,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('records a retryable failed attempt when the endpoint request throws before the final attempt', async () => {
@@ -1460,7 +1437,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
     });
     expect(dbState.deliveries[0]?.next_retry_at).toBeInstanceOf(Date);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('dead-letters the final failed attempt when the endpoint request throws', async () => {
@@ -1489,7 +1465,6 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
       next_retry_at: null,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('throws when a final endpoint request failure cannot be dead-lettered', async () => {
@@ -1515,6 +1490,5 @@ describe('deliverWebhookActivity', () => {
       delivered_at: null,
     });
     expect(dbState.updateCalls).toBe(1);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 });

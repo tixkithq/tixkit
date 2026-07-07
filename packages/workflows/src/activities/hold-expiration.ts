@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { createDb, EmailJobRepository, type Database } from '@tixkit/db';
+import { EmailJobRepository, type Database } from '@tixkit/db';
 import type { TemplateKey } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { getActivityDb } from './activity-clients.js';
 
 const CHECKOUT_BASE_URL =
   process.env.CHECKOUT_URL ?? process.env.NEXT_PUBLIC_CHECKOUT_URL ?? 'https://checkout.tixkit.com';
@@ -56,7 +57,7 @@ async function releasePendingDiscountReservation(
 export async function expireStaleHoldsActivity(): Promise<
   WorkflowActivityResult<{ expiredCount: number }>
 > {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const result = await db
       .updateTable('checkout_holds')
@@ -75,15 +76,13 @@ export async function expireStaleHoldsActivity(): Promise<
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
 export async function expireStaleSessionsActivity(): Promise<
   WorkflowActivityResult<{ expiredCount: number }>
 > {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const now = new Date();
     const result = await db.transaction().execute(async (trx) => {
@@ -144,8 +143,6 @@ export async function expireStaleSessionsActivity(): Promise<
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -156,7 +153,7 @@ export async function processWaitlistOffersActivity(): Promise<
     queuedEmailCount: number;
   }>
 > {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const now = new Date();
     const offerResult = await db.transaction().execute(async (trx) => {
@@ -379,7 +376,5 @@ export async function processWaitlistOffersActivity(): Promise<
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }

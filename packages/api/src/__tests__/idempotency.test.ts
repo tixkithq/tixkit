@@ -2,6 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { hashRequest, withIdempotency } from '../services/idempotency.js';
 import { IdempotencyConflictError, IdempotencyInProgressError } from '@tixkit/domain';
 
+type IdempotencyPayloadScenario = {
+  surface: string;
+  base: unknown;
+  reordered: unknown;
+  changed: unknown;
+};
+
 describe('hashRequest', () => {
   it('produces a deterministic hash for the same payload', () => {
     const h1 = hashRequest({ foo: 'bar' });
@@ -67,6 +74,160 @@ describe('hashRequest', () => {
       }),
     ).not.toBe(baseHash);
   });
+
+  const payloadScenarios: IdempotencyPayloadScenario[] = [
+    {
+      surface: 'checkout session creation',
+      base: {
+        eventId: 'evt_1',
+        items: [
+          {
+            ticketTypeId: 'tt_vip',
+            quantity: 2,
+            attendeeFields: [{ name: 'Ada Lovelace' }, { name: 'Grace Hopper' }],
+          },
+        ],
+        buyer: { email: 'buyer@example.com', firstName: 'Ada', lastName: 'Lovelace' },
+        buyerFields: { company: 'Analytical Engines' },
+        discountCode: 'SAVE20',
+        accessCode: 'VIP',
+      },
+      reordered: {
+        accessCode: 'VIP',
+        discountCode: 'SAVE20',
+        buyerFields: { company: 'Analytical Engines' },
+        buyer: { lastName: 'Lovelace', firstName: 'Ada', email: 'buyer@example.com' },
+        items: [
+          {
+            quantity: 2,
+            attendeeFields: [{ name: 'Ada Lovelace' }, { name: 'Grace Hopper' }],
+            ticketTypeId: 'tt_vip',
+          },
+        ],
+        eventId: 'evt_1',
+      },
+      changed: {
+        eventId: 'evt_1',
+        items: [{ ticketTypeId: 'tt_vip', quantity: 1 }],
+        buyer: { email: 'buyer@example.com', firstName: 'Ada', lastName: 'Lovelace' },
+        buyerFields: { company: 'Analytical Engines' },
+        discountCode: 'SAVE20',
+        accessCode: 'VIP',
+      },
+    },
+    {
+      surface: 'checkout confirmation',
+      base: { paymentMethodId: 'pm_1', expectedTotalCents: 12500, acceptedTerms: true },
+      reordered: { acceptedTerms: true, expectedTotalCents: 12500, paymentMethodId: 'pm_1' },
+      changed: { paymentMethodId: 'pm_2', expectedTotalCents: 12500, acceptedTerms: true },
+    },
+    {
+      surface: 'order refund',
+      base: {
+        amountCents: 4200,
+        reason: 'requested_by_customer',
+        ticketIds: ['tic_1', 'tic_2'],
+        notifyBuyer: true,
+      },
+      reordered: {
+        notifyBuyer: true,
+        ticketIds: ['tic_1', 'tic_2'],
+        reason: 'requested_by_customer',
+        amountCents: 4200,
+      },
+      changed: {
+        amountCents: 4100,
+        reason: 'requested_by_customer',
+        ticketIds: ['tic_1', 'tic_2'],
+        notifyBuyer: true,
+      },
+    },
+    {
+      surface: 'message campaign',
+      base: {
+        channel: 'email',
+        subject: 'Tonight starts soon',
+        body: '<p>Hello {{buyer.firstName}}</p>',
+        segmentId: 'seg_vip',
+        scheduledAt: '2026-07-07T19:00:00.000Z',
+      },
+      reordered: {
+        scheduledAt: '2026-07-07T19:00:00.000Z',
+        segmentId: 'seg_vip',
+        body: '<p>Hello {{buyer.firstName}}</p>',
+        subject: 'Tonight starts soon',
+        channel: 'email',
+      },
+      changed: {
+        channel: 'sms',
+        body: 'Hello {{buyer.firstName}}',
+        segmentId: 'seg_vip',
+        scheduledAt: '2026-07-07T19:00:00.000Z',
+      },
+    },
+    {
+      surface: 'ticket transfer',
+      base: { recipientEmail: 'new@example.com', recipientName: 'New Owner' },
+      reordered: { recipientName: 'New Owner', recipientEmail: 'new@example.com' },
+      changed: { recipientEmail: 'other@example.com', recipientName: 'New Owner' },
+    },
+    {
+      surface: 'offline scan sync',
+      base: {
+        deviceId: 'dev_1',
+        scans: [
+          { ticketId: 'tic_1', scannedAt: '2026-07-07T18:00:00.000Z', result: 'accepted' },
+          { ticketId: 'tic_2', scannedAt: '2026-07-07T18:00:02.000Z', result: 'duplicate' },
+        ],
+      },
+      reordered: {
+        scans: [
+          { result: 'accepted', scannedAt: '2026-07-07T18:00:00.000Z', ticketId: 'tic_1' },
+          { result: 'duplicate', scannedAt: '2026-07-07T18:00:02.000Z', ticketId: 'tic_2' },
+        ],
+        deviceId: 'dev_1',
+      },
+      changed: {
+        deviceId: 'dev_1',
+        scans: [{ ticketId: 'tic_1', scannedAt: '2026-07-07T18:00:00.000Z', result: 'rejected' }],
+      },
+    },
+    {
+      surface: 'report export',
+      base: {
+        format: 'csv',
+        range: { from: '2026-07-01', to: '2026-07-07' },
+        filters: { channel: 'online', status: 'paid' },
+      },
+      reordered: {
+        filters: { status: 'paid', channel: 'online' },
+        range: { to: '2026-07-07', from: '2026-07-01' },
+        format: 'csv',
+      },
+      changed: {
+        format: 'csv',
+        range: { from: '2026-07-01', to: '2026-07-08' },
+        filters: { channel: 'online', status: 'paid' },
+      },
+    },
+    {
+      surface: 'resale listing',
+      base: { priceCents: 3800, expiresAt: '2026-07-14T18:00:00.000Z' },
+      reordered: { expiresAt: '2026-07-14T18:00:00.000Z', priceCents: 3800 },
+      changed: { priceCents: 3900, expiresAt: '2026-07-14T18:00:00.000Z' },
+    },
+  ];
+
+  it.each(payloadScenarios)(
+    'keeps $surface idempotency hashes stable for equivalent payloads and distinct for changed payloads',
+    ({ base, reordered, changed }) => {
+      const baseHash = hashRequest(base);
+
+      expect(hashRequest(reordered)).toBe(baseHash);
+      expect(hashRequest(changed)).not.toBe(baseHash);
+      expect(baseHash).toMatch(/^[a-f0-9]{64}$/);
+    },
+  );
 
   it('handles null and undefined payloads', () => {
     const h1 = hashRequest(null);

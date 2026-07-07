@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -180,10 +181,15 @@ export function registerHealthRoute(app: FastifyInstance): void {
   );
 }
 
-export function registerJsonBodyParser(app: FastifyInstance): void {
+export function registerJsonBodyParser(
+  app: FastifyInstance,
+  options: { captureRawBody?: boolean } = {},
+): void {
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
     const rawBody = body as string;
-    (request as unknown as { rawBody: string }).rawBody = rawBody;
+    if (options.captureRawBody === true) {
+      (request as unknown as { rawBody: string }).rawBody = rawBody;
+    }
     if (rawBody.trim().length === 0) {
       done(null, undefined);
       return;
@@ -282,8 +288,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     origin: createCorsOriginValidator(config.corsAllowedOrigins),
     credentials: true,
   });
-  // Capture raw body for webhook signature verification while still parsing JSON for all routes
-  registerJsonBodyParser(app);
+  await app.register(compress, {
+    globalCompression: true,
+    globalDecompression: false,
+    threshold: config.compressionThresholdBytes,
+  });
 
   // Initialize services
   const db = createDb(config.databaseUrl);
@@ -328,6 +337,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Public webhook routes (no auth, signature-verified)
   await app.register(async (publicWebhooks) => {
     await registerIpRateLimit(publicWebhooks, { redis: rateLimitRedis });
+    registerJsonBodyParser(publicWebhooks, { captureRawBody: true });
     await publicWebhooks.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
     await publicWebhooks.register(stripeWebhookRoutes, { prefix: '/v1/webhooks/stripe' });
     await publicWebhooks.register(telnyxWebhookRoutes, { prefix: '/v1/webhooks/telnyx' });

@@ -1,6 +1,7 @@
-import { createDb, type Database } from '@tixkit/db';
+import type { Database } from '@tixkit/db';
 import { PutObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
 import { Redis } from 'ioredis';
+import { PassThrough } from 'node:stream';
 import { ulid } from 'ulid';
 import {
   parseExportFilterDateBoundary,
@@ -9,8 +10,11 @@ import {
 } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { getActivityDb, startNotificationDeliveryWorkflow } from './activity-clients.js';
 
 const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
+const DEFAULT_EXPORT_PAGE_SIZE = 1_000;
+const MAX_EXPORT_PAGE_SIZE = 10_000;
 
 function isValidExportFileUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -40,6 +44,14 @@ function exportContentType(format: string) {
     return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   }
   return 'text/csv';
+}
+
+function exportPageSize(): number {
+  const raw = process.env.EXPORT_PAGE_SIZE;
+  if (!raw) return DEFAULT_EXPORT_PAGE_SIZE;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_EXPORT_PAGE_SIZE;
+  return Math.min(Math.max(parsed, 1), MAX_EXPORT_PAGE_SIZE);
 }
 
 function encodeS3Key(key: string) {
@@ -225,8 +237,82 @@ function escapeCsv(val: unknown): string {
   return str;
 }
 
-function toJson(rows: Record<string, unknown>[]): string {
-  return JSON.stringify(rows, null, 2);
+class ExportDataWriter {
+  private headers: string[] | null = null;
+  private chunks: string[] = [];
+  private jsonStarted = false;
+  private jsonRowCount = 0;
+  private xlsxRows: Record<string, unknown>[] = [];
+  private finalized = false;
+  rowCount = 0;
+
+  constructor(
+    private readonly format: string,
+    private readonly writeChunk?: (chunk: string) => Promise<void> | void,
+  ) {}
+
+  async appendRows(rows: Record<string, unknown>[]): Promise<void> {
+    if (rows.length === 0) return;
+    this.rowCount += rows.length;
+    if (this.format === 'json') {
+      await this.appendJsonRows(rows);
+      return;
+    }
+    if (this.format === 'xlsx') {
+      this.xlsxRows.push(...rows);
+      return;
+    }
+    await this.appendCsvRows(rows);
+  }
+
+  private async appendCsvRows(rows: Record<string, unknown>[]): Promise<void> {
+    if (!this.headers) {
+      this.headers = Object.keys(rows[0]);
+      await this.push(this.headers.join(','));
+    }
+    for (const row of rows) {
+      await this.push('\n');
+      await this.push(this.headers.map((h) => escapeCsv(row[h])).join(','));
+    }
+  }
+
+  private async appendJsonRows(rows: Record<string, unknown>[]): Promise<void> {
+    if (!this.jsonStarted) {
+      await this.push('[');
+      this.jsonStarted = true;
+    }
+    for (const row of rows) {
+      if (this.jsonRowCount > 0) await this.push(',\n');
+      await this.push(`\n  ${JSON.stringify(row, null, 2).replace(/\n/g, '\n  ')}`);
+      this.jsonRowCount += 1;
+    }
+  }
+
+  private async push(chunk: string): Promise<void> {
+    if (this.writeChunk) {
+      await this.writeChunk(chunk);
+      return;
+    }
+    this.chunks.push(chunk);
+  }
+
+  async data(): Promise<string> {
+    if (this.finalized) return this.writeChunk ? '' : this.chunks.join('');
+    this.finalized = true;
+    if (this.format === 'xlsx') {
+      const data = await toXlsx(this.xlsxRows);
+      if (this.writeChunk) {
+        await this.writeChunk(data);
+        return '';
+      }
+      return data;
+    }
+    if (this.format === 'json') {
+      if (!this.jsonStarted) return '[]';
+      await this.push('\n]');
+    }
+    return this.writeChunk ? '' : this.chunks.join('');
+  }
 }
 
 async function toXlsx(rows: Record<string, unknown>[]): Promise<string> {
@@ -375,27 +461,36 @@ function buildQuestionColumns(questions: ExportQuestion[]): {
   return { headers, valuesFor };
 }
 
-function applyDateFilter<T extends Record<string, unknown>>(
-  query: T[],
-  filters: ExportFilters,
-  dateField = 'created_at',
-): T[] {
-  let result = query;
+function applyDateFilterToQuery<T>(query: T, filters: ExportFilters, dateField = 'created_at'): T {
+  let result = query as any;
   if (filters.from) {
     const from = parseExportFilterDateBoundary(filters.from, 'start');
-    result = result.filter((row) => {
-      const value = row[dateField];
-      return (value instanceof Date || typeof value === 'string') && new Date(value) >= from;
-    });
+    result = result.where(dateField, '>=', from);
   }
   if (filters.to) {
     const to = parseExportFilterDateBoundary(filters.to, 'end');
-    result = result.filter((row) => {
-      const value = row[dateField];
-      return (value instanceof Date || typeof value === 'string') && new Date(value) <= to;
-    });
+    result = result.where(dateField, '<=', to);
   }
-  return result;
+  return result as T;
+}
+
+async function appendPagedExportRows<T extends Record<string, unknown>>(input: {
+  query: any;
+  writer: ExportDataWriter;
+  mapRows: (rows: T[]) => Promise<Record<string, unknown>[]> | Record<string, unknown>[];
+}): Promise<void> {
+  const pageSize = exportPageSize();
+  let offset = 0;
+
+  for (;;) {
+    let pageQuery = input.query.limit(pageSize);
+    if (offset > 0) pageQuery = pageQuery.offset(offset);
+    const rows = (await pageQuery.execute()) as T[];
+    if (rows.length === 0) break;
+    await input.writer.appendRows(await input.mapRows(rows));
+    if (rows.length < pageSize) break;
+    offset += rows.length;
+  }
 }
 
 function readPersistedExportFilters(type: string, persistedFilters: unknown) {
@@ -410,12 +505,15 @@ function readPersistedExportFilters(type: string, persistedFilters: unknown) {
   }
 }
 
-export async function generateExportActivity(input: {
-  exportId: string;
-  type: string;
-  format: string;
-}): Promise<WorkflowActivityResult<{ data: string; rowCount: number }>> {
-  const db = createDb();
+async function generateExportWithWriter(
+  input: {
+    exportId: string;
+    type: string;
+    format: string;
+  },
+  writer: ExportDataWriter,
+): Promise<WorkflowActivityResult<{ data: string; rowCount: number }>> {
+  const db = getActivityDb();
   try {
     const { exportJob } = await recordExportJobStatus(db, {
       exportId: input.exportId,
@@ -430,10 +528,24 @@ export async function generateExportActivity(input: {
     }
     const { filters } = filterResult;
 
-    let rows: Record<string, unknown>[] = [];
-
     if (input.type === 'attendees') {
-      let query = db.selectFrom('attendees').selectAll().where('tenant_id', '=', tenantId);
+      let query = db
+        .selectFrom('attendees')
+        .select([
+          'id',
+          'email',
+          'first_name',
+          'last_name',
+          'phone',
+          'status',
+          'event_id',
+          'order_id',
+          'ticket_type_id',
+          'checked_in_at',
+          'custom_answers',
+          'created_at',
+        ])
+        .where('tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
@@ -444,47 +556,14 @@ export async function generateExportActivity(input: {
       if (filters.ticketTypeId) {
         query = query.where('ticket_type_id', '=', filters.ticketTypeId) as typeof query;
       }
-
-      let attendees = await query.execute();
       if (filters.from || filters.to) {
-        attendees = applyDateFilter(attendees, filters);
+        query = applyDateFilterToQuery(query, filters);
       }
-
-      // Apply check-in status filter by joining to tickets.
-      if (filters.checkInStatus) {
-        const attendeeIds = new Set(attendees.map((a) => a.id));
-        if (attendeeIds.size > 0) {
-          const checkedInTickets = await db
-            .selectFrom('tickets')
-            .select(['attendee_id'])
-            .where('attendee_id', 'in', [...attendeeIds])
-            .where('status', '=', 'checked_in')
-            .execute();
-          const checkedInAttendeeIds = new Set(checkedInTickets.map((t) => t.attendee_id));
-          attendees = attendees.filter((a) =>
-            filters.checkInStatus === 'checked_in'
-              ? checkedInAttendeeIds.has(a.id)
-              : !checkedInAttendeeIds.has(a.id),
-          );
-        }
-      }
-
-      rows = attendees.map((a) => ({
-        id: a.id,
-        email: a.email,
-        firstName: a.first_name,
-        lastName: a.last_name,
-        phone: a.phone,
-        status: a.status,
-        eventId: a.event_id,
-        orderId: a.order_id,
-        checkedInAt: a.checked_in_at,
-        createdAt: a.created_at,
-      }));
 
       // Append checkout question and consent answer columns when the event has
       // configured questions. This preserves historical consent text/version
       // snapshots for auditability (C6).
+      let valuesFor: ((customAnswers: string | null) => Record<string, string>) | undefined;
       if (eventId) {
         const questions = (await db
           .selectFrom('questions')
@@ -502,8 +581,39 @@ export async function generateExportActivity(input: {
           .execute()) as ExportQuestion[];
 
         if (questions.length > 0) {
-          const { valuesFor } = buildQuestionColumns(questions);
-          rows = attendees.map((a) =>
+          valuesFor = buildQuestionColumns(questions).valuesFor;
+        }
+      }
+      await appendPagedExportRows({
+        query: query.orderBy('id', 'asc'),
+        writer,
+        mapRows: async (attendees) => {
+          let page = attendees;
+          if (filters.checkInStatus) {
+            const attendeeIds = new Set(
+              page.map((a) => a.id).filter((id): id is string => typeof id === 'string'),
+            );
+            if (attendeeIds.size > 0) {
+              const checkedInTickets = await db
+                .selectFrom('tickets')
+                .select(['attendee_id'])
+                .where('attendee_id', 'in', [...attendeeIds])
+                .where('status', '=', 'checked_in')
+                .execute();
+              const checkedInAttendeeIds = new Set(
+                checkedInTickets
+                  .map((t) => t.attendee_id)
+                  .filter((id): id is string => typeof id === 'string'),
+              );
+              page = page.filter((a) => {
+                if (typeof a.id !== 'string') return filters.checkInStatus !== 'checked_in';
+                return filters.checkInStatus === 'checked_in'
+                  ? checkedInAttendeeIds.has(a.id)
+                  : !checkedInAttendeeIds.has(a.id);
+              });
+            }
+          }
+          return page.map((a) =>
             Object.assign(
               {
                 id: a.id,
@@ -517,13 +627,28 @@ export async function generateExportActivity(input: {
                 checkedInAt: a.checked_in_at,
                 createdAt: a.created_at,
               },
-              valuesFor(a.custom_answers as string | null),
+              valuesFor ? valuesFor(a.custom_answers as string | null) : {},
             ),
           );
-        }
-      }
+        },
+      });
     } else if (input.type === 'orders') {
-      let query = db.selectFrom('orders').selectAll().where('tenant_id', '=', tenantId);
+      let query = db
+        .selectFrom('orders')
+        .select([
+          'id',
+          'order_number',
+          'status',
+          'currency',
+          'total_cents',
+          'refunded_cents',
+          'buyer_email',
+          'buyer_first_name',
+          'buyer_last_name',
+          'paid_at',
+          'created_at',
+        ])
+        .where('tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
@@ -531,27 +656,44 @@ export async function generateExportActivity(input: {
       if (filters.status) {
         query = query.where('status', '=', filters.status) as typeof query;
       }
-
-      let orders = await query.execute();
       if (filters.from || filters.to) {
-        orders = applyDateFilter(orders, filters);
+        query = applyDateFilterToQuery(query, filters);
       }
 
-      rows = orders.map((o) => ({
-        id: o.id,
-        orderNumber: o.order_number,
-        status: o.status,
-        currency: o.currency,
-        totalCents: o.total_cents,
-        refundedCents: o.refunded_cents,
-        buyerEmail: o.buyer_email,
-        buyerFirstName: o.buyer_first_name,
-        buyerLastName: o.buyer_last_name,
-        paidAt: o.paid_at,
-        createdAt: o.created_at,
-      }));
+      await appendPagedExportRows({
+        query: query.orderBy('id', 'asc'),
+        writer,
+        mapRows: (orders) =>
+          orders.map((o) => ({
+            id: o.id,
+            orderNumber: o.order_number,
+            status: o.status,
+            currency: o.currency,
+            totalCents: o.total_cents,
+            refundedCents: o.refunded_cents,
+            buyerEmail: o.buyer_email,
+            buyerFirstName: o.buyer_first_name,
+            buyerLastName: o.buyer_last_name,
+            paidAt: o.paid_at,
+            createdAt: o.created_at,
+          })),
+      });
     } else if (input.type === 'tickets') {
-      let query = db.selectFrom('tickets').selectAll().where('tenant_id', '=', tenantId);
+      let query = db
+        .selectFrom('tickets')
+        .select([
+          'id',
+          'code',
+          'status',
+          'event_id',
+          'order_id',
+          'attendee_id',
+          'ticket_type_id',
+          'transferred_to_email',
+          'checked_in_at',
+          'created_at',
+        ])
+        .where('tenant_id', '=', tenantId);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
@@ -562,23 +704,26 @@ export async function generateExportActivity(input: {
       if (filters.ticketTypeId) {
         query = query.where('ticket_type_id', '=', filters.ticketTypeId) as typeof query;
       }
-
-      let tickets = await query.execute();
       if (filters.from || filters.to) {
-        tickets = applyDateFilter(tickets, filters);
+        query = applyDateFilterToQuery(query, filters);
       }
 
-      rows = tickets.map((t) => ({
-        id: t.id,
-        code: t.code,
-        status: t.status,
-        eventId: t.event_id,
-        orderId: t.order_id,
-        attendeeId: t.attendee_id,
-        transferredToEmail: t.transferred_to_email,
-        checkedInAt: t.checked_in_at,
-        createdAt: t.created_at,
-      }));
+      await appendPagedExportRows({
+        query: query.orderBy('id', 'asc'),
+        writer,
+        mapRows: (tickets) =>
+          tickets.map((t) => ({
+            id: t.id,
+            code: t.code,
+            status: t.status,
+            eventId: t.event_id,
+            orderId: t.order_id,
+            attendeeId: t.attendee_id,
+            transferredToEmail: t.transferred_to_email,
+            checkedInAt: t.checked_in_at,
+            createdAt: t.created_at,
+          })),
+      });
     } else if (input.type === 'scan_logs') {
       let query = db
         .selectFrom('scan_logs')
@@ -603,30 +748,41 @@ export async function generateExportActivity(input: {
       if (filters.status) {
         query = query.where('scan_logs.outcome', '=', filters.status) as typeof query;
       }
-
-      let scanLogs = await query
-        .orderBy('scan_logs.scanned_at', 'asc')
-        .orderBy('scan_logs.id', 'asc')
-        .execute();
       if (filters.from || filters.to) {
-        scanLogs = applyDateFilter(scanLogs, filters, 'scanned_at');
+        query = applyDateFilterToQuery(query, filters, 'scan_logs.scanned_at');
       }
 
-      rows = scanLogs.map((s) => ({
-        id: s.id,
-        checkInListId: s.check_in_list_id,
-        deviceId: s.device_id,
-        ticketId: s.ticket_id,
-        qrHash: s.qr_hash,
-        outcome: s.outcome,
-        scannedAt: s.scanned_at,
-        offline: s.offline,
-        createdAt: s.created_at,
-      }));
+      await appendPagedExportRows({
+        query: query.orderBy('scan_logs.scanned_at', 'asc').orderBy('scan_logs.id', 'asc'),
+        writer,
+        mapRows: (scanLogs) =>
+          scanLogs.map((s) => ({
+            id: s.id,
+            checkInListId: s.check_in_list_id,
+            deviceId: s.device_id,
+            ticketId: s.ticket_id,
+            qrHash: s.qr_hash,
+            outcome: s.outcome,
+            scannedAt: s.scanned_at,
+            offline: s.offline,
+            createdAt: s.created_at,
+          })),
+      });
     } else if (input.type === 'sales') {
       let query = db
         .selectFrom('orders')
-        .selectAll()
+        .select([
+          'id',
+          'order_number',
+          'status',
+          'currency',
+          'total_cents',
+          'refunded_cents',
+          'tax_cents',
+          'fee_cents',
+          'buyer_email',
+          'created_at',
+        ])
         .where('tenant_id', '=', tenantId)
         .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
 
@@ -636,71 +792,83 @@ export async function generateExportActivity(input: {
       if (filters.status) {
         query = query.where('status', '=', filters.status) as typeof query;
       }
-
-      let orders = await query.execute();
       if (filters.from || filters.to) {
-        orders = applyDateFilter(orders, filters);
+        query = applyDateFilterToQuery(query, filters);
       }
 
-      rows = orders.map((o) => ({
-        orderId: o.id,
-        orderNumber: o.order_number,
-        status: o.status,
-        currency: o.currency,
-        grossCents: Number(o.total_cents),
-        refundedCents: Number(o.refunded_cents),
-        netCents: Number(o.total_cents) - Number(o.refunded_cents),
-        taxCents: Number(o.tax_cents),
-        feeCents: Number(o.fee_cents),
-        buyerEmail: o.buyer_email,
-        createdAt: o.created_at,
-      }));
+      await appendPagedExportRows({
+        query: query.orderBy('id', 'asc'),
+        writer,
+        mapRows: (orders) =>
+          orders.map((o) => ({
+            orderId: o.id,
+            orderNumber: o.order_number,
+            status: o.status,
+            currency: o.currency,
+            grossCents: Number(o.total_cents),
+            refundedCents: Number(o.refunded_cents),
+            netCents: Number(o.total_cents) - Number(o.refunded_cents),
+            taxCents: Number(o.tax_cents),
+            feeCents: Number(o.fee_cents),
+            buyerEmail: o.buyer_email,
+            createdAt: o.created_at,
+          })),
+      });
     } else if (input.type === 'tax') {
       let query = db
         .selectFrom('orders')
-        .selectAll()
+        .select([
+          'id',
+          'order_number',
+          'currency',
+          'subtotal_cents',
+          'discount_cents',
+          'tax_cents',
+          'status',
+          'created_at',
+        ])
         .where('tenant_id', '=', tenantId)
         .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
       }
-
-      let orders = await query.execute();
       if (filters.from || filters.to) {
-        orders = applyDateFilter(orders, filters);
+        query = applyDateFilterToQuery(query, filters);
       }
 
-      rows = orders.map((o) => ({
-        orderId: o.id,
-        orderNumber: o.order_number,
-        currency: o.currency,
-        taxableCents: Number(o.subtotal_cents) - Number(o.discount_cents),
-        taxCents: Number(o.tax_cents),
-        status: o.status,
-        createdAt: o.created_at,
-      }));
+      await appendPagedExportRows({
+        query: query.orderBy('id', 'asc'),
+        writer,
+        mapRows: (orders) =>
+          orders.map((o) => ({
+            orderId: o.id,
+            orderNumber: o.order_number,
+            currency: o.currency,
+            taxableCents: Number(o.subtotal_cents) - Number(o.discount_cents),
+            taxCents: Number(o.tax_cents),
+            status: o.status,
+            createdAt: o.created_at,
+          })),
+      });
     }
 
-    let data: string;
-    if (input.format === 'json') {
-      data = toJson(rows);
-    } else if (input.format === 'xlsx') {
-      data = await toXlsx(rows);
-    } else {
-      data = toCsv(rows);
-    }
-
-    return okResult({ data, rowCount: rows.length });
+    return okResult({ data: await writer.data(), rowCount: writer.rowCount });
   } catch (err) {
     return errResult(
       'EXPORT_GENERATION_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
+}
+
+export async function generateExportActivity(input: {
+  exportId: string;
+  type: string;
+  format: string;
+}): Promise<WorkflowActivityResult<{ data: string; rowCount: number }>> {
+  return generateExportWithWriter(input, new ExportDataWriter(input.format));
 }
 
 export async function uploadFileActivity(input: {
@@ -721,6 +889,10 @@ export async function uploadFileActivity(input: {
 }
 
 async function uploadExportData(exportId: string, data: string, format: string): Promise<string> {
+  return uploadExportBody(exportId, data, format);
+}
+
+async function uploadExportBody(exportId: string, body: unknown, format: string): Promise<string> {
   const bucket = process.env.S3_EXPORT_BUCKET ?? process.env.S3_BUCKET ?? 'tixkit-exports';
   const region = process.env.S3_EXPORT_REGION ?? process.env.S3_REGION ?? 'us-east-1';
   const key = `exports/${exportId}.${format}`;
@@ -755,7 +927,7 @@ async function uploadExportData(exportId: string, data: string, format: string):
       new PutObjectCommand({
         Bucket: bucket,
         Key: key,
-        Body: data,
+        Body: body as never,
         ContentType: exportContentType(format),
       }),
     );
@@ -764,11 +936,75 @@ async function uploadExportData(exportId: string, data: string, format: string):
   return fileUrl;
 }
 
+function writeExportStreamChunk(stream: PassThrough, chunk: string): Promise<void> {
+  if (stream.destroyed) return Promise.reject(new Error('Export upload stream was closed'));
+  if (stream.write(chunk)) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      stream.off('drain', onDrain);
+      stream.off('error', onError);
+      stream.off('close', onClose);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error) => {
+      cleanup();
+      reject(err);
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error('Export upload stream closed before queued data drained'));
+    };
+
+    stream.once('drain', onDrain);
+    stream.once('error', onError);
+    stream.once('close', onClose);
+  });
+}
+
+async function uploadGeneratedExportStream(input: {
+  exportId: string;
+  type: string;
+  format: string;
+}): Promise<WorkflowActivityResult<{ fileUrl: string; rowCount: number }>> {
+  const stream = new PassThrough();
+  const uploadPromise = uploadExportBody(input.exportId, stream, input.format);
+  const writer = new ExportDataWriter(input.format, (chunk) =>
+    writeExportStreamChunk(stream, chunk),
+  );
+
+  const genResult = await generateExportWithWriter(input, writer);
+  if (!genResult.ok) {
+    stream.destroy(new Error(genResult.message));
+    await uploadPromise.catch(() => undefined);
+    return genResult;
+  }
+
+  stream.end();
+  try {
+    const fileUrl = await uploadPromise;
+    return okResult({ fileUrl, rowCount: genResult.value.rowCount });
+  } catch (err) {
+    return errResult(
+      'FILE_UPLOAD_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  }
+}
+
 export async function generateAndUploadExportActivity(input: {
   exportId: string;
   type: string;
   format: string;
 }): Promise<WorkflowActivityResult<{ fileUrl: string; rowCount: number }>> {
+  if (!isLocalExportStorageMode() && input.format !== 'xlsx') {
+    return uploadGeneratedExportStream(input);
+  }
+
   const genResult = await generateExportActivity(input);
   if (!genResult.ok) return genResult;
 
@@ -788,7 +1024,7 @@ export async function markExportFailedActivity(input: {
   exportId: string;
   reason?: string;
 }): Promise<WorkflowActivityResult<{ failed: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     await recordExportJobStatus(db, {
       exportId: input.exportId,
@@ -803,8 +1039,6 @@ export async function markExportFailedActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -818,7 +1052,7 @@ export async function notifyExportCompleteActivity(input: {
     return errResult('INVALID_EXPORT_FILE_URL', 'Export file URL must use HTTPS');
   }
 
-  const db = createDb();
+  const db = getActivityDb();
   try {
     await recordExportJobStatus(db, {
       exportId: input.exportId,
@@ -881,54 +1115,21 @@ export async function notifyExportCompleteActivity(input: {
             });
 
             // Start the notification delivery workflow.
-            try {
-              const { Connection, Client } = await import('@temporalio/client');
-              const { notificationDeliveryWorkflow } = await import('../workflows/notification.js');
-              const { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } =
-                await import('../shared/types.js');
-              const temporalAddress = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
-              const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
-              const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
-              const connection = await Connection.connect({ address: temporalAddress });
-              const client = new Client({ connection, namespace: temporalNamespace });
-              const workflowId = notificationWorkflowId(job.id);
-              try {
-                await client.workflow.start(notificationDeliveryWorkflow, {
-                  taskQueue: temporalTaskQueue,
-                  workflowId,
-                  args: [
-                    {
-                      version: NOTIFICATION_WORKFLOW_VERSION,
-                      jobId: job.id,
-                      tenantId: user.tenant_id,
-                      brandId: route.brand_id,
-                      templateKey: 'staff-order-notification',
-                      templateVersionId: templateVersion.id,
-                      toEmail: user.email,
-                      variables: {
-                        exportId: input.exportId,
-                        downloadUrl,
-                        notificationType: 'staff',
-                      },
-                      providerRouteId: route.id,
-                      notificationType: 'staff',
-                    },
-                  ],
-                });
-              } catch (err) {
-                if (
-                  !(
-                    err instanceof Error &&
-                    (err.name === 'WorkflowExecutionAlreadyStartedError' ||
-                      err.message.includes('already started'))
-                  )
-                ) {
-                  throw err;
-                }
-              }
-            } catch {
-              // Non-fatal: email job is queued for later drainage.
-            }
+            await startNotificationDeliveryWorkflow({
+              jobId: job.id,
+              tenantId: user.tenant_id,
+              brandId: route.brand_id,
+              templateKey: 'staff-order-notification',
+              templateVersionId: templateVersion.id,
+              toEmail: user.email,
+              variables: {
+                exportId: input.exportId,
+                downloadUrl,
+                notificationType: 'staff',
+              },
+              providerRouteId: route.id,
+              notificationType: 'staff',
+            });
           }
         }
       }
@@ -943,7 +1144,5 @@ export async function notifyExportCompleteActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }

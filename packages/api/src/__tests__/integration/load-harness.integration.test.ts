@@ -1,5 +1,7 @@
 import { expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
 import { performance } from 'node:perf_hooks';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createDb, type Database } from '@tixkit/db';
 import {
@@ -94,6 +96,41 @@ const BULK_OFFLINE_SYNC_SLO_MS = process.env.BULK_OFFLINE_SYNC_SLO_MS
   ? Number.parseInt(process.env.BULK_OFFLINE_SYNC_SLO_MS, 10)
   : null;
 const INSERT_CHUNK_SIZE = 500;
+const PERFORMANCE_METRICS_PATH = process.env.PERFORMANCE_METRICS_PATH;
+const performanceMetrics: Record<string, number> = {};
+let dbQueryCount = 0;
+
+function recordPerformanceMetric(metric: string, value: number): void {
+  performanceMetrics[metric] = Number(value.toFixed(2));
+}
+
+async function writePerformanceMetrics(): Promise<void> {
+  if (!PERFORMANCE_METRICS_PATH) return;
+  const target = path.resolve(PERFORMANCE_METRICS_PATH);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, `${JSON.stringify(performanceMetrics, null, 2)}\n`);
+}
+
+async function measureDbQueryCount<T>(operation: () => Promise<T>): Promise<{
+  queryCount: number;
+  value: T;
+}> {
+  const before = dbQueryCount;
+  const value = await operation();
+  return { queryCount: dbQueryCount - before, value };
+}
+
+async function measureHeapDelta<T>(operation: () => Promise<T>): Promise<{
+  heapDeltaBytes: number;
+  value: T;
+}> {
+  const before = process.memoryUsage().heapUsed;
+  const value = await operation();
+  return {
+    heapDeltaBytes: Math.max(0, process.memoryUsage().heapUsed - before),
+    value,
+  };
+}
 
 async function seedTenantGraph(trx: Database): Promise<void> {
   await trx
@@ -725,7 +762,11 @@ async function runBulkOfflineSyncRoute(input: {
 describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
   beforeAll(async () => {
     previousDbDriver = setIntegrationDatabaseDriver();
-    db = createDb(integrationDatabaseUrl());
+    db = createDb(integrationDatabaseUrl(), {
+      log(event) {
+        if (event.level === 'query') dbQueryCount += 1;
+      },
+    });
     inventoryService = new InventoryService(db);
     paymentEventRepo = new PaymentEventRepository(db);
     ticketRepo = new TicketRepository(db);
@@ -736,6 +777,7 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
   });
 
   afterAll(async () => {
+    await writePerformanceMetrics();
     await app.close();
     await cleanupAll(db);
     await db.destroy();
@@ -842,20 +884,37 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       sessionIds.push(await createCheckoutSession(db, ticketTypeId));
     }
 
-    const measuredResults = await Promise.all(
-      sessionIds.map((sessionId) =>
-        measureSettled(() =>
-          inventoryService.reserveCart({
-            items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
-            checkoutSessionId: sessionId,
-          }),
+    const measuredHeapResults = await measureHeapDelta(() =>
+      measureDbQueryCount(() =>
+        Promise.all(
+          sessionIds.map((sessionId) =>
+            measureSettled(() =>
+              inventoryService.reserveCart({
+                items: [{ inventoryPoolId: poolId, ticketTypeId, quantity: 1 }],
+                checkoutSessionId: sessionId,
+              }),
+            ),
+          ),
         ),
       ),
     );
+    const measuredQueryResults = measuredHeapResults.value;
+    const measuredResults = measuredQueryResults.value;
     const results = measuredResults.map((entry) => entry.outcome);
+    const checkoutP50 = percentile(
+      measuredResults.map((entry) => entry.durationMs),
+      0.5,
+    );
     const checkoutP95 = percentile(
       measuredResults.map((entry) => entry.durationMs),
       0.95,
+    );
+    recordPerformanceMetric('checkoutReservationP50Ms', checkoutP50);
+    recordPerformanceMetric('checkoutReservationP95Ms', checkoutP95);
+    recordPerformanceMetric('checkoutReservationQueryCount', measuredQueryResults.queryCount);
+    recordPerformanceMetric(
+      'checkoutReservationHeapDeltaBytes',
+      measuredHeapResults.heapDeltaBytes,
     );
 
     const succeeded = results.filter((r) => r.status === 'fulfilled').length;
@@ -1009,16 +1068,30 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
     });
 
     const scannedAt = new Date();
-    const measuredOutcomes = await Promise.all(
-      Array.from({ length: BURST }, () =>
-        measure(() => ticketRepo.checkInIfValid(ticket.id, deviceId, scannedAt)),
+    const measuredHeapOutcomes = await measureHeapDelta(() =>
+      measureDbQueryCount(() =>
+        Promise.all(
+          Array.from({ length: BURST }, () =>
+            measure(() => ticketRepo.checkInIfValid(ticket.id, deviceId, scannedAt)),
+          ),
+        ),
       ),
     );
+    const measuredQueryOutcomes = measuredHeapOutcomes.value;
+    const measuredOutcomes = measuredQueryOutcomes.value;
     const outcomes = measuredOutcomes.map((entry) => entry.value);
+    const scanP50 = percentile(
+      measuredOutcomes.map((entry) => entry.durationMs),
+      0.5,
+    );
     const scanP95 = percentile(
       measuredOutcomes.map((entry) => entry.durationMs),
       0.95,
     );
+    recordPerformanceMetric('scannerCheckInP50Ms', scanP50);
+    recordPerformanceMetric('scannerCheckInP95Ms', scanP95);
+    recordPerformanceMetric('scannerCheckInQueryCount', measuredQueryOutcomes.queryCount);
+    recordPerformanceMetric('scannerCheckInHeapDeltaBytes', measuredHeapOutcomes.heapDeltaBytes);
 
     const accepted = outcomes.filter(Boolean).length;
     const duplicates = outcomes.filter((v) => !v).length;

@@ -14,7 +14,13 @@ import {
   executeTableQuery,
 } from '@tixkit/db';
 import { sql } from 'kysely';
-import { col, defineTable, paramsToQuery, type AdminTablePage } from '@tixkit/admin-table-core';
+import {
+  col,
+  defineTable,
+  paramsToQuery,
+  type AdminTableQuery,
+  type AdminTablePage,
+} from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import type { ScanRequest, SyncScanInput } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
@@ -184,6 +190,39 @@ const attendeesTableSchema = defineTable('attendees', {
   ],
 });
 
+const attendeeListColumns = [
+  'id',
+  'tenant_id',
+  'order_id',
+  'event_id',
+  'ticket_type_id',
+  'event_occurrence_id',
+  'ticket_id',
+  'first_name',
+  'last_name',
+  'email',
+  'phone',
+  'status',
+  'custom_answers',
+  'checked_in_at',
+  'check_in_device_id',
+  'created_at',
+  'updated_at',
+] as const;
+
+function parseStrictTableQuery(
+  schema: Parameters<typeof paramsToQuery>[0],
+  params: URLSearchParams,
+): AdminTableQuery {
+  const { query, rejected } = paramsToQuery(schema, params);
+  if (rejected.length > 0) {
+    throw new ValidationError(`Invalid table query parameters: ${rejected.join(', ')}`, {
+      rejected,
+    });
+  }
+  return query;
+}
+
 function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
   ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
   ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
@@ -242,7 +281,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
       if (value === undefined || key === 'checkInListId' || key === 'eventOccurrenceId') continue;
       searchParams.set(key, value);
     }
-    const { query: tableQuery } = paramsToQuery(attendeesTableSchema, searchParams);
+    const tableQuery = parseStrictTableQuery(attendeesTableSchema, searchParams);
 
     const result = await executeTableQuery(
       db,
@@ -252,6 +291,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         tenantId: principal.tenantId,
         scope,
         serialize: serializeAttendee,
+        selectFields: attendeeListColumns,
         strictValidation: true,
         customFilters: {
           checkInStatus: (q, value) => {
@@ -362,7 +402,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         searchParams.set(key, value);
       }
     }
-    const { query: tableQuery } = paramsToQuery(attendeesTableSchema, searchParams);
+    const tableQuery = parseStrictTableQuery(attendeesTableSchema, searchParams);
 
     // Execute the table query with custom checkInStatus filter and facet
     const result = await executeTableQuery(
@@ -373,6 +413,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         tenantId: principal.tenantId,
         scope,
         serialize: serializeAttendee,
+        selectFields: attendeeListColumns,
         strictValidation: true,
         customFilters: {
           checkInStatus: (q, value) => {

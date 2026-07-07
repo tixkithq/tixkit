@@ -48,6 +48,7 @@ const {
     organizationId: string;
     eventType: string;
     payload: Record<string, unknown>;
+    idempotencyKey?: string;
   }): Promise<
     WorkflowActivityResult<{
       eventId: string;
@@ -84,6 +85,13 @@ const CLOSEABLE_COMPENSATION_STATUSES = new Set([
   'compensated:succeeded',
   'compensated:already_ordered',
 ]);
+
+function paymentReconciliationWebhookIdempotencyKey(
+  input: PaymentReconciliationWorkflowInput,
+  eventType: string,
+) {
+  return `payment-reconciliation:${input.provider}:${input.providerEventId}:${eventType}`;
+}
 
 async function runReconciliationActivity(
   input: PaymentReconciliationWorkflowInput,
@@ -163,6 +171,7 @@ export async function paymentReconciliationWorkflow(
       organizationId: webhookEvent.organizationId,
       eventType: webhookEvent.eventType,
       payload: webhookEvent.payload,
+      idempotencyKey: paymentReconciliationWebhookIdempotencyKey(input, webhookEvent.eventType),
     });
     if (!webhookEventResult.ok) {
       if (webhookEventResult.retryable) {

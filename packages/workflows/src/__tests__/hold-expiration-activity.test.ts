@@ -288,7 +288,6 @@ describe('expireStaleSessionsActivity', () => {
       status: 'reserved',
       reserved_checkout_session_id: 'cs_fresh_open',
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('does not release waitlist or discount reservations when payment claims the session before expiry transition', async () => {
@@ -348,7 +347,6 @@ describe('expireStaleSessionsActivity', () => {
       }),
     ]);
     expect(dbState.tables.discount_codes[0]).toMatchObject({ uses_count: 1 });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 });
 

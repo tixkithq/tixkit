@@ -47,6 +47,8 @@ import { WaitlistCheckoutReservationsMigration } from './migrations/0043_waitlis
 import { CheckoutHoldOccurrencesMigration } from './migrations/0044_checkout_hold_occurrences.js';
 import { TableQueryIndexesMigration } from './migrations/0045_table_query_indexes.js';
 import { OrganizationClerkIdUniqueMigration } from './migrations/0046_organization_clerk_id_unique.js';
+import { EventPublicRevisionMigration } from './migrations/0047_event_public_revision.js';
+import { HotQueryIndexesMigration } from './migrations/0048_hot_query_indexes.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -217,6 +219,8 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0044_checkout_hold_occurrences': CheckoutHoldOccurrencesMigration,
       '0045_table_query_indexes': TableQueryIndexesMigration,
       '0046_organization_clerk_id_unique': OrganizationClerkIdUniqueMigration,
+      '0047_event_public_revision': EventPublicRevisionMigration,
+      '0048_hot_query_indexes': HotQueryIndexesMigration,
     };
   }
 }

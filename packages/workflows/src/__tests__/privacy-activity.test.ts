@@ -830,7 +830,6 @@ describe('processPrivacyRequestActivity', () => {
       emailSuppressionsRedacted: 1,
       messageConsentsRedacted: 1,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('returns completed requests without rewriting retained data during workflow replay', async () => {
@@ -860,7 +859,6 @@ describe('processPrivacyRequestActivity', () => {
       first_name: 'Ada',
       custom_answers: JSON.stringify({ company: '<script>alert(1)</script>' }),
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('returns retryable failures without terminally marking the request failed', async () => {
@@ -880,7 +878,6 @@ describe('processPrivacyRequestActivity', () => {
       error: null,
       completed_at: null,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('marks unsupported persisted request types failed without retrying them', async () => {
@@ -913,7 +910,6 @@ describe('processPrivacyRequestActivity', () => {
       error: 'Unsupported privacy request type: legacy_subject_download',
       completed_at: new Date('2026-06-28T12:00:00.000Z'),
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('repairs legacy completed erasures from the scheduled retention activity', async () => {
@@ -1100,7 +1096,6 @@ describe('processPrivacyRequestActivity', () => {
     ).toMatchObject({
       result: JSON.stringify({ already: true }),
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('repairs retained ledgers when commerce rows were already pseudonymized', async () => {
@@ -1319,7 +1314,6 @@ describe('processPrivacyRequestActivity', () => {
       attendeesRedacted: 0,
       ticketsTouched: 0,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('exports the retention policy with the retained commerce snapshot', async () => {
@@ -1407,6 +1401,5 @@ describe('processPrivacyRequestActivity', () => {
         consentText: 'Ada Lovelace consented with buyer@test.com and +15550000001',
       }),
     ]);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 });

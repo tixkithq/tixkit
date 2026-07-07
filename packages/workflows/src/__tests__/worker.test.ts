@@ -87,9 +87,17 @@ describe('ensureHoldExpirationScheduler', () => {
 
 describe('runWorker', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     workflowStart.mockResolvedValue(undefined);
     process.env.OTEL_SDK_DISABLED = 'true';
+    delete process.env.TEMPORAL_EXPORT_TASK_QUEUE;
+    delete process.env.TEMPORAL_PDF_TASK_QUEUE;
+    delete process.env.TEMPORAL_WALLET_TASK_QUEUE;
+    delete process.env.TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS;
+    delete process.env.TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS;
+    delete process.env.TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS;
+    delete process.env.TEMPORAL_WORKER_TASK_QUEUES;
   });
 
   it('emits readiness only after the hold-expiration scheduler is ensured', async () => {
@@ -112,8 +120,27 @@ describe('runWorker', () => {
       expect(operations).toEqual(['scheduler-started', 'worker-run', 'ready-log']),
     );
 
-    expect(log).toHaveBeenCalledWith('TIXKIT_WORKER_READY taskQueue=tixkit');
+    expect(log).toHaveBeenCalledWith('TIXKIT_WORKER_READY taskQueues=tixkit');
     await expect(Promise.race([started, Promise.resolve('running')])).resolves.toBe('running');
     log.mockRestore();
+  });
+
+  it('passes configured concurrency limits into Worker.create', async () => {
+    process.env.TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS = '7';
+    process.env.TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS = '3';
+    process.env.TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS = '11';
+    const { runWorker } = await import('../worker.js');
+
+    const started = runWorker({ workflowsPath: 'test-workflows.js' });
+    await vi.waitFor(() => expect(workerCreate).toHaveBeenCalled());
+
+    expect(workerCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxConcurrentActivityTaskExecutions: 7,
+        maxConcurrentWorkflowTaskExecutions: 3,
+        maxCachedWorkflows: 11,
+      }),
+    );
+    await expect(Promise.race([started, Promise.resolve('running')])).resolves.toBe('running');
   });
 });

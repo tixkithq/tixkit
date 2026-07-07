@@ -12,6 +12,7 @@ import {
   col,
   defineTable,
   paramsToQuery,
+  type AdminTableQuery,
   type AdminTablePage,
 } from '@tixkit/admin-table-core';
 import { NotFoundError, ValidationError, type Principal } from '@tixkit/domain';
@@ -36,6 +37,23 @@ const auditLogTableSchema = defineTable('audit_logs', {
   ],
 });
 
+const auditLogListColumns = [
+  'id',
+  'tenant_id',
+  'organization_id',
+  'brand_id',
+  'actor_type',
+  'actor_id',
+  'action',
+  'resource_type',
+  'resource_id',
+  'diff_summary',
+  'request_id',
+  'ip',
+  'user_agent',
+  'created_at',
+] as const;
+
 const PRIVACY_REQUEST_STATUS_PRESETS = ['pending', 'processing', 'completed', 'failed'] as const;
 
 const privacyRequestTableSchema = defineTable('privacy_requests', {
@@ -50,6 +68,36 @@ const privacyRequestTableSchema = defineTable('privacy_requests', {
     col.dateTime('completedAt').serverField('completed_at').filterable(),
   ],
 });
+
+const privacyRequestListColumns = [
+  'id',
+  'tenant_id',
+  'organization_id',
+  'brand_id',
+  'request_type',
+  'subject_type',
+  'subject_id',
+  'subject_email',
+  'status',
+  'requested_by',
+  'result',
+  'error',
+  'created_at',
+  'completed_at',
+] as const;
+
+function parseStrictTableQuery(
+  schema: Parameters<typeof paramsToQuery>[0],
+  params: URLSearchParams,
+): AdminTableQuery {
+  const { query, rejected } = paramsToQuery(schema, params);
+  if (rejected.length > 0) {
+    throw new ValidationError(`Invalid table query parameters: ${rejected.join(', ')}`, {
+      rejected,
+    });
+  }
+  return query;
+}
 
 const privacyRequestSchema = z
   .object({
@@ -179,7 +227,12 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
 
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
+      return {
+        items: [],
+        nextCursor: undefined,
+        total: 0,
+        filterTotal: 0,
+      } as AdminTablePage<unknown>;
     }
 
     const scope: Record<string, string | string[]> = {};
@@ -196,15 +249,20 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
         searchParams.set(key, value);
       }
     }
-    const { query: tableQuery } = paramsToQuery(auditLogTableSchema, searchParams);
+    const tableQuery = parseStrictTableQuery(auditLogTableSchema, searchParams);
 
-    const result = await executeTableQuery(db, {
-      tableName: 'audit_logs',
-      schema: auditLogTableSchema,
-      tenantId: principal.tenantId,
-      scope,
-      serialize: serializeAuditLog,
-    }, tableQuery);
+    const result = await executeTableQuery(
+      db,
+      {
+        tableName: 'audit_logs',
+        schema: auditLogTableSchema,
+        tenantId: principal.tenantId,
+        scope,
+        serialize: serializeAuditLog,
+        selectFields: auditLogListColumns,
+      },
+      tableQuery,
+    );
 
     return result as AdminTablePage<unknown>;
   });
@@ -220,7 +278,12 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
     if (brandId) ClerkAuthService.requireBrandScope(principal, brandId);
 
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
-      return { items: [], nextCursor: undefined, total: 0, filterTotal: 0 } as AdminTablePage<unknown>;
+      return {
+        items: [],
+        nextCursor: undefined,
+        total: 0,
+        filterTotal: 0,
+      } as AdminTablePage<unknown>;
     }
 
     const scope: Record<string, string | string[]> = {};
@@ -237,15 +300,20 @@ export const privacyRoutes: FastifyPluginAsync = async (app) => {
         searchParams.set(key, value);
       }
     }
-    const { query: tableQuery } = paramsToQuery(privacyRequestTableSchema, searchParams);
+    const tableQuery = parseStrictTableQuery(privacyRequestTableSchema, searchParams);
 
-    const result = await executeTableQuery(db, {
-      tableName: 'privacy_requests',
-      schema: privacyRequestTableSchema,
-      tenantId: principal.tenantId,
-      scope,
-      serialize: serializePrivacyRequest,
-    }, tableQuery);
+    const result = await executeTableQuery(
+      db,
+      {
+        tableName: 'privacy_requests',
+        schema: privacyRequestTableSchema,
+        tenantId: principal.tenantId,
+        scope,
+        serialize: serializePrivacyRequest,
+        selectFields: privacyRequestListColumns,
+      },
+      tableQuery,
+    );
 
     return result as AdminTablePage<unknown>;
   });

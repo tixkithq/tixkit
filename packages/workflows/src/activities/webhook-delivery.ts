@@ -3,12 +3,12 @@ import type { LookupAddress, LookupAllOptions } from 'node:dns';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import type { LookupFunction } from 'node:net';
-import { createDb } from '@tixkit/db';
 import { WebhookDeliveryRepository, WebhookEndpointRepository } from '@tixkit/db';
 import { signWebhookPayload } from '@tixkit/domain/developer';
 import { withSpan } from '@tixkit/shared';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { getActivityDb } from './activity-clients.js';
 
 const WEBHOOK_API_VERSION = '2026-01-01';
 const WEBHOOK_USER_AGENT = 'Tixkit-Webhook/1.0';
@@ -86,7 +86,7 @@ export async function deliverWebhookActivity(input: {
   attempt: number;
   finalAttempt?: boolean;
 }): Promise<WorkflowActivityResult<{ statusCode: number; response: string }>> {
-  const db = createDb();
+  const db = getActivityDb();
   let claimedDeliveryId: string | undefined;
   let claimedLeaseExpiresAt: Date | undefined;
   try {
@@ -311,8 +311,6 @@ export async function deliverWebhookActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       input.finalAttempt !== true && !nonRetryableDeliveryError,
     );
-  } finally {
-    await db.destroy();
   }
 }
 

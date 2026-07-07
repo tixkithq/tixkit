@@ -1,4 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const PERFORMANCE_METRICS_PATH = process.env.PERFORMANCE_METRICS_PATH;
+
+async function recordPerformanceMetric(metric: string, value: number): Promise<void> {
+  if (!PERFORMANCE_METRICS_PATH) return;
+  const target = path.resolve(PERFORMANCE_METRICS_PATH);
+  await mkdir(path.dirname(target), { recursive: true });
+
+  let existing: Record<string, number> = {};
+  try {
+    const decoded = JSON.parse(await readFile(target, 'utf8'));
+    if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
+      existing = decoded as Record<string, number>;
+    }
+  } catch {
+    existing = {};
+  }
+
+  existing[metric] = Number(value.toFixed(2));
+  await writeFile(target, `${JSON.stringify(existing, null, 2)}\n`);
+}
 
 // Mock @temporalio/client so notification workflow start doesn't try to connect.
 vi.mock('@temporalio/client', () => ({
@@ -6,11 +29,39 @@ vi.mock('@temporalio/client', () => ({
   Client: vi.fn(),
 }));
 
-const s3Mock = vi.hoisted(() => ({
-  constructorConfigs: [] as unknown[],
-  putObjectInputs: [] as Record<string, unknown>[],
-  send: vi.fn(async (_command: unknown) => ({})),
-}));
+const s3Mock = vi.hoisted(() => {
+  async function defaultSend(command: unknown) {
+    const body = (command as { input?: { Body?: unknown } }).input?.Body;
+    if (
+      body &&
+      typeof body === 'object' &&
+      'on' in body &&
+      'once' in body &&
+      'resume' in body &&
+      typeof body.on === 'function' &&
+      typeof body.once === 'function' &&
+      typeof body.resume === 'function'
+    ) {
+      await new Promise<void>((resolve, reject) => {
+        const stream = body as unknown as {
+          once: (event: string, callback: (error?: Error) => void) => void;
+          resume: () => void;
+        };
+        stream.once('error', (error) => reject(error));
+        stream.once('end', () => resolve());
+        stream.resume();
+      });
+    }
+    return {};
+  }
+
+  return {
+    constructorConfigs: [] as unknown[],
+    putObjectInputs: [] as Record<string, unknown>[],
+    defaultSend,
+    send: vi.fn(defaultSend),
+  };
+});
 
 vi.mock('@aws-sdk/client-s3', () => {
   class S3Client {
@@ -127,6 +178,8 @@ vi.mock('@tixkit/db', () => {
     const conditions: Array<{ column: string; op: string; value: unknown }> = [];
     let selectedColumns: unknown[] | null = null;
     const orderBys: Array<{ column: string; direction: string }> = [];
+    let rowLimit: number | null = null;
+    let rowOffset = 0;
     const matchesConditions = (row: Record<string, unknown>) =>
       conditions.every((condition) => {
         const column = condition.column.includes('.')
@@ -140,8 +193,23 @@ vi.mock('@tixkit/db', () => {
         if (condition.op === 'in' && Array.isArray(condition.value)) {
           return condition.value.includes(actual);
         }
+        if (condition.op === '>=' || condition.op === '<=') {
+          const left =
+            actual instanceof Date ? actual.getTime() : new Date(String(actual)).getTime();
+          const right =
+            condition.value instanceof Date
+              ? condition.value.getTime()
+              : new Date(String(condition.value)).getTime();
+          if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+          return condition.op === '>=' ? left >= right : left <= right;
+        }
         return true;
       });
+    const applyQueryWindow = (rows: Record<string, unknown>[]) => {
+      const start = rowOffset;
+      const end = rowLimit == null ? undefined : start + rowLimit;
+      return rows.slice(start, end);
+    };
     const query = {
       innerJoin() {
         return query;
@@ -157,16 +225,20 @@ vi.mock('@tixkit/db', () => {
         return query;
       },
       where(column: string, op: string, value: unknown) {
-        if (table === 'scan_logs') {
-          conditions.push({ column, op, value });
-        }
+        conditions.push({ column, op, value });
         return query;
       },
       orderBy(column: string, direction = 'asc') {
-        if (table === 'scan_logs') {
-          orderBys.push({ column, direction });
-          dbState.scanLogOrderBys.push({ column, direction });
-        }
+        orderBys.push({ column, direction });
+        if (table === 'scan_logs') dbState.scanLogOrderBys.push({ column, direction });
+        return query;
+      },
+      limit(limit: number) {
+        rowLimit = limit;
+        return query;
+      },
+      offset(offset: number) {
+        rowOffset = offset;
         return query;
       },
       async executeTakeFirst() {
@@ -184,26 +256,31 @@ vi.mock('@tixkit/db', () => {
         throw new Error(`No mock row for table ${table}`);
       },
       async execute() {
-        if (table === 'attendees') return dbState.attendees;
-        if (table === 'orders') return dbState.orders;
+        if (table === 'attendees')
+          return applyQueryWindow(dbState.attendees.filter(matchesConditions));
+        if (table === 'orders') return applyQueryWindow(dbState.orders.filter(matchesConditions));
         if (table === 'questions') return dbState.questions;
         if (table === 'scan_logs') {
           // eslint-disable-next-line unicorn/no-array-sort -- this sorts the filtered copy and keeps compatibility with the package TS target.
-          const rows = dbState.scanLogs.filter(matchesConditions).sort((a, b) => {
-            for (const orderBy of orderBys) {
-              const column = orderBy.column.includes('.')
-                ? orderBy.column.split('.').at(-1)!
-                : orderBy.column;
-              const aValue = a[column];
-              const bValue = b[column];
-              const aComparable = aValue instanceof Date ? aValue.getTime() : String(aValue ?? '');
-              const bComparable = bValue instanceof Date ? bValue.getTime() : String(bValue ?? '');
-              if (aComparable === bComparable) continue;
-              const direction = orderBy.direction === 'desc' ? -1 : 1;
-              return aComparable > bComparable ? direction : -direction;
-            }
-            return 0;
-          });
+          const rows = applyQueryWindow(
+            dbState.scanLogs.filter(matchesConditions).sort((a, b) => {
+              for (const orderBy of orderBys) {
+                const column = orderBy.column.includes('.')
+                  ? orderBy.column.split('.').at(-1)!
+                  : orderBy.column;
+                const aValue = a[column];
+                const bValue = b[column];
+                const aComparable =
+                  aValue instanceof Date ? aValue.getTime() : String(aValue ?? '');
+                const bComparable =
+                  bValue instanceof Date ? bValue.getTime() : String(bValue ?? '');
+                if (aComparable === bComparable) continue;
+                const direction = orderBy.direction === 'desc' ? -1 : 1;
+                return aComparable > bComparable ? direction : -direction;
+              }
+              return 0;
+            }),
+          );
 
           if (!selectedColumns) return rows;
           const columns = selectedColumns;
@@ -218,7 +295,19 @@ vi.mock('@tixkit/db', () => {
             ),
           );
         }
-        if (table === 'tickets') return [{ attendee_id: 'att_1' }];
+        if (table === 'tickets') {
+          return applyQueryWindow(
+            [
+              {
+                id: 'tkt_1',
+                tenant_id: 'tnt_1',
+                event_id: 'evt_1',
+                attendee_id: 'att_1',
+                status: 'checked_in',
+              },
+            ].filter(matchesConditions),
+          );
+        }
         return [];
       },
     };
@@ -267,6 +356,7 @@ vi.mock('@tixkit/db', () => {
 
 const {
   generateExportActivity,
+  generateAndUploadExportActivity,
   uploadFileActivity,
   markExportFailedActivity,
   notifyExportCompleteActivity,
@@ -384,8 +474,9 @@ describe('uploadFileActivity', () => {
     s3Mock.constructorConfigs.length = 0;
     s3Mock.putObjectInputs.length = 0;
     s3Mock.send.mockReset();
-    s3Mock.send.mockResolvedValue({});
+    s3Mock.send.mockImplementation(s3Mock.defaultSend);
     process.env.NODE_ENV = originalNodeEnv;
+    delete process.env.EXPORT_PAGE_SIZE;
     delete process.env.EXPORT_STORAGE_MODE;
     delete process.env.S3_ENDPOINT;
     delete process.env.S3_FORCE_PATH_STYLE;
@@ -500,6 +591,81 @@ describe('uploadFileActivity', () => {
       expect(result.errorCode).toBe('FILE_UPLOAD_FAILED');
       expect(result.message).toBe('Access denied');
     }
+  });
+
+  it('streams generated CSV exports to S3 in the combined production activity', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.S3_EXPORT_BUCKET = 'exports-bucket';
+    process.env.S3_EXPORT_REGION = 'us-west-2';
+
+    const result = await generateAndUploadExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowCount).toBe(1);
+      expect(result.value.fileUrl).toContain('exp_1.csv');
+    }
+    expect(s3Mock.send).toHaveBeenCalledTimes(1);
+    expect(s3Mock.putObjectInputs[0]).toMatchObject({
+      Bucket: 'exports-bucket',
+      Key: 'exports/exp_1.csv',
+      ContentType: 'text/csv',
+    });
+    expect(typeof s3Mock.putObjectInputs[0].Body).not.toBe('string');
+    expect(s3Mock.putObjectInputs[0].Body).toEqual(
+      expect.objectContaining({ pipe: expect.any(Function) }),
+    );
+  });
+
+  it('records bounded heap growth for a streamed generated CSV export', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.EXPORT_PAGE_SIZE = '100';
+    process.env.S3_EXPORT_BUCKET = 'exports-bucket';
+    process.env.S3_EXPORT_REGION = 'us-west-2';
+    dbState.exportJob = {
+      ...dbState.exportJob,
+      id: 'exp_memory',
+      type: 'attendees',
+      format: 'csv',
+      status: 'processing',
+      filters: null,
+    };
+    dbState.attendees = Array.from({ length: 2_500 }, (_, index) => ({
+      id: `att_memory_${String(index).padStart(5, '0')}`,
+      first_name: `First${index}`,
+      last_name: `Last${index}`,
+      email: `attendee-${index}@test.com`,
+      phone: '+15550000001',
+      status: 'registered',
+      tenant_id: 'tnt_1',
+      event_id: 'evt_1',
+      order_id: `ord_memory_${index}`,
+      ticket_type_id: 'tt_1',
+      custom_answers: null,
+      checked_in_at: null,
+      created_at: new Date('2026-06-01'),
+    }));
+
+    const heapBefore = process.memoryUsage().heapUsed;
+    const result = await generateAndUploadExportActivity({
+      exportId: 'exp_memory',
+      type: 'attendees',
+      format: 'csv',
+    });
+    const heapDeltaBytes = Math.max(0, process.memoryUsage().heapUsed - heapBefore);
+    await recordPerformanceMetric('exportStreamHeapDeltaBytes', heapDeltaBytes);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowCount).toBe(2_500);
+      expect(result.value.fileUrl).toContain('exp_memory.csv');
+    }
+    expect(s3Mock.send).toHaveBeenCalledTimes(1);
+    expect(typeof s3Mock.putObjectInputs[0].Body).not.toBe('string');
   });
 });
 
@@ -775,6 +941,7 @@ function parseCsv(csv: string): string[][] {
 
 describe('T30 export content validation - attendee CSV', () => {
   beforeEach(() => {
+    delete process.env.EXPORT_PAGE_SIZE;
     dbState.exportJob = {
       id: 'exp_1',
       tenant_id: 'tnt_1',
@@ -865,6 +1032,22 @@ describe('T30 export content validation - attendee CSV', () => {
     for (const row of rows) {
       expect(row).toHaveLength(rows[0].length);
     }
+  });
+
+  it('streams attendee export rows across multiple query pages', async () => {
+    process.env.EXPORT_PAGE_SIZE = '1';
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rowCount).toBe(2);
+    const rows = parseCsv(result.value.data);
+    expect(rows.map((row) => row[1])).toEqual(['email', 'ada@test.com', 'grace@test.com']);
   });
 
   it('includes rows through the end of a date-only to filter', async () => {

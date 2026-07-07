@@ -14,6 +14,7 @@ export {
   AccessRuleRepository,
   ProductCategoryRepository,
   ProductRepository,
+  bumpEventPublicRevision,
 } from './event.js';
 export {
   CheckoutHoldRepository,

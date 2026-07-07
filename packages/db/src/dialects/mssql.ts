@@ -16,6 +16,7 @@ import {
 } from 'kysely';
 import * as Tarn from 'tarn';
 import * as Tedious from 'tedious';
+import type { DbPoolConfig } from '../client.js';
 
 type MssqlConnectionOptions = {
   server: string;
@@ -58,14 +59,18 @@ export function parseMssqlConnectionUrl(url: string): MssqlConnectionOptions {
   };
 }
 
-export function createMssqlDialect(url: string): MssqlDialect {
+export function createMssqlDialect(url: string, pool: DbPoolConfig = {}): MssqlDialect {
   const options = parseMssqlConnectionUrl(url);
   return new MssqlDialect({
     tarn: {
       ...Tarn,
       options: {
-        min: 0,
-        max: Number(process.env.MSSQL_POOL_MAX ?? 10),
+        min: pool.min ?? 0,
+        max: pool.max ?? 10,
+        ...(pool.idleTimeoutMillis !== undefined ? { idleTimeoutMillis: pool.idleTimeoutMillis } : {}),
+        ...(pool.connectionTimeoutMillis !== undefined
+          ? { acquireTimeoutMillis: pool.connectionTimeoutMillis }
+          : {}),
       },
     },
     tedious: {

@@ -1,7 +1,7 @@
-import { createDb } from '@tixkit/db';
 import { UserProfileRepository, OrganizationRepository } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { getActivityDb } from './activity-clients.js';
 
 export async function syncUserActivity(input: {
   clerkUserId: string;
@@ -10,7 +10,7 @@ export async function syncUserActivity(input: {
   lastName?: string;
   avatarUrl?: string;
 }): Promise<WorkflowActivityResult<{ userId: string; created: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const repo = new UserProfileRepository(db);
     const existing = await repo.findByClerkUserId('system', input.clerkUserId);
@@ -39,8 +39,6 @@ export async function syncUserActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -48,7 +46,7 @@ export async function syncOrganizationActivity(input: {
   clerkOrgId: string;
   name: string;
 }): Promise<WorkflowActivityResult<{ orgId: string; created: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const repo = new OrganizationRepository(db);
     const existing = await db
@@ -69,15 +67,13 @@ export async function syncOrganizationActivity(input: {
     return okResult({ orgId: record.id, created: true });
   } catch (err) {
     return errResult('ORG_SYNC_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
-  } finally {
-    await db.destroy();
   }
 }
 
 export async function deleteUserActivity(input: {
   clerkUserId: string;
 }): Promise<WorkflowActivityResult<{ suspended: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const repo = new UserProfileRepository(db);
     // Suspend every profile across all tenants; never delete history.
@@ -94,7 +90,5 @@ export async function deleteUserActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }

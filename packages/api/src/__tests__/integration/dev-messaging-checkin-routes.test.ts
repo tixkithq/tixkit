@@ -2625,6 +2625,237 @@ describe('public access code validation', () => {
     await app.close();
   });
 
+  it('caches public availability metadata while keeping inventory counts live', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    let available = 5;
+    const getAvailabilityBatch = vi.fn(async (poolIds: readonly string[]) => {
+      expect(poolIds).toEqual(['inv_cache']);
+      return new Map([['inv_cache', { total: 10, sold: 0, reserved: 0, available }]]);
+    });
+    const getOccurrenceAvailabilityBatch = vi.fn(async (occurrenceIds: readonly string[]) => {
+      expect(occurrenceIds).toEqual([]);
+      return new Map<string, unknown>();
+    });
+    const tables = {
+      events: [
+        {
+          id: 'evt_metadata_cache',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'br_1',
+          slug: 'metadata-cache',
+          title: 'Metadata Cache',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: now,
+          ends_at: null,
+          venue: null,
+          visibility: 'public',
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_cache',
+          event_id: 'evt_metadata_cache',
+          event_occurrence_id: null,
+          name: 'Original Name',
+          description: null,
+          kind: 'paid',
+          status: 'active',
+          visibility: 'public',
+          currency: 'USD',
+          price_cents: 2500,
+          minimum_price_cents: null,
+          sales_start_at: null,
+          sales_end_at: null,
+          min_per_order: 1,
+          max_per_order: 4,
+          inventory_pool_id: 'inv_cache',
+          sort_order: 1,
+          requires_access_code: false,
+          access_code_hint: null,
+        },
+      ],
+      products: [],
+    };
+    const app = await setupApp(publicRoutes, makePrincipal(), tables, {
+      inventoryService: {
+        reserveCart: vi.fn(),
+        getAvailabilityBatch,
+        getOccurrenceAvailabilityBatch,
+      },
+    });
+
+    const first = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_metadata_cache/availability',
+    });
+    available = 2;
+    tables.ticket_types[0].name = 'Changed Name';
+    tables.ticket_types[0].price_cents = 9900;
+    const second = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_metadata_cache/availability',
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(getAvailabilityBatch).toHaveBeenCalledTimes(2);
+    expect(getOccurrenceAvailabilityBatch).toHaveBeenCalledTimes(2);
+    expect(first.json()).toMatchObject([
+      { ticketTypeId: 'tt_cache', name: 'Original Name', priceCents: 2500, available: 5 },
+    ]);
+    expect(second.json()).toMatchObject([
+      { ticketTypeId: 'tt_cache', name: 'Original Name', priceCents: 2500, available: 2 },
+    ]);
+    await app.close();
+  });
+
+  it('returns persisted public event revision without aggregating child tables', async () => {
+    const revision = new Date('2026-06-01T00:00:05.000Z');
+    const app = await setupApp(publicRoutes, makePrincipal(), {
+      events: [
+        {
+          id: 'evt_revision',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'br_1',
+          slug: 'revision',
+          title: 'Revision',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: new Date('2026-06-01T00:00:00.000Z'),
+          ends_at: null,
+          venue: null,
+          visibility: 'public',
+          public_revision: revision,
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_revision/revision',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ revision: revision.toISOString() });
+    await app.close();
+  });
+
+  it('returns first-load public checkout bootstrap metadata in one response', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const getAvailabilityBatch = vi.fn(async (poolIds: readonly string[]) => {
+      expect(poolIds).toEqual(['inv_ga']);
+      return new Map([['inv_ga', { total: 10, sold: 4, reserved: 3, available: 3 }]]);
+    });
+    const getOccurrenceAvailabilityBatch = vi.fn(async (occurrenceIds: readonly string[]) => {
+      expect(occurrenceIds).toEqual([]);
+      return new Map<string, unknown>();
+    });
+    const app = await setupApp(
+      publicRoutes,
+      makePrincipal(),
+      {
+        events: [
+          {
+            id: 'evt_1',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'br_1',
+            slug: 'event',
+            title: 'Event',
+            description: null,
+            status: 'published',
+            timezone: 'America/New_York',
+            starts_at: now,
+            ends_at: null,
+            venue: null,
+            visibility: 'public',
+            cover_image_url: null,
+            resale_enabled: false,
+            resale_max_multiplier: 2,
+            resale_max_absolute_cents: null,
+          },
+        ],
+        marketing_integrations: [
+          {
+            id: 'mi_1',
+            event_id: 'evt_1',
+            provider: 'ga4',
+            config: JSON.stringify({ measurementId: 'G-TEST' }),
+            consent_required: false,
+            status: 'active',
+          },
+        ],
+        ticket_types: [
+          {
+            id: 'tt_ga',
+            event_id: 'evt_1',
+            name: 'GA',
+            description: null,
+            kind: 'paid',
+            status: 'active',
+            visibility: 'public',
+            currency: 'USD',
+            price_cents: 2500,
+            minimum_price_cents: null,
+            sales_start_at: null,
+            sales_end_at: null,
+            min_per_order: 1,
+            max_per_order: 4,
+            inventory_pool_id: 'inv_ga',
+            sort_order: 1,
+            requires_access_code: false,
+            access_code_hint: null,
+          },
+        ],
+        products: [],
+        questions: [
+          customQuestionRow({
+            id: 'q_company',
+            label: 'Company',
+            required: true,
+            applies_to: 'buyer',
+            sort_order: 1,
+          }),
+        ],
+      },
+      {
+        inventoryService: {
+          reserveCart: vi.fn(),
+          getAvailabilityBatch,
+          getOccurrenceAvailabilityBatch,
+        },
+      },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/bootstrap?products=tt_ga',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(getAvailabilityBatch).toHaveBeenCalledTimes(1);
+    expect(getOccurrenceAvailabilityBatch).toHaveBeenCalledTimes(1);
+    expect(res.json()).toMatchObject({
+      event: {
+        id: 'evt_1',
+        title: 'Event',
+        marketingIntegrations: [{ provider: 'ga4', consentRequired: false, status: 'active' }],
+      },
+      availability: [{ ticketTypeId: 'tt_ga', available: 3, status: 'active' }],
+      questions: {
+        buyerQuestions: [{ id: 'q_company', label: 'Company', required: true }],
+        attendeeQuestions: [],
+      },
+      resaleListing: null,
+    });
+    await app.close();
+  });
+
   it('caps public ticket availability by occurrence remaining capacity', async () => {
     const now = new Date('2026-06-01T00:00:00.000Z');
     const getAvailabilityBatch = vi.fn(async () => {

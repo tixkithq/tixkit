@@ -1,4 +1,4 @@
-import { createDb, type Database } from '@tixkit/db';
+import type { Database } from '@tixkit/db';
 import {
   OrderRepository,
   PaymentIntentRepository,
@@ -6,55 +6,17 @@ import {
   ContentRepository,
 } from '@tixkit/db';
 import { withSpan } from '@tixkit/shared';
-import { Connection, Client } from '@temporalio/client';
 import Stripe from 'stripe';
-import { notificationDeliveryWorkflow } from '../workflows/notification.js';
 import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
-import { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } from '../shared/types.js';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 import { buildTransactionalMergeTagContext } from './messaging-context.js';
-
-const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
-const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
-const TEMPORAL_TASK_QUEUE = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
-
-let cachedClient: Client | null = null;
-
-async function getTemporalClient(): Promise<Client> {
-  if (!cachedClient) {
-    const connection = await Connection.connect({ address: TEMPORAL_ADDRESS });
-    cachedClient = new Client({ connection, namespace: TEMPORAL_NAMESPACE });
-  }
-  return cachedClient;
-}
+import { getActivityDb, startNotificationDeliveryWorkflow } from './activity-clients.js';
 
 async function startNotificationWorkflow(
   input: Omit<NotificationDeliveryWorkflowInput, 'version'>,
 ): Promise<void> {
-  try {
-    const client = await getTemporalClient();
-    const workflowId = notificationWorkflowId(input.jobId);
-    try {
-      await client.workflow.start(notificationDeliveryWorkflow, {
-        taskQueue: TEMPORAL_TASK_QUEUE,
-        workflowId,
-        args: [{ version: NOTIFICATION_WORKFLOW_VERSION, ...input }],
-      });
-    } catch (err) {
-      if (
-        !(
-          err instanceof Error &&
-          (err.name === 'WorkflowExecutionAlreadyStartedError' ||
-            err.message.includes('already started'))
-        )
-      ) {
-        throw err;
-      }
-    }
-  } catch {
-    // Non-fatal: email job row is queued for later drainage.
-  }
+  await startNotificationDeliveryWorkflow(input);
 }
 
 function parseMetadata(value: unknown): Record<string, unknown> {
@@ -105,6 +67,19 @@ type RefundReservation =
     };
 
 const CAPACITY_REFUND_STATUSES = new Set(['pending', 'succeeded']);
+
+function updatedRowCount(result: unknown): number {
+  if (!Array.isArray(result)) return 0;
+  return result.reduce((count, entry) => {
+    if (!entry || typeof entry !== 'object') return count;
+    const value =
+      (entry as { numUpdatedRows?: unknown; numChangedRows?: unknown }).numUpdatedRows ??
+      (entry as { numChangedRows?: unknown }).numChangedRows;
+    if (typeof value === 'bigint') return count + Number(value);
+    if (typeof value === 'number') return count + value;
+    return count;
+  }, 0);
+}
 
 function refundMatchesRequest(refund: RefundRow, requestKey: string, nonce: string): boolean {
   if (refund.request_idempotency_key === requestKey || refund.request_nonce === nonce) {
@@ -159,7 +134,7 @@ export async function processRefundActivity(input: {
   idempotencyKey?: string;
   nonce: string;
 }): Promise<WorkflowActivityResult<{ providerRefundId: string; status: string }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const callerKey = input.idempotencyKey ?? `refund-${input.orderId}`;
     const stripeIdempotencyKey = `${callerKey}:${input.nonce}`;
@@ -520,17 +495,14 @@ export async function processRefundActivity(input: {
     });
   } catch (err) {
     return errResult('REFUND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
-  } finally {
-    await db.destroy();
   }
 }
-
 export async function updateLedgerActivity(input: {
   orderId: string;
   refundAmountCents: number;
   providerRefundId: string;
 }): Promise<WorkflowActivityResult<{ balanced: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const orderRepo = new OrderRepository(db);
     const order = await orderRepo.findById(input.orderId);
@@ -602,8 +574,6 @@ export async function updateLedgerActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -613,145 +583,147 @@ export async function voidTicketsActivity(input: {
   isFullRefund: boolean;
   providerRefundId?: string;
 }): Promise<WorkflowActivityResult<{ voidedCount: number; voidedTicketIds: string[] }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
-    const orderRepo = new OrderRepository(db);
-    const order = await orderRepo.findById(input.orderId);
-    if (!order) {
-      return errResult('ORDER_NOT_FOUND', 'Order not found', false);
-    }
+    const voidedTicketIds = await db.transaction().execute(async (trx) => {
+      const orderRepo = new OrderRepository(trx as Database);
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', input.orderId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!order) {
+        throw new Error('ORDER_NOT_FOUND');
+      }
 
-    const refund = input.providerRefundId
-      ? await db
-          .selectFrom('refunds')
-          .selectAll()
-          .where('provider_refund_id', '=', input.providerRefundId)
-          .executeTakeFirst()
-      : null;
-    const refundMetadata = parseMetadata(refund?.metadata);
-    const existingVoidedTicketIds = stringArray(refundMetadata.voidedTicketIds);
-    if (existingVoidedTicketIds.length > 0) {
-      return okResult({
-        voidedCount: existingVoidedTicketIds.length,
-        voidedTicketIds: existingVoidedTicketIds,
-      });
-    }
+      const refund = input.providerRefundId
+        ? await trx
+            .selectFrom('refunds')
+            .selectAll()
+            .where('provider_refund_id', '=', input.providerRefundId)
+            .forUpdate()
+            .executeTakeFirst()
+        : null;
+      const refundMetadata = parseMetadata(refund?.metadata);
+      const existingVoidedTicketIds = stringArray(refundMetadata.voidedTicketIds);
+      if (existingVoidedTicketIds.length > 0) {
+        return existingVoidedTicketIds;
+      }
 
-    const tickets = await db
-      .selectFrom('tickets')
-      .selectAll()
-      .where('order_id', '=', input.orderId)
-      .orderBy('id', 'asc')
-      .execute();
+      const validTickets = await trx
+        .selectFrom('tickets')
+        .selectAll()
+        .where('order_id', '=', input.orderId)
+        .where('status', '=', 'valid')
+        .orderBy('id', 'asc')
+        .forUpdate()
+        .execute();
 
-    // Only void `valid` tickets; never re-void already-voided tickets.
-    const validTickets = tickets.filter((t) => t.status === 'valid');
+      let ticketsToVoid: typeof validTickets;
 
-    let ticketsToVoid: typeof validTickets;
-
-    if (input.isFullRefund) {
-      // Full refund: void all remaining valid tickets.
-      ticketsToVoid = validTickets;
-    } else {
-      // Partial refund: compute the proportional number of tickets to void
-      // using per-line-item prices. Void tickets from line items in order of
-      // descending unit price (conservative: voids the most expensive tickets
-      // first). Select tickets by ticket_type_id so multi-ticket-type orders
-      // void the correct ticket types.
-      const lineItems = await orderRepo.getLineItems(input.orderId);
-      if (lineItems.length === 0) {
-        ticketsToVoid = [];
+      if (input.isFullRefund) {
+        ticketsToVoid = validTickets;
       } else {
-        // Group valid tickets by ticket_type_id for targeted voiding.
-        const validByType = new Map<string, typeof validTickets>();
-        for (const t of validTickets) {
-          const list = validByType.get(t.ticket_type_id) ?? [];
-          list.push(t);
-          validByType.set(t.ticket_type_id, list);
-        }
-
-        // Sort line items by unit price descending so we void expensive tickets first.
-        // eslint-disable-next-line unicorn/no-array-sort -- sorting a copied line-item list preserves deterministic refund allocation.
-        const sortedLines = [...lineItems].sort(
-          (a, b) => Number(b.unit_price_cents) - Number(a.unit_price_cents),
-        );
-
-        let remainingAmount = input.amountCents;
-        ticketsToVoid = [];
-
-        for (const line of sortedLines) {
-          if (!line.ticket_type_id) continue;
-          if (remainingAmount <= 0) break;
-          const quantity = Math.max(1, Number(line.quantity));
-          const lineTotalCents = Number(line.total_cents ?? 0);
-          const unitPriceCents = Number(line.unit_price_cents ?? 0);
-          const perTicketPriceCents = Math.max(
-            0,
-            Math.round(lineTotalCents > 0 ? lineTotalCents / quantity : unitPriceCents),
-          );
-          if (perTicketPriceCents <= 0) continue;
-
-          const ticketsOfType = validByType.get(line.ticket_type_id) ?? [];
-          const voidableFromType = Math.floor(remainingAmount / perTicketPriceCents);
-          const voidCount = Math.min(voidableFromType, ticketsOfType.length);
-
-          for (let i = 0; i < voidCount; i++) {
-            ticketsToVoid.push(ticketsOfType[i]);
+        const lineItems = await orderRepo.getLineItems(input.orderId);
+        if (lineItems.length === 0) {
+          ticketsToVoid = [];
+        } else {
+          const validByType = new Map<string, typeof validTickets>();
+          for (const ticket of validTickets) {
+            const list = validByType.get(ticket.ticket_type_id) ?? [];
+            list.push(ticket);
+            validByType.set(ticket.ticket_type_id, list);
           }
-          remainingAmount -= voidCount * perTicketPriceCents;
-          // Remove voided tickets from the map so they aren't voided twice.
-          validByType.set(line.ticket_type_id, ticketsOfType.slice(voidCount));
+
+          // eslint-disable-next-line unicorn/no-array-sort -- sorting a copied line-item list preserves deterministic refund allocation.
+          const sortedLines = [...lineItems].sort(
+            (a, b) => Number(b.unit_price_cents) - Number(a.unit_price_cents),
+          );
+
+          let remainingAmount = input.amountCents;
+          ticketsToVoid = [];
+
+          for (const line of sortedLines) {
+            if (!line.ticket_type_id) continue;
+            if (remainingAmount <= 0) break;
+            const quantity = Math.max(1, Number(line.quantity));
+            const lineTotalCents = Number(line.total_cents ?? 0);
+            const unitPriceCents = Number(line.unit_price_cents ?? 0);
+            const perTicketPriceCents = Math.max(
+              0,
+              Math.round(lineTotalCents > 0 ? lineTotalCents / quantity : unitPriceCents),
+            );
+            if (perTicketPriceCents <= 0) continue;
+
+            const ticketsOfType = validByType.get(line.ticket_type_id) ?? [];
+            const voidableFromType = Math.floor(remainingAmount / perTicketPriceCents);
+            const voidCount = Math.min(voidableFromType, ticketsOfType.length);
+
+            for (let i = 0; i < voidCount; i += 1) {
+              ticketsToVoid.push(ticketsOfType[i]);
+            }
+            remainingAmount -= voidCount * perTicketPriceCents;
+            validByType.set(line.ticket_type_id, ticketsOfType.slice(voidCount));
+          }
         }
       }
-    }
 
-    const voidedTicketIds: string[] = [];
-    const now = new Date();
-    await Promise.all(
-      ticketsToVoid.map((ticket) =>
-        db
+      const wonTicketIds: string[] = [];
+      const now = new Date();
+      for (const ticket of ticketsToVoid) {
+        // eslint-disable-next-line no-await-in-loop -- each conditional update establishes the exact tickets this refund won under concurrency.
+        const updateResult = await trx
           .updateTable('tickets')
           .set({ status: 'void', updated_at: now })
           .where('id', '=', ticket.id)
-          .execute(),
-      ),
-    );
-    voidedTicketIds.push(...ticketsToVoid.map((ticket) => ticket.id));
-    if (voidedTicketIds.length > 0) {
-      await db
-        .updateTable('wallet_passes')
-        .set({ status: 'revoked', revoked_at: now, updated_at: now })
-        .where('ticket_id', 'in', voidedTicketIds)
-        .where('status', '=', 'active')
-        .execute();
-    }
+          .where('status', '=', 'valid')
+          .execute();
+        if (updatedRowCount(updateResult) > 0) {
+          wonTicketIds.push(ticket.id);
+        }
+      }
 
-    if (refund) {
-      await db
-        .updateTable('refunds')
-        .set({
-          metadata: JSON.stringify({ ...refundMetadata, voidedTicketIds }),
-          updated_at: now,
-        })
-        .where('id', '=', refund.id)
-        .execute();
-    }
+      if (wonTicketIds.length > 0) {
+        await trx
+          .updateTable('wallet_passes')
+          .set({ status: 'revoked', revoked_at: now, updated_at: now })
+          .where('ticket_id', 'in', wonTicketIds)
+          .where('status', '=', 'active')
+          .execute();
+      }
 
-    await orderRepo.addTimelineEvent(
-      input.orderId,
-      'tickets.voided',
-      `Voided ${voidedTicketIds.length} tickets`,
-      { voidedTicketIds },
-    );
+      if (refund) {
+        await trx
+          .updateTable('refunds')
+          .set({
+            metadata: JSON.stringify({ ...refundMetadata, voidedTicketIds: wonTicketIds }),
+            updated_at: now,
+          })
+          .where('id', '=', refund.id)
+          .execute();
+      }
+
+      await orderRepo.addTimelineEvent(
+        input.orderId,
+        'tickets.voided',
+        `Voided ${wonTicketIds.length} tickets`,
+        { voidedTicketIds: wonTicketIds },
+      );
+
+      return wonTicketIds;
+    });
+
     return okResult({ voidedCount: voidedTicketIds.length, voidedTicketIds });
   } catch (err) {
+    if (err instanceof Error && err.message === 'ORDER_NOT_FOUND') {
+      return errResult('ORDER_NOT_FOUND', 'Order not found', false);
+    }
     return errResult(
       'VOID_TICKETS_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -762,7 +734,7 @@ export async function restoreInventoryActivity(input: {
   providerRefundId?: string;
   voidedTicketIds?: string[];
 }): Promise<WorkflowActivityResult<{ restored: number }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const restored = await db.transaction().execute(async (trx) => {
       const refund = input.providerRefundId
@@ -956,8 +928,6 @@ export async function restoreInventoryActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -968,7 +938,7 @@ export async function notifyRefundActivity(input: {
   brandId: string;
   providerRefundId?: string;
 }): Promise<WorkflowActivityResult<{ notified: boolean; jobId?: string }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const orderRepo = new OrderRepository(db);
     const order = await orderRepo.findById(input.orderId);
@@ -1021,7 +991,11 @@ export async function notifyRefundActivity(input: {
         .select(['id', 'title', 'starts_at', 'timezone', 'venue'])
         .where('id', '=', order.event_id)
         .executeTakeFirst(),
-      db.selectFrom('brands').select(['id', 'name']).where('id', '=', input.brandId).executeTakeFirst(),
+      db
+        .selectFrom('brands')
+        .select(['id', 'name'])
+        .where('id', '=', input.brandId)
+        .executeTakeFirst(),
       input.providerRefundId
         ? db
             .selectFrom('refunds')
@@ -1079,7 +1053,5 @@ export async function notifyRefundActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }

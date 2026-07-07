@@ -32,6 +32,7 @@ export type AppConfig = {
   metricsBearerToken: string;
   rateLimitMax: number;
   rateLimitTimeWindow: string;
+  compressionThresholdBytes: number;
   trustProxy: TrustProxyConfig;
 };
 
@@ -312,6 +313,11 @@ export function loadConfig(): AppConfig {
       nodeEnv === 'production' ? '100' : '1000',
     ),
     rateLimitTimeWindow: parseRateLimitTimeWindow(process.env.RATE_LIMIT_TIME_WINDOW, '1 minute'),
+    compressionThresholdBytes: parsePositiveIntegerConfig(
+      'API_COMPRESSION_THRESHOLD_BYTES',
+      process.env.API_COMPRESSION_THRESHOLD_BYTES,
+      '1024',
+    ),
     trustProxy,
   };
 }

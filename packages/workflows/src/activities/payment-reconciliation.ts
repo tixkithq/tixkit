@@ -1,13 +1,14 @@
-import { createDb } from '@tixkit/db';
 import {
   CheckoutSessionRepository,
   PaymentIntentRepository,
   OrderRepository,
   RefundRepository,
   PaymentEventRepository,
+  type Database,
 } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { getActivityDb } from './activity-clients.js';
 import { compensateOrphanPaymentActivity } from './checkout.js';
 import {
   notifyRefundActivity,
@@ -114,7 +115,7 @@ export async function reconcilePaymentActivity(input: {
   eventType: string;
   data: Record<string, unknown>;
 }): Promise<WorkflowActivityResult<PaymentReconciliationResult>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const paymentIntent = input.data as {
       id?: string;
@@ -260,8 +261,6 @@ export async function reconcilePaymentActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -308,7 +307,7 @@ function sumSucceededRefunds(
 }
 
 async function updateRefundReconciliationState(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   orderRepo: InstanceType<typeof OrderRepository>,
   order: { id: string; total_cents: number | string | bigint },
   refundedCents: number,
@@ -392,7 +391,7 @@ export async function reconcileRefundActivity(input: {
   eventType: string;
   data: Record<string, unknown>;
 }): Promise<WorkflowActivityResult<PaymentReconciliationResult>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const refundOrCharge = input.data as {
       id: string;
@@ -568,8 +567,6 @@ export async function reconcileRefundActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -578,7 +575,7 @@ export async function reconcileDisputeActivity(input: {
   provider: string;
   data: Record<string, unknown>;
 }): Promise<WorkflowActivityResult<PaymentReconciliationResult>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const dispute = input.data as {
       id: string;
@@ -628,8 +625,6 @@ export async function reconcileDisputeActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -649,7 +644,7 @@ export async function markProviderEventProcessedActivity(input: {
   provider: string;
   providerEventId: string;
 }): Promise<WorkflowActivityResult<{ processed: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const eventRepo = new PaymentEventRepository(db);
     await eventRepo.markProcessedByProviderEventId(input.provider, input.providerEventId);
@@ -660,7 +655,5 @@ export async function markProviderEventProcessedActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }

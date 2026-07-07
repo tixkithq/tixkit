@@ -71,6 +71,12 @@ function requireAnyPermission(principal: Principal, permissions: Permission[]): 
   }
 }
 
+function requireOrganizationCreationPrincipal(principal: Principal): void {
+  if (principal.brandIds?.length || principal.eventIds?.length) {
+    throw new ForbiddenError('Scoped principals cannot create tenant organizations');
+  }
+}
+
 function requireBrandCreationPrincipal(principal: Principal): void {
   if (principal.brandIds?.length || principal.eventIds?.length) {
     throw new ForbiddenError('Scoped principals cannot create brands');
@@ -270,6 +276,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.post('/organizations', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'settings.write');
+    requireOrganizationCreationPrincipal(principal);
     const body = parseBody(createOrganizationSchema, request.body);
     await requireUniqueClerkOrganizationId(db, body.clerkOrganizationId);
 

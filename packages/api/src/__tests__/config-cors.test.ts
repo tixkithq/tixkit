@@ -7,6 +7,7 @@ import { loadConfig, parseTrustProxy, resolveCorsAllowedOrigins } from '../confi
 
 const ENV_KEYS = [
   'API_BASE_URL',
+  'API_COMPRESSION_THRESHOLD_BYTES',
   'AUTH_PROVIDER',
   'CLERK_PUBLISHABLE_KEY',
   'CLERK_SECRET_KEY',

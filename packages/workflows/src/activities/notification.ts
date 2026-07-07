@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { createDb } from '@tixkit/db';
 import {
   ContentRepository,
   EmailProviderRouteRepository,
@@ -10,6 +9,7 @@ import {
   SmsSenderIdentityRepository,
   SmsJobRepository,
   SmsDeliveryRepository,
+  type Database,
 } from '@tixkit/db';
 import {
   OpenCoreEmailSdkTransport,
@@ -31,6 +31,7 @@ import type { SmsTransport } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { getActivityDb } from './activity-clients.js';
 
 type SendRenderOutput = {
   subject?: string;
@@ -77,7 +78,7 @@ function parseJobVariables(value: unknown): Record<string, unknown> {
 }
 
 async function recordSendRenderArtifact(input: {
-  db: ReturnType<typeof createDb>;
+  db: Database;
   tenantId: string;
   brandId: string;
   channel: 'email' | 'sms';
@@ -111,7 +112,7 @@ export async function checkSuppressionActivity(input: {
   email: string;
   tenantId: string;
 }): Promise<WorkflowActivityResult<{ suppressed: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const suppression = await db
       .selectFrom('email_suppressions')
@@ -126,8 +127,6 @@ export async function checkSuppressionActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -136,7 +135,7 @@ export async function checkConsentActivity(input: {
   tenantId: string;
   notificationType: string;
 }): Promise<WorkflowActivityResult<{ allowed: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     // Transactional emails always pass consent checks.
     if (input.notificationType === 'transactional') {
@@ -174,8 +173,6 @@ export async function checkConsentActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -184,7 +181,7 @@ export async function markEmailJobSuppressedActivity(input: {
   tenantId: string;
   reason: 'suppression' | 'consent';
 }): Promise<WorkflowActivityResult<{ suppressed: true }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const jobRepo = new EmailJobRepository(db);
     const job = await jobRepo.findById(input.jobId);
@@ -204,8 +201,6 @@ export async function markEmailJobSuppressedActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -216,7 +211,7 @@ export async function markEmailJobFailedActivity(input: {
   errorCode: string;
   message: string;
 }): Promise<WorkflowActivityResult<{ failed: true; errorCode: string; message: string }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const jobRepo = new EmailJobRepository(db);
     const job = await jobRepo.findById(input.jobId);
@@ -243,8 +238,6 @@ export async function markEmailJobFailedActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -253,7 +246,7 @@ export async function checkSmsConsentActivity(input: {
   tenantId: string;
   notificationType: string;
 }): Promise<WorkflowActivityResult<{ allowed: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const consent = await db
       .selectFrom('message_consents')
@@ -278,8 +271,6 @@ export async function checkSmsConsentActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -294,7 +285,7 @@ export async function renderTemplateActivity(input: {
 }): Promise<
   WorkflowActivityResult<{ subject: string; html: string; text?: string; segments?: number }>
 > {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     if (!input.tenantId) {
       return errResult(
@@ -370,8 +361,6 @@ export async function renderTemplateActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -419,7 +408,7 @@ export async function sendEmailActivity(input: {
   html: string;
   text?: string;
 }): Promise<WorkflowActivityResult<{ deliveryId: string; provider: string }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const jobRepo = new EmailJobRepository(db);
     const job = await jobRepo.findById(input.jobId);
@@ -633,8 +622,6 @@ export async function sendEmailActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -643,7 +630,7 @@ export async function sendSmsActivity(input: {
   providerRouteId: string;
   notificationType: 'transactional' | 'bulk' | 'staff' | 'system';
 }): Promise<WorkflowActivityResult<{ deliveryId: string; provider: string }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const jobRepo = new SmsJobRepository(db);
     const job = await jobRepo.findById(input.jobId);
@@ -791,7 +778,5 @@ export async function sendSmsActivity(input: {
     return okResult({ deliveryId: result.deliveryId, provider: result.provider });
   } catch (err) {
     return errResult('SMS_SEND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
-  } finally {
-    await db.destroy();
   }
 }

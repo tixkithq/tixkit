@@ -87,6 +87,7 @@ export function registerMetricsRoute(
   app.get(
     '/metrics',
     {
+      compress: false,
       config: {
         rateLimit: false,
       },

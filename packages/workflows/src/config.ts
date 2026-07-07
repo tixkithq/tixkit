@@ -2,6 +2,10 @@ type WorkflowConfig = {
   temporalAddress: string;
   temporalNamespace: string;
   temporalTaskQueue: string;
+  temporalWorkerTaskQueues: string[];
+  temporalWorkerMaxConcurrentActivityTaskExecutions?: number;
+  temporalWorkerMaxConcurrentWorkflowTaskExecutions?: number;
+  temporalWorkerMaxCachedWorkflows?: number;
   databaseUrl: string;
   redisUrl: string;
 };
@@ -87,15 +91,61 @@ function requireProductionConfig(): void {
   }
 }
 
+function parseCommaSeparatedList(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function parseOptionalPositiveInteger(name: string, value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  if (!/^[1-9]\d*$/.test(value.trim())) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return parsed;
+}
+
+function resolveWorkerTaskQueues(primaryQueue: string): string[] {
+  const configuredQueues = parseCommaSeparatedList(process.env.TEMPORAL_WORKER_TASK_QUEUES);
+  const cpuHeavyQueues = [
+    process.env.TEMPORAL_EXPORT_TASK_QUEUE,
+    process.env.TEMPORAL_PDF_TASK_QUEUE,
+    process.env.TEMPORAL_WALLET_TASK_QUEUE,
+  ].flatMap((value) => parseCommaSeparatedList(value));
+  return [...new Set([primaryQueue, ...configuredQueues, ...cpuHeavyQueues])];
+}
+
 export function loadConfig(): WorkflowConfig {
   if (process.env.NODE_ENV === 'production') {
     requireProductionConfig();
   }
 
+  const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
+
   return {
     temporalAddress: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
     temporalNamespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
-    temporalTaskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit',
+    temporalTaskQueue,
+    temporalWorkerTaskQueues: resolveWorkerTaskQueues(temporalTaskQueue),
+    temporalWorkerMaxConcurrentActivityTaskExecutions: parseOptionalPositiveInteger(
+      'TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS',
+      process.env.TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS,
+    ),
+    temporalWorkerMaxConcurrentWorkflowTaskExecutions: parseOptionalPositiveInteger(
+      'TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS',
+      process.env.TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS,
+    ),
+    temporalWorkerMaxCachedWorkflows: parseOptionalPositiveInteger(
+      'TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS',
+      process.env.TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS,
+    ),
     databaseUrl: process.env.DATABASE_URL ?? '',
     redisUrl: process.env.REDIS_URL ?? '',
   };

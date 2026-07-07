@@ -10,10 +10,9 @@ vi.mock('@temporalio/client', () => ({
 const dbState = vi.hoisted(() => ({
   existingJob: undefined as { id: string; status: string } | undefined,
   providerRoute: undefined as { id: string } | undefined,
-  publishedTemplate:
-    { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } } as
-      | { version: { id: string }; document: { id: string } }
-      | undefined,
+  publishedTemplate: { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } } as
+    | { version: { id: string }; document: { id: string } }
+    | undefined,
   createJobErrorOnce: undefined as Error | undefined,
   createdJobs: [] as Record<string, unknown>[],
   order: {
@@ -170,7 +169,6 @@ describe('sendConfirmationEmailActivity', () => {
 
     expect(result).toEqual({ ok: true, value: { status: 'skipped' } });
     expect(dbState.createdJobs).toEqual([]);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('skips when no published email content template is configured for the scope', async () => {

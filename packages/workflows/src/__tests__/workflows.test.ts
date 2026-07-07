@@ -1322,6 +1322,7 @@ describe('paymentReconciliationWorkflow', () => {
       organizationId: 'org_1',
       eventType: 'order.paid',
       payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+      idempotencyKey: 'payment-reconciliation:stripe:evt_stripe_1:order.paid',
     });
     expect(mockState.childStarts).toEqual([
       {
@@ -1383,8 +1384,48 @@ describe('paymentReconciliationWorkflow', () => {
       organizationId: 'org_1',
       eventType: 'order.paid',
       payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+      idempotencyKey: 'payment-reconciliation:stripe:evt_stripe_1:order.paid',
     });
     expect(markInput).toEqual({ provider: 'stripe', providerEventId: 'evt_stripe_1' });
+  });
+
+  it('uses a stable webhook idempotency key before provider mark-processed retries', async () => {
+    let webhookEventInput: Record<string, unknown> | undefined;
+
+    setActivity('reconcilePaymentActivity', async () =>
+      okResult({
+        orderId: 'ord_1',
+        status: 'paid',
+        webhookEvent: makeReconciledOrderWebhookEvent(),
+      }),
+    );
+    setActivity('emitWebhookEventActivity', async (input) => {
+      webhookEventInput = input;
+      return okResult({
+        eventId: 'whe_stable',
+        deliveries: [
+          { endpointId: 'wh_1', eventId: 'whe_stable', url: 'https://example.test/hook' },
+        ],
+      });
+    });
+    setActivity('markProviderEventProcessedActivity', async () =>
+      errResult('PROVIDER_EVENT_UPDATE_FAILED', 'database unavailable', true),
+    );
+
+    await expect(paymentReconciliationWorkflow(makePaymentReconciliationInput())).rejects.toThrow(
+      'Payment provider event mark-processed failed (PROVIDER_EVENT_UPDATE_FAILED): database unavailable',
+    );
+
+    expect(webhookEventInput).toEqual({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      eventType: 'order.paid',
+      payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+      idempotencyKey: 'payment-reconciliation:stripe:evt_stripe_1:order.paid',
+    });
+    expect(mockState.childStarts[0]?.options).toMatchObject({
+      workflowId: 'webhook-delivery:whe_stable:wh_1',
+    });
   });
 
   it('does not mark provider events processed when webhook event creation fails retryably', async () => {
@@ -1412,12 +1453,12 @@ describe('paymentReconciliationWorkflow', () => {
   });
 
   it('emits refund and dispute webhook events before marking processed', async () => {
-    const emittedEventTypes: unknown[] = [];
+    const emittedWebhookInputs: unknown[] = [];
     const markedProviderEvents: unknown[] = [];
 
     setActivity('emitWebhookEventActivity', async (input) => {
-      emittedEventTypes.push(input.eventType);
-      return okResult({ eventId: `whe_${emittedEventTypes.length}`, deliveries: [] });
+      emittedWebhookInputs.push(input);
+      return okResult({ eventId: `whe_${emittedWebhookInputs.length}`, deliveries: [] });
     });
     setActivity('markProviderEventProcessedActivity', async (input) => {
       markedProviderEvents.push(input);
@@ -1451,7 +1492,22 @@ describe('paymentReconciliationWorkflow', () => {
       ),
     ).resolves.toEqual({ status: 'disputed' });
 
-    expect(emittedEventTypes).toEqual(['order.refunded', 'order.disputed']);
+    expect(emittedWebhookInputs).toEqual([
+      {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        eventType: 'order.refunded',
+        payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+        idempotencyKey: 'payment-reconciliation:stripe:evt_stripe_1:order.refunded',
+      },
+      {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        eventType: 'order.disputed',
+        payload: { orderId: 'ord_1', eventId: 'evt_1', checkoutSessionId: 'cs_1' },
+        idempotencyKey: 'payment-reconciliation:stripe:evt_stripe_1:order.disputed',
+      },
+    ]);
     expect(markedProviderEvents).toHaveLength(2);
   });
 

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { createDb, PrivacyRequestRepository, type Database } from '@tixkit/db';
+import { PrivacyRequestRepository, type Database } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { errResult, okResult } from '../shared/types.js';
+import { getActivityDb } from './activity-clients.js';
 
 type PrivacyRequestRow = {
   id: string;
@@ -925,7 +926,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
 export async function processPrivacyRequestActivity(input: {
   requestId: string;
 }): Promise<WorkflowActivityResult<{ requestId: string; status: string }>> {
-  const db = createDb(process.env.DATABASE_URL ?? '');
+  const db = getActivityDb();
   const repo = new PrivacyRequestRepository(db);
   try {
     const request = (await repo.findById(input.requestId)) as PrivacyRequestRow | undefined;
@@ -960,11 +961,8 @@ export async function processPrivacyRequestActivity(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown privacy request failure';
     return errResult('privacy_request_failed', message, true);
-  } finally {
-    await db.destroy();
   }
 }
-
 export async function enforcePrivacyRetentionActivity(
   input: {
     batchSize?: number;
@@ -973,7 +971,7 @@ export async function enforcePrivacyRetentionActivity(
 ): Promise<
   WorkflowActivityResult<{ inspectedCount: number; repairedCount: number; skippedCount: number }>
 > {
-  const db = createDb(process.env.DATABASE_URL ?? '');
+  const db = getActivityDb();
   const repo = new PrivacyRequestRepository(db);
   const batchSize = Math.min(Math.max(input.batchSize ?? 50, 1), 250);
   try {
@@ -1015,7 +1013,5 @@ export async function enforcePrivacyRetentionActivity(
       error instanceof Error ? error.message : 'Unknown privacy retention failure',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }

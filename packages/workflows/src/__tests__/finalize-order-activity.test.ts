@@ -364,7 +364,6 @@ describe('createPaymentIntentActivity capture mode', () => {
     });
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBe('pi_1');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('pending_payment');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('reuses an existing local payment intent row after a partial commit replay', async () => {
@@ -408,7 +407,6 @@ describe('createPaymentIntentActivity capture mode', () => {
     expect(Object.values(dbState.tables.payment_intents)).toHaveLength(1);
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBe('pi_existing');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('pending_payment');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('creates Stripe Connect destination charges with the configured application fee', async () => {
@@ -511,7 +509,6 @@ describe('createPaymentIntentActivity capture mode', () => {
       paymentIntentRowId: 'pi_1',
       source: 'checkout_payment_intent_attach_failed',
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
   it('blocks attach failure when created payment intent compensation needs manual review', async () => {
@@ -582,7 +579,6 @@ describe('createPaymentIntentActivity capture mode', () => {
       provider_compensation_id: 'local:pi_capture_cs_1',
       attempts: 1,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(2);
   });
 
   it('fails closed in production when Stripe is not configured', async () => {
@@ -603,7 +599,6 @@ describe('createPaymentIntentActivity capture mode', () => {
     });
     expect(Object.values(dbState.tables.payment_intents)).toHaveLength(0);
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBeUndefined();
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -634,7 +629,6 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(1);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('completed');
     expect(dbState.locks).toEqual(['inventory_pools', 'checkout_holds']);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('claims only the waitlist offer reserved by the finalized checkout session', async () => {
@@ -669,7 +663,6 @@ describe('finalizeOrderActivity inventory holds', () => {
       reserved_until: null,
     });
     expect(dbState.tables.waitlist_entries.wle_1.claimed_at).toBeInstanceOf(Date);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('finalizes attendee records from sanitized cart item answers before legacy ticket-type answers', async () => {
@@ -703,7 +696,6 @@ describe('finalizeOrderActivity inventory holds', () => {
     });
     expect(attendees[0].custom_answers).not.toContain('q_hidden');
     expect(attendees[0].custom_answers).not.toContain('legacy stale value');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('finalizes distinct attendee answers for repeated ticket types on separate cart lines', async () => {
@@ -770,7 +762,6 @@ describe('finalizeOrderActivity inventory holds', () => {
       'occ_morning',
       'occ_evening',
     ]);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('expires stale holds and fails before creating an order', async () => {
@@ -792,7 +783,6 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('expired');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('expired');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('returns a committed order when a concurrent finalize wins before a handled transaction failure', async () => {
@@ -821,7 +811,6 @@ describe('finalizeOrderActivity inventory holds', () => {
       value: { orderId: 'ord_committed' },
     });
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('expired');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('throws retryable database concurrency errors so Temporal retries finalization', async () => {
@@ -840,7 +829,6 @@ describe('finalizeOrderActivity inventory holds', () => {
         paymentIntentId: 'pi_provider_1',
       }),
     ).rejects.toBe(concurrencyError);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('finalizes a reserved resale listing into a buyer order and transfers the seller ticket', async () => {
@@ -974,7 +962,6 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(Object.values(dbState.tables.orders)).toHaveLength(0);
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('active');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed for a paid online checkout without a provider intent', async () => {
@@ -993,7 +980,6 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(Object.values(dbState.tables.orders)).toHaveLength(0);
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('active');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('allows a paid offline box-office tender without a provider intent', async () => {
@@ -1021,7 +1007,6 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('converted');
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(1);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('completed');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('allows a free checkout without a payment intent', async () => {
@@ -1041,7 +1026,6 @@ describe('finalizeOrderActivity inventory holds', () => {
       payment_provider: null,
     });
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('converted');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1084,7 +1068,6 @@ describe('releaseHoldActivity checkout session status', () => {
       reserved_checkout_session_id: null,
       reserved_until: null,
     });
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('cancels the checkout session when a buyer cancels before payment completes', async () => {
@@ -1096,7 +1079,6 @@ describe('releaseHoldActivity checkout session status', () => {
     expect(result.ok).toBe(true);
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('released');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('cancelled');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 
   it('requires a checkoutSessionId when updating checkout session status', async () => {
@@ -1112,7 +1094,6 @@ describe('releaseHoldActivity checkout session status', () => {
     });
     expect(dbState.tables.checkout_holds.hld_1.status).toBe('active');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('pending_payment');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 });
 

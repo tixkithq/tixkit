@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import * as allActivities from './activities/index.js';
+import { closeActivityClients } from './activities/activity-clients.js';
 import { holdExpirationWorkflow } from './workflows/index.js';
 import { holdExpirationWorkflowId, HOLD_EXPIRATION_WORKFLOW_VERSION } from './shared/types.js';
 import { buildWorkerStartupFailureMessage } from './startup-diagnostics.js';
@@ -40,6 +41,26 @@ type EnsureHoldExpirationSchedulerOptions = {
 type RunWorkerOptions = {
   workflowsPath?: string;
 };
+
+function workerConcurrencyOptions() {
+  return {
+    ...(config.temporalWorkerMaxConcurrentActivityTaskExecutions !== undefined
+      ? {
+          maxConcurrentActivityTaskExecutions:
+            config.temporalWorkerMaxConcurrentActivityTaskExecutions,
+        }
+      : {}),
+    ...(config.temporalWorkerMaxConcurrentWorkflowTaskExecutions !== undefined
+      ? {
+          maxConcurrentWorkflowTaskExecutions:
+            config.temporalWorkerMaxConcurrentWorkflowTaskExecutions,
+        }
+      : {}),
+    ...(config.temporalWorkerMaxCachedWorkflows !== undefined
+      ? { maxCachedWorkflows: config.temporalWorkerMaxCachedWorkflows }
+      : {}),
+  };
+}
 
 function isWorkflowExecutionAlreadyStartedError(err: unknown): boolean {
   return (
@@ -86,56 +107,69 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
   const connection = await NativeConnection.connect({
     address: config.temporalAddress,
   });
-  const tracingDisabled = process.env.OTEL_SDK_DISABLED === 'true';
-  const telemetryResource = tracingDisabled
-    ? undefined
-    : await createTelemetryResource({
-        serviceName: 'tixkit-worker',
-        serviceVersion: process.env.npm_package_version,
-        environment: process.env.NODE_ENV ?? 'development',
-        otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-      });
-  const workflowTraceExporter = tracingDisabled
-    ? undefined
-    : await createTraceExporter({ serviceName: 'tixkit-worker' });
-  const activityInterceptors: ActivityInterceptorsFactory[] = [
-    (ctx) => ({ inbound: new TixkitActivityMetricsInterceptor(ctx, observability.metrics) }),
-  ];
-  if (!tracingDisabled) {
-    const { OpenTelemetryActivityInboundInterceptor } =
-      await import('@temporalio/interceptors-opentelemetry');
-    activityInterceptors.unshift((ctx) => ({
-      inbound: new OpenTelemetryActivityInboundInterceptor(ctx),
-    }));
+  try {
+    const tracingDisabled = process.env.OTEL_SDK_DISABLED === 'true';
+    const telemetryResource = tracingDisabled
+      ? undefined
+      : await createTelemetryResource({
+          serviceName: 'tixkit-worker',
+          serviceVersion: process.env.npm_package_version,
+          environment: process.env.NODE_ENV ?? 'development',
+          otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+        });
+    const workflowTraceExporter = tracingDisabled
+      ? undefined
+      : await createTraceExporter({ serviceName: 'tixkit-worker' });
+    const activityInterceptors: ActivityInterceptorsFactory[] = [
+      (ctx) => ({ inbound: new TixkitActivityMetricsInterceptor(ctx, observability.metrics) }),
+    ];
+    if (!tracingDisabled) {
+      const { OpenTelemetryActivityInboundInterceptor } =
+        await import('@temporalio/interceptors-opentelemetry');
+      activityInterceptors.unshift((ctx) => ({
+        inbound: new OpenTelemetryActivityInboundInterceptor(ctx),
+      }));
+    }
+
+    const workerOptions = {
+      connection,
+      namespace: config.temporalNamespace,
+      workflowsPath: options.workflowsPath ?? require.resolve('./workflows/index.js'),
+      activities: allActivities,
+      enableSDKTracing: !tracingDisabled,
+      ...workerConcurrencyOptions(),
+      ...(workflowTraceExporter && telemetryResource
+        ? {
+            sinks: {
+              exporter: createWorkflowExporterSink(workflowTraceExporter, telemetryResource),
+            },
+          }
+        : {}),
+      interceptors: {
+        ...(tracingDisabled
+          ? {}
+          : { workflowModules: [require.resolve('./workflows/otel-interceptors.js')] }),
+        activity: activityInterceptors,
+      },
+    };
+    const workers = await Promise.all(
+      config.temporalWorkerTaskQueues.map((taskQueue) =>
+        Worker.create({
+          ...workerOptions,
+          taskQueue,
+        }),
+      ),
+    );
+
+    await ensureHoldExpirationScheduler();
+
+    const workerRuns = workers.map((worker) => worker.run());
+    console.log(`TIXKIT_WORKER_READY taskQueues=${config.temporalWorkerTaskQueues.join(',')}`);
+    await Promise.all(workerRuns);
+  } finally {
+    await closeActivityClients();
+    await connection.close();
   }
-
-  const worker = await Worker.create({
-    connection,
-    namespace: config.temporalNamespace,
-    taskQueue: config.temporalTaskQueue,
-    workflowsPath: options.workflowsPath ?? require.resolve('./workflows/index.js'),
-    activities: allActivities,
-    enableSDKTracing: !tracingDisabled,
-    ...(workflowTraceExporter && telemetryResource
-      ? {
-          sinks: {
-            exporter: createWorkflowExporterSink(workflowTraceExporter, telemetryResource),
-          },
-        }
-      : {}),
-    interceptors: {
-      ...(tracingDisabled
-        ? {}
-        : { workflowModules: [require.resolve('./workflows/otel-interceptors.js')] }),
-      activity: activityInterceptors,
-    },
-  });
-
-  await ensureHoldExpirationScheduler();
-
-  const workerRun = worker.run();
-  console.log(`TIXKIT_WORKER_READY taskQueue=${config.temporalTaskQueue}`);
-  await workerRun;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

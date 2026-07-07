@@ -19,6 +19,7 @@ const dbState = vi.hoisted(() => ({
     organization_id: string;
     type: string;
     payload: string;
+    idempotency_key?: string;
     status: string;
     created_at: Date;
   }>,
@@ -44,13 +45,25 @@ vi.mock('@tixkit/db', () => {
       organizationId: string;
       type: string;
       payload: Record<string, unknown>;
+      idempotencyKey?: string;
     }) {
+      if (input.idempotencyKey) {
+        const existing = dbState.events.find(
+          (event) =>
+            event.tenant_id === input.tenantId &&
+            event.organization_id === input.organizationId &&
+            event.type === input.type &&
+            event.idempotency_key === input.idempotencyKey,
+        );
+        if (existing) return existing;
+      }
       const event = {
         id: `whe_${dbState.events.length + 1}`,
         tenant_id: input.tenantId,
         organization_id: input.organizationId,
         type: input.type,
         payload: JSON.stringify(input.payload),
+        idempotency_key: input.idempotencyKey,
         status: 'pending',
         created_at: new Date('2026-06-01T00:00:00Z'),
       };
@@ -96,6 +109,28 @@ describe('emitWebhookEventActivity', () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain('secret');
-    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the same durable webhook event for a repeated idempotency key', async () => {
+    const input = {
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      eventType: 'order.paid',
+      payload: { orderId: 'ord_1' },
+      idempotencyKey: 'payment-reconciliation:stripe:evt_1:order.paid',
+    };
+
+    const first = await emitWebhookEventActivity(input);
+    const second = await emitWebhookEventActivity(input);
+
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({
+      ok: true,
+      value: {
+        eventId: 'whe_1',
+        deliveries: [{ endpointId: 'wh_1', eventId: 'whe_1' }],
+      },
+    });
+    expect(dbState.events).toHaveLength(1);
   });
 });

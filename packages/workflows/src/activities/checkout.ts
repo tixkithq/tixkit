@@ -1,4 +1,4 @@
-import { createDb, type Database } from '@tixkit/db';
+import type { Database } from '@tixkit/db';
 import {
   EmailJobRepository,
   PaymentCompensationRepository,
@@ -14,10 +14,7 @@ import { withSpan } from '@tixkit/shared';
 import Stripe from 'stripe';
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
 import QRCode from 'qrcode';
-import { Connection, Client } from '@temporalio/client';
-import { notificationDeliveryWorkflow } from '../workflows/notification.js';
 import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
-import { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } from '../shared/types.js';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 import {
@@ -27,13 +24,47 @@ import {
   type WalletPassArtifact,
 } from '../wallet-passes.js';
 import { buildTransactionalMergeTagContext } from './messaging-context.js';
+import { getActivityDb, startNotificationDeliveryWorkflow } from './activity-clients.js';
 
-const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
-const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
-const TEMPORAL_TASK_QUEUE = process.env.TEMPORAL_TASK_QUEUE ?? 'tixkit';
-
-let cachedClient: Client | null = null;
 const e2eTicketIssueFailures = new Set<string>();
+const DEFAULT_TICKET_PDF_GENERATION_CONCURRENCY = 4;
+const DEFAULT_WALLET_PASS_GENERATION_CONCURRENCY = 2;
+
+function parsePositiveIntegerEnv(name: string, defaultValue: number): number {
+  const value = process.env[name]?.trim();
+  if (!value) return defaultValue;
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index] as T, index);
+      }
+    }),
+  );
+
+  return results;
+}
 
 function normalizeDiscountCode(code: string): string {
   return code.trim().toUpperCase();
@@ -139,40 +170,10 @@ type BrandTheme = {
   accent?: string;
 };
 
-async function getTemporalClient(): Promise<Client> {
-  if (!cachedClient) {
-    const connection = await Connection.connect({ address: TEMPORAL_ADDRESS });
-    cachedClient = new Client({ connection, namespace: TEMPORAL_NAMESPACE });
-  }
-  return cachedClient;
-}
-
 async function startNotificationWorkflow(
   input: Omit<NotificationDeliveryWorkflowInput, 'version'>,
 ): Promise<void> {
-  try {
-    const client = await getTemporalClient();
-    const workflowId = notificationWorkflowId(input.jobId);
-    try {
-      await client.workflow.start(notificationDeliveryWorkflow, {
-        taskQueue: TEMPORAL_TASK_QUEUE,
-        workflowId,
-        args: [{ version: NOTIFICATION_WORKFLOW_VERSION, ...input }],
-      });
-    } catch (err) {
-      if (
-        !(
-          err instanceof Error &&
-          (err.name === 'WorkflowExecutionAlreadyStartedError' ||
-            err.message.includes('already started'))
-        )
-      ) {
-        throw err;
-      }
-    }
-  } catch {
-    // Non-fatal: the email job row is queued and a poller or manual retry can drain it.
-  }
+  await startNotificationDeliveryWorkflow(input);
 }
 
 function parseStoredJson<T>(value: unknown): T {
@@ -700,7 +701,7 @@ export async function createPaymentIntentActivity(input: {
 }): Promise<
   WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string; provider?: string }>
 > {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
     if (!stripeSecretKey) {
@@ -946,8 +947,6 @@ export async function createPaymentIntentActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -972,7 +971,7 @@ export async function compensateOrphanPaymentActivity(input: {
     providerCompensationId?: string;
   }>
 > {
-  const db = createDb();
+  const db = getActivityDb();
   let compensationRepo: PaymentCompensationRepository | undefined;
   let compensation: PaymentCompensationRow | undefined;
   let attemptedAction: OrphanPaymentCompensationAction = 'refund';
@@ -1328,11 +1327,8 @@ export async function compensateOrphanPaymentActivity(input: {
       }
     }
     return errResult('PAYMENT_COMPENSATION_FAILED', message, true);
-  } finally {
-    await db.destroy();
   }
 }
-
 // Activity: Finalize order - creates order, attendees, and tickets
 export async function finalizeOrderActivity(input: {
   checkoutSessionId: string;
@@ -1344,7 +1340,7 @@ export async function finalizeOrderActivity(input: {
   operatorId?: string;
   tenderType?: BoxOfficeTenderType;
 }): Promise<WorkflowActivityResult<{ orderId: string }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     // Idempotency: if an order already exists for this checkout session (e.g. the
     // activity is retried after committing but before reporting success), return
@@ -2357,8 +2353,6 @@ export async function finalizeOrderActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       false,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -2369,7 +2363,7 @@ export async function sendConfirmationEmailActivity(input: {
   tenantId: string;
   brandId: string;
 }): Promise<WorkflowActivityResult<{ jobId?: string; status: 'queued' | 'skipped' }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const orderRepo = new OrderRepository(db);
     const order = await orderRepo.findById(input.orderId);
@@ -2416,7 +2410,11 @@ export async function sendConfirmationEmailActivity(input: {
         .select(['id', 'title', 'starts_at', 'timezone', 'venue'])
         .where('id', '=', order.event_id)
         .executeTakeFirst(),
-      db.selectFrom('brands').select(['id', 'name']).where('id', '=', input.brandId).executeTakeFirst(),
+      db
+        .selectFrom('brands')
+        .select(['id', 'name'])
+        .where('id', '=', input.brandId)
+        .executeTakeFirst(),
     ]);
     const context = buildTransactionalMergeTagContext({ order, event, brand });
 
@@ -2464,8 +2462,6 @@ export async function sendConfirmationEmailActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -2475,7 +2471,7 @@ export async function releaseHoldActivity(input: {
   checkoutSessionId?: string;
   checkoutSessionStatus?: 'cancelled' | 'expired';
 }): Promise<WorkflowActivityResult<{ released: boolean }>> {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     if (input.checkoutSessionStatus && !input.checkoutSessionId) {
       return errResult(
@@ -2570,8 +2566,6 @@ export async function releaseHoldActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       false,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -2584,7 +2578,7 @@ export async function issueTicketsActivity(input: {
 }): Promise<WorkflowActivityResult<{ issued: number; jobId?: string }>> {
   failTicketIssueActivityOnceForE2e(input);
 
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const tickets = await db
       .selectFrom('tickets')
@@ -2652,8 +2646,13 @@ export async function issueTicketsActivity(input: {
       walletPassLinks = [];
     }
 
-    const pdfAttachments = await Promise.all(
-      tickets.map(async (ticket) => {
+    const pdfAttachments = await mapWithConcurrency(
+      tickets,
+      parsePositiveIntegerEnv(
+        'TICKET_PDF_GENERATION_CONCURRENCY',
+        DEFAULT_TICKET_PDF_GENERATION_CONCURRENCY,
+      ),
+      async (ticket) => {
         const pdfContent = await generateTicketPdf({
           ticket,
           ticketType: ticketTypesById.get(ticket.ticket_type_id) ?? null,
@@ -2668,7 +2667,7 @@ export async function issueTicketsActivity(input: {
           content: pdfContent,
           contentEncoding: 'base64' as const,
         };
-      }),
+      },
     );
 
     // Check for existing email job to avoid duplicates.
@@ -2765,8 +2764,6 @@ export async function issueTicketsActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }
 
@@ -2816,6 +2813,9 @@ async function ensureWalletPassesForTickets(
   const links: TicketWalletPassLink[] = [];
   const brandTheme = parseBrandTheme(input.brand?.theme);
   const brandColor = brandTheme.primaryColor ?? brandTheme.primary ?? brandTheme.accent;
+  const artifactJobs: Array<
+    () => Promise<{ ticketId: string; id: string; artifact: WalletPassArtifact }>
+  > = [];
 
   for (const ticket of input.tickets) {
     const ticketType = input.ticketTypesById.get(ticket.ticket_type_id);
@@ -2835,54 +2835,48 @@ async function ensureWalletPassesForTickets(
       brandColor,
     };
 
-    const artifacts: Array<{ id: string; artifact: WalletPassArtifact }> = [];
-    if (config.apple && !existingKeys.has(`${ticket.id}:apple`)) {
+    const appleConfig = config.apple;
+    if (appleConfig && !existingKeys.has(`${ticket.id}:apple`)) {
       const id = `wps_${ulid()}`;
-      artifacts.push({
+      artifactJobs.push(async () => ({
+        ticketId: ticket.id,
         id,
-        // eslint-disable-next-line no-await-in-loop -- pass signing is tied to this ticket/provider id before persistence.
         artifact: await generateAppleWalletPass(
           { ...commonInput, passId: id },
-          config.apple,
+          appleConfig,
           config.apiBaseUrl,
         ),
-      });
+      }));
     }
-    if (config.google && !existingKeys.has(`${ticket.id}:google`)) {
+    const googleConfig = config.google;
+    if (googleConfig && !existingKeys.has(`${ticket.id}:google`)) {
       const id = `wps_${ulid()}`;
-      artifacts.push({
+      artifactJobs.push(async () => ({
+        ticketId: ticket.id,
         id,
-        artifact: generateGoogleWalletPass({ ...commonInput, passId: id }, config.google),
-      });
+        artifact: generateGoogleWalletPass({ ...commonInput, passId: id }, googleConfig),
+      }));
     }
+  }
 
-    for (const { id, artifact } of artifacts) {
-      const now = new Date();
-      // eslint-disable-next-line no-await-in-loop -- inserts update the per-ticket/provider idempotency set before the next provider is considered.
-      await db
-        .insertInto('wallet_passes')
-        .values({
-          id,
-          tenant_id: input.tenantId,
-          ticket_id: ticket.id,
-          provider: artifact.provider,
-          status: 'active',
-          serial_number: artifact.serialNumber,
-          pass_url: artifact.passUrl,
-          access_token_hash: artifact.accessTokenHash ?? null,
-          content_type: artifact.contentType ?? null,
-          artifact_base64: artifact.artifactBase64 ?? null,
-          metadata: JSON.stringify(artifact.metadata),
-          revoked_at: null,
-          created_at: now,
-          updated_at: now,
-        })
-        .execute();
-      existingKeys.add(`${ticket.id}:${artifact.provider}`);
-      existingPasses.push({
+  const generatedArtifacts = await mapWithConcurrency(
+    artifactJobs,
+    parsePositiveIntegerEnv(
+      'WALLET_PASS_GENERATION_CONCURRENCY',
+      DEFAULT_WALLET_PASS_GENERATION_CONCURRENCY,
+    ),
+    async (generate) => generate(),
+  );
+
+  for (const { ticketId, id, artifact } of generatedArtifacts) {
+    const now = new Date();
+    // eslint-disable-next-line no-await-in-loop -- persistence stays sequential to preserve per-ticket/provider idempotency updates.
+    await db
+      .insertInto('wallet_passes')
+      .values({
         id,
         tenant_id: input.tenantId,
-        ticket_id: ticket.id,
+        ticket_id: ticketId,
         provider: artifact.provider,
         status: 'active',
         serial_number: artifact.serialNumber,
@@ -2894,15 +2888,32 @@ async function ensureWalletPassesForTickets(
         revoked_at: null,
         created_at: now,
         updated_at: now,
-      });
-      if (artifact.provider === 'apple') {
-        // eslint-disable-next-line no-await-in-loop -- the ticket points at the persisted Apple pass id created in this iteration.
-        await db
-          .updateTable('tickets')
-          .set({ wallet_pass_id: id, updated_at: now })
-          .where('id', '=', ticket.id)
-          .execute();
-      }
+      })
+      .execute();
+    existingKeys.add(`${ticketId}:${artifact.provider}`);
+    existingPasses.push({
+      id,
+      tenant_id: input.tenantId,
+      ticket_id: ticketId,
+      provider: artifact.provider,
+      status: 'active',
+      serial_number: artifact.serialNumber,
+      pass_url: artifact.passUrl,
+      access_token_hash: artifact.accessTokenHash ?? null,
+      content_type: artifact.contentType ?? null,
+      artifact_base64: artifact.artifactBase64 ?? null,
+      metadata: JSON.stringify(artifact.metadata),
+      revoked_at: null,
+      created_at: now,
+      updated_at: now,
+    });
+    if (artifact.provider === 'apple') {
+      // eslint-disable-next-line no-await-in-loop -- the ticket points at the persisted Apple pass id created in this iteration.
+      await db
+        .updateTable('tickets')
+        .set({ wallet_pass_id: id, updated_at: now })
+        .where('id', '=', ticketId)
+        .execute();
     }
   }
 

@@ -1,7 +1,7 @@
-import { createDb } from '@tixkit/db';
 import { WebhookEventRepository, WebhookEndpointRepository } from '@tixkit/db';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
+import { getActivityDb } from './activity-clients.js';
 
 export async function emitWebhookEventActivity(input: {
   tenantId: string;
@@ -15,7 +15,7 @@ export async function emitWebhookEventActivity(input: {
     deliveries: { endpointId: string; eventId: string; url: string }[];
   }>
 > {
-  const db = createDb();
+  const db = getActivityDb();
   try {
     const endpointRepo = new WebhookEndpointRepository(db);
     const eventRepo = new WebhookEventRepository(db);
@@ -42,7 +42,5 @@ export async function emitWebhookEventActivity(input: {
       err instanceof Error ? err.message : 'Unknown error',
       true,
     );
-  } finally {
-    await db.destroy();
   }
 }

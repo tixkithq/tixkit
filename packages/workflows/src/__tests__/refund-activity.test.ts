@@ -33,10 +33,9 @@ const dbState = vi.hoisted(() => ({
   } as Record<string, unknown>,
   brand: { id: 'brd_1', name: 'Northstar Events' } as Record<string, unknown>,
   createdJobs: [] as Record<string, unknown>[],
-  publishedTemplate:
-    { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } } as
-      | { version: { id: string }; document: { id: string } }
-      | undefined,
+  publishedTemplate: { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } } as
+    | { version: { id: string }; document: { id: string } }
+    | undefined,
   lineItems: [] as Record<string, unknown>[],
   tickets: [] as Record<string, unknown>[],
   checkoutHolds: [] as Record<string, unknown>[],
@@ -257,14 +256,14 @@ vi.mock('@tixkit/db', () => {
           const values =
             typeof updateValues === 'function' ? updateValues(expressionBuilder) : updateValues;
           dbState.updatedTickets.push({ table, ...values });
-          return [];
+          return [{ numUpdatedRows: 0n }];
         }
         for (const row of rows) {
           const values = resolveValues(row);
           Object.assign(row, values);
           dbState.updatedTickets.push({ table, ...values });
         }
-        return [];
+        return [{ numUpdatedRows: BigInt(rows.length) }];
       },
     };
     return query;
@@ -344,6 +343,20 @@ const {
   voidTicketsActivity,
   notifyRefundActivity,
 } = await import('../activities/refund.js');
+
+function expectedLedgerAllocation(input: {
+  total: number;
+  tax: number;
+  fee: number;
+  refund: number;
+}) {
+  const ratio = input.total > 0 ? input.refund / input.total : 0;
+  const taxRefundCents = Math.min(input.tax, Math.round(input.tax * ratio));
+  const feeRefundCents = Math.min(input.fee, Math.round(input.fee * ratio));
+  const grossRefundCents = Math.max(0, input.refund - taxRefundCents - feeRefundCents);
+  const netRevenueDeltaCents = -Math.max(0, input.refund - taxRefundCents);
+  return { taxRefundCents, feeRefundCents, grossRefundCents, netRevenueDeltaCents };
+}
 
 beforeEach(() => {
   dbState.transactionQueue = Promise.resolve();
@@ -472,6 +485,72 @@ describe('voidTicketsActivity', () => {
       expect(result.value.voidedCount).toBe(1);
       expect(result.value.voidedTicketIds).toEqual(['tkt_2']);
     }
+  });
+
+  it('voids distinct tickets for concurrent partial refund activities', async () => {
+    dbState.tickets = [
+      { id: 'tkt_1', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
+      { id: 'tkt_2', order_id: 'ord_1', ticket_type_id: 'tt_1', status: 'valid' },
+    ];
+    dbState.lineItems = [{ ticket_type_id: 'tt_1', unit_price_cents: 5000, quantity: 2 }];
+    dbState.refunds = [
+      {
+        id: 'rfd_1',
+        order_id: 'ord_1',
+        provider_refund_id: 're_partial_1',
+        amount_cents: 5000,
+        currency: 'USD',
+        status: 'succeeded',
+        metadata: '{}',
+      },
+      {
+        id: 'rfd_2',
+        order_id: 'ord_1',
+        provider_refund_id: 're_partial_2',
+        amount_cents: 5000,
+        currency: 'USD',
+        status: 'succeeded',
+        metadata: '{}',
+      },
+    ];
+
+    const [first, second] = await Promise.all([
+      voidTicketsActivity({
+        orderId: 'ord_1',
+        amountCents: 5000,
+        isFullRefund: false,
+        providerRefundId: 're_partial_1',
+      }),
+      voidTicketsActivity({
+        orderId: 'ord_1',
+        amountCents: 5000,
+        isFullRefund: false,
+        providerRefundId: 're_partial_2',
+      }),
+    ]);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (first.ok && second.ok) {
+      expect(first.value.voidedCount).toBe(1);
+      expect(second.value.voidedCount).toBe(1);
+      expect(new Set([...first.value.voidedTicketIds, ...second.value.voidedTicketIds])).toEqual(
+        new Set(['tkt_1', 'tkt_2']),
+      );
+    }
+    expect(dbState.tickets.map((ticket) => [ticket.id, ticket.status])).toEqual([
+      ['tkt_1', 'void'],
+      ['tkt_2', 'void'],
+    ]);
+    const firstMetadata = JSON.parse(String(dbState.refunds[0].metadata)) as Record<
+      string,
+      unknown
+    >;
+    const secondMetadata = JSON.parse(String(dbState.refunds[1].metadata)) as Record<
+      string,
+      unknown
+    >;
+    expect(firstMetadata.voidedTicketIds).not.toEqual(secondMetadata.voidedTicketIds);
   });
 });
 
@@ -966,6 +1045,19 @@ describe('processRefundActivity - Stripe Connect', () => {
 });
 
 describe('updateLedgerActivity', () => {
+  const refundLedgerScenarios = [
+    { total: 1, tax: 0, fee: 0, refund: 1 },
+    { total: 100, tax: 7, fee: 3, refund: 1 },
+    { total: 100, tax: 7, fee: 3, refund: 50 },
+    { total: 100, tax: 7, fee: 3, refund: 99 },
+    { total: 100, tax: 7, fee: 3, refund: 100 },
+    { total: 10_000, tax: 800, fee: 200, refund: 3_333 },
+    { total: 10_000, tax: 800, fee: 200, refund: 9_999 },
+    { total: 99_999, tax: 8_765, fee: 432, refund: 54_321 },
+    { total: 250_000, tax: 0, fee: 12_345, refund: 125_001 },
+    { total: 1_000_000, tax: 82_501, fee: 25_001, refund: 999_999 },
+  ] as const;
+
   beforeEach(() => {
     dbState.order = {
       id: 'ord_1',
@@ -1021,6 +1113,75 @@ describe('updateLedgerActivity', () => {
 
     expect(result.ok).toBe(true);
     expect(dbState.timeline).toHaveLength(1);
+  });
+
+  it.each(refundLedgerScenarios)(
+    'keeps refund ledger allocation balanced and capped for total $total refund $refund',
+    async (scenario) => {
+      dbState.order = {
+        ...dbState.order,
+        total_cents: scenario.total,
+        tax_cents: scenario.tax,
+        fee_cents: scenario.fee,
+        refunded_cents: scenario.refund,
+      };
+      dbState.timeline = [];
+
+      const result = await updateLedgerActivity({
+        orderId: 'ord_1',
+        refundAmountCents: scenario.refund,
+        providerRefundId: `re_generated_${scenario.total}_${scenario.refund}`,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(dbState.timeline).toHaveLength(1);
+      const metadata = JSON.parse(String(dbState.timeline[0].metadata)) as {
+        balanced: boolean;
+        entries: Array<{ direction: string; amountCents: number }>;
+        feeRefundCents: number;
+        grossRefundCents: number;
+        netRevenueDeltaCents: number;
+        refundCents: number;
+        taxRefundCents: number;
+      };
+      const debitTotal = metadata.entries
+        .filter((entry) => entry.direction === 'debit')
+        .reduce((sum, entry) => sum + entry.amountCents, 0);
+      const creditTotal = metadata.entries
+        .filter((entry) => entry.direction === 'credit')
+        .reduce((sum, entry) => sum + entry.amountCents, 0);
+      const expected = expectedLedgerAllocation(scenario);
+
+      expect(metadata.balanced).toBe(true);
+      expect(debitTotal).toBe(creditTotal);
+      expect(metadata.refundCents).toBe(scenario.refund);
+      expect(metadata.taxRefundCents).toBe(expected.taxRefundCents);
+      expect(metadata.feeRefundCents).toBe(expected.feeRefundCents);
+      expect(metadata.grossRefundCents).toBe(expected.grossRefundCents);
+      expect(metadata.netRevenueDeltaCents).toBe(expected.netRevenueDeltaCents);
+      expect(metadata.taxRefundCents).toBeLessThanOrEqual(scenario.tax);
+      expect(metadata.feeRefundCents).toBeLessThanOrEqual(scenario.fee);
+      expect(metadata.grossRefundCents).toBeGreaterThanOrEqual(0);
+      expect(metadata.netRevenueDeltaCents).toBeLessThanOrEqual(0);
+    },
+  );
+
+  it('fails closed without writing a ledger entry when persisted refunded total exceeds order total', async () => {
+    dbState.order = {
+      ...dbState.order,
+      total_cents: 10_000,
+      refunded_cents: 10_001,
+    };
+    dbState.timeline = [];
+
+    const result = await updateLedgerActivity({
+      orderId: 'ord_1',
+      refundAmountCents: 1,
+      providerRefundId: 're_over_refunded',
+    });
+
+    expect(result).toEqual({ ok: true, value: { balanced: false } });
+    expect(dbState.timeline).toHaveLength(0);
   });
 });
 
