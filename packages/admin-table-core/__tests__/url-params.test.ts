@@ -17,7 +17,7 @@ const schema = defineTable('orders', {
     col.status('status', ['pending', 'paid', 'failed', 'cancelled', 'refunded']).facet(),
     col.enum('salesChannel', ['online', 'box_office']).facet(),
     col.boolean('refundState').facet(),
-    col.money('totalCents').filterable().facet(),
+    col.money('totalCents').sortable().filterable().facet(),
     col.dateTime('createdAt').sortable().filterable().facet(),
   ],
 });
@@ -115,9 +115,14 @@ describe('queryToParams / paramsToQuery round-trip', () => {
 
   it('round-trips multiple sort entries', () => {
     const query = {
-      sort: [{ field: 'createdAt', direction: 'desc' as const }],
+      sort: [
+        { field: 'createdAt', direction: 'desc' as const },
+        { field: 'totalCents', direction: 'asc' as const },
+      ],
     };
     const params = queryToParams(schema, query);
+    expect(params.get('sort')).toBe('createdAt:desc,totalCents:asc');
+
     const result = paramsToQuery(schema, params);
     expect(result.query.sort).toEqual(query.sort);
   });
@@ -218,6 +223,23 @@ describe('invalid param handling', () => {
 
   it('rejects invalid sort direction', () => {
     const result = paramsToQuery(schema, new URLSearchParams('sort=createdAt:up'));
+    expect(result.query.sort).toBeUndefined();
+    expect(result.rejected).toContain('sort');
+  });
+
+  it('rejects mixed valid and unknown sort fields', () => {
+    const result = paramsToQuery(schema, new URLSearchParams('sort=createdAt:desc,unknown:asc'));
+
+    expect(result.query.sort).toBeUndefined();
+    expect(result.rejected).toContain('sort');
+  });
+
+  it('rejects mixed valid and malformed sort directions', () => {
+    const result = paramsToQuery(
+      schema,
+      new URLSearchParams('sort=createdAt:desc,totalCents:sideways'),
+    );
+
     expect(result.query.sort).toBeUndefined();
     expect(result.rejected).toContain('sort');
   });

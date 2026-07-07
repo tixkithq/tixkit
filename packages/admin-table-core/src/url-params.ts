@@ -106,6 +106,7 @@ type FilterParseResult =
   | { status: 'absent' }
   | { status: 'invalid'; rejected: string[] }
   | { status: 'valid'; value: AdminTableFilterValue };
+type SortParseResult = { status: 'invalid' } | { status: 'valid'; value: AdminTableSort[] };
 
 export function paramsToQuery(schema: TableSchema, params: URLSearchParams): ParseResult {
   const rejected: string[] = [];
@@ -149,9 +150,9 @@ export function paramsToQuery(schema: TableSchema, params: URLSearchParams): Par
   // Sort
   if (params.has('sort')) {
     const sortRaw = params.get('sort')!;
-    const sort = parseSortParam(sortRaw, schema);
-    if (sort.length > 0) {
-      query.sort = sort;
+    const sortResult = parseSortParam(sortRaw, schema);
+    if (sortResult.status === 'valid') {
+      query.sort = sortResult.value;
     } else {
       rejected.push('sort');
     }
@@ -199,22 +200,26 @@ export function paramsToQuery(schema: TableSchema, params: URLSearchParams): Par
   return { query, rejected };
 }
 
-function parseSortParam(raw: string, schema: TableSchema): AdminTableSort[] {
+function parseSortParam(raw: string, schema: TableSchema): SortParseResult {
   const parts = raw
     .split(',')
     .map((p) => p.trim())
     .filter(Boolean);
+  if (parts.length === 0) return { status: 'invalid' };
+
   const result: AdminTableSort[] = [];
   for (const part of parts) {
     const colonIndex = part.lastIndexOf(':');
-    if (colonIndex === -1) continue;
+    if (colonIndex === -1) return { status: 'invalid' };
     const field = part.slice(0, colonIndex);
     const direction = part.slice(colonIndex + 1) as SortDirection;
-    if (direction !== 'asc' && direction !== 'desc') continue;
-    if (!schema.columns.some((c) => c.id === field && c.sortable)) continue;
+    if (direction !== 'asc' && direction !== 'desc') return { status: 'invalid' };
+    if (!schema.columns.some((c) => c.id === field && c.sortable)) {
+      return { status: 'invalid' };
+    }
     result.push({ field, direction });
   }
-  return result;
+  return { status: 'valid', value: result };
 }
 
 function parseFilterParam(
