@@ -86,16 +86,31 @@ export async function expireStaleSessionsActivity(): Promise<
   const db = createDb();
   try {
     const now = new Date();
-    const expiredSessions = await db
-      .selectFrom('checkout_sessions')
-      .select(['id', 'tenant_id', 'cart'])
-      .where('status', '=', 'open')
-      .where('expires_at', '<', now)
-      .where('payment_intent_id', 'is', null)
-      .execute();
-
     const result = await db.transaction().execute(async (trx) => {
+      const expiredSessions = await trx
+        .selectFrom('checkout_sessions')
+        .select(['id', 'tenant_id', 'cart'])
+        .where('status', '=', 'open')
+        .where('expires_at', '<', now)
+        .where('payment_intent_id', 'is', null)
+        .forUpdate()
+        .execute();
+
+      let expiredCount = 0n;
       for (const session of expiredSessions) {
+        // eslint-disable-next-line no-await-in-loop -- the guarded state transition must win before releasing session-owned side effects.
+        const transitionResult = await trx
+          .updateTable('checkout_sessions')
+          .set({ status: 'expired', updated_at: now })
+          .where('id', '=', session.id)
+          .where('status', '=', 'open')
+          .where('expires_at', '<', now)
+          .where('payment_intent_id', 'is', null)
+          .executeTakeFirst();
+        const transitionedRows = BigInt(transitionResult?.numUpdatedRows ?? 0);
+        if (transitionedRows === 0n) continue;
+        expiredCount += transitionedRows;
+
         const cart = parseStoredJson<{ waitlistEntryId?: string }>(session.cart, {});
         // eslint-disable-next-line no-await-in-loop -- each discount release is tied to the expired session row.
         await releasePendingDiscountReservation(trx, session.id, now);
@@ -116,13 +131,7 @@ export async function expireStaleSessionsActivity(): Promise<
           .execute();
       }
 
-      return trx
-        .updateTable('checkout_sessions')
-        .set({ status: 'expired', updated_at: now })
-        .where('status', '=', 'open')
-        .where('expires_at', '<', now)
-        .where('payment_intent_id', 'is', null)
-        .execute();
+      return [{ numUpdatedRows: expiredCount }];
     });
     return okResult({
       expiredCount: Number(

@@ -5,6 +5,7 @@ type MockRow = Record<string, any>;
 const dbState = {
   tables: {} as Record<string, MockRow[]>,
   emailJobs: [] as MockRow[],
+  beforeCheckoutSessionUpdate: undefined as undefined | (() => void),
   destroy: vi.fn(),
 };
 
@@ -30,7 +31,8 @@ function matches(row: MockRow, filters: Array<{ col: string; op: string; val: an
     if (filter.op === '<') return new Date(value) < new Date(filter.val);
     if (filter.op === '<=') return new Date(value) <= new Date(filter.val);
     if (filter.op === '>') {
-      if (value instanceof Date || filter.val instanceof Date) return new Date(value) > new Date(filter.val);
+      if (value instanceof Date || filter.val instanceof Date)
+        return new Date(value) > new Date(filter.val);
       return Number(value) > Number(filter.val);
     }
     if (filter.op === 'is') return filter.val === null ? value == null : value === filter.val;
@@ -100,14 +102,15 @@ vi.mock('@tixkit/db', () => {
       ),
     );
     if (!template) return undefined;
-    const version = getRows('notification_template_versions').find((row) =>
-      matches(
-        {
-          ...row,
-          'version.is_default': row.is_default,
-        },
-        filters.filter((filter) => filter.col.startsWith('version.')),
-      ) && row.template_id === template.id,
+    const version = getRows('notification_template_versions').find(
+      (row) =>
+        matches(
+          {
+            ...row,
+            'version.is_default': row.is_default,
+          },
+          filters.filter((filter) => filter.col.startsWith('version.')),
+        ) && row.template_id === template.id,
     );
     return version ? { id: version.id } : undefined;
   }
@@ -146,7 +149,8 @@ vi.mock('@tixkit/db', () => {
           return getRows(table).filter((row) => matches(row, filters));
         },
         async executeTakeFirst() {
-          if (table === 'notification_templates as template') return defaultTemplateVersion(filters);
+          if (table === 'notification_templates as template')
+            return defaultTemplateVersion(filters);
           return getRows(table).find((row) => matches(row, filters)) ?? undefined;
         },
       };
@@ -173,15 +177,16 @@ vi.mock('@tixkit/db', () => {
       let updates: MockRow = {};
       const query = {
         set(values: MockRow | ((eb: (col: string, _op: string, val: any) => any) => MockRow)) {
-          updates = typeof values === 'function'
-            ? values((col, op, val) => {
-                if (op === '-') {
-                  const currentRow = getRows(table).find((row) => matches(row, filters));
-                  return (currentRow?.[col] ?? 0) - val;
-                }
-                return val;
-              })
-            : values;
+          updates =
+            typeof values === 'function'
+              ? values((col, op, val) => {
+                  if (op === '-') {
+                    const currentRow = getRows(table).find((row) => matches(row, filters));
+                    return (currentRow?.[col] ?? 0) - val;
+                  }
+                  return val;
+                })
+              : values;
           return query;
         },
         where(col: string, op: string, val: any) {
@@ -189,6 +194,10 @@ vi.mock('@tixkit/db', () => {
           return query;
         },
         async execute() {
+          if (table === 'checkout_sessions') {
+            dbState.beforeCheckoutSessionUpdate?.();
+            dbState.beforeCheckoutSessionUpdate = undefined;
+          }
           let updatedCount = 0;
           for (const row of getRows(table)) {
             if (!matches(row, filters)) continue;
@@ -221,14 +230,14 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { expireStaleSessionsActivity, processWaitlistOffersActivity } = await import(
-  '../activities/hold-expiration.js'
-);
+const { expireStaleSessionsActivity, processWaitlistOffersActivity } =
+  await import('../activities/hold-expiration.js');
 
 describe('expireStaleSessionsActivity', () => {
   beforeEach(() => {
     dbState.tables = {};
     dbState.emailJobs = [];
+    dbState.beforeCheckoutSessionUpdate = undefined;
     dbState.destroy.mockClear();
   });
 
@@ -279,6 +288,66 @@ describe('expireStaleSessionsActivity', () => {
       status: 'reserved',
       reserved_checkout_session_id: 'cs_fresh_open',
     });
+    expect(dbState.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not release waitlist or discount reservations when payment claims the session before expiry transition', async () => {
+    const past = new Date(Date.now() - 60_000);
+    const future = new Date(Date.now() + 60_000);
+    dbState.tables.checkout_sessions = [
+      {
+        id: 'cs_raced',
+        tenant_id: 'tnt_1',
+        status: 'open',
+        expires_at: past,
+        payment_intent_id: null,
+        cart: JSON.stringify({ waitlistEntryId: 'wle_1' }),
+      },
+    ];
+    dbState.tables.waitlist_entries = [
+      {
+        id: 'wle_1',
+        tenant_id: 'tnt_1',
+        status: 'reserved',
+        reserved_checkout_session_id: 'cs_raced',
+        reserved_until: future,
+      },
+    ];
+    dbState.tables.discount_redemptions = [
+      {
+        id: 'dr_1',
+        checkout_session_id: 'cs_raced',
+        discount_code_id: 'dc_1',
+        order_id: null,
+      },
+    ];
+    dbState.tables.discount_codes = [{ id: 'dc_1', uses_count: 1 }];
+    dbState.beforeCheckoutSessionUpdate = () => {
+      Object.assign(dbState.tables.checkout_sessions[0], {
+        status: 'pending_payment',
+        payment_intent_id: 'pi_1',
+      });
+    };
+
+    const result = await expireStaleSessionsActivity();
+
+    expect(result).toEqual({ ok: true, value: { expiredCount: 0 } });
+    expect(dbState.tables.checkout_sessions[0]).toMatchObject({
+      status: 'pending_payment',
+      payment_intent_id: 'pi_1',
+    });
+    expect(dbState.tables.waitlist_entries[0]).toMatchObject({
+      status: 'reserved',
+      reserved_checkout_session_id: 'cs_raced',
+      reserved_until: future,
+    });
+    expect(dbState.tables.discount_redemptions).toEqual([
+      expect.objectContaining({
+        id: 'dr_1',
+        checkout_session_id: 'cs_raced',
+      }),
+    ]);
+    expect(dbState.tables.discount_codes[0]).toMatchObject({ uses_count: 1 });
     expect(dbState.destroy).toHaveBeenCalledTimes(1);
   });
 });
