@@ -34,6 +34,29 @@ import {
 export const REACT_EMAIL_EDITOR_PACKAGE = '@react-email/editor' as const;
 export { MERGE_TAG_REGISTRY };
 
+export const SEEDABLE_EMAIL_TEMPLATE_KEYS = [
+  'order-confirmed',
+  'tickets-issued',
+  'payment-failed',
+  'order-cancelled',
+  'order-refunded',
+  'event-updated',
+  'event-cancelled',
+  'event-reminder',
+  'attendee-message',
+  'staff-order-notification',
+  'checkin-device-invited',
+  'waitlist-invite',
+] as const satisfies readonly TemplateKey[];
+
+const SEEDABLE_EMAIL_TEMPLATE_KEY_SET: ReadonlySet<TemplateKey> = new Set(
+  SEEDABLE_EMAIL_TEMPLATE_KEYS,
+);
+
+export function hasSeedableDefaultEmailTemplate(key: TemplateKey): boolean {
+  return SEEDABLE_EMAIL_TEMPLATE_KEY_SET.has(key);
+}
+
 export type EmailTemplateCategory = 'transactional' | 'bulk' | 'staff' | 'system';
 
 export type EmailTemplateSender = {
@@ -149,10 +172,7 @@ export function normalizeEmailTemplateDocument(value: unknown): EmailTemplateDoc
   ) {
     return undefined;
   }
-  if (
-    document.editor.globalCss !== undefined &&
-    typeof document.editor.globalCss !== 'string'
-  ) {
+  if (document.editor.globalCss !== undefined && typeof document.editor.globalCss !== 'string') {
     return undefined;
   }
   if (
@@ -359,6 +379,9 @@ export function createDefaultEmailTemplateForKey(key: TemplateKey): EmailTemplat
   const lifecycle = getTemplateLifecycle(key);
   if (!lifecycle) {
     throw new Error(`No lifecycle metadata registered for template key: ${key}`);
+  }
+  if (!hasSeedableDefaultEmailTemplate(key)) {
+    throw new Error(`No seedable default email template registered for template key: ${key}`);
   }
   const editor =
     key === 'waitlist-invite'
@@ -581,15 +604,9 @@ function defaultBlocksForKey(key: TemplateKey): EmailTemplateBlock[] {
         },
       ];
     default:
-      // P1/P2 keys are not seeded yet; provide a minimal generic block so the
-      // function stays total over the full TemplateKey union.
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}},',
-        },
-      ];
+      throw new Error(
+        `No seedable default email template blocks registered for template key: ${key}`,
+      );
   }
 }
 
@@ -751,8 +768,7 @@ export async function renderEmailTemplate(
       context,
     );
     const editorHtmlWithFooter = appendEditorUnsubscribeFooter(editorHtml, document, context);
-    const editorText =
-      document.editor.contentText?.trim() || plainTextFromHtml(editorHtml) || '';
+    const editorText = document.editor.contentText?.trim() || plainTextFromHtml(editorHtml) || '';
     const editorTextWithFooter = appendEditorUnsubscribeText(editorText, document, context);
     return {
       subject,

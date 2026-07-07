@@ -1,12 +1,8 @@
 import { createDb, ContentRepository } from '@tixkit/db';
-import {
-  P0_TEMPLATE_KEYS,
-  MERGE_TAG_REGISTRY,
-  getTemplateLifecycle,
-  type TemplateKey,
-} from '@tixkit/domain';
+import { MERGE_TAG_REGISTRY, getTemplateLifecycle, type TemplateKey } from '@tixkit/domain';
 import {
   createDefaultEmailTemplateForKey,
+  SEEDABLE_EMAIL_TEMPLATE_KEYS,
   validateEmailTemplate,
 } from '@tixkit/content-email';
 
@@ -41,10 +37,7 @@ const EMAIL_VARIABLE_DEFINITIONS = MERGE_TAG_REGISTRY.map((variable) => ({
   description: variable.description,
 }));
 
-export const SEED_EMAIL_TEMPLATE_KEYS: readonly TemplateKey[] = [
-  ...P0_TEMPLATE_KEYS,
-  'waitlist-invite',
-];
+export const SEED_EMAIL_TEMPLATE_KEYS: readonly TemplateKey[] = SEEDABLE_EMAIL_TEMPLATE_KEYS;
 
 export async function seedEmailTemplateDefaults(
   input: SeedEmailTemplatesInput,
@@ -63,46 +56,48 @@ export async function seedEmailTemplateDefaults(
     const repo = new ContentRepository(db);
     const createdBy = input.createdBy ?? 'system-seed';
 
-    const results = await Promise.all(
-      SEED_EMAIL_TEMPLATE_KEYS.map(async (key) => {
-        const existing = await repo.findPublishedEmailTemplate({
-          tenantId: input.tenantId,
-          brandId: input.brandId,
-          eventId: input.eventId ?? undefined,
-          key,
-        });
-        if (existing) return null;
+    const seeded: TemplateKey[] = [];
+    for (const key of SEED_EMAIL_TEMPLATE_KEYS) {
+      const existing = await repo.findPublishedEmailTemplate({
+        tenantId: input.tenantId,
+        brandId: input.brandId,
+        eventId: input.eventId ?? undefined,
+        key,
+      });
+      if (existing) continue;
 
-        const lifecycle = getTemplateLifecycle(key);
-        const document = createDefaultEmailTemplateForKey(key);
-        const created = await repo.createDocument({
-          tenantId: input.tenantId,
-          organizationId: input.organizationId,
-          brandId: input.brandId,
-          eventId: input.eventId ?? null,
-          channel: 'email',
-          key,
-          name: lifecycle?.name ?? key,
-          locale: 'en',
-        });
-        const version = await repo.createVersion({
-          documentId: created.id,
-          subject: document.settings.subject,
-          previewText: document.settings.previewText,
-          contentJson: document,
-          variables: EMAIL_VARIABLE_DEFINITIONS,
-          validation: validateEmailTemplate(document),
-          createdBy,
-        });
-        await repo.publishVersion({ documentId: created.id, versionId: version.id });
-        return key;
-      }),
-    );
-    const seeded = results.filter((key): key is TemplateKey => key !== null);
+      const lifecycle = getTemplateLifecycle(key);
+      const document = createDefaultEmailTemplateForKey(key);
+      const validation = validateEmailTemplate(document);
+      if (!validation.valid) {
+        throw new Error(`Generated default email template for ${key} failed validation`);
+      }
+      const created = await repo.createDocument({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        brandId: input.brandId,
+        eventId: input.eventId ?? null,
+        channel: 'email',
+        key,
+        name: lifecycle?.name ?? key,
+        locale: 'en',
+      });
+      const version = await repo.createVersion({
+        documentId: created.id,
+        subject: document.settings.subject,
+        previewText: document.settings.previewText,
+        contentJson: document,
+        variables: EMAIL_VARIABLE_DEFINITIONS,
+        validation,
+        createdBy,
+      });
+      await repo.publishVersion({ documentId: created.id, versionId: version.id });
+      seeded.push(key);
+    }
 
     return {
       ok: true,
-      message: `Seeded ${seeded.length} P0 email template${seeded.length === 1 ? '' : 's'}.`,
+      message: `Seeded ${seeded.length} email template${seeded.length === 1 ? '' : 's'}.`,
       seeded,
     };
   } catch (err) {

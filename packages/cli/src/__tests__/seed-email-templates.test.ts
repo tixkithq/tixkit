@@ -6,6 +6,7 @@ const mockState = vi.hoisted(() => ({
   createdVersions: [] as Record<string, unknown>[],
   publishedVersions: [] as { documentId: string; versionId: string }[],
   findPublishedCalls: [] as Record<string, unknown>[],
+  invalidDefaultKeys: new Set<string>(),
   destroy: vi.fn(),
 }));
 
@@ -42,9 +43,37 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-const { seedEmailTemplateDefaults, SEED_EMAIL_TEMPLATE_KEYS } = await import(
-  '../seed-email-templates.js'
-);
+vi.mock('@tixkit/content-email', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tixkit/content-email')>();
+  const domain = await import('@tixkit/domain');
+  return {
+    ...actual,
+    SEEDABLE_EMAIL_TEMPLATE_KEYS: [...domain.P0_TEMPLATE_KEYS, 'waitlist-invite'],
+    validateEmailTemplate: (
+      document: Parameters<typeof actual.validateEmailTemplate>[0],
+      options?: Parameters<typeof actual.validateEmailTemplate>[1],
+    ) => {
+      const result = actual.validateEmailTemplate(document, options);
+      if (!mockState.invalidDefaultKeys.has(document.settings.templateKey)) return result;
+      return {
+        ...result,
+        valid: false,
+        issues: [
+          ...result.issues,
+          {
+            code: 'seeded_default_invalid',
+            field: 'contentJson',
+            message: 'Mocked invalid seeded default',
+            severity: 'error',
+          },
+        ],
+      };
+    },
+  };
+});
+
+const { seedEmailTemplateDefaults, SEED_EMAIL_TEMPLATE_KEYS } =
+  await import('../seed-email-templates.js');
 const { getTemplateLifecycle, validateMergeTags } = await import('@tixkit/domain');
 
 describe('seedEmailTemplateDefaults', () => {
@@ -55,6 +84,7 @@ describe('seedEmailTemplateDefaults', () => {
     mockState.createdVersions = [];
     mockState.publishedVersions = [];
     mockState.findPublishedCalls = [];
+    mockState.invalidDefaultKeys = new Set();
     mockState.destroy.mockClear();
   });
 
@@ -85,9 +115,7 @@ describe('seedEmailTemplateDefaults', () => {
     expect(mockState.publishedVersions).toHaveLength(SEED_EMAIL_TEMPLATE_KEYS.length);
 
     // Every seeded key got a unique email-channel document scoped to the brand.
-    const seededKeys = new Set(
-      mockState.createdDocuments.map((doc) => doc.key as string),
-    );
+    const seededKeys = new Set(mockState.createdDocuments.map((doc) => doc.key as string));
     expect(seededKeys).toEqual(new Set(SEED_EMAIL_TEMPLATE_KEYS));
     for (const doc of mockState.createdDocuments) {
       expect(doc.channel).toBe('email');
@@ -168,6 +196,26 @@ describe('seedEmailTemplateDefaults', () => {
     expect(result.seeded).toEqual(missingKeys);
     expect(mockState.createdDocuments).toHaveLength(missingKeys.length);
     expect(mockState.publishedVersions).toHaveLength(missingKeys.length);
+  });
+
+  it('refuses to publish a generated default that fails validation', async () => {
+    const invalidKey = SEED_EMAIL_TEMPLATE_KEYS[0];
+    mockState.invalidDefaultKeys = new Set([invalidKey]);
+
+    const result = await seedEmailTemplateDefaults({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain(
+      `Generated default email template for ${invalidKey} failed validation`,
+    );
+    expect(result.seeded).toEqual([]);
+    expect(mockState.createdDocuments).toHaveLength(0);
+    expect(mockState.createdVersions).toHaveLength(0);
+    expect(mockState.publishedVersions).toHaveLength(0);
   });
 
   it('seeds waitlist invite content with registry-required merge tags', async () => {

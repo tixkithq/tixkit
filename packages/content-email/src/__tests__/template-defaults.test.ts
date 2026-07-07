@@ -1,12 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   createDefaultEmailTemplateForKey,
+  hasSeedableDefaultEmailTemplate,
   P0_EMAIL_TEMPLATE_DEFAULTS,
   renderEmailTemplate,
+  SEEDABLE_EMAIL_TEMPLATE_KEYS,
   validateEmailTemplate,
 } from '../index.js';
 import {
   P0_TEMPLATE_KEYS,
+  TEMPLATE_KEYS,
   getTemplateLifecycle,
   type MergeTagContext,
 } from '@tixkit/domain';
@@ -49,7 +52,11 @@ const distinctiveContext: MergeTagContext = {
     buyerName: 'Buyer Ada',
     buyerEmail: 'buyer@example.test',
   },
-  refund: { amount: '$20.00', processingEta: '5-10 business days', processedAt: '2026-07-10 12:00' },
+  refund: {
+    amount: '$20.00',
+    processingEta: '5-10 business days',
+    processedAt: '2026-07-10 12:00',
+  },
   device: {
     inviteUrl: 'https://scan.example.test/invite/dev-1',
     permissionScope: 'checkins.write',
@@ -99,10 +106,13 @@ describe('createDefaultEmailTemplateForKey', () => {
   });
 
   it('produces defaults that validate cleanly', () => {
-    for (const key of P0_TEMPLATE_KEYS) {
+    for (const key of SEEDABLE_EMAIL_TEMPLATE_KEYS) {
       const doc = createDefaultEmailTemplateForKey(key);
       const result = validateEmailTemplate(doc);
-      expect(result.valid, `${key} default has validation blockers: ${JSON.stringify(result.issues)}`).toBe(true);
+      expect(
+        result.valid,
+        `${key} default has validation blockers: ${JSON.stringify(result.issues)}`,
+      ).toBe(true);
     }
   });
 
@@ -164,5 +174,16 @@ describe('createDefaultEmailTemplateForKey', () => {
 
   it('throws for template keys without lifecycle metadata', () => {
     expect(() => createDefaultEmailTemplateForKey('not-a-lifecycle-key' as never)).toThrow();
+  });
+
+  it('throws for registered lifecycle keys without seedable defaults', () => {
+    const unsupportedKeys = TEMPLATE_KEYS.filter((key) => !hasSeedableDefaultEmailTemplate(key));
+    expect(unsupportedKeys.length).toBeGreaterThan(0);
+
+    for (const key of unsupportedKeys) {
+      expect(() => createDefaultEmailTemplateForKey(key), key).toThrow(
+        `No seedable default email template registered for template key: ${key}`,
+      );
+    }
   });
 });
