@@ -42,5 +42,17 @@ export default defineConfig({
     include: ['src/__tests__/**/*.test.ts'],
     setupFiles: ['src/__tests__/setup.ts'],
     testTimeout: 15_000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: '../../coverage/packages/workflows',
+      all: false,
+      thresholds: {
+        statements: 35,
+        branches: 24,
+        functions: 30,
+        lines: 35,
+      },
+    },
   },
 });

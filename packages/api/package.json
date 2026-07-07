@@ -13,6 +13,7 @@
     "typecheck": "tsc -b",
     "test:unit": "vitest run src/__tests__/*.test.ts",
     "test:integration": "vitest run src/__tests__/integration --maxWorkers=1",
+    "test:coverage": "vitest run src/__tests__/*.test.ts --coverage",
     "clean": "rm -rf dist"
   },
   "dependencies": {

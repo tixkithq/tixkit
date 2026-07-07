@@ -20,6 +20,18 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['src/test/setup.ts'],
     css: false,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: '../../coverage/apps/admin-dashboard',
+      all: false,
+      thresholds: {
+        statements: 35,
+        branches: 24,
+        functions: 30,
+        lines: 35,
+      },
+    },
   },
   resolve: {
     alias: {

@@ -14,5 +14,17 @@ export default defineConfig({
     environment: 'node',
     include: ['src/__tests__/**/*.test.{ts,tsx}'],
     globalSetup: ['./src/__tests__/integration/migration-setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: '../../coverage/packages/api',
+      all: false,
+      thresholds: {
+        statements: 30,
+        branches: 18,
+        functions: 24,
+        lines: 30,
+      },
+    },
   },
 });

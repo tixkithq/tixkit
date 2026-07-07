@@ -87,8 +87,7 @@ const localApiEnv = {
   OFFLINE_MANIFEST_SIGNING_KEY:
     process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? 'ci-offline-manifest-signing-key',
   OFFLINE_MANIFEST_KEY_ID: process.env.OFFLINE_MANIFEST_KEY_ID ?? 'manifest:ci',
-  TIXKIT_PREVIEW_TOKEN_SECRET:
-    process.env.TIXKIT_PREVIEW_TOKEN_SECRET ?? 'ci-preview-token-secret',
+  TIXKIT_PREVIEW_TOKEN_SECRET: process.env.TIXKIT_PREVIEW_TOKEN_SECRET ?? 'ci-preview-token-secret',
   PUBLIC_CHECKOUT_URL: checkoutUrl,
   CHECKOUT_PUBLIC_URL: checkoutUrl,
   ...s3Env,

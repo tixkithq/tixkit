@@ -10,6 +10,7 @@
     "lint": "oxlint src",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "clean": "rm -rf .next dist"
   },
   "dependencies": {
