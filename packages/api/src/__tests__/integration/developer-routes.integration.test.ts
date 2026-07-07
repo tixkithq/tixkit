@@ -174,6 +174,10 @@ function createScannerDeviceLifecycleDb() {
 }
 
 function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
+  const rowsFor = (table: string) => {
+    tables[table] ??= [];
+    return tables[table];
+  };
   // eslint-disable-next-line unicorn/consistent-function-scoping -- this resolver is scoped to the joined-row shape in this mock DB.
   const resolveColumn = (row: Record<string, unknown>, column: string) => {
     const event = row['__event'] as Record<string, unknown> | undefined;
@@ -229,9 +233,9 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
     });
   };
   const baseRows = (table: string) => {
-    if (table !== 'webhook_deliveries') return [...(tables[table] ?? [])];
-    return (tables.webhook_deliveries ?? []).flatMap((delivery) => {
-      const event = (tables.webhook_events ?? []).find(
+    if (table !== 'webhook_deliveries') return [...rowsFor(table)];
+    return rowsFor('webhook_deliveries').flatMap((delivery) => {
+      const event = rowsFor('webhook_events').find(
         (candidate) => candidate.id === delivery.event_id,
       );
       return event ? [{ __delivery: delivery, __event: event }] : [];
@@ -239,6 +243,26 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
   };
 
   return {
+    insertInto(table: string) {
+      return {
+        values(values: Record<string, unknown>) {
+          const insert = {
+            returningAll() {
+              return insert;
+            },
+            async executeTakeFirstOrThrow() {
+              rowsFor(table).push(values);
+              return values;
+            },
+            async execute() {
+              rowsFor(table).push(values);
+              return [];
+            },
+          };
+          return insert;
+        },
+      };
+    },
     selectFrom(table: string) {
       const predicates: QueryPredicate[] = [];
       const orderBy: Array<{ column: string; direction: 'asc' | 'desc' }> = [];
@@ -300,8 +324,47 @@ function createWebhookDb(tables: Record<string, Record<string, unknown>[]>) {
           const rows = await query.execute();
           return rows[0];
         },
+        async executeTakeFirstOrThrow() {
+          const rows = await query.execute();
+          if (!rows[0]) throw new Error(`No row found in ${table}`);
+          return rows[0];
+        },
       };
       return query;
+    },
+    updateTable(table: string) {
+      const predicates: QueryPredicate[] = [];
+      let nextValues: Record<string, unknown> = {};
+      const update = {
+        set(values: Record<string, unknown>) {
+          nextValues = values;
+          return update;
+        },
+        where(column: string, operator: string, value: unknown) {
+          predicates.push((row) => compareValues(resolveColumn(row, column), operator, value));
+          return update;
+        },
+        returningAll() {
+          return update;
+        },
+        async executeTakeFirstOrThrow() {
+          const row = rowsFor(table).find((candidate) =>
+            predicates.every((predicate) => predicate(candidate)),
+          );
+          if (!row) throw new Error(`No row found in ${table}`);
+          Object.assign(row, nextValues);
+          return row;
+        },
+        async execute() {
+          for (const row of rowsFor(table).filter((candidate) =>
+            predicates.every((predicate) => predicate(candidate)),
+          )) {
+            Object.assign(row, nextValues);
+          }
+          return [];
+        },
+      };
+      return update;
     },
   };
 }
@@ -726,6 +789,113 @@ describe('developer routes integration', () => {
     const res = await app.inject({ method: 'GET', url: '/webhook-endpoints' });
     expect(res.statusCode).toBe(200);
     expect(res.json().items[0].secret).toBeUndefined();
+    await app.close();
+  });
+
+  it('audits webhook endpoint creation without secret material', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_endpoints: [],
+      audit_logs: [],
+    };
+    const app = await setupWebhookRouteApp(principal, createWebhookDb(tables));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook-endpoints',
+      payload: {
+        organizationId: 'org_1',
+        url: 'https://hooks.example.com/tixkit',
+        events: ['order.paid'],
+        description: 'Order webhooks',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(tables.webhook_endpoints).toHaveLength(1);
+    expect(tables.audit_logs).toEqual([
+      expect.objectContaining({
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        actor_type: 'user',
+        actor_id: 'usr_1',
+        action: 'webhook_endpoint.created',
+        resource_type: 'WebhookEndpoint',
+        resource_id: tables.webhook_endpoints[0].id,
+      }),
+    ]);
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain(
+      String(tables.webhook_endpoints[0].secret),
+    );
+
+    await app.close();
+  });
+
+  it('audits webhook endpoint updates with changed fields only', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const createdAt = new Date('2026-06-01T00:00:00Z');
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_endpoints: [
+        {
+          id: 'wh_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://old.example.com/webhooks',
+          secret: 'secret_1',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+      ],
+      audit_logs: [],
+    };
+    const app = await setupWebhookRouteApp(principal, createWebhookDb(tables));
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/webhook-endpoints/wh_1',
+      payload: {
+        url: 'https://new.example.com/webhooks',
+        events: ['order.paid', 'order.refunded'],
+        status: 'disabled',
+        description: 'Disabled during rotation',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(tables.webhook_endpoints[0]).toMatchObject({
+      url: 'https://new.example.com/webhooks',
+      events: JSON.stringify(['order.paid', 'order.refunded']),
+      status: 'disabled',
+      description: 'Disabled during rotation',
+    });
+    expect(tables.audit_logs).toEqual([
+      expect.objectContaining({
+        action: 'webhook_endpoint.updated',
+        resource_type: 'WebhookEndpoint',
+        resource_id: 'wh_1',
+      }),
+    ]);
+    expect(JSON.parse(tables.audit_logs[0].diff_summary as string)).toEqual({
+      changedFields: ['url', 'events', 'status', 'description'],
+    });
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret_1');
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('https://new.example.com/webhooks');
+
     await app.close();
   });
 
@@ -1482,35 +1652,37 @@ describe('developer routes integration', () => {
     };
     const startWebhookDelivery = vi.fn(async () => undefined);
     const createdAt = new Date('2026-06-01T00:00:00Z');
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_events: [
+        {
+          id: 'whe_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          type: 'order.paid',
+          payload: JSON.stringify({ orderId: 'ord_1' }),
+          status: 'pending',
+          created_at: createdAt,
+        },
+      ],
+      webhook_endpoints: [
+        {
+          id: 'wh_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://example.com/webhooks',
+          secret: 'secret',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+      ],
+      audit_logs: [],
+    };
     const app = Fastify();
     app.decorate('context', {
-      db: createWebhookDb({
-        webhook_events: [
-          {
-            id: 'whe_1',
-            tenant_id: 'tnt_1',
-            organization_id: 'org_1',
-            type: 'order.paid',
-            payload: JSON.stringify({ orderId: 'ord_1' }),
-            status: 'pending',
-            created_at: createdAt,
-          },
-        ],
-        webhook_endpoints: [
-          {
-            id: 'wh_1',
-            tenant_id: 'tnt_1',
-            organization_id: 'org_1',
-            url: 'https://example.com/webhooks',
-            secret: 'secret',
-            events: JSON.stringify(['order.paid']),
-            status: 'active',
-            description: null,
-            created_at: createdAt,
-            updated_at: createdAt,
-          },
-        ],
-      }) as unknown as Database,
+      db: createWebhookDb(tables) as unknown as Database,
       pricingEngine: {},
       inventoryService: {},
       qrService: {},
@@ -1542,6 +1714,20 @@ describe('developer routes integration', () => {
       Record<string, unknown>,
     ];
     expect(replayInput).not.toHaveProperty('secret');
+    expect(tables.audit_logs).toEqual([
+      expect.objectContaining({
+        action: 'webhook_event.replayed',
+        resource_type: 'WebhookEvent',
+        resource_id: 'whe_1',
+      }),
+    ]);
+    expect(JSON.parse(tables.audit_logs[0].diff_summary as string)).toEqual({
+      replayScope: 'organization',
+      eventType: 'order.paid',
+      queuedEndpointCount: 1,
+    });
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('ord_1');
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret');
 
     await app.close();
   });
@@ -1556,63 +1742,65 @@ describe('developer routes integration', () => {
     };
     const startWebhookDelivery = vi.fn(async () => undefined);
     const createdAt = new Date('2026-06-01T00:00:00Z');
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_events: [
+        {
+          id: 'whe_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          type: 'order.paid',
+          payload: JSON.stringify({ orderId: 'ord_1' }),
+          status: 'pending',
+          created_at: createdAt,
+        },
+      ],
+      webhook_endpoints: [
+        {
+          id: 'wh_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://primary.example.com/webhooks',
+          secret: 'secret_1',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+        {
+          id: 'wh_2',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://secondary.example.com/webhooks',
+          secret: 'secret_2',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+      ],
+      webhook_deliveries: [
+        {
+          id: 'whd_dead_lettered',
+          endpoint_id: null,
+          requested_endpoint_id: 'wh_1',
+          delivery_key: 'live',
+          event_id: 'whe_1',
+          attempt: 3,
+          status_code: 500,
+          response: 'gone',
+          status: 'dead_lettered',
+          delivered_at: null,
+          next_retry_at: null,
+          created_at: new Date('2026-06-01T00:10:00Z'),
+        },
+      ],
+      audit_logs: [],
+    };
     const app = Fastify();
     app.decorate('context', {
-      db: createWebhookDb({
-        webhook_events: [
-          {
-            id: 'whe_1',
-            tenant_id: 'tnt_1',
-            organization_id: 'org_1',
-            type: 'order.paid',
-            payload: JSON.stringify({ orderId: 'ord_1' }),
-            status: 'pending',
-            created_at: createdAt,
-          },
-        ],
-        webhook_endpoints: [
-          {
-            id: 'wh_1',
-            tenant_id: 'tnt_1',
-            organization_id: 'org_1',
-            url: 'https://primary.example.com/webhooks',
-            secret: 'secret_1',
-            events: JSON.stringify(['order.paid']),
-            status: 'active',
-            description: null,
-            created_at: createdAt,
-            updated_at: createdAt,
-          },
-          {
-            id: 'wh_2',
-            tenant_id: 'tnt_1',
-            organization_id: 'org_1',
-            url: 'https://secondary.example.com/webhooks',
-            secret: 'secret_2',
-            events: JSON.stringify(['order.paid']),
-            status: 'active',
-            description: null,
-            created_at: createdAt,
-            updated_at: createdAt,
-          },
-        ],
-        webhook_deliveries: [
-          {
-            id: 'whd_dead_lettered',
-            endpoint_id: null,
-            requested_endpoint_id: 'wh_1',
-            delivery_key: 'live',
-            event_id: 'whe_1',
-            attempt: 3,
-            status_code: 500,
-            response: 'gone',
-            status: 'dead_lettered',
-            delivered_at: null,
-            next_retry_at: null,
-            created_at: new Date('2026-06-01T00:10:00Z'),
-          },
-        ],
-      }) as unknown as Database,
+      db: createWebhookDb(tables) as unknown as Database,
       pricingEngine: {},
       inventoryService: {},
       qrService: {},
@@ -1643,6 +1831,22 @@ describe('developer routes integration', () => {
         replayNonce: expect.any(String),
       }),
     );
+    expect(tables.audit_logs).toEqual([
+      expect.objectContaining({
+        action: 'webhook_event.replayed',
+        resource_type: 'WebhookEvent',
+        resource_id: 'whe_1',
+      }),
+    ]);
+    expect(JSON.parse(tables.audit_logs[0].diff_summary as string)).toEqual({
+      replayScope: 'endpoint',
+      endpointId: 'wh_1',
+      eventType: 'order.paid',
+      queuedEndpointCount: 1,
+    });
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('ord_1');
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret_1');
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret_2');
 
     await app.close();
   });

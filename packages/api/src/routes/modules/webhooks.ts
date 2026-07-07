@@ -3,8 +3,9 @@ import type { Principal } from '@tixkit/domain';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { WebhookEndpointRepository, WebhookEventRepository } from '@tixkit/db';
+import { AuditLogRepository, WebhookEndpointRepository, WebhookEventRepository } from '@tixkit/db';
 import { ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
+import { writeAuditLog } from '../../auth/audit.js';
 import {
   pageEnvelope,
   parsePagination,
@@ -47,6 +48,18 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       description: body.description,
     });
 
+    await writeAuditLog(new AuditLogRepository(db), request, principal, {
+      action: 'webhook_endpoint.created',
+      organizationId: body.organizationId,
+      resourceType: 'WebhookEndpoint',
+      resourceId: endpoint.id as string,
+      diffSummary: {
+        url: body.url,
+        events: body.events,
+        descriptionPresent: body.description !== undefined,
+      },
+    });
+
     // Return with secret (only shown once)
     return reply.status(201).send(serializeWebhookEndpoint(endpoint, true));
   });
@@ -69,7 +82,17 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     if (body.events) updateData.events = JSON.stringify(body.events);
     if (body.status) updateData.status = body.status;
     if (body.description !== undefined) updateData.description = body.description;
-    return serializeWebhookEndpoint(await repo.update(endpointId, updateData));
+    const endpoint = await repo.update(endpointId, updateData);
+    await writeAuditLog(new AuditLogRepository(db), request, principal, {
+      action: 'webhook_endpoint.updated',
+      organizationId: existing.organization_id,
+      resourceType: 'WebhookEndpoint',
+      resourceId: endpointId,
+      diffSummary: {
+        changedFields: Object.keys(updateData).filter((field) => field !== 'updated_at'),
+      },
+    });
+    return serializeWebhookEndpoint(endpoint);
   });
 
   app.get('/webhook-endpoints', async (request) => {
@@ -212,6 +235,18 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       ),
     );
 
+    await writeAuditLog(new AuditLogRepository(db), request, principal, {
+      action: 'webhook_event.replayed',
+      organizationId: event.organization_id,
+      resourceType: 'WebhookEvent',
+      resourceId: eventId,
+      diffSummary: {
+        replayScope: 'organization',
+        eventType: event.type,
+        queuedEndpointCount: endpoints.length,
+      },
+    });
+
     return reply.status(202).send({ queued: true, eventId, endpoints: endpoints.length });
   });
 
@@ -259,6 +294,19 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       replayNonce: randomUUID(),
       payload,
       maxAttempts: 5,
+    });
+
+    await writeAuditLog(new AuditLogRepository(db), request, principal, {
+      action: 'webhook_event.replayed',
+      organizationId: event.organization_id,
+      resourceType: 'WebhookEvent',
+      resourceId: eventId,
+      diffSummary: {
+        replayScope: 'endpoint',
+        endpointId,
+        eventType,
+        queuedEndpointCount: 1,
+      },
     });
 
     return reply.status(202).send({ queued: true, eventId, endpointId });
