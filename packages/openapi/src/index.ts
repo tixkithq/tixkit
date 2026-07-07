@@ -3475,7 +3475,6 @@ const rawOpenApiSpec = {
                   capacity: { type: 'integer', nullable: true },
                   coverImageUrl: { type: 'string', format: 'uri', nullable: true },
                   externalUrl: { type: 'string', format: 'uri', nullable: true },
-                  status: { type: 'string', enum: ['draft', 'published', 'paused', 'archived'] },
                 },
               },
             },
@@ -5475,9 +5474,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Create a check-in list',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
-        parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
-        ],
+        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
           required: true,
           content: {

@@ -359,6 +359,8 @@ Custom domains are a paid managed-cloud brand/white-label feature. A domain must
 | `POST`  | `/v1/events/:eventId/pause`   | `events.write` | Set status `paused`                                 |
 | `POST`  | `/v1/events/:eventId/archive` | `events.write` | Set status `archived`                               |
 
+`PATCH /v1/events/:eventId` does not accept `status`; use the dedicated lifecycle endpoints above for status changes.
+
 Event slug contract:
 
 - `events.slug` is unique per brand.

@@ -1201,6 +1201,7 @@ describe('openApiSpec', () => {
     const eventSchema = openApiSpec.components.schemas.Event;
     expect(eventSchema.required).toContain('currency');
     expect(eventSchema.properties).toHaveProperty('currency');
+    expect(eventSchema.properties).toHaveProperty('status');
 
     const createSchema =
       openApiSpec.paths['/events'].post.requestBody.content['application/json'].schema;
@@ -1210,6 +1211,9 @@ describe('openApiSpec', () => {
     const updateSchema =
       openApiSpec.paths['/events/{eventId}'].patch.requestBody.content['application/json'].schema;
     expect(updateSchema.properties).toHaveProperty('currency');
-    expect(updateSchema.properties).toHaveProperty('status');
+    expect(updateSchema.properties).not.toHaveProperty('status');
+    expect(openApiSpec.paths['/events/{eventId}/publish'].post.responses['200']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/pause'].post.responses['200']).toBeDefined();
+    expect(openApiSpec.paths['/events/{eventId}/archive'].post.responses['200']).toBeDefined();
   });
 });

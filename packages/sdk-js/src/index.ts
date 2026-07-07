@@ -2136,7 +2136,6 @@ class EventResource {
         | 'title'
         | 'description'
         | 'currency'
-        | 'status'
         | 'timezone'
         | 'startsAt'
         | 'endsAt'

@@ -885,16 +885,16 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(call.body)).toMatchObject({ currency: 'EUR' });
   });
 
-  it('events.update sends status and currency when supplied', async () => {
-    const fm = mockFetch(200, { id: 'evt_1', status: 'paused', currency: 'GBP' });
+  it('events.update sends mutable event fields without status changes', async () => {
+    const fm = mockFetch(200, { id: 'evt_1', status: 'published', currency: 'GBP' });
     const c = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.events.update('evt_1', { status: 'paused', currency: 'GBP' });
+    await c.events.update('evt_1', { currency: 'GBP' });
     const call = getCall(fm);
-    expect(JSON.parse(call.body)).toEqual({ status: 'paused', currency: 'GBP' });
+    expect(JSON.parse(call.body)).toEqual({ currency: 'GBP' });
   });
 
   it('events.pause sends POST', async () => {
