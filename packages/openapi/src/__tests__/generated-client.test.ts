@@ -68,6 +68,7 @@ describe('Generated client compile validation (T33)', () => {
       '/public/events/{eventId}/content-page',
       '/public/events/{eventId}/discovery-card',
       '/public/events/{eventId}/draft-preview',
+      '/public/events/by-slug/{slug}',
       '/public/events/{eventId}/revision',
       '/public/events/{eventId}/resale-listings',
       '/public/events/by-slug/{slug}/page',
@@ -84,6 +85,8 @@ describe('Generated client compile validation (T33)', () => {
     for (const schema of [
       'PublicContentPage',
       'DraftPreviewPage',
+      'PublicEvent',
+      'PublicMarketingIntegration',
       'PublicEventDiscoveryCard',
       'PublicEventRevision',
       'PublicTicketListing',
@@ -102,6 +105,9 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('version: {');
     expect(output).toContain('versionNumber: number');
     expect(output).toContain('status: string');
+    expect(output).toContain(
+      'marketingIntegrations: components["schemas"]["PublicMarketingIntegration"][]',
+    );
   });
 
   it('generated types preserve public availability product rows', async () => {

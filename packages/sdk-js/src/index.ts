@@ -62,6 +62,28 @@ export type Event = {
   updatedAt: string;
 };
 
+export type PublicMarketingIntegration = {
+  provider: 'ga4' | 'meta_pixel' | 'generic_tag';
+  config: Record<string, unknown>;
+  consentRequired: boolean;
+  status: 'active' | 'disabled' | string;
+};
+
+export type PublicEvent = {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  status: string;
+  timezone: string;
+  startsAt: string;
+  endsAt?: string;
+  venue?: Record<string, unknown> | null;
+  brandId: string;
+  coverImageUrl?: string;
+  marketingIntegrations: PublicMarketingIntegration[];
+};
+
 export type ResalePolicy = {
   enabled: boolean;
   maxMultiplier: number;
@@ -3190,7 +3212,7 @@ class OAuthApplicationResource {
 
 class PublicResource {
   constructor(private client: TixkitClient) {}
-  async getEvent(eventId: string): Promise<Event> {
+  async getEvent(eventId: string): Promise<PublicEvent> {
     return this.client.request('GET', `/public/events/${eventId}`);
   }
   async getEventRevision(eventId: string): Promise<PublicEventRevision> {

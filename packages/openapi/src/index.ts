@@ -706,6 +706,51 @@ const rawOpenApiSpec = {
         },
         required: ['document', 'version', 'contentJson', 'context', 'renderModel', 'validation'],
       },
+      PublicMarketingIntegration: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+          config: {
+            type: 'object',
+            additionalProperties: true,
+            description:
+              'Buyer-safe public config. GA4 exposes measurementId, Meta Pixel exposes pixelId, and generic tags expose an HTTPS pixelUrl.',
+          },
+          consentRequired: { type: 'boolean' },
+          status: { type: 'string', enum: ['active', 'disabled'] },
+        },
+        required: ['provider', 'config', 'consentRequired', 'status'],
+      },
+      PublicEvent: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          slug: { type: 'string' },
+          title: { type: 'string' },
+          description: { type: 'string' },
+          status: { type: 'string' },
+          timezone: { type: 'string' },
+          startsAt: { type: 'string', format: 'date-time' },
+          endsAt: { type: 'string', format: 'date-time' },
+          venue: { type: ['object', 'null'], additionalProperties: true },
+          brandId: { type: 'string' },
+          coverImageUrl: { type: 'string', format: 'uri' },
+          marketingIntegrations: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicMarketingIntegration' },
+          },
+        },
+        required: [
+          'id',
+          'slug',
+          'title',
+          'status',
+          'timezone',
+          'startsAt',
+          'brandId',
+          'marketingIntegrations',
+        ],
+      },
       PublicEventRevision: {
         type: 'object',
         properties: {
@@ -4341,7 +4386,7 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event details (hidden ticket types excluded)',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } } },
           },
         },
       },
@@ -4389,7 +4434,7 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event details for the verified custom-domain slug',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } } },
           },
           '404': { description: 'No matching published event for the custom domain' },
         },

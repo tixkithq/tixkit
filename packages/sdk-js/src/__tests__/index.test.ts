@@ -16,6 +16,7 @@ import {
   type OrderDetail,
   type PrivacyRequestInput,
   type PublicAvailabilityItem,
+  type PublicEvent,
   type SmsTemplateDocument,
   type UploadArtifactDownload,
   type UploadPurpose,
@@ -2562,9 +2563,34 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('public.getEvent sends GET without auth', async () => {
-    const fm = mockFetch(200, { id: 'evt_1', title: 'Event' });
+    const fm = mockFetch(200, {
+      id: 'evt_1',
+      slug: 'summer-show',
+      title: 'Event',
+      status: 'published',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-07T20:00:00.000Z',
+      brandId: 'brd_1',
+      marketingIntegrations: [
+        {
+          provider: 'ga4',
+          config: { measurementId: 'G-TEST1234' },
+          consentRequired: true,
+          status: 'active',
+        },
+      ],
+    });
     const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    await c.public.getEvent('evt_1');
+    const event = await c.public.getEvent('evt_1');
+    expectTypeOf(event).toEqualTypeOf<PublicEvent>();
+    expect(event).toMatchObject({
+      id: 'evt_1',
+      slug: 'summer-show',
+      brandId: 'brd_1',
+      marketingIntegrations: [{ provider: 'ga4' }],
+    });
+    expect(event).not.toHaveProperty('currency');
+    expect(event).not.toHaveProperty('resalePolicy');
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/public/events/evt_1');
   });

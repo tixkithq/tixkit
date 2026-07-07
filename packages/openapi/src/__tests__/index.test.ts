@@ -890,6 +890,37 @@ describe('openApiSpec', () => {
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/DraftPreviewPage' });
     expect(
+      openApiSpec.paths['/public/events/{eventId}'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicEvent' });
+    expect(
+      openApiSpec.paths['/public/events/by-slug/{slug}'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PublicEvent' });
+    expect(openApiSpec.components.schemas.PublicEvent.required).toEqual([
+      'id',
+      'slug',
+      'title',
+      'status',
+      'timezone',
+      'startsAt',
+      'brandId',
+      'marketingIntegrations',
+    ]);
+    expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty('currency');
+    expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty('visibility');
+    expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty('resalePolicy');
+    expect(
+      openApiSpec.components.schemas.PublicEvent.properties.marketingIntegrations.items,
+    ).toEqual({
+      $ref: '#/components/schemas/PublicMarketingIntegration',
+    });
+    expect(openApiSpec.components.schemas.PublicMarketingIntegration.properties).not.toHaveProperty(
+      'tenantId',
+    );
+    expect(
       openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses,
     ).not.toHaveProperty('401');
     expect(
