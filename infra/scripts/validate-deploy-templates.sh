@@ -286,6 +286,72 @@ render_service_health_check_path() {
   ' infra/render.yaml
 }
 
+require_render_service_env_key() {
+  local service_name="$1"
+  local env_key="$2"
+
+  awk -v service_name="${service_name}" -v env_key="${env_key}" '
+    /^  - type: / {
+      in_service = 0
+    }
+    $0 == "    name: " service_name {
+      in_service = 1
+      found_service = 1
+      next
+    }
+    in_service && $0 == "      - key: " env_key {
+      found_key = 1
+      exit
+    }
+    END {
+      exit found_service && found_key ? 0 : 1
+    }
+  ' infra/render.yaml ||
+    fail "infra/render.yaml service ${service_name} must declare ${env_key}"
+}
+
+require_render_service_env_value() {
+  local service_name="$1"
+  local env_key="$2"
+  local expected_value="$3"
+
+  awk -v service_name="${service_name}" -v env_key="${env_key}" -v expected_value="${expected_value}" '
+    /^  - type: / {
+      in_service = 0
+      pending_key = 0
+    }
+    $0 == "    name: " service_name {
+      in_service = 1
+      found_service = 1
+      pending_key = 0
+      next
+    }
+    in_service && $0 == "      - key: " env_key {
+      found_key = 1
+      pending_key = 1
+      next
+    }
+    in_service && pending_key && /^[[:space:]]*value:/ {
+      value = $0
+      sub(/^[[:space:]]*value:[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      if (value == expected_value) {
+        found_value = 1
+      }
+      pending_key = 0
+      exit
+    }
+    in_service && pending_key && /^[[:space:]]*- key:/ {
+      pending_key = 0
+      exit
+    }
+    END {
+      exit found_service && found_key && found_value ? 0 : 1
+    }
+  ' infra/render.yaml ||
+    fail "infra/render.yaml service ${service_name} must set ${env_key}=${expected_value}"
+}
+
 next_app_route_file_for_path() {
   local app_root="$1"
   local route_path="$2"
@@ -463,6 +529,26 @@ expected_helm_api_origin='https://api.tixkit.com'
 expected_helm_checkout_origin='https://checkout.tixkit.com'
 expected_helm_admin_origin='https://admin.tixkit.com'
 expected_helm_cors_origins="${expected_helm_checkout_origin},${expected_helm_admin_origin}"
+
+for render_api_required_env in \
+  AUTH_PROVIDER \
+  API_BASE_URL \
+  METRICS_BEARER_TOKEN \
+  STRIPE_SECRET_KEY \
+  STRIPE_WEBHOOK_SECRET \
+  S3_ENDPOINT \
+  S3_BUCKET \
+  S3_ACCESS_KEY_ID \
+  S3_SECRET_ACCESS_KEY \
+  S3_REGION \
+  CLERK_SECRET_KEY \
+  CLERK_PUBLISHABLE_KEY \
+  CLERK_WEBHOOK_SECRET; do
+  require_render_service_env_key tixkit-api "${render_api_required_env}"
+done
+require_render_service_env_value tixkit-api AUTH_PROVIDER clerk
+require_render_service_env_value tixkit-api API_BASE_URL "${expected_render_api_origin}"
+require_render_service_env_key tixkit-checkout NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 
 grep -Eq '^[[:space:]]*TRUST_PROXY[[:space:]]*=[[:space:]]*"1"[[:space:]]*$' infra/fly/api.toml ||
   fail 'infra/fly/api.toml must set API TRUST_PROXY to bounded hop count "1"'

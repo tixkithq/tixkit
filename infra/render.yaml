@@ -27,6 +27,32 @@ services:
         value: 1
       - key: CORS_ALLOWED_ORIGINS
         value: https://tixkit-checkout.onrender.com,https://tixkit-admin.onrender.com
+      - key: AUTH_PROVIDER
+        value: clerk
+      - key: API_BASE_URL
+        value: https://tixkit-api.onrender.com
+      - key: METRICS_BEARER_TOKEN
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_WEBHOOK_SECRET
+        sync: false
       - key: TEMPORAL_ADDRESS
         sync: false
       - key: TEMPORAL_NAMESPACE
@@ -71,6 +97,8 @@ services:
         value: 3000
       - key: NEXT_PUBLIC_TIXKIT_API_BASE_URL
         value: https://tixkit-api.onrender.com/v1
+      - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        sync: false
     plan: starter
 
   - type: web
