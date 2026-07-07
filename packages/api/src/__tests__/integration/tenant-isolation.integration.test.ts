@@ -139,22 +139,33 @@ function createMockDb(tables: Tables = {}): unknown {
   }
 
   function createUpdate(table: string) {
+    const wheres: Array<{ column: string; op: string; value: unknown }> = [];
     return {
       set(values: Row) {
         const rows = tables[table] ?? [];
-        if (rows[0]) Object.assign(rows[0], values);
-        return {
-          where() {
+        const update = {
+          where(column: string, op: string, value: unknown) {
+            wheres.push({ column, op, value });
+            return update;
+          },
+          returningAll() {
             return {
-              returningAll() {
-                return {
-                  executeTakeFirstOrThrow: async () => rows[0] ?? { id: 'updated', ...values },
-                };
+              executeTakeFirstOrThrow: async () => {
+                const row = rows.find((candidate) => matchesWheres(candidate, wheres));
+                if (!row) return { id: 'updated', ...values };
+                Object.assign(row, values);
+                return row;
               },
-              execute: async () => [],
             };
           },
+          execute: async () => {
+            for (const row of rows) {
+              if (matchesWheres(row, wheres)) Object.assign(row, values);
+            }
+            return [];
+          },
         };
+        return update;
       },
     };
   }
@@ -515,6 +526,30 @@ function contentVersionRow(overrides: Row = {}): Row {
     created_at: new Date('2026-06-01T00:00:00.000Z'),
     ...overrides,
   };
+}
+
+function legacyEventPageContentJson(eventId: string): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    channel: 'event_page',
+    eventId,
+    blocks: [
+      {
+        type: 'hero',
+        id: `hero_${eventId}`,
+        headline: 'Legacy event page',
+        body: 'Legacy body',
+      },
+    ],
+    editor: {
+      provider: '@tiptap/core',
+      document: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Legacy body' }] }],
+      },
+    },
+    settings: { theme: 'default' },
+  });
 }
 
 async function setupApp(
@@ -2754,6 +2789,133 @@ describe('brand and event scope denial', () => {
 
     expect(res.statusCode).toBe(404);
     expect(tables.content_document_versions).toHaveLength(0);
+    await app.close();
+  });
+
+  it('POST /content-documents/migrate-event-page-chrome rejects read-only event-page principals', async () => {
+    const originalContent = legacyEventPageContentJson('evt_1');
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_read_only',
+      scopes: ['events.read'],
+    });
+    const tables: Tables = {
+      content_documents: [contentDocumentRow()],
+      content_document_versions: [contentVersionRow({ content_json: originalContent })],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents/migrate-event-page-chrome',
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(tables.content_document_versions?.[0]?.content_json).toBe(originalContent);
+    await app.close();
+  });
+
+  it('POST /content-documents/migrate-event-page-chrome only migrates permitted brand documents', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_brand_scoped',
+      brandIds: ['brd_A'],
+      scopes: ['events.write'],
+    });
+    const tables: Tables = {
+      content_documents: [
+        contentDocumentRow({ id: 'cdoc_A', brand_id: 'brd_A', event_id: 'evt_A' }),
+        contentDocumentRow({ id: 'cdoc_B', brand_id: 'brd_B', event_id: 'evt_B' }),
+      ],
+      content_document_versions: [
+        contentVersionRow({
+          id: 'cver_A',
+          document_id: 'cdoc_A',
+          content_json: legacyEventPageContentJson('evt_A'),
+        }),
+        contentVersionRow({
+          id: 'cver_B',
+          document_id: 'cdoc_B',
+          content_json: legacyEventPageContentJson('evt_B'),
+        }),
+      ],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents/migrate-event-page-chrome',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      documentsScanned: 1,
+      versionsChecked: 1,
+      versionsMigrated: 1,
+      migrated: [{ documentId: 'cdoc_A', versionId: 'cver_A', versionNumber: 1 }],
+    });
+    const migratedBlocks = JSON.parse(String(tables.content_document_versions?.[0]?.content_json))
+      .blocks as Array<{ type: string }>;
+    const untouchedBlocks = JSON.parse(String(tables.content_document_versions?.[1]?.content_json))
+      .blocks as Array<{ type: string }>;
+    expect(migratedBlocks.map((block) => block.type)).toContain('brand_footer');
+    expect(untouchedBlocks.map((block) => block.type)).not.toContain('brand_footer');
+    await app.close();
+  });
+
+  it('POST /content-documents/migrate-event-page-chrome only migrates permitted event documents', async () => {
+    const principal = makePrincipal({
+      type: 'api_key',
+      id: 'ak_event_scoped',
+      eventIds: ['evt_A'],
+      scopes: ['events.write'],
+    });
+    const tables: Tables = {
+      content_documents: [
+        contentDocumentRow({ id: 'cdoc_A', event_id: 'evt_A' }),
+        contentDocumentRow({ id: 'cdoc_B', event_id: 'evt_B' }),
+        contentDocumentRow({ id: 'cdoc_brand', event_id: null }),
+      ],
+      content_document_versions: [
+        contentVersionRow({
+          id: 'cver_A',
+          document_id: 'cdoc_A',
+          content_json: legacyEventPageContentJson('evt_A'),
+        }),
+        contentVersionRow({
+          id: 'cver_B',
+          document_id: 'cdoc_B',
+          content_json: legacyEventPageContentJson('evt_B'),
+        }),
+        contentVersionRow({
+          id: 'cver_brand',
+          document_id: 'cdoc_brand',
+          content_json: legacyEventPageContentJson('evt_brand'),
+        }),
+      ],
+    };
+    const app = await setupApp(contentRoutes, principal, tables);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/content-documents/migrate-event-page-chrome',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      documentsScanned: 1,
+      versionsChecked: 1,
+      versionsMigrated: 1,
+      migrated: [{ documentId: 'cdoc_A', versionId: 'cver_A', versionNumber: 1 }],
+    });
+    const versionBlocks = (tables.content_document_versions ?? []).map((version) =>
+      (JSON.parse(String(version.content_json)).blocks as Array<{ type: string }>).map(
+        (block) => block.type,
+      ),
+    );
+    expect(versionBlocks[0]).toContain('brand_footer');
+    expect(versionBlocks[1]).not.toContain('brand_footer');
+    expect(versionBlocks[2]).not.toContain('brand_footer');
     await app.close();
   });
 });

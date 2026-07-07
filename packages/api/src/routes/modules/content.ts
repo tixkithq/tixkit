@@ -1256,12 +1256,22 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/content-documents/migrate-event-page-chrome', async (request) => {
     const principal = request.principal!;
-    requireContentListPermission(principal, 'event_page');
+    requireContentPermission(principal, 'event_page', 'write');
+    if (principal.type !== 'system' && principal.organizationIds.length === 0) {
+      return {
+        documentsScanned: 0,
+        versionsChecked: 0,
+        versionsMigrated: 0,
+        migrated: [],
+      };
+    }
 
     const documents = await repo().listDocuments({
       tenantId: principal.tenantId,
       channel: 'event_page',
       organizationIds: principal.type === 'system' ? undefined : principal.organizationIds,
+      brandIds: principal.brandIds,
+      eventIds: principal.eventIds,
       limit: 1000,
     });
 
