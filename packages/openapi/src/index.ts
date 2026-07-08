@@ -6109,7 +6109,7 @@ const rawOpenApiSpec = {
     '/api-keys': {
       get: {
         summary: 'List API keys',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
@@ -6125,7 +6125,7 @@ const rawOpenApiSpec = {
       },
       post: {
         summary: 'Create API key',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         requestBody: {
           required: true,
           content: {
@@ -6158,14 +6158,14 @@ const rawOpenApiSpec = {
     '/api-keys/{keyId}': {
       delete: {
         summary: 'Revoke API key',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         responses: { '204': { description: 'API key revoked' } },
       },
     },
     '/scanner-devices': {
       get: {
         summary: 'List scanner devices',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
@@ -6181,7 +6181,7 @@ const rawOpenApiSpec = {
       },
       post: {
         summary: 'Create scanner device',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         requestBody: {
           required: true,
           content: {
@@ -6216,7 +6216,7 @@ const rawOpenApiSpec = {
     '/scanner-devices/{deviceId}/revoke': {
       post: {
         summary: 'Revoke scanner device',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         responses: {
           '200': {
             description: 'Scanner device revoked',
@@ -7289,7 +7289,7 @@ const rawOpenApiSpec = {
     '/audit-logs': {
       get: {
         summary: 'List scoped admin audit log entries',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
@@ -8403,7 +8403,7 @@ const rawOpenApiSpec = {
     '/oauth-applications': {
       get: {
         summary: 'List OAuth applications',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
@@ -8440,7 +8440,7 @@ const rawOpenApiSpec = {
       },
       post: {
         summary: 'Create OAuth application',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         requestBody: {
           required: true,
           content: {
@@ -8485,7 +8485,7 @@ const rawOpenApiSpec = {
     '/oauth-applications/{appId}': {
       delete: {
         summary: 'Delete OAuth application',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         responses: {
           '204': { description: 'OAuth application deleted' },
           '401': {
@@ -8597,7 +8597,7 @@ const rawOpenApiSpec = {
     '/webhook-endpoints': {
       get: {
         summary: 'List webhook endpoints',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
@@ -8613,7 +8613,7 @@ const rawOpenApiSpec = {
       },
       post: {
         summary: 'Create webhook endpoint',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         requestBody: {
           required: true,
           content: {
@@ -8652,7 +8652,7 @@ const rawOpenApiSpec = {
     '/webhook-endpoints/{endpointId}': {
       patch: {
         summary: 'Update webhook endpoint',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         requestBody: {
           required: true,
           content: {
@@ -8690,7 +8690,7 @@ const rawOpenApiSpec = {
         summary: 'List webhook delivery events for an endpoint',
         description:
           'Returns delivery events in newest-first delivery creation order. Use nextCursor opaquely as the next cursor value.',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           { $ref: '#/components/parameters/Cursor' },
           { $ref: '#/components/parameters/Limit' },
@@ -8751,7 +8751,7 @@ const rawOpenApiSpec = {
         summary: 'Replay webhook event to one endpoint',
         description:
           'Queues one webhook delivery for the selected endpoint when the endpoint is active and subscribed to the event type.',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           {
             name: 'endpointId',
@@ -8797,7 +8797,7 @@ const rawOpenApiSpec = {
     '/webhook-events/{eventId}/replay': {
       post: {
         summary: 'Replay webhook event',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         responses: {
           '202': {
             description: 'Webhook replay queued',

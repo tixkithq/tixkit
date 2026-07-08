@@ -38,6 +38,8 @@ curl -X GET http://localhost:4000/v1/events \
 
 Revoked (`DELETE /v1/api-keys/:keyId`) or expired keys fail with `401 UNAUTHORIZED`. Last-used timestamps are updated on each authenticated call.
 
+Scoped API keys can call admin automation routes that require scopes they hold, including Developer settings (`developers.write`) and audit-log listing (`settings.write`); they use the same `Authorization: Bearer tk_...` header as other API-key requests.
+
 ### Scanner devices
 
 Scanner devices authenticate with a `deviceId` and `secret` pair issued via `POST /v1/scanner-devices`. The secret is constant-time compared against the stored hash. Revoked devices fail with `403 FORBIDDEN`. Scanner devices carry explicit `checkins.read`/`checkins.write` scopes; omit `scopes` during creation for the default read/write device, or create a polling-only scanner with `scopes: ["checkins.read"]`.

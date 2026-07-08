@@ -140,6 +140,31 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths).not.toHaveProperty('/developer/api-keys');
   });
 
+  it('documents API-key authentication on scoped developer and audit automation routes', () => {
+    const apiKeyCapableOperations = [
+      openApiSpec.paths['/api-keys'].get,
+      openApiSpec.paths['/api-keys'].post,
+      openApiSpec.paths['/api-keys/{keyId}'].delete,
+      openApiSpec.paths['/scanner-devices'].get,
+      openApiSpec.paths['/scanner-devices'].post,
+      openApiSpec.paths['/scanner-devices/{deviceId}/revoke'].post,
+      openApiSpec.paths['/oauth-applications'].get,
+      openApiSpec.paths['/oauth-applications'].post,
+      openApiSpec.paths['/oauth-applications/{appId}'].delete,
+      openApiSpec.paths['/webhook-endpoints'].get,
+      openApiSpec.paths['/webhook-endpoints'].post,
+      openApiSpec.paths['/webhook-endpoints/{endpointId}'].patch,
+      openApiSpec.paths['/webhook-endpoints/{endpointId}/events'].get,
+      openApiSpec.paths['/webhook-endpoints/{endpointId}/events/{eventId}/replay'].post,
+      openApiSpec.paths['/webhook-events/{eventId}/replay'].post,
+      openApiSpec.paths['/audit-logs'].get,
+    ];
+
+    for (const operation of apiKeyCapableOperations) {
+      expect(operation.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+    }
+  });
+
   it('documents stable credential metadata returned by API serializers', () => {
     expect(openApiSpec.components.schemas.ApiKey.properties).toMatchObject({
       tenantId: { type: 'string' },
