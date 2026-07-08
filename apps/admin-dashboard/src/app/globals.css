@@ -6,6 +6,9 @@
 @import '@react-email/editor/styles/slash-command.css';
 @import '@react-email/editor/styles/inspector.css';
 
+@source not "../../.next";
+@source not "../../.next-codex-cdp";
+@source not "../../.turbo";
 @source "../../../../packages/content-editor-shell/src";
 
 @custom-variant dark (&:is(.dark *));
@@ -163,7 +166,7 @@
   .tixkit-react-email-editor {
     min-height: 42rem;
     width: 100%;
-    color: #050505;
+    color: var(--foreground);
   }
 
   .tixkit-react-email-editor .tiptap,
@@ -201,13 +204,13 @@
 
   .tixkit-react-email-editor .ProseMirror p {
     margin: 0;
-    color: rgb(24 24 27 / 78%);
+    color: color-mix(in srgb, var(--foreground) 78%, transparent);
     font-size: 0.95rem;
     line-height: 1.65;
   }
 
   .tixkit-react-email-editor .ProseMirror a {
-    color: #0f172a;
+    color: var(--foreground);
     font-weight: 600;
     text-decoration: underline;
     text-underline-offset: 3px;
@@ -220,11 +223,93 @@
   }
 
   .tixkit-react-email-editor .ProseMirror p.is-editor-empty:first-child::before {
-    color: rgb(24 24 27 / 35%);
+    color: color-mix(in srgb, var(--foreground) 35%, transparent);
     content: attr(data-placeholder);
     float: left;
     height: 0;
     pointer-events: none;
+  }
+
+  [data-tixkit-email-inspector='true'] {
+    color: var(--foreground);
+    color-scheme: light;
+  }
+
+  .dark [data-tixkit-email-inspector='true'] {
+    color-scheme: dark;
+  }
+
+  [data-tixkit-email-inspector='true'] :is(label, p, span, div) {
+    color: inherit;
+  }
+
+  [data-tixkit-email-inspector='true'] :is(input, textarea, select, button) {
+    border-color: var(--border);
+    color: var(--foreground);
+  }
+
+  [data-tixkit-email-inspector='true']
+    :is(
+      [data-re-inspector-select],
+      [data-re-inspector-number],
+      [data-re-inspector-color-control],
+      [data-re-inspector-input],
+      [data-re-inspector-color-hex],
+      [data-re-inspector-unit]
+    ) {
+    background-color: transparent;
+    color: var(--foreground);
+  }
+
+  [data-tixkit-email-inspector='true'] [data-re-inspector-select] {
+    color-scheme: light;
+  }
+
+  .dark [data-tixkit-email-inspector='true'] [data-re-inspector-select] {
+    color-scheme: dark;
+  }
+
+  [data-tixkit-email-inspector='true'] [data-re-inspector-select] option {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
+
+  [data-tixkit-email-inspector='true'] [data-re-inspector-select] option:checked {
+    background-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+    color: var(--foreground);
+  }
+
+  [data-tixkit-email-inspector='true'] [data-re-inspector-color-trigger] {
+    border: 1px solid var(--border);
+    background-color: transparent;
+  }
+
+  [data-tixkit-email-inspector='true'] [data-re-inspector-toggle-item][data-active] {
+    background-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+    color: var(--foreground);
+  }
+
+  [data-tixkit-email-inspector='true'] :is(input, textarea, select)::placeholder {
+    color: var(--muted-foreground);
+  }
+
+  [data-tixkit-email-inspector='true'] :is(button, [role='button']) {
+    color: var(--foreground);
+  }
+
+  [data-tixkit-email-inspector='true'] :is(button, [role='button']):hover {
+    background-color: var(--accent);
+    color: var(--accent-foreground);
+  }
+
+  [data-tixkit-email-inspector='true'] svg {
+    color: currentColor;
+    stroke: currentColor;
+  }
+
+  [data-tixkit-email-inspector='true'] input[type='color'],
+  [data-tixkit-email-inspector='true'] [role='button']:has(input[type='color']) {
+    background-color: transparent;
   }
 
   .tixkit-email-variable-chip {

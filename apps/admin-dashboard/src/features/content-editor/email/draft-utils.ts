@@ -1,8 +1,11 @@
 import {
   REACT_EMAIL_EDITOR_PACKAGE,
   createDefaultEmailTemplate,
+  createDefaultEmailTemplateForKey,
+  hasSeedableDefaultEmailTemplate,
   type EmailTemplateDocument,
 } from '@tixkit/content-email';
+import { getTemplateLifecycle, type TemplateKey } from '@tixkit/domain';
 import type {
   AdminBrandSenderIdentity,
   AdminContentDocument,
@@ -25,7 +28,30 @@ export function listItemsFromResponse<T>(value: unknown): T[] {
 export function defaultEmailDocument(
   event?: AdminEventDetail,
   senderIdentity?: AdminBrandSenderIdentity,
+  templateKey: TemplateKey = 'order-confirmed',
 ): EmailTemplateDocument {
+  const lifecycle = getTemplateLifecycle(templateKey);
+  const seededDocument = hasSeedableDefaultEmailTemplate(templateKey)
+    ? createDefaultEmailTemplateForKey(templateKey)
+    : undefined;
+  if (seededDocument) {
+    return {
+      ...seededDocument,
+      settings: {
+        ...seededDocument.settings,
+        templateKey,
+        subject: lifecycle?.defaultSubject ?? seededDocument.settings.subject,
+        previewText: lifecycle?.defaultPreviewText ?? seededDocument.settings.previewText,
+        category: lifecycle?.category ?? seededDocument.settings.category,
+        sender: {
+          fromEmail: senderIdentity?.email ?? '',
+          fromName: senderIdentity?.name || '{{brand.name}}',
+          replyToEmail: senderIdentity?.replyToEmail,
+        },
+      },
+    };
+  }
+
   return createDefaultEmailTemplate({
     editor: {
       provider: REACT_EMAIL_EDITOR_PACKAGE,
@@ -46,13 +72,13 @@ export function defaultEmailDocument(
       ].join('\n\n'),
     },
     settings: {
-      templateKey: 'order-confirmed',
-      subject: event
-        ? `Your ${event.title} tickets are ready`
-        : 'Your {{event.title}} tickets are ready',
-      previewText: 'Everything you need before arrival.',
+      templateKey,
+      subject:
+        lifecycle?.defaultSubject ??
+        (event ? `Your ${event.title} tickets are ready` : 'Your {{event.title}} tickets are ready'),
+      previewText: lifecycle?.defaultPreviewText ?? 'Everything you need before arrival.',
       locale: 'en',
-      category: 'transactional',
+      category: lifecycle?.category ?? 'transactional',
       sender: {
         fromEmail: senderIdentity?.email ?? '',
         fromName: senderIdentity?.name || '{{brand.name}}',

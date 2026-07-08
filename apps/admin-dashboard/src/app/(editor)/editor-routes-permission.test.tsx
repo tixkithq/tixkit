@@ -23,8 +23,12 @@ vi.mock('@/components/permission-guard', () => ({
 }));
 
 vi.mock('@/features/content-editor/email-persisted-editor-view', () => ({
-  EmailPersistedEditorView: () => {
-    editorViewMocks.email();
+  EmailPersistedEditorView: (props: {
+    eventId: string;
+    returnHref?: string;
+    templateKey?: string;
+  }) => {
+    editorViewMocks.email(props);
     return <div data-testid="email-editor" />;
   },
 }));
@@ -61,7 +65,45 @@ describe('Editor route permission guards', () => {
     permissionGuardMock.allowed = true;
     render(await EmailPage({ params: Promise.resolve({ eventId: 'evt_1' }) }));
     expect(permissionGuardMock.required).toBe('messages.write');
+    expect(editorViewMocks.email).toHaveBeenCalledWith({
+      eventId: 'evt_1',
+      returnHref: undefined,
+      templateKey: undefined,
+    });
     expect(screen.getByTestId('email-editor')).toBeInTheDocument();
+  });
+
+  it('email page passes a registered template key from search params', async () => {
+    permissionGuardMock.allowed = true;
+    render(
+      await EmailPage({
+        params: Promise.resolve({ eventId: 'evt_1' }),
+        searchParams: Promise.resolve({ templateKey: 'waitlist-invite' }),
+      }),
+    );
+    expect(editorViewMocks.email).toHaveBeenCalledWith({
+      eventId: 'evt_1',
+      returnHref: undefined,
+      templateKey: 'waitlist-invite',
+    });
+  });
+
+  it('email page passes a local return href from search params', async () => {
+    permissionGuardMock.allowed = true;
+    render(
+      await EmailPage({
+        params: Promise.resolve({ eventId: 'evt_1' }),
+        searchParams: Promise.resolve({
+          returnTo: '/events/evt_1/messages?tab=lifecycle&templateKey=event-reminder',
+          templateKey: 'event-reminder',
+        }),
+      }),
+    );
+    expect(editorViewMocks.email).toHaveBeenCalledWith({
+      eventId: 'evt_1',
+      returnHref: '/events/evt_1/messages?tab=lifecycle&templateKey=event-reminder',
+      templateKey: 'event-reminder',
+    });
   });
 
   it('sms page guards with messages.write', async () => {

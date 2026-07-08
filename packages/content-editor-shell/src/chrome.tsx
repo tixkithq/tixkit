@@ -280,18 +280,18 @@ export function EditorLeftRail({
         )}
       </div>
 
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Insert popover buttons at bottom */}
+      {/* Insert popover buttons */}
       <div
         className={cn(
-          'flex flex-col items-center gap-1',
+          'mt-3 flex flex-col items-center gap-1',
           insertsDisabled && 'pointer-events-none opacity-40',
         )}
       >
         {inserts}
       </div>
+
+      {/* Spacer */}
+      <div className="flex-1" />
     </nav>
   );
 }

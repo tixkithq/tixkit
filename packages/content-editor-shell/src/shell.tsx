@@ -181,7 +181,7 @@ export function ContentEditorShell({
         onTestSend={onTestSend}
       />
 
-      <div className="grid min-h-[calc(100svh-12rem)] grid-cols-[4rem_minmax(0,1fr)] lg:grid-cols-[4rem_minmax(0,1fr)_20rem]">
+      <div className="grid min-h-[calc(100svh-12rem)] grid-cols-[4rem_1fr] lg:grid-cols-[4rem_1fr_20rem]">
         <InsertRail actions={insertActions} onInsertAction={onInsertAction} />
         <section
           aria-label="Editor canvas workspace"
@@ -702,7 +702,7 @@ function BlockerPanel({ issues }: { issues: ContentValidationIssue[] }) {
 
 function InspectorRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3">
+    <div className="grid grid-cols-[5rem_1fr] gap-3">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 truncate font-medium">{value}</dd>
     </div>

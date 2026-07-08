@@ -53,10 +53,10 @@ function groupedBy<T>(
 
 function paletteButtonClass(active: boolean) {
   return [
-    'inline-flex size-9 items-center justify-center rounded-md border text-muted-foreground transition-colors',
+    'inline-flex size-8 items-center justify-center rounded-md border text-muted-foreground transition-colors',
     active
       ? 'border-foreground/20 bg-accent text-accent-foreground'
-      : 'border-border bg-background hover:bg-accent hover:text-accent-foreground',
+      : 'border-transparent hover:bg-accent hover:text-accent-foreground',
   ].join(' ');
 }
 
@@ -113,8 +113,8 @@ export function InsertPalette({
   const variableGroups = groupedBy(variables, (item) => item.kind);
 
   return (
-    <div className="pointer-events-none absolute right-full top-1/2 z-20 mr-3 -translate-y-1/2">
-      <div className="pointer-events-auto flex flex-col items-center gap-1 rounded-md border bg-background p-1 shadow-lg">
+    <div className="relative">
+      <div className="flex flex-col items-center gap-1">
         <button
           aria-label="Insert text"
           aria-expanded={open === 'text'}
@@ -153,7 +153,7 @@ export function InsertPalette({
         </button>
       </div>
       {open ? (
-        <div className="pointer-events-auto absolute right-12 top-0 w-72 rounded-md border bg-popover p-2 text-popover-foreground shadow-xl">
+        <div className="absolute left-10 bottom-0 z-50 w-72 rounded-md border bg-popover p-2 text-popover-foreground shadow-xl">
           {open === 'text' ? (
             <div className="space-y-1">
               {textItems.map((item) => (

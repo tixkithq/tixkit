@@ -38,6 +38,12 @@ function selectedSenderIdentity(
   return identities.find((identity) => identity.email.trim().toLowerCase() === normalizedFromEmail);
 }
 
+const envelopeRowClass =
+  'grid min-h-11 grid-cols-[96px_minmax(0,1fr)] items-center gap-4 px-4 py-2';
+const envelopeDividerRowClass = `${envelopeRowClass} border-t border-border/70`;
+const envelopeControlClass =
+  'min-w-0 rounded-none border-0 border-b border-transparent bg-transparent px-0 py-1.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-muted-foreground/35 focus:border-ring focus:bg-transparent focus:ring-0 disabled:opacity-50';
+
 export function EnvelopeHeader({
   disabled,
   emailDocument,
@@ -58,17 +64,17 @@ export function EnvelopeHeader({
   return (
     <section
       aria-label="Email envelope"
-      className="mb-3 overflow-hidden rounded-md border border-border bg-background"
+      className="mx-auto mb-3 w-full max-w-[600px] overflow-hidden bg-background"
       data-testid="email-metadata-bar"
     >
-      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_84px_minmax(0,1fr)] items-center gap-x-4 gap-y-2 border-b border-border/70 px-4 py-2">
+      <div className={envelopeRowClass}>
         <label className="text-xs font-medium text-muted-foreground" htmlFor="email-envelope-from">
           From
         </label>
         <select
           id="email-envelope-from"
           aria-label="Verified sender"
-          className="min-w-0 border-none bg-transparent text-sm text-foreground outline-none disabled:opacity-50"
+          className={envelopeControlClass}
           disabled={disabled || senderIdentities.length === 0}
           onChange={(change) => {
             const identity = senderIdentities.find(
@@ -90,11 +96,13 @@ export function EnvelopeHeader({
             </option>
           ))}
         </select>
+      </div>
+      <div className={envelopeDividerRowClass}>
         <span className="text-left text-xs font-medium text-muted-foreground">Reply-To</span>
         {replyToOpen ? (
           <input
             aria-label="Reply-To"
-            className="min-w-0 border-none bg-transparent text-left text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+            className={envelopeControlClass}
             disabled={disabled}
             onChange={(change) =>
               onChange({
@@ -115,7 +123,7 @@ export function EnvelopeHeader({
         ) : (
           <button
             aria-label="Reply-To"
-            className="min-w-0 truncate text-left text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className={`${envelopeControlClass} truncate text-left text-muted-foreground hover:text-foreground`}
             disabled={disabled}
             onClick={() => setReplyToOpen(true)}
             type="button"
@@ -124,7 +132,7 @@ export function EnvelopeHeader({
           </button>
         )}
       </div>
-      <div className="grid min-h-11 grid-cols-[84px_minmax(0,1fr)_84px_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-4 py-2">
+      <div className={envelopeDividerRowClass}>
         <label
           className="text-xs font-medium text-muted-foreground"
           htmlFor="email-envelope-subject"
@@ -134,7 +142,7 @@ export function EnvelopeHeader({
         <input
           id="email-envelope-subject"
           aria-label="Subject"
-          className="min-w-0 border-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+          className={envelopeControlClass}
           disabled={disabled}
           onChange={(change) =>
             onChange({
@@ -148,11 +156,13 @@ export function EnvelopeHeader({
           placeholder="Subject"
           value={emailDocument.settings.subject}
         />
+      </div>
+      <div className={envelopeDividerRowClass}>
         <span className="text-left text-xs font-medium text-muted-foreground">Preview</span>
         {previewOpen ? (
           <input
             aria-label="Preview text"
-            className="min-w-0 border-none bg-transparent text-left text-sm text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-50"
+            className={envelopeControlClass}
             disabled={disabled}
             onChange={(change) =>
               onChange({
@@ -169,7 +179,7 @@ export function EnvelopeHeader({
         ) : (
           <button
             aria-label="Preview text"
-            className="min-w-0 truncate text-left text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className={`${envelopeControlClass} truncate text-left text-muted-foreground hover:text-foreground`}
             disabled={disabled}
             onClick={() => setPreviewOpen(true)}
             type="button"

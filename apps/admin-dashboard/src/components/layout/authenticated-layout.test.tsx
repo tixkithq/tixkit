@@ -20,6 +20,11 @@ vi.mock('@/context/bootstrap-provider', () => ({
   BootstrapProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/events/evt_1/tickets',
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 import { AuthenticatedLayout } from './authenticated-layout';
 
 function renderLayout() {
@@ -44,6 +49,7 @@ describe('AuthenticatedLayout', () => {
 
     const header = screen.getByRole('banner');
     expect(header).toContainElement(screen.getByRole('button', { name: 'Toggle Sidebar' }));
+    expect(header).toContainElement(screen.getByRole('navigation', { name: 'Breadcrumb' }));
     expect(header).toContainElement(screen.getByRole('button', { name: 'Header action' }));
     // Workspace scope now lives in the sidebar header switcher, not the top bar.
     expect(screen.queryByRole('navigation', { name: 'Workspace scope' })).not.toBeInTheDocument();

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, it, vi } from 'vitest';
-import { EditorChrome } from './chrome.js';
+import { EditorChrome, EditorLeftRail } from './chrome.js';
 import { ContentEditorShell } from './shell.js';
 import { createContentEditorFixture, fixtureChannelLabel } from './fixtures.js';
 
@@ -43,6 +43,25 @@ describe('ContentEditorShell', () => {
 
     expect(onInsertAction).toHaveBeenNthCalledWith(1, 'hero');
     expect(onInsertAction).toHaveBeenNthCalledWith(2, 'ticket-summary');
+  });
+
+  it('keeps insert tools near the top of the left rail', () => {
+    render(
+      <EditorLeftRail
+        hiddenModes={{ code: true, editor: true, preview: true }}
+        inserts={
+          <>
+            <button type="button">Insert block</button>
+            <button type="button">Insert theme</button>
+          </>
+        }
+        mode="editor"
+        onModeChange={vi.fn()}
+      />,
+    );
+
+    const rail = screen.getByRole('navigation', { name: 'Editor tools' });
+    expect(rail).toHaveTextContent('Insert blockInsert theme');
   });
 
   it('renders host inspector modes for content page body theme code variables history and issues', () => {

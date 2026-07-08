@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import dynamic from 'next/dynamic';
-import { Archive, Code, Copy, Eye, Palette, Pencil, Save, Send } from 'lucide-react';
+import { Archive, Code, Copy, Eye, Palette, Pencil, RotateCcw, Save, Send } from 'lucide-react';
 import { EmailEditor, type EmailEditorRef } from '@react-email/editor';
 import { toast } from 'sonner';
 import {
@@ -11,6 +11,7 @@ import {
   EditorLeftRail,
   type EditorMode,
   EditorTopBar,
+  InsertPopoverButton,
 } from '@tixkit/content-editor-shell';
 import {
   applyEmailGlobalCssToHtml,
@@ -21,6 +22,7 @@ import {
   type EmailTemplateDocument,
 } from '@tixkit/content-email';
 import type { ContentValidationIssue } from '@tixkit/content-core';
+import { getTemplateLifecycle, type TemplateKey } from '@tixkit/domain';
 import {
   adminApi,
   type AdminBrand,
@@ -91,7 +93,66 @@ const StyleInspector = dynamic<StyleInspectorProps>(
   { ssr: false },
 );
 
-export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
+function themePresetButtonClass(active: boolean) {
+  return [
+    'rounded-md border px-2.5 py-1.5 text-xs font-medium capitalize transition-colors disabled:pointer-events-none disabled:opacity-50',
+    active
+      ? 'border-foreground/20 bg-accent text-accent-foreground'
+      : 'border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+  ].join(' ');
+}
+
+function textFromEditorJson(value: unknown): string {
+  if (!value || typeof value !== 'object') return '';
+  const node = value as { content?: unknown; text?: unknown; type?: unknown };
+  if (typeof node.text === 'string') return node.text;
+  if (node.type === 'hardBreak') return '\n';
+  if (!Array.isArray(node.content)) return '';
+  return node.content
+    .map((child) => textFromEditorJson(child))
+    .join(node.type === 'doc' ? '\n' : '');
+}
+
+function hasEmailCanvasContent(document: EmailTemplateDocument): boolean {
+  const htmlText = plainTextFromHtml(document.editor.contentHtml ?? '');
+  const jsonText = textFromEditorJson(document.editor.contentJson);
+  return Boolean(
+    document.editor.contentText?.trim() ||
+    htmlText.trim() ||
+    jsonText.trim() ||
+    /<(?:img|hr)\b/i.test(document.editor.contentHtml ?? ''),
+  );
+}
+
+function restoreDefaultCanvasContent(
+  document: EmailTemplateDocument,
+  event: AdminEventDetail,
+  senderIdentity: AdminBrandSenderIdentity | undefined,
+  templateKey: TemplateKey,
+): EmailTemplateDocument {
+  if (hasEmailCanvasContent(document)) return document;
+  const defaultDocument = defaultEmailDocument(event, senderIdentity, templateKey);
+  return {
+    ...document,
+    editor: {
+      ...document.editor,
+      contentHtml: defaultDocument.editor.contentHtml,
+      contentText: defaultDocument.editor.contentText,
+      contentJson: defaultDocument.editor.contentJson,
+    },
+    blocks: defaultDocument.blocks,
+  };
+}
+
+export function EmailPersistedEditorView({
+  eventId,
+  returnHref,
+  templateKey = 'order-confirmed',
+}: {
+  eventId: string;
+  returnHref?: string;
+  templateKey?: TemplateKey;
+}) {
   const [event, setEvent] = React.useState<AdminEventDetail>();
   const [brand, setBrand] = React.useState<AdminBrand>();
   const [document, setDocument] = React.useState<AdminContentDocument>();
@@ -237,7 +298,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     let loadedBrand: AdminBrand | undefined;
     if (brandsResult.ok) {
       loadedBrand = listItemsFromResponse<AdminBrand>(brandsResult.data).find(
-        (brand) => brand.id === loadedEvent.brandId,
+        (candidateBrand) => candidateBrand.id === loadedEvent.brandId,
       );
     }
 
@@ -254,16 +315,23 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     }
 
     let loadedDocument = listItemsFromResponse<AdminContentDocument>(documentsResult.data).find(
-      (item) => item.channel === 'email' && item.eventId === loadedEvent.id,
+      (item) =>
+        item.channel === 'email' && item.eventId === loadedEvent.id && item.key === templateKey,
     );
     if (!loadedDocument) {
+      const lifecycle = getTemplateLifecycle(templateKey);
       const createResult = await adminApi.createContentDocument({
         organizationId: loadedEvent.organizationId,
         brandId: loadedEvent.brandId,
         eventId: loadedEvent.id,
         channel: 'email',
-        key: 'order-confirmed',
-        name: `${loadedEvent.title} email template`,
+        key: templateKey,
+        name:
+          templateKey === 'order-confirmed'
+            ? `${loadedEvent.title} email template`
+            : lifecycle?.name
+              ? `${loadedEvent.title} ${lifecycle.name}`
+              : `${loadedEvent.title} email template`,
         locale: 'en',
       });
       if (!createResult.ok) {
@@ -299,7 +367,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     let loadedVersions = listItemsFromResponse<AdminContentDocumentVersion>(versionsResult.data);
     let loadedDraft = latestDraft(loadedVersions, loadedDocument);
     if (!loadedDraft) {
-      const initialDocument = defaultEmailDocument(loadedEvent, defaultSenderIdentity);
+      const initialDocument = defaultEmailDocument(loadedEvent, defaultSenderIdentity, templateKey);
       const saveResult = await adminApi.saveContentVersion(loadedDocument.id, {
         contentJson: initialDocument,
         subject: initialDocument.settings.subject,
@@ -329,6 +397,12 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     const normalizedWithSender = currentSenderIdentity
       ? applySenderIdentity(normalized, currentSenderIdentity)
       : normalized;
+    const canvasDocument = restoreDefaultCanvasContent(
+      normalizedWithSender,
+      loadedEvent,
+      currentSenderIdentity ?? defaultSenderIdentity,
+      templateKey,
+    );
 
     setEvent(loadedEvent);
     setBrand(loadedBrand);
@@ -337,18 +411,18 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     setVersions(loadedVersions);
     setSenderIdentities(loadedSenderIdentities);
     setTemplateChoices(loadedTemplateChoices);
-    setEmailDocument(normalizedWithSender);
-    setPreview(previewFromEditorDocument('Editor snapshot', normalizedWithSender));
+    setEmailDocument(canvasDocument);
+    setPreview(previewFromEditorDocument('Editor snapshot', canvasDocument));
     setReviewIssues(
       mergeValidationIssues([
-        ...validateEmailTemplate(normalizedWithSender, { provider: 'resend' }).issues,
-        ...senderIdentityIssues(normalizedWithSender, loadedSenderIdentities),
+        ...validateEmailTemplate(canvasDocument, { provider: 'resend' }).issues,
+        ...senderIdentityIssues(canvasDocument, loadedSenderIdentities),
       ]),
     );
     setReviewState('checked');
     setAutosave('saved');
     setLoading(false);
-  }, [eventId]);
+  }, [eventId, templateKey]);
 
   React.useEffect(() => {
     void load();
@@ -682,14 +756,18 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     const operationId = nextOperationId();
     const saved = await saveDraft(operationId, review.document);
     if (!saved) return;
+    const testSendResults = await Promise.all(
+      recipients.map((testRecipient) =>
+        adminApi.testSendContent(document.id, {
+          versionId: saved.version.id,
+          recipient: testRecipient,
+          context: event ? sampleContext(event) : undefined,
+        }),
+      ),
+    );
+    if (!isCurrentOperation(operationId)) return;
     const capturedRecipients: string[] = [];
-    for (const testRecipient of recipients) {
-      const result = await adminApi.testSendContent(document.id, {
-        versionId: saved.version.id,
-        recipient: testRecipient,
-        context: event ? sampleContext(event) : undefined,
-      });
-      if (!isCurrentOperation(operationId)) return;
+    for (const result of testSendResults) {
       if (!result.ok) {
         setAutosave('error');
         setActionError(resultMessage(result.error, 'Unable to capture email test send'));
@@ -697,6 +775,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       }
       capturedRecipients.push(result.data.testSend.recipient);
     }
+    if (!isCurrentOperation(operationId)) return;
     setTestDialogOpen(false);
     setActionError(undefined);
     setNotice(
@@ -744,6 +823,32 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
     setTemplatePickerOpen(false);
     markDraftDirty();
     setNotice(`Applied template ${template.name}`);
+  }
+
+  function resetToStudioDefault() {
+    if (!event || !emailDocument || isArchived) return;
+    const currentTemplateKey = emailDocument.settings.templateKey as TemplateKey;
+    const lifecycle = getTemplateLifecycle(currentTemplateKey);
+    if (!lifecycle) {
+      setAutosave('error');
+      setActionError('This document is not tied to a lifecycle email default.');
+      return;
+    }
+    const defaultDocument = defaultEmailDocument(event, selectedSenderIdentity, currentTemplateKey);
+    const nextDocument = ensureBulkUnsubscribeFooter({
+      ...defaultDocument,
+      settings: {
+        ...defaultDocument.settings,
+        sender: emailDocument.settings.sender,
+      },
+    });
+    setEmailDocument(nextDocument);
+    setPreview(previewFromEditorDocument('Editor snapshot', nextDocument));
+    setEditorMode('editor');
+    setEditorRevision((current) => current + 1);
+    setActionError(undefined);
+    markDraftDirty();
+    setNotice(`Reset to the Studio default for ${lifecycle.name}`);
   }
 
   async function archiveDocument() {
@@ -832,6 +937,13 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       icon: <Save className="size-4" />,
       onClick: () => void saveDraft(),
       disabled: Boolean(archivedReason) || autosave === 'saving',
+    },
+    {
+      id: 'studio-default',
+      label: 'Reset to Studio default',
+      icon: <RotateCcw className="size-4" />,
+      onClick: resetToStudioDefault,
+      disabled: Boolean(archivedReason),
       separatorAfter: true,
     },
     {
@@ -950,7 +1062,9 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
   );
   const paletteVariableItems = variableInsertItems.map(({ key, presentation }) => ({
     key,
-    ...presentation,
+    label: presentation.label,
+    preview: presentation.preview,
+    kind: presentation.kind,
   }));
   const issueBannerIssues =
     reviewState === 'checked'
@@ -985,6 +1099,76 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       ))}
     </div>
   );
+  const leftRailTools = (
+    <>
+      {editorMode === 'editor' ? (
+        <InsertPalette
+          components={paletteComponentItems}
+          disabled={!canEdit}
+          editorRef={emailEditorRef}
+          onInsert={markDraftDirty}
+          onUploadImage={uploadInlineEmailImage}
+          variables={paletteVariableItems}
+        />
+      ) : null}
+      <InsertPopoverButton disabled={!canEdit} icon={<Palette className="size-4" />} label="Theme">
+        <div className="space-y-3 p-2">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Email theme
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Apply a preset to the current template.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(['brand', 'minimal', 'basic'] as const).map((preset) => (
+              <button
+                aria-pressed={emailThemePreset === preset}
+                className={themePresetButtonClass(emailThemePreset === preset)}
+                disabled={!canEdit}
+                key={preset}
+                onClick={() => applyEmailThemePreset(preset)}
+                type="button"
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+        </div>
+      </InsertPopoverButton>
+      <InsertPopoverButton
+        disabled={!canEdit}
+        icon={<Code className="size-4" />}
+        label="Global CSS"
+      >
+        <div className="space-y-2 p-2">
+          <label className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Global CSS
+            <textarea
+              aria-label="Global CSS"
+              className="mt-2 min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              disabled={!canEdit}
+              onChange={(change) =>
+                updateEmailDocument({
+                  ...emailDocument,
+                  editor: {
+                    ...emailDocument.editor,
+                    globalCss: change.currentTarget.value,
+                  },
+                })
+              }
+              placeholder=".email-root { }"
+              value={emailDocument.editor.globalCss ?? ''}
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Scoped CSS is applied to rendered email HTML before preview, test, and publish.
+          </p>
+        </div>
+      </InsertPopoverButton>
+    </>
+  );
 
   return (
     <EditorChrome
@@ -993,7 +1177,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       topBar={
         <EditorTopBar
           autosave={autosave}
-          backHref={`/events/${event.id}`}
+          backHref={returnHref ?? `/events/${event.id}`}
           channelLabel="Email"
           documentName={document.name}
           error={actionError}
@@ -1009,28 +1193,28 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
       leftRail={
         <EditorLeftRail
           hiddenModes={{ code: true, editor: true, preview: true }}
-          insertsDisabled
+          insertsDisabled={!canEdit}
           mode={editorMode}
           onModeChange={(mode) => void handleModeChange(mode)}
-          inserts={null}
+          inserts={leftRailTools}
         />
       }
       inspector={null}
       canvas={
         <section
           aria-label="email template editable document"
-          className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 lg:pr-80 lg:rounded-tl-3xl xl:pr-[22rem]"
+          className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 lg:mr-80 xl:mr-[22rem]"
           data-testid="editor-canvas"
           ref={editorCanvasRef}
         >
           {showIssueBanner && (
             <div className="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100 sm:px-6">
-              <div className="mx-auto flex w-full max-w-[648px] items-start justify-between gap-3">
+              <div className="mx-auto flex w-full max-w-[860px] items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-medium">
                     {issueBannerIssues.length === 1
-                      ? 'Resolve 1 review blocker before publishing.'
-                      : `Resolve ${issueBannerIssues.length} review blockers before publishing.`}
+                      ? 'Resolve 1 required field before publishing.'
+                      : `Resolve ${issueBannerIssues.length} required fields before publishing.`}
                   </div>
                   <p className="mt-0.5 truncate text-xs opacity-80">
                     {issueBannerIssues[0]?.message}
@@ -1046,7 +1230,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
               </div>
             </div>
           )}
-          <div className="mx-auto min-h-full w-full max-w-[648px] px-5 py-6 sm:px-6">
+          <div className="mx-auto min-h-full w-full max-w-[860px] px-5 py-6 sm:px-6">
             <EnvelopeHeader
               disabled={!canEdit}
               emailDocument={emailDocument}
@@ -1073,14 +1257,6 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                 />
               ) : (
                 <>
-                  <InsertPalette
-                    components={paletteComponentItems}
-                    disabled={!canEdit}
-                    editorRef={emailEditorRef}
-                    onInsert={markDraftDirty}
-                    onUploadImage={uploadInlineEmailImage}
-                    variables={paletteVariableItems}
-                  />
                   <EmailEditor
                     bubbleMenu={{
                       hideWhenActiveNodes: emailBubbleHiddenNodes,
@@ -1089,7 +1265,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                       trigger: emailBubbleMenuTrigger,
                       children: <TixkitEmailBubbleMenu />,
                     }}
-                    className="tixkit-react-email-editor rounded-lg bg-white shadow-sm ring-1 ring-border/50 dark:bg-zinc-950"
+                    className="tixkit-react-email-editor mx-auto w-full max-w-[600px] rounded-lg bg-white shadow-sm ring-1 ring-border/50 dark:bg-zinc-950"
                     content={initialEditorContent(emailDocument)}
                     editable={canEdit}
                     extensions={emailExtensions}
@@ -1107,21 +1283,7 @@ export function EmailPersistedEditorView({ eventId }: { eventId: string }) {
                     ref={emailEditorRef}
                     theme={brandTheme}
                   >
-                    <StyleInspector
-                      disabled={!canEdit}
-                      globalCss={emailDocument.editor.globalCss ?? ''}
-                      onGlobalCssChange={(globalCss) =>
-                        updateEmailDocument({
-                          ...emailDocument,
-                          editor: {
-                            ...emailDocument.editor,
-                            globalCss,
-                          },
-                        })
-                      }
-                      onThemePresetChange={applyEmailThemePreset}
-                      themePreset={emailThemePreset}
-                    />
+                    <StyleInspector />
                   </EmailEditor>
                 </>
               )}

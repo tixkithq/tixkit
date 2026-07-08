@@ -100,6 +100,8 @@ describe('EditorLayout auth handoff', () => {
 
     expect(mocks.auth).not.toHaveBeenCalled();
     expect(mocks.getPrincipal).not.toHaveBeenCalled();
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Event detail' })).not.toBeInTheDocument();
     expect(screen.getByTestId('editor-child')).toBeInTheDocument();
   });
 

@@ -8,6 +8,7 @@ import { PermissionProvider } from '@/context/permission-provider';
 import { BootstrapProvider } from '@/context/bootstrap-provider';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/layout/app-sidebar';
+import { AdminBreadcrumbs } from '@/components/layout/admin-breadcrumbs';
 import { SkipToMain } from '@/components/skip-to-main';
 
 type AuthenticatedLayoutProps = {
@@ -35,6 +36,7 @@ export function AuthenticatedLayout({ children, headerActions }: AuthenticatedLa
                 <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
                   <div className="flex min-h-16 w-full items-center gap-3 px-4 py-3">
                     <SidebarTrigger className="shrink-0 md:hidden" />
+                    <AdminBreadcrumbs />
                     {headerActions ? (
                       <div className="ml-auto flex shrink-0 items-center justify-end gap-3 sm:gap-4">
                         {headerActions}

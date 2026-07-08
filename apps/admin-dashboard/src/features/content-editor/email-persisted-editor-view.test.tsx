@@ -107,6 +107,7 @@ const editorMockState = vi.hoisted(() => ({
   alignmentCalls: [] as string[],
   slashCommandItems: [] as Array<{ title?: string; description?: string; category?: string }>,
   lastTheme: undefined as unknown,
+  lastInitialText: '',
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -145,19 +146,7 @@ vi.mock('@/context/permission-provider', () => ({
 vi.mock('./email/style-inspector', async () => {
   const ReactModule = await import('react');
   return {
-    StyleInspector: ({
-      disabled,
-      globalCss,
-      onGlobalCssChange,
-      onThemePresetChange,
-      themePreset,
-    }: {
-      disabled: boolean;
-      globalCss: string;
-      onGlobalCssChange: (css: string) => void;
-      onThemePresetChange: (preset: 'brand' | 'minimal' | 'basic') => void;
-      themePreset: 'brand' | 'minimal' | 'basic';
-    }) =>
+    StyleInspector: () =>
       ReactModule.createElement(
         'aside',
         {
@@ -165,22 +154,6 @@ vi.mock('./email/style-inspector', async () => {
           'data-testid': 'native-email-inspector-host',
         },
         ReactModule.createElement('p', null, 'Page style'),
-        ReactModule.createElement(
-          'button',
-          {
-            disabled,
-            onClick: () => onThemePresetChange(themePreset === 'minimal' ? 'brand' : 'minimal'),
-            type: 'button',
-          },
-          'Edit theme',
-        ),
-        ReactModule.createElement('textarea', {
-          'aria-label': 'Style inspector Global CSS',
-          disabled,
-          onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) =>
-            onGlobalCssChange(event.currentTarget.value),
-          value: globalCss,
-        }),
       ),
   };
 });
@@ -216,6 +189,7 @@ vi.mock('@react-email/editor', async () => {
       const [value, setValue] = ReactModule.useState(() =>
         editorMockHelpers.textFromContent(content),
       );
+      editorMockState.lastInitialText = editorMockHelpers.textFromContent(content);
       const valueRef = ReactModule.useRef(value);
       const onReadyRef = ReactModule.useRef(onReady);
       const onUpdateRef = ReactModule.useRef(onUpdate);
@@ -638,6 +612,7 @@ describe('EmailPersistedEditorView', () => {
     editorMockState.alignmentCalls = [];
     editorMockState.slashCommandItems = [];
     editorMockState.lastTheme = undefined;
+    editorMockState.lastInitialText = '';
     vi.stubGlobal(
       'confirm',
       vi.fn(() => true),
@@ -1044,6 +1019,11 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.queryByText('Transactional ticket messages')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Send timing')).not.toBeInTheDocument();
     expect(screen.getByTestId('native-email-inspector-host')).toBeInTheDocument();
+    expect(screen.getByLabelText('Insert Theme')).toBeInTheDocument();
+    expect(screen.getByLabelText('Insert Global CSS')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Insert Theme'));
+    expect(screen.getByText('Email theme')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'minimal' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Align left' })).not.toBeInTheDocument();
     expect(screen.queryByText('Typography')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Template key')).not.toBeInTheDocument();
@@ -1198,6 +1178,104 @@ describe('EmailPersistedEditorView', () => {
             '<p>Hi {{recipient.name}}, your {{event.title}} tickets are ready. Manage preferences: {{brand.supportUrl}}.</p>',
           renderedText:
             'Hi {{recipient.name}}, your {{event.title}} tickets are ready. Manage preferences: {{brand.supportUrl}}.',
+        }),
+      );
+    });
+  });
+
+  it('does not let a blank editor export overwrite the starter draft', async () => {
+    editorMockState.exportedHtml = '<!DOCTYPE html><html><body><p><br /></p></body></html>';
+    editorMockState.exportedText = '';
+    editorMockState.exportedJson = { type: 'doc', content: [] };
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByRole('textbox', { name: 'Email body' });
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            editor: expect.objectContaining({
+              contentHtml: emailDocument.editor.contentHtml,
+            }),
+          }),
+          renderedHtml: emailDocument.editor.contentHtml,
+        }),
+      );
+    });
+  });
+
+  it('restores seeded lifecycle canvas content when a saved draft body is empty', async () => {
+    const emptyEmailDocument = {
+      ...emailDocument,
+      editor: {
+        provider: REACT_EMAIL_EDITOR_PACKAGE,
+        contentHtml: '',
+        contentText: '',
+        contentJson: {
+          type: 'doc',
+          content: [{ type: 'paragraph' }],
+        },
+      },
+      blocks: [],
+    };
+    adminApiMock.listContentVersions.mockResolvedValue(
+      ok({
+        items: [
+          {
+            ...version,
+            contentJson: emptyEmailDocument,
+            renderedHtml: '',
+            renderedText: '',
+          },
+        ],
+      }),
+    );
+
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByTestId('native-email-inspector-host');
+
+    expect(editorMockState.lastInitialText).toContain('{{recipient.name}}');
+    expect(editorMockState.lastInitialText).toContain('{{event.title}}');
+    expect(editorMockState.lastInitialText).toContain('{{order.id}}');
+    expect(screen.queryByText(/required fields before publishing/i)).not.toBeInTheDocument();
+  });
+
+  it('resets a lifecycle draft back to the Studio default starter content', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    const canvas = await screen.findByRole('textbox', { name: 'Email body' });
+    canvas.textContent = 'Bare custom body';
+    fireEvent.input(canvas);
+    expect(canvas).toHaveTextContent('Bare custom body');
+
+    clickMoreAction('Reset to Studio default');
+
+    let resetCanvas: HTMLElement | undefined;
+    await waitFor(() => {
+      resetCanvas = screen.getByRole('textbox', { name: 'Email body' });
+      expect(resetCanvas).toHaveTextContent('Receipt and order details inside.');
+    });
+    expect(resetCanvas).toHaveTextContent('Details');
+    expect(resetCanvas).toHaveTextContent('{{order.id}}');
+    expect(resetCanvas).not.toHaveTextContent('Bare custom body');
+    expect(screen.getByText('Reset to the Studio default for Order confirmed')).toBeInTheDocument();
+
+    clickEmailSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_email',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            editor: expect.objectContaining({
+              contentText: expect.stringContaining('Receipt and order details inside.'),
+            }),
+          }),
+          renderedText: expect.stringContaining('Receipt and order details inside.'),
         }),
       );
     });
@@ -1382,7 +1460,12 @@ describe('EmailPersistedEditorView', () => {
     adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [] }));
     adminApiMock.saveContentVersion.mockResolvedValue(ok(version));
 
-    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+    render(
+      React.createElement(EmailPersistedEditorView, {
+        eventId: 'evt_1',
+        templateKey: 'review-request',
+      }),
+    );
 
     await screen.findByLabelText('Subject');
     expect(adminApiMock.createContentDocument).toHaveBeenCalledWith({
@@ -1390,8 +1473,8 @@ describe('EmailPersistedEditorView', () => {
       brandId: 'brd_1',
       eventId: 'evt_1',
       channel: 'email',
-      key: 'order-confirmed',
-      name: 'All Access Chicago email template',
+      key: 'review-request',
+      name: 'All Access Chicago Review request',
       locale: 'en',
     });
     expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -1399,8 +1482,13 @@ describe('EmailPersistedEditorView', () => {
       expect.objectContaining({
         contentJson: expect.objectContaining({
           schemaVersion: 1,
-          editor: expect.objectContaining({ provider: '@react-email/editor' }),
+          editor: expect.objectContaining({
+            provider: '@react-email/editor',
+            contentHtml: expect.stringContaining('{{review.platform}}'),
+          }),
         }),
+        renderedHtml: expect.stringContaining('{{recipient.name}}'),
+        renderedText: expect.stringContaining('{{event.title}}'),
       }),
     );
   });

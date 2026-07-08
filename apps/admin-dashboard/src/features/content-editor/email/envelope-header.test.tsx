@@ -76,6 +76,24 @@ describe('EnvelopeHeader', () => {
     );
   });
 
+  it('renders envelope fields as stacked rows', () => {
+    render(
+      <EnvelopeHeader
+        disabled={false}
+        emailDocument={createEmailDocument()}
+        onChange={vi.fn()}
+        senderIdentities={[senderIdentity]}
+      />,
+    );
+
+    const metadataBar = screen.getByTestId('email-metadata-bar');
+    expect(metadataBar.children).toHaveLength(4);
+    expect(metadataBar.children[0]).toHaveTextContent('From');
+    expect(metadataBar.children[1]).toHaveTextContent('Reply-To');
+    expect(metadataBar.children[2]).toHaveTextContent('Subject');
+    expect(metadataBar.children[3]).toHaveTextContent('Preview');
+  });
+
   it('keeps reply-to collapsed by default and edits it after expansion', () => {
     const onChange = vi.fn();
     const baseDocument = createEmailDocument();

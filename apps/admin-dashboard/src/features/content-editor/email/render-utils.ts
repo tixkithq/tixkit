@@ -81,6 +81,9 @@ export function withEditorExport(
   const canonicalHtml = jsonHtml || exportedHtml;
   const htmlText = plainTextFromHtml(canonicalHtml);
   const contentText = jsonText || exported.text.trim() || htmlText;
+  if (!contentText.trim() && !hasMeaningfulHtml(canonicalHtml)) {
+    return document;
+  }
   const baseContentHtml =
     canonicalHtml && (htmlText || !jsonText) ? canonicalHtml : htmlFromPlainText(contentText);
   const contentHtml = applyEmailGlobalCssToHtml(baseContentHtml, document.editor.globalCss);
@@ -94,6 +97,15 @@ export function withEditorExport(
     },
     blocks: projectEditorTextToLegacyBlocks(document.blocks, contentText),
   };
+}
+
+function hasMeaningfulHtml(html: string): boolean {
+  const withoutEmptyTags = html
+    .replace(/<style\b[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .trim();
+  return withoutEmptyTags.length > 0 || /<(?:img|hr)\b/i.test(html);
 }
 
 export function projectEditorTextToLegacyBlocks(
