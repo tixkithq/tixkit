@@ -96,3 +96,4 @@ apps/checkout/public/tixkit-widget.js
 artifacts/
 .continue-*
 .next-codex-cdp*/
+.next-*/

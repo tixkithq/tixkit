@@ -2,6 +2,19 @@ const checkoutFrameSrc = process.env.PUBLIC_CHECKOUT_URL?.trim()
   ? new URL(process.env.PUBLIC_CHECKOUT_URL).origin
   : 'http://localhost:3000';
 
+function originFromUrl(value, fallback) {
+  try {
+    return new URL(value?.trim() || fallback).origin;
+  } catch {
+    return new URL(fallback).origin;
+  }
+}
+
+const adminApiImageSrc = originFromUrl(
+  process.env.NEXT_PUBLIC_ADMIN_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL,
+  'http://localhost:4000',
+);
+
 const adminSecurityHeaders = [
   {
     key: 'Content-Security-Policy',
@@ -11,7 +24,7 @@ const adminSecurityHeaders = [
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self' https://*.clerk.accounts.dev https://*.clerk.com",
-      "img-src 'self' data: blob: https:",
+      `img-src 'self' data: blob: https: ${adminApiImageSrc}`,
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.com",

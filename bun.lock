@@ -257,7 +257,6 @@
         "@temporalio/client": "^1.18.0",
         "@temporalio/interceptors-opentelemetry": "^1.18.1",
         "@tixkit/admin-table-core": "workspace:*",
-        "@tixkit/content-core": "workspace:*",
         "@tixkit/content-email": "workspace:*",
         "@tixkit/content-event-page": "workspace:*",
         "@tixkit/content-message": "workspace:*",

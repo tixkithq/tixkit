@@ -501,20 +501,31 @@ Bulk marketing and event-update SMS require active `smsOptIn`. Suppression and c
 
 ### Reporting & Exports
 
-| Method | Path                                                  | Scope          | Description                                                                    |
-| ------ | ----------------------------------------------------- | -------------- | ------------------------------------------------------------------------------ |
-| `GET`  | `/v1/events/:eventId/reports/sales`                   | `reports.read` | Gross/net sales, sales by channel, refunds, fees, tax, tickets sold, check-ins |
-| `GET`  | `/v1/events/:eventId/reports/tax`                     | `reports.read` | Tax breakdown                                                                  |
-| `GET`  | `/v1/events/:eventId/reports/attendance`              | `reports.read` | Attendance/check-in stats                                                      |
-| `GET`  | `/v1/events/:eventId/reports/promo`                   | `reports.read` | Promo/discount usage                                                           |
-| `GET`  | `/v1/events/:eventId/reports/conversion`              | `reports.read` | Conversion funnel                                                              |
-| `GET`  | `/v1/organizations/:organizationId/reports/affiliate` | `reports.read` | Affiliate/referral attribution                                                 |
-| `POST` | `/v1/exports`                                         | `reports.read` | Start async export (requires `Idempotency-Key`)                                |
-| `GET`  | `/v1/exports/:exportId`                               | `reports.read` | Export job status                                                              |
-| `GET`  | `/v1/exports/:exportId/events`                        | `reports.read` | SSE stream of export job events (reconnect with `Last-Event-ID`)               |
-| `GET`  | `/v1/exports/:exportId/download`                      | `reports.read` | Scoped download URL for completed export                                       |
+| Method | Path                                                  | Scope                      | Description                                                                    |
+| ------ | ----------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------ |
+| `GET`  | `/v1/events/:eventId/reports/sales`                   | `reports.read`             | Gross/net sales, sales by channel, refunds, fees, tax, tickets sold, check-ins |
+| `GET`  | `/v1/events/:eventId/reports/tax`                     | `reports.read`             | Tax breakdown                                                                  |
+| `GET`  | `/v1/events/:eventId/reports/attendance`              | `reports.read`             | Attendance/check-in stats                                                      |
+| `GET`  | `/v1/events/:eventId/reports/promo`                   | `reports.read`             | Promo/discount usage                                                           |
+| `GET`  | `/v1/events/:eventId/reports/conversion`              | `reports.read`             | Conversion funnel                                                              |
+| `GET`  | `/v1/organizations/:organizationId/reports/affiliate` | `reports.read`             | Affiliate/referral attribution                                                 |
+| `POST` | `/v1/exports`                                         | `reports.read` + type read | Start async export (requires `Idempotency-Key`)                                |
+| `GET`  | `/v1/exports/:exportId`                               | `reports.read`             | Export job status                                                              |
+| `GET`  | `/v1/exports/:exportId/events`                        | `reports.read`             | SSE stream of export job events (reconnect with `Last-Event-ID`)               |
+| `GET`  | `/v1/exports/:exportId/download`                      | `reports.read`             | Scoped download URL for completed export                                       |
 
 Sales metrics account for refunded/voided tickets and persisted financial snapshots. Exports run as Temporal workflows; the SSE stream replays durable `export_job_events` on reconnect.
+
+Export creation requires `reports.read` plus the raw-data permission for the requested export type:
+
+| Export type | Additional permission |
+| ----------- | --------------------- |
+| `attendees` | `attendees.read`      |
+| `orders`    | `orders.read`         |
+| `sales`     | `orders.read`         |
+| `tax`       | `orders.read`         |
+| `tickets`   | `checkins.read`       |
+| `scan_logs` | `checkins.read`       |
 
 Conversion reports return persisted `widgetViews` from deduped widget impression records. Checkout starts and completions continue to use persisted checkout-session data; conversion rate uses completed orders divided by widget views when views exist, otherwise it falls back to checkout starts.
 

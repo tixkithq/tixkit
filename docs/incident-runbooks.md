@@ -80,14 +80,16 @@ SLO targets:
 
 ### Root-cause checks
 
-1. `SELECT * FROM payment_events WHERE provider = 'stripe' AND provider_event_id = '<evt_id>';` — is `processed_at` set? Was the event stored at all?
+1. `SELECT * FROM payment_events WHERE provider = 'stripe' AND provider_event_id = '<evt_id>';` — is `processed_at` set? Check `recovery_status`, `recovery_attempts`, `recovery_owner`, `recovery_claimed_until`, `next_recovery_at`, and `last_recovery_error`.
 2. In Temporal UI, look for `payment-reconciliation:<providerEventId>`. Is it running, failed, or missing?
 3. Check Stripe dashboard for the event; confirm it was delivered to `POST /v1/webhooks/stripe` with a `200` response.
 4. Check `payment_intents` for the matching `provider_intent_id` and `checkout_session_id` metadata.
 
 ### Recovery
 
-- **Event stored but not processed** (`processed_at IS NULL`): Stripe will redeliver on its retry schedule. To force recovery, redeliver from the Stripe dashboard, or POST the raw event payload back to `/v1/webhooks/stripe` with valid signature headers. The handler will skip the duplicate check (event is stored but unprocessed) and start `paymentReconciliationWorkflow`, which is idempotent by `providerEventId`.
+- **Event stored but not processed** (`processed_at IS NULL`): the worker-owned `provider-event-recovery:scheduled` workflow claims due rows, starts a recovery reconciliation workflow such as `payment-reconciliation-recovery:<providerEventId>:<attempt>`, and releases the row for another scan until the provider event is marked processed. Check `recovery_status = 'claimed'` with an unexpired `recovery_claimed_until` before intervening; if the lease is expired, the next scheduler tick can reclaim it.
+- **Recovery stuck in manual review** (`recovery_status = 'manual_review'`): inspect `last_recovery_error` and the stored `raw_payload`. Fix malformed/unsupported payloads or provider mapping first, then set `recovery_status = 'pending'`, clear `last_recovery_error`, and set `next_recovery_at = now()` to let the scheduled recovery workflow retry.
+- **Need immediate recovery**: after fixing the downstream issue, set `next_recovery_at = now()` for the unprocessed row or redeliver from the Stripe dashboard. Do not mark `processed_at` manually unless reconciliation has been verified independently.
 - **Reconciliation workflow failed**: inspect the failed activity in Temporal UI. Fix the downstream issue (DB connection, provider outage), then use the Temporal CLI to retry:
   ```bash
   temporal workflow reset --id payment-reconciliation:<providerEventId> --event-id <first_failed_event_id>
