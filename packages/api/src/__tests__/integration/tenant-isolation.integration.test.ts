@@ -1713,6 +1713,58 @@ describe('cross-tenant denial', () => {
   });
 
   // Payment account binding validation tests (T24 regression coverage)
+  it('PATCH /brands/:brandId allows billing.write to bind a payment account', async () => {
+    const tables: Tables = {
+      brands: [brandRow()],
+      payment_accounts: [
+        {
+          id: 'pa_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_1',
+          status: 'active',
+          default_currency: 'USD',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+    };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ scopes: ['billing.write'] }),
+      tables,
+    );
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_1',
+      payload: { paymentAccountId: 'pa_1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ id: 'brd_1', paymentAccountId: 'pa_1' });
+    expect(tables.brands[0].payment_account_id).toBe('pa_1');
+    await app.close();
+  });
+
+  it('PATCH /brands/:brandId does not allow billing.write to edit general brand settings', async () => {
+    const tables: Tables = { brands: [brandRow()] };
+    const app = await setupApp(
+      tenantRoutes,
+      makePrincipal({ scopes: ['billing.write'] }),
+      tables,
+    );
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/brands/brd_1',
+      payload: { name: 'Billing User Edit' },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(tables.brands[0].name).toBe('Brand1');
+    await app.close();
+  });
+
   it('PATCH /brands/:brandId rejects payment account from another tenant', async () => {
     const tables: Tables = {
       brands: [brandRow()],

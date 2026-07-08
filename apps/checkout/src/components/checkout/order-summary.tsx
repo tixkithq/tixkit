@@ -12,6 +12,8 @@ type Props = {
     subtotalCents: number;
     discountCents: number;
     feeCents: number;
+    buyerFeeCents?: number;
+    organizerAbsorbedFeeCents?: number;
     taxCents: number;
     totalCents: number;
   };
@@ -39,7 +41,7 @@ export function OrderSummary({ items, tickets, currency, quote, presetTotalCents
     .filter((line): line is NonNullable<typeof line> => line !== null);
   const subtotalCents = quote?.subtotalCents ?? lines.reduce((sum, l) => sum + l.subtotal, 0);
   const discountCents = quote?.discountCents ?? 0;
-  const feeCents = quote?.feeCents ?? 0;
+  const feeCents = quote?.buyerFeeCents ?? quote?.feeCents ?? 0;
   const taxCents = quote?.taxCents ?? 0;
   const totalCents =
     quote?.totalCents ?? presetTotalCents ?? subtotalCents - discountCents + feeCents + taxCents;

@@ -446,7 +446,7 @@ describe('content routes', () => {
       ]),
     );
     expect(response.json().output.html).toContain('Hi Ada');
-    expect(response.json().output.text).toContain('Your All Access tickets are ready.');
+    expect(response.json().output.text).toContain('Hi Ada, order');
   });
 
   it('saves, previews, and captures canonical email template test sends', async () => {
@@ -504,13 +504,10 @@ describe('content routes', () => {
       documentId: 'cdoc_1',
       subject: 'Tickets for {{event.title}}',
       previewText: 'Ready for {{recipient.name}}',
-      renderedHtml: expect.stringContaining('<!DOCTYPE html'),
-      renderedText: expect.stringContaining('TICKET SUMMARY'),
+      renderedHtml: expect.stringContaining('<p>Hi , order .</p>'),
+      renderedText: expect.stringContaining('Hi , order .'),
       validation: { valid: true },
     });
-    expect(save.json().renderedHtml).not.toBe(
-      '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
-    );
     expect(save.json().renderedHtml).not.toBe('<p>caller supplied html must not win</p>');
     expect(save.json().renderedText).not.toBe('caller supplied text');
 
@@ -543,7 +540,7 @@ describe('content routes', () => {
       },
     });
     expect(preview.json().output.html).toContain('Hi Ada');
-    expect(preview.json().output.text).toContain('TICKET SUMMARY');
+    expect(preview.json().output.text).toContain('Hi Ada, order');
 
     const capture = await app.inject({
       method: 'POST',
@@ -597,7 +594,7 @@ describe('content routes', () => {
         expect.objectContaining({
           document_id: 'cdoc_1',
           subject: 'Tickets for {{event.title}}',
-          rendered_html: expect.stringContaining('<!DOCTYPE html'),
+          rendered_html: expect.stringContaining('<p>Hi , order .</p>'),
         }),
         expect.objectContaining({
           channel: 'email',

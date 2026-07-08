@@ -6,6 +6,7 @@ import {
   BrandRepository,
   EventRepository,
   EventOccurrenceRepository,
+  FeeRuleRepository,
   AuditLogRepository,
   executeTableQuery,
 } from '@tixkit/db';
@@ -29,6 +30,7 @@ import {
   createEventOccurrenceSchema,
   createEventSchema,
   parseBody,
+  updateEventFeePolicySchema,
   updateEventOccurrenceSchema,
   updateEventSchema,
 } from '../../http/schemas.js';
@@ -245,6 +247,49 @@ function parseStrictTableQuery(
     });
   }
   return query;
+}
+
+type FeeRuleRow = {
+  id: string;
+  event_id: string;
+  name: string;
+  type: string;
+  value: number;
+  applied_to: string;
+  absorb_into_price?: boolean | number | null;
+  created_at?: Date | string;
+  updated_at?: Date | string;
+};
+
+type EventFeePolicyRow = {
+  pass_fees_to_buyer?: boolean | number | null;
+};
+
+function serializeDate(value: Date | string | undefined): string | undefined {
+  if (value instanceof Date) return value.toISOString();
+  return typeof value === 'string' ? value : undefined;
+}
+
+function boolValue(value: boolean | number | null | undefined): boolean {
+  return value === true || value === 1;
+}
+
+function serializeFeePolicy(eventId: string, event: EventFeePolicyRow, rows: FeeRuleRow[]) {
+  return {
+    eventId,
+    passFeesToBuyer: boolValue(event.pass_fees_to_buyer),
+    rules: rows.map((row) => ({
+      id: row.id,
+      eventId: row.event_id,
+      name: row.name,
+      type: row.type,
+      value: Number(row.value),
+      appliedTo: row.applied_to,
+      absorbIntoPrice: Boolean(row.absorb_into_price),
+      createdAt: serializeDate(row.created_at),
+      updatedAt: serializeDate(row.updated_at),
+    })),
+  };
 }
 
 export const eventRoutes: FastifyPluginAsync = async (app) => {
@@ -523,6 +568,78 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (body.externalUrl !== undefined) updateData.external_url = body.externalUrl;
 
     return serializeEvent(await repo.update(eventId, updateData));
+  });
+
+  app.get('/events/:eventId/fee-policy', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId } = request.params as { eventId: string };
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    const rows = await new FeeRuleRepository(db).findByEvent(eventId);
+    return serializeFeePolicy(eventId, event as EventFeePolicyRow, rows as FeeRuleRow[]);
+  });
+
+  app.put('/events/:eventId/fee-policy', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId } = request.params as { eventId: string };
+    const body = parseBody(updateEventFeePolicySchema, request.body);
+    const event = await new EventRepository(db).findById(eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
+    ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+    ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+    ClerkAuthService.requireBrandScope(principal, event.brand_id);
+    ClerkAuthService.requireEventScope(principal, eventId);
+
+    await new EventRepository(db).update(eventId, {
+      pass_fees_to_buyer: body.passFeesToBuyer,
+    } as Record<string, unknown>);
+    await db.deleteFrom('fee_rules').where('event_id', '=', eventId).execute();
+    if (body.rules.length > 0) {
+      const now = new Date();
+      await db
+        .insertInto('fee_rules')
+        .values(
+          body.rules.map((rule) => ({
+            id: `fee_${ulid()}`,
+            event_id: eventId,
+            name: rule.name,
+            type: rule.type,
+            value: rule.value,
+            applied_to: rule.appliedTo,
+            absorb_into_price: !body.passFeesToBuyer,
+            created_at: now,
+            updated_at: now,
+          })),
+        )
+        .execute();
+    }
+    const rows = await new FeeRuleRepository(db).findByEvent(eventId);
+    const updatedEvent = await new EventRepository(db).findById(eventId);
+
+    await writeAuditLog(audit(), request, principal, {
+      action: 'event.fee_policy_updated',
+      organizationId: event.organization_id,
+      brandId: event.brand_id,
+      resourceType: 'Event',
+      resourceId: eventId,
+      diffSummary: {
+        passFeesToBuyer: body.passFeesToBuyer,
+        ruleCount: body.rules.length,
+      },
+    });
+
+    return serializeFeePolicy(
+      eventId,
+      (updatedEvent ?? event) as EventFeePolicyRow,
+      rows as FeeRuleRow[],
+    );
   });
 
   app.get('/events/:eventId/marketing-integrations', async (request) => {

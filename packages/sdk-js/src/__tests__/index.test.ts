@@ -947,6 +947,46 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm).method).toBe('GET');
   });
 
+  it('events exposes fee policy reads and updates', async () => {
+    const fm = mockFetch(200, {
+      eventId: 'evt_1',
+      passFeesToBuyer: true,
+      rules: [
+        {
+          id: 'fee_1',
+          eventId: 'evt_1',
+          name: 'Service fee',
+          type: 'percentage',
+          value: 500,
+          appliedTo: 'per_ticket',
+          absorbIntoPrice: false,
+        },
+      ],
+    });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    const policy = await c.events.getFeePolicy('evt_1');
+    expect(policy.rules[0]?.absorbIntoPrice).toBe(false);
+    expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/fee-policy');
+    expect(getCall(fm).method).toBe('GET');
+
+    fm.mockClear();
+    await c.events.updateFeePolicy('evt_1', {
+      passFeesToBuyer: false,
+      rules: [{ name: 'Order fee', type: 'fixed', value: 250, appliedTo: 'per_order' }],
+    });
+    expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/fee-policy');
+    expect(getCall(fm).method).toBe('PUT');
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      passFeesToBuyer: false,
+      rules: [{ name: 'Order fee', type: 'fixed', value: 250, appliedTo: 'per_order' }],
+    });
+  });
+
   it('tickets creates, delists, and completes resale listings with idempotency keys', async () => {
     const fm = mockFetch(201, { id: 'lst_1', status: 'listed' });
     const c = new TixkitClient({

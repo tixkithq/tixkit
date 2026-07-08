@@ -93,6 +93,7 @@ function baseEventRow(overrides: Record<string, unknown> = {}) {
     capacity: null,
     cover_image_url: null,
     external_url: null,
+    pass_fees_to_buyer: false,
     created_at: new Date('2026-06-01T00:00:00.000Z'),
     updated_at: new Date('2026-06-01T00:00:00.000Z'),
     ...overrides,
@@ -108,6 +109,7 @@ function createEventMutationDb(
     concurrentMarketingIntegrationSystemTimeAfterInsert?: Date;
     marketingIntegrations?: Record<string, unknown>[];
     marketingIntegrationAfterRecoveryUpdate?: Record<string, unknown>;
+    feeRules?: Record<string, unknown>[];
   } = {},
 ) {
   const rows: Record<string, Record<string, unknown>[]> = {
@@ -123,6 +125,7 @@ function createEventMutationDb(
     ],
     audit_logs: [],
     marketing_integrations: seed.marketingIntegrations ? [...seed.marketingIntegrations] : [],
+    fee_rules: seed.feeRules ? [...seed.feeRules] : [],
   };
   const inserted: Record<string, unknown>[] = [];
   const updates: Record<string, unknown>[] = [];
@@ -168,14 +171,18 @@ function createEventMutationDb(
 
   function insertInto(table: string) {
     return {
-      values(values: Record<string, unknown>) {
-        const row = table === 'events' ? baseEventRow(values) : values;
+      values(values: Record<string, unknown> | Record<string, unknown>[]) {
+        const valueRows = Array.isArray(values) ? values : [values];
+        const insertRows = valueRows.map((value) =>
+          table === 'events' ? baseEventRow(value) : value,
+        );
+        const row = insertRows[0];
         return {
           returningAll: () => ({
             executeTakeFirstOrThrow: async () => {
               rows[table] ??= [];
-              rows[table].push(row);
-              inserted.push(row);
+              rows[table].push(...insertRows);
+              inserted.push(...insertRows);
               return row;
             },
           }),
@@ -193,8 +200,8 @@ function createEventMutationDb(
               );
             }
             rows[table] ??= [];
-            rows[table].push(row);
-            inserted.push(row);
+            rows[table].push(...insertRows);
+            inserted.push(...insertRows);
           },
         };
       },
@@ -242,6 +249,20 @@ function createEventMutationDb(
     };
   }
 
+  function deleteFrom(table: string) {
+    return {
+      where(column: string, _op: string, value: unknown) {
+        return {
+          execute: async () => {
+            const before = rows[table] ?? [];
+            rows[table] = before.filter((row) => row[column] !== value);
+            return { numDeletedRows: BigInt(before.length - rows[table].length) };
+          },
+        };
+      },
+    };
+  }
+
   return {
     inserted,
     updates,
@@ -249,6 +270,7 @@ function createEventMutationDb(
       selectFrom,
       insertInto,
       updateTable,
+      deleteFrom,
     } as unknown as Database,
   };
 }
@@ -395,6 +417,169 @@ describe('event routes', () => {
       message: 'Use the dedicated publish, pause, or archive endpoint to change event status',
     });
     expect(updates.some((update) => update.status === 'paused')).toBe(false);
+    await app.close();
+  });
+
+  it('returns the current event fee policy', async () => {
+    const { db } = createEventMutationDb({
+      event: baseEventRow({ pass_fees_to_buyer: true }),
+      feeRules: [
+        {
+          id: 'fee_1',
+          event_id: 'evt_1',
+          name: 'Service fee',
+          type: 'percentage',
+          value: 500,
+          applied_to: 'per_ticket',
+          absorb_into_price: false,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/fee-policy',
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      eventId: 'evt_1',
+      passFeesToBuyer: true,
+      rules: [
+        {
+          id: 'fee_1',
+          eventId: 'evt_1',
+          name: 'Service fee',
+          type: 'percentage',
+          value: 500,
+          appliedTo: 'per_ticket',
+          absorbIntoPrice: false,
+        },
+      ],
+    });
+    await app.close();
+  });
+
+  it('returns the saved pass-through setting when no fee rules exist', async () => {
+    const { db } = createEventMutationDb({
+      event: baseEventRow({ pass_fees_to_buyer: true }),
+      feeRules: [],
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/fee-policy',
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      eventId: 'evt_1',
+      passFeesToBuyer: true,
+      rules: [],
+    });
+    await app.close();
+  });
+
+  it('replaces the event fee policy and marks rules as buyer-paid or absorbed', async () => {
+    const { db, inserted, updates } = createEventMutationDb({
+      event: baseEventRow({ pass_fees_to_buyer: true }),
+      feeRules: [
+        {
+          id: 'fee_old',
+          event_id: 'evt_1',
+          name: 'Old fee',
+          type: 'fixed',
+          value: 100,
+          applied_to: 'per_order',
+          absorb_into_price: false,
+        },
+      ],
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/fee-policy',
+      payload: {
+        passFeesToBuyer: false,
+        rules: [
+          {
+            name: 'Organizer paid service fee',
+            type: 'fixed',
+            value: 250,
+            appliedTo: 'per_order',
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      eventId: 'evt_1',
+      passFeesToBuyer: false,
+      rules: [
+        {
+          name: 'Organizer paid service fee',
+          type: 'fixed',
+          value: 250,
+          appliedTo: 'per_order',
+          absorbIntoPrice: true,
+        },
+      ],
+    });
+    expect(inserted).toContainEqual(
+      expect.objectContaining({
+        event_id: 'evt_1',
+        name: 'Organizer paid service fee',
+        absorb_into_price: true,
+      }),
+    );
+    expect(updates).toContainEqual(expect.objectContaining({ pass_fees_to_buyer: false }));
+    expect(inserted).toContainEqual(
+      expect.objectContaining({
+        action: 'event.fee_policy_updated',
+        resource_type: 'Event',
+        resource_id: 'evt_1',
+      }),
+    );
+    await app.close();
+  });
+
+  it('saves pass-through setting without creating fee rules', async () => {
+    const { db, inserted, updates } = createEventMutationDb({
+      event: baseEventRow({ pass_fees_to_buyer: false }),
+      feeRules: [],
+    });
+    const app = await setupEventApp(db, writePrincipal);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/events/evt_1/fee-policy',
+      payload: {
+        passFeesToBuyer: true,
+        rules: [],
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      eventId: 'evt_1',
+      passFeesToBuyer: true,
+      rules: [],
+    });
+    expect(updates).toContainEqual(expect.objectContaining({ pass_fees_to_buyer: true }));
+    expect(inserted).not.toContainEqual(expect.objectContaining({ event_id: 'evt_1' }));
+    expect(inserted).toContainEqual(
+      expect.objectContaining({
+        action: 'event.fee_policy_updated',
+        resource_type: 'Event',
+        resource_id: 'evt_1',
+      }),
+    );
     await app.close();
   });
 

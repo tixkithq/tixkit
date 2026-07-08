@@ -979,7 +979,7 @@ export default function CheckoutFlow({
       <Surface brand={brand}>
         <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
           <Skeleton className="h-8 w-48" />
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
             <div className="space-y-4">
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
@@ -1056,7 +1056,7 @@ export default function CheckoutFlow({
           </dl>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
           <div className="space-y-6">
             {phase === 'select' ? (
               <Card>

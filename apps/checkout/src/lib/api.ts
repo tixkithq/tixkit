@@ -144,6 +144,8 @@ export type CheckoutQuote = {
   discountCents: number;
   taxCents: number;
   feeCents: number;
+  buyerFeeCents?: number;
+  organizerAbsorbedFeeCents?: number;
   lineItems?: Array<{
     type?: string;
     ticketTypeId?: string;
@@ -158,6 +160,8 @@ export type CheckoutQuote = {
     discountCents?: number;
     taxCents?: number;
     feeCents?: number;
+    buyerFeeCents?: number;
+    organizerAbsorbedFeeCents?: number;
     totalCents: number;
   }>;
 };

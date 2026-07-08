@@ -20,6 +20,7 @@ const API_BASE_URL = (
 ).replace(/\/$/, '');
 const DEFAULT_TIMEOUT_MS = 15_000;
 const CLERK_TOKEN_WAIT_MS = 5_000;
+const TRANSIENT_RETRY_DELAY_MS = 250;
 const FIXTURES_ALLOWED = process.env.NODE_ENV === 'test';
 
 function apiError(
@@ -72,6 +73,23 @@ export function getAdminApiBaseUrl(): string {
   return API_BASE_URL;
 }
 
+function requestMethod(options: RequestInit): string {
+  return (options.method ?? 'GET').toUpperCase();
+}
+
+function canRetryRequest(options: RequestInit): boolean {
+  const method = requestMethod(options);
+  return method === 'GET' || method === 'HEAD';
+}
+
+function isTransientErrorCode(code: string): boolean {
+  return code === 'network_error' || code === 'timeout';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function getAdminApiAuthHeaders(
   headers: Record<string, string> = {},
 ): Promise<Record<string, string>> {
@@ -86,20 +104,34 @@ export async function getAdminApiAuthHeaders(
 }
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> {
+  const retryable = canRetryRequest(options);
+  for (let attempt = 0; attempt < (retryable ? 2 : 1); attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await requestOnce<T>(path, options);
+    if (!retryable || result.ok || !isTransientErrorCode(result.error.code) || attempt > 0) {
+      return result;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await delay(TRANSIENT_RETRY_DELAY_MS);
+  }
+  return requestOnce<T>(path, options);
+}
+
+async function requestOnce<T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> {
   const url = `${API_BASE_URL}${path}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string> | undefined),
-    };
+    const headers = new Headers(options.headers);
+    if (!headers.has('Content-Type') && typeof options.body === 'string') {
+      headers.set('Content-Type', 'application/json');
+    }
 
-    if (!headers.Authorization && typeof window !== 'undefined') {
+    if (!headers.has('Authorization') && typeof window !== 'undefined') {
       const clerkToken = await getClerkToken();
       if (clerkToken) {
-        headers.Authorization = `Bearer ${clerkToken}`;
+        headers.set('Authorization', `Bearer ${clerkToken}`);
       }
     }
 

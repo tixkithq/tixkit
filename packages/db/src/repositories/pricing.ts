@@ -279,6 +279,40 @@ export class TaxRuleRepository extends BaseRepository {
 }
 
 export class FeeRuleRepository extends BaseRepository {
+  async replaceForEvent(
+    eventId: string,
+    rules: Array<{
+      name: string;
+      type: string;
+      value: number;
+      appliedTo: string;
+      absorbIntoPrice?: boolean;
+    }>,
+  ) {
+    await this.db.deleteFrom('fee_rules').where('event_id', '=', eventId).execute();
+    if (rules.length === 0) return [];
+
+    const now = new Date();
+    await this.db
+      .insertInto('fee_rules')
+      .values(
+        rules.map((rule) => ({
+          id: `fee_${ulid()}`,
+          event_id: eventId,
+          name: rule.name,
+          type: rule.type,
+          value: rule.value,
+          applied_to: rule.appliedTo,
+          absorb_into_price: rule.absorbIntoPrice ?? false,
+          created_at: now,
+          updated_at: now,
+        })),
+      )
+      .execute();
+
+    return this.findByEvent(eventId);
+  }
+
   async create(input: {
     eventId: string;
     name: string;

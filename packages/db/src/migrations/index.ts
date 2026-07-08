@@ -46,3 +46,4 @@ export { TableQueryIndexesMigration } from './0045_table_query_indexes.js';
 export { OrganizationClerkIdUniqueMigration } from './0046_organization_clerk_id_unique.js';
 export { EventPublicRevisionMigration } from './0047_event_public_revision.js';
 export { HotQueryIndexesMigration } from './0048_hot_query_indexes.js';
+export { EventFeePassThroughMigration } from './0049_event_fee_pass_through.js';

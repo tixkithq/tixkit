@@ -512,6 +512,8 @@ describe('PricingEngine', () => {
 
     expect(quote.subtotalCents).toBe(20000);
     expect(quote.feeCents).toBe(1000);
+    expect(quote.buyerFeeCents).toBe(1000);
+    expect(quote.organizerAbsorbedFeeCents).toBe(0);
     expect(quote.totalCents).toBe(21000);
   });
 
@@ -538,6 +540,8 @@ describe('PricingEngine', () => {
     });
 
     expect(quote.feeCents).toBe(200);
+    expect(quote.buyerFeeCents).toBe(200);
+    expect(quote.organizerAbsorbedFeeCents).toBe(0);
     expect(quote.totalCents).toBe(20200);
   });
 
@@ -579,7 +583,83 @@ describe('PricingEngine', () => {
     expect(quote.subtotalCents).toBe(20000);
     expect(quote.discountCents).toBe(10000);
     expect(quote.feeCents).toBe(1000);
+    expect(quote.buyerFeeCents).toBe(1000);
+    expect(quote.organizerAbsorbedFeeCents).toBe(0);
     expect(quote.totalCents).toBe(11000);
+  });
+
+  it('keeps absorbed per-ticket fees out of the buyer total', () => {
+    const feeRule = {
+      id: 'fee_absorbed_ticket',
+      eventId: 'evt_1',
+      name: 'Service Fee',
+      type: 'percentage' as const,
+      value: 500,
+      appliedTo: 'per_ticket' as const,
+      absorbIntoPrice: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const quote = pricingEngine.calculate({
+      currency: 'USD',
+      cart: { items: [{ ticketTypeId: 'tt_paid', quantity: 2 }] },
+      ticketTypes,
+      taxRules: [],
+      feeRules: [feeRule],
+      discountCodes: [],
+    });
+
+    expect(quote.subtotalCents).toBe(20000);
+    expect(quote.feeCents).toBe(1000);
+    expect(quote.buyerFeeCents).toBe(0);
+    expect(quote.organizerAbsorbedFeeCents).toBe(1000);
+    expect(quote.totalCents).toBe(20000);
+    expect(quote.lineItems[0]).toMatchObject({
+      feeCents: 1000,
+      buyerFeeCents: 0,
+      organizerAbsorbedFeeCents: 1000,
+      totalCents: 20000,
+    });
+  });
+
+  it('supports mixed buyer-paid and absorbed fees', () => {
+    const buyerFeeRule = {
+      id: 'fee_buyer_order',
+      eventId: 'evt_1',
+      name: 'Order Fee',
+      type: 'fixed' as const,
+      value: 200,
+      appliedTo: 'per_order' as const,
+      absorbIntoPrice: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const absorbedFeeRule = {
+      id: 'fee_absorbed_ticket',
+      eventId: 'evt_1',
+      name: 'Organizer Fee',
+      type: 'percentage' as const,
+      value: 500,
+      appliedTo: 'per_ticket' as const,
+      absorbIntoPrice: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const quote = pricingEngine.calculate({
+      currency: 'USD',
+      cart: { items: [{ ticketTypeId: 'tt_paid', quantity: 2 }] },
+      ticketTypes,
+      taxRules: [],
+      feeRules: [buyerFeeRule, absorbedFeeRule],
+      discountCodes: [],
+    });
+
+    expect(quote.feeCents).toBe(1200);
+    expect(quote.buyerFeeCents).toBe(200);
+    expect(quote.organizerAbsorbedFeeCents).toBe(1000);
+    expect(quote.totalCents).toBe(20200);
   });
 
   it('should reject invalid discount code', () => {

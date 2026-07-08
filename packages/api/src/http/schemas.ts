@@ -380,6 +380,34 @@ export const updateEventSchema = z
   })
   .strict();
 
+const eventFeePolicyRuleSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      id: ulidSchema.optional(),
+      name: z.string().trim().min(1).max(80),
+      type: z.literal('percentage'),
+      value: z.number().int().min(0).max(10_000),
+      appliedTo: z.enum(['per_ticket', 'per_order']),
+    })
+    .strict(),
+  z
+    .object({
+      id: ulidSchema.optional(),
+      name: z.string().trim().min(1).max(80),
+      type: z.literal('fixed'),
+      value: z.number().int().min(0).max(100_000_000),
+      appliedTo: z.enum(['per_ticket', 'per_order']),
+    })
+    .strict(),
+]);
+
+export const updateEventFeePolicySchema = z
+  .object({
+    passFeesToBuyer: z.boolean(),
+    rules: z.array(eventFeePolicyRuleSchema).max(5).default([]),
+  })
+  .strict();
+
 export const createEventOccurrenceSchema = z
   .object({
     title: z.string().min(1),

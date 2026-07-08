@@ -1528,6 +1528,12 @@ describe('brand domain creation', () => {
   });
 
   it('POST /organizations/:organizationId/payment-accounts/stripe-connect creates a Stripe account and onboarding link when configured', async () => {
+    const originalAdminDashboardUrl = process.env.ADMIN_DASHBOARD_URL;
+    const originalNextPublicAdminOrigin = process.env.NEXT_PUBLIC_ADMIN_ORIGIN;
+    const originalApiBaseUrl = process.env.API_BASE_URL;
+    delete process.env.ADMIN_DASHBOARD_URL;
+    delete process.env.NEXT_PUBLIC_ADMIN_ORIGIN;
+    process.env.API_BASE_URL = 'http://localhost:4000';
     const tables = {
       organizations: [
         {
@@ -1564,68 +1570,84 @@ describe('brand domain creation', () => {
       },
     };
     const app = await setupApp(tenantRoutes, makePrincipal(), tables, { stripe });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/organizations/org_1/payment-accounts/stripe-connect',
-    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/organizations/org_1/payment-accounts/stripe-connect',
+      });
 
-    expect(res.statusCode).toBe(201);
-    expect(res.json()).toMatchObject({
-      provider: 'stripe_connect',
-      providerAccountId: 'acct_created_1',
-      status: 'pending',
-      defaultCurrency: 'USD',
-      detailsSubmitted: false,
-      chargesEnabled: false,
-      payoutsEnabled: false,
-      requirements: {
-        currently_due: ['business_profile.url'],
-        pending_verification: [],
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toMatchObject({
+        provider: 'stripe_connect',
+        providerAccountId: 'acct_created_1',
+        status: 'pending',
+        defaultCurrency: 'USD',
+        detailsSubmitted: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        requirements: {
+          currently_due: ['business_profile.url'],
+          pending_verification: [],
+          disabled_reason: null,
+        },
+        disabledReason: null,
+        onboardingUrl: 'https://connect.stripe.test/onboard/acct_created_1',
+      });
+      expect(tables.payment_accounts).toHaveLength(1);
+      expect(tables.payment_accounts[0]).toMatchObject({
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        provider: 'stripe_connect',
+        provider_account_id: 'acct_created_1',
+        status: 'pending',
+        default_currency: 'USD',
+        details_submitted: false,
+        charges_enabled: false,
+        payouts_enabled: false,
         disabled_reason: null,
-      },
-      disabledReason: null,
-      onboardingUrl: 'https://connect.stripe.test/onboard/acct_created_1',
-    });
-    expect(tables.payment_accounts).toHaveLength(1);
-    expect(tables.payment_accounts[0]).toMatchObject({
-      tenant_id: 'tnt_1',
-      organization_id: 'org_1',
-      provider: 'stripe_connect',
-      provider_account_id: 'acct_created_1',
-      status: 'pending',
-      default_currency: 'USD',
-      details_submitted: false,
-      charges_enabled: false,
-      payouts_enabled: false,
-      disabled_reason: null,
-    });
-    expect(
-      JSON.parse(
-        String((tables.payment_accounts as Array<Record<string, unknown>>)[0].requirements),
-      ),
-    ).toMatchObject({
-      currently_due: ['business_profile.url'],
-    });
-    expect(stripe.accounts.create).toHaveBeenCalledWith({
-      type: 'express',
-      country: 'US',
-      business_profile: { name: 'Org' },
-      metadata: {
-        tenantId: 'tnt_1',
-        organizationId: 'org_1',
-      },
-    });
-    expect(stripe.accountLinks.create).toHaveBeenCalledWith({
-      account: 'acct_created_1',
-      type: 'account_onboarding',
-      refresh_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=refresh',
-      ),
-      return_url: expect.stringContaining(
-        '/settings/payments?organizationId=org_1&stripeConnect=return',
-      ),
-    });
-    await app.close();
+      });
+      expect(
+        JSON.parse(
+          String((tables.payment_accounts as Array<Record<string, unknown>>)[0].requirements),
+        ),
+      ).toMatchObject({
+        currently_due: ['business_profile.url'],
+      });
+      expect(stripe.accounts.create).toHaveBeenCalledWith({
+        type: 'express',
+        country: 'US',
+        business_profile: { name: 'Org' },
+        metadata: {
+          tenantId: 'tnt_1',
+          organizationId: 'org_1',
+        },
+      });
+      expect(stripe.accountLinks.create).toHaveBeenCalledWith({
+        account: 'acct_created_1',
+        type: 'account_onboarding',
+        refresh_url:
+          'http://localhost:3001/settings/payments?organizationId=org_1&stripeConnect=refresh',
+        return_url:
+          'http://localhost:3001/settings/payments?organizationId=org_1&stripeConnect=return',
+      });
+    } finally {
+      if (originalAdminDashboardUrl === undefined) {
+        delete process.env.ADMIN_DASHBOARD_URL;
+      } else {
+        process.env.ADMIN_DASHBOARD_URL = originalAdminDashboardUrl;
+      }
+      if (originalNextPublicAdminOrigin === undefined) {
+        delete process.env.NEXT_PUBLIC_ADMIN_ORIGIN;
+      } else {
+        process.env.NEXT_PUBLIC_ADMIN_ORIGIN = originalNextPublicAdminOrigin;
+      }
+      if (originalApiBaseUrl === undefined) {
+        delete process.env.API_BASE_URL;
+      } else {
+        process.env.API_BASE_URL = originalApiBaseUrl;
+      }
+      await app.close();
+    }
   });
 
   it('POST /organizations/:organizationId/payment-accounts/stripe-connect ignores legacy Stripe accounts', async () => {
@@ -2020,7 +2042,7 @@ describe('brand domain creation', () => {
     expect(stripe.accounts.retrieve).toHaveBeenCalledWith('acct_refresh_1');
     expect(stripe.accountLinks.create).toHaveBeenCalledWith({
       account: 'acct_refresh_1',
-      type: 'account_update',
+      type: 'account_onboarding',
       refresh_url: expect.stringContaining(
         '/settings/payments?organizationId=org_1&stripeConnect=refresh',
       ),

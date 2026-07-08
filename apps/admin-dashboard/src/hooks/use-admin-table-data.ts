@@ -20,6 +20,7 @@ const REPORT_QUERY_PREFIXES = new Set([
 ]);
 const STATIC_METADATA_QUERY_PREFIXES = new Set([
   'getEvent',
+  'getEventFeePolicy',
   'getResalePolicy',
   'listCheckInLists',
   'listCheckoutQuestions',

@@ -90,6 +90,35 @@ export type ResalePolicy = {
   maxAbsoluteCents?: number;
 };
 
+export type FeeRule = {
+  id?: string;
+  eventId?: string;
+  name: string;
+  type: 'percentage' | 'fixed';
+  value: number;
+  appliedTo: 'per_ticket' | 'per_order';
+  absorbIntoPrice: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type EventFeePolicy = {
+  eventId: string;
+  passFeesToBuyer: boolean;
+  rules: FeeRule[];
+};
+
+export type UpdateEventFeePolicyInput = {
+  passFeesToBuyer: boolean;
+  rules: Array<{
+    id?: string;
+    name: string;
+    type: 'percentage' | 'fixed';
+    value: number;
+    appliedTo: 'per_ticket' | 'per_order';
+  }>;
+};
+
 export type TicketType = {
   id: string;
   eventId: string;
@@ -235,6 +264,8 @@ export type CheckoutSession = {
     discountCents: number;
     taxCents: number;
     feeCents: number;
+    buyerFeeCents?: number;
+    organizerAbsorbedFeeCents?: number;
     lineItems?: unknown[];
   };
   successUrl?: string;
@@ -2217,6 +2248,17 @@ class EventResource {
 
   async updateResalePolicy(eventId: string, input: ResalePolicy): Promise<ResalePolicy> {
     return this.client.request('PUT', `/events/${eventId}/resale-policy`, { body: input });
+  }
+
+  async getFeePolicy(eventId: string): Promise<EventFeePolicy> {
+    return this.client.request('GET', `/events/${eventId}/fee-policy`);
+  }
+
+  async updateFeePolicy(
+    eventId: string,
+    input: UpdateEventFeePolicyInput,
+  ): Promise<EventFeePolicy> {
+    return this.client.request('PUT', `/events/${eventId}/fee-policy`, { body: input });
   }
 
   async listResaleListings(

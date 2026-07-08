@@ -151,13 +151,17 @@ function serializeBootstrapBrand(row: Record<string, unknown>, includeSettings: 
 
 function stripeConnectReturnUrl(organizationId: string): string {
   const baseUrl =
-    process.env.ADMIN_DASHBOARD_URL ?? process.env.API_BASE_URL ?? 'http://localhost:3001';
+    process.env.ADMIN_DASHBOARD_URL ??
+    process.env.NEXT_PUBLIC_ADMIN_ORIGIN ??
+    'http://localhost:3001';
   return `${baseUrl.replace(/\/$/, '')}/settings/payments?organizationId=${encodeURIComponent(organizationId)}&stripeConnect=return`;
 }
 
 function stripeConnectRefreshUrl(organizationId: string): string {
   const baseUrl =
-    process.env.ADMIN_DASHBOARD_URL ?? process.env.API_BASE_URL ?? 'http://localhost:3001';
+    process.env.ADMIN_DASHBOARD_URL ??
+    process.env.NEXT_PUBLIC_ADMIN_ORIGIN ??
+    'http://localhost:3001';
   return `${baseUrl.replace(/\/$/, '')}/settings/payments?organizationId=${encodeURIComponent(organizationId)}&stripeConnect=refresh`;
 }
 
@@ -179,10 +183,6 @@ function stripeAccountState(account: Stripe.Account) {
       : {},
     disabledReason: account.requirements?.disabled_reason ?? null,
   };
-}
-
-function stripeAccountLinkType(status: string): 'account_onboarding' | 'account_update' {
-  return status === 'active' ? 'account_update' : 'account_onboarding';
 }
 
 const mssqlDuplicateInsertErrorNumbers = new Set([2601, 2627]);
@@ -508,10 +508,18 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/brands/:brandId', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'settings.write');
-    ClerkAuthService.requireNoEventScope(principal, 'brand settings');
     const { brandId } = request.params as { brandId: string };
     const body = parseBody(updateBrandSchema, request.body);
+    const isPaymentAccountBindingOnly =
+      Object.keys(body).length === 1 &&
+      Object.prototype.hasOwnProperty.call(body, 'paymentAccountId');
+
+    if (isPaymentAccountBindingOnly) {
+      requireAnyPermission(principal, ['settings.write', 'billing.write']);
+    } else {
+      ClerkAuthService.requirePermission(principal, 'settings.write');
+    }
+    ClerkAuthService.requireNoEventScope(principal, 'brand settings');
 
     const brandRepo = new BrandRepository(db);
     const brand = await brandRepo.findById(brandId);
@@ -759,7 +767,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
       const accountLink = await stripe.accountLinks.create({
         account: account.provider_account_id,
-        type: stripeAccountLinkType(account.status),
+        type: 'account_onboarding',
         refresh_url: stripeConnectRefreshUrl(organizationId),
         return_url: stripeConnectReturnUrl(organizationId),
       });
@@ -849,7 +857,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
       const accountLink = await stripe.accountLinks.create({
         account: updated.provider_account_id,
-        type: stripeAccountLinkType(updated.status),
+        type: 'account_onboarding',
         refresh_url: stripeConnectRefreshUrl(organizationId),
         return_url: stripeConnectReturnUrl(organizationId),
       });

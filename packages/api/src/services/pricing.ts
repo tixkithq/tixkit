@@ -139,6 +139,8 @@ export class PricingEngine {
     let discountCents = 0;
     let taxCents = 0;
     let feeCents = 0;
+    let buyerFeeCents = 0;
+    let organizerAbsorbedFeeCents = 0;
     const lineItems: PriceLineItem[] = [];
 
     let appliedDiscount: DiscountCode | null = null;
@@ -180,6 +182,8 @@ export class PricingEngine {
       }
 
       let lineFee = 0;
+      let lineBuyerFee = 0;
+      let lineOrganizerAbsorbedFee = 0;
       for (const feeRule of feeRules) {
         if (feeRule.appliedTo === 'per_ticket') {
           const feeAmount =
@@ -188,7 +192,13 @@ export class PricingEngine {
                   ((line.subtotalCents - lineDiscount) * feeRule.value) / 10000 / line.quantity,
                 )
               : feeRule.value;
-          lineFee += feeAmount * line.quantity;
+          const lineFeeTotal = feeAmount * line.quantity;
+          lineFee += lineFeeTotal;
+          if (feeRule.absorbIntoPrice) {
+            lineOrganizerAbsorbedFee += lineFeeTotal;
+          } else {
+            lineBuyerFee += lineFeeTotal;
+          }
         } else if (feeRule.appliedTo === 'per_order') {
           continue;
         }
@@ -202,7 +212,8 @@ export class PricingEngine {
           taxRule.appliedTo === 'ticket' || taxRule.appliedTo === 'all'
             ? line.subtotalCents - lineDiscount
             : 0;
-        const feeTaxable = taxRule.appliedTo === 'fee' || taxRule.appliedTo === 'all' ? lineFee : 0;
+        const feeTaxable =
+          taxRule.appliedTo === 'fee' || taxRule.appliedTo === 'all' ? lineBuyerFee : 0;
         const totalTaxable = taxableBase + feeTaxable;
         if (totalTaxable <= 0) continue;
         let ruleTax = 0;
@@ -231,8 +242,8 @@ export class PricingEngine {
         (r) => r.type === 'inclusive' && this.taxApplies(r, input.buyerCountry, input.buyerRegion),
       );
       const lineTotal = hasInclusiveTax
-        ? line.subtotalCents - lineDiscount + lineFee
-        : line.subtotalCents - lineDiscount + lineFee + lineTax;
+        ? line.subtotalCents - lineDiscount + lineBuyerFee
+        : line.subtotalCents - lineDiscount + lineBuyerFee + lineTax;
 
       lineItems.push({
         type: line.type,
@@ -247,12 +258,16 @@ export class PricingEngine {
         taxCents: lineTax,
         taxBreakdown,
         feeCents: lineFee,
+        buyerFeeCents: lineBuyerFee,
+        organizerAbsorbedFeeCents: lineOrganizerAbsorbedFee,
         totalCents: lineTotal,
       });
 
       discountCents += lineDiscount;
       taxCents += lineTax;
       feeCents += lineFee;
+      buyerFeeCents += lineBuyerFee;
+      organizerAbsorbedFeeCents += lineOrganizerAbsorbedFee;
     }
 
     for (const feeRule of feeRules) {
@@ -262,6 +277,11 @@ export class PricingEngine {
             ? Math.round(((subtotalCents - discountCents) * feeRule.value) / 10000)
             : feeRule.value;
         feeCents += feeAmount;
+        if (feeRule.absorbIntoPrice) {
+          organizerAbsorbedFeeCents += feeAmount;
+        } else {
+          buyerFeeCents += feeAmount;
+        }
       }
     }
 
@@ -269,8 +289,8 @@ export class PricingEngine {
       (r) => r.type === 'inclusive' && this.taxApplies(r, input.buyerCountry, input.buyerRegion),
     );
     const totalCents = hasInclusiveTax
-      ? subtotalCents - discountCents + feeCents
-      : subtotalCents - discountCents + taxCents + feeCents;
+      ? subtotalCents - discountCents + buyerFeeCents
+      : subtotalCents - discountCents + taxCents + buyerFeeCents;
 
     return {
       id: `pq_${ulid()}`,
@@ -279,6 +299,8 @@ export class PricingEngine {
       discountCents,
       taxCents,
       feeCents,
+      buyerFeeCents,
+      organizerAbsorbedFeeCents,
       totalCents,
       lineItems,
       expiresAt: expiresAt.toISOString(),

@@ -260,7 +260,9 @@ function createMockDb(): unknown {
             dbState.idempotencyRecords.find((record) => rowMatchesWheres(record, query.wheres))
           );
         }
-        if (table === 'export_jobs') return dbState.exportJobs[0];
+        if (table === 'export_jobs') {
+          return dbState.exportJobs.find((job) => rowMatchesWheres(job, query.wheres));
+        }
         if (table === 'checkout_sessions') {
           if (
             query.wheres.some(
@@ -1161,6 +1163,41 @@ describe('order routes', () => {
       status: 'processing',
     });
     expect(body.fileUrl).toBeUndefined();
+    await app.close();
+  });
+
+  it('GET /exports/:exportId returns 404 for an export in another tenant', async () => {
+    dbState.exportJobs = [
+      {
+        id: 'exp_other_tenant',
+        tenant_id: 'tnt_other',
+        event_id: 'evt_1',
+        type: 'attendees',
+        format: 'csv',
+        status: 'processing',
+        file_url: null,
+        requested_by: 'usr_2',
+        filters: null,
+        created_at: new Date('2026-06-01'),
+        completed_at: null,
+      },
+    ];
+    const app = await setupApp(reportingRoutes, makePrincipal());
+
+    const res = await app.inject({ method: 'GET', url: '/exports/exp_other_tenant' });
+
+    expect(res.statusCode).toBe(404);
+    expect(dbState.queryWheres).toEqual(
+      expect.arrayContaining([
+        {
+          table: 'export_jobs',
+          wheres: expect.arrayContaining([
+            { column: 'id', op: '=', value: 'exp_other_tenant' },
+            { column: 'tenant_id', op: '=', value: 'tnt_1' },
+          ]),
+        },
+      ]),
+    );
     await app.close();
   });
 

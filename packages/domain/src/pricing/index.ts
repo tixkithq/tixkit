@@ -26,6 +26,8 @@ export type PriceLineItem = {
     providerCalculationId?: string;
   }>;
   feeCents: number;
+  buyerFeeCents?: number;
+  organizerAbsorbedFeeCents?: number;
   totalCents: number;
 };
 
@@ -36,6 +38,8 @@ export type PriceQuote = {
   discountCents: number;
   taxCents: number;
   feeCents: number;
+  buyerFeeCents?: number;
+  organizerAbsorbedFeeCents?: number;
   totalCents: number;
   lineItems: PriceLineItem[];
   expiresAt: ISO8601Date;

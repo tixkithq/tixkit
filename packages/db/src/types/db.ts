@@ -210,6 +210,7 @@ export interface EventTable {
   resale_enabled: Generated<boolean>;
   resale_max_multiplier: Generated<number>;
   resale_max_absolute_cents: number | null;
+  pass_fees_to_buyer: Generated<boolean>;
   code_format: string | null;
   public_revision: Timestamp | null;
   created_at: Timestamp;

@@ -117,6 +117,24 @@ export type AdminResalePolicy = {
   maxAbsoluteCents?: number;
 };
 
+export type AdminFeeRule = {
+  id?: string;
+  eventId?: string;
+  name: string;
+  type: 'percentage' | 'fixed';
+  value: number;
+  appliedTo: 'per_ticket' | 'per_order';
+  absorbIntoPrice: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AdminFeePolicy = {
+  eventId: string;
+  passFeesToBuyer: boolean;
+  rules: AdminFeeRule[];
+};
+
 export type AdminEventListItem = {
   id: string;
   title: string;
@@ -1423,6 +1441,17 @@ export type CreateCheckoutQuestionInput = {
 
 export type UpdateCheckoutQuestionInput = Partial<CreateCheckoutQuestionInput>;
 
+export type UpdateEventFeePolicyInput = {
+  passFeesToBuyer: boolean;
+  rules: Array<{
+    id?: string;
+    name: string;
+    type: 'percentage' | 'fixed';
+    value: number;
+    appliedTo: 'per_ticket' | 'per_order';
+  }>;
+};
+
 export type RefundOrderInput = {
   amountCents?: number;
   reason?: string;
@@ -1632,6 +1661,11 @@ export type AdminApi = {
     eventId: string,
     input: AdminResalePolicy,
   ): Promise<ApiResult<AdminResalePolicy>>;
+  getEventFeePolicy(eventId: string): Promise<ApiResult<AdminFeePolicy>>;
+  updateEventFeePolicy(
+    eventId: string,
+    input: UpdateEventFeePolicyInput,
+  ): Promise<ApiResult<AdminFeePolicy>>;
   listResaleListings(
     eventId: string,
     input?: PageCursor,
@@ -2359,6 +2393,39 @@ function normalizeResalePolicy(value: unknown): AdminResalePolicy {
   };
 }
 
+function normalizeFeePolicy(value: unknown, eventId?: string): AdminFeePolicy {
+  const record = asRecord(value);
+  const rules = Array.isArray(record?.rules) ? record.rules : [];
+  return {
+    eventId: stringValue(record?.eventId ?? record?.event_id, eventId ?? ''),
+    passFeesToBuyer: record?.passFeesToBuyer === true || record?.pass_fees_to_buyer === true,
+    rules: rules.map((ruleValue) => {
+      const rule = asRecord(ruleValue) ?? {};
+      const type = rule.type === 'percentage' ? 'percentage' : 'fixed';
+      const appliedTo =
+        rule.appliedTo === 'per_ticket' || rule.applied_to === 'per_ticket'
+          ? 'per_ticket'
+          : 'per_order';
+      return {
+        id: stringValue(rule.id, undefined),
+        eventId: eventId
+          ? stringValue(rule.eventId ?? rule.event_id, eventId)
+          : stringValue(rule.eventId ?? rule.event_id, undefined),
+        name: stringValue(rule.name, 'Service fee'),
+        type,
+        value: finiteNumber(rule.value, 0),
+        appliedTo,
+        absorbIntoPrice:
+          rule.absorbIntoPrice === true ||
+          rule.absorb_into_price === true ||
+          rule.absorb_into_price === 1,
+        createdAt: stringValue(rule.createdAt ?? rule.created_at, undefined),
+        updatedAt: stringValue(rule.updatedAt ?? rule.updated_at, undefined),
+      } satisfies AdminFeeRule;
+    }),
+  };
+}
+
 function normalizeTicketListing(
   value: Partial<AdminTicketListing> & Record<string, unknown>,
 ): AdminTicketListing {
@@ -2973,6 +3040,26 @@ const fixtureEvents: AdminEventDetail[] = [
     updatedAt: iso(-7_776_000_000),
   },
 ];
+
+const fixtureFeePolicies: Record<string, AdminFeePolicy> = {
+  evt_demo_001: {
+    eventId: 'evt_demo_001',
+    passFeesToBuyer: true,
+    rules: [
+      {
+        id: 'fee_demo_001',
+        eventId: 'evt_demo_001',
+        name: 'Service fee',
+        type: 'percentage',
+        value: 500,
+        appliedTo: 'per_ticket',
+        absorbIntoPrice: false,
+        createdAt: iso(-3_600_000),
+        updatedAt: iso(-3_600_000),
+      },
+    ],
+  },
+};
 
 const fixtureTicketTypes: Record<string, AdminTicketType[]> = {
   evt_demo_001: [
@@ -4273,6 +4360,64 @@ export const adminApi: AdminApi = {
         if (!event) return err<AdminResalePolicy>(apiError('not_found', 'Event not found', 404));
         event.resalePolicy = normalizeResalePolicy(input);
         return ok(event.resalePolicy);
+      },
+    );
+  },
+
+  async getEventFeePolicy(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminFeePolicy>(`/v1/events/${eventId}/fee-policy`, {
+          method: 'GET',
+        });
+        return result.ok ? ok(normalizeFeePolicy(result.data, eventId)) : result;
+      },
+      () => {
+        const event = fixtureEvents.find((e) => e.id === eventId);
+        if (!event) return err<AdminFeePolicy>(apiError('not_found', 'Event not found', 404));
+        return ok(
+          normalizeFeePolicy(
+            fixtureFeePolicies[eventId] ?? {
+              eventId,
+              passFeesToBuyer: false,
+              rules: [],
+            },
+            eventId,
+          ),
+        );
+      },
+    );
+  },
+
+  async updateEventFeePolicy(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminFeePolicy>(`/v1/events/${eventId}/fee-policy`, {
+          method: 'PUT',
+          body: JSON.stringify(input),
+        });
+        return result.ok ? ok(normalizeFeePolicy(result.data, eventId)) : result;
+      },
+      () => {
+        const event = fixtureEvents.find((e) => e.id === eventId);
+        if (!event) return err<AdminFeePolicy>(apiError('not_found', 'Event not found', 404));
+        const nowIso = iso(0);
+        const policy = normalizeFeePolicy(
+          {
+            eventId,
+            passFeesToBuyer: input.passFeesToBuyer,
+            rules: input.rules.map((rule) => ({
+              ...rule,
+              id: rule.id ?? newFixtureId('fee'),
+              eventId,
+              absorbIntoPrice: !input.passFeesToBuyer,
+              updatedAt: nowIso,
+            })),
+          },
+          eventId,
+        );
+        fixtureFeePolicies[eventId] = policy;
+        return ok(policy);
       },
     );
   },

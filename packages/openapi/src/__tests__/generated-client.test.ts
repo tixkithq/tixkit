@@ -44,6 +44,7 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('Event');
     expect(output).toContain('Order');
     expect(output).toContain('CheckoutSession');
+    expect(output).toContain('EventFeePolicy');
     expect(output).toContain('Organization');
     expect(output).toContain('Brand');
     expect(output).toContain('paymentAccountId');
@@ -142,8 +143,12 @@ describe('Generated client compile validation (T33)', () => {
 
     expect(output).toContain('CheckoutSessionUpdateInput');
     expect(output).toContain('AttendeeUpdateInput');
+    expect(output).toContain('UpdateEventFeePolicyInput');
     expect(output).toContain('/checkout/sessions/{sessionId}');
     expect(output).toContain('/attendees/{attendeeId}');
+    expect(output).toContain('/events/{eventId}/fee-policy');
+    expect(output).toContain('buyerFeeCents?: number');
+    expect(output).toContain('organizerAbsorbedFeeCents?: number');
     expect(output).toContain('successUrl?: string');
     expect(output).toContain('cancelUrl?: string');
     expect(output).toContain(

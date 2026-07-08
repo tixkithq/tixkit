@@ -1040,6 +1040,52 @@ const rawOpenApiSpec = {
         },
         required: ['enabled', 'maxMultiplier'],
       },
+      FeeRule: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          eventId: { type: 'string' },
+          name: { type: 'string' },
+          type: { type: 'string', enum: ['percentage', 'fixed'] },
+          value: { type: 'integer', minimum: 0 },
+          appliedTo: { type: 'string', enum: ['per_ticket', 'per_order'] },
+          absorbIntoPrice: { type: 'boolean' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['name', 'type', 'value', 'appliedTo', 'absorbIntoPrice'],
+      },
+      EventFeePolicy: {
+        type: 'object',
+        properties: {
+          eventId: { type: 'string' },
+          passFeesToBuyer: { type: 'boolean' },
+          rules: { type: 'array', items: { $ref: '#/components/schemas/FeeRule' } },
+        },
+        required: ['eventId', 'passFeesToBuyer', 'rules'],
+      },
+      UpdateEventFeePolicyInput: {
+        type: 'object',
+        properties: {
+          passFeesToBuyer: { type: 'boolean' },
+          rules: {
+            type: 'array',
+            maxItems: 5,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string', minLength: 1, maxLength: 80 },
+                type: { type: 'string', enum: ['percentage', 'fixed'] },
+                value: { type: 'integer', minimum: 0 },
+                appliedTo: { type: 'string', enum: ['per_ticket', 'per_order'] },
+              },
+              required: ['name', 'type', 'value', 'appliedTo'],
+            },
+          },
+        },
+        required: ['passFeesToBuyer', 'rules'],
+      },
       EventPage: {
         type: 'object',
         properties: {
@@ -1531,6 +1577,8 @@ const rawOpenApiSpec = {
           discountCents: { type: 'integer' },
           taxCents: { type: 'integer' },
           feeCents: { type: 'integer' },
+          buyerFeeCents: { type: 'integer' },
+          organizerAbsorbedFeeCents: { type: 'integer' },
           totalCents: { type: 'integer' },
         },
         required: ['quantity', 'totalCents'],
@@ -1555,6 +1603,8 @@ const rawOpenApiSpec = {
               discountCents: { type: 'integer' },
               taxCents: { type: 'integer' },
               feeCents: { type: 'integer' },
+              buyerFeeCents: { type: 'integer' },
+              organizerAbsorbedFeeCents: { type: 'integer' },
               lineItems: {
                 type: 'array',
                 items: { $ref: '#/components/schemas/CheckoutQuoteLineItem' },
@@ -5582,6 +5632,40 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Ticket transferred',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Ticket' } } },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/fee-policy': {
+      get: {
+        summary: 'Get event fee pass-through policy',
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Event fee pass-through policy',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/EventFeePolicy' } },
+            },
+          },
+        },
+      },
+      put: {
+        summary: 'Update event fee pass-through policy',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateEventFeePolicyInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Event fee pass-through policy updated',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/EventFeePolicy' } },
+            },
           },
         },
       },
