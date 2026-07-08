@@ -475,7 +475,7 @@ The response includes `items`, `nextCursor`, `prevCursor`, `total`, `filterTotal
 | `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId`                        | `checkins.read`   | Poll async offline sync job status                                                                                         |
 | `GET`   | `/v1/check-ins/bulk-sync-jobs/:jobId/chunks`                 | `checkins.read`   | List async offline sync chunk summaries                                                                                    |
 
-Offline sync accepts up to 100,000 scans per request. Scan outcomes: `accepted`, `duplicate`, `not_found`, `already_checked_in`, `invalid_list`, `wrong_event`. Scan logs are persisted with `deviceId`, `scannedAt`, `qrHash`, and `metadata`.
+Offline sync accepts up to 100,000 scans per request. Scan outcomes: `accepted`, `duplicate`, `invalid`, `revoked`, `not_found`, `wrong_event`, `wrong_list`. Scan logs are persisted with `deviceId`, `scannedAt`, `qrHash`, and `metadata`.
 
 Async bulk sync is for larger offline backlogs. Jobs accept `totalChunks` and optional `totalScans` up to 250,000, chunk uploads accept up to 50,000 scans each, and job/chunk responses return aggregate counters plus bounded redacted error samples rather than per-scan result arrays. Processing waits until every declared chunk is uploaded, then applies the full job in submitted `scannedAt` order with sequence/index tie-breakers. Re-uploading the same chunk with the same payload replays stored chunk state; reusing the sequence with a different payload is rejected.
 

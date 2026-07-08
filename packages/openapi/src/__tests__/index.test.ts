@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { OpenApiParameter } from '../index.js';
 import { openApiSpec } from '../index.js';
 
@@ -1277,6 +1278,20 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/UploadArtifactDownload' });
+  });
+
+  it('keeps API reference offline sync outcomes aligned with OpenAPI', () => {
+    const apiReference = readFileSync('../../docs/api-reference.md', 'utf8');
+    const outcomeLine = apiReference.split(/\r?\n/).find((line) => line.includes('Scan outcomes:'));
+    expect(outcomeLine).toBeDefined();
+
+    const outcomeList = /Scan outcomes: (?<outcomes>.+?)\. Scan logs/.exec(outcomeLine!)?.groups
+      ?.outcomes;
+    expect(outcomeList).toBeDefined();
+    const documentedOutcomes = [...outcomeList!.matchAll(/`([^`]+)`/g)].map((match) => match[1]);
+    const openApiOutcomes = openApiSpec.components.schemas.ScanResult.properties.outcome.enum;
+
+    expect(documentedOutcomes).toEqual(openApiOutcomes);
   });
 
   it('documents the atomic checkout-question reorder contract', () => {
