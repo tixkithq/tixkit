@@ -30,12 +30,14 @@ describe('useMemoryTableState', () => {
     expect(result.current.query).toEqual({ limit: 50, search: 'test' });
   });
 
-  it('resetFilters clears filters, search, and sort', () => {
+  it('resetFilters clears filters, search, sort, cursor, and direction', () => {
     const { result } = renderHook(() =>
       useMemoryTableState({
         search: 'test',
         sort: [{ field: 'createdAt', direction: 'desc' }],
         filters: { status: { type: 'select', values: ['paid'] } },
+        cursor: 'cursor_page_2',
+        direction: 'next',
         limit: 50,
       }),
     );

@@ -50,6 +50,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
 import { useBootstrap } from '@/context/bootstrap-provider';
+import { usePermissions } from '@/context/permission-provider';
+import type { TixkitPermission } from '@/lib/permissions';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { subscribeToExportJob } from '@/lib/export-jobs';
 import { toast } from 'sonner';
@@ -68,13 +70,43 @@ type LoadState<T> = {
   refetch: () => void;
 };
 
-const EXPORT_OPTIONS: Array<{ type: AdminExportType; label: string; ariaLabel: string }> = [
-  { type: 'sales', label: 'Sales', ariaLabel: 'Export sales CSV' },
-  { type: 'tax', label: 'Tax', ariaLabel: 'Export tax CSV' },
-  { type: 'attendees', label: 'Attendees', ariaLabel: 'Export attendees CSV' },
-  { type: 'orders', label: 'Orders', ariaLabel: 'Export orders CSV' },
-  { type: 'tickets', label: 'Tickets', ariaLabel: 'Export tickets CSV' },
-  { type: 'scan_logs', label: 'Scan logs', ariaLabel: 'Export scan logs CSV' },
+const EXPORT_OPTIONS: Array<{
+  type: AdminExportType;
+  label: string;
+  ariaLabel: string;
+  requiredPermission: TixkitPermission;
+}> = [
+  {
+    type: 'sales',
+    label: 'Sales',
+    ariaLabel: 'Export sales CSV',
+    requiredPermission: 'orders.read',
+  },
+  { type: 'tax', label: 'Tax', ariaLabel: 'Export tax CSV', requiredPermission: 'orders.read' },
+  {
+    type: 'attendees',
+    label: 'Attendees',
+    ariaLabel: 'Export attendees CSV',
+    requiredPermission: 'attendees.read',
+  },
+  {
+    type: 'orders',
+    label: 'Orders',
+    ariaLabel: 'Export orders CSV',
+    requiredPermission: 'orders.read',
+  },
+  {
+    type: 'tickets',
+    label: 'Tickets',
+    ariaLabel: 'Export tickets CSV',
+    requiredPermission: 'checkins.read',
+  },
+  {
+    type: 'scan_logs',
+    label: 'Scan logs',
+    ariaLabel: 'Export scan logs CSV',
+    requiredPermission: 'checkins.read',
+  },
 ];
 
 function toIsoDate(date: Date): string {
@@ -99,6 +131,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
   const [lastExport, setLastExport] = React.useState<AdminExportJob | null>(null);
   const [selectedOrganizationId, setSelectedOrganizationId] = React.useState('');
   const { organizationId: bootstrapOrgId, brandId: bootstrapBrandId } = useBootstrap();
+  const { can } = usePermissions();
   const exportSubscriptionRef = React.useRef<(() => void) | null>(null);
   const [from, setFrom] = React.useState<Date | undefined>(
     () => new Date(Date.now() - 30 * 86_400_000),
@@ -317,7 +350,7 @@ export function ReportsView({ eventId }: ReportsViewProps) {
           <div className="grid gap-2">
             <span className="text-sm font-medium">Exports</span>
             <div className="flex max-w-3xl flex-wrap gap-2">
-              {EXPORT_OPTIONS.map((option) => (
+              {EXPORT_OPTIONS.filter((option) => can(option.requiredPermission)).map((option) => (
                 <Button
                   key={option.type}
                   aria-label={option.ariaLabel}

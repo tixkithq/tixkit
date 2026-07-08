@@ -183,6 +183,7 @@ export function EventFeePolicyCard({
   } = useAdminQuery(['getEventFeePolicy', eventId], () => adminApi.getEventFeePolicy(eventId));
   const [saving, setSaving] = React.useState(false);
   const lastSavedPolicyRef = React.useRef<string | null>(null);
+  const failedPolicyRef = React.useRef<string | null>(null);
   const saveVersionRef = React.useRef(0);
   const form = useForm<FeePolicyFormValues>({
     resolver: zodResolver(feePolicyFormSchema),
@@ -197,6 +198,7 @@ export function EventFeePolicyCard({
     if (feePolicy) {
       const values = feePolicyToValues(feePolicy);
       lastSavedPolicyRef.current = serializeValues(values);
+      failedPolicyRef.current = null;
       form.reset(values);
     }
   }, [feePolicy, form, serializeValues]);
@@ -239,15 +241,17 @@ export function EventFeePolicyCard({
 
       const saveVersion = (saveVersionRef.current += 1);
       lastSavedPolicyRef.current = policyKey;
+      failedPolicyRef.current = null;
       setSaving(true);
       const result = await adminApi.updateEventFeePolicy(eventId, input);
       if (saveVersion === saveVersionRef.current) {
         setSaving(false);
       }
       if (!result.ok) {
-        if (saveVersion === saveVersionRef.current) {
-          lastSavedPolicyRef.current = null;
+        if (saveVersion !== saveVersionRef.current) {
+          return;
         }
+        failedPolicyRef.current = policyKey;
         toast.error(result.error.message);
         return;
       }
@@ -268,34 +272,27 @@ export function EventFeePolicyCard({
       return;
     }
 
-    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
-    const subscription = form.watch((values) => {
-      if (timeoutId) {
-        window.clearTimeout(timeoutId);
-      }
+    const parsed = feePolicyFormSchema.safeParse({ passFeesToBuyer, rules });
+    if (!parsed.success) {
+      return;
+    }
 
-      const parsed = feePolicyFormSchema.safeParse(values);
-      if (!parsed.success) {
-        return;
-      }
+    const policyKey = serializeValues(parsed.data);
+    if (lastSavedPolicyRef.current === policyKey) {
+      return;
+    }
+    if (failedPolicyRef.current === policyKey) {
+      return;
+    }
 
-      const policyKey = serializeValues(parsed.data);
-      if (lastSavedPolicyRef.current === policyKey) {
-        return;
-      }
-
-      timeoutId = window.setTimeout(() => {
-        void savePolicy(parsed.data);
-      }, FEE_POLICY_AUTOSAVE_DELAY_MS);
-    });
+    const timeoutId = window.setTimeout(() => {
+      void savePolicy(parsed.data);
+    }, FEE_POLICY_AUTOSAVE_DELAY_MS);
 
     return () => {
-      subscription.unsubscribe();
-      if (timeoutId) {
-        window.clearTimeout(timeoutId);
-      }
+      window.clearTimeout(timeoutId);
     };
-  }, [feePolicy, form, loading, savePolicy, serializeValues]);
+  }, [feePolicy, loading, passFeesToBuyer, rules, savePolicy, serializeValues]);
 
   return (
     <Card data-testid="fee-policy-card">
@@ -441,11 +438,13 @@ export function EventFeePolicyCard({
                             </FormItem>
                           )}
                         />
-                        <div className="flex lg:pt-8">
+                        <div className="flex flex-col gap-2">
+                          <div className="hidden h-[14px] lg:block" aria-hidden="true" />
                           <Button
                             type="button"
                             variant="outline"
                             size="icon"
+                            className="h-9 w-9"
                             onClick={() => removeRule(index)}
                             aria-label="Remove fee rule"
                           >
@@ -465,7 +464,7 @@ export function EventFeePolicyCard({
                   type="button"
                   variant="outline"
                   onClick={addRule}
-                  disabled={rules.length >= 5}
+                  disabled={rules.length >= 5 || saving}
                 >
                   <Plus className="size-4" />
                   Add Fee

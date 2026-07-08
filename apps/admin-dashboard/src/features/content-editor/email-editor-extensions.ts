@@ -960,13 +960,29 @@ function createVariableMenuElement(input: {
 }
 
 function selectVariableToken(input: {
+  cursor?: number;
   from: number;
   key: string;
   to: number;
   view: EditorView;
 }): void {
-  const selection = TextSelection.create(input.view.state.doc, input.from, input.to);
-  input.view.dispatch(input.view.state.tr.setSelection(selection));
+  const cursor =
+    typeof input.cursor === 'number'
+      ? Math.max(input.from, Math.min(input.cursor, input.to))
+      : input.to;
+  const selection = TextSelection.create(input.view.state.doc, cursor);
+  const $cursor = input.view.state.doc.resolve(cursor);
+  const storedMarks = (input.view.state.storedMarks ?? $cursor.marks()).filter(
+    (mark) => mark.type.name !== tixkitMergeTagMarkName,
+  );
+  input.view.dispatch(
+    input.view.state.tr
+      .setSelection(selection)
+      .setStoredMarks(storedMarks)
+      .setMeta(mergeTagPreviewPluginKey, {
+        active: { cursor, from: input.from, key: input.key, scope: 'text', to: input.to },
+      }),
+  );
   input.view.dom.dispatchEvent(
     new CustomEvent('tixkit-email-variable-select', {
       bubbles: true,
@@ -974,6 +990,29 @@ function selectVariableToken(input: {
     }),
   );
   input.view.focus();
+}
+
+function splitBlockPreservingVariableStyles(view: EditorView): boolean {
+  const { selection, storedMarks } = view.state;
+  if (!selection.empty) return false;
+  const range = findMergeTagRangeAtPosition(view.state, selection.from);
+  if (!range) return false;
+  const $from = selection.$from;
+  const marks = (storedMarks ?? $from.marks()).filter(
+    (mark) => mark.type.name !== tixkitMergeTagMarkName,
+  );
+  try {
+    view.dispatch(
+      view.state.tr
+        .split(selection.from)
+        .setStoredMarks(marks)
+        .setMeta(mergeTagPreviewPluginKey, { active: null }),
+    );
+    view.focus();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function mergeTagKeyFromMark(
@@ -1872,11 +1911,6 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                 chipClickGuardUntil = Date.now() + 500;
                 lastChipClickKey = key;
                 lastChipClickRange = { from, to };
-                view.dispatch(
-                  view.state.tr.setMeta(mergeTagPreviewPluginKey, {
-                    active: { cursor: from + 1, from, key, scope: 'text', to },
-                  }),
-                );
                 selectVariableToken({ from, key, to, view });
                 view.dom.dispatchEvent(
                   new CustomEvent('tixkit-email-variable-activate', {
@@ -1933,7 +1967,14 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                   );
                   return true;
                 }
-                if (event.key !== 'Enter' && event.key !== ' ') return false;
+                if (event.key === 'Enter') {
+                  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+                    return false;
+                  if (!splitBlockPreservingVariableStyles(view)) return false;
+                  event.preventDefault();
+                  return true;
+                }
+                if (event.key !== ' ') return false;
                 const range = findMergeTagRangeAtPosition(view.state, view.state.selection.from);
                 if (!range) return false;
                 event.preventDefault();
@@ -1943,11 +1984,6 @@ function createMergeTagPreviewExtension(mergeTags: readonly string[]) {
                   new CustomEvent('tixkit-email-variable-activate', {
                     bubbles: true,
                     detail: { from, key, to },
-                  }),
-                );
-                view.dispatch(
-                  view.state.tr.setMeta(mergeTagPreviewPluginKey, {
-                    active: { cursor: from + 1, from, key, scope: 'text', to },
                   }),
                 );
                 return true;
@@ -2310,11 +2346,20 @@ export function createEmailSlashCommands(input: {
 type EmailCommandRange = { from: number; to: number };
 
 type ImageCommandChain = ReturnType<Editor['chain']> & {
-  setImage?: (attrs: { alignment?: string; alt: string; src: string }) => ImageCommandChain;
+  setImage?: (attrs: EmailImageAttrs) => ImageCommandChain;
 };
 
 type UploadImageCommands = Editor['commands'] & {
   uploadImage?: () => boolean;
+};
+
+type EmailImageAttrs = {
+  alignment?: string;
+  alt: string;
+  height?: string;
+  href?: string | null;
+  src: string;
+  width?: string;
 };
 
 function commandChain(editor: Editor, range?: EmailCommandRange) {
@@ -2324,6 +2369,102 @@ function commandChain(editor: Editor, range?: EmailCommandRange) {
 
 export function insertMergeTag(editor: Editor, key: string, range?: EmailCommandRange) {
   commandChain(editor, range).insertContent(`{{${key}}}`).run();
+}
+
+function cleanEmailImageAttrs(attrs: EmailImageAttrs): EmailImageAttrs | null {
+  const src = attrs.src.trim();
+  if (!src) return null;
+  const cleanAttrs: EmailImageAttrs = {
+    alignment: attrs.alignment,
+    alt: attrs.alt.trim() || 'Email image',
+    src,
+  };
+  const height = attrs.height?.trim();
+  const href = attrs.href?.trim();
+  const width = attrs.width?.trim();
+  if (height) cleanAttrs.height = height;
+  if (href) cleanAttrs.href = href;
+  if (width) cleanAttrs.width = width;
+  return cleanAttrs;
+}
+
+function imageNodePositionBySrc(editor: Editor, src: string): number | null {
+  if (!editor.state?.doc) return null;
+  let position: number | null = null;
+  editor.state.doc.descendants((node, pos) => {
+    if (position !== null) return false;
+    if (node.type.name === 'image' && node.attrs.src === src) {
+      position = pos;
+      return false;
+    }
+    return true;
+  });
+  return position;
+}
+
+function selectImageNodeBySrc(editor: Editor, src: string): void {
+  if (!editor.view || !editor.state?.doc) return;
+  const position = imageNodePositionBySrc(editor, src);
+  if (position === null) return;
+  try {
+    editor.view.dispatch(
+      editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, position)),
+    );
+    editor.view.focus();
+  } catch {
+    editor.view.focus();
+  }
+}
+
+export function replaceEmailImageSrc(
+  editor: Editor,
+  previousSrc: string,
+  nextSrc: string,
+): boolean {
+  if (!editor.view || !editor.state?.doc) return false;
+  const cleanNextSrc = nextSrc.trim();
+  if (!previousSrc || !cleanNextSrc) return false;
+  const position = imageNodePositionBySrc(editor, previousSrc);
+  if (position === null) return false;
+  const node = editor.state.doc.nodeAt(position);
+  if (!node) return false;
+  editor.view.dispatch(
+    editor.state.tr.setNodeMarkup(position, undefined, {
+      ...node.attrs,
+      src: cleanNextSrc,
+    }),
+  );
+  selectImageNodeBySrc(editor, cleanNextSrc);
+  return true;
+}
+
+export function removeEmailImageBySrc(editor: Editor, src: string): boolean {
+  if (!editor.view || !editor.state?.doc) return false;
+  const position = imageNodePositionBySrc(editor, src);
+  if (position === null) return false;
+  const node = editor.state.doc.nodeAt(position);
+  if (!node) return false;
+  editor.view.dispatch(editor.state.tr.delete(position, position + node.nodeSize));
+  return true;
+}
+
+export function insertEmailImage(
+  editor: Editor,
+  attrs: EmailImageAttrs,
+  range?: EmailCommandRange,
+): boolean {
+  const cleanAttrs = cleanEmailImageAttrs(attrs);
+  if (!cleanAttrs) return false;
+  const chain = commandChain(editor, range) as ImageCommandChain;
+  const inserted =
+    typeof chain.setImage === 'function'
+      ? chain.setImage(cleanAttrs).run()
+      : chain.insertContent({ type: 'image', attrs: cleanAttrs }).run();
+  if (!inserted && typeof chain.setImage === 'function') {
+    commandChain(editor, range).insertContent({ type: 'image', attrs: cleanAttrs }).run();
+  }
+  selectImageNodeBySrc(editor, cleanAttrs.src);
+  return true;
 }
 
 export function insertEmailComponent(
@@ -2337,27 +2478,15 @@ export function insertEmailComponent(
       (editor.commands as UploadImageCommands).uploadImage?.();
       return;
     case 'Ticket QR': {
-      const chain = commandChain(editor, range) as ImageCommandChain;
-      if (typeof chain.setImage === 'function') {
-        chain
-          .setImage({
-            src: mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
-            alt: 'Ticket QR code',
-            alignment: 'center',
-          })
-          .run();
-      } else {
-        chain
-          .insertContent({
-            type: 'image',
-            attrs: {
-              src: mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
-              alt: 'Ticket QR code',
-              alignment: 'center',
-            },
-          })
-          .run();
-      }
+      insertEmailImage(
+        editor,
+        {
+          src: mergeTagCanvasAttributeValue('ticket.qrCodeUrl'),
+          alt: 'Ticket QR code',
+          alignment: 'center',
+        },
+        range,
+      );
       return;
     }
     case 'Ticket summary':

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import type { TableSchema, AdminTableQuery } from '@tixkit/admin-table-core';
-import { paramsToQuery, queryToParams } from '@tixkit/admin-table-core';
+import { paramsToQuery, queryToParams, resetAdminTableCursor } from '@tixkit/admin-table-core';
 
 export type UrlAdapterResult = {
   query: AdminTableQuery;
@@ -61,7 +61,7 @@ export function useUrlTableState(schema: TableSchema): UrlAdapterResult {
 
   const resetFilters = React.useCallback(() => {
     const cleared: AdminTableQuery = {
-      ...query,
+      ...resetAdminTableCursor(query),
       filters: undefined,
       search: undefined,
       sort: undefined,

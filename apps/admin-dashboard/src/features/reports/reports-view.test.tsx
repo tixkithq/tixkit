@@ -180,6 +180,10 @@ vi.mock('@/lib/export-jobs', () => ({
   subscribeToExportJob: vi.fn(() => vi.fn()),
 }));
 
+const permissionsMock = vi.hoisted(() => ({
+  can: vi.fn(),
+}));
+
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: () => ({
     organizations: [],
@@ -192,6 +196,10 @@ vi.mock('@/context/bootstrap-provider', () => ({
     loading: false,
     error: null,
   }),
+}));
+
+vi.mock('@/context/permission-provider', () => ({
+  usePermissions: () => permissionsMock,
 }));
 
 type ReportsAdminApiMock = {
@@ -233,6 +241,7 @@ const adminApiMock = getAdminApiMock();
 describe('ReportsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    permissionsMock.can.mockReturnValue(true);
     adminApiMock.listEvents.mockResolvedValue({
       ok: true,
       data: { items: [], total: 0 },
@@ -491,6 +500,20 @@ describe('ReportsView', () => {
         }),
       );
     });
+  });
+
+  it('hides export types when the paired raw-data permission is missing', async () => {
+    permissionsMock.can.mockImplementation((permission: string) => permission === 'orders.read');
+    const view = render(<ReportsView eventId="evt_1" />);
+
+    await view.findByText('Gross Sales');
+
+    expect(view.getByRole('button', { name: 'Export sales CSV' })).toBeInTheDocument();
+    expect(view.getByRole('button', { name: 'Export tax CSV' })).toBeInTheDocument();
+    expect(view.getByRole('button', { name: 'Export orders CSV' })).toBeInTheDocument();
+    expect(view.queryByRole('button', { name: 'Export attendees CSV' })).not.toBeInTheDocument();
+    expect(view.queryByRole('button', { name: 'Export tickets CSV' })).not.toBeInTheDocument();
+    expect(view.queryByRole('button', { name: 'Export scan logs CSV' })).not.toBeInTheDocument();
   });
 
   it('shows status for the selected export type and unlocks exports after queueing', async () => {

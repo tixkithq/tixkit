@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import type { AdminTableQuery } from '@tixkit/admin-table-core';
-import { hasActiveFilters } from '@tixkit/admin-table-core';
+import { hasActiveFilters, resetAdminTableCursor } from '@tixkit/admin-table-core';
 
 export type MemoryAdapterResult = {
   query: AdminTableQuery;
@@ -31,7 +31,7 @@ export function useMemoryTableState(initialQuery?: AdminTableQuery): MemoryAdapt
 
   const resetFilters = React.useCallback(() => {
     setQueryState((prev) => ({
-      ...prev,
+      ...resetAdminTableCursor(prev),
       filters: undefined,
       search: undefined,
       sort: undefined,

@@ -8,7 +8,7 @@ import type {
   AdminTableFilterValue,
   AdminTableFacet,
 } from '@tixkit/admin-table-core';
-import { hasActiveFilters, isFilterEmpty } from '@tixkit/admin-table-core';
+import { hasActiveFilters, isFilterEmpty, resetAdminTableCursor } from '@tixkit/admin-table-core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DataTableFilterPopover } from './data-table-filter-popover';
@@ -45,9 +45,12 @@ export function DataTableToolbar({
         if (!value || isFilterEmpty(value)) {
           const { [field]: _removed, ...rest } = prevFilters;
           void _removed;
-          return { ...prev, filters: Object.keys(rest).length > 0 ? rest : undefined };
+          return resetAdminTableCursor({
+            ...prev,
+            filters: Object.keys(rest).length > 0 ? rest : undefined,
+          });
         }
-        return { ...prev, filters: { ...prevFilters, [field]: value } };
+        return resetAdminTableCursor({ ...prev, filters: { ...prevFilters, [field]: value } });
       });
     },
     [onQueryChange],
@@ -56,7 +59,7 @@ export function DataTableToolbar({
   const setSearch = React.useCallback(
     (value: string) => {
       onQueryChange((prev) => ({
-        ...prev,
+        ...resetAdminTableCursor(prev),
         search: value.trim() || undefined,
       }));
     },
@@ -69,6 +72,8 @@ export function DataTableToolbar({
       filters: undefined,
       search: undefined,
       sort: undefined,
+      cursor: undefined,
+      direction: undefined,
     }));
   }, [onQueryChange]);
 

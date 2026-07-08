@@ -51,6 +51,7 @@ describe('StyleInspector', () => {
     expect(screen.getByText('Document styles')).toBeInTheDocument();
     expect(screen.getByText('Attributes')).toBeInTheDocument();
     expect(screen.getByText('Size')).toBeInTheDocument();
+    expect(screen.getByText('Background')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit theme/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Global CSS')).not.toBeInTheDocument();
   });

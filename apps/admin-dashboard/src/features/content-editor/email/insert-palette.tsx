@@ -6,7 +6,13 @@ import type { EmailEditorRef } from '@react-email/editor';
 import type { SlashCommandItem } from '@react-email/editor/ui';
 import type { JSONContent } from '@tiptap/core';
 import type { EmailVariablePresentation } from '../email-editor-extensions';
-import { insertEmailComponent, insertMergeTag } from '../email-editor-extensions';
+import {
+  insertEmailComponent,
+  insertEmailImage,
+  insertMergeTag,
+  removeEmailImageBySrc,
+  replaceEmailImageSrc,
+} from '../email-editor-extensions';
 
 export type EmailVariablePaletteItem = EmailVariablePresentation & {
   key: string;
@@ -60,6 +66,31 @@ function paletteButtonClass(active: boolean) {
   ].join(' ');
 }
 
+function waitForImageLoad(src: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, 5000);
+    image.addEventListener('load', () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      resolve(true);
+    });
+    image.addEventListener('error', () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      resolve(false);
+    });
+    image.src = src;
+  });
+}
+
 export function InsertPalette({
   components,
   disabled,
@@ -88,21 +119,25 @@ export function InsertPalette({
   const uploadImage = async (file: File) => {
     if (!editor) return;
     setUploading(true);
+    const previewUrl = URL.createObjectURL(file);
+    const alt = file.name.replace(/\.[^.]+$/, '').trim() || 'Email image';
+    insertEmailImage(editor, { src: previewUrl, alt, alignment: 'center' });
     try {
       const result = await onUploadImage(file);
-      type ImageCommandChain = ReturnType<typeof editor.chain> & {
-        setImage?: (attrs: { alignment?: string; alt: string; src: string }) => ImageCommandChain;
-      };
-      const chain = editor.chain().focus() as ImageCommandChain;
-      const alt = file.name.replace(/\.[^.]+$/, '').trim() || 'Email image';
-      if (typeof chain.setImage === 'function') {
-        chain.setImage({ src: result.url, alt, alignment: 'center' }).run();
+      const uploadedImageLoaded = await waitForImageLoad(result.url);
+      if (uploadedImageLoaded) {
+        replaceEmailImageSrc(editor, previewUrl, result.url);
+        URL.revokeObjectURL(previewUrl);
       } else {
-        chain
-          .insertContent({ type: 'image', attrs: { src: result.url, alt, alignment: 'center' } })
-          .run();
+        console.error(
+          `Uploaded email image could not be loaded by the editor canvas: ${result.url}`,
+        );
       }
       completeInsert();
+    } catch (error) {
+      removeEmailImageBySrc(editor, previewUrl);
+      URL.revokeObjectURL(previewUrl);
+      throw error;
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';

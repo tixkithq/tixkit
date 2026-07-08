@@ -1,31 +1,23 @@
 'use client';
 
 import * as React from 'react';
-import { Download, Users } from 'lucide-react';
-import { type AdminAttendeeListItem, type AdminExportJob, adminApi } from '@/lib/api';
+import { Users } from 'lucide-react';
+import { type AdminAttendeeListItem, adminApi } from '@/lib/api';
 import { attendeesTableSchema } from '@/lib/table-schemas';
-import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
 import { DataTable, useUrlTableState } from '@/components/data-table';
 import { TextCell, TimestampCell } from '@/components/data-table/cells';
 import { useAdminTableData } from '@/hooks/use-admin-table-data';
-import { usePermissions } from '@/context/permission-provider';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { getAttendeeColumns } from './columns';
 import { AttendeeFormDialog } from './attendee-form';
-import { subscribeToExportJob } from '@/lib/export-jobs';
-import { toast } from 'sonner';
 import { AttendeeStatusBadge, CheckInStatusBadge } from '@/features/events/event-status-badge';
 
 export function AttendeesTable() {
   const [editingAttendee, setEditingAttendee] = React.useState<AdminAttendeeListItem | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [exporting, setExporting] = React.useState(false);
-  const [lastExport, setLastExport] = React.useState<AdminExportJob | null>(null);
-  const exportSubscriptionRef = React.useRef<(() => void) | null>(null);
   const { organizationId, brandId } = useBootstrap();
   const { query, updateQuery } = useUrlTableState(attendeesTableSchema);
-  const { can } = usePermissions();
 
   const { data, loading, error, refetch } = useAdminTableData<AdminAttendeeListItem>({
     schema: attendeesTableSchema,
@@ -47,51 +39,8 @@ export function AttendeesTable() {
     [],
   );
 
-  React.useEffect(() => {
-    return () => {
-      exportSubscriptionRef.current?.();
-    };
-  }, []);
-
-  const handleExport = async () => {
-    exportSubscriptionRef.current?.();
-    setExporting(true);
-    const result = await adminApi.createExport({
-      type: 'attendees',
-      format: 'csv',
-    });
-    if (!result.ok) {
-      setExporting(false);
-      toast.error(result.error.message);
-      return;
-    }
-
-    setLastExport(result.data);
-    toast.success(`Export queued (${result.data.exportId})`);
-    exportSubscriptionRef.current = subscribeToExportJob(result.data.exportId, {
-      onUpdate: setLastExport,
-      onDone: (completed) => {
-        setLastExport(completed);
-        setExporting(false);
-        if (completed.status === 'completed') {
-          toast.success('Export ready to download');
-        } else {
-          toast.error('Export failed');
-        }
-      },
-      onError: (streamError) => {
-        setExporting(false);
-        toast.error(streamError.message);
-      },
-    });
-  };
-
-  const attendees = data?.items ?? [];
-  const canExport = can('attendees.read') && !exporting && attendees.length > 0;
-
   return (
     <>
-      {lastExport && <ExportStatusNotice exportJob={lastExport} />}
       <DataTable
         schema={attendeesTableSchema}
         columns={columns}
@@ -102,19 +51,6 @@ export function AttendeesTable() {
         error={error ? { message: error.message } : undefined}
         onRetry={() => refetch()}
         getRowId={(row) => row.id}
-        toolbarActions={
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-9"
-            onClick={handleExport}
-            disabled={!canExport}
-            suppressHydrationWarning
-          >
-            <Download className="size-4" />
-            {exporting ? 'Exporting...' : 'Export'}
-          </Button>
-        }
         emptyState={
           <EmptyState
             icon={Users}
@@ -193,25 +129,6 @@ function AttendeeRowSheetContent({ attendee }: { attendee: AdminAttendeeListItem
           </dd>
         </div>
       </dl>
-    </div>
-  );
-}
-
-function ExportStatusNotice({ exportJob }: { exportJob: AdminExportJob }) {
-  const href = exportJob.downloadUrl;
-  return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm">
-      <span>
-        Export {exportJob.exportId} is {exportJob.status}.
-      </span>
-      {exportJob.status === 'completed' && href && (
-        <Button asChild size="sm" variant="outline">
-          <a href={href} target="_blank" rel="noreferrer">
-            <Download className="size-4" />
-            Download
-          </a>
-        </Button>
-      )}
     </div>
   );
 }

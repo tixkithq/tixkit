@@ -278,6 +278,7 @@ function mockWaitlistData() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   document.body.innerHTML = '';
   if (originalClipboardDescriptor) {
     Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor);
@@ -615,5 +616,36 @@ describe('EventTicketsView fee policy', () => {
       });
     });
     expect(adminApiMock.getEventFeePolicy).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not repeat failed fee autosave toasts for the same form state', async () => {
+    mockEventTicketsData();
+    adminApiMock.updateEventFeePolicy.mockResolvedValue({
+      ok: false,
+      error: {
+        message: 'Internal error occurred',
+      },
+    });
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Fees & Resale/i }));
+
+    const panel = await view.findByTestId('fee-policy-card');
+    fireEvent.click(within(panel).getByRole('button', { name: /Add Fee/i }));
+
+    await waitFor(() => {
+      expect(adminApiMock.updateEventFeePolicy).toHaveBeenCalledTimes(1);
+    });
+    expect(toast.error).toHaveBeenCalledWith('Internal error occurred');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+
+    expect(adminApiMock.updateEventFeePolicy).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledTimes(1);
   });
 });

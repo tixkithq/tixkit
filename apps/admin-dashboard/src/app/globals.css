@@ -218,8 +218,26 @@
 
   .tixkit-react-email-editor .ProseMirror img {
     display: block;
+    min-height: 2.5rem;
+    height: auto;
     max-width: 100%;
     border-radius: 0.5rem;
+    object-fit: contain;
+  }
+
+  .tixkit-react-email-editor .ProseMirror img:is([align='left'], [alignment='left']) {
+    margin-left: 0;
+    margin-right: auto;
+  }
+
+  .tixkit-react-email-editor .ProseMirror img:is([align='center'], [alignment='center']) {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .tixkit-react-email-editor .ProseMirror img:is([align='right'], [alignment='right']) {
+    margin-left: auto;
+    margin-right: 0;
   }
 
   .tixkit-react-email-editor .ProseMirror p.is-editor-empty:first-child::before {

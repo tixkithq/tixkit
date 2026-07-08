@@ -7,7 +7,7 @@ export type EmailThemePreset = 'brand' | 'minimal' | 'basic';
 export type StyleInspectorProps = Record<string, never>;
 
 const inspectorNodeSectionLayout: Record<string, string[]> = {
-  image: ['attributes', 'size', 'link', 'padding', 'border'],
+  image: ['attributes', 'size', 'link', 'padding', 'background', 'border'],
   button: ['link', 'size', 'padding', 'border', 'background'],
   section: ['background', 'padding', 'border'],
   div: ['background', 'padding', 'border'],

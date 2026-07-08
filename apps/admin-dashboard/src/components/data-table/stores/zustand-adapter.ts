@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import type { AdminTableQuery } from '@tixkit/admin-table-core';
+import { resetAdminTableCursor, type AdminTableQuery } from '@tixkit/admin-table-core';
 
 type TableStateStore = {
   query: AdminTableQuery;
@@ -24,7 +24,7 @@ export function createTableStore(initialQuery: AdminTableQuery = {}) {
     resetFilters: () =>
       set((state) => ({
         query: {
-          ...state.query,
+          ...resetAdminTableCursor(state.query),
           filters: undefined,
           search: undefined,
           sort: undefined,
