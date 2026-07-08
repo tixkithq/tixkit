@@ -1420,9 +1420,9 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/orders/{orderId}/refunds'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });
-    expect(openApiSpec.paths['/orders/{orderId}/cancel'].post.parameters).toEqual([
-      { name: 'orderId', in: 'path', required: true, schema: { type: 'string' } },
-    ]);
+    expect(openApiSpec.paths['/orders/{orderId}/cancel'].post.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
     expect(openApiSpec.paths['/checkout/sessions'].post.parameters).toContainEqual({
       $ref: '#/components/parameters/RequiredIdempotencyKey',
     });

@@ -638,7 +638,7 @@ describe('AdminApi order timestamps', () => {
 
   it('cancelOrder sets cancelledAt', async () => {
     // ord_003 is pending.
-    const result = await adminApi.cancelOrder('ord_003');
+    const result = await adminApi.cancelOrder('ord_003', { idempotencyKey: 'cancel_ord_003' });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.cancelledAt).toBeDefined();

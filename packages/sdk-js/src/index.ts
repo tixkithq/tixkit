@@ -2394,8 +2394,10 @@ class OrderResource {
     return this.client.request('GET', `/orders/${orderId}/invoice/download`);
   }
 
-  async cancel(orderId: string): Promise<Order> {
-    return this.client.request('POST', `/orders/${orderId}/cancel`);
+  async cancel(orderId: string, options: IdempotencyOptions): Promise<Order> {
+    return this.client.request('POST', `/orders/${orderId}/cancel`, {
+      idempotencyKey: options.idempotencyKey,
+    });
   }
 
   async refund(orderId: string, input: CreateRefundInput): Promise<RefundQueued> {

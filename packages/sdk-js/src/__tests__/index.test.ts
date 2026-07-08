@@ -2604,6 +2604,23 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('orders.cancel sends required idempotency header without a body', async () => {
+    const fm = mockFetch(200, { id: 'ord_1', status: 'cancelled' });
+    const c = new TixkitClient({
+      apiKey: 'tk_test_123',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.orders.cancel('ord_1', { idempotencyKey: 'idem_cancel_1' });
+    const call = getCall(fm);
+
+    expect(call.url).toBe('https://api.test/v1/orders/ord_1/cancel');
+    expect(call.method).toBe('POST');
+    expect(call.headers['Idempotency-Key']).toBe('idem_cancel_1');
+    expect(call.body).toBeUndefined();
+  });
+
   it('public.getEvent sends GET without auth', async () => {
     const fm = mockFetch(200, {
       id: 'evt_1',

@@ -1788,7 +1788,10 @@ export type AdminApi = {
     },
   ): Promise<ApiResult<PageResult<AdminPaymentCompensation>>>;
   getOrder(orderId: string): Promise<ApiResult<AdminOrderDetail>>;
-  cancelOrder(orderId: string): Promise<ApiResult<AdminOrderListItem>>;
+  cancelOrder(
+    orderId: string,
+    input?: { idempotencyKey?: string },
+  ): Promise<ApiResult<AdminOrderListItem>>;
   refundOrder(orderId: string, input: RefundOrderInput): Promise<ApiResult<RefundOrderResult>>;
 
   listAttendees(
@@ -5495,9 +5498,15 @@ export const adminApi: AdminApi = {
     );
   },
 
-  async cancelOrder(orderId) {
+  async cancelOrder(orderId, input) {
     return withFixture(
-      () => request<AdminOrderListItem>(`/v1/orders/${orderId}/cancel`, { method: 'POST' }),
+      () =>
+        request<AdminOrderListItem>(`/v1/orders/${orderId}/cancel`, {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': input?.idempotencyKey ?? adminIdempotencyKey(`cancel_${orderId}`),
+          },
+        }),
       () => {
         const order = fixtureOrders.find((o) => o.id === orderId);
         if (!order) return err<AdminOrderListItem>(apiError('not_found', 'Order not found', 404));

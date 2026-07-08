@@ -5496,6 +5496,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Cancel order',
         security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         responses: {
           '200': {
             description: 'Order cancelled',
