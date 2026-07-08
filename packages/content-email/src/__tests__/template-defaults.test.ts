@@ -8,9 +8,9 @@ import {
   validateEmailTemplate,
 } from '../index.js';
 import {
-  P0_TEMPLATE_KEYS,
   TEMPLATE_KEYS,
   getTemplateLifecycle,
+  renderMergeTags,
   type MergeTagContext,
 } from '@tixkit/domain';
 
@@ -40,6 +40,7 @@ const distinctiveContext: MergeTagContext = {
     pdfUrl: 'https://tickets.example.test/pdf/TKTCODE-42.pdf',
     walletAppleUrl: 'https://tickets.example.test/pass/apple/TKTCODE-42.pkpass',
     walletGoogleUrl: 'https://pay.google.com/gp/v/save/abc',
+    transferUrl: 'https://checkout.example.test/transfer/TKTCODE-42/claim',
   },
   order: {
     id: 'ORDER-777',
@@ -68,6 +69,32 @@ const distinctiveContext: MergeTagContext = {
     inviteUrl: 'https://checkout.example.test/waitlist/claim/abc',
     expiresAt: '2026-07-18 19:00',
   },
+  review: { platform: 'Review Site' },
+  salesDigest: {
+    revenue: '$4,320.00',
+    orders: '38',
+    topTicketType: 'VIP',
+  },
+  payout: {
+    amount: '$1,250.00',
+    eta: '2-3 business days',
+    account: 'Bank ****4242',
+    period: 'June 2026',
+  },
+  integration: {
+    name: 'Integration Stripe',
+    reconnectUrl: 'https://admin.example.test/integrations/stripe/reconnect',
+  },
+  webhook: {
+    endpointUrl: 'https://hooks.example.test/integrations/stripe',
+    attempts: '5',
+  },
+  chargeback: {
+    id: 'DP-777',
+    amount: '$45.00',
+    dueAt: '2026-07-18',
+    evidenceUrl: 'https://admin.example.test/disputes/DP-777',
+  },
 };
 
 const requiredVarValue: Record<string, string> = {
@@ -84,11 +111,22 @@ const requiredVarValue: Record<string, string> = {
   'event.venueName': distinctiveContext.event!.venueName!,
   'waitlist.inviteUrl': distinctiveContext.waitlist!.inviteUrl!,
   'waitlist.expiresAt': distinctiveContext.waitlist!.expiresAt!,
+  'event.checkoutUrl': distinctiveContext.event!.checkoutUrl!,
+  'ticket.transferUrl': distinctiveContext.ticket!.transferUrl!,
+  'review.platform': distinctiveContext.review!.platform!,
+  'dashboard.url': distinctiveContext.dashboard!.url!,
+  'payout.amount': distinctiveContext.payout!.amount!,
+  'integration.name': distinctiveContext.integration!.name!,
+  'integration.reconnectUrl': distinctiveContext.integration!.reconnectUrl!,
+  'webhook.endpointUrl': distinctiveContext.webhook!.endpointUrl!,
+  'chargeback.id': distinctiveContext.chargeback!.id!,
+  'chargeback.amount': distinctiveContext.chargeback!.amount!,
+  'chargeback.dueAt': distinctiveContext.chargeback!.dueAt!,
 };
 
 describe('createDefaultEmailTemplateForKey', () => {
-  it('covers every P0 template key with a default document', () => {
-    for (const key of P0_TEMPLATE_KEYS) {
+  it('covers every lifecycle template key with a default document', () => {
+    for (const key of TEMPLATE_KEYS) {
       const doc = P0_EMAIL_TEMPLATE_DEFAULTS[key];
       expect(doc, `missing default for ${key}`).toBeDefined();
       expect(doc.settings.templateKey).toBe(key);
@@ -96,7 +134,7 @@ describe('createDefaultEmailTemplateForKey', () => {
   });
 
   it('derives subject, category, and preview text from the lifecycle registry', () => {
-    for (const key of P0_TEMPLATE_KEYS) {
+    for (const key of TEMPLATE_KEYS) {
       const entry = getTemplateLifecycle(key)!;
       const doc = createDefaultEmailTemplateForKey(key);
       expect(doc.settings.subject).toBe(entry.defaultSubject);
@@ -116,9 +154,9 @@ describe('createDefaultEmailTemplateForKey', () => {
     }
   });
 
-  it('renders every required merge tag for each P0 default', async () => {
+  it('renders every required merge tag for each lifecycle default', async () => {
     await Promise.all(
-      P0_TEMPLATE_KEYS.map(async (key) => {
+      TEMPLATE_KEYS.map(async (key) => {
         const entry = getTemplateLifecycle(key)!;
         const doc = createDefaultEmailTemplateForKey(key);
         const rendered = await renderEmailTemplate(doc, distinctiveContext);
@@ -136,32 +174,39 @@ describe('createDefaultEmailTemplateForKey', () => {
     );
   });
 
-  it('renders every required merge tag for the waitlist invite default', async () => {
-    const entry = getTemplateLifecycle('waitlist-invite')!;
-    const doc = createDefaultEmailTemplateForKey('waitlist-invite');
-    const rendered = await renderEmailTemplate(doc, distinctiveContext);
-    expect(rendered.validation.valid).toBe(true);
-    const output = `${rendered.html}\n${rendered.text}`;
-    for (const requiredVar of entry.requiredVariables) {
-      const expected = requiredVarValue[requiredVar];
-      expect(expected, `no expected value mapped for {{${requiredVar}}}`).toBeDefined();
-      expect(output).toContain(expected);
-    }
+  it('uses the Studio editor HTML as the send-rendered lifecycle body', async () => {
+    await Promise.all(
+      TEMPLATE_KEYS.map(async (key) => {
+        const doc = createDefaultEmailTemplateForKey(key);
+        const rendered = await renderEmailTemplate(doc, distinctiveContext);
+        const expectedHtml = renderMergeTags(doc.editor.contentHtml, distinctiveContext, {
+          channel: 'email',
+          escape: 'html',
+        });
+
+        expect(doc.editor.contentHtml, `${key} default should use the Studio shell`).toContain(
+          'background-color: #dce1e4',
+        );
+        expect(doc.editor.contentHtml, `${key} default should use the Studio card`).toContain(
+          'border-radius: 28px',
+        );
+        expect(rendered.html, `${key} send render drifted from editor HTML`).toBe(expectedHtml);
+      }),
+    );
   });
 
-  it('requires an unsubscribe footer only for the bulk attendee-message default', () => {
-    const attendeeMessage = createDefaultEmailTemplateForKey('attendee-message');
-    expect(attendeeMessage.settings.category).toBe('bulk');
-    expect(attendeeMessage.blocks.some((block) => block.type === 'unsubscribe_footer')).toBe(true);
-
-    for (const key of P0_TEMPLATE_KEYS) {
+  it('requires unsubscribe footers for bulk defaults only', () => {
+    for (const key of TEMPLATE_KEYS) {
       const entry = getTemplateLifecycle(key)!;
-      if (entry.category !== 'transactional') continue;
       const doc = createDefaultEmailTemplateForKey(key);
-      expect(
-        doc.blocks.some((block) => block.type === 'unsubscribe_footer'),
-        `${key} transactional default should not force an unsubscribe footer`,
-      ).toBe(false);
+      const hasFooter = doc.blocks.some((block) => block.type === 'unsubscribe_footer');
+      if (entry.category === 'bulk') {
+        expect(hasFooter, `${key} bulk default should include an unsubscribe footer`).toBe(true);
+      } else {
+        expect(hasFooter, `${key} non-bulk default should not force an unsubscribe footer`).toBe(
+          false,
+        );
+      }
     }
   });
 
@@ -172,18 +217,44 @@ describe('createDefaultEmailTemplateForKey', () => {
     expect(rendered.html).toContain('https://tickets.example.test/pass/apple/TKTCODE-42.pkpass');
   });
 
+  it('does not render optional lifecycle rows that would be blank without context', async () => {
+    const doc = createDefaultEmailTemplateForKey('event-reminder');
+    const rendered = await renderEmailTemplate(doc, {
+      event: {
+        title: 'Sample Summer Showcase',
+        startsAt: 'Sat, Aug 15 at 8:00 PM',
+        venueName: 'River North Hall',
+      },
+      brand: { name: 'All Access Chicago', supportUrl: 'https://help.example.test/support' },
+      recipient: { name: 'Ada Lovelace' },
+      ticket: {
+        qrCodeUrl: 'https://tickets.example.test/qr/TKTCODE-42.png',
+      },
+    });
+
+    expect(rendered.validation.valid).toBe(true);
+    expect(rendered.html).toContain('River North Hall');
+    expect(rendered.html).not.toContain('Venue City');
+    expect(rendered.html).not.toContain('Timezone');
+    expect(rendered.html).not.toContain('Door Time');
+  });
+
+  it('renders ticket QR merge tags only as images, not CTA links', () => {
+    const doc = createDefaultEmailTemplateForKey('event-reminder');
+
+    expect(doc.editor.contentHtml).toContain('<img src="{{ticket.qrCodeUrl}}"');
+    expect(doc.editor.contentHtml).not.toContain('href="{{ticket.qrCodeUrl}}"');
+    expect(doc.editor.contentText).not.toContain('Qr Code');
+  });
+
   it('throws for template keys without lifecycle metadata', () => {
     expect(() => createDefaultEmailTemplateForKey('not-a-lifecycle-key' as never)).toThrow();
   });
 
-  it('throws for registered lifecycle keys without seedable defaults', () => {
-    const unsupportedKeys = TEMPLATE_KEYS.filter((key) => !hasSeedableDefaultEmailTemplate(key));
-    expect(unsupportedKeys.length).toBeGreaterThan(0);
-
-    for (const key of unsupportedKeys) {
-      expect(() => createDefaultEmailTemplateForKey(key), key).toThrow(
-        `No seedable default email template registered for template key: ${key}`,
-      );
+  it('marks every registered lifecycle key as seedable', () => {
+    expect(SEEDABLE_EMAIL_TEMPLATE_KEYS).toEqual(TEMPLATE_KEYS);
+    for (const key of TEMPLATE_KEYS) {
+      expect(hasSeedableDefaultEmailTemplate(key), key).toBe(true);
     }
   });
 });

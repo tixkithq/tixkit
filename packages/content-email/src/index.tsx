@@ -1,19 +1,4 @@
-import * as React from 'react';
-import {
-  Body,
-  Button,
-  Container,
-  Head,
-  Heading,
-  Hr,
-  Html,
-  Img,
-  Link,
-  Preview,
-  Section,
-  Text,
-} from '@react-email/components';
-import { render } from '@react-email/render';
+import type * as React from 'react';
 import {
   validateContentVersion,
   type ContentValidationIssue,
@@ -25,7 +10,7 @@ import {
   renderMergeTags,
   validateMergeTags,
   getTemplateLifecycle,
-  P0_TEMPLATE_KEYS,
+  TEMPLATE_KEYS,
   type MergeTagContext,
   type SendEmailInput,
   type TemplateKey,
@@ -46,7 +31,26 @@ export const SEEDABLE_EMAIL_TEMPLATE_KEYS = [
   'attendee-message',
   'staff-order-notification',
   'checkin-device-invited',
+  'waitlist-joined',
   'waitlist-invite',
+  'waitlist-invite-expiring',
+  'abandoned-checkout',
+  'ticket-transfer-started',
+  'ticket-transfer-accepted',
+  'ticket-transfer-cancelled',
+  'wallet-pass-ready',
+  'post-event-thank-you',
+  'review-request',
+  'daily-sales-digest',
+  'payout-scheduled',
+  'payout-paid',
+  'payout-failed',
+  'brand-sender-verification',
+  'integration-disconnected',
+  'webhook-failed',
+  'chargeback-opened',
+  'chargeback-won',
+  'chargeback-lost',
 ] as const satisfies readonly TemplateKey[];
 
 const SEEDABLE_EMAIL_TEMPLATE_KEY_SET: ReadonlySet<TemplateKey> = new Set(
@@ -219,27 +223,106 @@ export function normalizeEmailTemplateDocument(value: unknown): EmailTemplateDoc
 
 const defaultContainerStyle = {
   margin: '0 auto',
-  padding: '24px 0',
+  padding: '24px',
   width: '100%',
-  maxWidth: '640px',
+  maxWidth: '600px',
 } satisfies React.CSSProperties;
 
 const paragraphStyle = {
-  color: '#243145',
+  color: '#726a6a',
   fontSize: '15px',
   lineHeight: '24px',
   margin: '0 0 16px',
 } satisfies React.CSSProperties;
 
 const buttonStyle = {
-  backgroundColor: '#111827',
-  borderRadius: '6px',
+  backgroundColor: '#332c2c',
+  border: '1px solid #332c2c',
+  borderRadius: '999px',
   color: '#ffffff',
   display: 'inline-block',
   fontSize: '14px',
   fontWeight: 600,
-  padding: '11px 16px',
+  lineHeight: '20px',
+  padding: '12px 18px',
   textDecoration: 'none',
+} satisfies React.CSSProperties;
+
+const studioFontFamily =
+  '"Inter", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+const shellStyle = {
+  backgroundColor: '#dce1e4',
+  fontFamily: studioFontFamily,
+} satisfies React.CSSProperties;
+
+const studioEmailCardStyle = {
+  backgroundColor: '#ffffff',
+  border: '1px solid rgba(51, 44, 44, 0.08)',
+  borderRadius: '28px',
+  padding: '18px',
+} satisfies React.CSSProperties;
+
+const cardStyle = {
+  backgroundColor: '#f6f6f6',
+  border: '1px solid #f0f0f0',
+  borderRadius: '22px',
+  margin: '0 0 12px',
+  padding: '28px',
+} satisfies React.CSSProperties;
+
+const panelStyle = {
+  backgroundColor: '#ffffff',
+  border: '1px solid #e8e9e9',
+  borderRadius: '16px',
+  margin: '0 0 10px',
+  padding: '16px',
+} satisfies React.CSSProperties;
+
+const eyebrowStyle = {
+  color: '#332c2c',
+  fontSize: '13px',
+  fontWeight: 700,
+  letterSpacing: '0.08em',
+  lineHeight: '20px',
+  margin: '0',
+  textTransform: 'uppercase',
+} satisfies React.CSSProperties;
+
+const headingStyle = {
+  color: '#332c2c',
+  fontSize: '40px',
+  fontWeight: 700,
+  letterSpacing: '-0.8px',
+  lineHeight: '48px',
+  margin: '0 0 16px',
+} satisfies React.CSSProperties;
+
+const subheadingStyle = {
+  color: '#332c2c',
+  fontSize: '22px',
+  fontWeight: 600,
+  letterSpacing: '-0.18px',
+  lineHeight: '31px',
+  margin: '0 0 12px',
+} satisfies React.CSSProperties;
+
+const mutedStyle = {
+  color: '#726a6a',
+  fontSize: '13px',
+  lineHeight: '20px',
+  margin: '0',
+} satisfies React.CSSProperties;
+
+const studioHeaderStyle = {
+  padding: '10px 10px 18px',
+} satisfies React.CSSProperties;
+
+const studioFooterStyle = {
+  color: '#726a6a',
+  fontSize: '12px',
+  lineHeight: '18px',
+  padding: '18px 10px 4px',
 } satisfies React.CSSProperties;
 
 export const EMAIL_GLOBAL_CSS_STYLE_ID = 'tixkit-email-global-css';
@@ -351,11 +434,17 @@ export function createDefaultEmailTemplate(
       },
     ],
   };
+  const hasEditorHtmlOverride =
+    typeof overrides.editor?.contentHtml === 'string' && overrides.editor.contentHtml.length > 0;
+  const legacyEditorContent =
+    Array.isArray(overrides.blocks) && !hasEditorHtmlOverride
+      ? legacyEditorContentFromBlocks(overrides.blocks)
+      : undefined;
 
   return {
     ...base,
     ...overrides,
-    editor: { ...base.editor, ...overrides.editor },
+    editor: { ...base.editor, ...legacyEditorContent, ...overrides.editor },
     settings: {
       ...base.settings,
       ...overrides.settings,
@@ -383,24 +472,15 @@ export function createDefaultEmailTemplateForKey(key: TemplateKey): EmailTemplat
   if (!hasSeedableDefaultEmailTemplate(key)) {
     throw new Error(`No seedable default email template registered for template key: ${key}`);
   }
-  const editor =
-    key === 'waitlist-invite'
-      ? {
-          provider: REACT_EMAIL_EDITOR_PACKAGE,
-          contentHtml: [
-            '<h1>Tickets are available for {{event.title}}</h1>',
-            '<p>Hi {{recipient.name}}, claim your waitlist offer at {{waitlist.inviteUrl}}.</p>',
-          ].join(''),
-          contentText:
-            'Tickets are available for {{event.title}}\nHi {{recipient.name}}, claim your waitlist offer at {{waitlist.inviteUrl}}.',
-        }
-      : {
-          provider: REACT_EMAIL_EDITOR_PACKAGE,
-          contentHtml: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}},</p>',
-        };
+  const blocks = defaultBlocksForKey(key);
+  const editorContent = defaultEditorContentForKey(key, blocks);
   return {
     schemaVersion: 1,
-    editor,
+    editor: {
+      provider: REACT_EMAIL_EDITOR_PACKAGE,
+      contentHtml: editorContent.html,
+      contentText: editorContent.text,
+    },
     settings: {
       templateKey: key,
       subject: lifecycle.defaultSubject,
@@ -413,210 +493,484 @@ export function createDefaultEmailTemplateForKey(key: TemplateKey): EmailTemplat
         replyToEmail: 'support@example.test',
       },
     },
-    blocks: defaultBlocksForKey(key),
+    blocks,
   };
 }
 
+type StudioEmailRow = {
+  label: string;
+  value: string;
+};
+
+type StudioEmailAction = {
+  label: string;
+  url: string;
+};
+
+type StudioEmailContent = {
+  eyebrow: string;
+  headline: string;
+  intro: string;
+  summaryTitle: string;
+  rows: StudioEmailRow[];
+  primaryAction?: StudioEmailAction;
+  secondaryActions: StudioEmailAction[];
+  qr?: {
+    title: string;
+    imageUrl: string;
+    imageAlt: string;
+  };
+  complianceNote?: string;
+};
+
 function defaultBlocksForKey(key: TemplateKey): EmailTemplateBlock[] {
-  switch (key) {
-    case 'order-confirmed':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, your order is confirmed.',
-          ctaLabel: 'Manage order',
-          ctaUrl: '{{order.manageUrl}}',
-        },
-        {
-          type: 'order_summary',
-          title: 'Order summary',
-          rows: [
-            { label: 'Order ID', value: '{{order.id}}' },
-            { label: 'Total', value: '{{order.total}}' },
-          ],
-        },
-      ];
-    case 'tickets-issued':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, your tickets are ready.',
-          ctaLabel: 'Download tickets',
-          ctaUrl: '{{ticket.pdfUrl}}',
-        },
-        {
-          type: 'ticket_summary',
-          title: 'Ticket',
-          body: '{{ticket.type}} - Code {{ticket.code}}',
-        },
-        {
-          type: 'qr_code',
+  const lifecycle = getTemplateLifecycle(key);
+  if (!lifecycle) {
+    throw new Error(`No lifecycle metadata registered for template key: ${key}`);
+  }
+  if (lifecycle.category !== 'bulk') return [];
+  return [
+    {
+      type: 'unsubscribe_footer',
+      body: 'You are receiving this because you subscribed to updates from {{brand.name}} or attended this event.',
+      unsubscribeUrl: '{{brand.supportUrl}}',
+    },
+  ];
+}
+
+function defaultEditorContentForKey(
+  key: TemplateKey,
+  _blocks: EmailTemplateBlock[],
+): { html: string; text: string } {
+  const lifecycle = getTemplateLifecycle(key);
+  if (!lifecycle) {
+    throw new Error(`No lifecycle metadata registered for template key: ${key}`);
+  }
+  const html = studioEmailHtml(defaultStudioEmailContentForKey(lifecycle));
+  return {
+    html,
+    text: plainTextFromHtml(html),
+  };
+}
+
+function defaultStudioEmailContentForKey(
+  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
+): StudioEmailContent {
+  const variables = Array.from(
+    new Set([
+      'recipient.name',
+      ...lifecycle.requiredVariables,
+      ...defaultOptionalVariablesForLifecycle(lifecycle),
+    ]),
+  );
+  const qrVariable = variables.includes('ticket.qrCodeUrl') ? 'ticket.qrCodeUrl' : undefined;
+  const actionVariables = variables.filter(
+    (variable) => variable !== qrVariable && isActionVariable(variable),
+  );
+  const primaryActionVariable = actionVariables[0];
+  const secondaryActionVariables = actionVariables
+    .filter((variable) => variable !== primaryActionVariable)
+    .slice(0, 3);
+  const nonRowVariables = new Set(['recipient.name', 'event.title', qrVariable]);
+  const rows = variables
+    .filter((variable) => variable && !nonRowVariables.has(variable) && !isActionVariable(variable))
+    .slice(0, 7)
+    .map((variable) => ({
+      label: mergeTagLabel(variable),
+      value: `{{${variable}}}`,
+    }));
+  const requiredFallbackRows = lifecycle.requiredVariables
+    .filter(
+      (variable) =>
+        !studioContentHasVariable(
+          {
+            headline: headlineForLifecycle(lifecycle),
+            intro: introForLifecycle(lifecycle),
+            rows,
+            primaryAction: primaryActionVariable
+              ? { label: actionLabel(primaryActionVariable), url: `{{${primaryActionVariable}}}` }
+              : undefined,
+            secondaryActions: secondaryActionVariables.map((secondaryVariable) => ({
+              label: actionLabel(secondaryVariable),
+              url: `{{${secondaryVariable}}}`,
+            })),
+            qr: qrVariable
+              ? {
+                  title: 'Your ticket QR',
+                  imageUrl: `{{${qrVariable}}}`,
+                  imageAlt: 'Ticket QR code',
+                }
+              : undefined,
+          },
+          variable,
+        ),
+    )
+    .map((variable) => ({
+      label: mergeTagLabel(variable),
+      value: `{{${variable}}}`,
+    }));
+  return {
+    eyebrow: '{{brand.name}}',
+    headline: headlineForLifecycle(lifecycle),
+    intro: introForLifecycle(lifecycle),
+    summaryTitle: summaryTitleForLifecycle(lifecycle),
+    rows: dedupeRows([...requiredFallbackRows, ...rows]),
+    primaryAction: primaryActionVariable
+      ? { label: actionLabel(primaryActionVariable), url: `{{${primaryActionVariable}}}` }
+      : undefined,
+    secondaryActions: secondaryActionVariables.map((variable) => ({
+      label: actionLabel(variable),
+      url: `{{${variable}}}`,
+    })),
+    qr: qrVariable
+      ? {
           title: 'Your ticket QR',
-          imageUrl: '{{ticket.qrCodeUrl}}',
+          imageUrl: `{{${qrVariable}}}`,
           imageAlt: 'Ticket QR code',
-        },
-        {
-          type: 'calendar_button',
-          label: 'Add to Apple Wallet',
-          url: '{{ticket.walletAppleUrl}}',
-        },
-      ];
-    case 'payment-failed':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, your payment could not be completed.',
-        },
-        {
-          type: 'order_summary',
-          title: 'Order summary',
-          rows: [{ label: 'Order ID', value: '{{order.id}}' }],
-        },
-        { type: 'calendar_button', label: 'Retry payment', url: '{{order.retryUrl}}' },
-        { type: 'calendar_button', label: 'Get support', url: '{{brand.supportUrl}}' },
-      ];
-    case 'order-cancelled':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, your order was cancelled.',
-        },
-        {
-          type: 'order_summary',
-          title: 'Order summary',
-          rows: [{ label: 'Order ID', value: '{{order.id}}' }],
-        },
-      ];
-    case 'order-refunded':
-      return [
-        {
-          type: 'event_hero',
-          headline: 'Refund issued',
-          body: 'Hi {{recipient.name}}, your refund has been issued.',
-        },
-        {
-          type: 'order_summary',
-          title: 'Refund summary',
-          rows: [
-            { label: 'Order ID', value: '{{order.id}}' },
-            { label: 'Refund amount', value: '{{refund.amount}}' },
-          ],
-        },
-      ];
-    case 'event-updated':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, event details have been updated.',
-        },
-        { type: 'ticket_summary', title: 'What changed', body: '{{event.changeSummary}}' },
-      ];
-    case 'event-cancelled':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, this event has been cancelled.',
-        },
-        { type: 'calendar_button', label: 'Refund policy', url: '{{event.refundPolicyUrl}}' },
-      ];
-    case 'event-reminder':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, your event is coming up.',
-        },
-        {
-          type: 'order_summary',
-          title: 'Event details',
-          rows: [
-            { label: 'Starts', value: '{{event.startsAt}}' },
-            { label: 'Venue', value: '{{event.venueName}}' },
-          ],
-        },
-        {
-          type: 'qr_code',
-          title: 'Your ticket QR',
-          imageUrl: '{{ticket.qrCodeUrl}}',
-          imageAlt: 'Ticket QR code',
-        },
-      ];
-    case 'attendee-message':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, you have a message from the organizer.',
-        },
-        {
-          type: 'unsubscribe_footer',
-          body: 'You are receiving this because you purchased tickets with {{brand.name}}.',
-          unsubscribeUrl: '{{brand.supportUrl}}',
-        },
-      ];
-    case 'staff-order-notification':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, a new order was placed.',
-        },
-        {
-          type: 'order_summary',
-          title: 'Order summary',
-          rows: [{ label: 'Order ID', value: '{{order.id}}' }],
-        },
-        { type: 'calendar_button', label: 'Open dashboard', url: '{{dashboard.url}}' },
-      ];
-    case 'checkin-device-invited':
-      return [
-        {
-          type: 'event_hero',
-          headline: '{{event.title}}',
-          body: 'Hi {{recipient.name}}, you are invited to scan for this event.',
-        },
-        { type: 'calendar_button', label: 'Open scanner', url: '{{device.inviteUrl}}' },
-      ];
-    case 'waitlist-invite':
-      return [
-        {
-          type: 'event_hero',
-          headline: 'Tickets are available for {{event.title}}',
-          body: 'Hi {{recipient.name}}, your spot on the waitlist is ready.',
-          ctaLabel: 'Claim tickets',
-          ctaUrl: '{{waitlist.inviteUrl}}',
-        },
-        {
-          type: 'ticket_summary',
-          title: 'Offer details',
-          body: '{{ticket.type}}',
-        },
-        {
-          type: 'order_summary',
-          title: 'Claim before it expires',
-          rows: [{ label: 'Expires', value: '{{waitlist.expiresAt}}' }],
-        },
-      ];
-    default:
-      throw new Error(
-        `No seedable default email template blocks registered for template key: ${key}`,
-      );
+        }
+      : undefined,
+    complianceNote:
+      lifecycle.category === 'bulk'
+        ? 'You are receiving this because you subscribed to updates from {{brand.name}} or attended this event.'
+        : undefined,
+  };
+}
+
+function studioEmailHtml(content: StudioEmailContent): string {
+  return [
+    `<div style="${styleAttr(shellStyle)}">`,
+    `<div style="${styleAttr(defaultContainerStyle)}">`,
+    `<section style="${styleAttr(studioEmailCardStyle)}">`,
+    `<header style="${styleAttr(studioHeaderStyle)}">`,
+    `<p style="${styleAttr(eyebrowStyle)}">${content.eyebrow}</p>`,
+    '</header>',
+    `<section style="${styleAttr(cardStyle)}">`,
+    `<h1 style="${styleAttr(headingStyle)}">${content.headline}</h1>`,
+    `<p style="${styleAttr(paragraphStyle)}">${content.intro}</p>`,
+    content.primaryAction
+      ? `<p style="${styleAttr({ margin: '20px 0 0' })}"><a href="${content.primaryAction.url}" style="${styleAttr(buttonStyle)}">${content.primaryAction.label}</a></p>`
+      : '',
+    '</section>',
+    `<section style="${styleAttr(cardStyle)}">`,
+    `<h2 style="${styleAttr(subheadingStyle)}">${content.summaryTitle}</h2>`,
+    ...content.rows.map(
+      (row) =>
+        `<div style="${styleAttr(panelStyle)}"><p style="${styleAttr(mutedStyle)}">${row.label}</p><p style="${styleAttr({
+          ...paragraphStyle,
+          color: '#332c2c',
+          fontWeight: 600,
+          margin: '4px 0 0',
+        })}">${row.value}</p></div>`,
+    ),
+    '</section>',
+    content.qr
+      ? [
+          `<section style="${styleAttr({ ...cardStyle, textAlign: 'center' })}">`,
+          `<h2 style="${styleAttr(subheadingStyle)}">${content.qr.title}</h2>`,
+          `<p style="${styleAttr({ margin: '18px 0 0' })}"><img src="${content.qr.imageUrl}" alt="${content.qr.imageAlt}" style="${styleAttr({
+            backgroundColor: '#ffffff',
+            borderRadius: '18px',
+            display: 'block',
+            margin: '0 auto',
+            maxWidth: '220px',
+            padding: '18px',
+          })}" /></p>`,
+          '</section>',
+        ].join('')
+      : '',
+    content.secondaryActions.length > 0
+      ? [
+          `<section style="${styleAttr(cardStyle)}">`,
+          `<h2 style="${styleAttr(subheadingStyle)}">Next steps</h2>`,
+          ...content.secondaryActions.map(
+            (action) =>
+              `<p style="${styleAttr({ margin: '0 0 10px' })}"><a href="${action.url}" style="${styleAttr({
+                color: '#332c2c',
+                fontSize: '15px',
+                fontWeight: 600,
+                lineHeight: '24px',
+              })}">${action.label}</a></p>`,
+          ),
+          '</section>',
+        ].join('')
+      : '',
+    `<footer style="${styleAttr(studioFooterStyle)}">`,
+    content.complianceNote
+      ? `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px', margin: '0 0 8px' })}">${content.complianceNote}</p>`
+      : '',
+    `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px' })}">Need help? Contact <a href="{{brand.supportUrl}}" style="color: #332c2c">{{brand.name}} support</a>.</p>`,
+    '</footer>',
+    '</section>',
+    '</div>',
+    '</div>',
+  ].join('');
+}
+
+function headlineForLifecycle(
+  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
+): string {
+  if (lifecycle.requiredVariables.includes('event.title')) return '{{event.title}}';
+  if (lifecycle.optionalVariables.includes('event.title')) return '{{event.title}}';
+  if (lifecycle.requiredVariables.includes('integration.name')) return '{{integration.name}}';
+  return lifecycle.name;
+}
+
+function introForLifecycle(
+  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
+): string {
+  const detail = lifecycle.defaultPreviewText ?? sentenceCase(lifecycle.trigger);
+  return `Hi {{recipient.name}}, ${detail}`;
+}
+
+function summaryTitleForLifecycle(
+  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
+): string {
+  switch (lifecycle.category) {
+    case 'staff':
+      return 'Operational details';
+    case 'system':
+      return 'Account details';
+    case 'bulk':
+      return 'Message details';
+    case 'transactional':
+      return 'Details';
   }
 }
 
+function studioContentHasVariable(
+  content: Pick<
+    StudioEmailContent,
+    'headline' | 'intro' | 'primaryAction' | 'qr' | 'rows' | 'secondaryActions'
+  >,
+  variable: string,
+): boolean {
+  const token = `{{${variable}}}`;
+  return [
+    content.headline,
+    content.intro,
+    content.primaryAction?.url,
+    content.qr?.imageUrl,
+    ...content.rows.flatMap((row) => [row.label, row.value]),
+    ...content.secondaryActions.flatMap((action) => [action.label, action.url]),
+  ].some((value) => value?.includes(token));
+}
+
+function isActionVariable(variable: string): boolean {
+  return variable.endsWith('Url') || variable === 'dashboard.url';
+}
+
+function defaultOptionalVariablesForLifecycle(
+  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
+): string[] {
+  const allowedByKey: Partial<Record<TemplateKey, string[]>> = {
+    'tickets-issued': ['ticket.pdfUrl', 'ticket.walletAppleUrl', 'ticket.walletGoogleUrl'],
+    'event-reminder': ['ticket.qrCodeUrl'],
+    'wallet-pass-ready': ['ticket.walletAppleUrl', 'ticket.walletGoogleUrl', 'ticket.qrCodeUrl'],
+  };
+  const allowed = allowedByKey[lifecycle.key] ?? [];
+  return lifecycle.optionalVariables.filter((variable) => allowed.includes(variable));
+}
+
+function actionLabel(variable: string): string {
+  switch (variable) {
+    case 'dashboard.url':
+      return 'Open dashboard';
+    case 'brand.supportUrl':
+      return 'Contact support';
+    case 'event.checkoutUrl':
+      return 'Finish checkout';
+    case 'event.publicUrl':
+      return 'View event';
+    case 'event.mapUrl':
+      return 'Open map';
+    case 'order.manageUrl':
+      return 'Manage order';
+    case 'order.receiptUrl':
+      return 'View receipt';
+    case 'order.retryUrl':
+      return 'Retry payment';
+    case 'ticket.pdfUrl':
+      return 'Download tickets';
+    case 'ticket.transferUrl':
+      return 'Accept ticket';
+    case 'ticket.walletAppleUrl':
+      return 'Add to Apple Wallet';
+    case 'ticket.walletGoogleUrl':
+      return 'Save to Google Wallet';
+    case 'waitlist.inviteUrl':
+      return 'Claim tickets';
+    case 'device.inviteUrl':
+      return 'Open scanner';
+    case 'integration.reconnectUrl':
+      return 'Reconnect integration';
+    case 'chargeback.evidenceUrl':
+      return 'Submit evidence';
+    default:
+      return mergeTagLabel(variable);
+  }
+}
+
+function mergeTagLabel(variable: string): string {
+  const [, name = variable] = variable.split('.');
+  return name
+    .replace(/Url$/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/^\w/, (match) => match.toUpperCase());
+}
+
+function dedupeRows(rows: StudioEmailRow[]): StudioEmailRow[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (seen.has(row.value)) return false;
+    seen.add(row.value);
+    return true;
+  });
+}
+
+function sentenceCase(value: string): string {
+  if (!value) return value;
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function legacyEditorContentFromBlocks(
+  blocks: EmailTemplateBlock[],
+): Pick<EmailTemplateDocument['editor'], 'contentHtml' | 'contentText'> {
+  const blockHtml = blocks.flatMap(legacyEditorHtmlFromBlock);
+  const requiredRecipientFallback = blockHtml.join('').includes('{{recipient.name}}')
+    ? []
+    : [`<p style="${styleAttr(paragraphStyle)}">Hi {{recipient.name}}</p>`];
+  const html = [
+    `<div style="${styleAttr(shellStyle)}">`,
+    `<div style="${styleAttr(defaultContainerStyle)}">`,
+    `<section style="${styleAttr(studioEmailCardStyle)}">`,
+    `<header style="${styleAttr(studioHeaderStyle)}">`,
+    `<p style="${styleAttr(eyebrowStyle)}">{{brand.name}}</p>`,
+    '</header>',
+    ...blockHtml,
+    ...requiredRecipientFallback,
+    `<footer style="${styleAttr(studioFooterStyle)}">`,
+    `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px' })}">Need help? Contact <a href="{{brand.supportUrl}}" style="color: #332c2c">{{brand.name}} support</a>.</p>`,
+    '</footer>',
+    '</section>',
+    '</div>',
+    '</div>',
+  ].join('');
+  return { contentHtml: html, contentText: plainTextFromHtml(html) };
+}
+
+function legacyEditorHtmlFromBlock(block: EmailTemplateBlock): string[] {
+  switch (block.type) {
+    case 'event_hero':
+      return [
+        `<section style="${styleAttr(cardStyle)}">`,
+        block.imageUrl
+          ? `<p><img src="${block.imageUrl}" alt="${block.imageAlt ?? ''}" style="${styleAttr({
+              borderRadius: '12px',
+              marginBottom: '22px',
+              width: '100%',
+            })}" /></p>`
+          : '',
+        `<h1 style="${styleAttr(headingStyle)}">${block.headline}</h1>`,
+        block.body ? `<p style="${styleAttr(paragraphStyle)}">${block.body}</p>` : '',
+        block.ctaLabel && block.ctaUrl
+          ? `<p><a href="${block.ctaUrl}" style="${styleAttr(buttonStyle)}">${block.ctaLabel}</a></p>`
+          : '',
+        '</section>',
+      ].filter(Boolean);
+    case 'ticket_summary':
+      return [
+        `<section style="${styleAttr(cardStyle)}">`,
+        `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
+        `<p style="${styleAttr(paragraphStyle)}">${block.body}</p>`,
+        '</section>',
+      ];
+    case 'order_summary':
+      return [
+        `<section style="${styleAttr(cardStyle)}">`,
+        `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
+        ...block.rows.map(
+          (row) =>
+            `<div style="${styleAttr(panelStyle)}"><p style="${styleAttr(mutedStyle)}">${row.label}</p><p style="${styleAttr({
+              ...paragraphStyle,
+              color: '#332c2c',
+              fontWeight: 600,
+              margin: '4px 0 0',
+            })}">${row.value}</p></div>`,
+        ),
+        '</section>',
+      ];
+    case 'qr_code':
+      return [
+        `<section style="${styleAttr({ ...cardStyle, textAlign: 'center' })}">`,
+        `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
+        `<p><img src="${block.imageUrl}" alt="${block.imageAlt ?? ''}" style="${styleAttr({
+          backgroundColor: '#ffffff',
+          borderRadius: '18px',
+          margin: '0 auto',
+          maxWidth: '220px',
+          padding: '18px',
+        })}" /></p>`,
+        '</section>',
+      ];
+    case 'calendar_button':
+      return [
+        `<section style="${styleAttr(cardStyle)}">`,
+        `<p><a href="${block.url}" style="${styleAttr(buttonStyle)}">${block.label}</a></p>`,
+        '</section>',
+      ];
+    case 'venue_block':
+      return [
+        `<section style="${styleAttr(cardStyle)}">`,
+        `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
+        `<p style="${styleAttr(paragraphStyle)}">${block.address}</p>`,
+        block.mapUrl ? `<p><a href="${block.mapUrl}">Open map</a></p>` : '',
+        '</section>',
+      ].filter(Boolean);
+    case 'social_links':
+      return [
+        `<section style="${styleAttr(cardStyle)}">`,
+        ...block.links.map((link) => `<p><a href="${link.url}">${link.label}</a></p>`),
+        '</section>',
+      ];
+    case 'unsubscribe_footer':
+      return [
+        `<section style="${styleAttr({
+          color: '#71717a',
+          fontSize: '12px',
+          padding: '12px 4px 0',
+        })}">`,
+        '<hr>',
+        `<p>${block.body}</p>`,
+        `<p><a href="${block.unsubscribeUrl}">Manage preferences</a></p>`,
+        '</section>',
+      ];
+    case 'raw_html':
+      return [`<div style="${styleAttr(cardStyle)}">${block.safe ? block.html : ''}</div>`];
+  }
+}
+
+function stripEmptyImageTags(html: string): string {
+  return html.replace(/<img\b(?=[^>]*\ssrc=(["'])\1)[^>]*>/gi, '');
+}
+
+function styleAttr(style: React.CSSProperties): string {
+  return Object.entries(style)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([property, value]) => `${kebabCaseCssProperty(property)}: ${String(value)}`)
+    .join('; ');
+}
+
+function kebabCaseCssProperty(property: string): string {
+  return property.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
+}
+
 /**
- * Seedable default email template document for every P0 lifecycle key.
+ * Seedable default email template document for every lifecycle key.
  * Use this to bootstrap editable content documents per brand/event scope.
  */
 export const P0_EMAIL_TEMPLATE_DEFAULTS: Readonly<Record<TemplateKey, EmailTemplateDocument>> =
   Object.fromEntries(
-    P0_TEMPLATE_KEYS.map((key) => [key, createDefaultEmailTemplateForKey(key)]),
+    TEMPLATE_KEYS.map((key) => [key, createDefaultEmailTemplateForKey(key)]),
   ) as Readonly<Record<TemplateKey, EmailTemplateDocument>>;
 
 export function validateEmailTemplate(
@@ -762,40 +1116,22 @@ export async function renderEmailTemplate(
   const previewText = document.settings.previewText
     ? renderPlain(document.settings.previewText, context)
     : undefined;
-  if (document.editor.contentJson) {
-    const editorHtml = renderHtml(
+  const editorHtml = stripEmptyImageTags(
+    renderHtml(
       applyEmailGlobalCssToHtml(document.editor.contentHtml, document.editor.globalCss),
       context,
-    );
-    const editorHtmlWithFooter = appendEditorUnsubscribeFooter(editorHtml, document, context);
-    const editorText = document.editor.contentText?.trim() || plainTextFromHtml(editorHtml) || '';
-    const editorTextWithFooter = appendEditorUnsubscribeText(editorText, document, context);
-    return {
-      subject,
-      previewText,
-      html: editorHtmlWithFooter,
-      text: renderPlain(editorTextWithFooter, context),
-      validation,
-    };
-  }
-
-  const html = await render(
-    React.createElement(EmailTemplate, {
-      blocks: document.blocks,
-      context,
-      previewText,
-    }),
+    ),
   );
-  const text = await render(
-    React.createElement(EmailTemplate, {
-      blocks: document.blocks,
-      context,
-      previewText,
-    }),
-    { plainText: true },
-  );
-
-  return { subject, previewText, html, text, validation };
+  const editorHtmlWithFooter = appendEditorUnsubscribeFooter(editorHtml, document, context);
+  const editorText = document.editor.contentText?.trim() || plainTextFromHtml(editorHtml) || '';
+  const editorTextWithFooter = appendEditorUnsubscribeText(editorText, document, context);
+  return {
+    subject,
+    previewText,
+    html: editorHtmlWithFooter,
+    text: renderPlain(editorTextWithFooter, context),
+    validation,
+  };
 }
 
 function appendEditorUnsubscribeFooter(
@@ -872,152 +1208,6 @@ export function createEmailTestSend(
       notificationType: document.settings.category,
     },
   };
-}
-
-function EmailTemplate({
-  blocks,
-  context,
-  previewText,
-}: {
-  blocks: EmailTemplateBlock[];
-  context: MergeTagContext;
-  previewText?: string;
-}) {
-  return React.createElement(
-    Html,
-    { lang: 'en' },
-    React.createElement(Head),
-    previewText ? React.createElement(Preview, null, previewText) : undefined,
-    React.createElement(
-      Body,
-      { style: { backgroundColor: '#f8fafc', fontFamily: 'Arial, sans-serif' } },
-      React.createElement(
-        Container,
-        { style: defaultContainerStyle },
-        blocks.map((block, index) =>
-          React.createElement(
-            React.Fragment,
-            { key: `${block.type}-${index}` },
-            renderBlock(block, context),
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-function renderBlock(block: EmailTemplateBlock, context: MergeTagContext): React.ReactNode {
-  switch (block.type) {
-    case 'event_hero': {
-      const imageUrl = block.imageUrl ? renderUrl(block.imageUrl, context).trim() : '';
-      return React.createElement(
-        Section,
-        { style: { backgroundColor: '#ffffff', borderRadius: '8px', padding: '28px' } },
-        imageUrl
-          ? React.createElement(Img, {
-              alt: block.imageAlt ?? '',
-              src: imageUrl,
-              style: { borderRadius: '6px', marginBottom: '20px', width: '100%' },
-            })
-          : undefined,
-        React.createElement(Heading, { as: 'h1' }, renderPlain(block.headline, context)),
-        block.body
-          ? React.createElement(Text, { style: paragraphStyle }, renderPlain(block.body, context))
-          : undefined,
-        block.ctaLabel && block.ctaUrl
-          ? React.createElement(
-              Button,
-              { href: renderUrl(block.ctaUrl, context), style: buttonStyle },
-              renderPlain(block.ctaLabel, context),
-            )
-          : undefined,
-      );
-    }
-    case 'ticket_summary':
-      return React.createElement(
-        Section,
-        { style: { backgroundColor: '#ffffff', padding: '24px 28px' } },
-        React.createElement(Heading, { as: 'h2' }, renderPlain(block.title, context)),
-        React.createElement(Text, { style: paragraphStyle }, renderPlain(block.body, context)),
-      );
-    case 'order_summary':
-      return React.createElement(
-        Section,
-        { style: { backgroundColor: '#ffffff', padding: '24px 28px' } },
-        React.createElement(Heading, { as: 'h2' }, renderPlain(block.title, context)),
-        block.rows.map((row) =>
-          React.createElement(
-            Text,
-            { key: `${row.label}-${row.value}`, style: paragraphStyle },
-            `${renderPlain(row.label, context)}: ${renderPlain(row.value, context)}`,
-          ),
-        ),
-      );
-    case 'qr_code': {
-      const imageUrl = renderUrl(block.imageUrl, context).trim();
-      return React.createElement(
-        Section,
-        { style: { backgroundColor: '#ffffff', padding: '24px 28px', textAlign: 'center' } },
-        React.createElement(Heading, { as: 'h2' }, renderPlain(block.title, context)),
-        imageUrl
-          ? React.createElement(Img, {
-              alt: block.imageAlt ?? '',
-              src: imageUrl,
-              style: { margin: '0 auto', maxWidth: '220px' },
-            })
-          : undefined,
-      );
-    }
-    case 'calendar_button':
-      return React.createElement(
-        Section,
-        { style: { backgroundColor: '#ffffff', padding: '24px 28px' } },
-        React.createElement(
-          Button,
-          { href: renderUrl(block.url, context), style: buttonStyle },
-          renderPlain(block.label, context),
-        ),
-      );
-    case 'venue_block':
-      return React.createElement(
-        Section,
-        { style: { backgroundColor: '#ffffff', padding: '24px 28px' } },
-        React.createElement(Heading, { as: 'h2' }, renderPlain(block.title, context)),
-        React.createElement(Text, { style: paragraphStyle }, renderPlain(block.address, context)),
-        block.mapUrl
-          ? React.createElement(Link, { href: renderUrl(block.mapUrl, context) }, 'Open map')
-          : undefined,
-      );
-    case 'social_links':
-      return React.createElement(
-        Section,
-        { style: { backgroundColor: '#ffffff', padding: '24px 28px' } },
-        block.links.map((link) =>
-          React.createElement(
-            Link,
-            { href: renderUrl(link.url, context), key: `${link.label}-${link.url}` },
-            renderPlain(link.label, context),
-          ),
-        ),
-      );
-    case 'unsubscribe_footer':
-      return React.createElement(
-        Section,
-        { style: { color: '#64748b', fontSize: '12px', padding: '20px 28px' } },
-        React.createElement(Hr),
-        React.createElement(Text, null, renderPlain(block.body, context)),
-        React.createElement(
-          Link,
-          { href: renderUrl(block.unsubscribeUrl, context) },
-          'Manage preferences',
-        ),
-      );
-    case 'raw_html':
-      return React.createElement('div', {
-        dangerouslySetInnerHTML: { __html: block.safe ? block.html : '' },
-        style: { backgroundColor: '#ffffff', padding: '24px 28px' },
-      });
-  }
 }
 
 function collectTemplateStrings(document: EmailTemplateDocument): string[] {
@@ -1492,6 +1682,7 @@ function sampleContext(): MergeTagContext {
       pdfUrl: 'https://tickets.example.test/pdf/TKT-123.pdf',
       walletAppleUrl: 'https://tickets.example.test/pass/apple/TKT-123.pkpass',
       walletGoogleUrl: 'https://pay.google.com/gp/v/save/abc123',
+      transferUrl: 'https://checkout.example.test/transfer/TKT-123/claim',
     },
     order: {
       id: 'ord_123',
@@ -1519,6 +1710,32 @@ function sampleContext(): MergeTagContext {
       position: '3',
       inviteUrl: 'https://checkout.example.test/waitlist/claim/demo',
       expiresAt: '2026-07-17 20:00',
+    },
+    review: { platform: 'Google' },
+    salesDigest: {
+      revenue: '$4,320.00',
+      orders: '38',
+      topTicketType: 'General Admission',
+    },
+    payout: {
+      amount: '$1,250.00',
+      eta: '2-3 business days',
+      account: 'Bank ****4242',
+      period: 'June 2026',
+    },
+    integration: {
+      name: 'Stripe',
+      reconnectUrl: 'https://admin.example.test/integrations/stripe/reconnect',
+    },
+    webhook: {
+      endpointUrl: 'https://hooks.example.test/integrations/stripe',
+      attempts: '5',
+    },
+    chargeback: {
+      id: 'dp_123',
+      amount: '$45.00',
+      dueAt: '2026-07-18',
+      evidenceUrl: 'https://admin.example.test/disputes/dp_123',
     },
   };
 }

@@ -45,10 +45,8 @@ vi.mock('@tixkit/db', () => {
 
 vi.mock('@tixkit/content-email', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tixkit/content-email')>();
-  const domain = await import('@tixkit/domain');
   return {
     ...actual,
-    SEEDABLE_EMAIL_TEMPLATE_KEYS: [...domain.P0_TEMPLATE_KEYS, 'waitlist-invite'],
     validateEmailTemplate: (
       document: Parameters<typeof actual.validateEmailTemplate>[0],
       options?: Parameters<typeof actual.validateEmailTemplate>[1],
@@ -232,13 +230,14 @@ describe('seedEmailTemplateDefaults', () => {
     );
     expect(version).toBeDefined();
     const document = version!.contentJson as {
+      editor: { contentHtml: string; contentText?: string };
       settings: { subject: string; previewText?: string };
-      blocks: unknown[];
     };
     const renderedTemplate = [
       document.settings.subject,
       document.settings.previewText,
-      JSON.stringify(document.blocks),
+      document.editor.contentHtml,
+      document.editor.contentText,
     ]
       .filter(Boolean)
       .join('\n');

@@ -7,7 +7,7 @@ import {
 } from '@tixkit/content-email';
 
 /**
- * Idempotently seed published P0 email content documents for a brand/event scope
+ * Idempotently seed published lifecycle email content documents for a brand/event scope
  * from the lifecycle defaults (`createDefaultEmailTemplateForKey`). This makes
  * the transactional workflow emails (order-confirmed, tickets-issued,
  * order-refunded, ...) resolve a published content version by key/scope so the

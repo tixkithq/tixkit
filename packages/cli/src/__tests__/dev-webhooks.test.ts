@@ -83,12 +83,27 @@ function mockSpawn(secret: string | null, exitEarly = false) {
 }
 
 describe('runDevWebhooks', () => {
+  const originalStripeApiKey = process.env.STRIPE_API_KEY;
+  const originalStripeSecretKey = process.env.STRIPE_SECRET_KEY;
+
   beforeEach(() => {
     vi.resetAllMocks();
+    delete process.env.STRIPE_API_KEY;
+    delete process.env.STRIPE_SECRET_KEY;
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    if (originalStripeApiKey === undefined) {
+      delete process.env.STRIPE_API_KEY;
+    } else {
+      process.env.STRIPE_API_KEY = originalStripeApiKey;
+    }
+    if (originalStripeSecretKey === undefined) {
+      delete process.env.STRIPE_SECRET_KEY;
+    } else {
+      process.env.STRIPE_SECRET_KEY = originalStripeSecretKey;
+    }
   });
 
   it('dry-run prints the planned forward set without spawning stripe listen', async () => {
