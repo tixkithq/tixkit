@@ -95,3 +95,4 @@ apps/checkout/public/tixkit-widget.js
 .playwright*
 artifacts/
 .continue-*
+.next-codex-cdp*/

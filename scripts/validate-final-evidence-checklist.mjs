@@ -289,14 +289,29 @@ function isSeparatorRow(cells) {
   return cells.every((cell) => /^:?-{2,}:?$/.test(cell));
 }
 
+function isMalformedCompletionId(value) {
+  return /^C-?\d+$/i.test(value) && !/^C-\d{3}$/.test(value);
+}
+
 export function parseFinalEvidenceChecklist(markdown) {
+  const malformedRows = [];
   const rows = [];
-  for (const line of markdown.split(/\r?\n/)) {
+  const lines = markdown.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
     const cells = splitMarkdownRow(line);
-    if (!cells || cells.length < 5 || isSeparatorRow(cells) || cells[0] === 'ID') {
+    if (!cells || isSeparatorRow(cells) || cells[0] === 'ID') {
       continue;
     }
     if (!/^C-\d{3}$/.test(cells[0])) {
+      if (isMalformedCompletionId(cells[0])) {
+        malformedRows.push(
+          `line ${index + 1}: final evidence row id must use C-### format: ${cells[0]}`,
+        );
+      }
+      continue;
+    }
+    if (cells.length !== 5) {
+      malformedRows.push(`line ${index + 1}: final evidence row ${cells[0]} must have 5 columns`);
       continue;
     }
     rows.push({
@@ -307,7 +322,7 @@ export function parseFinalEvidenceChecklist(markdown) {
       currentEvidence: cells[4],
     });
   }
-  return rows;
+  return { malformedRows, rows };
 }
 
 function collectBacklogRows(backlogMarkdown) {
@@ -323,10 +338,13 @@ export function validateFinalEvidenceChecklist(
   markdown,
   { backlogMarkdown = null, validationRunbookMarkdown = null } = {},
 ) {
-  const rows = parseFinalEvidenceChecklist(markdown);
+  const { malformedRows, rows } = parseFinalEvidenceChecklist(markdown);
   const errors = [];
   const rowsById = new Map();
   const backlogRows = collectBacklogRows(backlogMarkdown);
+  for (const malformedRow of malformedRows) {
+    errors.push(`Malformed final evidence row: ${malformedRow}`);
+  }
 
   for (const row of rows) {
     if (rowsById.has(row.id)) {
@@ -336,6 +354,15 @@ export function validateFinalEvidenceChecklist(
 
     if (!ALLOWED_STATUSES.has(row.status)) {
       errors.push(`${row.id}: invalid status ${row.status}`);
+    }
+    if (!row.gate.trim()) {
+      errors.push(`${row.id}: gate must not be empty`);
+    }
+    if (!row.requiredEvidence.trim()) {
+      errors.push(`${row.id}: required evidence must not be empty`);
+    }
+    if (!row.currentEvidence.trim()) {
+      errors.push(`${row.id}: current evidence must not be empty`);
     }
 
     if (backlogRows && !REQUIRED_ROWS.has(row.id)) {

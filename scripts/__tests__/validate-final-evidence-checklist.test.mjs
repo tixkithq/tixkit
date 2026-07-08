@@ -119,6 +119,71 @@ test('validateFinalEvidenceChecklist rejects missing required gate rows', () => 
   assert.deepEqual(result.errors, ['C-082: missing final evidence row']);
 });
 
+test('validateFinalEvidenceChecklist rejects malformed required gate ids', () => {
+  const result = validateFinalEvidenceChecklist(
+    validChecklist.replace(c082BlockingRow, c082BlockingRow.replace('C-082', 'C082')),
+  );
+
+  assert.equal(result.errors.length, 2);
+  assert.ok(
+    result.errors.some((error) =>
+      /^Malformed final evidence row: line \d+: final evidence row id must use C-### format: C082$/.test(
+        error,
+      ),
+    ),
+  );
+  assert.ok(result.errors.includes('C-082: missing final evidence row'));
+});
+
+test('validateFinalEvidenceChecklist rejects malformed required gate rows', () => {
+  const result = validateFinalEvidenceChecklist(
+    validChecklist.replace(
+      c082BlockingRow,
+      '| C-082 | User-story matrix final proof | Blocking | Missing current evidence column |',
+    ),
+  );
+
+  assert.equal(result.errors.length, 2);
+  assert.ok(
+    result.errors.some((error) =>
+      /^Malformed final evidence row: line \d+: final evidence row C-082 must have 5 columns$/.test(
+        error,
+      ),
+    ),
+  );
+  assert.ok(result.errors.includes('C-082: missing final evidence row'));
+});
+
+test('validateFinalEvidenceChecklist rejects final evidence rows with extra columns', () => {
+  const result = validateFinalEvidenceChecklist(
+    validChecklist.replace(
+      c082BlockingRow,
+      `${c082BlockingRow.replace(/ \\|$/, ' | Extra proof drift |')}`,
+    ),
+  );
+
+  assert.equal(result.errors.length, 2);
+  assert.ok(
+    result.errors.some((error) =>
+      /^Malformed final evidence row: line \d+: final evidence row C-082 must have 5 columns$/.test(
+        error,
+      ),
+    ),
+  );
+  assert.ok(result.errors.includes('C-082: missing final evidence row'));
+});
+
+test('validateFinalEvidenceChecklist rejects blank final evidence cells', () => {
+  const result = validateFinalEvidenceChecklist(
+    validChecklist.replace(
+      c082BlockingRow,
+      `| C-082 |  | Blocking | ${c082RequiredEvidence} | Blocking: local matrix passes; fresh hosted CI proof depends on C-035. |`,
+    ),
+  );
+
+  assert.deepEqual(result.errors, ['C-082: gate must not be empty']);
+});
+
 test('validateFinalEvidenceChecklist rejects non-done backlog rows missing from the checklist', () => {
   const expandedBacklog = matchingBacklog
     .replace('Total rows: 6.', 'Total rows: 7.')
