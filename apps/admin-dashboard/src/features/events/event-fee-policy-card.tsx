@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, Save, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { z } from 'zod';
 import {
   type AdminFeePolicy,
@@ -80,6 +80,7 @@ export const feePolicyFormSchema = z
   .strict();
 
 export type FeePolicyFormValues = z.infer<typeof feePolicyFormSchema>;
+const FEE_POLICY_AUTOSAVE_DELAY_MS = 300;
 
 // Stripe US standard processing fee (2.9% + $0.30). Preview/demonstration only;
 // this is not applied to settlement. Kept as constants so it can be made
@@ -181,16 +182,24 @@ export function EventFeePolicyCard({
     refetch,
   } = useAdminQuery(['getEventFeePolicy', eventId], () => adminApi.getEventFeePolicy(eventId));
   const [saving, setSaving] = React.useState(false);
+  const lastSavedPolicyRef = React.useRef<string | null>(null);
+  const saveVersionRef = React.useRef(0);
   const form = useForm<FeePolicyFormValues>({
     resolver: zodResolver(feePolicyFormSchema),
     defaultValues: feePolicyToValues(undefined),
   });
 
+  const serializeValues = React.useCallback((values: FeePolicyFormValues) => {
+    return JSON.stringify(feePolicyValuesToInput(values));
+  }, []);
+
   React.useEffect(() => {
     if (feePolicy) {
-      form.reset(feePolicyToValues(feePolicy));
+      const values = feePolicyToValues(feePolicy);
+      lastSavedPolicyRef.current = serializeValues(values);
+      form.reset(values);
     }
-  }, [feePolicy, form]);
+  }, [feePolicy, form, serializeValues]);
 
   const rules = form.watch('rules');
   const passFeesToBuyer = form.watch('passFeesToBuyer');
@@ -220,18 +229,73 @@ export function EventFeePolicyCard({
     );
   };
 
-  const savePolicy = async (values: FeePolicyFormValues) => {
-    setSaving(true);
-    const result = await adminApi.updateEventFeePolicy(eventId, feePolicyValuesToInput(values));
-    setSaving(false);
-    if (!result.ok) {
-      toast.error(result.error.message);
+  const savePolicy = React.useCallback(
+    async (values: FeePolicyFormValues) => {
+      const input = feePolicyValuesToInput(values);
+      const policyKey = JSON.stringify(input);
+      if (lastSavedPolicyRef.current === policyKey) {
+        return;
+      }
+
+      const saveVersion = (saveVersionRef.current += 1);
+      lastSavedPolicyRef.current = policyKey;
+      setSaving(true);
+      const result = await adminApi.updateEventFeePolicy(eventId, input);
+      if (saveVersion === saveVersionRef.current) {
+        setSaving(false);
+      }
+      if (!result.ok) {
+        if (saveVersion === saveVersionRef.current) {
+          lastSavedPolicyRef.current = null;
+        }
+        toast.error(result.error.message);
+        return;
+      }
+      if (saveVersion !== saveVersionRef.current) {
+        return;
+      }
+
+      const nextValues = feePolicyToValues(result.data);
+      lastSavedPolicyRef.current = serializeValues(nextValues);
+      form.reset(nextValues);
+      await refetch();
+    },
+    [eventId, form, refetch, serializeValues],
+  );
+
+  React.useEffect(() => {
+    if (loading || !feePolicy) {
       return;
     }
-    toast.success('Ticket fee policy saved');
-    form.reset(feePolicyToValues(result.data));
-    await refetch();
-  };
+
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+    const subscription = form.watch((values) => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      const parsed = feePolicyFormSchema.safeParse(values);
+      if (!parsed.success) {
+        return;
+      }
+
+      const policyKey = serializeValues(parsed.data);
+      if (lastSavedPolicyRef.current === policyKey) {
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        void savePolicy(parsed.data);
+      }, FEE_POLICY_AUTOSAVE_DELAY_MS);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [feePolicy, form, loading, savePolicy, serializeValues]);
 
   return (
     <Card data-testid="fee-policy-card">
@@ -258,7 +322,7 @@ export function EventFeePolicyCard({
           </div>
         ) : (
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(savePolicy)} className="space-y-4">
+            <div className="space-y-4">
               {error && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                   {error.message}
@@ -377,16 +441,17 @@ export function EventFeePolicyCard({
                             </FormItem>
                           )}
                         />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="mt-8"
-                          onClick={() => removeRule(index)}
-                          aria-label="Remove fee rule"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
+                        <div className="flex lg:pt-8">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeRule(index)}
+                            aria-label="Remove fee rule"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -405,12 +470,8 @@ export function EventFeePolicyCard({
                   <Plus className="size-4" />
                   Add Fee
                 </Button>
-                <Button type="submit" disabled={saving}>
-                  <Save className="size-4" />
-                  {saving ? 'Saving' : 'Save Fees'}
-                </Button>
               </div>
-            </form>
+            </div>
           </Form>
         )}
       </CardContent>
