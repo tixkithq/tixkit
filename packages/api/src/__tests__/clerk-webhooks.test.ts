@@ -16,6 +16,13 @@ type PaymentEventRow = {
   raw_payload: string;
   processed_at: Date | null;
   idempotency_key: string;
+  recovery_status?: string;
+  recovery_attempts?: number;
+  recovery_owner?: string | null;
+  recovery_claimed_until?: Date | null;
+  next_recovery_at?: Date | null;
+  last_recovery_error?: string | null;
+  recovery_updated_at?: Date | null;
   created_at: Date;
 };
 

@@ -66,6 +66,35 @@ const webhookEventTypeValues = [
   'event.cancelled',
 ] as const;
 
+const adminTableQueryParameterRefs = [
+  { $ref: '#/components/parameters/AdminTableCursor' },
+  { $ref: '#/components/parameters/AdminTableDirection' },
+  { $ref: '#/components/parameters/AdminTableLimit' },
+  { $ref: '#/components/parameters/AdminTableSearch' },
+  { $ref: '#/components/parameters/AdminTableSort' },
+  { $ref: '#/components/parameters/AdminTableIncludeFacets' },
+  { $ref: '#/components/parameters/AdminTableIncludeTotal' },
+] as const;
+
+function adminTablePageSchema(itemSchema: OpenApiReference) {
+  return {
+    type: 'object',
+    properties: {
+      items: { type: 'array', items: itemSchema },
+      nextCursor: { type: ['string', 'null'] },
+      prevCursor: { type: ['string', 'null'] },
+      total: { type: 'integer' },
+      filterTotal: { type: 'integer' },
+      facets: {
+        type: 'object',
+        additionalProperties: { $ref: '#/components/schemas/AdminTableFacet' },
+      },
+      applied: { $ref: '#/components/schemas/AdminTableAppliedQuery' },
+    },
+    required: ['items'],
+  };
+}
+
 function isDeclaredPathParameter(parameter: OpenApiParameter, name: string) {
   return (
     !('$ref' in parameter) &&
@@ -221,6 +250,52 @@ const rawOpenApiSpec = {
         in: 'query',
         required: false,
         schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+      },
+      AdminTableCursor: {
+        name: 'cursor',
+        in: 'query',
+        required: false,
+        schema: { type: 'string' },
+        description: 'Opaque admin table cursor returned as nextCursor or prevCursor',
+      },
+      AdminTableDirection: {
+        name: 'direction',
+        in: 'query',
+        required: false,
+        schema: { type: 'string', enum: ['next', 'prev'] },
+        description: 'Cursor traversal direction. Use prev with a prevCursor value.',
+      },
+      AdminTableLimit: {
+        name: 'limit',
+        in: 'query',
+        required: false,
+        schema: { type: 'integer', minimum: 1, maximum: 100 },
+      },
+      AdminTableSearch: {
+        name: 'search',
+        in: 'query',
+        required: false,
+        schema: { type: 'string' },
+      },
+      AdminTableSort: {
+        name: 'sort',
+        in: 'query',
+        required: false,
+        schema: { type: 'string' },
+        description:
+          'Comma-separated sort fields in field:direction form, for example createdAt:desc',
+      },
+      AdminTableIncludeFacets: {
+        name: 'includeFacets',
+        in: 'query',
+        required: false,
+        schema: { type: 'boolean' },
+      },
+      AdminTableIncludeTotal: {
+        name: 'includeTotal',
+        in: 'query',
+        required: false,
+        schema: { type: 'boolean' },
       },
     },
     schemas: {
@@ -1086,15 +1161,86 @@ const rawOpenApiSpec = {
         },
         required: ['passFeesToBuyer', 'rules'],
       },
-      EventPage: {
+      AdminTableSortEntry: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/Event' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
+          field: { type: 'string' },
+          direction: { type: 'string', enum: ['asc', 'desc'] },
         },
-        required: ['items', 'nextCursor', 'hasMore'],
+        required: ['field', 'direction'],
       },
+      AdminTableFilterValue: {
+        oneOf: [
+          {
+            type: 'object',
+            properties: { type: { const: 'text' }, value: { type: 'string' } },
+            required: ['type', 'value'],
+          },
+          {
+            type: 'object',
+            properties: {
+              type: { const: 'select' },
+              values: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['type', 'values'],
+          },
+          {
+            type: 'object',
+            properties: { type: { const: 'boolean' }, value: { type: 'boolean' } },
+            required: ['type', 'value'],
+          },
+          {
+            type: 'object',
+            properties: {
+              type: { const: 'date_range' },
+              from: { type: 'string', format: 'date-time' },
+              to: { type: 'string', format: 'date-time' },
+            },
+            required: ['type'],
+          },
+          {
+            type: 'object',
+            properties: {
+              type: { const: 'number_range' },
+              min: { type: 'number' },
+              max: { type: 'number' },
+            },
+            required: ['type'],
+          },
+        ],
+      },
+      AdminTableFacetRow: {
+        type: 'object',
+        properties: {
+          value: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+          total: { type: 'integer' },
+        },
+        required: ['value', 'total'],
+      },
+      AdminTableFacet: {
+        type: 'object',
+        properties: {
+          rows: { type: 'array', items: { $ref: '#/components/schemas/AdminTableFacetRow' } },
+          total: { type: 'integer' },
+          min: { type: 'number' },
+          max: { type: 'number' },
+        },
+      },
+      AdminTableAppliedQuery: {
+        type: 'object',
+        properties: {
+          search: { type: 'string' },
+          sort: { type: 'array', items: { $ref: '#/components/schemas/AdminTableSortEntry' } },
+          filters: {
+            type: 'object',
+            additionalProperties: { $ref: '#/components/schemas/AdminTableFilterValue' },
+          },
+          rejectedFilters: { type: 'array', items: { type: 'string' } },
+          rejectedSort: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['sort', 'filters'],
+      },
+      EventPage: adminTablePageSchema({ $ref: '#/components/schemas/Event' }),
       TicketType: {
         type: 'object',
         properties: {
@@ -1897,15 +2043,7 @@ const rawOpenApiSpec = {
           },
         ],
       },
-      OrderPage: {
-        type: 'object',
-        properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/Order' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
-        },
-        required: ['items', 'nextCursor', 'hasMore'],
-      },
+      OrderPage: adminTablePageSchema({ $ref: '#/components/schemas/Order' }),
       PaymentCompensation: {
         type: 'object',
         properties: {
@@ -2405,15 +2543,7 @@ const rawOpenApiSpec = {
           },
         },
       },
-      AttendeePage: {
-        type: 'object',
-        properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/Attendee' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
-        },
-        required: ['items', 'nextCursor', 'hasMore'],
-      },
+      AttendeePage: adminTablePageSchema({ $ref: '#/components/schemas/Attendee' }),
       Ticket: {
         type: 'object',
         properties: {
@@ -2993,15 +3123,7 @@ const rawOpenApiSpec = {
         },
         required: ['exportId', 'type', 'format', 'status', 'createdAt'],
       },
-      AuditLogPage: {
-        type: 'object',
-        properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/AuditLog' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
-        },
-        required: ['items', 'nextCursor', 'hasMore'],
-      },
+      AuditLogPage: adminTablePageSchema({ $ref: '#/components/schemas/AuditLog' }),
       PrivacyRequestInput: {
         type: 'object',
         properties: {
@@ -3043,15 +3165,7 @@ const rawOpenApiSpec = {
           'createdAt',
         ],
       },
-      PrivacyRequestPage: {
-        type: 'object',
-        properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/PrivacyRequest' } },
-          nextCursor: { type: ['string', 'null'] },
-          hasMore: { type: 'boolean' },
-        },
-        required: ['items', 'nextCursor', 'hasMore'],
-      },
+      PrivacyRequestPage: adminTablePageSchema({ $ref: '#/components/schemas/PrivacyRequest' }),
       MessageQueued: {
         type: 'object',
         properties: {
@@ -3584,8 +3698,12 @@ const rawOpenApiSpec = {
         summary: 'List events',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
+          ...adminTableQueryParameterRefs,
+          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'startsAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'startsAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
         ],
         responses: {
           '200': {
@@ -5408,10 +5526,17 @@ const rawOpenApiSpec = {
         summary: 'List orders',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
+          ...adminTableQueryParameterRefs,
           { name: 'organizationId', in: 'query', schema: { type: 'string' } },
           { name: 'eventId', in: 'query', schema: { type: 'string' } },
+          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'salesChannel', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'paymentProvider', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'refundState', in: 'query', required: false, schema: { type: 'boolean' } },
+          { name: 'totalCentsMin', in: 'query', required: false, schema: { type: 'number' } },
+          { name: 'totalCentsMax', in: 'query', required: false, schema: { type: 'number' } },
+          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
         ],
         responses: {
           '200': {
@@ -5561,8 +5686,15 @@ const rawOpenApiSpec = {
         summary: 'List attendees for an event',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
+          ...adminTableQueryParameterRefs,
+          { name: 'checkInListId', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'eventOccurrenceId', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'checkInStatus', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'checkedInAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'checkedInAtTo', in: 'query', required: false, schema: { type: 'string' } },
         ],
         responses: {
           '200': {
@@ -5579,8 +5711,14 @@ const rawOpenApiSpec = {
         summary: 'List all attendees across the tenant (cross-event)',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
+          ...adminTableQueryParameterRefs,
+          { name: 'eventId', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'checkInStatus', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'checkedInAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'checkedInAtTo', in: 'query', required: false, schema: { type: 'string' } },
         ],
         responses: {
           '200': {
@@ -6966,7 +7104,20 @@ const rawOpenApiSpec = {
     '/exports': {
       post: {
         summary: 'Queue export (Idempotency-Key required)',
+        description:
+          'Requires reports.read plus a type-specific read permission: attendees exports require attendees.read; orders, sales, and tax exports require orders.read; tickets and scan_logs exports require checkins.read.',
         security: [{ BearerAuth: [] }],
+        'x-required-permissions': {
+          base: ['reports.read'],
+          byType: {
+            attendees: ['attendees.read'],
+            orders: ['orders.read'],
+            sales: ['orders.read'],
+            tax: ['orders.read'],
+            tickets: ['checkins.read'],
+            scan_logs: ['checkins.read'],
+          },
+        },
         parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,
@@ -7292,8 +7443,7 @@ const rawOpenApiSpec = {
         summary: 'List scoped admin audit log entries',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
+          ...adminTableQueryParameterRefs,
           {
             name: 'organizationId',
             in: 'query',
@@ -7304,6 +7454,8 @@ const rawOpenApiSpec = {
           { name: 'action', in: 'query', required: false, schema: { type: 'string' } },
           { name: 'resourceType', in: 'query', required: false, schema: { type: 'string' } },
           { name: 'actorId', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
         ],
         responses: {
           '200': {
@@ -7328,8 +7480,7 @@ const rawOpenApiSpec = {
         summary: 'List GDPR data export and erasure requests',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { $ref: '#/components/parameters/Cursor' },
-          { $ref: '#/components/parameters/Limit' },
+          ...adminTableQueryParameterRefs,
           {
             name: 'organizationId',
             in: 'query',
@@ -7349,6 +7500,11 @@ const rawOpenApiSpec = {
             required: false,
             schema: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed'] },
           },
+          { name: 'subjectType', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'completedAtFrom', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'completedAtTo', in: 'query', required: false, schema: { type: 'string' } },
         ],
         responses: {
           '200': {

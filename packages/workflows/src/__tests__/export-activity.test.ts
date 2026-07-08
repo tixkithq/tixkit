@@ -23,10 +23,16 @@ async function recordPerformanceMetric(metric: string, value: number): Promise<v
   await writeFile(target, `${JSON.stringify(existing, null, 2)}\n`);
 }
 
+const temporalState = vi.hoisted(() => ({
+  workflowStart: vi.fn(async () => undefined),
+}));
+
 // Mock @temporalio/client so notification workflow start doesn't try to connect.
 vi.mock('@temporalio/client', () => ({
-  Connection: { connect: vi.fn() },
-  Client: vi.fn(),
+  Connection: { connect: vi.fn(async () => ({ close: vi.fn() })) },
+  Client: vi.fn(function Client() {
+    return { workflow: { start: temporalState.workflowStart } };
+  }),
 }));
 
 const s3Mock = vi.hoisted(() => {
@@ -123,11 +129,19 @@ const dbState = vi.hoisted(() => ({
     file_url: null,
     completed_at: null,
   } as Record<string, unknown>,
+  event: {
+    id: 'evt_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+    brand_id: 'brd_1',
+  } as Record<string, unknown> | null,
   updateCalls: [] as Record<string, unknown>[],
   user: { email: 'admin@test.com', tenant_id: 'tnt_1' } as Record<string, unknown> | null,
   providerRoute: { id: 'epr_1', brand_id: 'brd_1' } as Record<string, unknown> | null,
   templateVersion: { id: 'ntv_1' } as Record<string, unknown> | null,
+  existingJob: undefined as Record<string, unknown> | undefined,
   createdJobs: [] as Record<string, unknown>[],
+  updatedJobs: [] as Array<{ id: string; input: Record<string, unknown> }>,
   emailJobCreateError: null as Error | null,
   exportEvents: [] as Record<string, unknown>[],
   scanLogSelects: [] as unknown[][],
@@ -167,7 +181,24 @@ const dbState = vi.hoisted(() => ({
       buyer_last_name: 'Lovelace',
       paid_at: new Date('2026-06-01'),
       tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
       event_id: 'evt_1',
+      created_at: new Date('2026-06-01'),
+    },
+  ] as Record<string, unknown>[],
+  tickets: [
+    {
+      id: 'tkt_1',
+      code: 'TIX-1',
+      tenant_id: 'tnt_1',
+      event_id: 'evt_1',
+      order_id: 'ord_1',
+      attendee_id: 'att_1',
+      ticket_type_id: 'tt_1',
+      status: 'active',
+      transferred_to_email: null,
+      checked_in_at: null,
       created_at: new Date('2026-06-01'),
     },
   ] as Record<string, unknown>[],
@@ -197,10 +228,22 @@ vi.mock('@tixkit/db', () => {
       dbState.createdJobs.push(input);
       return { id: 'emj_1', status: 'pending', ...input };
     }
+    async findByIdempotencyKey() {
+      return dbState.existingJob;
+    }
+    async update(id: string, input: Record<string, unknown>) {
+      dbState.updatedJobs.push({ id, input });
+      if (dbState.existingJob?.id === id) {
+        Object.assign(dbState.existingJob, input);
+        return dbState.existingJob;
+      }
+      return { id, ...input };
+    }
   }
 
   function createQuery(table: string) {
     const conditions: Array<{ column: string; op: string; value: unknown }> = [];
+    const joins: string[] = [];
     let selectedColumns: unknown[] | null = null;
     const orderBys: Array<{ column: string; direction: string }> = [];
     let rowLimit: number | null = null;
@@ -210,10 +253,18 @@ vi.mock('@tixkit/db', () => {
         const column = condition.column.includes('.')
           ? condition.column.split('.').at(-1)!
           : condition.column;
-        const actual =
+        let actual =
           condition.column === 'check_in_lists.event_id'
             ? (row.check_in_list_event_id ?? row.event_id)
-            : row[column];
+            : Object.prototype.hasOwnProperty.call(row, condition.column)
+              ? row[condition.column]
+              : row[column];
+        if (actual === undefined && condition.column === 'organization_id' && table === 'orders') {
+          actual = dbState.event?.organization_id;
+        }
+        if (actual === undefined && condition.column === 'brand_id' && table === 'orders') {
+          actual = dbState.event?.brand_id;
+        }
         if (condition.op === '=') return actual === condition.value;
         if (condition.op === 'in' && Array.isArray(condition.value)) {
           return condition.value.includes(actual);
@@ -235,8 +286,33 @@ vi.mock('@tixkit/db', () => {
       const end = rowLimit == null ? undefined : start + rowLimit;
       return rows.slice(start, end);
     };
+    const withJoinedOrder = (row: Record<string, unknown>) => {
+      if (!joins.includes('orders')) return row;
+      const order = dbState.orders.find((candidate) => candidate.id === row.order_id) ?? {
+        tenant_id: row.tenant_id,
+        organization_id: dbState.event?.organization_id,
+        brand_id: dbState.event?.brand_id,
+      };
+      return {
+        ...row,
+        ...Object.fromEntries(
+          Object.entries(order).map(([key, value]) => [`orders.${key}`, value]),
+        ),
+      };
+    };
+    const withJoinedEvent = (row: Record<string, unknown>) => {
+      if (!joins.includes('events')) return row;
+      if (!dbState.event) return row;
+      return {
+        ...row,
+        ...Object.fromEntries(
+          Object.entries(dbState.event).map(([key, value]) => [`events.${key}`, value]),
+        ),
+      };
+    };
     const query = {
-      innerJoin() {
+      innerJoin(joinTable: string) {
+        joins.push(joinTable);
         return query;
       },
       select(columns: unknown[]) {
@@ -268,6 +344,7 @@ vi.mock('@tixkit/db', () => {
       },
       async executeTakeFirst() {
         if (table === 'export_jobs') return dbState.exportJob;
+        if (table === 'events') return dbState.event;
         if (table === 'user_profiles') return dbState.user;
         if (table === 'email_provider_routes') return dbState.providerRoute;
         if (table === 'notification_templates as template') return dbState.templateVersion;
@@ -275,6 +352,7 @@ vi.mock('@tixkit/db', () => {
       },
       async executeTakeFirstOrThrow() {
         if (table === 'export_jobs') return dbState.exportJob;
+        if (table === 'events' && dbState.event) return dbState.event;
         if (table === 'user_profiles') return dbState.user;
         if (table === 'email_provider_routes') return dbState.providerRoute;
         if (table === 'notification_templates as template') return dbState.templateVersion;
@@ -282,29 +360,32 @@ vi.mock('@tixkit/db', () => {
       },
       async execute() {
         if (table === 'attendees')
-          return applyQueryWindow(dbState.attendees.filter(matchesConditions));
+          return applyQueryWindow(dbState.attendees.map(withJoinedOrder).filter(matchesConditions));
         if (table === 'orders') return applyQueryWindow(dbState.orders.filter(matchesConditions));
         if (table === 'questions') return dbState.questions;
         if (table === 'scan_logs') {
           // eslint-disable-next-line unicorn/no-array-sort -- this sorts the filtered copy and keeps compatibility with the package TS target.
           const rows = applyQueryWindow(
-            dbState.scanLogs.filter(matchesConditions).sort((a, b) => {
-              for (const orderBy of orderBys) {
-                const column = orderBy.column.includes('.')
-                  ? orderBy.column.split('.').at(-1)!
-                  : orderBy.column;
-                const aValue = a[column];
-                const bValue = b[column];
-                const aComparable =
-                  aValue instanceof Date ? aValue.getTime() : String(aValue ?? '');
-                const bComparable =
-                  bValue instanceof Date ? bValue.getTime() : String(bValue ?? '');
-                if (aComparable === bComparable) continue;
-                const direction = orderBy.direction === 'desc' ? -1 : 1;
-                return aComparable > bComparable ? direction : -direction;
-              }
-              return 0;
-            }),
+            dbState.scanLogs
+              .map(withJoinedEvent)
+              .filter(matchesConditions)
+              .sort((a, b) => {
+                for (const orderBy of orderBys) {
+                  const column = orderBy.column.includes('.')
+                    ? orderBy.column.split('.').at(-1)!
+                    : orderBy.column;
+                  const aValue = a[column];
+                  const bValue = b[column];
+                  const aComparable =
+                    aValue instanceof Date ? aValue.getTime() : String(aValue ?? '');
+                  const bComparable =
+                    bValue instanceof Date ? bValue.getTime() : String(bValue ?? '');
+                  if (aComparable === bComparable) continue;
+                  const direction = orderBy.direction === 'desc' ? -1 : 1;
+                  return aComparable > bComparable ? direction : -direction;
+                }
+                return 0;
+              }),
           );
 
           if (!selectedColumns) return rows;
@@ -321,17 +402,7 @@ vi.mock('@tixkit/db', () => {
           );
         }
         if (table === 'tickets') {
-          return applyQueryWindow(
-            [
-              {
-                id: 'tkt_1',
-                tenant_id: 'tnt_1',
-                event_id: 'evt_1',
-                attendee_id: 'att_1',
-                status: 'checked_in',
-              },
-            ].filter(matchesConditions),
-          );
+          return applyQueryWindow(dbState.tickets.map(withJoinedOrder).filter(matchesConditions));
         }
         return [];
       },
@@ -400,6 +471,12 @@ describe('generateExportActivity', () => {
       file_url: null,
       completed_at: null,
     };
+    dbState.event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+    };
     dbState.updateCalls = [];
     dbState.exportEvents = [];
     dbState.questions = [];
@@ -452,7 +529,24 @@ describe('generateExportActivity', () => {
         buyer_last_name: 'Lovelace',
         paid_at: new Date('2026-06-01'),
         tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
         event_id: 'evt_1',
+        created_at: new Date('2026-06-01'),
+      },
+    ];
+    dbState.tickets = [
+      {
+        id: 'tkt_1',
+        code: 'TIX-1',
+        tenant_id: 'tnt_1',
+        event_id: 'evt_1',
+        order_id: 'ord_1',
+        attendee_id: 'att_1',
+        ticket_type_id: 'tt_1',
+        status: 'active',
+        transferred_to_email: null,
+        checked_in_at: null,
         created_at: new Date('2026-06-01'),
       },
     ];
@@ -489,6 +583,132 @@ describe('generateExportActivity', () => {
       export_job_id: 'exp_1',
       status: 'processing',
     });
+  });
+
+  it('excludes same-event attendee rows outside the event organization and brand scope', async () => {
+    dbState.attendees.push({
+      id: 'att_wrong_scope',
+      first_name: 'Mallory',
+      last_name: 'Mismatch',
+      email: 'mallory@test.com',
+      phone: '+15550000002',
+      status: 'registered',
+      tenant_id: 'tnt_1',
+      event_id: 'evt_1',
+      order_id: 'ord_wrong_scope',
+      ticket_type_id: 'tt_1',
+      custom_answers: null,
+      checked_in_at: null,
+      created_at: new Date('2026-06-01'),
+    });
+    dbState.orders.push({
+      ...dbState.orders[0],
+      id: 'ord_wrong_scope',
+      order_number: 'TK-1002',
+      organization_id: 'org_other',
+      brand_id: 'brd_other',
+      buyer_email: 'wrong-scope-buyer@test.com',
+    });
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'attendees',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowCount).toBe(1);
+      expect(result.value.data).toContain('ada@test.com');
+      expect(result.value.data).not.toContain('mallory@test.com');
+    }
+  });
+
+  it('excludes same-event order, sales, and tax rows outside the event organization and brand scope', async () => {
+    dbState.orders.push({
+      ...dbState.orders[0],
+      id: 'ord_wrong_scope',
+      order_number: 'TK-1002',
+      organization_id: 'org_other',
+      brand_id: 'brd_other',
+      buyer_email: 'wrong-scope-buyer@test.com',
+    });
+
+    for (const type of ['orders', 'sales', 'tax']) {
+      dbState.exportJob = { ...dbState.exportJob, type };
+      const result = await generateExportActivity({
+        exportId: 'exp_1',
+        type,
+        format: 'csv',
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.rowCount).toBe(1);
+        expect(result.value.data).toContain('TK-1001');
+        expect(result.value.data).not.toContain('TK-1002');
+        expect(result.value.data).not.toContain('wrong-scope-buyer@test.com');
+      }
+    }
+  });
+
+  it('excludes same-event ticket rows outside the event organization and brand scope', async () => {
+    dbState.orders.push({
+      ...dbState.orders[0],
+      id: 'ord_wrong_scope',
+      order_number: 'TK-1002',
+      organization_id: 'org_1',
+      brand_id: 'brd_other',
+    });
+    dbState.tickets.push({
+      ...dbState.tickets[0],
+      id: 'tkt_wrong_scope',
+      code: 'TIX-WRONG',
+      order_id: 'ord_wrong_scope',
+      attendee_id: 'att_wrong_scope',
+    });
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'tickets',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowCount).toBe(1);
+      expect(result.value.data).toContain('TIX-1');
+      expect(result.value.data).not.toContain('TIX-WRONG');
+    }
+  });
+
+  it('excludes scan logs when the check-in list event does not match the export event scope', async () => {
+    dbState.scanLogs.push({
+      id: 'slog_wrong_event',
+      check_in_list_id: 'cil_wrong',
+      device_id: 'scanner_2',
+      ticket_id: 'tkt_wrong_scope',
+      qr_hash: 'hash_wrong',
+      outcome: 'accepted',
+      offline: false,
+      tenant_id: 'tnt_1',
+      check_in_list_event_id: 'evt_other',
+      scanned_at: new Date('2026-06-01T12:01:00Z'),
+      created_at: new Date('2026-06-01T12:01:01Z'),
+    });
+
+    const result = await generateExportActivity({
+      exportId: 'exp_1',
+      type: 'scan_logs',
+      format: 'csv',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rowCount).toBe(1);
+      expect(result.value.data).toContain('hash_1');
+      expect(result.value.data).not.toContain('hash_wrong');
+    }
   });
 });
 
@@ -810,7 +1030,11 @@ describe('notifyExportCompleteActivity', () => {
     dbState.providerRoute = { id: 'epr_1', brand_id: 'brd_1' };
     dbState.templateVersion = { id: 'ntv_1' };
     dbState.createdJobs = [];
+    dbState.updatedJobs = [];
+    dbState.existingJob = undefined;
     dbState.emailJobCreateError = null;
+    temporalState.workflowStart.mockReset();
+    temporalState.workflowStart.mockResolvedValue(undefined);
   });
 
   it('updates export job status to completed and sets file_url', async () => {
@@ -910,9 +1134,13 @@ describe('notifyExportCompleteActivity', () => {
       downloadUrl: '/v1/exports/exp_1/download',
     });
     expect(dbState.createdJobs[0].variables).not.toHaveProperty('fileUrl');
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_1',
+      input: { status: 'queued', workflow_id: 'notification:emj_1' },
+    });
   });
 
-  it('keeps the completed export when notification job queueing fails', async () => {
+  it('keeps the completed export and reports retryable notification failure when queueing fails', async () => {
     dbState.emailJobCreateError = new Error('email job database unavailable');
 
     const result = await notifyExportCompleteActivity({
@@ -922,7 +1150,11 @@ describe('notifyExportCompleteActivity', () => {
       tenantId: 'tnt_1',
     });
 
-    expect(result).toMatchObject({ ok: true, value: { notified: false } });
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EXPORT_NOTIFICATION_FAILED',
+      retryable: true,
+    });
     expect(dbState.updateCalls).toContainEqual(
       expect.objectContaining({
         table: 'export_jobs',
@@ -938,6 +1170,63 @@ describe('notifyExportCompleteActivity', () => {
       }),
     );
     expect(dbState.createdJobs).toHaveLength(0);
+  });
+
+  it('marks the export email job start_failed when Temporal rejects the handoff', async () => {
+    temporalState.workflowStart.mockRejectedValue(new Error('Temporal unavailable'));
+
+    const result = await notifyExportCompleteActivity({
+      exportId: 'exp_1',
+      fileUrl: 'https://bucket.s3.amazonaws.com/exports/exp_1.csv',
+      requestedBy: 'usr_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EXPORT_NOTIFICATION_FAILED',
+      retryable: true,
+    });
+    expect(dbState.createdJobs).toHaveLength(1);
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_1',
+      input: { status: 'start_failed', workflow_id: null },
+    });
+  });
+
+  it('restarts an existing queued export email with no durable workflow id', async () => {
+    dbState.existingJob = {
+      id: 'emj_existing',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      template_key: 'staff-order-notification',
+      template_version_id: 'ntv_1',
+      to_email: 'admin@test.com',
+      to_name: null,
+      variables: JSON.stringify({ notificationType: 'staff', exportId: 'exp_1' }),
+      provider_route_id: 'epr_1',
+      status: 'queued',
+      workflow_id: null,
+      scheduled_at: null,
+    };
+
+    const result = await notifyExportCompleteActivity({
+      exportId: 'exp_1',
+      fileUrl: 'https://bucket.s3.amazonaws.com/exports/exp_1.csv',
+      requestedBy: 'usr_1',
+      tenantId: 'tnt_1',
+    });
+
+    expect(result).toEqual({ ok: true, value: { notified: true } });
+    expect(dbState.createdJobs).toHaveLength(0);
+    expect(temporalState.workflowStart).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ workflowId: 'notification:emj_existing' }),
+    );
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_existing',
+      input: { status: 'queued', workflow_id: 'notification:emj_existing' },
+    });
   });
 
   it('still marks export as completed when no user email is found', async () => {
@@ -1363,6 +1652,28 @@ describe('T30 export content validation - checkout question answers', () => {
     };
     dbState.updateCalls = [];
     dbState.exportEvents = [];
+    dbState.event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+    };
+    dbState.orders = [
+      {
+        id: 'ord_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+      },
+      {
+        id: 'ord_2',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+      },
+    ];
     dbState.questions = [
       {
         id: 'q_company',
@@ -1520,6 +1831,35 @@ describe('T30 export content validation - consent field data', () => {
     };
     dbState.updateCalls = [];
     dbState.exportEvents = [];
+    dbState.event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+    };
+    dbState.orders = [
+      {
+        id: 'ord_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+      },
+      {
+        id: 'ord_2',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+      },
+      {
+        id: 'ord_3',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+      },
+    ];
     dbState.questions = [
       {
         id: 'q_marketing',
@@ -1915,6 +2255,21 @@ describe('T30 export failure recovery', () => {
     };
     dbState.updateCalls = [];
     dbState.exportEvents = [];
+    dbState.event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+    };
+    dbState.orders = [
+      {
+        id: 'ord_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        event_id: 'evt_1',
+      },
+    ];
     dbState.questions = [];
     dbState.attendees = [
       {

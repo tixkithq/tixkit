@@ -89,6 +89,45 @@ type PaymentReconciliationResult = {
   webhookEvent?: ReconciledOrderWebhookEvent;
 };
 
+type ProviderEventRecoveryItem =
+  | {
+      id: string;
+      provider: 'stripe';
+      providerEventId: string;
+      eventType: string;
+      recoveryAttempts: number;
+      workflow: 'payment_reconciliation';
+      input: {
+        providerEventId: string;
+        provider: string;
+        eventType: string;
+        data: Record<string, unknown>;
+      };
+    }
+  | {
+      id: string;
+      provider: 'clerk';
+      providerEventId: string;
+      eventType: string;
+      recoveryAttempts: number;
+      workflow: 'clerk_identity_sync';
+      input: {
+        providerEventId: string;
+        eventType: string;
+        clerkUserId?: string;
+        clerkOrgId?: string;
+        email?: string;
+        firstName?: string;
+        lastName?: string;
+        avatarUrl?: string;
+        orgName?: string;
+      };
+    };
+
+type PaymentEventRecoveryRow = Awaited<
+  ReturnType<PaymentEventRepository['claimUnprocessedForRecovery']>
+>[number];
+
 function orderWebhookEvent(
   order: ReconciledOrderContext,
   eventType: 'order.paid' | 'order.refunded' | 'order.disputed',
@@ -114,6 +153,7 @@ export async function reconcilePaymentActivity(input: {
   provider: string;
   eventType: string;
   data: Record<string, unknown>;
+  trustedCheckoutSessionId?: string;
 }): Promise<WorkflowActivityResult<PaymentReconciliationResult>> {
   const db = getActivityDb();
   try {
@@ -144,7 +184,11 @@ export async function reconcilePaymentActivity(input: {
       if (successfulPaymentEvent) {
         const metadata = stringRecord(paymentIntent.metadata);
         const checkoutSessionId = metadata?.checkoutSessionId;
-        if (!checkoutSessionId) {
+        if (
+          !checkoutSessionId ||
+          input.trustedCheckoutSessionId === undefined ||
+          input.trustedCheckoutSessionId !== checkoutSessionId
+        ) {
           return errResult(
             'PAYMENT_INTENT_NOT_FOUND',
             `No local payment intent found for successful provider event ${input.providerEventId}`,
@@ -304,6 +348,77 @@ function sumSucceededRefunds(
     (sum, refund) => (refund.status === 'succeeded' ? sum + Number(refund.amount_cents) : sum),
     0,
   );
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function buildProviderEventRecoveryItem(
+  row: PaymentEventRecoveryRow,
+): ProviderEventRecoveryItem | undefined {
+  const rawPayload = parseJsonRecord(row.raw_payload);
+  if (!rawPayload) return undefined;
+
+  if (row.provider === 'stripe') {
+    const data = parseJsonRecord((rawPayload.data as { object?: unknown } | undefined)?.object);
+    if (!data) return undefined;
+    return {
+      id: row.id,
+      provider: 'stripe',
+      providerEventId: row.provider_event_id,
+      eventType: row.event_type,
+      recoveryAttempts: Number(row.recovery_attempts),
+      workflow: 'payment_reconciliation',
+      input: {
+        providerEventId: row.provider_event_id,
+        provider: 'stripe',
+        eventType: row.event_type,
+        data,
+      },
+    };
+  }
+
+  if (row.provider === 'clerk') {
+    const data = parseJsonRecord(rawPayload.data);
+    if (!data) return undefined;
+    const isOrgEvent = row.event_type.startsWith('organization');
+    const emailAddresses = Array.isArray(data.email_addresses) ? data.email_addresses : [];
+    const firstEmail = parseJsonRecord(emailAddresses[0]);
+    return {
+      id: row.id,
+      provider: 'clerk',
+      providerEventId: row.provider_event_id,
+      eventType: row.event_type,
+      recoveryAttempts: Number(row.recovery_attempts),
+      workflow: 'clerk_identity_sync',
+      input: {
+        providerEventId: row.provider_event_id,
+        eventType: row.event_type,
+        clerkUserId: isOrgEvent ? undefined : typeof data.id === 'string' ? data.id : undefined,
+        email: typeof firstEmail?.email_address === 'string' ? firstEmail.email_address : undefined,
+        firstName: typeof data.first_name === 'string' ? data.first_name : undefined,
+        lastName: typeof data.last_name === 'string' ? data.last_name : undefined,
+        avatarUrl: typeof data.image_url === 'string' ? data.image_url : undefined,
+        clerkOrgId: isOrgEvent && typeof data.id === 'string' ? data.id : undefined,
+        orgName: isOrgEvent && typeof data.name === 'string' ? data.name : undefined,
+      },
+    };
+  }
+
+  return undefined;
+}
+
+function recoveryBackoff(attempts: number): number {
+  return Math.min(60 * 60 * 1000, Math.max(60_000, 2 ** Math.min(attempts, 6) * 30_000));
 }
 
 async function updateRefundReconciliationState(
@@ -539,6 +654,10 @@ export async function reconcileRefundActivity(input: {
 
     const allRefunds = await refundRepo.findByOrder(order.id);
     const newRefunded = Math.min(Number(order.total_cents), sumSucceededRefunds(allRefunds));
+    const materialStateTransition =
+      newRefunded !== Number(order.refunded_cents) ||
+      (newRefunded >= Number(order.total_cents) ? 'refunded' : 'partially_refunded') !==
+        order.status;
     const newStatus = await updateRefundReconciliationState(db, orderRepo, order, newRefunded);
     if (createdRefund) {
       await applySucceededRefundSideEffects({
@@ -559,7 +678,9 @@ export async function reconcileRefundActivity(input: {
     return okResult({
       orderId: order.id,
       status: newStatus,
-      webhookEvent: orderWebhookEvent(order, 'order.refunded'),
+      ...(createdRefund || materialStateTransition
+        ? { webhookEvent: orderWebhookEvent(order, 'order.refunded') }
+        : {}),
     });
   } catch (err) {
     return errResult(
@@ -638,6 +759,104 @@ export async function emitDomainEventActivity(input: {
   // is handled at the workflow orchestration layer.
   void input;
   return okResult({ emitted: true });
+}
+
+export async function claimUnprocessedProviderEventsActivity(input: {
+  ownerId: string;
+  limit?: number;
+  leaseMs?: number;
+}): Promise<WorkflowActivityResult<{ events: ProviderEventRecoveryItem[] }>> {
+  const db = getActivityDb();
+  try {
+    const eventRepo = new PaymentEventRepository(db);
+    const now = new Date();
+    const rows = await eventRepo.claimUnprocessedForRecovery({
+      ownerId: input.ownerId,
+      limit: input.limit ?? 25,
+      leaseUntil: new Date(now.getTime() + (input.leaseMs ?? 5 * 60_000)),
+      now,
+    });
+    const events: ProviderEventRecoveryItem[] = [];
+    for (const row of rows) {
+      const item = buildProviderEventRecoveryItem(row);
+      if (item) {
+        events.push(item);
+      } else {
+        // eslint-disable-next-line no-await-in-loop -- unsupported claimed rows must be released individually.
+        await eventRepo.markRecoveryFailed({
+          id: row.id,
+          ownerId: input.ownerId,
+          retryable: false,
+          message: `Provider event ${row.provider}:${row.provider_event_id} cannot be recovered automatically`,
+          now,
+        });
+      }
+    }
+    return okResult({ events });
+  } catch (err) {
+    return errResult(
+      'PROVIDER_EVENT_RECOVERY_CLAIM_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  }
+}
+
+export async function markProviderEventRecoveryDispatchedActivity(input: {
+  id: string;
+  ownerId: string;
+  recoveryAttempts: number;
+}): Promise<WorkflowActivityResult<{ dispatched: boolean }>> {
+  const db = getActivityDb();
+  try {
+    const eventRepo = new PaymentEventRepository(db);
+    const now = new Date();
+    await eventRepo.markRecoveryDispatched({
+      id: input.id,
+      ownerId: input.ownerId,
+      nextRecoveryAt: new Date(now.getTime() + recoveryBackoff(input.recoveryAttempts)),
+      now,
+    });
+    return okResult({ dispatched: true });
+  } catch (err) {
+    return errResult(
+      'PROVIDER_EVENT_RECOVERY_DISPATCH_MARK_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  }
+}
+
+export async function markProviderEventRecoveryFailedActivity(input: {
+  id: string;
+  ownerId: string;
+  recoveryAttempts: number;
+  message: string;
+  retryable?: boolean;
+}): Promise<WorkflowActivityResult<{ failed: boolean }>> {
+  const db = getActivityDb();
+  try {
+    const eventRepo = new PaymentEventRepository(db);
+    const now = new Date();
+    const retryable = input.retryable ?? true;
+    await eventRepo.markRecoveryFailed({
+      id: input.id,
+      ownerId: input.ownerId,
+      retryable,
+      message: input.message,
+      nextRecoveryAt: retryable
+        ? new Date(now.getTime() + recoveryBackoff(input.recoveryAttempts))
+        : undefined,
+      now,
+    });
+    return okResult({ failed: true });
+  } catch (err) {
+    return errResult(
+      'PROVIDER_EVENT_RECOVERY_FAILURE_MARK_FAILED',
+      err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  }
 }
 
 export async function markProviderEventProcessedActivity(input: {

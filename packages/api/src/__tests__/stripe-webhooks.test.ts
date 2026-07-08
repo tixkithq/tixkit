@@ -28,6 +28,13 @@ type PaymentEventRow = {
   raw_payload: string;
   processed_at: Date | null;
   idempotency_key: string;
+  recovery_status?: string;
+  recovery_attempts?: number;
+  recovery_owner?: string | null;
+  recovery_claimed_until?: Date | null;
+  next_recovery_at?: Date | null;
+  last_recovery_error?: string | null;
+  recovery_updated_at?: Date | null;
   created_at: Date;
 };
 
@@ -368,6 +375,7 @@ describe('Stripe webhook route', () => {
         status: 'succeeded',
         metadata: { checkoutSessionId: 'cs_1' },
       },
+      trustedCheckoutSessionId: 'cs_1',
     });
     expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledWith('cs_1', 'pi_stripe_1');
 
@@ -731,13 +739,19 @@ describe('Stripe webhook route', () => {
       'signal:payment-succeeded',
       'start:payment-reconciliation',
     ]);
-    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
+    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledWith({
+      providerEventId: 'evt_stripe_1',
+      provider: 'stripe',
+      eventType: 'payment_intent.succeeded',
+      data: expect.objectContaining({ id: 'pi_stripe_1' }),
+      trustedCheckoutSessionId: 'cs_1',
+    });
     expect(temporalClient.signalPaymentSucceeded).toHaveBeenCalledOnce();
 
     await app.close();
   });
 
-  it('starts reconciliation but does not signal when metadata checkout session points at a mismatched payment intent', async () => {
+  it('starts reconciliation without trusted checkout metadata when metadata points at a mismatched payment intent', async () => {
     const state: StripeWebhookTestState = {
       events: [],
       checkoutSession: { id: 'cs_1', tenant_id: 'tnt_1' },
@@ -774,7 +788,15 @@ describe('Stripe webhook route', () => {
     expect(res.json()).toEqual({ received: true, duplicate: false });
     expect(state.operations).toEqual(['insert:payment_events', 'start:payment-reconciliation']);
     expect(state.events[0]?.processed_at).toBeNull();
-    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledOnce();
+    expect(temporalClient.startPaymentReconciliation).toHaveBeenCalledWith({
+      providerEventId: 'evt_stripe_1',
+      provider: 'stripe',
+      eventType: 'payment_intent.succeeded',
+      data: expect.objectContaining({
+        id: 'pi_stripe_1',
+        metadata: { checkoutSessionId: 'cs_1' },
+      }),
+    });
     expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();
 
     await app.close();

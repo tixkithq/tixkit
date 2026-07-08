@@ -239,6 +239,7 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
     reply.header('Content-Type', contentType);
     reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
     return reply.send(stream);
   });
 
@@ -248,6 +249,7 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
     reply.header('Content-Type', contentType);
     reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
     return reply.send(stream);
   });
 };

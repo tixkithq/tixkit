@@ -97,6 +97,8 @@ type MessageConsentPrivacyRow = {
   created_at: Date;
 };
 
+const PRIVACY_REQUEST_AUDIT_RESOURCE_TYPES = ['privacy_request', 'PrivacyRequest'] as const;
+
 function isErasedPrivacyEmail(value: string | null | undefined): boolean {
   return /^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/.test(value ?? '');
 }
@@ -908,7 +910,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
       }),
     })
     .where('tenant_id', '=', request.tenant_id)
-    .where('resource_type', '=', 'privacy_request')
+    .where('resource_type', 'in', [...PRIVACY_REQUEST_AUDIT_RESOURCE_TYPES])
     .where('resource_id', '=', request.id)
     .execute();
 

@@ -34,6 +34,7 @@ function buildPrivacyRetentionIds(suffix: string) {
     ticketId: `tkt_priv_${suffix}`,
     invoiceId: `inv_priv_${suffix}`,
     auditLogId: `aud_priv_${suffix}`,
+    apiAuditLogId: `aud_priv_api_${suffix}`,
     requestId: `prv_priv_${suffix}`,
     otherOrganizationId: `org_priv_other_${suffix}`,
     otherBrandId: `brd_priv_other_${suffix}`,
@@ -629,19 +630,38 @@ async function seedPrivacyRetentionFixture(db: Database, ids: FixtureIds, suffix
     .execute();
   await db
     .insertInto('audit_logs')
-    .values({
-      id: ids.auditLogId,
-      tenant_id: ids.tenantId,
-      actor_type: 'user',
-      actor_id: 'usr_privacy',
-      action: 'privacy.erasure.requested',
-      resource_type: 'privacy_request',
-      resource_id: ids.requestId,
-      diff_summary: JSON.stringify({ subjectEmail: 'buyer@test.com' }),
-      ip: '127.0.0.1',
-      user_agent: 'vitest',
-      created_at: now,
-    })
+    .values([
+      {
+        id: ids.auditLogId,
+        tenant_id: ids.tenantId,
+        actor_type: 'user',
+        actor_id: 'usr_privacy',
+        action: 'privacy.erasure.requested',
+        resource_type: 'privacy_request',
+        resource_id: ids.requestId,
+        diff_summary: JSON.stringify({ subjectEmail: 'buyer@test.com' }),
+        ip: '127.0.0.1',
+        user_agent: 'vitest',
+        created_at: now,
+      },
+      {
+        id: ids.apiAuditLogId,
+        tenant_id: ids.tenantId,
+        actor_type: 'user',
+        actor_id: 'usr_privacy',
+        action: 'privacy.erasure.requested',
+        resource_type: 'PrivacyRequest',
+        resource_id: ids.requestId,
+        diff_summary: JSON.stringify({
+          subjectType: 'buyer',
+          subjectId: null,
+          subjectEmail: 'buyer@test.com',
+        }),
+        ip: '127.0.0.1',
+        user_agent: 'vitest',
+        created_at: now,
+      },
+    ])
     .execute();
   await db
     .insertInto('privacy_requests')
@@ -665,7 +685,10 @@ async function seedPrivacyRetentionFixture(db: Database, ids: FixtureIds, suffix
 }
 
 async function cleanupPrivacyRetentionFixture(db: Database, ids: FixtureIds) {
-  await db.deleteFrom('audit_logs').where('id', '=', ids.auditLogId).execute();
+  await db
+    .deleteFrom('audit_logs')
+    .where('id', 'in', [ids.auditLogId, ids.apiAuditLogId])
+    .execute();
   await db.deleteFrom('privacy_requests').where('id', '=', ids.requestId).execute();
   await db.deleteFrom('tickets').where('id', 'in', [ids.ticketId, ids.otherTicketId]).execute();
   await db
@@ -752,6 +775,7 @@ describe.sequential.each(driverCases)(
         invoice,
         checkoutSession,
         auditLog,
+        apiAuditLog,
         privacyRequest,
         waitlistEntry,
         otherOrder,
@@ -791,6 +815,11 @@ describe.sequential.each(driverCases)(
           .selectFrom('audit_logs')
           .selectAll()
           .where('id', '=', ids.auditLogId)
+          .executeTakeFirstOrThrow(),
+        db
+          .selectFrom('audit_logs')
+          .selectAll()
+          .where('id', '=', ids.apiAuditLogId)
           .executeTakeFirstOrThrow(),
         db
           .selectFrom('privacy_requests')
@@ -904,6 +933,19 @@ describe.sequential.each(driverCases)(
         subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
       });
       expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
+      expect(apiAuditLog).toMatchObject({
+        id: ids.apiAuditLogId,
+        tenant_id: ids.tenantId,
+        organization_id: null,
+        action: 'privacy.erasure.requested',
+        resource_type: 'PrivacyRequest',
+        resource_id: ids.requestId,
+      });
+      const apiAuditSummary = parseJsonColumn(apiAuditLog.diff_summary);
+      expect(apiAuditSummary).toMatchObject({
+        subjectEmail: expect.stringMatching(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/),
+      });
+      expect(JSON.stringify(apiAuditLog)).not.toContain('buyer@test.com');
 
       expect(privacyRequest).toMatchObject({
         id: ids.requestId,

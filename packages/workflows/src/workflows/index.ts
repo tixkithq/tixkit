@@ -2,6 +2,7 @@ export * from './checkout.js';
 export * from './notification.js';
 export * from './webhook-delivery.js';
 export * from './hold-expiration.js';
+export * from './provider-event-recovery.js';
 export * from './refund.js';
 export * from './export.js';
 export * from './clerk-identity-sync.js';

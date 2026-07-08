@@ -1563,6 +1563,7 @@ describe('upload artifact routes', () => {
     expect(res.headers['content-disposition']).toContain('hero.png');
     expect(res.headers['cache-control']).toContain('max-age=31536000');
     expect(res.headers['cache-control']).toContain('immutable');
+    expect(res.headers['cross-origin-resource-policy']).toBe('cross-origin');
     await app.close();
   });
 
@@ -1602,6 +1603,7 @@ describe('upload artifact routes', () => {
     expect(res.headers['content-disposition']).toContain('logo.png');
     expect(res.headers['cache-control']).toContain('max-age=31536000');
     expect(res.headers['cache-control']).toContain('immutable');
+    expect(res.headers['cross-origin-resource-policy']).toBe('cross-origin');
     await app.close();
   });
 

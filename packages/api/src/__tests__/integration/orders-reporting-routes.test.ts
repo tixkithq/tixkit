@@ -614,6 +614,8 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
       'orders.write',
       'refunds.write',
       'reports.read',
+      'attendees.read',
+      'checkins.read',
       'events.read',
       'events.write',
     ],
@@ -2393,12 +2395,75 @@ describe('reporting routes', () => {
     await app.close();
   });
 
+  it.each([
+    ['attendees', 'attendees.read'],
+    ['orders', 'orders.read'],
+    ['sales', 'orders.read'],
+    ['tax', 'orders.read'],
+    ['tickets', 'checkins.read'],
+    ['scan_logs', 'checkins.read'],
+  ])(
+    'POST /exports rejects %s exports when the principal only has reports.read',
+    async (type, requiredPermission) => {
+      const principal = makePrincipal({
+        scopes: ['reports.read'],
+      });
+      const app = await setupApp(reportingRoutes, principal);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/exports',
+        headers: { 'idempotency-key': `export-key-missing-${type}-permission` },
+        payload: { eventId: 'evt_1', type, format: 'csv' },
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.json().message).toContain(`Missing required permission: ${requiredPermission}`);
+      expect(dbState.exportJobs).toHaveLength(0);
+      expect(dbState.exportEvents).toHaveLength(0);
+      expect(dbState.startExportCalled).toBe(false);
+      await app.close();
+    },
+  );
+
+  it.each([
+    ['attendees', 'attendees.read'],
+    ['orders', 'orders.read'],
+    ['sales', 'orders.read'],
+    ['tax', 'orders.read'],
+    ['tickets', 'checkins.read'],
+    ['scan_logs', 'checkins.read'],
+  ])(
+    'POST /exports allows %s exports with the type-specific read permission',
+    async (type, permission) => {
+      const principal = makePrincipal({
+        scopes: ['reports.read', permission as Principal['scopes'][number]],
+      });
+      const app = await setupApp(reportingRoutes, principal);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/exports',
+        headers: { 'idempotency-key': `export-key-allowed-${type}` },
+        payload: { eventId: 'evt_1', type, format: 'csv' },
+      });
+
+      expect(res.statusCode).toBe(202);
+      expect(dbState.exportJobs).toHaveLength(1);
+      expect(dbState.exportJobs[0]).toMatchObject({
+        tenant_id: 'tnt_1',
+        event_id: 'evt_1',
+        type,
+      });
+      expect(dbState.startExportCalled).toBe(true);
+      await app.close();
+    },
+  );
+
   it('POST /exports rejects tenant-wide export creation for event-scoped API keys', async () => {
     const principal = makePrincipal({
       type: 'api_key',
       id: 'ak_event_scoped',
       eventIds: ['evt_1'],
-      scopes: ['reports.read'],
+      scopes: ['reports.read', 'attendees.read'],
     });
     const app = await setupApp(reportingRoutes, principal);
     const res = await app.inject({
@@ -2420,7 +2485,7 @@ describe('reporting routes', () => {
       type: 'api_key',
       id: 'ak_brand_scoped',
       brandIds: ['brd_1'],
-      scopes: ['reports.read'],
+      scopes: ['reports.read', 'orders.read'],
     });
     const app = await setupApp(reportingRoutes, principal);
     const res = await app.inject({

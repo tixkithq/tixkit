@@ -21,6 +21,7 @@ export const NOTIFICATION_WORKFLOW_VERSION = 1;
 export const SMS_DELIVERY_WORKFLOW_VERSION = 1;
 export const WEBHOOK_DELIVERY_WORKFLOW_VERSION = 1;
 export const HOLD_EXPIRATION_WORKFLOW_VERSION = 1;
+export const PROVIDER_EVENT_RECOVERY_WORKFLOW_VERSION = 1;
 export const EXPORT_WORKFLOW_VERSION = 1;
 export const CLERK_IDENTITY_SYNC_WORKFLOW_VERSION = 1;
 export const PAYMENT_RECONCILIATION_WORKFLOW_VERSION = 2;
@@ -61,6 +62,24 @@ export function exportWorkflowId(exportId: string): string {
 
 export function holdExpirationWorkflowId(): string {
   return `hold-expiration:scheduled`;
+}
+
+export function providerEventRecoveryWorkflowId(): string {
+  return `provider-event-recovery:scheduled`;
+}
+
+export function paymentReconciliationRecoveryWorkflowId(
+  providerEventId: string,
+  attempt: number,
+): string {
+  return `payment-reconciliation-recovery:${providerEventId}:${attempt}`;
+}
+
+export function clerkIdentitySyncRecoveryWorkflowId(
+  providerEventId: string,
+  attempt: number,
+): string {
+  return `clerk-identity-sync-recovery:${providerEventId}:${attempt}`;
 }
 
 export function clerkIdentitySyncWorkflowId(providerEventId: string): string {

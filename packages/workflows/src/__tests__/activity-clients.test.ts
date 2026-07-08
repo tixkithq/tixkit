@@ -106,7 +106,19 @@ describe('activity Temporal clients', () => {
     );
 
     await expect(startNotificationDeliveryWorkflow(notificationInput('emj_1'))).resolves.toBe(
-      undefined,
+      'notification:emj_1',
+    );
+
+    await closeActivityClients();
+  });
+
+  it('throws when notification workflow start fails before Temporal accepts the handoff', async () => {
+    const { startNotificationDeliveryWorkflow, closeActivityClients } =
+      await import('../activities/activity-clients.js');
+    temporalMock.workflowStart.mockRejectedValue(new Error('Temporal unavailable'));
+
+    await expect(startNotificationDeliveryWorkflow(notificationInput('emj_1'))).rejects.toThrow(
+      'Temporal unavailable',
     );
 
     await closeActivityClients();

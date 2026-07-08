@@ -733,6 +733,13 @@ export interface PaymentEventTable {
   raw_payload: string;
   processed_at: Timestamp | null;
   idempotency_key: string;
+  recovery_status: string;
+  recovery_attempts: number;
+  recovery_owner: string | null;
+  recovery_claimed_until: Timestamp | null;
+  next_recovery_at: Timestamp | null;
+  last_recovery_error: string | null;
+  recovery_updated_at: Timestamp | null;
   created_at: Timestamp;
 }
 

@@ -526,6 +526,26 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.CreateTicketTypeBatch.required).toContain('ticketType');
   });
 
+  it('documents type-specific permissions for export creation', () => {
+    const postExport = openApiSpec.paths['/exports'].post;
+
+    expect(postExport.description).toContain('reports.read');
+    expect(postExport.description).toContain('attendees.read');
+    expect(postExport.description).toContain('orders.read');
+    expect(postExport.description).toContain('checkins.read');
+    expect(postExport['x-required-permissions']).toEqual({
+      base: ['reports.read'],
+      byType: {
+        attendees: ['attendees.read'],
+        orders: ['orders.read'],
+        sales: ['orders.read'],
+        tax: ['orders.read'],
+        tickets: ['checkins.read'],
+        scan_logs: ['checkins.read'],
+      },
+    });
+  });
+
   it('documents public event revisions and immutable brand logo streams', () => {
     expect(openApiSpec.components.schemas.PublicEventRevision).toEqual({
       type: 'object',
@@ -1169,13 +1189,54 @@ describe('openApiSpec', () => {
     });
   });
 
-  it('documents implemented order list filters', () => {
-    expect(openApiSpec.paths['/orders'].get.parameters).toEqual([
-      { $ref: '#/components/parameters/Cursor' },
-      { $ref: '#/components/parameters/Limit' },
-      { name: 'organizationId', in: 'query', schema: { type: 'string' } },
-      { name: 'eventId', in: 'query', schema: { type: 'string' } },
-    ]);
+  it('documents admin table query params and runtime page envelopes', () => {
+    for (const [path, pageSchema] of [
+      ['/events', 'EventPage'],
+      ['/orders', 'OrderPage'],
+      ['/events/{eventId}/attendees', 'AttendeePage'],
+      ['/attendees', 'AttendeePage'],
+      ['/audit-logs', 'AuditLogPage'],
+      ['/privacy/requests', 'PrivacyRequestPage'],
+    ] as const) {
+      const params = openApiSpec.paths[path].get.parameters;
+      expect(params).toEqual(
+        expect.arrayContaining([
+          { $ref: '#/components/parameters/AdminTableCursor' },
+          { $ref: '#/components/parameters/AdminTableDirection' },
+          { $ref: '#/components/parameters/AdminTableLimit' },
+          { $ref: '#/components/parameters/AdminTableSearch' },
+          { $ref: '#/components/parameters/AdminTableSort' },
+          { $ref: '#/components/parameters/AdminTableIncludeFacets' },
+          { $ref: '#/components/parameters/AdminTableIncludeTotal' },
+        ]),
+      );
+      expect(
+        openApiSpec.paths[path].get.responses['200'].content['application/json'].schema,
+      ).toEqual({ $ref: `#/components/schemas/${pageSchema}` });
+      const schema = openApiSpec.components.schemas[pageSchema];
+      expect(schema.properties).toMatchObject({
+        nextCursor: { type: ['string', 'null'] },
+        prevCursor: { type: ['string', 'null'] },
+        total: { type: 'integer' },
+        filterTotal: { type: 'integer' },
+        facets: {
+          type: 'object',
+          additionalProperties: { $ref: '#/components/schemas/AdminTableFacet' },
+        },
+        applied: { $ref: '#/components/schemas/AdminTableAppliedQuery' },
+      });
+      expect(schema.properties).not.toHaveProperty('hasMore');
+      expect(schema.required).toEqual(['items']);
+    }
+
+    expect(openApiSpec.paths['/orders'].get.parameters).toEqual(
+      expect.arrayContaining([
+        { name: 'organizationId', in: 'query', schema: { type: 'string' } },
+        { name: 'eventId', in: 'query', schema: { type: 'string' } },
+        { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
+        { name: 'refundState', in: 'query', required: false, schema: { type: 'boolean' } },
+      ]),
+    );
   });
 
   it('documents conversion widget impressions as persisted counts', () => {

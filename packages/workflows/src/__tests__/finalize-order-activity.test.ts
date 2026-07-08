@@ -52,6 +52,8 @@ function compare(row: Record<string, any>, col: string, op: string, val: any): b
   const value = row[col];
   if (op === '!=') return value !== val;
   if (op === '<') return new Date(value) < new Date(val);
+  if (op === '>') return Number(value) > Number(val);
+  if (op === '>=') return Number(value) >= Number(val);
   if (op === 'in') return Array.isArray(val) && val.includes(value);
   if (op === 'is') return val === null ? value == null : value === val;
   return value === val;
@@ -183,10 +185,39 @@ vi.mock('@tixkit/db', () => {
     };
   }
 
+  function deleteQuery(table: string) {
+    const filters: RowPredicate[] = [];
+    const query = {
+      where(
+        col: string | ((eb: ReturnType<typeof expressionBuilder>) => RowPredicate),
+        op?: string,
+        val?: any,
+      ) {
+        filters.push(
+          typeof col === 'function'
+            ? col(expressionBuilder())
+            : (row) => compare(row, col, op!, val),
+        );
+        return query;
+      },
+      async execute() {
+        let deletedCount = 0;
+        for (const [id, row] of Object.entries(rowsFor(table))) {
+          if (!matches(row, filters)) continue;
+          delete rowsFor(table)[id];
+          deletedCount += 1;
+        }
+        return [{ numDeletedRows: BigInt(deletedCount) }];
+      },
+    };
+    return query;
+  }
+
   const db = {
     selectFrom: selectQuery,
     updateTable: updateQuery,
     insertInto: insertQuery,
+    deleteFrom: deleteQuery,
     transaction: () => ({
       execute: async (fn: (trx: typeof db) => Promise<unknown>) => fn(db),
     }),
@@ -629,6 +660,41 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(1);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('completed');
     expect(dbState.locks).toEqual(['inventory_pools', 'checkout_holds']);
+  });
+
+  it('rejects non-published events and releases pending checkout resources', async () => {
+    dbState.tables.events.evt_1.status = 'paused';
+    dbState.tables.discount_codes = {
+      dc_1: {
+        id: 'dc_1',
+        uses_count: 1,
+      },
+    };
+    dbState.tables.discount_redemptions = {
+      dred_1: {
+        id: 'dred_1',
+        discount_code_id: 'dc_1',
+        checkout_session_id: 'cs_1',
+        order_id: null,
+      },
+    };
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EVENT_NOT_AVAILABLE',
+      retryable: false,
+    });
+    expect(Object.values(dbState.tables.orders)).toHaveLength(0);
+    expect(dbState.tables.checkout_holds.hld_1.status).toBe('released');
+    expect(dbState.tables.checkout_sessions.cs_1.status).toBe('expired');
+    expect(dbState.tables.discount_codes.dc_1.uses_count).toBe(0);
+    expect(Object.values(dbState.tables.discount_redemptions)).toHaveLength(0);
   });
 
   it('claims only the waitlist offer reserved by the finalized checkout session', async () => {
@@ -1409,6 +1475,7 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
       evt_1: {
         id: 'evt_1',
         organization_id: 'org_1',
+        status: 'published',
       },
     },
     checkout_holds: {
@@ -1591,6 +1658,7 @@ function seedCheckoutWithDiscount(input: {
       evt_1: {
         id: 'evt_1',
         organization_id: 'org_1',
+        status: 'published',
       },
     },
     checkout_holds: {

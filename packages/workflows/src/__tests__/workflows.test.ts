@@ -47,6 +47,10 @@ vi.mock('@temporalio/workflow', () => ({
   continueAsNew: async (input: unknown) => {
     mockState.continueAsNewInputs.push(input);
   },
+  workflowInfo: () => ({
+    workflowId: 'test-workflow',
+    runId: 'test-run',
+  }),
 }));
 
 import { checkoutSessionWorkflow } from '../workflows/checkout.js';
@@ -54,12 +58,14 @@ import { refundWorkflow } from '../workflows/refund.js';
 import { exportWorkflow } from '../workflows/export.js';
 import { webhookDeliveryWorkflow } from '../workflows/webhook-delivery.js';
 import { holdExpirationWorkflow } from '../workflows/hold-expiration.js';
+import { providerEventRecoveryWorkflow } from '../workflows/provider-event-recovery.js';
 import { notificationDeliveryWorkflow, smsDeliveryWorkflow } from '../workflows/notification.js';
 import { paymentReconciliationWorkflow } from '../workflows/payment-reconciliation.js';
 import { clerkIdentitySyncWorkflow } from '../workflows/clerk-identity-sync.js';
 import { privacyRequestWorkflow } from '../workflows/privacy.js';
 import {
   PAYMENT_RECONCILIATION_WORKFLOW_VERSION,
+  CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
   okResult,
   errResult,
   privacyRequestWorkflowId,
@@ -1586,6 +1592,104 @@ describe('paymentReconciliationWorkflow', () => {
     );
     expect(emitted).toBe(false);
     expect(marked).toBe(false);
+  });
+});
+
+describe('providerEventRecoveryWorkflow', () => {
+  beforeEach(() => {
+    resetState();
+  });
+
+  it('claims unprocessed provider events and dispatches recovery child workflows', async () => {
+    const dispatchMarks: unknown[] = [];
+
+    setActivity('claimUnprocessedProviderEventsActivity', async () =>
+      okResult({
+        events: [
+          {
+            id: 'pevt_stripe_1',
+            provider: 'stripe',
+            providerEventId: 'evt_stripe_1',
+            eventType: 'payment_intent.succeeded',
+            recoveryAttempts: 3,
+            workflow: 'payment_reconciliation',
+            input: {
+              providerEventId: 'evt_stripe_1',
+              provider: 'stripe',
+              eventType: 'payment_intent.succeeded',
+              data: { id: 'pi_1', status: 'succeeded' },
+            },
+          },
+          {
+            id: 'pevt_clerk_1',
+            provider: 'clerk',
+            providerEventId: 'msg_1',
+            eventType: 'user.created',
+            recoveryAttempts: 2,
+            workflow: 'clerk_identity_sync',
+            input: {
+              providerEventId: 'msg_1',
+              eventType: 'user.created',
+              clerkUserId: 'user_1',
+              email: 'user@example.test',
+            },
+          },
+        ],
+      }),
+    );
+    setActivity('markProviderEventRecoveryDispatchedActivity', async (input) => {
+      dispatchMarks.push(input);
+      return okResult({ dispatched: true });
+    });
+
+    await providerEventRecoveryWorkflow({ maxIterations: 1, batchSize: 10, leaseMs: 30_000 });
+
+    expect(mockState.childStarts).toEqual([
+      {
+        workflow: paymentReconciliationWorkflow,
+        options: {
+          workflowId: 'payment-reconciliation-recovery:evt_stripe_1:3',
+          parentClosePolicy: 'PARENT_CLOSE_POLICY_ABANDON',
+          args: [
+            {
+              version: PAYMENT_RECONCILIATION_WORKFLOW_VERSION,
+              providerEventId: 'evt_stripe_1',
+              provider: 'stripe',
+              eventType: 'payment_intent.succeeded',
+              data: { id: 'pi_1', status: 'succeeded' },
+            },
+          ],
+        },
+      },
+      {
+        workflow: clerkIdentitySyncWorkflow,
+        options: {
+          workflowId: 'clerk-identity-sync-recovery:msg_1:2',
+          parentClosePolicy: 'PARENT_CLOSE_POLICY_ABANDON',
+          args: [
+            {
+              version: CLERK_IDENTITY_SYNC_WORKFLOW_VERSION,
+              providerEventId: 'msg_1',
+              eventType: 'user.created',
+              clerkUserId: 'user_1',
+              email: 'user@example.test',
+            },
+          ],
+        },
+      },
+    ]);
+    expect(dispatchMarks).toEqual([
+      {
+        id: 'pevt_stripe_1',
+        ownerId: 'provider-event-recovery:test-workflow:test-run:0',
+        recoveryAttempts: 3,
+      },
+      {
+        id: 'pevt_clerk_1',
+        ownerId: 'provider-event-recovery:test-workflow:test-run:0',
+        recoveryAttempts: 2,
+      },
+    ]);
   });
 });
 

@@ -87,3 +87,8 @@ export function hasActiveFilters(query: AdminTableQuery): boolean {
   if (!query.filters) return false;
   return Object.values(query.filters).some((f) => !isFilterEmpty(f));
 }
+
+export function resetAdminTableCursor<TQuery extends AdminTableQuery>(query: TQuery): TQuery {
+  if (query.cursor === undefined && query.direction === undefined) return query;
+  return { ...query, cursor: undefined, direction: undefined };
+}

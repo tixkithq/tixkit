@@ -1343,6 +1343,17 @@ describe('privacy idempotency recovery', () => {
     expect(tables.privacy_requests).toHaveLength(1);
     expect(tables.idempotency_records).toHaveLength(1);
     expect(tables.idempotency_records[0]).toMatchObject({ status: 'completed' });
+    expect(tables.audit_logs).toHaveLength(1);
+    expect(tables.audit_logs[0]).toMatchObject({
+      action: 'privacy.export.requested',
+      resource_type: 'PrivacyRequest',
+      resource_id: requestId,
+      diff_summary: JSON.stringify({
+        subjectType: 'buyer',
+        subjectId: null,
+        subjectEmail: 'buyer@example.test',
+      }),
+    });
     expect(startPrivacyRequest).toHaveBeenCalledTimes(2);
     expect(startPrivacyRequest).toHaveBeenNthCalledWith(1, { requestId });
     expect(startPrivacyRequest).toHaveBeenNthCalledWith(2, { requestId });
@@ -1730,11 +1741,7 @@ describe('cross-tenant denial', () => {
         },
       ],
     };
-    const app = await setupApp(
-      tenantRoutes,
-      makePrincipal({ scopes: ['billing.write'] }),
-      tables,
-    );
+    const app = await setupApp(tenantRoutes, makePrincipal({ scopes: ['billing.write'] }), tables);
     const res = await app.inject({
       method: 'PATCH',
       url: '/brands/brd_1',
@@ -1749,11 +1756,7 @@ describe('cross-tenant denial', () => {
 
   it('PATCH /brands/:brandId does not allow billing.write to edit general brand settings', async () => {
     const tables: Tables = { brands: [brandRow()] };
-    const app = await setupApp(
-      tenantRoutes,
-      makePrincipal({ scopes: ['billing.write'] }),
-      tables,
-    );
+    const app = await setupApp(tenantRoutes, makePrincipal({ scopes: ['billing.write'] }), tables);
     const res = await app.inject({
       method: 'PATCH',
       url: '/brands/brd_1',

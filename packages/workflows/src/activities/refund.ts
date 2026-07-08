@@ -1,5 +1,6 @@
 import type { Database } from '@tixkit/db';
 import {
+  EmailJobRepository,
   OrderRepository,
   PaymentIntentRepository,
   RefundRepository,
@@ -7,17 +8,14 @@ import {
 } from '@tixkit/db';
 import { withSpan } from '@tixkit/shared';
 import Stripe from 'stripe';
-import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 import { buildTransactionalMergeTagContext } from './messaging-context.js';
-import { getActivityDb, startNotificationDeliveryWorkflow } from './activity-clients.js';
-
-async function startNotificationWorkflow(
-  input: Omit<NotificationDeliveryWorkflowInput, 'version'>,
-): Promise<void> {
-  await startNotificationDeliveryWorkflow(input);
-}
+import {
+  durablyStartNotificationDeliveryWorkflow,
+  getActivityDb,
+  restartQueuedNotificationDeliveryWorkflow,
+} from './activity-clients.js';
 
 function parseMetadata(value: unknown): Record<string, unknown> {
   if (!value) return {};
@@ -954,11 +952,12 @@ export async function notifyRefundActivity(input: {
     // Check for existing email job to avoid duplicates.
     const existingJob = await db
       .selectFrom('email_jobs')
-      .select(['id', 'status'])
+      .selectAll()
       .where('tenant_id', '=', input.tenantId)
       .where('idempotency_key', '=', idempotencyKey)
       .executeTakeFirst();
     if (existingJob) {
+      await restartQueuedNotificationDeliveryWorkflow(db, existingJob);
       return okResult({ notified: true, jobId: existingJob.id });
     }
 
@@ -1006,9 +1005,7 @@ export async function notifyRefundActivity(input: {
     ]);
     const context = buildTransactionalMergeTagContext({ order, event, brand, refund: refundRow });
 
-    const job = await new (
-      await import('@tixkit/db')
-    ).EmailJobRepository(db).create({
+    const job = await new EmailJobRepository(db).create({
       tenantId: input.tenantId,
       brandId: input.brandId,
       templateKey: 'order-refunded',
@@ -1026,8 +1023,7 @@ export async function notifyRefundActivity(input: {
       idempotencyKey,
     });
 
-    // Start the notification delivery workflow to actually send the email.
-    await startNotificationWorkflow({
+    await durablyStartNotificationDeliveryWorkflow(db, {
       jobId: job.id,
       tenantId: input.tenantId,
       brandId: input.brandId,

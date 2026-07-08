@@ -515,6 +515,19 @@ describe('processPrivacyRequestActivity', () => {
         resource_id: 'prv_erase_1',
         diff_summary: JSON.stringify({ subjectEmail: 'buyer@test.com' }),
       },
+      {
+        id: 'aud_api_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        action: 'privacy.erasure.requested',
+        resource_type: 'PrivacyRequest',
+        resource_id: 'prv_erase_1',
+        diff_summary: JSON.stringify({
+          subjectType: 'buyer',
+          subjectId: null,
+          subjectEmail: 'buyer@test.com',
+        }),
+      },
     ];
     dbState.checkoutSessions = [
       {
@@ -772,8 +785,10 @@ describe('processPrivacyRequestActivity', () => {
       status: 'issued',
       transferred_to_email: null,
     });
-    expect(dbState.auditLogs).toHaveLength(1);
-    expect(dbState.auditLogs[0]).toMatchObject({
+    expect(dbState.auditLogs).toHaveLength(2);
+    const legacyAuditLog = dbState.auditLogs.find((row) => row.id === 'aud_1');
+    const apiAuditLog = dbState.auditLogs.find((row) => row.id === 'aud_api_1');
+    expect(legacyAuditLog).toMatchObject({
       id: 'aud_1',
       tenant_id: 'tnt_1',
       organization_id: 'org_1',
@@ -781,9 +796,19 @@ describe('processPrivacyRequestActivity', () => {
       resource_type: 'privacy_request',
       resource_id: 'prv_erase_1',
     });
-    const auditSummary = JSON.parse(String(dbState.auditLogs[0].diff_summary));
-    expect(auditSummary.subjectEmail).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
-    expect(JSON.stringify(dbState.auditLogs[0])).not.toContain('buyer@test.com');
+    expect(apiAuditLog).toMatchObject({
+      id: 'aud_api_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      action: 'privacy.erasure.requested',
+      resource_type: 'PrivacyRequest',
+      resource_id: 'prv_erase_1',
+    });
+    for (const auditLog of [legacyAuditLog, apiAuditLog]) {
+      const auditSummary = JSON.parse(String(auditLog?.diff_summary));
+      expect(auditSummary.subjectEmail).toMatch(/^erased\+[a-f0-9]{16}@privacy\.tixkit\.invalid$/);
+      expect(JSON.stringify(auditLog)).not.toContain('buyer@test.com');
+    }
     expect(dbState.checkoutSessions).toHaveLength(1);
     const checkoutBuyer = JSON.parse(String(dbState.checkoutSessions[0].buyer));
     expect(checkoutBuyer).toMatchObject({

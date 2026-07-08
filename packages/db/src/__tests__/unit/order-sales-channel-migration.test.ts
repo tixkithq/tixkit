@@ -20,6 +20,7 @@ import { TableQueryIndexesMigration } from '../../migrations/0045_table_query_in
 import { OrganizationClerkIdUniqueMigration } from '../../migrations/0046_organization_clerk_id_unique.js';
 import { EventPublicRevisionMigration } from '../../migrations/0047_event_public_revision.js';
 import { HotQueryIndexesMigration } from '../../migrations/0048_hot_query_indexes.js';
+import { EventFeePassThroughMigration } from '../../migrations/0049_event_fee_pass_through.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -186,7 +187,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0048_hot_query_indexes');
+    expect(Object.keys(migrations).at(-1)).toBe('0049_event_fee_pass_through');
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -217,6 +218,7 @@ describe('OrderSalesChannelMigration', () => {
     );
     expect(migrations['0047_event_public_revision']).toBe(EventPublicRevisionMigration);
     expect(migrations['0048_hot_query_indexes']).toBe(HotQueryIndexesMigration);
+    expect(migrations['0049_event_fee_pass_through']).toBe(EventFeePassThroughMigration);
   });
 
   it('creates composite hot-query indexes for public and reporting reads', async () => {

@@ -8,11 +8,14 @@ import {
   TixkitClient,
   TixkitApiError,
   MAX_OFFLINE_MANIFEST_TICKETS,
+  type AdminTablePage,
   type BrandSenderIdentity,
   type ContentRenderArtifact,
   type EmailTemplateDocument,
+  type Event,
   type OfflineManifest,
   type OAuthApplication,
+  type Order,
   type OrderDetail,
   type PrivacyRequestInput,
   type PublicAvailabilityItem,
@@ -595,18 +598,40 @@ describe('TixkitClient', () => {
 
   it('does not send Authorization when no API key is configured', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: [], nextCursor: null, hasMore: false }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          items: [],
+          nextCursor: null,
+          prevCursor: null,
+          total: 0,
+          filterTotal: 0,
+          applied: { sort: [], filters: {} },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
     const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    await client.events.list({ limit: 10 });
+    const page = await client.events.list({
+      limit: 10,
+      cursor: 'evt_1',
+      direction: 'prev',
+      search: 'showcase',
+      sort: 'createdAt:desc',
+      includeFacets: true,
+      includeTotal: true,
+      status: 'published',
+    });
+    expectTypeOf(page).toEqualTypeOf<AdminTablePage<Event>>();
 
     const [url, init] = fetchMock.mock.calls[0]!;
     const headers = init?.headers as Record<string, string>;
-    expect(String(url)).toBe('https://api.test/v1/events?limit=10');
+    expect(String(url)).toBe(
+      'https://api.test/v1/events?cursor=evt_1&limit=10&direction=prev&search=showcase&sort=createdAt%3Adesc&includeFacets=true&includeTotal=true&status=published',
+    );
     expect(headers.Authorization).toBeUndefined();
     expect(headers['Content-Type']).toBeUndefined();
   });
@@ -1166,9 +1191,19 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.attendees.listAll({ eventId: 'evt_1', status: 'checked_in', limit: 50 });
+    await c.attendees.listAll({
+      eventId: 'evt_1',
+      status: 'active',
+      checkInStatus: 'checked_in',
+      direction: 'next',
+      sort: 'createdAt:desc',
+      includeFacets: true,
+      limit: 50,
+    });
     const call = getCall(fm);
-    expect(call.url).toBe('https://api.test/v1/attendees?limit=50&eventId=evt_1&status=checked_in');
+    expect(call.url).toBe(
+      'https://api.test/v1/attendees?limit=50&eventId=evt_1&status=active&checkInStatus=checked_in&direction=next&sort=createdAt%3Adesc&includeFacets=true',
+    );
     expect(call.method).toBe('GET');
   });
 
@@ -2512,15 +2547,33 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('orders.list sends organization and event filters with pagination', async () => {
-    const fm = mockFetch(200, { items: [], nextCursor: null, hasMore: false });
+    const fm = mockFetch(200, {
+      items: [],
+      nextCursor: null,
+      prevCursor: null,
+      facets: { status: { rows: [{ value: 'paid', total: 0 }] } },
+      applied: { sort: [{ field: 'createdAt', direction: 'desc' }], filters: {} },
+    });
     const c = new TixkitClient({
       apiKey: 'tk_test_123',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.orders.list({ limit: 50, organizationId: 'org_1', eventId: 'evt_1' });
+    const page = await c.orders.list({
+      limit: 50,
+      organizationId: 'org_1',
+      eventId: 'evt_1',
+      status: 'paid',
+      refundState: false,
+      includeFacets: true,
+      direction: 'prev',
+      cursor: 'ord_2',
+    });
+    expectTypeOf(page).toEqualTypeOf<AdminTablePage<Order>>();
     const call = getCall(fm);
-    expect(call.url).toBe('https://api.test/v1/orders?limit=50&organizationId=org_1&eventId=evt_1');
+    expect(call.url).toBe(
+      'https://api.test/v1/orders?cursor=ord_2&limit=50&organizationId=org_1&eventId=evt_1&status=paid&refundState=false&includeFacets=true&direction=prev',
+    );
   });
 
   it('orders.get returns the enriched order detail contract', async () => {

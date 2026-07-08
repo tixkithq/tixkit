@@ -76,6 +76,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
     // mark this provider event processed. If the signal fails, Stripe retry must
     // return here and retry the missing checkout signal instead of hitting the
     // processed-event duplicate guard.
+    let trustedCheckoutSessionId: string | undefined;
     if (
       event.type === 'payment_intent.succeeded' ||
       event.type === 'payment_intent.payment_failed'
@@ -90,6 +91,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
           checkoutSessionId,
         );
         if (isTrustedCheckoutPaymentIntent) {
+          trustedCheckoutSessionId = checkoutSessionId;
           try {
             if (event.type === 'payment_intent.succeeded') {
               await temporalClient.signalPaymentSucceeded(checkoutSessionId, paymentIntent.id);
@@ -126,6 +128,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
         provider: 'stripe',
         eventType: event.type,
         data: (event.data?.object ?? {}) as unknown as Record<string, unknown>,
+        ...(trustedCheckoutSessionId ? { trustedCheckoutSessionId } : {}),
       });
     }
 

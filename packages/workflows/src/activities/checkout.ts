@@ -14,7 +14,6 @@ import { withSpan } from '@tixkit/shared';
 import Stripe from 'stripe';
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
 import QRCode from 'qrcode';
-import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 import {
@@ -24,7 +23,11 @@ import {
   type WalletPassArtifact,
 } from '../wallet-passes.js';
 import { buildTransactionalMergeTagContext } from './messaging-context.js';
-import { getActivityDb, startNotificationDeliveryWorkflow } from './activity-clients.js';
+import {
+  durablyStartNotificationDeliveryWorkflow,
+  getActivityDb,
+  restartQueuedNotificationDeliveryWorkflow,
+} from './activity-clients.js';
 
 const e2eTicketIssueFailures = new Set<string>();
 const DEFAULT_TICKET_PDF_GENERATION_CONCURRENCY = 4;
@@ -170,12 +173,6 @@ type BrandTheme = {
   primaryColor?: string;
   accent?: string;
 };
-
-async function startNotificationWorkflow(
-  input: Omit<NotificationDeliveryWorkflowInput, 'version'>,
-): Promise<void> {
-  await startNotificationDeliveryWorkflow(input);
-}
 
 function parseStoredJson<T>(value: unknown): T {
   if (typeof value === 'string') return JSON.parse(value) as T;
@@ -367,6 +364,8 @@ async function releaseOrphanCheckoutResources(
       .where('checkout_session_id', '=', checkoutSessionId)
       .where('status', '=', 'active')
       .execute();
+
+    await releasePendingDiscountReservation(trx, checkoutSessionId, now);
 
     await trx
       .updateTable('checkout_sessions')
@@ -1427,6 +1426,10 @@ export async function finalizeOrderActivity(input: {
       .selectAll()
       .where('id', '=', session.event_id)
       .executeTakeFirstOrThrow();
+    if (event.status !== 'published') {
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
+      return errResult('EVENT_NOT_AVAILABLE', 'Event is not available for checkout', false);
+    }
     const paymentIntentValidation = await validateFinalizePaymentIntent({
       db,
       checkoutSessionId: input.checkoutSessionId,
@@ -2375,11 +2378,12 @@ export async function sendConfirmationEmailActivity(input: {
 
     const existingJob = await db
       .selectFrom('email_jobs')
-      .select(['id', 'status'])
+      .selectAll()
       .where('tenant_id', '=', input.tenantId)
       .where('idempotency_key', '=', `order-confirmed:${input.orderId}`)
       .executeTakeFirst();
     if (existingJob) {
+      await restartQueuedNotificationDeliveryWorkflow(db, existingJob);
       return okResult({ jobId: existingJob.id, status: 'queued' });
     }
 
@@ -2438,8 +2442,7 @@ export async function sendConfirmationEmailActivity(input: {
       idempotencyKey: `order-confirmed:${input.orderId}`,
     });
 
-    // Start the notification delivery workflow to actually send the email.
-    await startNotificationWorkflow({
+    await durablyStartNotificationDeliveryWorkflow(db, {
       jobId: job.id,
       tenantId: input.tenantId,
       brandId: input.brandId,
@@ -2675,11 +2678,12 @@ export async function issueTicketsActivity(input: {
     // Check for existing email job to avoid duplicates.
     const existingJob = await db
       .selectFrom('email_jobs')
-      .select(['id', 'status'])
+      .selectAll()
       .where('tenant_id', '=', input.tenantId)
       .where('idempotency_key', '=', `tickets-issued:${input.orderId}`)
       .executeTakeFirst();
     if (existingJob) {
+      await restartQueuedNotificationDeliveryWorkflow(db, existingJob);
       return okResult({ issued: tickets.length, jobId: existingJob.id });
     }
 
@@ -2740,8 +2744,7 @@ export async function issueTicketsActivity(input: {
       idempotencyKey: `tickets-issued:${input.orderId}`,
     });
 
-    // Start the notification delivery workflow.
-    await startNotificationWorkflow({
+    await durablyStartNotificationDeliveryWorkflow(db, {
       jobId: job.id,
       tenantId: input.tenantId,
       brandId: input.brandId,

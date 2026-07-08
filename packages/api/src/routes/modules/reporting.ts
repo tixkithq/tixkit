@@ -10,6 +10,7 @@ import {
   groupRevenueByChannel,
   NotFoundError,
   ValidationError,
+  type Permission,
   type Principal,
   type SalesChannel,
 } from '@tixkit/domain';
@@ -187,6 +188,23 @@ function requireUnscopedOrganizationReportPrincipal(principal: Principal) {
   if (hasBrandScope || hasEventScope) {
     throw new ValidationError('Resource-scoped principals cannot access organization-wide reports');
   }
+}
+
+const EXPORT_TYPE_PERMISSIONS: Record<string, Permission> = {
+  attendees: 'attendees.read',
+  orders: 'orders.read',
+  sales: 'orders.read',
+  tax: 'orders.read',
+  tickets: 'checkins.read',
+  scan_logs: 'checkins.read',
+};
+
+function requireExportTypePermission(principal: Principal, type: string) {
+  const permission = EXPORT_TYPE_PERMISSIONS[type];
+  if (!permission) {
+    throw new ValidationError(`Unsupported export type: ${type}`);
+  }
+  ClerkAuthService.requirePermission(principal, permission);
 }
 
 export const reportingRoutes: FastifyPluginAsync = async (app) => {
@@ -868,6 +886,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'reports.read');
     const body = parseBody(createExportSchema, request.body);
+    requireExportTypePermission(principal, body.type);
 
     if (!body.eventId && principal.type !== 'system') {
       throw new ValidationError('eventId is required for export creation');

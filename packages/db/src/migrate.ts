@@ -49,6 +49,8 @@ import { TableQueryIndexesMigration } from './migrations/0045_table_query_indexe
 import { OrganizationClerkIdUniqueMigration } from './migrations/0046_organization_clerk_id_unique.js';
 import { EventPublicRevisionMigration } from './migrations/0047_event_public_revision.js';
 import { HotQueryIndexesMigration } from './migrations/0048_hot_query_indexes.js';
+import { EventFeePassThroughMigration } from './migrations/0049_event_fee_pass_through.js';
+import { PaymentEventRecoveryMigration } from './migrations/0050_payment_event_recovery.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -221,6 +223,8 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0046_organization_clerk_id_unique': OrganizationClerkIdUniqueMigration,
       '0047_event_public_revision': EventPublicRevisionMigration,
       '0048_hot_query_indexes': HotQueryIndexesMigration,
+      '0049_event_fee_pass_through': EventFeePassThroughMigration,
+      '0050_payment_event_recovery': PaymentEventRecoveryMigration,
     };
   }
 }

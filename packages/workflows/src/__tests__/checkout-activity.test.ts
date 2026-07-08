@@ -1,20 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 
+const temporalState = vi.hoisted(() => ({
+  workflowStart: vi.fn(async () => undefined),
+}));
+
 // Mock @temporalio/client so startNotificationWorkflow doesn't try to connect.
 vi.mock('@temporalio/client', () => ({
-  Connection: { connect: vi.fn() },
-  Client: vi.fn(),
+  Connection: { connect: vi.fn(async () => ({ close: vi.fn() })) },
+  Client: vi.fn(function Client() {
+    return { workflow: { start: temporalState.workflowStart } };
+  }),
 }));
 
 const dbState = vi.hoisted(() => ({
-  existingJob: undefined as { id: string; status: string } | undefined,
+  existingJob: undefined as Record<string, unknown> | undefined,
   providerRoute: undefined as { id: string } | undefined,
   publishedTemplate: { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } } as
     | { version: { id: string }; document: { id: string } }
     | undefined,
   createJobErrorOnce: undefined as Error | undefined,
   createdJobs: [] as Record<string, unknown>[],
+  updatedJobs: [] as Array<{ id: string; input: Record<string, unknown> }>,
   order: {
     id: 'ord_1',
     order_number: 'TK-1001',
@@ -69,6 +76,14 @@ vi.mock('@tixkit/db', () => {
       }
       dbState.createdJobs.push(input);
       return { id: 'emj_1', status: 'pending', ...input };
+    }
+    async update(id: string, input: Record<string, unknown>) {
+      dbState.updatedJobs.push({ id, input });
+      if (dbState.existingJob?.id === id) {
+        Object.assign(dbState.existingJob, input);
+        return dbState.existingJob;
+      }
+      return { id, ...input };
     }
   }
 
@@ -146,6 +161,7 @@ describe('sendConfirmationEmailActivity', () => {
     dbState.publishedTemplate = { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } };
     dbState.createJobErrorOnce = undefined;
     dbState.createdJobs = [];
+    dbState.updatedJobs = [];
     dbState.tickets = [];
     dbState.ticketTypes = [{ id: 'tt_1', name: 'General Admission' }];
     dbState.attendees = [
@@ -157,6 +173,8 @@ describe('sendConfirmationEmailActivity', () => {
       },
     ];
     dbState.destroy.mockClear();
+    temporalState.workflowStart.mockReset();
+    temporalState.workflowStart.mockResolvedValue(undefined);
   });
 
   it('skips when no active provider route is persisted for the brand', async () => {
@@ -213,6 +231,68 @@ describe('sendConfirmationEmailActivity', () => {
       recipient: { name: 'Jordan Lee', email: 'buyer@example.com' },
       order: { id: 'TK-1001', total: '$45.00', buyerName: 'Jordan Lee' },
     });
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_1',
+      input: { status: 'queued', workflow_id: 'notification:emj_1' },
+    });
+  });
+
+  it('marks a newly queued confirmation email start_failed when Temporal rejects the handoff', async () => {
+    dbState.providerRoute = { id: 'epr_1' };
+    temporalState.workflowStart.mockRejectedValue(new Error('Temporal unavailable'));
+
+    const result = await sendConfirmationEmailActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_QUEUE_FAILED',
+      retryable: true,
+    });
+    expect(dbState.createdJobs).toHaveLength(1);
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_1',
+      input: { status: 'start_failed', workflow_id: null },
+    });
+  });
+
+  it('restarts an existing queued confirmation email with no durable workflow id', async () => {
+    dbState.existingJob = {
+      id: 'emj_existing',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      template_key: 'order-confirmed',
+      template_version_id: 'ntv_default',
+      to_email: 'buyer@example.com',
+      to_name: null,
+      variables: JSON.stringify({ notificationType: 'transactional', orderId: 'ord_1' }),
+      provider_route_id: 'epr_1',
+      status: 'queued',
+      workflow_id: null,
+      scheduled_at: null,
+    };
+
+    const result = await sendConfirmationEmailActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(result).toEqual({ ok: true, value: { jobId: 'emj_existing', status: 'queued' } });
+    expect(dbState.createdJobs).toHaveLength(0);
+    expect(temporalState.workflowStart).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ workflowId: 'notification:emj_existing' }),
+    );
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_existing',
+      input: { status: 'queued', workflow_id: 'notification:emj_existing' },
+    });
   });
 });
 
@@ -223,6 +303,7 @@ describe('issueTicketsActivity', () => {
     dbState.publishedTemplate = { version: { id: 'ntv_default' }, document: { id: 'cdoc_1' } };
     dbState.createJobErrorOnce = undefined;
     dbState.createdJobs = [];
+    dbState.updatedJobs = [];
     dbState.tickets = [
       {
         id: 'tkt_1',
@@ -234,6 +315,8 @@ describe('issueTicketsActivity', () => {
       },
     ];
     dbState.destroy.mockClear();
+    temporalState.workflowStart.mockReset();
+    temporalState.workflowStart.mockResolvedValue(undefined);
     delete process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE;
     delete process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE_KEY;
     delete process.env.APPLE_WALLET_ENABLED;
@@ -383,5 +466,40 @@ describe('issueTicketsActivity', () => {
 
     expect(result).toEqual({ ok: true, value: { issued: 1, jobId: 'emj_existing' } });
     expect(dbState.createdJobs).toHaveLength(0);
+  });
+
+  it('restarts an existing start_failed ticket email with no durable workflow id', async () => {
+    dbState.existingJob = {
+      id: 'emj_existing',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      template_key: 'tickets-issued',
+      template_version_id: 'ntv_default',
+      to_email: 'buyer@example.com',
+      to_name: null,
+      variables: JSON.stringify({ notificationType: 'transactional', orderId: 'ord_1' }),
+      provider_route_id: 'epr_1',
+      status: 'start_failed',
+      workflow_id: null,
+      scheduled_at: null,
+    };
+
+    const result = await issueTicketsActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@example.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+    });
+
+    expect(result).toEqual({ ok: true, value: { issued: 1, jobId: 'emj_existing' } });
+    expect(dbState.createdJobs).toHaveLength(0);
+    expect(temporalState.workflowStart).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ workflowId: 'notification:emj_existing' }),
+    );
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_existing',
+      input: { status: 'queued', workflow_id: 'notification:emj_existing' },
+    });
   });
 });

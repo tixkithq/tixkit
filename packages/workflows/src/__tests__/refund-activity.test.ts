@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const temporalState = vi.hoisted(() => ({
+  workflowStart: vi.fn(async () => undefined),
+}));
+
 // Mock @temporalio/client so startNotificationWorkflow doesn't try to connect.
 vi.mock('@temporalio/client', () => ({
-  Connection: { connect: vi.fn() },
-  Client: vi.fn(),
+  Connection: { connect: vi.fn(async () => ({ close: vi.fn() })) },
+  Client: vi.fn(function Client() {
+    return { workflow: { start: temporalState.workflowStart } };
+  }),
 }));
 
 const dbState = vi.hoisted(() => ({
@@ -32,7 +38,9 @@ const dbState = vi.hoisted(() => ({
     venue: JSON.stringify({ name: 'Main Hall', city: 'New York' }),
   } as Record<string, unknown>,
   brand: { id: 'brd_1', name: 'Northstar Events' } as Record<string, unknown>,
+  existingJob: undefined as Record<string, unknown> | undefined,
   createdJobs: [] as Record<string, unknown>[],
+  updatedJobs: [] as Array<{ id: string; input: Record<string, unknown> }>,
   publishedTemplate: { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } } as
     | { version: { id: string }; document: { id: string } }
     | undefined,
@@ -138,6 +146,14 @@ vi.mock('@tixkit/db', () => {
       dbState.createdJobs.push(input);
       return { id: 'emj_1', ...input };
     }
+    async update(id: string, input: Record<string, unknown>) {
+      dbState.updatedJobs.push({ id, input });
+      if (dbState.existingJob?.id === id) {
+        Object.assign(dbState.existingJob, input);
+        return dbState.existingJob;
+      }
+      return { id, ...input };
+    }
   }
   class ContentRepository {
     async findPublishedEmailTemplate() {
@@ -168,7 +184,7 @@ vi.mock('@tixkit/db', () => {
         return query;
       },
       async executeTakeFirst() {
-        if (table === 'email_jobs') return undefined;
+        if (table === 'email_jobs') return dbState.existingJob;
         if (table === 'email_provider_routes') return { id: 'epr_1' };
         if (table === 'notification_templates as template') return { id: 'ntv_1' };
         if (table === 'orders') return matches(dbState.order, filters) ? dbState.order : undefined;
@@ -363,7 +379,11 @@ beforeEach(() => {
   dbState.transactionDepth = 0;
   dbState.checkoutHolds = [];
   dbState.inventoryPools = [];
+  dbState.existingJob = undefined;
+  dbState.updatedJobs = [];
   dbState.destroy.mockClear();
+  temporalState.workflowStart.mockReset();
+  temporalState.workflowStart.mockResolvedValue(undefined);
   stripeMock.refundsCreate.mockReset();
   stripeMock.refundsCreate.mockImplementation(
     async (opts: Record<string, unknown>, opts2: Record<string, unknown>) => {
@@ -1214,6 +1234,8 @@ describe('notifyRefundActivity - idempotency key includes providerRefundId', () 
     ];
     dbState.publishedTemplate = { version: { id: 'ntv_1' }, document: { id: 'cdoc_1' } };
     dbState.createdJobs = [];
+    dbState.updatedJobs = [];
+    dbState.existingJob = undefined;
   });
 
   it('uses providerRefundId in the idempotency key so partial refunds get separate notifications', async () => {
@@ -1239,6 +1261,69 @@ describe('notifyRefundActivity - idempotency key includes providerRefundId', () 
       recipient: { name: 'Jordan Lee', email: 'buyer@test.com' },
       order: { id: 'TK-1001' },
       refund: { amount: '$50.00' },
+    });
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_1',
+      input: { status: 'queued', workflow_id: 'notification:emj_1' },
+    });
+  });
+
+  it('marks a refund email job start_failed when Temporal rejects the handoff', async () => {
+    temporalState.workflowStart.mockRejectedValue(new Error('Temporal unavailable'));
+
+    const result = await notifyRefundActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@test.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      providerRefundId: 're_stripe_abc',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'REFUND_NOTIFY_FAILED',
+      retryable: true,
+    });
+    expect(dbState.createdJobs).toHaveLength(1);
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_1',
+      input: { status: 'start_failed', workflow_id: null },
+    });
+  });
+
+  it('restarts an existing queued refund email with no durable workflow id', async () => {
+    dbState.existingJob = {
+      id: 'emj_existing',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      template_key: 'order-refunded',
+      template_version_id: 'ntv_1',
+      to_email: 'buyer@test.com',
+      to_name: null,
+      variables: JSON.stringify({ notificationType: 'transactional', orderId: 'ord_1' }),
+      provider_route_id: 'epr_1',
+      status: 'queued',
+      workflow_id: null,
+      scheduled_at: null,
+    };
+
+    const result = await notifyRefundActivity({
+      orderId: 'ord_1',
+      toEmail: 'buyer@test.com',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      providerRefundId: 're_stripe_abc',
+    });
+
+    expect(result).toEqual({ ok: true, value: { notified: true, jobId: 'emj_existing' } });
+    expect(dbState.createdJobs).toHaveLength(0);
+    expect(temporalState.workflowStart).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ workflowId: 'notification:emj_existing' }),
+    );
+    expect(dbState.updatedJobs).toContainEqual({
+      id: 'emj_existing',
+      input: { status: 'queued', workflow_id: 'notification:emj_existing' },
     });
   });
 });

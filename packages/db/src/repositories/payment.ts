@@ -286,6 +286,13 @@ export class PaymentEventRepository extends BaseRepository {
         raw_payload: JSON.stringify(input.rawPayload),
         processed_at: null,
         idempotency_key: input.idempotencyKey,
+        recovery_status: 'pending',
+        recovery_attempts: 0,
+        recovery_owner: null,
+        recovery_claimed_until: null,
+        next_recovery_at: null,
+        last_recovery_error: null,
+        recovery_updated_at: null,
         created_at: now,
       },
       id,
@@ -302,7 +309,14 @@ export class PaymentEventRepository extends BaseRepository {
   }
 
   async markProcessed(id: string) {
-    return this.updateReturning('payment_events', id, { processed_at: new Date() });
+    return this.updateReturning('payment_events', id, {
+      processed_at: new Date(),
+      recovery_status: 'processed',
+      recovery_owner: null,
+      recovery_claimed_until: null,
+      next_recovery_at: null,
+      recovery_updated_at: new Date(),
+    });
   }
 
   async markProcessedByProviderEventId(provider: string, providerEventId: string) {
@@ -311,5 +325,101 @@ export class PaymentEventRepository extends BaseRepository {
       throw new Error(`Payment event not found for provider event ${provider}:${providerEventId}`);
     }
     return this.markProcessed(event.id);
+  }
+
+  async claimUnprocessedForRecovery(input: {
+    ownerId: string;
+    limit: number;
+    leaseUntil: Date;
+    now?: Date;
+  }) {
+    const now = input.now ?? new Date();
+    const candidates = await this.db
+      .selectFrom('payment_events')
+      .selectAll()
+      .where('processed_at', 'is', null)
+      .where('recovery_status', 'in', ['pending', 'dispatched', 'retryable'])
+      .where((eb) =>
+        eb.or([eb('recovery_claimed_until', 'is', null), eb('recovery_claimed_until', '<', now)]),
+      )
+      .where((eb) => eb.or([eb('next_recovery_at', 'is', null), eb('next_recovery_at', '<=', now)]))
+      .orderBy('created_at', 'asc')
+      .limit(input.limit)
+      .execute();
+
+    const claimed = [];
+    for (const candidate of candidates) {
+      // eslint-disable-next-line no-await-in-loop -- each conditional update is a lease claim.
+      const row = await this.db
+        .updateTable('payment_events')
+        .set({
+          recovery_status: 'claimed',
+          recovery_attempts: Number(candidate.recovery_attempts ?? 0) + 1,
+          recovery_owner: input.ownerId,
+          recovery_claimed_until: input.leaseUntil,
+          last_recovery_error: null,
+          recovery_updated_at: now,
+        })
+        .where('id', '=', candidate.id)
+        .where('processed_at', 'is', null)
+        .where((eb) =>
+          eb.or([eb('recovery_claimed_until', 'is', null), eb('recovery_claimed_until', '<', now)]),
+        )
+        .returningAll()
+        .executeTakeFirst();
+      if (row) claimed.push(row);
+    }
+
+    return claimed;
+  }
+
+  async markRecoveryDispatched(input: {
+    id: string;
+    ownerId: string;
+    nextRecoveryAt: Date;
+    now?: Date;
+  }) {
+    const now = input.now ?? new Date();
+    return this.db
+      .updateTable('payment_events')
+      .set({
+        recovery_status: 'dispatched',
+        recovery_owner: null,
+        recovery_claimed_until: null,
+        next_recovery_at: input.nextRecoveryAt,
+        last_recovery_error: null,
+        recovery_updated_at: now,
+      })
+      .where('id', '=', input.id)
+      .where('recovery_owner', '=', input.ownerId)
+      .where('processed_at', 'is', null)
+      .returningAll()
+      .executeTakeFirst();
+  }
+
+  async markRecoveryFailed(input: {
+    id: string;
+    ownerId: string;
+    retryable: boolean;
+    message: string;
+    nextRecoveryAt?: Date;
+    now?: Date;
+  }) {
+    const now = input.now ?? new Date();
+    return this.db
+      .updateTable('payment_events')
+      .set({
+        recovery_status: input.retryable ? 'retryable' : 'manual_review',
+        recovery_owner: null,
+        recovery_claimed_until: null,
+        next_recovery_at: input.retryable ? (input.nextRecoveryAt ?? now) : null,
+        last_recovery_error: input.message,
+        recovery_updated_at: now,
+      })
+      .where('id', '=', input.id)
+      .where('recovery_owner', '=', input.ownerId)
+      .where('processed_at', 'is', null)
+      .returningAll()
+      .executeTakeFirst();
   }
 }

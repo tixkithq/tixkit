@@ -451,6 +451,25 @@ async function compensateCheckoutSessionCreation(input: {
   ]);
 }
 
+async function cancelCheckoutSessionForUnavailableEvent(input: {
+  db: Database;
+  releaseHoldsForSession: (checkoutSessionId: string) => Promise<void>;
+  checkoutSessionId: string;
+}): Promise<void> {
+  await Promise.allSettled([
+    releaseCheckoutUploadArtifactClaims(input.db, input.checkoutSessionId),
+    input.releaseHoldsForSession(input.checkoutSessionId),
+    new DiscountCodeRepository(input.db).releasePendingCheckoutReservation(input.checkoutSessionId),
+    input.db
+      .updateTable('checkout_sessions')
+      .set({ status: 'cancelled', updated_at: new Date() })
+      .where('id', '=', input.checkoutSessionId)
+      .where('status', 'in', ['open', 'pending_payment'])
+      .where('order_id', 'is', null)
+      .execute(),
+  ]);
+}
+
 async function reserveCheckoutDiscount(input: {
   db: Database;
   eventId: string;
@@ -1741,7 +1760,6 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           discountCodes: (discounts as DiscountCodeRow[]).map(toDomainDiscountCode),
         });
         // Reserve inventory across every pool the cart draws from.
-        const sessionRepo = new CheckoutSessionRepository(db);
         let sessionCreated = false;
         let waitlistReserved = false;
         try {
@@ -1765,15 +1783,6 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
                   checkoutSessionId: sessionId,
                 })
               : { primaryHoldId: null, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
-          await reserveCheckoutDiscount({
-            db,
-            eventId: body.eventId,
-            tenantId: event.tenant_id,
-            checkoutSessionId: sessionId,
-            discountCode: cart.discountCode,
-            discountCents: quote.discountCents,
-            now: new Date(answeredAt),
-          });
 
           if (waitlistEntry) {
             await updateWaitlistReservationExpiry({
@@ -1786,22 +1795,35 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             });
           }
 
-          const session = await sessionRepo.create({
-            id: sessionId,
-            tenantId: event.tenant_id,
-            eventId: body.eventId,
-            brandId: event.brand_id,
-            holdId: reservation.primaryHoldId ?? undefined,
-            currency: quote.currency,
-            cart: cart as Record<string, unknown>,
-            buyer: (checkoutBuyer as Record<string, unknown>) ?? {},
-            quote: quote as Record<string, unknown>,
-            expiresAt: reservation.expiresAt,
-            idempotencyKey,
-            successUrl: body.successUrl,
-            cancelUrl: body.cancelUrl,
+          const session = await db.transaction().execute(async (trx) => {
+            await reserveCheckoutDiscount({
+              db: trx,
+              eventId: body.eventId,
+              tenantId: event.tenant_id,
+              checkoutSessionId: sessionId,
+              discountCode: cart.discountCode,
+              discountCents: quote.discountCents,
+              now: new Date(answeredAt),
+            });
+
+            const created = await new CheckoutSessionRepository(trx).create({
+              id: sessionId,
+              tenantId: event.tenant_id,
+              eventId: body.eventId,
+              brandId: event.brand_id,
+              holdId: reservation.primaryHoldId ?? undefined,
+              currency: quote.currency,
+              cart: cart as Record<string, unknown>,
+              buyer: (checkoutBuyer as Record<string, unknown>) ?? {},
+              quote: quote as Record<string, unknown>,
+              expiresAt: reservation.expiresAt,
+              idempotencyKey,
+              successUrl: body.successUrl,
+              cancelUrl: body.cancelUrl,
+            });
+            sessionCreated = true;
+            return created;
           });
-          sessionCreated = true;
           await claimCheckoutUploadArtifacts(db, event.tenant_id, body.eventId, cart, sessionId);
 
           return { status: 201, body: publicCheckoutSession(session) };
@@ -2139,6 +2161,21 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       const order = await orderRepo.findById(session.order_id!);
       if (!order) throw new NotFoundError('Order', session.order_id!);
       return reply.status(200).send({ order, sessionId, status: 'completed' });
+    }
+
+    if (event.status !== 'published') {
+      await cancelCheckoutSessionForUnavailableEvent({
+        db,
+        releaseHoldsForSession: (id) => inventoryService.releaseHoldsForSession(id),
+        checkoutSessionId: sessionId,
+      });
+      return reply.status(409).send({
+        error: {
+          code: 'EVENT_NOT_AVAILABLE',
+          message: 'Event is not available for checkout',
+          requestId: request.id,
+        },
+      });
     }
 
     if (new Date(session.expires_at) < new Date()) {

@@ -177,7 +177,7 @@ export type EmailJob = TenantScopedEntity & {
   toName?: string;
   variables: Record<string, unknown>;
   providerRouteId: Ulid;
-  status: 'queued' | 'processing' | 'sent' | 'failed' | 'suppressed';
+  status: 'queued' | 'processing' | 'sent' | 'failed' | 'suppressed' | 'start_failed';
   priority: 'high' | 'normal' | 'low';
   scheduledAt?: ISO8601Date;
   idempotencyKey: string;

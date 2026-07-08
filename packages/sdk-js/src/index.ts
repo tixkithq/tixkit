@@ -1680,6 +1680,49 @@ export type PageResult<T> = {
   hasMore: boolean;
 };
 
+export type AdminTableSortDirection = 'asc' | 'desc';
+export type AdminTableCursorDirection = 'next' | 'prev';
+
+export type AdminTableSort = {
+  field: string;
+  direction: AdminTableSortDirection;
+};
+
+export type AdminTableFilterValue =
+  | { type: 'text'; value: string }
+  | { type: 'select'; values: string[] }
+  | { type: 'boolean'; value: boolean }
+  | { type: 'date_range'; from?: string; to?: string }
+  | { type: 'number_range'; min?: number; max?: number };
+
+export type AdminTableFacetRow = {
+  value: string | number | boolean;
+  total: number;
+};
+
+export type AdminTableFacet = {
+  rows?: AdminTableFacetRow[];
+  total?: number;
+  min?: number;
+  max?: number;
+};
+
+export type AdminTablePage<T> = {
+  items: T[];
+  nextCursor?: string | null;
+  prevCursor?: string | null;
+  total?: number;
+  filterTotal?: number;
+  facets?: Record<string, AdminTableFacet>;
+  applied?: {
+    search?: string;
+    sort: AdminTableSort[];
+    filters: Record<string, AdminTableFilterValue>;
+    rejectedFilters?: string[];
+    rejectedSort?: string[];
+  };
+};
+
 export type ItemList<T> = {
   items: T[];
 };
@@ -1687,6 +1730,14 @@ export type ItemList<T> = {
 export type PaginationParams = {
   cursor?: string;
   limit?: number;
+};
+
+export type AdminTableQueryParams = PaginationParams & {
+  direction?: AdminTableCursorDirection;
+  search?: string;
+  sort?: string;
+  includeTotal?: boolean;
+  includeFacets?: boolean;
 };
 
 export type CheckInListListParams = PaginationParams & {
@@ -1698,9 +1749,60 @@ export type CheckoutSessionGetOptions = {
   paymentIntentClientSecret?: string;
 };
 
-export type OrderListParams = PaginationParams & {
+export type EventListParams = AdminTableQueryParams & {
+  status?: string;
+  startsAtFrom?: string;
+  startsAtTo?: string;
+  createdAtFrom?: string;
+  createdAtTo?: string;
+};
+
+export type OrderListParams = AdminTableQueryParams & {
   organizationId?: string;
   eventId?: string;
+  status?: string;
+  salesChannel?: string;
+  paymentProvider?: string;
+  refundState?: boolean;
+  totalCentsMin?: number;
+  totalCentsMax?: number;
+  createdAtFrom?: string;
+  createdAtTo?: string;
+};
+
+export type AttendeeListParams = AdminTableQueryParams & {
+  status?: string;
+  checkInStatus?: string;
+  createdAtFrom?: string;
+  createdAtTo?: string;
+  checkedInAtFrom?: string;
+  checkedInAtTo?: string;
+};
+
+export type AttendeeListAllParams = AttendeeListParams & {
+  eventId?: string;
+};
+
+export type AuditLogListParams = AdminTableQueryParams & {
+  organizationId?: string;
+  brandId?: string;
+  action?: string;
+  resourceType?: string;
+  actorId?: string;
+  createdAtFrom?: string;
+  createdAtTo?: string;
+};
+
+export type PrivacyRequestListParams = AdminTableQueryParams & {
+  organizationId?: string;
+  brandId?: string;
+  requestType?: 'export' | 'erasure';
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
+  subjectType?: string;
+  createdAtFrom?: string;
+  createdAtTo?: string;
+  completedAtFrom?: string;
+  completedAtTo?: string;
 };
 
 export type IdempotencyOptions = {
@@ -2185,7 +2287,7 @@ class UploadResource {
 class EventResource {
   constructor(private client: TixkitClient) {}
 
-  async list(params?: PaginationParams): Promise<PageResult<Event>> {
+  async list(params?: EventListParams): Promise<AdminTablePage<Event>> {
     return this.client.request('GET', '/events', { params: paginationParams(params) });
   }
 
@@ -2378,7 +2480,7 @@ class EventResource {
 class OrderResource {
   constructor(private client: TixkitClient) {}
 
-  async list(params?: OrderListParams): Promise<PageResult<Order>> {
+  async list(params?: OrderListParams): Promise<AdminTablePage<Order>> {
     return this.client.request('GET', '/orders', { params: paginationParams(params) });
   }
 
@@ -2628,21 +2730,15 @@ class ProductResource {
 
 class AttendeeResource {
   constructor(private client: TixkitClient) {}
-  async list(eventId: string, params?: PaginationParams): Promise<PageResult<Attendee>> {
+  async list(eventId: string, params?: AttendeeListParams): Promise<AdminTablePage<Attendee>> {
     return this.client.request('GET', `/events/${eventId}/attendees`, {
       params: paginationParams(params),
     });
   }
-  async listAll(
-    params?: PaginationParams & { eventId?: string; status?: string },
-  ): Promise<PageResult<Attendee>> {
-    const query: Record<string, string> = {};
-    if (params?.cursor) query.cursor = params.cursor;
-    if (params?.limit !== undefined) query.limit = String(params.limit);
-    if (params?.eventId) query.eventId = params.eventId;
-    if (params?.status) query.status = params.status;
+  async listAll(params?: AttendeeListAllParams): Promise<AdminTablePage<Attendee>> {
+    const query = paginationParams(params);
     return this.client.request('GET', '/attendees', {
-      params: Object.keys(query).length > 0 ? query : undefined,
+      params: query,
     });
   }
   async update(
@@ -2945,26 +3041,11 @@ class ExportResource {
 class PrivacyResource {
   constructor(private client: TixkitClient) {}
 
-  async listAuditLogs(
-    params?: PaginationParams & {
-      organizationId?: string;
-      brandId?: string;
-      action?: string;
-      resourceType?: string;
-      actorId?: string;
-    },
-  ): Promise<PageResult<AuditLog>> {
+  async listAuditLogs(params?: AuditLogListParams): Promise<AdminTablePage<AuditLog>> {
     return this.client.request('GET', '/audit-logs', { params: paginationParams(params) });
   }
 
-  async listRequests(
-    params?: PaginationParams & {
-      organizationId?: string;
-      brandId?: string;
-      requestType?: 'export' | 'erasure';
-      status?: 'pending' | 'processing' | 'completed' | 'failed';
-    },
-  ): Promise<PageResult<PrivacyRequest>> {
+  async listRequests(params?: PrivacyRequestListParams): Promise<AdminTablePage<PrivacyRequest>> {
     return this.client.request('GET', '/privacy/requests', { params: paginationParams(params) });
   }
 

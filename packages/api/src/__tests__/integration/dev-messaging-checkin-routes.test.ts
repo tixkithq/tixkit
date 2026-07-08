@@ -6790,6 +6790,101 @@ describe('checkout confirm', () => {
     await app.close();
   });
 
+  it('POST /checkout/sessions/:sessionId/confirm rejects paused events before workflow start', async () => {
+    const startCheckoutSession = vi.fn();
+    const releaseHoldsForSession = vi.fn(async () => {});
+    const tables = {
+      checkout_sessions: [
+        {
+          id: 'cs_1',
+          tenant_id: 'tnt_1',
+          event_id: 'evt_1',
+          brand_id: 'brd_1',
+          status: 'open',
+          currency: 'USD',
+          quote: JSON.stringify({
+            totalCents: 0,
+            subtotalCents: 1000,
+            discountCents: 1000,
+            taxCents: 0,
+            feeCents: 0,
+          }),
+          buyer: JSON.stringify({ email: 'buyer@test.com' }),
+          cart: JSON.stringify({
+            items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+            discountCode: 'SAVE25',
+          }),
+          expires_at: new Date(Date.now() + 60000),
+          hold_id: 'hld_1',
+          order_id: null,
+          client_token: 'tok_1',
+          success_url: null,
+          cancel_url: null,
+          idempotency_key: 'key_1',
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'paused',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      discount_codes: [
+        {
+          id: 'dc_1',
+          uses_count: 1,
+        },
+      ],
+      discount_redemptions: [
+        {
+          id: 'dred_1',
+          discount_code_id: 'dc_1',
+          checkout_session_id: 'cs_1',
+          order_id: null,
+        },
+      ],
+      idempotency_records: [],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables, {
+      inventoryService: {
+        reserveCart: vi.fn(),
+        releaseHoldsForSession,
+      },
+      temporalClient: {
+        startCheckoutSession,
+        getCheckoutState: vi.fn(),
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions/cs_1/confirm',
+      headers: { 'idempotency-key': 'key-2', 'x-checkout-session-token': 'tok_1' },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatchObject({
+      code: 'EVENT_NOT_AVAILABLE',
+      message: 'Event is not available for checkout',
+    });
+    expect(startCheckoutSession).not.toHaveBeenCalled();
+    expect(releaseHoldsForSession).toHaveBeenCalledWith('cs_1');
+    expect(tables.checkout_sessions[0]).toMatchObject({ status: 'cancelled' });
+    expect(tables.discount_codes[0]).toMatchObject({ uses_count: 0 });
+    expect(tables.discount_redemptions).toHaveLength(0);
+    await app.close();
+  });
+
   it('POST /checkout/sessions/:sessionId/confirm requires retry when pending workflow failed with stale payment details', async () => {
     const startCheckoutSession = vi.fn();
     const getCheckoutState = vi.fn(async () => ({

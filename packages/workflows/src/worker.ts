@@ -6,8 +6,13 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import * as allActivities from './activities/index.js';
 import { closeActivityClients } from './activities/activity-clients.js';
-import { holdExpirationWorkflow } from './workflows/index.js';
-import { holdExpirationWorkflowId, HOLD_EXPIRATION_WORKFLOW_VERSION } from './shared/types.js';
+import { holdExpirationWorkflow, providerEventRecoveryWorkflow } from './workflows/index.js';
+import {
+  holdExpirationWorkflowId,
+  providerEventRecoveryWorkflowId,
+  HOLD_EXPIRATION_WORKFLOW_VERSION,
+  PROVIDER_EVENT_RECOVERY_WORKFLOW_VERSION,
+} from './shared/types.js';
 import { buildWorkerStartupFailureMessage } from './startup-diagnostics.js';
 import { TixkitActivityMetricsInterceptor, startWorkerObservability } from './observability.js';
 import { createWorkflowExporterSink } from './otel-workflow-exporter.js';
@@ -21,11 +26,11 @@ type SchedulerConnection = {
 type SchedulerClient = {
   workflow: {
     start(
-      workflow: typeof holdExpirationWorkflow,
+      workflow: typeof holdExpirationWorkflow | typeof providerEventRecoveryWorkflow,
       options: {
         taskQueue: string;
         workflowId: string;
-        args: [{ version: typeof HOLD_EXPIRATION_WORKFLOW_VERSION }];
+        args: [{ version: number }];
       },
     ): Promise<unknown>;
   };
@@ -72,6 +77,32 @@ function isWorkflowExecutionAlreadyStartedError(err: unknown): boolean {
 export async function ensureHoldExpirationScheduler(
   options: EnsureHoldExpirationSchedulerOptions = {},
 ): Promise<'started' | 'already_started'> {
+  return ensureScheduledWorkflow({
+    ...options,
+    workflow: holdExpirationWorkflow,
+    workflowId: options.workflowId ?? holdExpirationWorkflowId(),
+    version: HOLD_EXPIRATION_WORKFLOW_VERSION,
+  });
+}
+
+export async function ensureProviderEventRecoveryScheduler(
+  options: EnsureHoldExpirationSchedulerOptions = {},
+): Promise<'started' | 'already_started'> {
+  return ensureScheduledWorkflow({
+    ...options,
+    workflow: providerEventRecoveryWorkflow,
+    workflowId: options.workflowId ?? providerEventRecoveryWorkflowId(),
+    version: PROVIDER_EVENT_RECOVERY_WORKFLOW_VERSION,
+  });
+}
+
+async function ensureScheduledWorkflow(
+  options: EnsureHoldExpirationSchedulerOptions & {
+    workflow: typeof holdExpirationWorkflow | typeof providerEventRecoveryWorkflow;
+    workflowId: string;
+    version: number;
+  },
+): Promise<'started' | 'already_started'> {
   const clientConnection =
     options.connect === undefined
       ? await Connection.connect({ address: config.temporalAddress })
@@ -85,10 +116,10 @@ export async function ensureHoldExpirationScheduler(
         namespace: config.temporalNamespace,
       });
     try {
-      await client.workflow.start(holdExpirationWorkflow, {
+      await client.workflow.start(options.workflow, {
         taskQueue: options.taskQueue ?? config.temporalTaskQueue,
-        workflowId: options.workflowId ?? holdExpirationWorkflowId(),
-        args: [{ version: HOLD_EXPIRATION_WORKFLOW_VERSION }],
+        workflowId: options.workflowId,
+        args: [{ version: options.version }],
       });
       return 'started';
     } catch (err) {
@@ -162,6 +193,7 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
     );
 
     await ensureHoldExpirationScheduler();
+    await ensureProviderEventRecoveryScheduler();
 
     const workerRuns = workers.map((worker) => worker.run());
     console.log(`TIXKIT_WORKER_READY taskQueues=${config.temporalWorkerTaskQueues.join(',')}`);

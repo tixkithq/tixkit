@@ -1,4 +1,4 @@
-import type { Database } from '@tixkit/db';
+import { EmailJobRepository, type Database } from '@tixkit/db';
 import { PutObjectCommand, S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
 import { Redis } from 'ioredis';
 import { PassThrough } from 'node:stream';
@@ -10,7 +10,11 @@ import {
 } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
-import { getActivityDb, startNotificationDeliveryWorkflow } from './activity-clients.js';
+import {
+  durablyStartNotificationDeliveryWorkflow,
+  getActivityDb,
+  restartQueuedNotificationDeliveryWorkflow,
+} from './activity-clients.js';
 
 const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
 const DEFAULT_EXPORT_PAGE_SIZE = 1_000;
@@ -495,6 +499,30 @@ function readPersistedExportFilters(type: string, persistedFilters: unknown) {
   }
 }
 
+type EventExportScope = {
+  organizationId: string;
+  brandId: string;
+};
+
+async function loadEventExportScope(
+  db: Database,
+  tenantId: string,
+  eventId: string,
+): Promise<EventExportScope | null> {
+  const event = await db
+    .selectFrom('events')
+    .select(['organization_id', 'brand_id'])
+    .where('id', '=', eventId)
+    .where('tenant_id', '=', tenantId)
+    .executeTakeFirst();
+
+  if (!event) return null;
+  return {
+    organizationId: event.organization_id,
+    brandId: event.brand_id,
+  };
+}
+
 async function generateExportWithWriter(
   input: {
     exportId: string;
@@ -511,6 +539,10 @@ async function generateExportWithWriter(
     });
     const tenantId = String(exportJob.tenant_id);
     const eventId = typeof exportJob.event_id === 'string' ? exportJob.event_id : undefined;
+    const eventScope = eventId ? await loadEventExportScope(db, tenantId, eventId) : null;
+    if (eventId && !eventScope) {
+      return errResult('EXPORT_FAILED', 'Event not found for export job', false);
+    }
 
     const filterResult = readPersistedExportFilters(input.type, exportJob.filters);
     if (!filterResult.ok) {
@@ -521,33 +553,40 @@ async function generateExportWithWriter(
     if (input.type === 'attendees') {
       let query = db
         .selectFrom('attendees')
+        .innerJoin('orders', 'orders.id', 'attendees.order_id')
         .select([
-          'id',
-          'email',
-          'first_name',
-          'last_name',
-          'phone',
-          'status',
-          'event_id',
-          'order_id',
-          'ticket_type_id',
-          'checked_in_at',
-          'custom_answers',
-          'created_at',
+          'attendees.id as id',
+          'attendees.email as email',
+          'attendees.first_name as first_name',
+          'attendees.last_name as last_name',
+          'attendees.phone as phone',
+          'attendees.status as status',
+          'attendees.event_id as event_id',
+          'attendees.order_id as order_id',
+          'attendees.ticket_type_id as ticket_type_id',
+          'attendees.checked_in_at as checked_in_at',
+          'attendees.custom_answers as custom_answers',
+          'attendees.created_at as created_at',
         ])
-        .where('tenant_id', '=', tenantId);
+        .where('attendees.tenant_id', '=', tenantId)
+        .where('orders.tenant_id', '=', tenantId);
 
       if (eventId) {
-        query = query.where('event_id', '=', eventId) as typeof query;
+        query = query.where('attendees.event_id', '=', eventId) as typeof query;
+      }
+      if (eventScope) {
+        query = query
+          .where('orders.organization_id', '=', eventScope.organizationId)
+          .where('orders.brand_id', '=', eventScope.brandId) as typeof query;
       }
       if (filters.status) {
-        query = query.where('status', '=', filters.status) as typeof query;
+        query = query.where('attendees.status', '=', filters.status) as typeof query;
       }
       if (filters.ticketTypeId) {
-        query = query.where('ticket_type_id', '=', filters.ticketTypeId) as typeof query;
+        query = query.where('attendees.ticket_type_id', '=', filters.ticketTypeId) as typeof query;
       }
       if (filters.from || filters.to) {
-        query = applyDateFilterToQuery(query, filters);
+        query = applyDateFilterToQuery(query, filters, 'attendees.created_at');
       }
 
       // Append checkout question and consent answer columns when the event has
@@ -575,7 +614,7 @@ async function generateExportWithWriter(
         }
       }
       await appendPagedExportRows({
-        query: query.orderBy('id', 'asc'),
+        query: query.orderBy('attendees.id', 'asc'),
         writer,
         mapRows: async (attendees) => {
           let page = attendees;
@@ -643,6 +682,11 @@ async function generateExportWithWriter(
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
       }
+      if (eventScope) {
+        query = query
+          .where('organization_id', '=', eventScope.organizationId)
+          .where('brand_id', '=', eventScope.brandId) as typeof query;
+      }
       if (filters.status) {
         query = query.where('status', '=', filters.status) as typeof query;
       }
@@ -671,35 +715,42 @@ async function generateExportWithWriter(
     } else if (input.type === 'tickets') {
       let query = db
         .selectFrom('tickets')
+        .innerJoin('orders', 'orders.id', 'tickets.order_id')
         .select([
-          'id',
-          'code',
-          'status',
-          'event_id',
-          'order_id',
-          'attendee_id',
-          'ticket_type_id',
-          'transferred_to_email',
-          'checked_in_at',
-          'created_at',
+          'tickets.id as id',
+          'tickets.code as code',
+          'tickets.status as status',
+          'tickets.event_id as event_id',
+          'tickets.order_id as order_id',
+          'tickets.attendee_id as attendee_id',
+          'tickets.ticket_type_id as ticket_type_id',
+          'tickets.transferred_to_email as transferred_to_email',
+          'tickets.checked_in_at as checked_in_at',
+          'tickets.created_at as created_at',
         ])
-        .where('tenant_id', '=', tenantId);
+        .where('tickets.tenant_id', '=', tenantId)
+        .where('orders.tenant_id', '=', tenantId);
 
       if (eventId) {
-        query = query.where('event_id', '=', eventId) as typeof query;
+        query = query.where('tickets.event_id', '=', eventId) as typeof query;
+      }
+      if (eventScope) {
+        query = query
+          .where('orders.organization_id', '=', eventScope.organizationId)
+          .where('orders.brand_id', '=', eventScope.brandId) as typeof query;
       }
       if (filters.status) {
-        query = query.where('status', '=', filters.status) as typeof query;
+        query = query.where('tickets.status', '=', filters.status) as typeof query;
       }
       if (filters.ticketTypeId) {
-        query = query.where('ticket_type_id', '=', filters.ticketTypeId) as typeof query;
+        query = query.where('tickets.ticket_type_id', '=', filters.ticketTypeId) as typeof query;
       }
       if (filters.from || filters.to) {
-        query = applyDateFilterToQuery(query, filters);
+        query = applyDateFilterToQuery(query, filters, 'tickets.created_at');
       }
 
       await appendPagedExportRows({
-        query: query.orderBy('id', 'asc'),
+        query: query.orderBy('tickets.id', 'asc'),
         writer,
         mapRows: (tickets) =>
           tickets.map((t) => ({
@@ -733,7 +784,11 @@ async function generateExportWithWriter(
       if (eventId) {
         query = query
           .innerJoin('check_in_lists', 'check_in_lists.id', 'scan_logs.check_in_list_id')
-          .where('check_in_lists.event_id', '=', eventId) as typeof query;
+          .innerJoin('events', 'events.id', 'check_in_lists.event_id')
+          .where('check_in_lists.event_id', '=', eventId)
+          .where('events.tenant_id', '=', tenantId)
+          .where('events.organization_id', '=', eventScope!.organizationId)
+          .where('events.brand_id', '=', eventScope!.brandId) as typeof query;
       }
       if (filters.status) {
         query = query.where('scan_logs.outcome', '=', filters.status) as typeof query;
@@ -779,6 +834,11 @@ async function generateExportWithWriter(
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
       }
+      if (eventScope) {
+        query = query
+          .where('organization_id', '=', eventScope.organizationId)
+          .where('brand_id', '=', eventScope.brandId) as typeof query;
+      }
       if (filters.status) {
         query = query.where('status', '=', filters.status) as typeof query;
       }
@@ -822,6 +882,11 @@ async function generateExportWithWriter(
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
+      }
+      if (eventScope) {
+        query = query
+          .where('organization_id', '=', eventScope.organizationId)
+          .where('brand_id', '=', eventScope.brandId) as typeof query;
       }
       if (filters.from || filters.to) {
         query = applyDateFilterToQuery(query, filters);
@@ -1091,44 +1156,51 @@ export async function notifyExportCompleteActivity(input: {
             .executeTakeFirst();
 
           if (route && templateVersion) {
-            const { EmailJobRepository } = await import('@tixkit/db');
-            const job = await new EmailJobRepository(db).create({
+            const emailJobRepo = new EmailJobRepository(db);
+            const idempotencyKey = `export-complete:${input.exportId}`;
+            const existingJob = await emailJobRepo.findByIdempotencyKey(
+              user.tenant_id,
+              idempotencyKey,
+            );
+            if (existingJob) {
+              await restartQueuedNotificationDeliveryWorkflow(db, existingJob);
+              return okResult({ notified: true });
+            }
+
+            const variables = {
+              exportId: input.exportId,
+              downloadUrl,
+              notificationType: 'staff',
+            };
+            const job = await emailJobRepo.create({
               tenantId: user.tenant_id,
               brandId: route.brand_id,
               templateKey: 'staff-order-notification',
               templateVersionId: templateVersion.id,
               toEmail: user.email,
-              variables: {
-                exportId: input.exportId,
-                downloadUrl,
-                notificationType: 'staff',
-              },
+              variables,
               providerRouteId: route.id,
               priority: 'normal',
-              idempotencyKey: `export-complete:${input.exportId}`,
+              idempotencyKey,
             });
 
-            // Start the notification delivery workflow.
-            await startNotificationDeliveryWorkflow({
+            await durablyStartNotificationDeliveryWorkflow(db, {
               jobId: job.id,
               tenantId: user.tenant_id,
               brandId: route.brand_id,
               templateKey: 'staff-order-notification',
               templateVersionId: templateVersion.id,
               toEmail: user.email,
-              variables: {
-                exportId: input.exportId,
-                downloadUrl,
-                notificationType: 'staff',
-              },
+              variables,
               providerRouteId: route.id,
               notificationType: 'staff',
             });
           }
         }
       }
-    } catch {
-      return okResult({ notified: false });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return errResult('EXPORT_NOTIFICATION_FAILED', message, true);
     }
 
     return okResult({ notified: true });

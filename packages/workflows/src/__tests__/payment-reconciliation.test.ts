@@ -335,6 +335,7 @@ describe('reconcilePaymentActivity', () => {
       providerEventId: 'evt_missing_pi_success',
       provider: 'stripe',
       eventType: 'payment_intent.succeeded',
+      trustedCheckoutSessionId: 'cs_1',
       data: {
         id: 'pi_provider_1',
         status: 'succeeded',
@@ -364,14 +365,27 @@ describe('reconcilePaymentActivity', () => {
     });
   });
 
-  it('does not process a successful provider event without a local payment intent or trusted checkout metadata', async () => {
+  it('does not compensate a successful provider event when checkout metadata was not trusted', async () => {
     mockState.paymentIntent = undefined;
+    mockState.checkoutSession = {
+      id: 'cs_1',
+      tenant_id: 'tnt_1',
+      currency: 'USD',
+      status: 'expired',
+      expires_at: new Date(Date.now() - 60_000),
+    };
 
     const result = await reconcilePaymentActivity({
       providerEventId: 'evt_untrusted_success',
       provider: 'stripe',
       eventType: 'payment_intent.succeeded',
-      data: { id: 'pi_provider_1', status: 'succeeded' },
+      data: {
+        id: 'pi_provider_1',
+        status: 'succeeded',
+        amount_received: 10000,
+        currency: 'usd',
+        metadata: { checkoutSessionId: 'cs_1' },
+      },
     });
 
     expect(result).toMatchObject({
@@ -746,6 +760,7 @@ describe('reconcileRefundActivity', () => {
       ok: true,
       value: { orderId: 'ord_1', status: 'partially_refunded' },
     });
+    expect(refundResult.ok && refundResult.value.webhookEvent).toBeUndefined();
     expect(mockState.createdRefunds).toHaveLength(1);
     expect(mockState.refunds).toHaveLength(1);
     expect(mockState.order).toMatchObject({

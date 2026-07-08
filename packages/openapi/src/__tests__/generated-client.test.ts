@@ -56,6 +56,13 @@ describe('Generated client compile validation (T33)', () => {
     // Paginated envelopes should be present as schemas.
     expect(output).toContain('EventPage');
     expect(output).toContain('OrderPage');
+    expect(output).toContain('prevCursor?: string | null');
+    expect(output).toContain('filterTotal?: number');
+    expect(output).toContain('[key: string]: components["schemas"]["AdminTableFacet"]');
+    expect(output).toContain('applied?: components["schemas"]["AdminTableAppliedQuery"]');
+    expect(output).not.toContain(
+      'EventPage: {\\n            items: components["schemas"]["Event"][];\\n            nextCursor: string | null;\\n            hasMore: boolean;',
+    );
     expect(output).not.toContain('OrganizationPage');
     expect(output).not.toContain('BrandPage');
     expect(output).not.toContain('PaymentAccountPage');

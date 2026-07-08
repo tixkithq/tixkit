@@ -24,7 +24,7 @@ export {
 export type { ColumnType, FilterType, Align, ColumnSpec, TableSchema } from './schema.js';
 
 // Query types and helpers
-export { isFilterEmpty, hasActiveFilters } from './query.js';
+export { isFilterEmpty, hasActiveFilters, resetAdminTableCursor } from './query.js';
 export type {
   SortDirection,
   AdminTableSort,

@@ -31,6 +31,7 @@ const {
     provider: string;
     eventType: string;
     data: Record<string, unknown>;
+    trustedCheckoutSessionId?: string;
   }): Promise<WorkflowActivityResult<ReconciliationActivityValue>>;
   reconcileRefundActivity(input: {
     providerEventId: string;
@@ -74,6 +75,7 @@ export type PaymentReconciliationWorkflowInput = {
   provider: string;
   eventType: string;
   data: Record<string, unknown>;
+  trustedCheckoutSessionId?: string;
 };
 
 type ReconciliationResult = WorkflowActivityResult<ReconciliationActivityValue>;
@@ -118,6 +120,7 @@ async function runReconciliationActivity(
     provider: input.provider,
     eventType: input.eventType,
     data: input.data,
+    trustedCheckoutSessionId: input.trustedCheckoutSessionId,
   });
 }
 
