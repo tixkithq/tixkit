@@ -90,16 +90,22 @@ void main() {
             },
             'version': {
               'versionNumber': 3,
-              'renderedHtml': '<main class="tixkit-event-page">All Access</main>',
-              'renderedText': 'All Access',
               'publishedAt': '2026-06-02T00:00:00.000Z',
             },
             'page': {
-              'html': '<main>All Access</main>',
-              'text': 'All Access',
-              'headless': [
-                {'type': 'hero', 'id': 'hero', 'title': 'All Access'},
-              ],
+              'provider': '@puckeditor/core',
+              'puckData': {
+                'content': [
+                  {
+                    'type': 'Hero',
+                    'props': {'id': 'Hero-hero', 'headline': 'All Access'},
+                  },
+                ],
+                'root': {
+                  'props': {'title': 'All Access'},
+                },
+              },
+              'settings': {'locale': 'en'},
               'discovery': {
                 'title': 'All Access',
                 'summary': 'Chicago',
@@ -115,6 +121,8 @@ void main() {
     final page = await client.getContentPage('evt_1', locale: 'en');
     expect(page.document.eventId, 'evt_1');
     expect(page.page.discovery.title, 'All Access');
+    expect(page.page.provider, '@puckeditor/core');
+    expect(page.page.puckData.content.single.type, 'Hero');
     await client.getEventPage('evt_1', locale: 'en');
     await client.getEventPageBySlug('all-access', host: 'events.example.com', locale: 'en');
     final card = await client.getEventDiscoveryCard('evt_1');

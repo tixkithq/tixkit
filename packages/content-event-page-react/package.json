@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./puck": {
+      "types": "./dist/puck.d.ts",
+      "import": "./dist/puck.js"
+    },
     "./styles.css": "./src/styles.css"
   },
   "scripts": {
@@ -20,6 +24,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@puckeditor/core": "0.22.0",
     "@tixkit/content-event-page": "workspace:*",
     "react": "^19.2.0"
   },

@@ -34,14 +34,28 @@ describe('Next server webhook helpers', () => {
   it('loads public content-studio event pages through the JS SDK public client', async () => {
     const client = {
       public: {
-        getEventPage: vi.fn(async () => ({ page: { discovery: { title: 'All Access' } } })),
+        getEventPage: vi.fn(async () => ({
+          page: {
+            document: {
+              schemaVersion: 2,
+              editor: {
+                provider: '@puckeditor/core',
+                data: { content: [], root: { props: {} } },
+              },
+            },
+            discovery: { title: 'All Access' },
+          },
+        })),
         getEventPageBySlug: vi.fn(async () => ({ document: { eventId: 'evt_1' } })),
         getEventDiscoveryCard: vi.fn(async () => ({ title: 'All Access' })),
       },
     } as unknown as TixkitClient;
 
     await expect(loadPublicEventPage(client, 'evt_1', { locale: 'en' })).resolves.toMatchObject({
-      page: { discovery: { title: 'All Access' } },
+      page: {
+        document: { schemaVersion: 2 },
+        discovery: { title: 'All Access' },
+      },
     });
     await expect(
       loadPublicEventPageBySlug(client, 'all-access', {

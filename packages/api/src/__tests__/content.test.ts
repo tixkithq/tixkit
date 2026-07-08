@@ -267,7 +267,7 @@ function emailDocumentJson(overrides: Parameters<typeof createDefaultEmailTempla
   });
 }
 
-function eventPageJson(
+function legacyEventPageJson(
   overrides: Parameters<typeof createDefaultEventPageDocument>[0] = {
     eventId: 'evt_1',
     eventTitle: 'Published page',
@@ -275,10 +275,61 @@ function eventPageJson(
     startsAt: '2026-07-17T19:00:00.000Z',
     timezone: 'America/Chicago',
     venue: { name: 'The Salt Shed', city: 'Chicago' },
-    checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_1',
   },
 ) {
-  return createDefaultEventPageDocument(overrides);
+  return {
+    settings: {
+      locale: overrides.locale ?? 'en',
+      publicPath: overrides.publicUrl ?? `/e/${overrides.eventId}`,
+      discovery: {
+        summary: overrides.eventDescription ?? `Details for ${overrides.eventTitle}.`,
+        tags: [],
+        seoTitle: overrides.eventTitle,
+        seoDescription: overrides.eventDescription,
+      },
+    },
+    blocks: [
+      {
+        id: 'hero',
+        type: 'hero',
+        eyebrow: overrides.brandName,
+        headline: overrides.eventTitle,
+        body: overrides.eventDescription,
+        imageUrl: overrides.coverImageUrl,
+        imageAlt: overrides.coverImageAlt,
+        ctaLabel: 'Get tickets',
+        ctaUrl: overrides.publicUrl,
+      },
+      {
+        id: 'details',
+        type: 'event_details',
+        title: 'Event details',
+        items: [
+          { label: 'Date', value: overrides.startsAt ?? 'TBA' },
+          { label: 'Venue', value: overrides.venue?.name ?? 'Venue to be announced' },
+        ],
+      },
+      {
+        id: 'tickets',
+        type: 'tickets',
+        title: 'Tickets',
+      },
+    ],
+  };
+}
+
+function eventPageJson(overrides?: Parameters<typeof createDefaultEventPageDocument>[0]) {
+  return createDefaultEventPageDocument(
+    overrides ?? {
+      eventId: 'evt_1',
+      eventTitle: 'Published page',
+      eventDescription: 'Preview copy',
+      startsAt: '2026-07-17T19:00:00.000Z',
+      timezone: 'America/Chicago',
+      venue: { name: 'The Salt Shed', city: 'Chicago' },
+      publicUrl: '/e/evt_1',
+    },
+  );
 }
 
 async function setupContentApp(
@@ -1080,20 +1131,12 @@ describe('content routes', () => {
 
   it('fails closed for unsafe event-page rich-text images before publish', async () => {
     const eventPageDocument = eventPageJson();
-    eventPageDocument.blocks.push({
-      type: 'rich_text',
-      id: 'story',
-      content: {
-        type: 'doc',
-        content: [
-          {
-            type: 'image',
-            attrs: {
-              src: 'http://127.0.0.1/private-preview.png',
-              alt: '',
-            },
-          },
-        ],
+    eventPageDocument.editor.data.content.push({
+      type: 'Media',
+      props: {
+        id: 'private-media',
+        imageUrl: 'http://127.0.0.1/private-preview.png',
+        imageAlt: '',
       },
     });
     const { db } = createContentDb({
@@ -1120,12 +1163,16 @@ describe('content routes', () => {
     expect(save.statusCode).toBe(201);
     expect(save.json()).toMatchObject({
       documentId: 'cdoc_event_page',
+      contentJson: {
+        schemaVersion: 2,
+        editor: { provider: '@puckeditor/core' },
+      },
       validation: { valid: false },
     });
     expect(save.json().validation.issues).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: 'unsafe_image' }),
-        expect.objectContaining({ code: 'missing_image_alt' }),
+        expect.objectContaining({ code: 'unsafe_url' }),
+        expect.objectContaining({ code: 'missing_required_text' }),
       ]),
     );
 
@@ -1138,7 +1185,11 @@ describe('content routes', () => {
     expect(preview.statusCode).toBe(200);
     expect(preview.json()).toMatchObject({
       channel: 'event_page',
-      output: { html: '' },
+      output: {
+        provider: '@puckeditor/core',
+        puckData: { content: expect.any(Array) },
+      },
+      validation: { valid: false },
     });
 
     const publish = await app.inject({
@@ -1152,7 +1203,7 @@ describe('content routes', () => {
     );
   });
 
-  it('renders event-page previews from canonical JSON, ignoring caller-supplied renderedHtml', async () => {
+  it('saves event-page previews as Puck JSON, ignoring caller-supplied renderedHtml', async () => {
     const eventPageDocument = eventPageJson();
     const { db } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
@@ -1180,9 +1231,17 @@ describe('content routes', () => {
     });
 
     expect(save.statusCode).toBe(201);
-    expect(save.json().renderedHtml).not.toContain('caller-supplied stale html');
-    expect(save.json().renderedHtml).not.toContain('<script>');
-    expect(save.json().renderedText).not.toContain('caller-supplied stale text');
+    expect(save.json().contentJson).toMatchObject({
+      schemaVersion: 2,
+      editor: {
+        provider: '@puckeditor/core',
+        data: { content: expect.any(Array) },
+      },
+    });
+    expect(save.json().renderedHtml).toBeUndefined();
+    expect(save.json().renderedText).toBeUndefined();
+    expect(JSON.stringify(save.json())).not.toContain('caller-supplied stale html');
+    expect(JSON.stringify(save.json())).not.toContain('caller-supplied stale text');
 
     const preview = await app.inject({
       method: 'POST',
@@ -1191,12 +1250,18 @@ describe('content routes', () => {
     });
 
     expect(preview.statusCode).toBe(200);
-    expect(preview.json().output.html).not.toContain('caller-supplied stale html');
-    expect(preview.json().output.html).not.toContain('<script>');
+    expect(preview.json().output).toMatchObject({
+      provider: '@puckeditor/core',
+      puckData: { content: expect.any(Array) },
+      settings: { locale: 'en' },
+      discovery: { title: 'Published page' },
+    });
+    expect(JSON.stringify(preview.json())).not.toContain('caller-supplied stale html');
+    expect(JSON.stringify(preview.json())).not.toContain('<script>');
   });
 
-  it('event-page preview output matches canonical renderEventPageDocument output', async () => {
-    const eventPageDocument = eventPageJson();
+  it('migrates legacy event-page blocks to Puck data on save and preview', async () => {
+    const eventPageDocument = legacyEventPageJson();
     const { db } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
       content_documents: [
@@ -1229,8 +1294,73 @@ describe('content routes', () => {
     });
 
     expect(preview.statusCode).toBe(200);
-    expect(preview.json().output.html).toContain('class="tixkit-event-page"');
-    expect(preview.json().output.html).toContain('Published page');
+    expect(preview.json().output).toMatchObject({
+      provider: '@puckeditor/core',
+      puckData: {
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'Hero',
+            props: expect.objectContaining({ headline: 'Published page' }),
+          }),
+        ]),
+      },
+      discovery: { title: 'Published page' },
+    });
+    expect(preview.json().validation.valid).toBe(true);
+  });
+
+  it('migrates stored legacy event-page versions to Puck JSON', async () => {
+    const version = versionRow({
+      id: 'cver_legacy_event_page',
+      document_id: 'cdoc_event_page',
+      content_json: JSON.stringify(legacyEventPageJson()),
+      rendered_html: '<main>legacy rendered html</main>',
+      rendered_text: 'legacy rendered text',
+      validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+    });
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_event_page',
+          channel: 'event_page',
+          key: 'main',
+          name: 'Main event page',
+        }),
+      ],
+      content_document_versions: [version],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/migrate-event-page-puck',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      documentsScanned: 1,
+      versionsChecked: 1,
+      versionsMigrated: 1,
+      migrated: [
+        {
+          documentId: 'cdoc_event_page',
+          versionId: 'cver_legacy_event_page',
+          versionNumber: 1,
+        },
+      ],
+    });
+    const migrated = JSON.parse(String(version.content_json));
+    expect(migrated).toMatchObject({
+      schemaVersion: 2,
+      editor: {
+        provider: '@puckeditor/core',
+        data: { content: expect.any(Array) },
+      },
+    });
+    expect(version.rendered_html).toBeNull();
+    expect(version.rendered_text).toBeNull();
+    expect(JSON.parse(String(version.validation))).toMatchObject({ valid: true });
   });
 
   it('fails closed for SMS test sends without an active verified provider route', async () => {
@@ -1324,7 +1454,7 @@ describe('content routes', () => {
     expect(response.json().message ?? response.json().error?.message).toContain('canonical SMS');
   });
 
-  it('returns a rendered public event page from canonical content JSON without lifecycle fields', async () => {
+  it('returns a public Puck event page from V2 content JSON without lifecycle fields', async () => {
     const { db } = createContentDb({
       events: [
         {
@@ -1421,17 +1551,28 @@ describe('content routes', () => {
         publishedAt: '2026-06-02T00:00:00.000Z',
       },
       page: {
+        provider: '@puckeditor/core',
+        puckData: {
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'Hero',
+              props: expect.objectContaining({ headline: 'Published page' }),
+            }),
+          ]),
+        },
+        settings: {
+          locale: 'en',
+        },
         discovery: {
           title: 'Published page',
           summary: 'Preview copy',
         },
       },
     });
-    expect(response.json().version.renderedHtml).toContain('class="tixkit-event-page"');
-    expect(response.json().version.renderedHtml).toContain('General Admission');
-    expect(response.json().version.renderedHtml).not.toContain('Hidden comp');
-    expect(response.json().version.renderedHtml).not.toContain('stored html must not render');
-    expect(response.json().version.renderedHtml).not.toContain('<script>');
+    expect(response.json().version).not.toHaveProperty('renderedHtml');
+    expect(response.json().version).not.toHaveProperty('renderedText');
+    expect(JSON.stringify(response.json())).not.toContain('stored html must not render');
+    expect(JSON.stringify(response.json())).not.toContain('<script>');
     expect(JSON.stringify(response.json())).not.toContain('tnt_1');
     expect(JSON.stringify(response.json())).not.toContain('org_1');
     expect(JSON.stringify(response.json())).not.toContain('brd_1');
@@ -1443,7 +1584,7 @@ describe('content routes', () => {
     expect(JSON.stringify(response.json())).not.toContain('usr_private');
   });
 
-  it('keeps public event-page route latency bounded under concurrent load', async () => {
+  it('keeps public Puck event-page route latency bounded under concurrent load', async () => {
     const { db } = createContentDb({
       events: [
         {
@@ -1551,34 +1692,31 @@ describe('content routes', () => {
     expect(maxDurationMs).toBeLessThan(2_000);
     for (const { response } of responses) {
       const payload = response.json();
-      expect(payload.version.renderedHtml).toContain('General Admission');
-      expect(payload.version.renderedHtml).toContain('VIP');
-      expect(payload.version.renderedHtml).not.toContain('Hidden comp');
+      expect(payload.page.provider).toBe('@puckeditor/core');
+      expect(
+        payload.page.puckData.content.map((component: { type: string }) => component.type),
+      ).toEqual([
+        'Hero',
+        'EventDetails',
+        'Schedule',
+        'Venue',
+        'FAQ',
+      ]);
+      expect(payload.page.puckData.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'Hero',
+            props: expect.objectContaining({ headline: 'Published page' }),
+          }),
+        ]),
+      );
+      expect(payload.version).not.toHaveProperty('renderedHtml');
       expect(JSON.stringify(payload)).not.toContain('tnt_1');
       expect(JSON.stringify(payload)).not.toContain('stored html must not render');
-      expect(payload.page.renderModel.schemaVersion).toBe(1);
-      expect(payload.page.renderModel.validation.valid).toBe(true);
-      expect(payload.page.renderModel.blocks.map((block: { type: string }) => block.type)).toEqual([
-        'event_header',
-        'hero',
-        'event_details',
-        'tickets',
-        'schedule',
-        'venue_map',
-        'faq',
-        'resale_tickets',
-        'brand_footer',
-      ]);
-      expect(
-        payload.page.renderModel.blocks.some(
-          (block: { type: string; tickets?: { id: string }[] }) =>
-            block.type === 'tickets' && block.tickets?.some((ticket) => ticket.id === 'tt_vip'),
-        ),
-      ).toBe(true);
     }
   });
 
-  it('caches rendered public event pages by event public revision', async () => {
+  it('caches public Puck event pages by event public revision', async () => {
     const event = {
       id: 'evt_render_cache',
       tenant_id: 'tnt_1',
@@ -1594,21 +1732,29 @@ describe('content routes', () => {
       venue: null,
       public_revision: new Date('2026-06-01T00:00:00.000Z'),
     };
-    const ticket = {
-      id: 'tt_cache',
-      event_id: 'evt_render_cache',
-      name: 'Original GA',
-      description: 'Standing room',
-      kind: 'paid',
-      status: 'active',
-      visibility: 'public',
-      currency: 'USD',
-      price_cents: 3500,
-      minimum_price_cents: null,
-    };
+    const pageDocument = eventPageJson({
+      eventId: 'evt_render_cache',
+      eventTitle: 'Original headline',
+      eventDescription: 'Preview copy',
+    });
+    const version = versionRow({
+      id: 'cver_render_cache',
+      document_id: 'cdoc_render_cache',
+      version_number: 3,
+      status: 'published',
+      subject: 'Render cache',
+      preview_text: 'Preview copy',
+      content_json: JSON.stringify(pageDocument),
+      rendered_html: '<main>stored html must not render</main>',
+      rendered_text: 'stored text must not render',
+      variables: JSON.stringify([]),
+      validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+      created_by: 'usr_private',
+      published_at: new Date('2026-06-02T00:00:00.000Z'),
+    });
     const { db } = createContentDb({
       events: [event],
-      ticket_types: [ticket],
+      ticket_types: [],
       content_documents: [
         documentRow({
           id: 'cdoc_render_cache',
@@ -1620,23 +1766,7 @@ describe('content routes', () => {
           published_version_id: 'cver_render_cache',
         }),
       ],
-      content_document_versions: [
-        versionRow({
-          id: 'cver_render_cache',
-          document_id: 'cdoc_render_cache',
-          version_number: 3,
-          status: 'published',
-          subject: 'Render cache',
-          preview_text: 'Preview copy',
-          content_json: JSON.stringify(eventPageJson()),
-          rendered_html: '<main>stored html must not render</main>',
-          rendered_text: 'stored text must not render',
-          variables: JSON.stringify([]),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
-          created_by: 'usr_private',
-          published_at: new Date('2026-06-02T00:00:00.000Z'),
-        }),
-      ],
+      content_document_versions: [version],
     });
     const app = await setupPublicContentApp(db);
 
@@ -1644,7 +1774,12 @@ describe('content routes', () => {
       method: 'GET',
       url: '/public/events/evt_render_cache/page',
     });
-    ticket.name = 'Updated GA';
+    const updatedPageDocument = eventPageJson({
+      eventId: 'evt_render_cache',
+      eventTitle: 'Updated headline',
+      eventDescription: 'Preview copy',
+    });
+    version.content_json = JSON.stringify(updatedPageDocument);
     const second = await app.inject({
       method: 'GET',
       url: '/public/events/evt_render_cache/page',
@@ -1658,10 +1793,24 @@ describe('content routes', () => {
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
     expect(third.statusCode).toBe(200);
-    expect(first.json().version.renderedHtml).toContain('Original GA');
-    expect(second.json().version.renderedHtml).toContain('Original GA');
-    expect(second.json().version.renderedHtml).not.toContain('Updated GA');
-    expect(third.json().version.renderedHtml).toContain('Updated GA');
+    expect(
+      first
+        .json()
+        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero').props
+        .headline,
+    ).toBe('Original headline');
+    expect(
+      second
+        .json()
+        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero').props
+        .headline,
+    ).toBe('Original headline');
+    expect(
+      third
+        .json()
+        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero').props
+        .headline,
+    ).toBe('Updated headline');
     await app.close();
   });
 
@@ -1758,7 +1907,17 @@ describe('content routes', () => {
       availability: [{ ticketTypeId: 'tt_ga', available: 11, status: 'active' }],
       contentPage: {
         document: { eventId: 'evt_1', channel: 'event_page' },
-        page: { text: expect.stringContaining('Published page') },
+        page: {
+          provider: '@puckeditor/core',
+          puckData: {
+            content: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'Hero',
+                props: expect.objectContaining({ headline: 'Published page' }),
+              }),
+            ]),
+          },
+        },
       },
       resaleListings: { items: [], nextCursor: null, hasMore: false },
     });
@@ -1822,7 +1981,6 @@ describe('content routes', () => {
               eventId: 'evt_private',
               eventTitle: 'Private page',
               eventDescription: 'Private draft must not leak',
-              checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_private',
             }),
           ),
           rendered_html: '<main>private draft must not leak</main>',
@@ -1839,7 +1997,6 @@ describe('content routes', () => {
               eventId: 'evt_stale',
               eventTitle: 'Stale page',
               eventDescription: 'Stale draft must not leak',
-              checkoutUrl: 'https://checkout.tixkit.com/checkout?eventId=evt_stale',
             }),
           ),
           rendered_html: '<main>stale draft must not leak</main>',
@@ -1921,8 +2078,6 @@ describe('content routes', () => {
               startsAt: '2026-07-17T19:00:00.000Z',
               timezone: 'America/Chicago',
               venue: { name: 'The Salt Shed', city: 'Chicago' },
-              publicUrl: '{{event.publicUrl}}',
-              checkoutUrl: '{{event.checkoutUrl}}',
             }),
           ),
           validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
@@ -1943,9 +2098,7 @@ describe('content routes', () => {
 
     expect(page.statusCode).toBe(200);
     expect(page.json().document.eventId).toBe('evt_1');
-    expect(page.json().version.renderedHtml).toContain(
-      'href="https://events.example.com/checkout?eventId=evt_1"',
-    );
+    expect(page.json().page.provider).toBe('@puckeditor/core');
     expect(page.json().page.discovery.publicPath).toBe('https://events.example.com/published-page');
     expect(card.statusCode).toBe(200);
     expect(card.json()).toMatchObject({
@@ -2044,7 +2197,7 @@ describe('content routes', () => {
     }
   });
 
-  it('rejects published event-page records that are not canonical event-page JSON', async () => {
+  it('rejects published event-page records that are not Puck event-page JSON', async () => {
     const { db } = createContentDb({
       events: [
         {
@@ -2083,237 +2236,7 @@ describe('content routes', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().message ?? response.json().error?.message).toContain(
-      'valid event-page document',
+      'valid Puck event-page document',
     );
-  });
-});
-
-describe('event-page draft-preview token', () => {
-  const tokenSecret = 'test-preview-token-secret-for-draft-preview';
-  const draftPrincipal: Principal = {
-    type: 'user',
-    id: 'usr_1',
-    tenantId: 'tnt_1',
-    organizationIds: ['org_1'],
-    scopes: ['events.read', 'events.write', 'messages.write'],
-  };
-
-  function seedDraftPreviewDb() {
-    return createContentDb({
-      events: [
-        {
-          id: 'evt_1',
-          tenant_id: 'tnt_1',
-          organization_id: 'org_1',
-          brand_id: 'brd_1',
-          slug: 'draft-preview',
-          title: 'Draft Preview Event',
-          description: 'A draft preview description.',
-          status: 'published',
-          visibility: 'public',
-          starts_at: new Date('2026-07-17T19:00:00.000Z'),
-          ends_at: null,
-          timezone: 'America/Chicago',
-          venue: JSON.stringify({ name: 'The Salt Shed', city: 'Chicago' }),
-        },
-      ],
-      ticket_types: [
-        {
-          id: 'tt_ga',
-          event_id: 'evt_1',
-          name: 'General Admission',
-          description: 'Standing room',
-          kind: 'paid',
-          status: 'active',
-          visibility: 'public',
-          currency: 'USD',
-          price_cents: 3500,
-          minimum_price_cents: null,
-        },
-      ],
-      brands: [
-        {
-          id: 'brd_1',
-          tenant_id: 'tnt_1',
-          organization_id: 'org_1',
-          name: 'Tixkit',
-          slug: 'tixkit',
-          status: 'active',
-          theme: '{}',
-          email_identity_id: null,
-          sms_identity_id: null,
-          payment_account_id: null,
-          support_url: 'https://help.example.test',
-          legal_urls: JSON.stringify({
-            terms: 'https://example.test/terms',
-            privacy: 'https://example.test/privacy',
-            refundPolicy: 'https://example.test/refunds',
-          }),
-          white_label: true,
-          created_at: new Date('2026-06-01T00:00:00.000Z'),
-          updated_at: new Date('2026-06-01T00:00:00.000Z'),
-        },
-      ],
-      content_documents: [
-        documentRow({
-          id: 'cdoc_draft',
-          channel: 'event_page',
-          event_id: 'evt_1',
-          key: 'main',
-          name: 'Draft event page',
-          status: 'draft',
-          current_draft_version_id: 'cver_draft',
-          published_version_id: null,
-        }),
-      ],
-      content_document_versions: [
-        versionRow({
-          id: 'cver_draft',
-          document_id: 'cdoc_draft',
-          version_number: 1,
-          status: 'draft',
-          subject: 'Draft Preview Event',
-          preview_text: 'A draft preview description.',
-          content_json: JSON.stringify(
-            eventPageJson({
-              eventId: 'evt_1',
-              eventTitle: 'Draft Preview Event',
-              eventDescription: 'A draft preview description.',
-            }),
-          ),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
-        }),
-      ],
-    });
-  }
-
-  it('mints a signed preview token for an event-page draft', async () => {
-    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
-    const { db } = seedDraftPreviewDb();
-    const app = await setupContentApp(db, draftPrincipal);
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/content-documents/cdoc_draft/preview-token',
-      payload: {},
-    });
-
-    expect(response.statusCode).toBe(200);
-    const payload = response.json();
-    expect(payload.token).toBeTruthy();
-    expect(payload.url).toContain('/e/evt_1?token=');
-    expect(payload.url).toContain('edit=1');
-    expect(payload.expiresAt).toBeTruthy();
-    expect(payload.versionId).toBe('cver_draft');
-  });
-
-  it('serves a draft preview via the public endpoint with a valid token', async () => {
-    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
-    const { db } = seedDraftPreviewDb();
-
-    const adminApp = await setupContentApp(db, draftPrincipal);
-    const mintResponse = await adminApp.inject({
-      method: 'POST',
-      url: '/content-documents/cdoc_draft/preview-token',
-      payload: {},
-    });
-    expect(mintResponse.statusCode).toBe(200);
-    const { token } = mintResponse.json();
-
-    const publicApp = await setupPublicContentApp(db);
-    const previewResponse = await publicApp.inject({
-      method: 'GET',
-      url: `/public/events/evt_1/draft-preview?token=${encodeURIComponent(token)}`,
-    });
-
-    expect(previewResponse.statusCode).toBe(200);
-    const preview = previewResponse.json();
-    expect(preview.contentJson).toBeTruthy();
-    expect(preview.contentJson.blocks).toBeTruthy();
-    expect(preview.context).toBeTruthy();
-    expect(preview.context.event.title).toBe('Draft Preview Event');
-    expect(preview.context.event.description).toBe('A draft preview description.');
-    expect(preview.context.brand.name).toBe('Tixkit');
-    expect(preview.context.brand.termsUrl).toBe('https://example.test/terms');
-    expect(preview.renderModel).toBeTruthy();
-    expect(preview.validation.valid).toBe(true);
-  });
-
-  it('rejects a draft-preview request with a tampered token', async () => {
-    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
-    const { db } = seedDraftPreviewDb();
-
-    const adminApp = await setupContentApp(db, draftPrincipal);
-    const mintResponse = await adminApp.inject({
-      method: 'POST',
-      url: '/content-documents/cdoc_draft/preview-token',
-      payload: {},
-    });
-    const { token } = mintResponse.json();
-    const tampered = `${token.slice(0, -4)}XXXX`;
-
-    const publicApp = await setupPublicContentApp(db);
-    const response = await publicApp.inject({
-      method: 'GET',
-      url: `/public/events/evt_1/draft-preview?token=${encodeURIComponent(tampered)}`,
-    });
-
-    expect(response.statusCode).toBe(404);
-  });
-
-  it('rejects a draft-preview request when the token event does not match the URL', async () => {
-    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
-    const { db } = seedDraftPreviewDb();
-
-    const adminApp = await setupContentApp(db, draftPrincipal);
-    const mintResponse = await adminApp.inject({
-      method: 'POST',
-      url: '/content-documents/cdoc_draft/preview-token',
-      payload: {},
-    });
-    const { token } = mintResponse.json();
-
-    const publicApp = await setupPublicContentApp(db);
-    const response = await publicApp.inject({
-      method: 'GET',
-      url: `/public/events/evt_wrong/draft-preview?token=${encodeURIComponent(token)}`,
-    });
-
-    expect(response.statusCode).toBe(404);
-  });
-
-  it('rejects a draft-preview request with a token signed by a different secret', async () => {
-    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
-    const { db } = seedDraftPreviewDb();
-
-    const adminApp = await setupContentApp(db, draftPrincipal);
-    const mintResponse = await adminApp.inject({
-      method: 'POST',
-      url: '/content-documents/cdoc_draft/preview-token',
-      payload: {},
-    });
-    const { token } = mintResponse.json();
-
-    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', 'a-completely-different-secret');
-    const publicApp = await setupPublicContentApp(db);
-    const response = await publicApp.inject({
-      method: 'GET',
-      url: `/public/events/evt_1/draft-preview?token=${encodeURIComponent(token)}`,
-    });
-
-    expect(response.statusCode).toBe(404);
-  });
-
-  it('rejects a draft-preview request without a token', async () => {
-    vi.stubEnv('TIXKIT_PREVIEW_TOKEN_SECRET', tokenSecret);
-    const { db } = seedDraftPreviewDb();
-    const publicApp = await setupPublicContentApp(db);
-
-    const response = await publicApp.inject({
-      method: 'GET',
-      url: '/public/events/evt_1/draft-preview',
-    });
-
-    expect(response.statusCode).toBe(404);
   });
 });

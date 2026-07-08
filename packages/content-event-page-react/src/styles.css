@@ -1,24 +1,30 @@
 /*
- * Shared event page stylesheet.
+ * Shared Puck event-page content styles.
  *
- * Imported by the admin dashboard and checkout app so the canvas, preview
- * drawer, and public hosted page share one visual contract. The server HTML
- * renderer (packages/content-event-page) emits the same class names, so
- * API-rendered HTML and React-rendered pages are visually compatible.
- *
- * Brand theming flows through --tk-brand-* tokens; event page blocks own
- * their own stable namespaced classes and do not depend on app-specific
- * Tailwind prose styles for layout.
+ * Import this file in the public checkout render and in the Puck canvas iframe.
+ * Selectors are scoped to .tixkit-event-page-puck-scope/.tixkit-event-page so
+ * admin dashboard styles do not leak into buyer-facing content.
  */
 
+.tixkit-event-page-puck-scope {
+  --tk-brand-bg: #ffffff;
+  --tk-brand-fg: #111111;
+  --tk-brand-accent: #111111;
+  --tk-brand-accent-fg: #ffffff;
+  --tk-brand-font-body: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --tk-brand-font-heading: var(--tk-brand-font-body);
+  --tk-brand-radius: 14px;
+}
+
 .tixkit-event-page {
-  --tk-ep-bg: var(--background, var(--tk-brand-bg, #ffffff));
-  --tk-ep-fg: var(--foreground, var(--tk-brand-fg, #111111));
-  --tk-ep-muted: color-mix(in srgb, var(--tk-ep-fg), transparent 38%);
-  --tk-ep-border: var(--border, color-mix(in srgb, var(--tk-ep-fg), transparent 86%));
-  --tk-ep-accent: var(--primary, var(--tk-brand-accent, #111111));
-  --tk-ep-accent-fg: var(--primary-foreground, var(--tk-brand-accent-fg, #ffffff));
-  --tk-ep-radius: var(--radius, var(--tk-brand-radius, 14px));
+  --tk-ep-bg: var(--tk-brand-bg, #ffffff);
+  --tk-ep-fg: var(--tk-brand-fg, #111111);
+  --tk-ep-muted: color-mix(in srgb, var(--tk-ep-fg), transparent 36%);
+  --tk-ep-subtle: color-mix(in srgb, var(--tk-ep-fg), transparent 92%);
+  --tk-ep-border: color-mix(in srgb, var(--tk-ep-fg), transparent 84%);
+  --tk-ep-accent: var(--tk-brand-accent, #111111);
+  --tk-ep-accent-fg: var(--tk-brand-accent-fg, #ffffff);
+  --tk-ep-radius: var(--tk-brand-radius, 14px);
   --tk-ep-font-body: var(--tk-brand-font-body, Inter, system-ui, sans-serif);
   --tk-ep-font-heading: var(--tk-brand-font-heading, var(--tk-ep-font-body));
 
@@ -28,341 +34,384 @@
   line-height: 1.6;
 }
 
+.tixkit-event-page *,
+.tixkit-event-page *::before,
+.tixkit-event-page *::after {
+  box-sizing: border-box;
+}
+
 .tixkit-event-page > section,
 .tixkit-event-page > hr {
-  max-width: 720px;
+  width: min(100% - 2rem, 760px);
   margin-inline: auto;
-  padding-block: 1.25rem;
+}
+
+.tixkit-event-page > section {
+  padding-block: 1.5rem;
 }
 
 .tixkit-event-page h1,
 .tixkit-event-page h2,
 .tixkit-event-page h3 {
+  margin: 0;
+  color: var(--tk-ep-fg);
   font-family: var(--tk-ep-font-heading);
-  line-height: 1.25;
+  line-height: 1.18;
+  letter-spacing: 0;
 }
 
 .tixkit-event-page h1 {
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
-  letter-spacing: -0.01em;
+  font-size: 2.5rem;
+  font-weight: 720;
 }
 
 .tixkit-event-page h2 {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: 1.35rem;
+  font-weight: 680;
+}
+
+.tixkit-event-page p {
+  margin: 0;
+}
+
+.tixkit-event-page a {
+  color: var(--tk-ep-accent);
+}
+
+.tk-ep-align-center {
+  text-align: center;
+}
+
+.tk-ep-align-center .tk-ep-button {
+  margin-inline: auto;
 }
 
 .tk-ep-eyebrow {
+  margin: 0 0 0.5rem;
   color: var(--tk-ep-muted);
   font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin: 0 0 0.5rem;
 }
 
-.tk-ep-hero img,
-.tixkit-event-page img {
+.tk-ep-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  padding-block: 2rem;
+}
+
+.tk-ep-hero__copy {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.tk-ep-hero__body,
+.tk-ep-rich-text,
+.tk-ep-venue p,
+.tk-ep-person-list p,
+.tk-ep-faq details > p {
+  color: var(--tk-ep-muted);
+}
+
+.tk-ep-hero__image,
+.tk-ep-media img,
+.tk-ep-person-list img,
+.tk-ep-logo-list img {
+  display: block;
   max-width: 100%;
   height: auto;
   border-radius: var(--tk-ep-radius);
 }
 
-.tk-ep-button,
-.tixkit-event-page a {
-  color: var(--tk-ep-accent);
+.tk-ep-hero__image {
+  width: 100%;
+  object-fit: cover;
 }
 
 .tk-ep-button {
-  display: inline-block;
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--tk-ep-accent);
+  border-radius: min(var(--tk-ep-radius), 12px);
   background: var(--tk-ep-accent);
   color: var(--tk-ep-accent-fg);
-  border-radius: var(--tk-ep-radius);
-  padding: 0.6rem 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.65rem 1rem;
+  text-align: center;
   text-decoration: none;
-  font-weight: 600;
 }
 
 .tk-ep-button:hover {
-  filter: brightness(0.95);
+  filter: brightness(0.96);
 }
 
-.tk-ep-button-secondary {
+.tk-ep-button--secondary {
   background: transparent;
   color: var(--tk-ep-accent);
-  border: 1px solid var(--tk-ep-border);
 }
 
-.tk-ep-divider {
-  border: none;
-  border-top: 1px solid var(--tk-ep-border);
+.tk-ep-button--link {
+  min-height: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--tk-ep-accent);
+  padding: 0;
+  text-decoration: underline;
 }
 
-.tixkit-event-page dl {
+.tk-ep-rich-text {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
-.tixkit-event-page dl > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
+.tk-ep-rich-text > * {
+  margin-block: 0;
 }
 
-.tixkit-event-page dt {
-  color: var(--tk-ep-muted);
-}
-
-.tixkit-event-page ul,
-.tixkit-event-page ol {
-  display: grid;
-  gap: 0.5rem;
+.tk-ep-rich-text ul,
+.tk-ep-rich-text ol {
+  margin-block: 0;
   padding-inline-start: 1.25rem;
 }
 
-.tixkit-event-page details > summary {
-  cursor: pointer;
-  font-weight: 500;
+.tk-ep-media {
+  display: grid;
+  gap: 0.55rem;
 }
 
-.tixkit-event-page details > p {
+.tk-ep-media img {
+  width: 100%;
+  object-fit: cover;
+}
+
+.tk-ep-media--16-9 img {
+  aspect-ratio: 16 / 9;
+}
+
+.tk-ep-media--4-3 img {
+  aspect-ratio: 4 / 3;
+}
+
+.tk-ep-media--1-1 img {
+  aspect-ratio: 1 / 1;
+}
+
+.tk-ep-media figcaption {
   color: var(--tk-ep-muted);
-  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
 }
 
-.tk-ep-embed {
+.tk-ep-details,
+.tk-ep-schedule,
+.tk-ep-venue,
+.tk-ep-faq,
+.tk-ep-sponsors,
+.tk-ep-speakers,
+.tk-ep-social-links {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.tk-ep-details dl {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.tk-ep-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.5fr) minmax(0, 1fr);
+  gap: 1rem;
+  border-top: 1px solid var(--tk-ep-border);
+  padding-block: 0.7rem;
+}
+
+.tk-ep-details dt {
+  color: var(--tk-ep-muted);
+  font-weight: 600;
+}
+
+.tk-ep-details dd {
+  margin: 0;
+}
+
+.tk-ep-schedule ol,
+.tk-ep-logo-list,
+.tk-ep-person-list,
+.tk-ep-social-links ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tk-ep-schedule li {
   border: 1px solid var(--tk-ep-border);
   border-radius: var(--tk-ep-radius);
-  overflow: hidden;
+  padding: 0.9rem;
 }
 
-/* ---- Bubble menu for rich text editing ---- */
-
-.tk-ep-bubble {
+.tk-ep-schedule li > div {
   display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: var(--tk-ep-fg);
-  color: var(--tk-ep-bg);
-  border-radius: 8px;
-  padding: 0.3rem 0.4rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  font-size: 0.8rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-.tk-ep-bubble__btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.6rem;
-  height: 1.6rem;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 0.8rem;
-  padding: 0 0.35rem;
-  transition: background 0.1s;
-}
-
-.tk-ep-bubble__btn:hover {
-  background: color-mix(in srgb, currentColor, transparent 85%);
-}
-
-.tk-ep-bubble__btn[aria-pressed='true'] {
-  background: color-mix(in srgb, currentColor, transparent 70%);
-}
-
-.tk-ep-bubble__select {
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font-size: 0.75rem;
-  padding: 0.15rem 0.3rem;
-  cursor: pointer;
-  outline: none;
-}
-
-.tk-ep-bubble__select option {
-  background: var(--tk-ep-fg);
-  color: var(--tk-ep-bg);
-}
-
-.tk-ep-bubble__divider {
-  width: 1px;
-  height: 1.2rem;
-  background: color-mix(in srgb, currentColor, transparent 70%);
-  margin: 0 0.15rem;
-}
-
-/* ---- Empty state ---- */
-
-.tk-ep-empty-state {
-  max-width: 720px;
-  margin: 2rem auto;
-  padding: 2rem;
-  text-align: center;
-  border: 1px dashed var(--tk-ep-border);
-  border-radius: var(--tk-ep-radius);
-}
-
-.tk-ep-empty-state__title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--tk-ep-fg);
-  margin: 0 0 0.5rem;
-}
-
-.tk-ep-empty-state__hint {
-  font-size: 0.85rem;
+.tk-ep-schedule span,
+.tk-ep-schedule p {
   color: var(--tk-ep-muted);
-  margin: 0;
 }
 
-/* ---- Edit-mode inline editable affordances (non-layout only) ---- */
-
-[data-mode='edit'] [contenteditable='true'] {
-  outline: none;
-  border-radius: 4px;
-  min-width: 2rem;
-  caret-color: var(--tk-ep-accent);
+.tk-ep-venue__name {
+  font-weight: 700;
 }
 
-[data-mode='edit'] [contenteditable='true']:focus {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-accent), transparent 70%);
+.tk-ep-link {
+  font-weight: 700;
 }
 
-[data-mode='edit'] [contenteditable='true'][data-placeholder]:empty::before {
-  content: attr(data-placeholder);
-  color: color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
+.tk-ep-faq details {
+  border: 1px solid var(--tk-ep-border);
+  border-radius: var(--tk-ep-radius);
+  padding: 0.8rem 0.9rem;
 }
 
-/* ---- Editor overlay chrome (Puck-style, never participates in layout) ---- */
-
-.tk-ep-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 10;
-}
-
-.tk-ep-overlay__slot {
-  pointer-events: none;
-}
-
-.tk-ep-overlay__hit {
-  position: absolute;
-  inset: 0;
+.tk-ep-faq summary {
   cursor: pointer;
-  border: none;
-  background: transparent;
-  padding: 0;
-  margin: 0;
+  font-weight: 700;
+}
+
+.tk-ep-faq details > p {
+  margin-top: 0.55rem;
+}
+
+.tk-ep-logo-list {
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+}
+
+.tk-ep-logo-list li {
+  display: grid;
+  gap: 0.55rem;
+  align-content: center;
+  border: 1px solid var(--tk-ep-border);
   border-radius: var(--tk-ep-radius);
-  font: inherit;
+  padding: 0.85rem;
 }
 
-.tk-ep-overlay__hit:focus-visible {
-  outline: none;
+.tk-ep-logo-list img {
+  max-height: 4rem;
+  object-fit: contain;
 }
 
-.tk-ep-overlay__hit--selected {
-  cursor: default;
+.tk-ep-person-list li {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
 }
 
-.tk-ep-overlay__hover {
-  position: absolute;
-  inset: 0;
-  border: 1px solid color-mix(in srgb, var(--tk-ep-fg), transparent 60%);
-  border-radius: var(--tk-ep-radius);
-  pointer-events: none;
+.tk-ep-person-list img {
+  width: 4.5rem;
+  aspect-ratio: 1;
+  object-fit: cover;
 }
 
-.tk-ep-overlay__selected {
-  position: absolute;
-  inset: 0;
-  border: 1px solid var(--tk-ep-fg);
-  border-radius: var(--tk-ep-radius);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-ep-fg), transparent 70%);
-  pointer-events: none;
-}
-
-.tk-ep-overlay__toolbar {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.35rem;
-  padding: 0.25rem 0.4rem;
-  background: var(--tk-ep-fg);
-  color: var(--tk-ep-bg);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  font-size: 0.72rem;
-  pointer-events: auto;
-  white-space: nowrap;
-}
-
-.tk-ep-overlay__toolbar--below {
-  bottom: auto;
-  top: 100%;
-  margin-bottom: 0;
-  margin-top: 0.35rem;
-}
-
-.tk-ep-overlay__toolbar-label {
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.tk-ep-overlay__toolbar-actions {
-  display: inline-flex;
-  align-items: center;
+.tk-ep-person-list div {
+  display: grid;
   gap: 0.2rem;
 }
 
-.tk-ep-overlay__action {
+.tk-ep-person-list span {
+  color: var(--tk-ep-muted);
+}
+
+.tk-ep-button-row {
+  display: flex;
+}
+
+.tk-ep-divider {
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--tk-ep-border);
+}
+
+.tk-ep-divider--compact {
+  margin-block: 0.75rem;
+}
+
+.tk-ep-divider--normal {
+  margin-block: 1.5rem;
+}
+
+.tk-ep-divider--loose {
+  margin-block: 2.5rem;
+}
+
+.tk-ep-social-links ul {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.tk-ep-social-links a {
   display: inline-flex;
+  min-height: 2rem;
   align-items: center;
-  justify-content: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-size: 0.72rem;
-  padding: 0 0.3rem;
-  transition: background 0.1s;
+  border: 1px solid var(--tk-ep-border);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  text-decoration: none;
 }
 
-.tk-ep-overlay__action:hover:not(:disabled) {
-  background: color-mix(in srgb, currentColor, transparent 85%);
+.tk-ep-embed {
+  overflow: hidden;
+  border: 1px solid var(--tk-ep-border);
+  border-radius: var(--tk-ep-radius);
 }
 
-.tk-ep-overlay__action:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.tk-ep-embed iframe,
+.tk-ep-embed video,
+.tk-ep-embed embed,
+.tk-ep-embed object {
+  display: block;
+  width: 100%;
+  max-width: 100%;
 }
 
-.tk-ep-overlay__action--danger:hover:not(:disabled) {
-  color: #fca5a5;
-}
-
-@media (max-width: 640px) {
-  .tixkit-event-page > section,
-  .tixkit-event-page > hr {
-    padding-inline: 1rem;
+@media (min-width: 760px) {
+  .tk-ep-hero {
+    grid-template-columns: minmax(0, 1.05fr) minmax(16rem, 0.95fr);
+    align-items: center;
   }
 
-  .tixkit-event-page dl > div {
-    flex-direction: column;
-    gap: 0.15rem;
+  .tk-ep-hero.tk-ep-align-center {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tk-ep-hero.tk-ep-align-center .tk-ep-hero__image {
+    max-height: 28rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .tixkit-event-page h1 {
+    font-size: 2rem;
+  }
+
+  .tk-ep-details dl > div,
+  .tk-ep-person-list li {
+    grid-template-columns: 1fr;
+  }
+
+  .tk-ep-button {
+    width: 100%;
   }
 }

@@ -518,6 +518,33 @@ export type ContentRenderArtifact = {
   createdAt: string;
 };
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | { [key: string]: JsonValue } | JsonValue[];
+
+export type PuckComponentData = {
+  type: string;
+  props: Record<string, JsonValue>;
+};
+
+export type PuckRootData = {
+  props: Record<string, JsonValue>;
+};
+
+export type PuckData = {
+  content: PuckComponentData[];
+  root: PuckRootData;
+  zones?: Record<string, PuckComponentData[]>;
+};
+
+export type EventPageDocumentV2 = {
+  schemaVersion: 2;
+  editor: {
+    provider: '@puckeditor/core';
+    data: PuckData;
+  };
+  settings?: Record<string, JsonValue>;
+};
+
 export type PublicContentPage = {
   document: {
     eventId: string;
@@ -531,14 +558,12 @@ export type PublicContentPage = {
     versionNumber: number;
     subject?: string;
     previewText?: string;
-    renderedHtml?: string;
-    renderedText?: string;
     publishedAt?: string;
   };
   page: {
-    html: string;
-    text: string;
-    headless: PublicEventPageBlock[];
+    provider: '@puckeditor/core';
+    puckData: PuckData;
+    settings?: Record<string, JsonValue>;
     discovery: PublicEventDiscoveryCard;
   };
 };
@@ -570,18 +595,6 @@ export type PublicEventPageBootstrap = {
 
 export type PublicEventRevision = {
   revision: string | null;
-};
-
-export type PublicEventPageBlock = {
-  type: string;
-  id: string;
-  title?: string;
-  text?: string;
-  html?: string;
-  imageUrl?: string;
-  imageAlt?: string;
-  links?: Array<{ label: string; url: string }>;
-  items?: unknown[];
 };
 
 export type PublicEventDiscoveryCard = {

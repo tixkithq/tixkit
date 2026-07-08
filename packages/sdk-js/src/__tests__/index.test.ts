@@ -12,6 +12,7 @@ import {
   type BrandSenderIdentity,
   type ContentRenderArtifact,
   type EmailTemplateDocument,
+  type EventPageDocumentV2,
   type Event,
   type OfflineManifest,
   type OAuthApplication,
@@ -20,8 +21,10 @@ import {
   type PrivacyRequestInput,
   type PublicAvailabilityItem,
   type PublicCheckoutBootstrap,
+  type PublicContentPage,
   type PublicEvent,
   type PublicEventPageBootstrap,
+  type PuckData,
   type SmsTemplateDocument,
   type UploadArtifactDownload,
   type UploadPurpose,
@@ -2771,6 +2774,8 @@ describe('TixkitClient new resource methods', () => {
 
     const pageBootstrap = await c.public.getEventPageBootstrap('evt_1', { locale: 'en' });
     expectTypeOf(pageBootstrap).toEqualTypeOf<PublicEventPageBootstrap>();
+    expectTypeOf<PublicContentPage['page']['puckData']>().toEqualTypeOf<PuckData>();
+    expectTypeOf<EventPageDocumentV2['editor']['data']>().toEqualTypeOf<PuckData>();
     expect(getCall(fm, 2).url).toBe(
       'https://api.test/v1/public/events/evt_1/page-bootstrap?locale=en',
     );

@@ -27,16 +27,7 @@ export default async function EventPage({ params, searchParams }: PageProps) {
   const { eventId } = await params;
   const query = await searchParams;
 
-  const editMode = firstParam(query.edit) === '1';
-  const token = firstParam(query.token);
   const locale = firstParam(query.locale);
-
-  if (editMode && token) {
-    const EventPageEditOverlay = (await import('./event-page-edit-overlay')).default;
-    return (
-      <EventPageEditOverlay eventId={eventId} token={token} brandId={firstParam(query.brand)} />
-    );
-  }
 
   const initialBootstrap = await loadInitialBootstrap(eventId, locale);
 

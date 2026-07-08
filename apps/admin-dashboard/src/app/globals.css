@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import '@tixkit/content-event-page-react/styles.css';
+@import '@puckeditor/core/no-external.css';
 @import '@react-email/editor/themes/default.css';
 @import '@react-email/editor/styles/bubble-menu.css';
 @import '@react-email/editor/styles/slash-command.css';

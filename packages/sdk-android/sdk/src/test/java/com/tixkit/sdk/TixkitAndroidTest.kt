@@ -104,14 +104,15 @@ class TixkitAndroidTest {
           },
           "version": {
             "versionNumber": 3,
-            "renderedHtml": "<main class=\"tixkit-event-page\">All Access</main>",
-            "renderedText": "All Access",
             "publishedAt": "2026-06-02T00:00:00.000Z"
           },
           "page": {
-            "html": "<main>All Access</main>",
-            "text": "All Access",
-            "headless": [{"type": "hero", "id": "hero", "title": "All Access"}],
+            "provider": "@puckeditor/core",
+            "puckData": {
+              "content": [{"type": "Hero", "props": {"id": "Hero-hero", "headline": "All Access"}}],
+              "root": {"props": {"title": "All Access"}}
+            },
+            "settings": {"locale": "en"},
             "discovery": {
               "title": "All Access",
               "summary": "Chicago",
@@ -130,6 +131,8 @@ class TixkitAndroidTest {
     val contentPage = client.getContentPage("evt_1", locale = "en")
     assertEquals("evt_1", contentPage.document.eventId)
     assertEquals("All Access", contentPage.page.discovery.title)
+    assertEquals("@puckeditor/core", contentPage.page.provider)
+    assertEquals("Hero", contentPage.page.puckData.content.single().type)
     client.getEventPage("evt_1", locale = "en")
     client.getEventPageBySlug("all-access", host = "events.example.com", locale = "en")
     val card = client.getEventDiscoveryCard("evt_1")

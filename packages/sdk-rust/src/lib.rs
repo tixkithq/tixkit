@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use sha2::Sha256;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -477,40 +477,53 @@ pub struct PublicContentVersion {
     pub version_number: u32,
     pub subject: Option<String>,
     pub preview_text: Option<String>,
-    pub rendered_html: Option<String>,
-    pub rendered_text: Option<String>,
     pub published_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicEventPage {
-    pub html: String,
-    pub text: String,
-    pub headless: Vec<PublicEventPageBlock>,
+    pub provider: String,
+    pub puck_data: PuckData,
+    pub settings: Option<Map<String, Value>>,
     pub discovery: PublicEventDiscoveryCard,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct PublicEventPageBlock {
-    #[serde(rename = "type")]
-    pub block_type: String,
-    pub id: String,
-    pub title: Option<String>,
-    pub text: Option<String>,
-    pub html: Option<String>,
-    pub image_url: Option<String>,
-    pub image_alt: Option<String>,
-    pub links: Option<Vec<PublicPageLink>>,
-    pub items: Option<Vec<Value>>,
+pub struct EventPageDocumentV2 {
+    pub schema_version: u32,
+    pub editor: EventPageDocumentEditor,
+    pub settings: Option<Map<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct PublicPageLink {
-    pub label: String,
-    pub url: String,
+pub struct EventPageDocumentEditor {
+    pub provider: String,
+    pub data: PuckData,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PuckData {
+    pub content: Vec<PuckComponentData>,
+    pub root: PuckRootData,
+    pub zones: Option<HashMap<String, Vec<PuckComponentData>>>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PuckRootData {
+    pub props: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PuckComponentData {
+    #[serde(rename = "type")]
+    pub component_type: String,
+    pub props: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
@@ -1670,14 +1683,15 @@ mod tests {
             },
             "version": {
                 "versionNumber": 3,
-                "renderedHtml": "<main class=\"tixkit-event-page\">All Access</main>",
-                "renderedText": "All Access",
                 "publishedAt": "2026-06-02T00:00:00.000Z"
             },
             "page": {
-                "html": "<main>All Access</main>",
-                "text": "All Access",
-                "headless": [{"type": "hero", "id": "hero", "title": "All Access"}],
+                "provider": "@puckeditor/core",
+                "puckData": {
+                    "content": [{"type": "Hero", "props": {"id": "Hero-hero", "headline": "All Access"}}],
+                    "root": {"props": {"title": "All Access"}}
+                },
+                "settings": {"locale": "en"},
                 "discovery": {
                     "title": "All Access",
                     "summary": "Chicago",
@@ -1719,6 +1733,11 @@ mod tests {
             .expect("content page");
         assert_eq!(content_page.document.event_id, "evt_1");
         assert_eq!(content_page.page.discovery.title, "All Access");
+        assert_eq!(content_page.page.provider, "@puckeditor/core");
+        assert_eq!(
+            content_page.page.puck_data.content[0].component_type,
+            "Hero"
+        );
 
         tixkit
             .public()

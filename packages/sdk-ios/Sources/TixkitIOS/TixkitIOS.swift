@@ -377,33 +377,40 @@ public struct TixkitPublicContentVersion: Codable, Equatable, Sendable {
   public let versionNumber: Int
   public let subject: String?
   public let previewText: String?
-  public let renderedHtml: String?
-  public let renderedText: String?
   public let publishedAt: String?
 }
 
 public struct TixkitPublicEventPage: Codable, Equatable, Sendable {
-  public let html: String
-  public let text: String
-  public let headless: [TixkitPublicEventPageBlock]
+  public let provider: String
+  public let puckData: TixkitPuckData
+  public let settings: [String: TixkitJSONValue]?
   public let discovery: TixkitPublicEventDiscoveryCard
 }
 
-public struct TixkitPublicEventPageBlock: Codable, Equatable, Sendable {
-  public let type: String
-  public let id: String
-  public let title: String?
-  public let text: String?
-  public let html: String?
-  public let imageUrl: String?
-  public let imageAlt: String?
-  public let links: [TixkitPublicPageLink]?
-  public let items: [TixkitJSONValue]?
+public struct TixkitEventPageDocumentV2: Codable, Equatable, Sendable {
+  public let schemaVersion: Int
+  public let editor: TixkitEventPageDocumentEditor
+  public let settings: [String: TixkitJSONValue]?
 }
 
-public struct TixkitPublicPageLink: Codable, Equatable, Sendable {
-  public let label: String
-  public let url: String
+public struct TixkitEventPageDocumentEditor: Codable, Equatable, Sendable {
+  public let provider: String
+  public let data: TixkitPuckData
+}
+
+public struct TixkitPuckData: Codable, Equatable, Sendable {
+  public let content: [TixkitPuckComponentData]
+  public let root: TixkitPuckRootData
+  public let zones: [String: [TixkitPuckComponentData]]?
+}
+
+public struct TixkitPuckRootData: Codable, Equatable, Sendable {
+  public let props: [String: TixkitJSONValue]
+}
+
+public struct TixkitPuckComponentData: Codable, Equatable, Sendable {
+  public let type: String
+  public let props: [String: TixkitJSONValue]
 }
 
 public struct TixkitPublicEventDiscoveryCard: Codable, Equatable, Sendable {

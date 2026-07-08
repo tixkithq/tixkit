@@ -1,5 +1,9 @@
 import {
   TixkitClient,
+  type EventPageDocumentV2,
+  type PuckComponentData,
+  type PuckData,
+  type PuckRootData,
   type PublicContentPage,
   type PublicEventDiscoveryCard,
   type PublicTicketListing,
@@ -283,7 +287,14 @@ export type PublicEventPageBySlugParams = {
   locale?: string;
 };
 
-export type { PublicContentPage, PublicEventDiscoveryCard };
+export type {
+  EventPageDocumentV2,
+  PuckComponentData,
+  PuckData,
+  PuckRootData,
+  PublicContentPage,
+  PublicEventDiscoveryCard,
+};
 export type { PublicTicketListing };
 
 export type { TicketListing, TicketResaleCompletion };

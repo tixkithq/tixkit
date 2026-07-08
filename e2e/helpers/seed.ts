@@ -1,4 +1,5 @@
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { createDefaultEventPageDocument } from '../../packages/content-event-page/src/index';
 import { createDb, type Database } from '../../packages/db/src/client';
 import { QrService } from '../../packages/domain/src/tickets/index';
 import { apiBaseUrl } from './env';
@@ -38,43 +39,13 @@ export async function seedPublishedEventPageContent(input: {
   const documentId = `doc_evt_${safeSuffix}`.slice(0, 32);
   const versionId = `ver_evt_${safeSuffix}`.slice(0, 32);
   const summary = `Public resale checkout coverage for ${input.event.title}.`;
-  const contentJson = {
-    schemaVersion: 1,
-    editor: {
-      provider: '@tiptap/core',
-      document: {
-        type: 'doc',
-        content: [{ type: 'paragraph', content: [{ type: 'text', text: summary }] }],
-      },
-    },
-    settings: {
-      locale: 'en',
-      ticketCtaLabel: 'Get tickets',
-      discovery: {
-        summary,
-        tags: ['resale', 'checkout'],
-        seoTitle: input.event.title,
-        seoDescription: summary,
-      },
-    },
-    blocks: [
-      {
-        type: 'hero',
-        id: 'hero',
-        headline: input.event.title,
-        body: summary,
-        ctaLabel: 'Get tickets',
-        ctaUrl: '{{event.checkoutUrl}}',
-      },
-      {
-        type: 'tickets',
-        id: 'tickets',
-        title: 'Tickets',
-        body: 'Choose your tickets and continue through secure checkout.',
-        ctaLabel: 'Get tickets',
-      },
-    ],
-  };
+  const contentJson = createDefaultEventPageDocument({
+    eventId: input.event.id,
+    eventTitle: input.event.title,
+    eventDescription: summary,
+    publicUrl: `/e/${input.event.id}`,
+    locale: 'en',
+  });
 
   await withE2eDb(async (db) => {
     await db
@@ -119,7 +90,7 @@ export async function seedPublishedEventPageContent(input: {
         document_id: documentId,
         version_number: 1,
         status: 'published',
-        schema_version: 1,
+        schema_version: contentJson.schemaVersion,
         subject: input.event.title,
         preview_text: summary,
         content_json: JSON.stringify(contentJson),
@@ -136,7 +107,7 @@ export async function seedPublishedEventPageContent(input: {
           document_id: documentId,
           version_number: 1,
           status: 'published',
-          schema_version: 1,
+          schema_version: contentJson.schemaVersion,
           subject: input.event.title,
           preview_text: summary,
           content_json: JSON.stringify(contentJson),

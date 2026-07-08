@@ -588,7 +588,16 @@ function legacyEventPageContentJson(eventId: string): string {
         content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Legacy body' }] }],
       },
     },
-    settings: { theme: 'default' },
+    settings: {
+      locale: 'en',
+      ticketCtaLabel: 'Get tickets',
+      discovery: {
+        summary: 'Legacy body',
+        tags: [],
+        seoTitle: 'Legacy event page',
+        seoDescription: 'Legacy body',
+      },
+    },
   });
 }
 
@@ -3103,7 +3112,7 @@ describe('brand and event scope denial', () => {
     await app.close();
   });
 
-  it('POST /content-documents/migrate-event-page-chrome rejects read-only event-page principals', async () => {
+  it('POST /content-documents/migrate-event-page-puck rejects read-only event-page principals', async () => {
     const originalContent = legacyEventPageContentJson('evt_1');
     const principal = makePrincipal({
       type: 'api_key',
@@ -3118,7 +3127,7 @@ describe('brand and event scope denial', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/content-documents/migrate-event-page-chrome',
+      url: '/content-documents/migrate-event-page-puck',
     });
 
     expect(res.statusCode).toBe(403);
@@ -3126,7 +3135,7 @@ describe('brand and event scope denial', () => {
     await app.close();
   });
 
-  it('POST /content-documents/migrate-event-page-chrome only migrates permitted brand documents', async () => {
+  it('POST /content-documents/migrate-event-page-puck only migrates permitted brand documents', async () => {
     const principal = makePrincipal({
       type: 'api_key',
       id: 'ak_brand_scoped',
@@ -3155,7 +3164,7 @@ describe('brand and event scope denial', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/content-documents/migrate-event-page-chrome',
+      url: '/content-documents/migrate-event-page-puck',
     });
 
     expect(res.statusCode).toBe(200);
@@ -3165,16 +3174,21 @@ describe('brand and event scope denial', () => {
       versionsMigrated: 1,
       migrated: [{ documentId: 'cdoc_A', versionId: 'cver_A', versionNumber: 1 }],
     });
-    const migratedBlocks = JSON.parse(String(tables.content_document_versions?.[0]?.content_json))
-      .blocks as Array<{ type: string }>;
-    const untouchedBlocks = JSON.parse(String(tables.content_document_versions?.[1]?.content_json))
-      .blocks as Array<{ type: string }>;
-    expect(migratedBlocks.map((block) => block.type)).toContain('brand_footer');
-    expect(untouchedBlocks.map((block) => block.type)).not.toContain('brand_footer');
+    const migrated = JSON.parse(String(tables.content_document_versions?.[0]?.content_json)) as {
+      schemaVersion: number;
+      editor: { provider: string; data: { content: Array<{ type: string }> } };
+    };
+    const untouched = JSON.parse(String(tables.content_document_versions?.[1]?.content_json)) as {
+      schemaVersion: number;
+    };
+    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.editor.provider).toBe('@puckeditor/core');
+    expect(migrated.editor.data.content.map((component) => component.type)).toContain('Hero');
+    expect(untouched.schemaVersion).toBe(1);
     await app.close();
   });
 
-  it('POST /content-documents/migrate-event-page-chrome only migrates permitted event documents', async () => {
+  it('POST /content-documents/migrate-event-page-puck only migrates permitted event documents', async () => {
     const principal = makePrincipal({
       type: 'api_key',
       id: 'ak_event_scoped',
@@ -3209,7 +3223,7 @@ describe('brand and event scope denial', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/content-documents/migrate-event-page-chrome',
+      url: '/content-documents/migrate-event-page-puck',
     });
 
     expect(res.statusCode).toBe(200);
@@ -3219,14 +3233,11 @@ describe('brand and event scope denial', () => {
       versionsMigrated: 1,
       migrated: [{ documentId: 'cdoc_A', versionId: 'cver_A', versionNumber: 1 }],
     });
-    const versionBlocks = (tables.content_document_versions ?? []).map((version) =>
-      (JSON.parse(String(version.content_json)).blocks as Array<{ type: string }>).map(
-        (block) => block.type,
-      ),
+    const schemaVersions = (tables.content_document_versions ?? []).map(
+      (version) =>
+        (JSON.parse(String(version.content_json)) as { schemaVersion: number }).schemaVersion,
     );
-    expect(versionBlocks[0]).toContain('brand_footer');
-    expect(versionBlocks[1]).not.toContain('brand_footer');
-    expect(versionBlocks[2]).not.toContain('brand_footer');
+    expect(schemaVersions).toEqual([2, 1, 1]);
     await app.close();
   });
 });

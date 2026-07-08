@@ -138,33 +138,40 @@ data class TixkitPublicContentVersion(
   val versionNumber: Int,
   val subject: String? = null,
   val previewText: String? = null,
-  val renderedHtml: String? = null,
-  val renderedText: String? = null,
   val publishedAt: String? = null,
 )
 
 data class TixkitPublicEventPage(
-  val html: String,
-  val text: String,
-  val headless: List<TixkitPublicEventPageBlock>,
+  val provider: String,
+  val puckData: TixkitPuckData,
+  val settings: Map<String, Any?> = emptyMap(),
   val discovery: TixkitPublicEventDiscoveryCard,
 )
 
-data class TixkitPublicEventPageBlock(
-  val type: String,
-  val id: String,
-  val title: String? = null,
-  val text: String? = null,
-  val html: String? = null,
-  val imageUrl: String? = null,
-  val imageAlt: String? = null,
-  val links: List<TixkitPublicPageLink> = emptyList(),
-  val items: List<Any?> = emptyList(),
+data class TixkitEventPageDocumentV2(
+  val schemaVersion: Int,
+  val editor: TixkitEventPageDocumentEditor,
+  val settings: Map<String, Any?> = emptyMap(),
 )
 
-data class TixkitPublicPageLink(
-  val label: String,
-  val url: String,
+data class TixkitEventPageDocumentEditor(
+  val provider: String,
+  val data: TixkitPuckData,
+)
+
+data class TixkitPuckData(
+  val content: List<TixkitPuckComponentData>,
+  val root: TixkitPuckRootData,
+  val zones: Map<String, List<TixkitPuckComponentData>> = emptyMap(),
+)
+
+data class TixkitPuckRootData(
+  val props: Map<String, Any?> = emptyMap(),
+)
+
+data class TixkitPuckComponentData(
+  val type: String,
+  val props: Map<String, Any?> = emptyMap(),
 )
 
 data class TixkitPublicEventDiscoveryCard(
@@ -786,36 +793,44 @@ private fun parseVersion(json: JSONObject): TixkitPublicContentVersion =
     versionNumber = json.optInt("versionNumber"),
     subject = json.optNullableString("subject"),
     previewText = json.optNullableString("previewText"),
-    renderedHtml = json.optNullableString("renderedHtml"),
-    renderedText = json.optNullableString("renderedText"),
     publishedAt = json.optNullableString("publishedAt"),
   )
 
 private fun parseEventPage(json: JSONObject): TixkitPublicEventPage =
   TixkitPublicEventPage(
-    html = json.optString("html"),
-    text = json.optString("text"),
-    headless = json.optJSONArray("headless").toObjectList(::parseBlock),
+    provider = json.optString("provider"),
+    puckData = parsePuckData(json.getJSONObject("puckData")),
+    settings = json.optJSONObject("settings").toAnyMap(),
     discovery = parseDiscovery(json.getJSONObject("discovery")),
   )
 
-private fun parseBlock(json: JSONObject): TixkitPublicEventPageBlock =
-  TixkitPublicEventPageBlock(
-    type = json.optString("type"),
-    id = json.optString("id"),
-    title = json.optNullableString("title"),
-    text = json.optNullableString("text"),
-    html = json.optNullableString("html"),
-    imageUrl = json.optNullableString("imageUrl"),
-    imageAlt = json.optNullableString("imageAlt"),
-    links = json.optJSONArray("links").toObjectList(::parseLink),
-    items = json.optJSONArray("items").toAnyList(),
+private fun parseEventPageDocument(json: JSONObject): TixkitEventPageDocumentV2 =
+  TixkitEventPageDocumentV2(
+    schemaVersion = json.optInt("schemaVersion"),
+    editor = parseEventPageDocumentEditor(json.getJSONObject("editor")),
+    settings = json.optJSONObject("settings").toAnyMap(),
   )
 
-private fun parseLink(json: JSONObject): TixkitPublicPageLink =
-  TixkitPublicPageLink(
-    label = json.optString("label"),
-    url = json.optString("url"),
+private fun parseEventPageDocumentEditor(json: JSONObject): TixkitEventPageDocumentEditor =
+  TixkitEventPageDocumentEditor(
+    provider = json.optString("provider"),
+    data = parsePuckData(json.getJSONObject("data")),
+  )
+
+private fun parsePuckData(json: JSONObject): TixkitPuckData =
+  TixkitPuckData(
+    content = json.optJSONArray("content").toObjectList(::parsePuckComponentData),
+    root = parsePuckRootData(json.optJSONObject("root") ?: JSONObject()),
+    zones = json.optJSONObject("zones").toPuckZones(),
+  )
+
+private fun parsePuckRootData(json: JSONObject): TixkitPuckRootData =
+  TixkitPuckRootData(props = json.optJSONObject("props").toAnyMap())
+
+private fun parsePuckComponentData(json: JSONObject): TixkitPuckComponentData =
+  TixkitPuckComponentData(
+    type = json.optString("type"),
+    props = json.optJSONObject("props").toAnyMap(),
   )
 
 private fun parseDiscovery(json: JSONObject): TixkitPublicEventDiscoveryCard =
@@ -900,7 +915,35 @@ private fun JSONArray?.toStringList(): List<String> {
 
 private fun JSONArray?.toAnyList(): List<Any?> {
   if (this == null) return emptyList()
-  return List(length()) { index -> if (isNull(index)) null else get(index) }
+  return List(length()) { index -> jsonValueAt(index) }
+}
+
+private fun JSONObject?.toAnyMap(): Map<String, Any?> {
+  if (this == null) return emptyMap()
+  return keys().asSequence().associateWith { key -> jsonValue(key) }
+}
+
+private fun JSONObject?.toPuckZones(): Map<String, List<TixkitPuckComponentData>> {
+  if (this == null) return emptyMap()
+  return keys().asSequence().associateWith { key -> optJSONArray(key).toObjectList(::parsePuckComponentData) }
+}
+
+private fun JSONObject.jsonValue(key: String): Any? {
+  if (isNull(key)) return null
+  return when (val value = get(key)) {
+    is JSONObject -> value.toAnyMap()
+    is JSONArray -> value.toAnyList()
+    else -> value
+  }
+}
+
+private fun JSONArray.jsonValueAt(index: Int): Any? {
+  if (isNull(index)) return null
+  return when (val value = get(index)) {
+    is JSONObject -> value.toAnyMap()
+    is JSONArray -> value.toAnyList()
+    else -> value
+  }
 }
 
 private fun sha256Hex(bytes: ByteArray): String =

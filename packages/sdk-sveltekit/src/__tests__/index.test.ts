@@ -77,7 +77,18 @@ describe('SvelteKit server helpers', () => {
   it('loads public content-studio event pages through the JS SDK public client', async () => {
     const client = {
       public: {
-        getEventPage: vi.fn(async () => ({ page: { discovery: { title: 'All Access' } } })),
+        getEventPage: vi.fn(async () => ({
+          page: {
+            document: {
+              schemaVersion: 2,
+              editor: {
+                provider: '@puckeditor/core',
+                data: { content: [], root: { props: {} } },
+              },
+            },
+            discovery: { title: 'All Access' },
+          },
+        })),
         getEventPageBySlug: vi.fn(async () => ({ document: { eventId: 'evt_1' } })),
         getEventDiscoveryCard: vi.fn(async () => ({ title: 'All Access' })),
       },

@@ -11,7 +11,6 @@ import {
   type ContentChannel,
   type ContentDocument,
   type ContentDocumentVersion,
-  type ContentValidationResult,
   type RenderOutput,
 } from '@tixkit/content-core';
 import {
@@ -34,17 +33,15 @@ import {
   type SmsTransport,
 } from '@tixkit/domain';
 import {
-  normalizeEventPageDocument,
-  renderEventPageDocument,
-  renderResolvedEventPageHeadless,
-  renderResolvedEventPageHtml,
-  renderResolvedEventPageText,
-  resolveEventPageDocument,
-  validateEventPageDocument,
+  PUCK_EVENT_PAGE_PROVIDER,
+  normalizeEventPageDocumentV2,
+  normalizeOrMigrateEventPageDocumentV2,
+  resolveEventPageDocumentV2Discovery,
+  validateEventPageDocumentV2,
   type EventPageDiscoveryCard,
-  type EventPageHeadlessBlock,
+  type EventPagePuckData,
   type EventPageRenderContext,
-  type ResolvedEventPage,
+  type EventPageSettings,
 } from '@tixkit/content-event-page';
 import {
   normalizeSmsTemplateDocument,
@@ -62,7 +59,6 @@ import {
   type EmailTemplateDocument,
   type RenderedEmailTemplate,
 } from '@tixkit/content-email';
-import { signPayload, verifySignature } from '@tixkit/shared';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   createPublicAvailabilityMetadataCache,
@@ -89,38 +85,14 @@ type PublicContentPage = {
     versionNumber: number;
     subject?: string;
     previewText?: string;
-    renderedHtml?: string;
-    renderedText?: string;
     publishedAt?: string;
   };
   page: {
-    html: string;
-    text: string;
-    headless: EventPageHeadlessBlock[];
-    renderModel: ResolvedEventPage;
+    provider: typeof PUCK_EVENT_PAGE_PROVIDER;
+    puckData: EventPagePuckData;
+    settings: EventPageSettings;
     discovery: EventPageDiscoveryCard;
   };
-};
-
-type DraftPreviewPage = {
-  document: {
-    eventId: string;
-    channel: 'event_page';
-    key: string;
-    name: string;
-    locale: string;
-    updatedAt: string;
-  };
-  version: {
-    versionNumber: number;
-    status: string;
-    subject?: string;
-    previewText?: string;
-  };
-  contentJson: unknown;
-  context: EventPageRenderContext;
-  renderModel: ResolvedEventPage;
-  validation: ContentValidationResult;
 };
 
 type PublicEventPageBootstrap = {
@@ -137,67 +109,18 @@ type PublicContentPageCacheEntry = {
 
 type PublicContentPageCache = Map<string, PublicContentPageCacheEntry>;
 
-type PreviewTokenPayload = {
-  documentId: string;
-  versionId: string;
-  eventId: string;
-  exp: number;
+type EventPagePreviewOutput = {
+  provider: typeof PUCK_EVENT_PAGE_PROVIDER;
+  puckData: EventPagePuckData;
+  settings: EventPageSettings;
+  discovery: EventPageDiscoveryCard;
 };
+
+type ContentPreviewOutput = RenderOutput | EventPagePreviewOutput;
 
 const DEFAULT_PUBLIC_CONTENT_PAGE_CACHE_TTL_MS = 60_000;
 const MAX_PUBLIC_CONTENT_PAGE_CACHE_TTL_MS = 300_000;
 const MAX_PUBLIC_CONTENT_PAGE_CACHE_ENTRIES = 256;
-const PREVIEW_TOKEN_TTL_SECONDS = 900;
-
-function previewTokenSecret(): string {
-  const secret = process.env.TIXKIT_PREVIEW_TOKEN_SECRET?.trim();
-  if (!secret) throw new Error('TIXKIT_PREVIEW_TOKEN_SECRET is not configured');
-  return secret;
-}
-
-function mintPreviewToken(input: {
-  documentId: string;
-  versionId: string;
-  eventId: string;
-  ttlSeconds?: number;
-}): { token: string; expiresAt: string } {
-  const exp = Math.floor(Date.now() / 1000) + (input.ttlSeconds ?? PREVIEW_TOKEN_TTL_SECONDS);
-  const payload: PreviewTokenPayload = {
-    documentId: input.documentId,
-    versionId: input.versionId,
-    eventId: input.eventId,
-    exp,
-  };
-  const payloadStr = JSON.stringify(payload);
-  const signature = signPayload(payloadStr, previewTokenSecret());
-  const token = `${Buffer.from(payloadStr).toString('base64url')}.${Buffer.from(signature).toString('base64url')}`;
-  return { token, expiresAt: new Date(exp * 1000).toISOString() };
-}
-
-function verifyPreviewToken(token: string): PreviewTokenPayload | undefined {
-  const parts = token.split('.');
-  if (parts.length !== 2) return undefined;
-  const [payloadB64, sigB64] = parts;
-  let payloadStr: string;
-  let signature: string;
-  try {
-    payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
-    signature = Buffer.from(sigB64, 'base64url').toString('utf8');
-  } catch {
-    return undefined;
-  }
-  if (!verifySignature(payloadStr, signature, previewTokenSecret())) return undefined;
-  let payload: PreviewTokenPayload;
-  try {
-    payload = JSON.parse(payloadStr) as PreviewTokenPayload;
-  } catch {
-    return undefined;
-  }
-  if (typeof payload.exp !== 'number' || payload.exp < Math.floor(Date.now() / 1000)) {
-    return undefined;
-  }
-  return payload;
-}
 
 const createDocumentSchema = z
   .object({
@@ -392,22 +315,9 @@ function contentFromVersion(version: ContentDocumentVersion): PreviewContent {
 
 function validationFor(channel: ContentChannel, body: z.infer<typeof saveVersionSchema>) {
   if (channel === 'event_page') {
-    const document = normalizeEventPageDocument(body.contentJson);
-    if (!document) {
-      return {
-        valid: false,
-        severity: 'error' as const,
-        issues: [
-          {
-            code: 'invalid_event_page_document',
-            message: 'Event-page versions must store canonical TipTap event-page JSON',
-            severity: 'error' as const,
-            field: 'contentJson',
-          },
-        ],
-      };
-    }
-    return validateEventPageDocument(document);
+    const document = normalizeEventPageDocumentV2(body.contentJson);
+    if (!document) return invalidEventPageValidation();
+    return validateEventPageDocumentV2(document);
   }
   if (channel === 'sms') {
     const document = normalizeSmsTemplateDocument(body.contentJson);
@@ -429,6 +339,21 @@ function validationFor(channel: ContentChannel, body: z.infer<typeof saveVersion
     },
     channel,
   );
+}
+
+function invalidEventPageValidation() {
+  return {
+    valid: false,
+    severity: 'error' as const,
+    issues: [
+      {
+        code: 'invalid_event_page_document',
+        message: 'Event-page versions must store Tixkit Puck event-page JSON',
+        severity: 'error' as const,
+        field: 'contentJson',
+      },
+    ],
+  };
 }
 
 function invalidSmsTemplateValidation() {
@@ -466,7 +391,10 @@ async function renderDocumentPreview(
   content: PreviewContent,
   context: Record<string, unknown>,
   optOutToken?: string,
-): Promise<{ output: RenderOutput; validation: ReturnType<typeof validateContentVersion> }> {
+): Promise<{
+  output: ContentPreviewOutput;
+  validation: ReturnType<typeof validateContentVersion>;
+}> {
   if (channel === 'email') {
     const document = normalizeEmailTemplateDocument(content.contentJson);
     if (!document) {
@@ -501,19 +429,20 @@ async function renderDocumentPreview(
     };
   }
   if (channel === 'event_page') {
-    const document = normalizeEventPageDocument(content.contentJson);
+    const document = normalizeEventPageDocumentV2(content.contentJson);
     if (!document) {
-      throw new ValidationError('Event-page preview requires canonical event-page JSON', {
+      throw new ValidationError('Event-page preview requires Tixkit Puck event-page JSON', {
         code: 'invalid_event_page_document',
       });
     }
-    const rendered = renderEventPageDocument(document, context as EventPageRenderContext);
     return {
       output: {
-        html: rendered.html,
-        text: rendered.text,
+        provider: PUCK_EVENT_PAGE_PROVIDER,
+        puckData: document.editor.data,
+        settings: document.settings,
+        discovery: resolveEventPageDocumentV2Discovery(document, context as EventPageRenderContext),
       },
-      validation: rendered.validation,
+      validation: validateEventPageDocumentV2(document),
     };
   }
   const output = renderPreview(channel, RENDER_CONTRACTS[channel], content, context, optOutToken);
@@ -695,10 +624,14 @@ function normalizeForChecksum(value: unknown): unknown {
   return value;
 }
 
-function checksumRenderOutput(output: RenderOutput): string {
+function checksumRenderOutput(output: ContentPreviewOutput): string {
   return createHash('sha256')
     .update(JSON.stringify(normalizeForChecksum(output)))
     .digest('hex');
+}
+
+function renderOutputForPersistence(output: ContentPreviewOutput): RenderOutput {
+  return 'provider' in output ? {} : output;
 }
 
 function publicContentPageCacheTtlMs(): number {
@@ -770,23 +703,20 @@ function toPublicContentPage(input: {
   ) {
     throw new NotFoundError('ContentDocument', input.document.eventId ?? input.document.id);
   }
-  const pageDocument = normalizeEventPageDocument(input.version.contentJson);
+  const pageDocument = normalizeEventPageDocumentV2(input.version.contentJson);
   if (!pageDocument) {
-    throw new ValidationError('Published event page is not a valid event-page document', {
+    throw new ValidationError('Published event page is not a valid Puck event-page document', {
       code: 'invalid_event_page_document',
       eventId: input.document.eventId,
     });
   }
-  const renderModel = resolveEventPageDocument(pageDocument, input.context);
-  if (!renderModel.validation.valid) {
+  const validation = validateEventPageDocumentV2(pageDocument);
+  if (!validation.valid) {
     throw new ValidationError('Published event page has render blockers', {
-      issues: renderModel.validation.issues,
+      issues: validation.issues,
       eventId: input.document.eventId,
     });
   }
-
-  const html = renderResolvedEventPageHtml(renderModel);
-  const text = renderResolvedEventPageText(renderModel);
 
   return {
     document: {
@@ -801,16 +731,13 @@ function toPublicContentPage(input: {
       versionNumber: input.version.versionNumber,
       subject: input.version.subject,
       previewText: input.version.previewText,
-      renderedHtml: html,
-      renderedText: text,
       publishedAt: input.version.publishedAt,
     },
     page: {
-      html,
-      text,
-      headless: renderResolvedEventPageHeadless(renderModel),
-      renderModel,
-      discovery: renderModel.discovery,
+      provider: PUCK_EVENT_PAGE_PROVIDER,
+      puckData: pageDocument.editor.data,
+      settings: pageDocument.settings,
+      discovery: resolveEventPageDocumentV2Discovery(pageDocument, input.context),
     },
   };
 }
@@ -867,19 +794,6 @@ function publicEventUrl(event: { id: string; slug?: string | null }, host?: stri
     return new URL(`/e/${encodeURIComponent(event.id)}`, base).toString();
   } catch {
     return `https://checkout.tixkit.com/e/${encodeURIComponent(event.id)}`;
-  }
-}
-
-function checkoutUrl(eventId: string, host?: string): string {
-  if (host) return `https://${host}/checkout?eventId=${encodeURIComponent(eventId)}`;
-  const base = process.env.PUBLIC_CHECKOUT_URL?.trim() || process.env.CHECKOUT_PUBLIC_URL?.trim();
-  if (!base) return `https://checkout.tixkit.com/checkout?eventId=${encodeURIComponent(eventId)}`;
-  try {
-    const url = new URL('/checkout', base);
-    url.searchParams.set('eventId', eventId);
-    return url.toString();
-  } catch {
-    return `https://checkout.tixkit.com/checkout?eventId=${encodeURIComponent(eventId)}`;
   }
 }
 
@@ -1005,33 +919,39 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     );
     assertChannelAvailable(document.channel);
     const body = parseBody(saveVersionSchema, request.body);
-    const validation = validationFor(document.channel, body);
+    const eventPageDocument =
+      document.channel === 'event_page'
+        ? normalizeOrMigrateEventPageDocumentV2(body.contentJson)
+        : undefined;
+    if (document.channel === 'event_page' && !eventPageDocument) {
+      throw new ValidationError('Event-page versions must store Tixkit Puck event-page JSON', {
+        code: 'invalid_event_page_document',
+      });
+    }
+    const contentJson = eventPageDocument ?? body.contentJson;
+    const validation = validationFor(document.channel, { ...body, contentJson });
     const smsDocument =
       document.channel === 'sms' ? normalizeSmsTemplateDocument(body.contentJson) : undefined;
     const emailDocument =
       document.channel === 'email' ? normalizeEmailTemplateDocument(body.contentJson) : undefined;
-    const eventPageDocument =
-      document.channel === 'event_page' ? normalizeEventPageDocument(body.contentJson) : undefined;
     const renderedEmail = emailDocument ? await renderEmailTemplate(emailDocument, {}) : undefined;
-    const renderedEventPage = eventPageDocument
-      ? renderEventPageDocument(eventPageDocument, {} as EventPageRenderContext)
-      : undefined;
     const version = await repo().createVersion({
       documentId,
+      schemaVersion: eventPageDocument?.schemaVersion,
       subject: emailDocument ? emailDocument.settings.subject : body.subject,
       previewText: emailDocument ? emailDocument.settings.previewText : body.previewText,
-      contentJson: body.contentJson,
+      contentJson,
       renderedHtml: renderedEmail
         ? renderedEmail.html
-        : renderedEventPage
-          ? renderedEventPage.html
+        : document.channel === 'event_page'
+          ? undefined
           : body.renderedHtml,
       renderedText: renderedEmail
         ? renderedEmail.text
         : smsDocument
           ? smsDocument.editor.body
-          : renderedEventPage
-            ? renderedEventPage.text
+          : document.channel === 'event_page'
+            ? undefined
             : body.renderedText,
       variables: variableDefinitionsForChannel(document.channel),
       validation,
@@ -1083,53 +1003,6 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     return { channel: document.channel, output, validation, renderArtifact };
   });
 
-  app.post('/content-documents/:documentId/preview-token', async (request) => {
-    const { documentId } = request.params as { documentId: string };
-    const document = await loadAuthorizedDocument(
-      repo(),
-      db,
-      request.principal!,
-      documentId,
-      'read',
-    );
-    if (document.channel !== 'event_page' || !document.eventId) {
-      throw new NotFoundError('ContentDocument', documentId);
-    }
-    const body = parseBody(
-      z.object({ versionId: z.string().min(1).optional() }).strict(),
-      request.body,
-    );
-    let versionId = body.versionId;
-    if (!versionId) {
-      if (document.currentDraftVersionId) {
-        versionId = document.currentDraftVersionId;
-      } else {
-        const versions = await repo().listVersions(documentId);
-        const latest = versions.find((v) => v.status === 'draft') ?? versions[0];
-        if (!latest) throw new NotFoundError('ContentDocumentVersion', documentId);
-        versionId = latest.id;
-      }
-    } else {
-      const version = await repo().findVersionById(versionId);
-      if (!version || version.documentId !== documentId) {
-        throw new NotFoundError('ContentDocumentVersion', versionId);
-      }
-    }
-    const { token, expiresAt } = mintPreviewToken({
-      documentId,
-      versionId,
-      eventId: document.eventId,
-    });
-    const baseUrl =
-      process.env.PUBLIC_CHECKOUT_URL?.trim() ||
-      process.env.CHECKOUT_PUBLIC_URL?.trim() ||
-      'https://checkout.tixkit.com';
-    const url = new URL(`/e/${encodeURIComponent(document.eventId)}`, baseUrl);
-    url.searchParams.set('token', token);
-    url.searchParams.set('edit', '1');
-    return { token, url: url.toString(), expiresAt, versionId };
-  });
-
   app.post('/content-documents/:documentId/versions/:versionId/publish', async (request) => {
     const { documentId, versionId } = request.params as { documentId: string; versionId: string };
     const document = await loadAuthorizedDocument(
@@ -1144,9 +1017,21 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     if (!version || version.documentId !== documentId) {
       throw new NotFoundError('ContentDocumentVersion', versionId);
     }
-    if (!version.validation.valid) {
+    const publishValidation =
+      document.channel === 'event_page'
+        ? (() => {
+            const eventPageDocument = normalizeEventPageDocumentV2(version.contentJson);
+            if (!eventPageDocument) {
+              throw new ValidationError('Event-page publish requires Tixkit Puck event-page JSON', {
+                code: 'invalid_event_page_document',
+              });
+            }
+            return validateEventPageDocumentV2(eventPageDocument);
+          })()
+        : version.validation;
+    if (!publishValidation.valid) {
       throw new ValidationError('Content version has publish blockers', {
-        issues: version.validation.issues,
+        issues: publishValidation.issues,
       });
     }
     const published = await repo().publishVersion({ documentId, versionId });
@@ -1230,6 +1115,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         transport: app.context.smsTransport,
       });
     }
+    const outputForPersistence = renderOutputForPersistence(output);
     const send = await repo().recordTestSend({
       tenantId: principalTenant(request.principal!),
       documentId,
@@ -1237,9 +1123,9 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       channel: document.channel,
       recipient: body.recipient,
       status: 'captured',
-      renderedSubject: output.subject,
-      renderedHtml: output.html,
-      renderedText: output.text,
+      renderedSubject: outputForPersistence.subject,
+      renderedHtml: outputForPersistence.html,
+      renderedText: outputForPersistence.text,
     });
     const checksum = checksumRenderOutput(output);
     const renderArtifact = await repo().recordRenderArtifact({
@@ -1254,7 +1140,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(202).send({ testSend: send, output, renderArtifact });
   });
 
-  app.post('/content-documents/migrate-event-page-chrome', async (request) => {
+  app.post('/content-documents/migrate-event-page-puck', async (request) => {
     const principal = request.principal!;
     requireContentPermission(principal, 'event_page', 'write');
     if (principal.type !== 'system' && principal.organizationIds.length === 0) {
@@ -1283,15 +1169,21 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       const versions = await repo().listVersions(doc.id);
       for (const version of versions) {
         versionsChecked += 1;
-        const normalized = normalizeEventPageDocument(version.contentJson);
+        if (normalizeEventPageDocumentV2(version.contentJson)) continue;
+        const normalized = normalizeOrMigrateEventPageDocumentV2(version.contentJson);
         if (!normalized) continue;
         const before = JSON.stringify(version.contentJson);
         const after = JSON.stringify(normalized);
         if (before === after) continue;
 
+        const validation = validateEventPageDocumentV2(normalized);
         await repo().updateVersionContent({
           versionId: version.id,
           contentJson: normalized,
+          schemaVersion: normalized.schemaVersion,
+          renderedHtml: null,
+          renderedText: null,
+          validation,
         });
         versionsMigrated += 1;
         migrated.push({
@@ -1340,7 +1232,6 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     const brand = event.brand_id
       ? await new BrandRepository(db).findById(event.brand_id)
       : undefined;
-    const legalUrls = brand ? parseJsonValue<Record<string, unknown>>(brand.legal_urls, {}) : {};
     const resaleListings = event.tenant_id
       ? await new TicketListingRepository(db).findPublicAvailableByEvent({
           tenantId: event.tenant_id,
@@ -1356,18 +1247,11 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
         endsAt: event.ends_at ? new Date(event.ends_at).toISOString() : undefined,
         timezone: event.timezone ?? undefined,
         venueName: venue.name,
-        venueCity: venue.city,
         publicUrl: publicEventUrl(event, host),
-        checkoutUrl: checkoutUrl(event.id, host),
       },
       brand: brand
         ? {
             name: brand.name,
-            supportUrl: brand.support_url ?? undefined,
-            termsUrl: typeof legalUrls.terms === 'string' ? legalUrls.terms : undefined,
-            privacyUrl: typeof legalUrls.privacy === 'string' ? legalUrls.privacy : undefined,
-            refundUrl:
-              typeof legalUrls.refundPolicy === 'string' ? legalUrls.refundPolicy : undefined,
           }
         : undefined,
       tickets: tickets.map((ticket) => ({
@@ -1468,59 +1352,6 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     };
   }
 
-  async function loadDraftPreview(
-    eventId: string,
-    token: string,
-    host?: string,
-  ): Promise<DraftPreviewPage> {
-    const payload = verifyPreviewToken(token);
-    if (!payload || payload.eventId !== eventId) throw new NotFoundError('Event', eventId);
-    const event = await new EventRepository(db).findById(eventId);
-    if (!event) throw new NotFoundError('Event', eventId);
-    const contentRepo = new ContentRepository(db);
-    const version = await contentRepo.findVersionById(payload.versionId);
-    if (!version) throw new NotFoundError('ContentDocumentVersion', payload.versionId);
-    const document = await contentRepo.findDocumentById(version.documentId);
-    if (
-      !document ||
-      document.channel !== 'event_page' ||
-      document.eventId !== eventId ||
-      document.id !== payload.documentId ||
-      document.tenantId !== event.tenant_id
-    ) {
-      throw new NotFoundError('ContentDocument', eventId);
-    }
-    const pageDocument = normalizeEventPageDocument(version.contentJson);
-    if (!pageDocument) {
-      throw new ValidationError('Draft preview requires canonical event-page JSON', {
-        code: 'invalid_event_page_document',
-        eventId,
-      });
-    }
-    const context = await contextForEvent(event, host);
-    const renderModel = resolveEventPageDocument(pageDocument, context);
-    return {
-      document: {
-        eventId: document.eventId!,
-        channel: 'event_page',
-        key: document.key,
-        name: document.name,
-        locale: document.locale,
-        updatedAt: document.updatedAt,
-      },
-      version: {
-        versionNumber: version.versionNumber,
-        status: version.status,
-        subject: version.subject,
-        previewText: version.previewText,
-      },
-      contentJson: pageDocument,
-      context,
-      renderModel,
-      validation: renderModel.validation,
-    };
-  }
-
   async function resolveEventBySlug(
     slug: string,
     host: unknown,
@@ -1599,14 +1430,5 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     const { eventId } = request.params as { eventId: string };
     const { locale } = request.query as { locale?: string };
     return (await loadPublicPage(eventId, locale)).page.discovery;
-  });
-
-  app.get('/public/events/:eventId/draft-preview', async (request) => {
-    const { eventId } = request.params as { eventId: string };
-    const query = request.query as { token?: unknown; host?: unknown };
-    const token = firstQueryParam(query.token);
-    if (!token) throw new NotFoundError('Event', eventId);
-    const host = normalizeHost(query.host);
-    return loadDraftPreview(eventId, token, host);
   });
 };

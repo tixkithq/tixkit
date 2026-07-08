@@ -328,6 +328,7 @@ export class ContentRepository extends BaseRepository {
 
   async createVersion(input: {
     documentId: string;
+    schemaVersion?: number;
     subject?: string;
     previewText?: string;
     contentJson: unknown;
@@ -347,7 +348,7 @@ export class ContentRepository extends BaseRepository {
         document_id: input.documentId,
         version_number: versionNumber,
         status: 'draft',
-        schema_version: CONTENT_SCHEMA_VERSION,
+        schema_version: input.schemaVersion ?? CONTENT_SCHEMA_VERSION,
         subject: input.subject ?? null,
         preview_text: input.previewText ?? null,
         content_json: JSON.stringify(input.contentJson),
@@ -377,18 +378,22 @@ export class ContentRepository extends BaseRepository {
   async updateVersionContent(input: {
     versionId: string;
     contentJson: unknown;
-    renderedHtml?: string;
-    renderedText?: string;
-    subject?: string;
-    previewText?: string;
+    schemaVersion?: number;
+    renderedHtml?: string | null;
+    renderedText?: string | null;
+    subject?: string | null;
+    previewText?: string | null;
+    validation?: ContentValidationResult;
   }): Promise<void> {
     const updates: Record<string, unknown> = {
       content_json: JSON.stringify(input.contentJson),
     };
-    if (input.renderedHtml !== undefined) updates.rendered_html = input.renderedHtml;
-    if (input.renderedText !== undefined) updates.rendered_text = input.renderedText;
-    if (input.subject !== undefined) updates.subject = input.subject;
-    if (input.previewText !== undefined) updates.preview_text = input.previewText;
+    if (input.schemaVersion !== undefined) updates.schema_version = input.schemaVersion;
+    if (Object.hasOwn(input, 'renderedHtml')) updates.rendered_html = input.renderedHtml;
+    if (Object.hasOwn(input, 'renderedText')) updates.rendered_text = input.renderedText;
+    if (Object.hasOwn(input, 'subject')) updates.subject = input.subject;
+    if (Object.hasOwn(input, 'previewText')) updates.preview_text = input.previewText;
+    if (input.validation !== undefined) updates.validation = JSON.stringify(input.validation);
 
     await (this.db as any)
       .updateTable('content_document_versions')

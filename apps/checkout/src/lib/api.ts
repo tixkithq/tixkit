@@ -15,7 +15,7 @@
  *
  */
 
-import type { ResolvedEventPage } from '@tixkit/content-event-page';
+import type { EventPagePuckData } from '@tixkit/content-event-page-react/puck';
 
 export type PublicEvent = {
   id: string;
@@ -68,18 +68,6 @@ export type AvailabilityItem = {
   salesEndAt?: string;
 };
 
-export type PublicEventPageBlock = {
-  type: string;
-  id: string;
-  title?: string;
-  text?: string;
-  html?: string;
-  imageUrl?: string;
-  imageAlt?: string;
-  links?: Array<{ label: string; url: string }>;
-  items?: unknown[];
-};
-
 export type PublicEventDiscoveryCard = {
   title: string;
   summary: string;
@@ -104,38 +92,14 @@ export type PublicContentPage = {
     versionNumber: number;
     subject?: string;
     previewText?: string;
-    renderedHtml?: string;
-    renderedText?: string;
     publishedAt?: string;
   };
   page: {
-    html: string;
-    text: string;
-    headless: PublicEventPageBlock[];
-    renderModel?: ResolvedEventPage;
+    provider: '@puckeditor/core';
+    puckData: EventPagePuckData | null;
+    settings?: Record<string, unknown>;
     discovery: PublicEventDiscoveryCard;
   };
-};
-
-export type DraftPreviewPage = {
-  document: {
-    eventId: string;
-    channel: 'event_page';
-    key: string;
-    name: string;
-    locale: string;
-    updatedAt: string;
-  };
-  version: {
-    versionNumber: number;
-    status: string;
-    subject?: string;
-    previewText?: string;
-  };
-  contentJson: unknown;
-  context: Record<string, unknown>;
-  renderModel?: ResolvedEventPage;
-  validation: { valid: boolean; severity: string; issues: unknown[] };
 };
 
 export type CheckoutQuote = {
@@ -595,18 +559,6 @@ export const publicApi = {
       availability: Array.isArray(response.availability) ? response.availability : [],
       resaleListings: response.resaleListings ?? { items: [], nextCursor: null, hasMore: false },
     };
-  },
-
-  async getDraftPreview(
-    eventId: string,
-    token: string,
-    signal?: AbortSignal,
-  ): Promise<DraftPreviewPage> {
-    const params = new URLSearchParams({ token });
-    return apiRequest<DraftPreviewPage>(
-      `/public/events/${encodeURIComponent(eventId)}/draft-preview?${params.toString()}`,
-      { signal },
-    );
   },
 
   async getAvailability(

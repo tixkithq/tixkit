@@ -706,6 +706,8 @@ export type AdminContentPreview = {
   output: AdminContentRenderOutput;
   validation: AdminContentValidationResult;
   renderArtifact?: AdminContentRenderArtifact;
+  renderModel?: unknown;
+  brandTheme?: Record<string, unknown>;
 };
 
 export type AdminContentRenderArtifact = {

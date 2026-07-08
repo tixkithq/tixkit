@@ -602,14 +602,15 @@ describe('TixkitScannerClient', () => {
           },
           version: {
             versionNumber: 3,
-            renderedHtml: '<main class="tixkit-event-page">All Access</main>',
-            renderedText: 'All Access',
             publishedAt: '2026-06-02T00:00:00.000Z',
           },
           page: {
-            html: '<main>All Access</main>',
-            text: 'All Access',
-            headless: [{ type: 'hero', id: 'hero', title: 'All Access' }],
+            provider: '@puckeditor/core',
+            puckData: {
+              content: [{ type: 'Hero', props: { id: 'Hero-hero', headline: 'All Access' } }],
+              root: { props: { title: 'All Access' } },
+            },
+            settings: { locale: 'en' },
             discovery: {
               title: 'All Access',
               summary: 'Chicago',
@@ -624,6 +625,7 @@ describe('TixkitScannerClient', () => {
 
     await expect(client.getContentPage('evt_1', { locale: 'en' })).resolves.toMatchObject({
       document: { eventId: 'evt_1' },
+      page: { provider: '@puckeditor/core', puckData: { content: [{ type: 'Hero' }] } },
     });
     await client.getEventPage('evt_1', { locale: 'en' });
     await client.getEventPageBySlug('all-access', {

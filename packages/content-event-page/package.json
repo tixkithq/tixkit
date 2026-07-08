@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./puck": {
+      "types": "./dist/puck-contract.d.ts",
+      "import": "./dist/puck-contract.js"
     }
   },
   "scripts": {
@@ -19,11 +23,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tiptap/core": "^3.27.1",
-    "@tiptap/extension-image": "^3.27.1",
-    "@tiptap/extension-link": "^3.27.1",
-    "@tiptap/starter-kit": "^3.27.1",
-    "@tiptap/static-renderer": "^3.27.1",
     "@tixkit/content-core": "workspace:*",
     "@tixkit/domain": "workspace:*"
   },

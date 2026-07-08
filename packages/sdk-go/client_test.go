@@ -597,18 +597,18 @@ func TestPublicEventPageRoutes(t *testing.T) {
 			},
 			Version: PublicContentVersion{
 				VersionNumber: 3,
-				RenderedHTML:  `<main class="tixkit-event-page">All Access</main>`,
-				RenderedText:  "All Access",
 				PublishedAt:   "2026-06-02T00:00:00.000Z",
 			},
 			Page: PublicEventPage{
-				HTML: "<main>All Access</main>",
-				Text: "All Access",
-				Headless: []PublicEventPageBlock{{
-					Type:  "hero",
-					ID:    "hero",
-					Title: "All Access",
-				}},
+				Provider: "@puckeditor/core",
+				PuckData: PuckData{
+					Content: []PuckComponentData{{
+						Type:  "Hero",
+						Props: FlexibleObject{"id": "Hero-hero", "headline": "All Access"},
+					}},
+					Root: PuckRootData{Props: FlexibleObject{"title": "All Access"}},
+				},
+				Settings: FlexibleObject{"locale": "en"},
 				Discovery: PublicEventDiscoveryCard{
 					Title: "All Access",
 					Tags:  []string{"music"},
@@ -629,6 +629,9 @@ func TestPublicEventPageRoutes(t *testing.T) {
 	}
 	if page.Document.EventID != "evt_1" || page.Page.Discovery.Title != "All Access" {
 		t.Fatalf("page = %#v", page)
+	}
+	if page.Page.Provider != "@puckeditor/core" || page.Page.PuckData.Content[0].Type != "Hero" {
+		t.Fatalf("puck data = %#v", page.Page.PuckData)
 	}
 	if got := <-paths; got != "/v1/public/events/evt_1/content-page?locale=en" {
 		t.Fatalf("content page path = %s", got)

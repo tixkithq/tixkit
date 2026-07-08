@@ -384,6 +384,7 @@ const rawOpenApiSpec = {
           previewText: { type: 'string' },
           contentJson: {
             oneOf: [
+              { $ref: '#/components/schemas/EventPageDocumentV2' },
               { $ref: '#/components/schemas/EmailTemplateDocument' },
               { $ref: '#/components/schemas/SmsTemplateDocument' },
               { type: 'object', additionalProperties: true },
@@ -420,6 +421,90 @@ const rawOpenApiSpec = {
           'createdBy',
           'createdAt',
         ],
+      },
+      PuckComponentData: {
+        type: 'object',
+        description:
+          'Serializable Puck component instance. Slot fields are represented inside props as nested ComponentData arrays.',
+        properties: {
+          type: { type: 'string' },
+          props: { type: 'object', additionalProperties: true },
+        },
+        required: ['type', 'props'],
+      },
+      PuckRootData: {
+        type: 'object',
+        description: 'Serializable Puck root props for the page-level renderer.',
+        properties: {
+          props: { type: 'object', additionalProperties: true },
+        },
+        required: ['props'],
+      },
+      PuckData: {
+        type: 'object',
+        description:
+          'Puck page data consumed by the event-page renderer. The content array and root props follow the Puck Data model; zones is retained only for Puck legacy DropZone documents and should not be used for new slot-based content.',
+        properties: {
+          content: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PuckComponentData' },
+          },
+          root: { $ref: '#/components/schemas/PuckRootData' },
+          zones: {
+            type: 'object',
+            additionalProperties: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/PuckComponentData' },
+            },
+            deprecated: true,
+          },
+        },
+        required: ['content', 'root'],
+      },
+      EventPageDocumentV2: {
+        type: 'object',
+        description:
+          'Canonical event-page document persisted by the admin Puck editor. Public event-page payloads expose Puck data directly instead of legacy TipTap/headless/renderModel artifacts.',
+        properties: {
+          schemaVersion: { type: 'integer', enum: [2] },
+          editor: {
+            type: 'object',
+            properties: {
+              provider: { type: 'string', enum: ['@puckeditor/core'] },
+              data: { $ref: '#/components/schemas/PuckData' },
+            },
+            required: ['provider', 'data'],
+          },
+          settings: { type: 'object', additionalProperties: true },
+        },
+        required: ['schemaVersion', 'editor'],
+        example: {
+          schemaVersion: 2,
+          editor: {
+            provider: '@puckeditor/core',
+            data: {
+              content: [
+                {
+                  type: 'Hero',
+                  props: {
+                    id: 'Hero-hero',
+                    headline: 'All Access Chicago',
+                    eyebrow: 'Live at The Salt Shed',
+                  },
+                },
+              ],
+              root: {
+                props: {
+                  title: 'All Access Chicago',
+                },
+              },
+            },
+          },
+          settings: {
+            locale: 'en',
+            publicPath: '/all-access-chicago',
+          },
+        },
       },
       EmailTemplateDocument: {
         type: 'object',
@@ -726,8 +811,6 @@ const rawOpenApiSpec = {
               versionNumber: { type: 'integer' },
               subject: { type: 'string' },
               previewText: { type: 'string' },
-              renderedHtml: { type: 'string' },
-              renderedText: { type: 'string' },
               publishedAt: { type: 'string', format: 'date-time' },
             },
             required: ['versionNumber'],
@@ -735,16 +818,12 @@ const rawOpenApiSpec = {
           page: {
             type: 'object',
             properties: {
-              html: { type: 'string' },
-              text: { type: 'string' },
-              headless: {
-                type: 'array',
-                items: { $ref: '#/components/schemas/PublicEventPageBlock' },
-              },
-              renderModel: { $ref: '#/components/schemas/ResolvedEventPage' },
+              provider: { type: 'string', enum: ['@puckeditor/core'] },
+              puckData: { $ref: '#/components/schemas/PuckData' },
+              settings: { type: 'object', additionalProperties: true },
               discovery: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
             },
-            required: ['html', 'text', 'headless', 'renderModel', 'discovery'],
+            required: ['provider', 'puckData', 'settings', 'discovery'],
           },
         },
         required: ['document', 'version', 'page'],
@@ -774,12 +853,11 @@ const rawOpenApiSpec = {
             },
             required: ['versionNumber', 'status'],
           },
-          contentJson: { type: 'object', additionalProperties: true },
+          contentJson: { $ref: '#/components/schemas/EventPageDocumentV2' },
           context: { type: 'object', additionalProperties: true },
-          renderModel: { $ref: '#/components/schemas/ResolvedEventPage' },
           validation: { $ref: '#/components/schemas/ContentValidationResult' },
         },
-        required: ['document', 'version', 'contentJson', 'context', 'renderModel', 'validation'],
+        required: ['document', 'version', 'contentJson', 'context', 'validation'],
       },
       PublicCheckoutBootstrap: {
         type: 'object',
@@ -864,102 +942,6 @@ const rawOpenApiSpec = {
           revision: { type: 'string', nullable: true, format: 'date-time' },
         },
         required: ['revision'],
-      },
-      PublicEventPageBlock: {
-        type: 'object',
-        properties: {
-          type: { type: 'string' },
-          id: { type: 'string' },
-          title: { type: 'string' },
-          text: { type: 'string' },
-          html: { type: 'string' },
-          imageUrl: { type: 'string' },
-          imageAlt: { type: 'string' },
-          links: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                label: { type: 'string' },
-                url: { type: 'string' },
-              },
-              required: ['label', 'url'],
-            },
-          },
-          items: { type: 'array', items: { type: 'object', additionalProperties: true } },
-        },
-        required: ['type', 'id'],
-      },
-      ResolvedEventPage: {
-        type: 'object',
-        description:
-          'Canonical render model produced by resolveEventPageDocument. Shared by the admin canvas/preview, checkout public page, and headless consumers so every surface renders from one resolved representation.',
-        properties: {
-          schemaVersion: { type: 'integer' },
-          settings: {
-            type: 'object',
-            additionalProperties: true,
-            description: 'Resolved page-level settings (locale, fonts, discovery, social links).',
-          },
-          blocks: {
-            type: 'array',
-            items: { $ref: '#/components/schemas/ResolvedEventPageBlock' },
-          },
-          discovery: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
-          validation: {
-            type: 'object',
-            properties: {
-              valid: { type: 'boolean' },
-              severity: { type: 'string', enum: ['error', 'warning'] },
-              issues: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    severity: { type: 'string', enum: ['error', 'warning'] },
-                    code: { type: 'string' },
-                    message: { type: 'string' },
-                    field: { type: 'string' },
-                  },
-                  required: ['code', 'message', 'severity'],
-                },
-              },
-            },
-            required: ['valid', 'severity', 'issues'],
-          },
-        },
-        required: ['schemaVersion', 'settings', 'blocks', 'discovery', 'validation'],
-      },
-      ResolvedEventPageBlock: {
-        type: 'object',
-        description:
-          'A single resolved event-page block (hero, tickets, schedule, rich_text, etc.) with merge tags expanded and child entities (tickets, products, speakers) mapped in.',
-        properties: {
-          type: {
-            type: 'string',
-            enum: [
-              'hero',
-              'event_details',
-              'tickets',
-              'schedule',
-              'venue_map',
-              'faq',
-              'products',
-              'sponsors',
-              'speakers',
-              'button',
-              'social_links',
-              'custom_embed',
-              'rich_text',
-              'divider',
-            ],
-          },
-          id: { type: 'string' },
-          html: { type: 'string', description: 'Sanitized, merge-tag-resolved HTML fragment.' },
-          text: { type: 'string' },
-        },
-        required: ['type', 'id'],
-        additionalProperties: true,
       },
       PublicEventDiscoveryCard: {
         type: 'object',
@@ -7893,6 +7875,7 @@ const rawOpenApiSpec = {
                   previewText: { type: 'string' },
                   contentJson: {
                     oneOf: [
+                      { $ref: '#/components/schemas/EventPageDocumentV2' },
                       { $ref: '#/components/schemas/EmailTemplateDocument' },
                       { $ref: '#/components/schemas/SmsTemplateDocument' },
                       { type: 'object', additionalProperties: true },
@@ -7937,6 +7920,7 @@ const rawOpenApiSpec = {
                   renderedText: { type: 'string' },
                   contentJson: {
                     oneOf: [
+                      { $ref: '#/components/schemas/EventPageDocumentV2' },
                       { $ref: '#/components/schemas/EmailTemplateDocument' },
                       { $ref: '#/components/schemas/SmsTemplateDocument' },
                       { type: 'object', additionalProperties: true },

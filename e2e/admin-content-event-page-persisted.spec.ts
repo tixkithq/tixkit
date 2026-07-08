@@ -6,10 +6,45 @@ import { devBrandId, devOrganizationId } from './helpers/seed';
 
 const desktopViewport = { width: 1440, height: 1000 } as const;
 const mobileViewport = { width: 390, height: 844 } as const;
+const puckProvider = '@puckeditor/core';
 
 type SeededContentEvent = {
   id: string;
   title: string;
+  description?: string;
+  ticketType: {
+    id: string;
+    name: string;
+  };
+};
+
+type PuckComponent = {
+  type: string;
+  props: Record<string, unknown>;
+};
+
+type PuckData = {
+  root: { props: Record<string, unknown> };
+  content: PuckComponent[];
+  zones?: Record<string, PuckComponent[]>;
+};
+
+type EventPageDocumentV2 = {
+  schemaVersion: 2;
+  editor: {
+    provider: typeof puckProvider;
+    data: PuckData;
+  };
+  settings: {
+    locale: string;
+    discovery: {
+      title?: string;
+      summary: string;
+      tags: string[];
+      seoTitle?: string;
+      seoDescription?: string;
+    };
+  };
 };
 
 type ContentDocumentList = {
@@ -30,40 +65,7 @@ type ContentVersionList = {
     versionNumber: number;
     subject?: string;
     previewText?: string;
-    contentJson: {
-      schemaVersion?: number;
-      editor?: {
-        provider?: string;
-      };
-      settings?: {
-        ticketCtaLabel?: string;
-        discovery?: {
-          summary?: string;
-        };
-      };
-      blocks?: Array<{
-        type?: string;
-        headline?: string;
-        body?: string;
-        ctaLabel?: string;
-        content?: {
-          content?: Array<{
-            content?: Array<{
-              marks?: Array<{
-                type?: string;
-                attrs?: {
-                  fontFamily?: string;
-                };
-              }>;
-              text?: string;
-              type?: string;
-            }>;
-            type?: string;
-          }>;
-          type?: string;
-        };
-      }>;
-    };
+    contentJson: EventPageDocumentV2;
   }>;
 };
 
@@ -78,36 +80,18 @@ type PublicContentPage = {
     versionNumber: number;
     subject?: string;
     previewText?: string;
-    renderedHtml: string;
-    renderedText: string;
+    publishedAt?: string;
   };
   page: {
-    html: string;
-    text: string;
-    headless: Array<{
-      type: string;
-      title?: string;
-      body?: string;
-      label?: string;
-    }>;
-    renderModel: {
-      schemaVersion: number;
-      blocks: Array<{
-        type: string;
-        id: string;
-        headline?: string;
-        body?: string;
-        ctaLabel?: string;
-        html?: string;
-        text?: string;
-      }>;
-      validation: { valid: boolean; issues: Array<{ severity: string; message: string }> };
-    };
+    provider: typeof puckProvider;
+    puckData: PuckData | null;
+    settings?: Record<string, unknown>;
     discovery: {
       title: string;
       summary: string;
+      tags: string[];
     };
-  };
+  } & Record<string, unknown>;
 };
 
 async function jsonResponse<T>(response: APIResponse, expectedStatus: number): Promise<T> {
@@ -126,14 +110,14 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): P
 }
 
 async function seedContentEvent(page: Page, suffix: string): Promise<SeededContentEvent> {
-  const event = await jsonResponse<SeededContentEvent>(
+  const event = await jsonResponse<Omit<SeededContentEvent, 'ticketType'>>(
     await page.request.post(`${apiBaseUrl}/v1/events`, {
       data: {
         organizationId: devOrganizationId,
         brandId: devBrandId,
         slug: `e2e-content-event-page-${suffix}`,
         title: `E2E Event Page Studio ${suffix}`,
-        description: 'Seeded by Playwright for persisted event-page content editor coverage.',
+        description: 'Seeded by Playwright for Puck event-page editor coverage.',
         currency: 'USD',
         timezone: 'America/New_York',
         startsAt: '2026-11-17T23:00:00.000Z',
@@ -143,11 +127,36 @@ async function seedContentEvent(page: Page, suffix: string): Promise<SeededConte
     }),
     201,
   );
-  await jsonResponse<SeededContentEvent>(
+  const pool = await jsonResponse<{ id: string }>(
+    await page.request.post(`${apiBaseUrl}/v1/events/${event.id}/inventory-pools`, {
+      data: {
+        name: 'General admission',
+        totalCapacity: 25,
+        holdTtlSeconds: 600,
+      },
+    }),
+    201,
+  );
+  const ticketType = await jsonResponse<{ id: string; name: string }>(
+    await page.request.post(`${apiBaseUrl}/v1/events/${event.id}/ticket-types`, {
+      data: {
+        name: 'General Admission',
+        kind: 'free',
+        visibility: 'public',
+        currency: 'USD',
+        priceCents: 0,
+        inventoryPoolId: pool.id,
+        minPerOrder: 1,
+        maxPerOrder: 4,
+      },
+    }),
+    201,
+  );
+  await jsonResponse<Omit<SeededContentEvent, 'ticketType'>>(
     await page.request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, { data: {} }),
     200,
   );
-  return event;
+  return { ...event, ticketType };
 }
 
 async function loadEventPageContentState(eventId: string, page: Page) {
@@ -174,101 +183,68 @@ async function loadEventPageContentState(eventId: string, page: Page) {
 }
 
 async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> {
-  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
   await expect(page.getByRole('region', { name: 'Editor header' })).toBeVisible();
   await expect(page.getByRole('main', { name: 'Event page editable document' })).toBeVisible();
-  await expect(editorFrame.getByLabel('Page headline')).toBeVisible();
-  await expect(editorFrame.getByLabel('Page summary')).toBeVisible();
-  await expect(editorFrame.getByLabel('Ticket CTA label')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Editor tools' })).toBeVisible();
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Editor' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Preview' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Code' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Publish' })).toBeVisible();
   await expect(page.getByLabel('More actions')).toBeVisible();
 }
 
-async function expectEventPageDocumentCanvasPresentation(page: Page): Promise<void> {
+async function expectPuckEditorCanvas(page: Page, event: SeededContentEvent): Promise<void> {
   const canvas = page.locator('[data-testid="editor-canvas"]').first();
-  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
   await expect(canvas).toHaveAttribute('aria-label', 'Event page editable document');
-  await expect(canvas.getByRole('button', { name: /Select content region|Selected/i })).toHaveCount(
-    0,
+  await expect(canvas.locator('iframe').first()).toBeVisible();
+
+  const frame = page.frameLocator('[data-testid="editor-canvas"] iframe');
+  await expect(frame.locator('.tixkit-event-page').first()).toBeVisible();
+  await expect(frame.locator('.tixkit-event-page').first()).toHaveAttribute(
+    'data-schema-provider',
+    puckProvider,
   );
-  const snapshot = await canvas.evaluate((node) => {
-    const legacyCard = [...node.querySelectorAll<HTMLElement>('*')].find((element) => {
-      const className = element.getAttribute('class') ?? '';
-      return (
-        className.includes('group') &&
-        className.includes('rounded-md') &&
-        className.includes('border') &&
-        className.includes('p-4')
-      );
-    });
-    return {
-      legacyCardClass: legacyCard?.getAttribute('class') ?? null,
-      background: window.getComputedStyle(node).backgroundColor,
-    };
-  });
-  expect(snapshot.legacyCardClass).toBeNull();
-  expect(snapshot.background).not.toBe('rgb(9, 9, 11)');
-  // The admin canvas renders through the shared .tk-ep-* class contract (inside the edit iframe).
-  await expect(editorFrame.locator('.tixkit-event-page').first()).toBeVisible();
-  await expect(editorFrame.locator('.tk-ep-hero').first()).toHaveAttribute('data-block-id', 'hero');
-  await expect(editorFrame.locator('body')).toContainText('Tickets');
+  await expect(frame.locator('.tk-ep-hero').first()).toHaveAttribute(
+    'data-block-id',
+    new RegExp(`^hero-${event.id.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`),
+  );
+  await expect(frame.getByRole('heading', { name: event.title, level: 1 })).toBeVisible();
+  await expect(frame.locator('.tk-ep-tickets')).toHaveCount(0);
+  await expect(frame.locator('.tk-ep-resale-tickets')).toHaveCount(0);
 }
 
-/**
- * Fill a contenteditable editable field inside the editor iframe.
- * SurfaceText commits on input, so set textContent and dispatch a native input event.
- */
-async function fillEditableText(page: Page, label: string, text: string): Promise<void> {
-  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
-  const el = editorFrame.getByLabel(label);
-  await el.click();
-  await el.evaluate((node, value) => {
-    node.textContent = value;
-    node.dispatchEvent(new Event('input', { bubbles: true }));
-  }, text);
+function expectContentOnlyPuckData(data: PuckData | null | undefined): asserts data is PuckData {
+  expect(data).toBeTruthy();
+  expect(data?.root).toHaveProperty('props');
+  expect(Array.isArray(data?.content)).toBe(true);
+  const componentTypes = data!.content.map((block) => block.type);
+  expect(componentTypes).toEqual(
+    expect.arrayContaining(['Hero', 'EventDetails', 'Schedule', 'Venue', 'FAQ']),
+  );
+  expect(componentTypes).not.toEqual(
+    expect.arrayContaining(['Tickets', 'ResaleTickets', 'Footer', 'tickets', 'resale_tickets']),
+  );
 }
 
-async function insertEventPageTextBlock(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Insert Text' }).click();
-  const insertPopover = page.locator('[data-radix-popper-content-wrapper]').last();
-  await expect(insertPopover).toBeVisible();
-  await insertPopover.getByRole('button', { name: 'Text' }).click();
+async function saveDraftFromHeader(page: Page): Promise<void> {
+  const header = page.getByRole('region', { name: 'Editor header' });
+  await header.getByLabel('More actions').click();
+  await page.getByRole('menuitem', { name: 'Save draft' }).click();
+  await expect(page.getByText(/Saved draft v\d+/)).toBeVisible();
 }
 
-async function setRichTextSelectionFontFamily(
-  page: Page,
-  text: string,
-  fontFamily: string,
-): Promise<void> {
-  const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
-  const richTextEditor = editorFrame.locator('.tk-ep-rich-text .ProseMirror').last();
-  await expect(richTextEditor).toBeVisible();
-  await richTextEditor.click();
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.keyboard.type(text);
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await expect(editorFrame.getByLabel('Selection font family')).toBeVisible();
-  await editorFrame.getByLabel('Selection font family').selectOption(fontFamily);
-  await expect
-    .poll(
-      async () =>
-        richTextEditor
-          .locator('span[data-event-page-inline-style="true"]')
-          .first()
-          .evaluate((element) => window.getComputedStyle(element).fontFamily)
-          .catch(() => ''),
-      { message: 'selected rich text should render with the chosen font family' },
-    )
-    .toContain('Georgia');
+async function publishFromHeader(page: Page): Promise<void> {
+  const header = page.getByRole('region', { name: 'Editor header' });
+  await header.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText(/Published v\d+/)).toBeVisible();
 }
 
-test.describe('persisted admin event-page content editor', () => {
-  test.setTimeout(90_000);
+test.describe('persisted admin event-page Puck editor', () => {
+  test.setTimeout(180_000);
 
-  test('saves, previews, publishes, renders publicly, and reloads a canonical event page', async ({
+  test('saves, previews, publishes, renders publicly, and reloads a canonical Puck event page', async ({
     browserName,
     page,
   }, testInfo) => {
@@ -278,89 +254,45 @@ test.describe('persisted admin event-page content editor', () => {
 
     const suffix = `${testInfo.workerIndex}-${Date.now()}`;
     const event = await seedContentEvent(page, suffix);
-    const headline = `Updated hosted page ${suffix}`;
-    const summary = `Updated public page copy for ${event.title}.`;
-    const ctaLabel = 'Reserve tickets';
-    const styledRichText = `Curated lineup ${suffix}`;
-    const styledFontFamily = 'Georgia, serif';
+    const eventSummary = event.description ?? 'Seeded by Playwright for Puck event-page editor coverage.';
 
     await page.addInitScript(() => window.localStorage.setItem('tixkit-theme', 'light'));
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
     await expect(page.locator('html')).not.toHaveClass(/dark/);
-    await expectEventPageDocumentCanvasPresentation(page);
+    await expectPuckEditorCanvas(page, event);
 
-    await fillEditableText(page, 'Page headline', headline);
-    await fillEditableText(page, 'Page summary', summary);
-    await fillEditableText(page, 'Ticket CTA label', ctaLabel);
-    await insertEventPageTextBlock(page);
-    await setRichTextSelectionFontFamily(page, styledRichText, styledFontFamily);
-    await page.getByRole('button', { name: 'Preview', exact: true }).click();
-    await expect(page.getByText('Preview rendered from the saved content version')).toBeVisible();
-    await expect(page.getByTestId('preview-drawer')).toBeVisible();
-    await expect(page.getByTestId('preview-drawer')).toContainText(headline);
-    await expect(page.getByTestId('preview-drawer')).toContainText(summary);
-    await expect(page.getByTestId('preview-drawer')).toContainText(styledRichText);
-    // The admin preview renders the shared event-page surface (parity with checkout).
-    await expect(page.getByTestId('preview-surface').locator('.tixkit-event-page')).toBeVisible();
-    await expect(page.getByTestId('preview-surface').locator('.tk-ep-hero')).toHaveAttribute(
-      'data-block-id',
-      'hero',
+    await saveDraftFromHeader(page);
+
+    await page.getByRole('button', { name: 'Preview' }).click();
+    await expect(page.getByText('Preview opened from the saved Puck document')).toBeVisible();
+    const canvasPreview = page.locator(
+      '[data-testid="editor-canvas"] [data-testid="preview-surface"]',
     );
-    const previewStyledText = page
-      .getByTestId('preview-surface')
-      .locator('span[data-event-page-inline-style="true"]')
-      .filter({ hasText: styledRichText });
-    await expect(previewStyledText).toHaveCSS('font-family', /Georgia/);
+    await expect(canvasPreview.locator('.tixkit-event-page-puck-scope')).toBeVisible();
+    await expect(canvasPreview.locator('.tixkit-event-page')).toHaveAttribute(
+      'data-schema-provider',
+      puckProvider,
+    );
+    await expect(canvasPreview.locator('.tk-ep-hero')).toContainText(event.title);
+    await expect(canvasPreview.locator('.tk-ep-tickets')).toHaveCount(0);
     await page.getByTestId('preview-drawer').getByRole('button', { name: 'Close' }).click();
     await expect(page.getByTestId('preview-drawer')).toBeHidden();
+    await page.getByRole('button', { name: 'Editor' }).click();
+    await expectPuckEditorCanvas(page, event);
 
-    await page.getByRole('button', { name: 'Publish' }).click();
-    await expect(page.getByText(/Published v\d+/)).toBeVisible();
+    await publishFromHeader(page);
 
     const persisted = await loadEventPageContentState(event.id, page);
     expect(persisted.document.status).toBe('published');
     expect(persisted.document.publishedVersionId).toBeTruthy();
-    expect(
-      persisted.versions.some(
-        (version) =>
-          version.status === 'published' &&
-          version.contentJson.schemaVersion === 1 &&
-          version.contentJson.editor?.provider === '@tiptap/core' &&
-          version.contentJson.blocks?.some(
-            (block) =>
-              block.type === 'hero' && block.headline === headline && block.body === summary,
-          ) &&
-          version.contentJson.blocks?.some(
-            (block) => block.type === 'tickets' && block.ctaLabel === ctaLabel,
-          ) &&
-          version.contentJson.blocks?.some(
-            (block) =>
-              block.type === 'rich_text' &&
-              block.content?.content?.some((node) =>
-                node.content?.some(
-                  (child) =>
-                    child.text === styledRichText &&
-                    child.marks?.some(
-                      (mark) =>
-                        mark.type === 'eventPageInlineStyle' &&
-                        mark.attrs?.fontFamily === styledFontFamily,
-                    ),
-                ),
-              ),
-          ),
-      ),
-    ).toBe(true);
-    expect(
-      persisted.versions.some(
-        (version) =>
-          version.status === 'draft' &&
-          version.contentJson.blocks?.some(
-            (block) => block.type === 'hero' && block.headline === headline,
-          ),
-      ),
-    ).toBe(true);
+    const publishedVersion = persisted.versions.find((version) => version.status === 'published');
+    expect(publishedVersion).toBeTruthy();
+    expect(publishedVersion?.contentJson.schemaVersion).toBe(2);
+    expect(publishedVersion?.contentJson.editor.provider).toBe(puckProvider);
+    expect(publishedVersion?.contentJson.settings.discovery.summary).toBe(eventSummary);
+    expectContentOnlyPuckData(publishedVersion?.contentJson.editor.data);
 
     const publicPage = await jsonResponse<PublicContentPage>(
       await page.request.get(`${apiBaseUrl}/v1/public/events/${event.id}/page`),
@@ -368,59 +300,34 @@ test.describe('persisted admin event-page content editor', () => {
     );
     expect(publicPage.document.eventId).toBe(event.id);
     expect(publicPage.document.channel).toBe('event_page');
-    expect(publicPage.version.subject).toBe(headline);
-    expect(publicPage.page.html).toContain(headline);
-    expect(publicPage.page.text).toContain(summary);
-    expect(publicPage.page.text).toContain(ctaLabel);
-    expect(publicPage.page.text).toContain(styledRichText);
-    expect(publicPage.page.html).toContain(`font-family: ${styledFontFamily}`);
-    expect(publicPage.page.discovery.summary).toBe(summary);
-    expect(
-      publicPage.page.headless.some((block) => block.type === 'hero' && block.title === headline),
-    ).toBe(true);
-    // The public API returns the canonical render model shared by every surface.
-    expect(publicPage.page.renderModel.schemaVersion).toBe(1);
-    expect(publicPage.page.renderModel.validation.valid).toBe(true);
-    expect(
-      publicPage.page.renderModel.blocks.some(
-        (block) => block.type === 'hero' && block.id === 'hero',
-      ),
-    ).toBe(true);
-    expect(publicPage.page.renderModel.blocks.some((block) => block.type === 'tickets')).toBe(true);
-    expect(
-      publicPage.page.renderModel.blocks.some(
-        (block) =>
-          block.type === 'rich_text' &&
-          block.text?.includes(styledRichText) &&
-          block.html?.includes(`font-family: ${styledFontFamily}`),
-      ),
-    ).toBe(true);
+    expect(publicPage.version.subject).toBe(event.title);
+    expect(publicPage.page.provider).toBe(puckProvider);
+    expect(publicPage.page.discovery.summary).toBe(eventSummary);
+    expect(publicPage.page).not.toHaveProperty('html');
+    expect(publicPage.page).not.toHaveProperty('text');
+    expect(publicPage.page).not.toHaveProperty('headless');
+    expect(publicPage.page).not.toHaveProperty('renderModel');
+    expectContentOnlyPuckData(publicPage.page.puckData);
 
     await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
     await expect(page.getByText(event.title, { exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: headline, level: 1 })).toBeVisible();
-    await expect(page.getByTestId('published-event-page')).toContainText(headline);
-    await expect(page.getByTestId('published-event-page')).toContainText(summary);
-    await expect(page.getByTestId('published-event-page')).toContainText(ctaLabel);
-    await expect(page.getByTestId('published-event-page')).toContainText(styledRichText);
+    await expect(page.getByTestId('published-event-page')).toContainText(event.title);
+    await expect(page.getByTestId('published-event-page')).toContainText(eventSummary);
     await expect(
-      page
-        .getByTestId('published-event-page')
-        .locator('span[data-event-page-inline-style="true"]')
-        .filter({ hasText: styledRichText }),
-    ).toHaveCSS('font-family', /Georgia/);
-    // The checkout public page renders the shared event-page surface from renderModel.
+      page.locator('[data-testid="published-event-page"] .tixkit-event-page-puck-scope'),
+    ).toBeVisible();
     await expect(
       page.locator('[data-testid="published-event-page"] .tixkit-event-page'),
-    ).toBeVisible();
+    ).toHaveAttribute('data-schema-provider', puckProvider);
     await expect(page.locator('[data-testid="published-event-page"] .tk-ep-hero')).toHaveAttribute(
       'data-block-id',
-      'hero',
+      new RegExp(`^hero-${event.id.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`),
     );
-    await expect(
-      page.locator('[data-testid="published-event-page"] .tk-ep-tickets'),
-    ).toHaveAttribute('data-block-id', 'tickets');
-    await attachScreenshot(page, testInfo, 'checkout-event-page-published-content-desktop');
+    await expect(page.locator('[data-testid="published-event-page"] .tk-ep-tickets')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Tickets', level: 2 })).toBeVisible();
+    await expect(page.getByText(event.ticketType.name, { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Get tickets' })).toBeVisible();
+    await attachScreenshot(page, testInfo, 'checkout-event-page-puck-content-desktop');
     await expectNoAxeViolations(page, testInfo);
 
     if (browserName === 'chromium') {
@@ -428,8 +335,8 @@ test.describe('persisted admin event-page content editor', () => {
       const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
       const hostedSelectors = {
         main: 'main',
-        publishedArticle: '[data-testid="published-event-page"]',
-        contentCta: '[data-testid="published-event-page"] .tk-ep-button',
+        puckScope: '[data-testid="published-event-page"] .tixkit-event-page-puck-scope',
+        hero: '[data-testid="published-event-page"] .tk-ep-hero',
       } as const;
       const hostedBoxes = Object.fromEntries(
         await Promise.all(
@@ -440,13 +347,13 @@ test.describe('persisted admin event-page content editor', () => {
             });
             expect(node.nodeId).toBeGreaterThan(0);
             const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
-            expect(widthOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 60 : 300);
-            expect(heightOf(box.model.content)).toBeGreaterThan(name === 'contentCta' ? 12 : 40);
+            expect(widthOf(box.model.content)).toBeGreaterThan(name === 'main' ? 600 : 300);
+            expect(heightOf(box.model.content)).toBeGreaterThan(name === 'hero' ? 40 : 20);
             return [name, box] as const;
           }),
         ),
       );
-      await testInfo.attach('cdp-layout-boxes-checkout-event-page-published', {
+      await testInfo.attach('cdp-layout-boxes-checkout-event-page-puck', {
         body: JSON.stringify(hostedBoxes, null, 2),
         contentType: 'application/json',
       });
@@ -455,26 +362,26 @@ test.describe('persisted admin event-page content editor', () => {
 
     await page.setViewportSize(mobileViewport);
     await page.goto(`${checkoutBaseUrl}/e/${encodeURIComponent(event.id)}`);
-    await expect(page.getByTestId('published-event-page')).toContainText(headline);
-    await attachScreenshot(page, testInfo, 'checkout-event-page-published-content-mobile');
+    await expect(page.getByTestId('published-event-page')).toContainText(event.title);
+    await expect(page.getByRole('heading', { name: 'Tickets', level: 2 })).toBeVisible();
+    await attachScreenshot(page, testInfo, 'checkout-event-page-puck-content-mobile');
     await expectNoAxeViolations(page, testInfo);
 
     await page.setViewportSize(desktopViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
-    await attachScreenshot(page, testInfo, 'admin-content-event-page-persisted-desktop');
+    await expectPuckEditorCanvas(page, event);
+    await attachScreenshot(page, testInfo, 'admin-content-event-page-puck-desktop');
     await expectNoAxeViolations(page, testInfo, undefined, [], ['landmark-unique']);
 
     await page.reload();
-    const editorFrame = page.frameLocator('[data-testid="editor-iframe"]');
-    await expect(editorFrame.getByLabel('Page headline')).toHaveText(headline);
-    await expect(editorFrame.getByLabel('Page summary')).toHaveText(summary);
-    await expect(editorFrame.getByLabel('Ticket CTA label')).toHaveText(ctaLabel);
+    await expectPersistedEventPageEditorRegions(page);
+    await expectPuckEditorCanvas(page, event);
 
     await page.setViewportSize(mobileViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
-    await attachScreenshot(page, testInfo, 'admin-content-event-page-persisted-mobile');
+    await attachScreenshot(page, testInfo, 'admin-content-event-page-puck-mobile');
     await expectNoAxeViolations(page, testInfo, undefined, [], ['landmark-unique']);
 
     await page.getByLabel('More actions').click();
@@ -485,7 +392,7 @@ test.describe('persisted admin event-page content editor', () => {
     expect(archived.document.status).toBe('archived');
   });
 
-  test('captures Chromium CDP layout metrics for the persisted event-page editor', async ({
+  test('captures Chromium CDP layout metrics for the admin-hosted Puck editor', async ({
     browserName,
     page,
   }, testInfo) => {
@@ -499,15 +406,15 @@ test.describe('persisted admin event-page content editor', () => {
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
     await expect(page.locator('html')).not.toHaveClass(/dark/);
-    await expectEventPageDocumentCanvasPresentation(page);
+    await expectPuckEditorCanvas(page, event);
 
     const client = await page.context().newCDPSession(page);
     const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
     const selectors = {
       shell: '[data-testid="content-editor-shell"]',
       canvas: '[data-testid="editor-canvas"]',
-      headline: '[aria-label="Page headline"]',
-      summary: '[aria-label="Page summary"]',
+      iframe: '[data-testid="editor-canvas"] iframe',
+      inspector: 'aside',
     } as const;
     const boxes = Object.fromEntries(
       await Promise.all(
@@ -518,18 +425,29 @@ test.describe('persisted admin event-page content editor', () => {
           });
           expect(node.nodeId).toBeGreaterThan(0);
           const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
-          expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 250);
-          expect(heightOf(box.model.content)).toBeGreaterThanOrEqual(name === 'summary' ? 80 : 20);
+          expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 40);
+          expect(heightOf(box.model.content)).toBeGreaterThan(name === 'iframe' ? 300 : 20);
           return [name, box] as const;
         }),
       ),
     );
+    await client.detach();
 
-    await testInfo.attach('cdp-layout-boxes-event-page-persisted', {
-      body: JSON.stringify(boxes, null, 2),
+    const iframeBox = await page.locator('[data-testid="editor-canvas"] iframe').first().boundingBox();
+    const heroBox = await page
+      .frameLocator('[data-testid="editor-canvas"] iframe')
+      .locator('.tk-ep-hero')
+      .first()
+      .boundingBox();
+    expect(iframeBox?.width).toBeGreaterThan(300);
+    expect(iframeBox?.height).toBeGreaterThan(300);
+    expect(heroBox?.width).toBeGreaterThan(250);
+    expect(heroBox?.height).toBeGreaterThan(40);
+
+    await testInfo.attach('cdp-layout-boxes-event-page-puck-editor', {
+      body: JSON.stringify({ boxes, iframeBox, heroBox }, null, 2),
       contentType: 'application/json',
     });
-    await client.detach();
   });
 });
 

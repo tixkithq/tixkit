@@ -134,33 +134,40 @@ type PublicContentVersion struct {
 	VersionNumber int    `json:"versionNumber"`
 	Subject       string `json:"subject,omitempty"`
 	PreviewText   string `json:"previewText,omitempty"`
-	RenderedHTML  string `json:"renderedHtml,omitempty"`
-	RenderedText  string `json:"renderedText,omitempty"`
 	PublishedAt   string `json:"publishedAt,omitempty"`
 }
 
 type PublicEventPage struct {
-	HTML      string                   `json:"html"`
-	Text      string                   `json:"text"`
-	Headless  []PublicEventPageBlock   `json:"headless"`
+	Provider  string                   `json:"provider"`
+	PuckData  PuckData                 `json:"puckData"`
+	Settings  FlexibleObject           `json:"settings,omitempty"`
 	Discovery PublicEventDiscoveryCard `json:"discovery"`
 }
 
-type PublicEventPageBlock struct {
-	Type     string           `json:"type"`
-	ID       string           `json:"id"`
-	Title    string           `json:"title,omitempty"`
-	Text     string           `json:"text,omitempty"`
-	HTML     string           `json:"html,omitempty"`
-	ImageURL string           `json:"imageUrl,omitempty"`
-	ImageAlt string           `json:"imageAlt,omitempty"`
-	Links    []PublicPageLink `json:"links,omitempty"`
-	Items    []any            `json:"items,omitempty"`
+type EventPageDocumentV2 struct {
+	SchemaVersion int                     `json:"schemaVersion"`
+	Editor        EventPageDocumentEditor `json:"editor"`
+	Settings      FlexibleObject          `json:"settings,omitempty"`
 }
 
-type PublicPageLink struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
+type EventPageDocumentEditor struct {
+	Provider string   `json:"provider"`
+	Data     PuckData `json:"data"`
+}
+
+type PuckData struct {
+	Content []PuckComponentData            `json:"content"`
+	Root    PuckRootData                   `json:"root"`
+	Zones   map[string][]PuckComponentData `json:"zones,omitempty"`
+}
+
+type PuckRootData struct {
+	Props FlexibleObject `json:"props"`
+}
+
+type PuckComponentData struct {
+	Type  string         `json:"type"`
+	Props FlexibleObject `json:"props"`
 }
 
 type PublicEventDiscoveryCard struct {

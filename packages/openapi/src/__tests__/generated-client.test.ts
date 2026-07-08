@@ -97,6 +97,9 @@ describe('Generated client compile validation (T33)', () => {
       'PublicContentPage',
       'PublicCheckoutBootstrap',
       'PublicEventPageBootstrap',
+      'EventPageDocumentV2',
+      'PuckData',
+      'PuckComponentData',
       'DraftPreviewPage',
       'PublicEvent',
       'PublicMarketingIntegration',
@@ -114,7 +117,12 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('"X-Checkout-Session-Token"');
     expect(output).toContain('"Idempotency-Key"');
     expect(output).toContain('DraftPreviewPage');
-    expect(output).toContain('renderModel: components["schemas"]["ResolvedEventPage"]');
+    expect(output).toContain('data: components["schemas"]["PuckData"]');
+    expect(output).toContain('puckData: components["schemas"]["PuckData"]');
+    expect(output).toContain('content: components["schemas"]["PuckComponentData"][]');
+    expect(output).not.toContain('ResolvedEventPage');
+    expect(output).not.toContain('headless: components["schemas"]["PublicEventPageBlock"][]');
+    expect(output).not.toContain('renderModel:');
     expect(output).toContain('version: {');
     expect(output).toContain('versionNumber: number');
     expect(output).toContain('status: string');

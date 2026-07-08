@@ -32,7 +32,7 @@ import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
 import { useResolvedBrand } from '@/lib/use-brand';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { trackMarketingEvent } from '@/lib/marketing';
-import { EventPageSurface } from '@tixkit/content-event-page-react';
+import { EventPagePuckRender, isEventPagePuckData } from '@tixkit/content-event-page-react/puck';
 import { RefreshNotifier } from '@/components/refresh-notifier';
 
 type Props = {
@@ -193,10 +193,7 @@ export default function EventPageClient({
   const hasActiveTickets = visibleTickets.some((t) => t.status === 'active');
   const startsAt = event ? formatDateTime(event.startsAt, event.timezone) : null;
   const venueName = event?.venue?.name;
-  const renderModel = contentPage?.page.renderModel;
-  const publishedContentHasH1 =
-    Boolean(renderModel?.blocks.some((block) => block.type === 'hero')) ||
-    /<h1(?:\s|>)/i.test(contentPage?.page.html ?? '');
+  const puckData = contentPage?.page.puckData;
   const eventTitle = event?.title ?? 'Event';
 
   useEffect(() => {
@@ -273,15 +270,9 @@ export default function EventPageClient({
             <TicketIcon className="size-3.5" />
             {brand.name}
           </Badge>
-          {publishedContentHasH1 ? (
-            <p className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-              {eventTitle}
-            </p>
-          ) : (
-            <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-              {eventTitle}
-            </h1>
-          )}
+          <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
+            {eventTitle}
+          </h1>
           {event?.description ? (
             <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
               {event.description}
@@ -308,24 +299,10 @@ export default function EventPageClient({
           </dl>
         </header>
 
-        {contentPage ? (
-          renderModel ? (
-            <div data-testid="published-event-page">
-              <EventPageSurface
-                resolvedPage={renderModel}
-                mode="public"
-                onTicketCtaClick={() => goToCheckout()}
-              />
-            </div>
-          ) : (
-            <article
-              className="prose prose-neutral max-w-none dark:prose-invert"
-              data-testid="published-event-page"
-              dangerouslySetInnerHTML={{
-                __html: sanitizePublishedEventPageHtml(contentPage.page.html),
-              }}
-            />
-          )
+        {isEventPagePuckData(puckData) ? (
+          <div data-testid="published-event-page">
+            <EventPagePuckRender data={puckData} />
+          </div>
         ) : null}
 
         <Separator />
@@ -443,73 +420,6 @@ export default function EventPageClient({
       </div>
     </SurfaceShell>
   );
-}
-
-function sanitizePublishedEventPageHtml(html: string): string {
-  return html
-    .replace(/<iframe\b(?=[^>]*\ssrcdoc\b)[\s\S]*?<\/iframe>/gi, '')
-    .replace(
-      /<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[\s\S]*?<\/\1>/gi,
-      '',
-    )
-    .replace(/<(script|object|embed|form|svg|math|base|link|meta|style|template)\b[^>]*\/?>/gi, '')
-    .replace(/[\s/]+on[a-z][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]+))?/gi, '')
-    .replace(/[\s/]+(srcdoc|style)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi, '')
-    .replace(
-      /[\s/]+(href|src|data|action|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s"'`=<>]*)/gi,
-      (attribute: string, _name: string, rawValue: string) =>
-        hasUnsafeHtmlUrlScheme(rawValue) ? '' : attribute,
-    );
-}
-
-function hasUnsafeHtmlUrlScheme(rawValue: string): boolean {
-  const value = stripAttributeQuotes(rawValue)
-    .replace(
-      /&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));?/gi,
-      (_entity, hex, decimal, named) => {
-        if (hex) return htmlCodePointEntity(hex, 16);
-        if (decimal) return htmlCodePointEntity(decimal, 10);
-        return namedHtmlEntity(named);
-      },
-    )
-    .split('')
-    .filter((char) => {
-      const code = char.codePointAt(0) ?? 0;
-      return code > 0x20 && code !== 0x7f;
-    })
-    .join('')
-    .trim()
-    .toLowerCase();
-  return /^(?:javascript|data|file):/.test(value);
-}
-
-function stripAttributeQuotes(rawValue: string): string {
-  const first = rawValue[0];
-  const last = rawValue[rawValue.length - 1];
-  return (first === '"' || first === "'" || first === '`') && first === last
-    ? rawValue.slice(1, -1)
-    : rawValue;
-}
-
-function htmlCodePointEntity(value: string, radix: number): string {
-  const codePoint = Number.parseInt(value, radix);
-  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
-    return '';
-  }
-  return String.fromCodePoint(codePoint);
-}
-
-function namedHtmlEntity(name: string): string {
-  const normalized = name.toLowerCase();
-  if (normalized === 'colon') return ':';
-  if (normalized === 'tab') return '\t';
-  if (normalized === 'newline') return '\n';
-  if (normalized === 'amp') return '&';
-  if (normalized === 'lt') return '<';
-  if (normalized === 'gt') return '>';
-  if (normalized === 'quot') return '"';
-  if (normalized === 'apos') return "'";
-  return `&${name};`;
 }
 
 function SurfaceShell({ brand, children }: { brand: ResolvedBrand; children: React.ReactNode }) {

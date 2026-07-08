@@ -372,8 +372,6 @@ class TixkitPublicContentVersion {
     required this.versionNumber,
     this.subject,
     this.previewText,
-    this.renderedHtml,
-    this.renderedText,
     this.publishedAt,
   });
 
@@ -382,8 +380,6 @@ class TixkitPublicContentVersion {
       versionNumber: json['versionNumber'] as int? ?? 0,
       subject: json['subject'] as String?,
       previewText: json['previewText'] as String?,
-      renderedHtml: json['renderedHtml'] as String?,
-      renderedText: json['renderedText'] as String?,
       publishedAt: json['publishedAt'] as String?,
     );
   }
@@ -391,99 +387,138 @@ class TixkitPublicContentVersion {
   final int versionNumber;
   final String? subject;
   final String? previewText;
-  final String? renderedHtml;
-  final String? renderedText;
   final String? publishedAt;
 }
 
 class TixkitPublicEventPage {
   const TixkitPublicEventPage({
-    required this.html,
-    required this.text,
-    required this.headless,
+    required this.provider,
+    required this.puckData,
     required this.discovery,
+    this.settings = const {},
   });
 
   factory TixkitPublicEventPage.fromJson(Map<String, Object?> json) {
-    final rawHeadless = json['headless'];
     return TixkitPublicEventPage(
-      html: json['html'] as String? ?? '',
-      text: json['text'] as String? ?? '',
-      headless: rawHeadless is List
-          ? rawHeadless
-              .whereType<Map<String, Object?>>()
-              .map(TixkitPublicEventPageBlock.fromJson)
-              .toList(growable: false)
-          : const [],
+      provider: json['provider'] as String? ?? '',
+      puckData: TixkitPuckData.fromJson(json['puckData'] as Map<String, Object?>? ?? const {}),
+      settings: _objectMap(json['settings']),
       discovery: TixkitPublicEventDiscoveryCard.fromJson(
         json['discovery'] as Map<String, Object?>? ?? const {},
       ),
     );
   }
 
-  final String html;
-  final String text;
-  final List<TixkitPublicEventPageBlock> headless;
+  final String provider;
+  final TixkitPuckData puckData;
+  final Map<String, Object?> settings;
   final TixkitPublicEventDiscoveryCard discovery;
 }
 
-class TixkitPublicEventPageBlock {
-  const TixkitPublicEventPageBlock({
-    required this.type,
-    required this.id,
-    this.title,
-    this.text,
-    this.html,
-    this.imageUrl,
-    this.imageAlt,
-    this.links = const [],
-    this.items = const [],
+class TixkitEventPageDocumentV2 {
+  const TixkitEventPageDocumentV2({
+    required this.schemaVersion,
+    required this.editor,
+    this.settings = const {},
   });
 
-  factory TixkitPublicEventPageBlock.fromJson(Map<String, Object?> json) {
-    final rawLinks = json['links'];
-    final rawItems = json['items'];
-    return TixkitPublicEventPageBlock(
+  factory TixkitEventPageDocumentV2.fromJson(Map<String, Object?> json) {
+    return TixkitEventPageDocumentV2(
+      schemaVersion: json['schemaVersion'] as int? ?? 0,
+      editor: TixkitEventPageDocumentEditor.fromJson(
+        json['editor'] as Map<String, Object?>? ?? const {},
+      ),
+      settings: _objectMap(json['settings']),
+    );
+  }
+
+  final int schemaVersion;
+  final TixkitEventPageDocumentEditor editor;
+  final Map<String, Object?> settings;
+}
+
+class TixkitEventPageDocumentEditor {
+  const TixkitEventPageDocumentEditor({
+    required this.provider,
+    required this.data,
+  });
+
+  factory TixkitEventPageDocumentEditor.fromJson(Map<String, Object?> json) {
+    return TixkitEventPageDocumentEditor(
+      provider: json['provider'] as String? ?? '',
+      data: TixkitPuckData.fromJson(json['data'] as Map<String, Object?>? ?? const {}),
+    );
+  }
+
+  final String provider;
+  final TixkitPuckData data;
+}
+
+class TixkitPuckData {
+  const TixkitPuckData({
+    required this.content,
+    required this.root,
+    this.zones = const {},
+  });
+
+  factory TixkitPuckData.fromJson(Map<String, Object?> json) {
+    return TixkitPuckData(
+      content: _puckComponentList(json['content']),
+      root: TixkitPuckRootData.fromJson(json['root'] as Map<String, Object?>? ?? const {}),
+      zones: _puckZones(json['zones']),
+    );
+  }
+
+  final List<TixkitPuckComponentData> content;
+  final TixkitPuckRootData root;
+  final Map<String, List<TixkitPuckComponentData>> zones;
+}
+
+class TixkitPuckRootData {
+  const TixkitPuckRootData({this.props = const {}});
+
+  factory TixkitPuckRootData.fromJson(Map<String, Object?> json) {
+    return TixkitPuckRootData(props: _objectMap(json['props']));
+  }
+
+  final Map<String, Object?> props;
+}
+
+class TixkitPuckComponentData {
+  const TixkitPuckComponentData({
+    required this.type,
+    this.props = const {},
+  });
+
+  factory TixkitPuckComponentData.fromJson(Map<String, Object?> json) {
+    return TixkitPuckComponentData(
       type: json['type'] as String? ?? '',
-      id: json['id'] as String? ?? '',
-      title: json['title'] as String?,
-      text: json['text'] as String?,
-      html: json['html'] as String?,
-      imageUrl: json['imageUrl'] as String?,
-      imageAlt: json['imageAlt'] as String?,
-      links: rawLinks is List
-          ? rawLinks
-              .whereType<Map<String, Object?>>()
-              .map(TixkitPublicPageLink.fromJson)
-              .toList(growable: false)
-          : const [],
-      items: rawItems is List ? rawItems.cast<Object?>() : const [],
+      props: _objectMap(json['props']),
     );
   }
 
   final String type;
-  final String id;
-  final String? title;
-  final String? text;
-  final String? html;
-  final String? imageUrl;
-  final String? imageAlt;
-  final List<TixkitPublicPageLink> links;
-  final List<Object?> items;
+  final Map<String, Object?> props;
 }
 
-class TixkitPublicPageLink {
-  const TixkitPublicPageLink({required this.label, required this.url});
+Map<String, Object?> _objectMap(Object? value) {
+  if (value is Map<String, Object?>) return value;
+  if (value is Map) return value.map((key, entry) => MapEntry(key.toString(), entry));
+  return const {};
+}
 
-  factory TixkitPublicPageLink.fromJson(Map<String, Object?> json) {
-    return TixkitPublicPageLink(
-      label: json['label'] as String? ?? '',
-      url: json['url'] as String? ?? '',
-    );
-  }
+List<TixkitPuckComponentData> _puckComponentList(Object? value) {
+  if (value is! List) return const [];
+  return value
+      .whereType<Map<String, Object?>>()
+      .map(TixkitPuckComponentData.fromJson)
+      .toList(growable: false);
+}
 
-  final String label;
-  final String url;
+Map<String, List<TixkitPuckComponentData>> _puckZones(Object? value) {
+  final map = _objectMap(value);
+  if (map.isEmpty) return const {};
+  return map.map((key, entry) => MapEntry(key, _puckComponentList(entry)));
 }
 
 class TixkitPublicEventDiscoveryCard {

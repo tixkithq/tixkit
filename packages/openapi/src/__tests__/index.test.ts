@@ -886,6 +886,7 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema.properties.contentJson.oneOf,
     ).toEqual([
+      { $ref: '#/components/schemas/EventPageDocumentV2' },
       { $ref: '#/components/schemas/EmailTemplateDocument' },
       { $ref: '#/components/schemas/SmsTemplateDocument' },
       { type: 'object', additionalProperties: true },
@@ -895,6 +896,7 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema.properties.contentJson.oneOf,
     ).toEqual([
+      { $ref: '#/components/schemas/EventPageDocumentV2' },
       { $ref: '#/components/schemas/EmailTemplateDocument' },
       { $ref: '#/components/schemas/SmsTemplateDocument' },
       { type: 'object', additionalProperties: true },
@@ -1000,22 +1002,60 @@ describe('openApiSpec', () => {
     expect(
       openApiSpec.components.schemas.PublicContentPage.properties.version.properties,
     ).not.toHaveProperty('contentJson');
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.version.properties,
+    ).not.toHaveProperty('renderedHtml');
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.version.properties,
+    ).not.toHaveProperty('renderedText');
     expect(openApiSpec.components.schemas.PublicContentPage.properties.page.required).toEqual([
-      'html',
-      'text',
-      'headless',
-      'renderModel',
+      'provider',
+      'puckData',
+      'settings',
       'discovery',
     ]);
     expect(
-      openApiSpec.components.schemas.PublicContentPage.properties.page.properties.renderModel,
-    ).toEqual({ $ref: '#/components/schemas/ResolvedEventPage' });
+      openApiSpec.components.schemas.PublicContentPage.properties.page.properties.puckData,
+    ).toEqual({ $ref: '#/components/schemas/PuckData' });
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.page.properties.provider.enum,
+    ).toEqual(['@puckeditor/core']);
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.page.properties,
+    ).not.toHaveProperty('html');
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.page.properties,
+    ).not.toHaveProperty('text');
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.page.properties,
+    ).not.toHaveProperty('headless');
+    expect(
+      openApiSpec.components.schemas.PublicContentPage.properties.page.properties,
+    ).not.toHaveProperty('renderModel');
+    expect(openApiSpec.components.schemas.EventPageDocumentV2.required).toEqual([
+      'schemaVersion',
+      'editor',
+    ]);
+    expect(openApiSpec.components.schemas.EventPageDocumentV2.properties.editor.required).toEqual([
+      'provider',
+      'data',
+    ]);
+    expect(
+      openApiSpec.components.schemas.EventPageDocumentV2.properties.editor.properties.provider.enum,
+    ).toEqual(['@puckeditor/core']);
+    expect(openApiSpec.components.schemas.PuckData.required).toEqual(['content', 'root']);
+    expect(openApiSpec.components.schemas.PuckData.properties.content.items).toEqual({
+      $ref: '#/components/schemas/PuckComponentData',
+    });
+    expect(openApiSpec.components.schemas.PuckData.properties.zones.deprecated).toBe(true);
+    expect(openApiSpec.components.schemas).not.toHaveProperty('PublicEventPageBlock');
+    expect(openApiSpec.components.schemas).not.toHaveProperty('ResolvedEventPage');
+    expect(openApiSpec.components.schemas).not.toHaveProperty('ResolvedEventPageBlock');
     expect(openApiSpec.components.schemas.DraftPreviewPage.required).toEqual([
       'document',
       'version',
       'contentJson',
       'context',
-      'renderModel',
       'validation',
     ]);
     expect(openApiSpec.components.schemas.DraftPreviewPage.properties.document.required).toEqual([
@@ -1033,9 +1073,12 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.DraftPreviewPage.properties).not.toHaveProperty(
       'versionId',
     );
-    expect(openApiSpec.components.schemas.DraftPreviewPage.properties.renderModel).toEqual({
-      $ref: '#/components/schemas/ResolvedEventPage',
+    expect(openApiSpec.components.schemas.DraftPreviewPage.properties.contentJson).toEqual({
+      $ref: '#/components/schemas/EventPageDocumentV2',
     });
+    expect(openApiSpec.components.schemas.DraftPreviewPage.properties).not.toHaveProperty(
+      'renderModel',
+    );
   });
 
   it('documents checkout tracking separately from affiliate attribution', () => {

@@ -1,44 +1,14 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDefaultEventPageDocument, type EventPageBlock } from '@tixkit/content-event-page';
+import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
 import { EventPagePersistedEditorView } from './event-page-persisted-editor-view';
 
-/**
- * Simulate a block-change postMessage from the iframe edit overlay.
- * The admin editor listens for these and updates its local document state.
- * Origin must match the iframe's preview URL origin for the security check.
- */
-const MOCK_IFRAME_ORIGIN = 'https://checkout.test';
-function simulateBlockChange(blockId: string, block: EventPageBlock) {
-  act(() => {
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { source: 'tixkit-event-page-editor', type: 'block-change', blockId, block },
-        origin: MOCK_IFRAME_ORIGIN,
-      }),
-    );
-  });
-}
-
-function simulateBlockDuplicate(blockId: string, block: EventPageBlock) {
-  act(() => {
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { source: 'tixkit-event-page-editor', type: 'block-duplicate', blockId, block },
-        origin: MOCK_IFRAME_ORIGIN,
-      }),
-    );
-  });
-}
-
-/**
- * Wait for the editor to finish loading by waiting for the iframe to appear.
- */
-async function waitForEditorLoad() {
-  return screen.findByTestId('editor-iframe');
-}
+type MockPuckContent = {
+  type: string;
+  props: Record<string, unknown>;
+};
 
 const adminApiMock = vi.hoisted(() => ({
   getEvent: vi.fn(),
@@ -67,32 +37,106 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => ({
-    permissions: [
-      'events.read',
-      'events.write',
-      'tickets.write',
-      'orders.read',
-      'orders.write',
-      'refunds.write',
-      'attendees.read',
-      'attendees.write',
-      'checkins.read',
-      'checkins.write',
-      'messages.write',
-      'reports.read',
-      'settings.write',
-      'developers.write',
-      'billing.write',
-    ],
+    permissions: ['events.read', 'events.write'],
     can: () => true,
     loading: false,
     error: null,
   }),
 }));
 
+vi.mock('@puckeditor/core', async () => {
+  const ReactModule = await import('react');
+
+  function Puck({
+    children,
+    data,
+    iframe,
+    onChange,
+    onPublish,
+    permissions,
+  }: {
+    children?: React.ReactNode;
+    data: { root: { props: Record<string, unknown> }; content: MockPuckContent[] };
+    iframe?: { enabled?: boolean };
+    onChange?: (data: unknown) => void;
+    onPublish?: (data: unknown) => void;
+    permissions?: { edit?: boolean };
+  }) {
+    const changeHero = () => {
+      onChange?.({
+        ...data,
+        root: {
+          props: {
+            ...data.root.props,
+            title: 'Updated hosted page',
+            description: 'Updated page copy for {{event.title}}.',
+          },
+        },
+        content: data.content.map((item) =>
+          item.type === 'Hero'
+            ? {
+                ...item,
+                props: {
+                  ...item.props,
+                  headline: 'Updated hosted page',
+                  body: 'Updated page copy for {{event.title}}.',
+                },
+              }
+            : item,
+        ),
+      });
+    };
+    return ReactModule.createElement(
+      'section',
+      {
+        'data-testid': 'puck-editor',
+        'data-iframe-enabled': String(Boolean(iframe?.enabled)),
+        'data-editable': String(permissions?.edit !== false),
+      },
+      ReactModule.createElement(
+        'button',
+        { type: 'button', onClick: changeHero },
+        'Mock Puck change',
+      ),
+      ReactModule.createElement(
+        'button',
+        { type: 'button', onClick: () => onPublish?.(data) },
+        'Mock Puck publish',
+      ),
+      children,
+    );
+  }
+
+  Puck.Components = () => ReactModule.createElement('div', { 'data-testid': 'puck-components' });
+  Puck.Preview = () => ReactModule.createElement('div', { 'data-testid': 'puck-preview' });
+  Puck.Fields = () => ReactModule.createElement('div', { 'data-testid': 'puck-fields' });
+
+  function Render({
+    data,
+  }: {
+    data: { root?: { props?: { title?: string } }; content?: MockPuckContent[] };
+  }) {
+    const hero = data.content?.find((item) => item.type === 'Hero');
+    const heading =
+      typeof hero?.props.headline === 'string'
+        ? hero.props.headline
+        : typeof data.root?.props?.title === 'string'
+          ? data.root.props.title
+          : 'Preview';
+    return ReactModule.createElement(
+      'main',
+      { 'data-testid': 'mock-puck-render' },
+      ReactModule.createElement('h1', null, heading),
+    );
+  }
+
+  return { Puck, Render };
+});
+
 const event = {
   id: 'evt_1',
   title: 'All Access Chicago',
+  slug: 'all-access-chicago',
   description: 'Original event page copy.',
   startsAt: '2026-07-17T19:00:00.000Z',
   endsAt: '2026-07-17T23:00:00.000Z',
@@ -111,17 +155,22 @@ const event = {
   venue: { name: 'The Salt Shed', city: 'Chicago' },
 };
 
-const eventPageDocument = createDefaultEventPageDocument({
-  eventId: event.id,
-  eventTitle: event.title,
-  eventDescription: event.description,
-  startsAt: event.startsAt,
-  endsAt: event.endsAt,
-  timezone: event.timezone,
-  venue: event.venue,
-  checkoutUrl: '{{event.checkoutUrl}}',
-  publicUrl: '{{event.publicUrl}}',
-});
+function createPuckEventPageDocument() {
+  return createDefaultEventPageDocument({
+    eventId: event.id,
+    eventTitle: event.title,
+    eventDescription: event.description,
+    startsAt: event.startsAt,
+    endsAt: event.endsAt,
+    timezone: event.timezone,
+    venue: event.venue,
+    coverImageUrl: '',
+    coverImageAlt: event.title,
+    publicUrl: `/e/${event.slug}`,
+  });
+}
+
+const eventPageDocument = createPuckEventPageDocument();
 
 const document = {
   id: 'cdoc_event_page',
@@ -144,12 +193,10 @@ const version = {
   documentId: 'cdoc_event_page',
   versionNumber: 1,
   status: 'draft',
-  schemaVersion: 1,
-  subject: 'All Access Chicago',
+  schemaVersion: 2,
+  subject: 'Original hosted page',
   previewText: 'Original event page copy.',
   contentJson: eventPageDocument,
-  renderedHtml: '<main>Original event page copy.</main>',
-  renderedText: 'Original event page copy.',
   variables: [],
   validation: { valid: true, severity: 'warning', issues: [] },
   createdBy: 'usr_1',
@@ -166,6 +213,10 @@ function ok<T>(data: T) {
   return { ok: true as const, data };
 }
 
+async function waitForPuckEditor() {
+  return screen.findByTestId('puck-editor');
+}
+
 function openEventPageMoreActions() {
   const trigger = screen.getByRole('button', { name: 'More actions' });
   fireEvent.pointerDown(trigger);
@@ -175,20 +226,14 @@ function openEventPageMoreActions() {
   fireEvent.keyDown(trigger, { key: 'ArrowDown', code: 'ArrowDown' });
 }
 
-function clickEventPageSaveDraft() {
+function clickSaveDraft() {
   openEventPageMoreActions();
   fireEvent.click(screen.getByRole('menuitem', { name: 'Save draft' }));
 }
 
-function clickEventPageViewPublicPage() {
-  openEventPageMoreActions();
-  fireEvent.click(screen.getByRole('menuitem', { name: 'View public page' }));
-}
-
-function clickMobileInsertItem(itemName: string) {
-  fireEvent.click(screen.getByRole('button', { name: 'Insert' }));
-  const drawer = screen.getByRole('complementary', { name: 'Mobile insert content' });
-  fireEvent.click(within(drawer).getByRole('button', { name: itemName }));
+function lastSavePayload() {
+  const calls = adminApiMock.saveContentVersion.mock.calls;
+  return calls[calls.length - 1]?.[1];
 }
 
 describe('EventPagePersistedEditorView', () => {
@@ -205,10 +250,7 @@ describe('EventPagePersistedEditorView', () => {
     adminApiMock.previewContent.mockResolvedValue(
       ok({
         channel: 'event_page',
-        output: {
-          html: '<main><h1>Updated hosted page</h1><p>Updated page copy for Ada.</p></main>',
-          text: 'Updated hosted page Updated page copy for Ada.',
-        },
+        output: { puckData: eventPageDocument.editor.data },
         validation: { valid: true, severity: 'warning', issues: [] },
       }),
     );
@@ -224,56 +266,73 @@ describe('EventPagePersistedEditorView', () => {
     adminApiMock.archiveContentDocument.mockResolvedValue(ok({ ...document, status: 'archived' }));
     adminApiMock.mintPreviewToken.mockResolvedValue(
       ok({
-        token: 'mock-preview-token',
-        url: 'https://checkout.test/e/evt_1?edit=1&token=mock-preview-token',
+        token: 'unused',
+        url: 'https://checkout.test/e/evt_1?edit=1&token=unused',
         expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         versionId: 'cver_1',
       }),
     );
   });
 
-  it('loads an existing event page and persists preview, publish, and archive actions', async () => {
+  it('renders the admin-hosted Puck editor without preview-token or postMessage editing', async () => {
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    await waitForEditorLoad();
-    // The admin canvas renders an iframe pointing to the checkout edit overlay.
-    const canvas = screen.getByTestId('editor-canvas');
-    expect(canvas.querySelector('[data-testid="editor-iframe"]')).not.toBeNull();
-    expect(screen.queryByTestId('event-page-metadata-bar')).not.toBeInTheDocument();
-    expect(screen.getByRole('navigation', { name: 'Editor tools' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Event header' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
-    expect(screen.getByRole('button', { name: 'Inspector' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Inspector' }));
-    expect(screen.getByRole('button', { name: 'Close sidebar' })).toBeInTheDocument();
+    const puck = await waitForPuckEditor();
+    expect(puck).toHaveAttribute('data-iframe-enabled', 'true');
+    expect(screen.getByTestId('puck-components')).toBeInTheDocument();
+    expect(screen.getByTestId('puck-preview')).toBeInTheDocument();
+    expect(screen.getByTestId('puck-fields')).toBeInTheDocument();
+    expect(screen.queryByTestId('editor-iframe')).not.toBeInTheDocument();
+    expect(adminApiMock.mintPreviewToken).not.toHaveBeenCalled();
+    expect(adminApiMock.previewContent).not.toHaveBeenCalled();
 
-    const heroBlock = eventPageDocument.blocks.find((b) => b.type === 'hero')!;
-    const ticketsBlock = eventPageDocument.blocks.find((b) => b.type === 'tickets')!;
-    simulateBlockChange(heroBlock.id, {
-      ...heroBlock,
-      headline: 'Updated hosted page',
-      body: 'Updated page copy for {{event.title}}.',
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'https://checkout.test',
+          data: {
+            source: 'tixkit-event-page-editor',
+            type: 'block-change',
+            blockId: 'hero',
+            block: { type: 'hero', id: 'hero', headline: 'Legacy postMessage edit' },
+          },
+        }),
+      );
     });
-    simulateBlockChange(ticketsBlock.id, { ...ticketsBlock, ctaLabel: 'Reserve tickets' });
-    openEventPageMoreActions();
-    expect(screen.getByRole('menuitem', { name: 'Variables' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Variables' }));
-    expect(screen.getByText('Merge tags')).toBeInTheDocument();
-    expect(screen.getByLabelText('Dynamic value Event name')).toBeInTheDocument();
-    expect(screen.getByLabelText('Dynamic value Checkout link')).toBeInTheDocument();
-    expect(screen.queryByText('{{event.title}}')).not.toBeInTheDocument();
-    openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Version history' }));
-    expect(screen.getByText('More / History')).toBeInTheDocument();
-    openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Page details' }));
-    expect(screen.getByText('Page / Settings')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Locale')).not.toBeInTheDocument();
-    openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Review blockers' }));
-    expect(screen.getByText('Publish blockers')).toBeInTheDocument();
-    openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Open preview' }));
+
+    clickSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalled();
+    });
+    expect(lastSavePayload()).toEqual(
+      expect.objectContaining({
+        contentJson: expect.objectContaining({
+          schemaVersion: 2,
+          editor: expect.objectContaining({
+            provider: '@puckeditor/core',
+            data: expect.objectContaining({
+              root: expect.objectContaining({ props: expect.any(Object) }),
+              content: expect.arrayContaining([
+                expect.objectContaining({
+                  type: 'Hero',
+                  props: expect.objectContaining({ headline: 'All Access Chicago' }),
+                }),
+              ]),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(JSON.stringify(lastSavePayload())).not.toContain('Legacy postMessage edit');
+  });
+
+  it('saves Puck changes as the V2 event-page document payload without rendered artifacts', async () => {
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    await waitForPuckEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Mock Puck change' }));
+    clickSaveDraft();
 
     await waitFor(() => {
       expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
@@ -282,269 +341,78 @@ describe('EventPagePersistedEditorView', () => {
           subject: 'Updated hosted page',
           previewText: 'Updated page copy for {{event.title}}.',
           contentJson: expect.objectContaining({
-            schemaVersion: 1,
-            settings: expect.objectContaining({
-              ticketCtaLabel: 'Reserve tickets',
+            schemaVersion: 2,
+            editor: expect.objectContaining({
+              provider: '@puckeditor/core',
+              data: expect.objectContaining({
+                root: { props: expect.objectContaining({ title: 'Updated hosted page' }) },
+                content: expect.arrayContaining([
+                  expect.objectContaining({
+                    type: 'Hero',
+                    props: expect.objectContaining({
+                      headline: 'Updated hosted page',
+                      body: 'Updated page copy for {{event.title}}.',
+                    }),
+                  }),
+                ]),
+              }),
             }),
           }),
-          renderedHtml: expect.stringContaining('Updated hosted page'),
-          renderedText: expect.stringContaining('Updated page copy for All Access Chicago.'),
         }),
       );
-      expect(adminApiMock.previewContent).toHaveBeenCalledWith(
-        'cdoc_event_page',
-        expect.objectContaining({ versionId: 'cver_2' }),
-      );
     });
+    expect(lastSavePayload()).not.toHaveProperty('renderedHtml');
+    expect(lastSavePayload()).not.toHaveProperty('renderedText');
+  });
 
-    expect(screen.getByTestId('preview-drawer')).toHaveTextContent('Updated page copy');
-    // Preview renders the shared event-page surface (parity with checkout public page).
-    const previewSurface = screen.getByTestId('preview-surface');
-    expect(previewSurface.querySelector('.tixkit-event-page')).not.toBeNull();
-    expect(previewSurface.querySelector('.tk-ep-hero')?.getAttribute('data-block-id')).toBe('hero');
-    // Raw HTML/text debug output is secondary, not the primary preview UX.
-    expect(screen.queryByTestId('preview-html')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
-    expect(screen.getByTestId('preview-html').tagName).toBe('PRE');
-    expect(screen.getByTestId('preview-html')).toHaveTextContent('Updated hosted page');
+  it('publishes by saving the current Puck draft before publish', async () => {
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
+    await waitForPuckEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Mock Puck change' }));
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+
     await waitFor(() => {
       expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_event_page', 'cver_2');
     });
+    expect(lastSavePayload()).toEqual(
+      expect.objectContaining({
+        subject: 'Updated hosted page',
+        contentJson: expect.objectContaining({
+          schemaVersion: 2,
+          editor: expect.objectContaining({ provider: '@puckeditor/core' }),
+        }),
+      }),
+    );
+  });
+
+  it('archives and duplicates through the persisted content lifecycle', async () => {
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    await waitForPuckEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Mock Puck change' }));
+    openEventPageMoreActions();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate page' }));
+
+    await waitFor(() => {
+      expect(adminApiMock.duplicateContentDocument).toHaveBeenCalledWith('cdoc_event_page', {
+        name: 'All Access Chicago event page Copy',
+      });
+    });
+    const saveCallOrder = adminApiMock.saveContentVersion.mock.invocationCallOrder;
+    const duplicateCallOrder = adminApiMock.duplicateContentDocument.mock.invocationCallOrder;
+    expect(saveCallOrder[saveCallOrder.length - 1]).toBeLessThan(
+      duplicateCallOrder[duplicateCallOrder.length - 1],
+    );
 
     openEventPageMoreActions();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive page' }));
     await waitFor(() => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_event_page');
     });
-    await waitFor(() => {
-      expect(screen.getByText('Archived event page')).toBeInTheDocument();
-    });
-  }, 10000);
-
-  it('loads event-page content documents from array and keyed API response shapes', async () => {
-    adminApiMock.listContentDocuments.mockResolvedValueOnce(ok([document]));
-    const first = render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    expect(await waitForEditorLoad()).toBeInTheDocument();
-    expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
-    first.unmount();
-
-    vi.clearAllMocks();
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    );
-    adminApiMock.getEvent.mockResolvedValue(ok(event));
-    adminApiMock.listContentDocuments.mockResolvedValue(ok({ cdoc_event_page: document }));
-    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
-    adminApiMock.saveContentVersion.mockResolvedValue(ok(savedVersion));
-    adminApiMock.mintPreviewToken.mockResolvedValue(
-      ok({
-        token: 'mock-preview-token',
-        url: 'https://checkout.test/e/evt_1?edit=1&token=mock-preview-token',
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        versionId: 'cver_1',
-      }),
-    );
-
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-    expect(adminApiMock.createContentDocument).not.toHaveBeenCalled();
   });
 
-  it('opens the renderer-resolved public page URL and rejects unsafe public paths', async () => {
-    const openPage = vi.fn();
-    vi.stubGlobal('open', openPage);
-
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-    clickEventPageViewPublicPage();
-
-    expect(openPage).toHaveBeenCalledWith(
-      'https://events.example.test/e/evt_1',
-      '_blank',
-      'noopener,noreferrer',
-    );
-    expect(screen.getByText('Opened public page')).toBeInTheDocument();
-
-    openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Page details' }));
-    expect(screen.queryByLabelText('Locale')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Public path'), {
-      target: { value: 'javascript:alert(1)' },
-    });
-    clickEventPageViewPublicPage();
-
-    expect(openPage).toHaveBeenCalledTimes(1);
-    expect(
-      screen.getByText('Public page URL is not available. Set a safe http(s) public path first.'),
-    ).toBeInTheDocument();
-  });
-
-  it('adds real event-page blocks for every insert rail action', async () => {
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-
-    clickMobileInsertItem('Text');
-    clickMobileInsertItem('Image');
-    clickMobileInsertItem('Tickets');
-    clickMobileInsertItem('Schedule');
-    clickMobileInsertItem('Venue');
-    clickMobileInsertItem('Button');
-
-    // Simulate editing the button block label from the iframe.
-    const buttonBlock = {
-      id: 'button-15',
-      type: 'button' as const,
-      label: 'Join the list',
-      url: '{{event.checkoutUrl}}',
-      variant: 'primary' as const,
-    };
-    simulateBlockChange('button-15', buttonBlock);
-    clickEventPageSaveDraft();
-
-    await waitFor(() => {
-      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
-        'cdoc_event_page',
-        expect.objectContaining({
-          contentJson: expect.objectContaining({
-            blocks: expect.arrayContaining([
-              expect.objectContaining({
-                id: 'rich-text-10',
-                type: 'rich_text',
-                content: expect.objectContaining({
-                  content: expect.arrayContaining([expect.objectContaining({ type: 'paragraph' })]),
-                }),
-              }),
-              expect.objectContaining({
-                id: 'image-11',
-                type: 'rich_text',
-                content: expect.objectContaining({
-                  content: expect.arrayContaining([expect.objectContaining({ type: 'image' })]),
-                }),
-              }),
-              expect.objectContaining({
-                id: 'tickets-12',
-                type: 'tickets',
-                ctaLabel: 'Get tickets',
-              }),
-              expect.objectContaining({
-                id: 'schedule-13',
-                type: 'schedule',
-                items: expect.arrayContaining([
-                  expect.objectContaining({ title: 'All Access Chicago' }),
-                ]),
-              }),
-              expect.objectContaining({
-                id: 'venue-14',
-                type: 'venue_map',
-                venueName: 'The Salt Shed',
-              }),
-              expect.objectContaining({
-                id: 'button-15',
-                type: 'button',
-                label: 'Join the list',
-                url: '{{event.checkoutUrl}}',
-              }),
-            ]),
-          }),
-          renderedHtml: expect.stringContaining('Join the list'),
-        }),
-      );
-    });
-  });
-
-  it('persists edits to the exact duplicate block id sent by the iframe', async () => {
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-
-    const heroBlock = eventPageDocument.blocks.find((b) => b.type === 'hero')!;
-    const duplicateBlock = {
-      ...heroBlock,
-      id: 'hero-iframe-copy',
-      headline: 'Iframe generated copy',
-    };
-    simulateBlockDuplicate(heroBlock.id, duplicateBlock);
-    simulateBlockChange(duplicateBlock.id, {
-      ...duplicateBlock,
-      headline: 'Edited iframe generated copy',
-    });
-    clickEventPageSaveDraft();
-
-    await waitFor(() => {
-      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
-        'cdoc_event_page',
-        expect.objectContaining({
-          contentJson: expect.objectContaining({
-            blocks: expect.arrayContaining([
-              expect.objectContaining({
-                id: 'hero-iframe-copy',
-                type: 'hero',
-                headline: 'Edited iframe generated copy',
-              }),
-            ]),
-          }),
-        }),
-      );
-    });
-  });
-
-  it('requires confirmation before archiving and locks archived event pages', async () => {
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => false),
-    );
-
-    const editable = render(
-      React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }),
-    );
-
-    await waitForEditorLoad();
-    openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive page' }));
-
-    expect(adminApiMock.archiveContentDocument).not.toHaveBeenCalled();
-    editable.unmount();
-
-    vi.clearAllMocks();
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    );
-    adminApiMock.getEvent.mockResolvedValue(ok(event));
-    adminApiMock.listContentDocuments.mockResolvedValue(
-      ok({ items: [{ ...document, status: 'archived' }] }),
-    );
-    adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
-    adminApiMock.mintPreviewToken.mockResolvedValue(
-      ok({
-        token: 'mock-preview-token',
-        url: 'https://checkout.test/e/evt_1?edit=1&token=mock-preview-token',
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        versionId: 'cver_1',
-      }),
-    );
-
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-    // Archived pages lock all editing actions.
-    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
-    openEventPageMoreActions();
-    expect(screen.getByRole('menuitem', { name: 'Save draft' })).toHaveAttribute('data-disabled');
-    expect(screen.getByRole('menuitem', { name: 'Open preview' })).toHaveAttribute('data-disabled');
-    expect(screen.getByRole('menuitem', { name: 'View public page' })).toHaveAttribute(
-      'data-disabled',
-    );
-  });
-
-  it('creates the event-scoped event-page document and initial canonical draft when none exists', async () => {
+  it('creates the event-scoped event-page document and initial content-only Puck draft when none exists', async () => {
     adminApiMock.listContentDocuments.mockResolvedValue(ok({ items: [] }));
     adminApiMock.createContentDocument.mockResolvedValue(ok(document));
     adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [] }));
@@ -552,7 +420,7 @@ describe('EventPagePersistedEditorView', () => {
 
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    await waitForEditorLoad();
+    await waitForPuckEditor();
     expect(adminApiMock.createContentDocument).toHaveBeenCalledWith({
       organizationId: 'org_1',
       brandId: 'brd_1',
@@ -566,142 +434,41 @@ describe('EventPagePersistedEditorView', () => {
       'cdoc_event_page',
       expect.objectContaining({
         contentJson: expect.objectContaining({
-          schemaVersion: 1,
-          editor: expect.objectContaining({ provider: '@tiptap/core' }),
-        }),
-        renderedHtml: expect.stringContaining('tixkit-event-page'),
-      }),
-    );
-  });
-
-  it('ignores stale save completions before publishing the latest event-page draft', async () => {
-    let resolveStaleSave: (value: unknown) => void;
-    adminApiMock.saveContentVersion
-      .mockReturnValueOnce(
-        new Promise((resolve) => {
-          resolveStaleSave = resolve;
-        }),
-      )
-      .mockResolvedValue(ok({ ...savedVersion, id: 'cver_fresh', versionNumber: 3 }));
-    adminApiMock.publishContentVersion.mockResolvedValue(
-      ok({
-        document: { ...document, status: 'published', publishedVersionId: 'cver_fresh' },
-        version: { ...savedVersion, id: 'cver_fresh', versionNumber: 3, status: 'published' },
-      }),
-    );
-
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-    const heroBlock = eventPageDocument.blocks.find((b) => b.type === 'hero')!;
-    simulateBlockChange(heroBlock.id, { ...heroBlock, headline: 'Stale hosted page' });
-    clickEventPageSaveDraft();
-    await waitFor(() => expect(screen.getByText('Saving')).toBeInTheDocument());
-
-    simulateBlockChange(heroBlock.id, { ...heroBlock, headline: 'Fresh hosted page' });
-    await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument());
-
-    await act(async () => {
-      resolveStaleSave(ok({ ...savedVersion, id: 'cver_stale', subject: 'Stale hosted page' }));
-    });
-
-    expect(screen.queryByText('Saved draft v2')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => {
-      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith(
-        'cdoc_event_page',
-        'cver_fresh',
-      );
-    });
-    expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
-      'cdoc_event_page',
-      expect.objectContaining({
-        subject: 'Fresh hosted page',
-        contentJson: expect.objectContaining({
-          blocks: expect.arrayContaining([
-            expect.objectContaining({ type: 'hero', headline: 'Fresh hosted page' }),
-          ]),
+          schemaVersion: 2,
+          editor: expect.objectContaining({
+            provider: '@puckeditor/core',
+            data: expect.objectContaining({
+              root: expect.objectContaining({ props: expect.any(Object) }),
+              content: expect.not.arrayContaining([
+                expect.objectContaining({ type: 'Tickets' }),
+                expect.objectContaining({ type: 'ResaleTickets' }),
+              ]),
+            }),
+          }),
         }),
       }),
     );
+    expect(lastSavePayload()).not.toHaveProperty('renderedHtml');
   });
 
-  it('keeps the event-page editor editable after save failure and allows retry', async () => {
-    adminApiMock.saveContentVersion
-      .mockResolvedValueOnce({
-        ok: false,
-        error: { message: 'Injected event-page save outage' },
-      })
-      .mockResolvedValue(ok(savedVersion));
-
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-    const heroBlock = eventPageDocument.blocks.find((b) => b.type === 'hero')!;
-    simulateBlockChange(heroBlock.id, { ...heroBlock, headline: 'Retryable hosted page' });
-    clickEventPageSaveDraft();
-
-    expect(await screen.findByText('Injected event-page save outage')).toBeInTheDocument();
-    expect(screen.getByText('Save failed')).toBeInTheDocument();
-
-    simulateBlockChange(heroBlock.id, { ...heroBlock, headline: 'Recovered hosted page' });
-    expect(screen.queryByText('Injected event-page save outage')).not.toBeInTheDocument();
-    expect(screen.getByText('Ready')).toBeInTheDocument();
-
-    clickEventPageSaveDraft();
-    await waitFor(() => {
-      expect(screen.getByText('Saved draft v2')).toBeInTheDocument();
-    });
-    expect(adminApiMock.saveContentVersion).toHaveBeenLastCalledWith(
-      'cdoc_event_page',
-      expect.objectContaining({ subject: 'Recovered hosted page' }),
-    );
-  });
-
-  it('saves the latest event-page draft before duplicating the page', async () => {
-    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
-
-    await waitForEditorLoad();
-    const heroBlock = eventPageDocument.blocks.find((b) => b.type === 'hero')!;
-    simulateBlockChange(heroBlock.id, { ...heroBlock, headline: 'Duplicate-ready hosted page' });
-
-    openEventPageMoreActions();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate page' }));
-
-    await waitFor(() => {
-      expect(adminApiMock.duplicateContentDocument).toHaveBeenCalledWith('cdoc_event_page', {
-        name: 'All Access Chicago event page Copy',
-      });
-    });
-    expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
-      'cdoc_event_page',
-      expect.objectContaining({
-        subject: 'Duplicate-ready hosted page',
-        contentJson: expect.objectContaining({
-          blocks: expect.arrayContaining([
-            expect.objectContaining({ type: 'hero', headline: 'Duplicate-ready hosted page' }),
-          ]),
-        }),
-      }),
-    );
-    const saveCallOrder = adminApiMock.saveContentVersion.mock.invocationCallOrder;
-    const duplicateCallOrder = adminApiMock.duplicateContentDocument.mock.invocationCallOrder;
-    expect(saveCallOrder[saveCallOrder.length - 1]).toBeLessThan(
-      duplicateCallOrder[duplicateCallOrder.length - 1],
-    );
-    expect(
-      screen.getByText('Duplicated event page as All Access Chicago event page Copy'),
-    ).toBeInTheDocument();
-  });
-
-  it('fails closed when the saved draft is not canonical TipTap event-page JSON', async () => {
+  it('migrates legacy block drafts into content-only V2 Puck documents on save', async () => {
     adminApiMock.listContentVersions.mockResolvedValue(
       ok({
         items: [
           {
             ...version,
-            contentJson: { schemaVersion: 1, editor: { provider: 'legacy-page-builder' } },
+            schemaVersion: 1,
+            contentJson: {
+              settings: {
+                locale: 'en',
+                publicPath: '/e/all-access-chicago',
+                discovery: { summary: 'Legacy event page copy.', tags: [] },
+              },
+              blocks: [
+                { id: 'hero-legacy', type: 'hero', headline: 'Legacy hero', body: 'Legacy copy' },
+                { id: 'tickets-legacy', type: 'tickets', title: 'Tickets' },
+              ],
+            },
           },
         ],
       }),
@@ -709,10 +476,48 @@ describe('EventPagePersistedEditorView', () => {
 
     render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
 
-    expect(
-      await screen.findByText(
-        'Saved event-page draft is not canonical Tixkit TipTap event-page JSON.',
-      ),
-    ).toBeInTheDocument();
+    await waitForPuckEditor();
+    clickSaveDraft();
+
+    await waitFor(() => {
+      expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
+        'cdoc_event_page',
+        expect.objectContaining({
+          contentJson: expect.objectContaining({
+            schemaVersion: 2,
+            editor: expect.objectContaining({
+              provider: '@puckeditor/core',
+              data: expect.objectContaining({
+                content: [
+                  expect.objectContaining({
+                    type: 'Hero',
+                    props: expect.objectContaining({ headline: 'Legacy hero' }),
+                  }),
+                ],
+              }),
+            }),
+          }),
+        }),
+      );
+    });
+    expect(JSON.stringify(lastSavePayload())).not.toContain('tickets-legacy');
+  });
+
+  it('locks Puck editing actions for archived event pages', async () => {
+    adminApiMock.listContentDocuments.mockResolvedValue(
+      ok({ items: [{ ...document, status: 'archived' }] }),
+    );
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+
+    const puck = await waitForPuckEditor();
+    expect(puck).toHaveAttribute('data-editable', 'false');
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    openEventPageMoreActions();
+    expect(screen.getByRole('menuitem', { name: 'Save draft' })).toHaveAttribute('data-disabled');
+    expect(screen.getByRole('menuitem', { name: 'Open preview' })).toHaveAttribute('data-disabled');
+    expect(screen.getByRole('menuitem', { name: 'Duplicate page' })).toHaveAttribute(
+      'data-disabled',
+    );
   });
 });

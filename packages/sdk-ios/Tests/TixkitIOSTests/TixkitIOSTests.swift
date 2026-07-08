@@ -89,14 +89,18 @@ final class TixkitIOSTests: XCTestCase {
           ],
           "version": [
             "versionNumber": 3,
-            "renderedHtml": "<main class=\"tixkit-event-page\">All Access</main>",
-            "renderedText": "All Access",
             "publishedAt": "2026-06-02T00:00:00.000Z",
           ],
           "page": [
-            "html": "<main>All Access</main>",
-            "text": "All Access",
-            "headless": [["type": "hero", "id": "hero", "title": "All Access"]],
+            "provider": "@puckeditor/core",
+            "puckData": [
+              "content": [[
+                "type": "Hero",
+                "props": ["id": "Hero-hero", "headline": "All Access"],
+              ]],
+              "root": ["props": ["title": "All Access"]],
+            ],
+            "settings": ["locale": "en"],
             "discovery": [
               "title": "All Access",
               "summary": "Chicago",
@@ -119,6 +123,8 @@ final class TixkitIOSTests: XCTestCase {
     let contentPage = try await client.getContentPage(eventId: "evt_1", locale: "en")
     XCTAssertEqual(contentPage.document.eventId, "evt_1")
     XCTAssertEqual(contentPage.page.discovery.title, "All Access")
+    XCTAssertEqual(contentPage.page.provider, "@puckeditor/core")
+    XCTAssertEqual(contentPage.page.puckData.content.first?.type, "Hero")
     _ = try await client.getEventPage(eventId: "evt_1", locale: "en")
     _ = try await client.getEventPageBySlug(slug: "all-access", host: "events.example.com", locale: "en")
     let card = try await client.getEventDiscoveryCard(eventId: "evt_1")
