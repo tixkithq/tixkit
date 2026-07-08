@@ -576,7 +576,7 @@ describe('EventTicketsView fee policy', () => {
     expect(within(weekendRow as HTMLTableRowElement).getByText('$86.62')).toBeInTheDocument();
   });
 
-  it('updates the fee explanation and save payload when pass-through is toggled off', async () => {
+  it('autosaves pass-through changes without a fee save button', async () => {
     mockEventTicketsData();
 
     const view = render(<EventTicketsView eventId="evt_1" />);
@@ -587,6 +587,8 @@ describe('EventTicketsView fee policy', () => {
     fireEvent.click(view.getByRole('tab', { name: /Fees & Resale/i }));
 
     const panel = await view.findByTestId('fee-policy-card');
+    expect(within(panel).queryByRole('button', { name: /Save Fees/i })).not.toBeInTheDocument();
+
     fireEvent.click(within(panel).getByRole('switch', { name: /Pass fees to buyers/i }));
 
     await waitFor(() => {
@@ -597,8 +599,6 @@ describe('EventTicketsView fee policy', () => {
     expect(within(fridayRow as HTMLTableRowElement).getAllByText('$35.00')).toHaveLength(2);
     expect(within(fridayRow as HTMLTableRowElement).getByText('$1.75')).toBeInTheDocument();
     expect(within(fridayRow as HTMLTableRowElement).getByText('$31.93')).toBeInTheDocument();
-
-    fireEvent.click(within(panel).getByRole('button', { name: /Save Fees/i }));
 
     await waitFor(() => {
       expect(adminApiMock.updateEventFeePolicy).toHaveBeenCalledWith('evt_1', {
