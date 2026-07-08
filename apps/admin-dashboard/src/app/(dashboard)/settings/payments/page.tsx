@@ -59,6 +59,7 @@ export default function PaymentsPage() {
   const [stripeConnectReturnNotice, setStripeConnectReturnNotice] =
     React.useState<StripeConnectReturnNotice | null>(null);
   const handledStripeConnectReturnRef = React.useRef<string | null>(null);
+  const autoBindingBrandRef = React.useRef<string | null>(null);
   const stripeConnectAction = searchParams.get('stripeConnect');
   const stripeConnectOrganizationId = searchParams.get('organizationId');
 
@@ -134,6 +135,51 @@ export default function PaymentsPage() {
   const connectedAccount = accounts.find(
     (account) => account.provider === 'stripe_connect' || account.provider === 'stripe',
   );
+
+  React.useEffect(() => {
+    if (loading || bindingBrand || brands.length === 0 || accounts.length !== 1) {
+      return;
+    }
+
+    const selectedBrand = brands.find((brand) => brand.id === selectedBrandId);
+    const account = accounts[0];
+    if (!selectedBrand || !account || selectedBrand.paymentAccountId === account.id) {
+      return;
+    }
+    if (selectedBrand.paymentAccountId) {
+      return;
+    }
+
+    const autoBindKey = `${selectedBrand.id}:${account.id}`;
+    if (autoBindingBrandRef.current === autoBindKey) {
+      return;
+    }
+    autoBindingBrandRef.current = autoBindKey;
+
+    const bindDefaultPaymentAccount = async () => {
+      setBindingBrand(true);
+      const result = await adminApi.updateBrand(selectedBrand.id, {
+        paymentAccountId: account.id,
+      });
+      setBindingBrand(false);
+
+      if (!result.ok) {
+        autoBindingBrandRef.current = null;
+        toast.error(result.error.message);
+        return;
+      }
+
+      setSelectedPaymentAccountId(account.id);
+      setBrands((current) =>
+        current.map((brand) =>
+          brand.id === selectedBrand.id ? { ...brand, paymentAccountId: account.id } : brand,
+        ),
+      );
+      toast.success('Payment account binding updated');
+    };
+
+    void bindDefaultPaymentAccount();
+  }, [accounts, bindingBrand, brands, loading, selectedBrandId]);
 
   React.useEffect(() => {
     if (

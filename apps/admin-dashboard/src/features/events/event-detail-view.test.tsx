@@ -85,8 +85,7 @@ function mockLoadedEventDetail() {
       loading: false,
       error: null,
       refetch: vi.fn(),
-    })
-    .mockReturnValueOnce({ data: [], loading: false, error: null, refetch: vi.fn() });
+    });
 }
 
 afterEach(() => {
@@ -164,5 +163,30 @@ describe('EventDetailView', () => {
       'href',
       '/events/evt_1/messages',
     );
+  });
+
+  it('shows Schedule and Marketing quick links', async () => {
+    mockLoadedEventDetail();
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByRole('link', { name: 'Schedule' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/schedule',
+    );
+    expect(view.getByRole('link', { name: 'Marketing' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/marketing',
+    );
+  });
+
+  it('does not render the marketing integrations panel inline', async () => {
+    mockLoadedEventDetail();
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    await view.findByRole('link', { name: 'Tickets' });
+    expect(view.queryByText('Marketing Integrations')).not.toBeInTheDocument();
+    expect(view.queryByText('Google Analytics 4')).not.toBeInTheDocument();
   });
 });

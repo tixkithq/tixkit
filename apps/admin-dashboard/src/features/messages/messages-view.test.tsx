@@ -134,6 +134,62 @@ vi.mock('@/components/ui/select', () => ({
   ),
 }));
 
+vi.mock('@/components/ui/tabs', () => {
+  const TabsContext = React.createContext<{
+    value: string;
+    onValueChange?: (value: string) => void;
+  }>({ value: '' });
+
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Vitest hoists mock factories, so keep mock components local.
+  const Tabs = ({
+    value,
+    defaultValue,
+    onValueChange,
+    children,
+  }: {
+    value?: string;
+    defaultValue?: string;
+    onValueChange?: (value: string) => void;
+    children: React.ReactNode;
+  }) => {
+    const contextValue = React.useMemo(
+      () => ({ value: value ?? defaultValue ?? '', onValueChange }),
+      [defaultValue, onValueChange, value],
+    );
+    return (
+      <TabsContext.Provider value={contextValue}>
+        <div>{children}</div>
+      </TabsContext.Provider>
+    );
+  };
+
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- Vitest hoists mock factories, so keep mock components local.
+  const TabsList = ({ children }: { children: React.ReactNode }) => (
+    <div role="tablist">{children}</div>
+  );
+
+  function TabsTrigger({ value, children }: { value: string; children: React.ReactNode }) {
+    const context = React.useContext(TabsContext);
+    return (
+      <button
+        aria-selected={context.value === value}
+        onClick={() => context.onValueChange?.(value)}
+        role="tab"
+        type="button"
+      >
+        {children}
+      </button>
+    );
+  }
+
+  function TabsContent({ value, children }: { value: string; children: React.ReactNode }) {
+    const context = React.useContext(TabsContext);
+    return context.value === value ? <div>{children}</div> : null;
+  }
+
+  return { Tabs, TabsList, TabsTrigger, TabsContent };
+});
+
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
     open ? <div>{children}</div> : null,
@@ -169,7 +225,7 @@ function contentDocument(
     tenantId: 'tnt_1',
     organizationId: 'org_1',
     brandId: 'brd_1',
-    eventId: overrides.eventId ?? 'evt_1',
+    eventId: 'eventId' in overrides ? overrides.eventId : 'evt_1',
     channel,
     key: overrides.key ?? `${channel}-reminder`,
     name: overrides.name ?? `${channel === 'email' ? 'Email' : 'SMS'} reminder`,
@@ -426,6 +482,53 @@ describe('MessageFormDialog', () => {
 });
 
 describe('EventMessagesView', () => {
+  it('surfaces lifecycle email defaults and event overrides', async () => {
+    adminApiMock.listMessages.mockResolvedValue({ ok: true, data: [] });
+    adminApiMock.getEvent.mockResolvedValue({
+      ok: true,
+      data: { id: 'evt_1', title: 'Demo Event', brandId: 'brd_1' },
+    });
+    adminApiMock.listContentDocuments.mockImplementation(
+      (request?: { brandId?: string; eventId?: string }) => {
+        const items = request?.eventId
+          ? [
+              contentDocument({
+                id: 'cdoc_event_order',
+                key: 'order-confirmed',
+                name: 'Demo Event order confirmation',
+                eventId: 'evt_1',
+                status: 'published',
+              }),
+            ]
+          : [
+              contentDocument({
+                id: 'cdoc_brand_order',
+                key: 'order-confirmed',
+                name: 'Brand order confirmation',
+                eventId: undefined,
+                status: 'published',
+              }),
+            ];
+        return Promise.resolve({ ok: true, data: { items, nextCursor: null, hasMore: false } });
+      },
+    );
+
+    const view = render(<EventMessagesView eventId="evt_1" />);
+    fireEvent.click(view.getByRole('tab', { name: 'Lifecycle emails' }));
+
+    expect((await view.findAllByText('Order confirmed')).length).toBeGreaterThan(0);
+    expect(view.getByText('Brand order confirmation')).toBeInTheDocument();
+    expect(view.getByText('Demo Event order confirmation')).toBeInTheDocument();
+    expect(view.getAllByText('Transactional').length).toBeGreaterThan(0);
+    expect(view.getByText('Lifecycle template')).toBeInTheDocument();
+    expect(view.getAllByRole('combobox').length).toBeGreaterThan(0);
+    expect(view.getAllByRole('link', { name: 'Open in editor' })[0]).toHaveAttribute(
+      'href',
+      '/events/evt_1/content/email?templateKey=order-confirmed&returnTo=%2Fevents%2Fevt_1%2Fmessages%3Ftab%3Dlifecycle%26templateKey%3Dorder-confirmed',
+    );
+    expect(view.getAllByRole('link', { name: 'Open in editor' }).length).toBeGreaterThan(1);
+  });
+
   it('renders persisted audience labels after campaign reload', async () => {
     adminApiMock.listMessages.mockResolvedValue({
       ok: true,

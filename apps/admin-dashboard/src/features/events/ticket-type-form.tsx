@@ -476,19 +476,22 @@ export function TicketTypeFormDrawer({
                   </FormItem>
                 )}
               />
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
                 <FormField
                   control={form.control}
                   name="priceCents"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Price (cents)</FormLabel>
+                    <FormItem className="sm:w-56">
+                      <FormLabel>Price</FormLabel>
                       <FormControl>
                         <Input
+                          className="w-full"
                           type="number"
+                          min={0}
+                          step={0.01}
                           disabled={kind === 'free'}
-                          value={field.value ?? 0}
-                          onChange={(e) => field.onChange(Number(e.target.value))}
+                          value={field.value ? field.value / 100 : 0}
+                          onChange={(e) => field.onChange(Math.round(Number(e.target.value) * 100))}
                         />
                       </FormControl>
                       <FormDescription>
@@ -504,11 +507,11 @@ export function TicketTypeFormDrawer({
                   control={form.control}
                   name="currency"
                   render={({ field }) => (
-                    <FormItem>
+                    <FormItem className="sm:w-20">
                       <FormLabel>Currency</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="w-full">
                             <SelectValue />
                           </SelectTrigger>
                         </FormControl>
@@ -531,13 +534,17 @@ export function TicketTypeFormDrawer({
                   name="minimumPriceCents"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Minimum Donation (cents)</FormLabel>
+                      <FormLabel>Minimum Donation</FormLabel>
                       <FormControl>
                         <Input
                           type="number"
-                          value={field.value ?? ''}
+                          min={0}
+                          step={0.01}
+                          value={field.value ? field.value / 100 : ''}
                           onChange={(e) =>
-                            field.onChange(e.target.value ? Number(e.target.value) : undefined)
+                            field.onChange(
+                              e.target.value ? Math.round(Number(e.target.value) * 100) : undefined,
+                            )
                           }
                         />
                       </FormControl>

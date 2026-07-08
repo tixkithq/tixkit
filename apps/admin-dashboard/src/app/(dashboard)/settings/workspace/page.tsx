@@ -203,7 +203,7 @@ function WorkspacePageContent() {
                 />
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_14rem]">
+              <div className="grid gap-4 lg:grid-cols-[1fr_14rem]">
                 <div className="space-y-2">
                   <Label>Accepted Tender Types</Label>
                   <div className="grid gap-3 sm:grid-cols-3">

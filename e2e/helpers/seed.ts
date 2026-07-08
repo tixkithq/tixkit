@@ -419,6 +419,87 @@ async function withE2eDb<T>(callback: (db: Database) => Promise<T>): Promise<T> 
   }
 }
 
+async function ensureDevTenantGraph(): Promise<void> {
+  const now = new Date();
+  await withE2eDb(async (db) => {
+    await db
+      .insertInto('tenants')
+      .values({
+        id: devTenantId,
+        name: 'Local Development',
+        status: 'active',
+        plan: 'free',
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({
+          name: 'Local Development',
+          status: 'active',
+          plan: 'free',
+          updated_at: now,
+        }),
+      )
+      .execute();
+
+    await db
+      .insertInto('organizations')
+      .values({
+        id: devOrganizationId,
+        tenant_id: devTenantId,
+        name: 'Tixkit Dev',
+        slug: 'tixkit-dev',
+        clerk_organization_id: null,
+        box_office_settings: JSON.stringify({
+          enabled: true,
+          allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+          requireBuyerEmail: false,
+          receiptMode: 'email',
+        }),
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({
+          tenant_id: devTenantId,
+          name: 'Tixkit Dev',
+          slug: 'tixkit-dev',
+          status: 'active',
+          updated_at: now,
+        }),
+      )
+      .execute();
+
+    await db
+      .insertInto('brands')
+      .values({
+        id: devBrandId,
+        tenant_id: devTenantId,
+        organization_id: devOrganizationId,
+        name: 'Tixkit Dev',
+        slug: 'tixkit-dev',
+        status: 'active',
+        theme: JSON.stringify({ primaryColor: '#4f46e5' }),
+        legal_urls: JSON.stringify({}),
+        white_label: false,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({
+          tenant_id: devTenantId,
+          organization_id: devOrganizationId,
+          name: 'Tixkit Dev',
+          slug: 'tixkit-dev',
+          status: 'active',
+          updated_at: now,
+        }),
+      )
+      .execute();
+  });
+}
+
 function safeIdPart(suffix: string): string {
   return suffix.replaceAll(/[^a-zA-Z0-9_-]/g, '-').slice(0, 18);
 }
@@ -435,6 +516,8 @@ export async function seedFreeCheckoutEvent(
   request: APIRequestContext,
   suffix: string,
 ): Promise<SeededCheckoutEvent> {
+  await ensureDevTenantGraph();
+
   const eventTitle = `E2E Checkout ${suffix}`;
   const event = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/events`, {

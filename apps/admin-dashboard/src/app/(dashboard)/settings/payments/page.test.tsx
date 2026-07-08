@@ -70,6 +70,11 @@ const brand = {
   paymentAccountId: 'acct_1',
 };
 
+const unboundBrand = {
+  ...brand,
+  paymentAccountId: null,
+};
+
 const pendingAccount = {
   id: 'acct_1',
   organizationId: organization.id,
@@ -117,10 +122,52 @@ beforeEach(() => {
   setSearchParams('');
   adminApiMock.listPaymentAccounts.mockResolvedValue(ok([pendingAccount]));
   adminApiMock.refreshStripeConnectAccount.mockResolvedValue(ok(activeAccount));
+  adminApiMock.updateBrand.mockResolvedValue(ok(brand));
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+describe('PaymentsPage brand payment routing', () => {
+  it('keeps the saved payment account binding selected on load', async () => {
+    render(<PaymentsPage />);
+
+    expect(
+      await screen.findByText('stripe_connect - acct_stripe_1 (pending)'),
+    ).toBeVisible();
+    expect(adminApiMock.updateBrand).not.toHaveBeenCalled();
+  });
+
+  it('automatically persists the only payment account for an unbound brand', async () => {
+    useBootstrapMock.mockReturnValue({
+      organizations: [organization],
+      organizationId: organization.id,
+      availableBrands: [unboundBrand],
+      brandId: unboundBrand.id,
+      setBrandId: vi.fn(),
+      loading: false,
+      error: null,
+    });
+    adminApiMock.updateBrand.mockResolvedValue(
+      ok({
+        ...unboundBrand,
+        paymentAccountId: pendingAccount.id,
+      }),
+    );
+
+    render(<PaymentsPage />);
+
+    await waitFor(() => {
+      expect(adminApiMock.updateBrand).toHaveBeenCalledWith(unboundBrand.id, {
+        paymentAccountId: pendingAccount.id,
+      });
+    });
+    expect(
+      await screen.findByText('stripe_connect - acct_stripe_1 (pending)'),
+    ).toBeVisible();
+    expect(toast.success).toHaveBeenCalledWith('Payment account binding updated');
+  });
 });
 
 describe('PaymentsPage Stripe Connect return handling', () => {

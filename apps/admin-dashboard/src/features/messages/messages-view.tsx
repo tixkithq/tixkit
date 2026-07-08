@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -25,12 +26,14 @@ import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { formatDate } from '@/lib/format';
+import { LifecycleEmailsView } from './lifecycle-emails-view';
 import { MessageFormDialog } from './message-form';
 
 export function MessagesView() {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [selectedEventId, setSelectedEventId] = React.useState<string>('');
   const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('');
+  const [activeTab, setActiveTab] = React.useState<'campaigns' | 'lifecycle'>('campaigns');
 
   const { organizationId, brandId } = useBootstrap();
   const {
@@ -57,6 +60,7 @@ export function MessagesView() {
   }, [organizationId, brandId]);
 
   const campaigns = data ?? [];
+  const selectedEvent = events.find((event) => event.id === selectedEventId);
 
   return (
     <div className="space-y-6">
@@ -80,105 +84,124 @@ export function MessagesView() {
             ))}
           </SelectContent>
         </Select>
-        <Button
-          onClick={() => setDialogOpen(true)}
-          disabled={!selectedEventId || eventsLoading || Boolean(eventsError)}
-        >
-          <Plus className="size-4" />
-          New campaign
-        </Button>
+        {activeTab === 'campaigns' && (
+          <Button
+            onClick={() => setDialogOpen(true)}
+            disabled={!selectedEventId || eventsLoading || Boolean(eventsError)}
+          >
+            <Plus className="size-4" />
+            New campaign
+          </Button>
+        )}
       </div>
 
-      {eventsLoading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-24 w-full" />
-        </div>
-      ) : eventsError ? (
-        <EmptyState
-          icon={MessageSquare}
-          title="Failed to load events"
-          description={eventsError.message}
-          action={<Button onClick={refetchEvents}>Try again</Button>}
-        />
-      ) : !selectedEventId ? (
-        <EmptyState
-          icon={MessageSquare}
-          title="Select an event"
-          description="Choose an event to view and create message campaigns for its attendees."
-        />
-      ) : loading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full" />
-          ))}
-        </div>
-      ) : error ? (
-        <EmptyState
-          icon={MessageSquare}
-          title="Failed to load campaigns"
-          description={error.message}
-          action={<Button onClick={refetch}>Try again</Button>}
-        />
-      ) : campaigns.length === 0 ? (
-        <EmptyState
-          icon={MessageSquare}
-          title="No campaigns yet"
-          description="Create a campaign to message attendees by channel and audience segment."
-          action={
-            <Button onClick={() => setDialogOpen(true)}>
-              <Plus className="size-4" />
-              New campaign
-            </Button>
-          }
-        />
-      ) : (
-        <div className="space-y-3">
-          {campaigns.map((campaign) => (
-            <Card key={campaign.id}>
-              <CardContent className="flex flex-col items-start justify-between gap-3 p-4 sm:flex-row sm:items-center">
-                <div className="flex min-w-0 items-start gap-3">
-                  {campaign.channel === 'email' ? (
-                    <Mail className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <Smartphone className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-                  )}
-                  <div className="min-w-0">
-                    <p className="break-words font-medium">{campaign.name}</p>
-                    <p className="break-words text-sm text-muted-foreground">
-                      {campaign.audienceLabel} · {campaign.queuedCount} queued
-                      {campaign.sentCount > 0 && ` · ${campaign.sentCount} sent`}
-                      {campaign.deliveredCount > 0 && ` · ${campaign.deliveredCount} delivered`}
-                      {campaign.failedCount > 0 && ` · ${campaign.failedCount} failed`}
-                      {campaign.suppressedCount > 0 && ` · ${campaign.suppressedCount} suppressed`}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
-                  <span className="text-sm text-muted-foreground">
-                    {formatDate(campaign.createdAt)}
-                  </span>
-                  <Badge variant="outline" className="shrink-0">
-                    {campaign.status}
-                  </Badge>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={() => setSelectedCampaignId(campaign.id)}
-                  >
-                    Details
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start">
+          <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
+          <TabsTrigger value="lifecycle">Lifecycle emails</TabsTrigger>
+        </TabsList>
+        <TabsContent value="campaigns" className="mt-4">
+          {eventsLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : eventsError ? (
+            <EmptyState
+              icon={MessageSquare}
+              title="Failed to load events"
+              description={eventsError.message}
+              action={<Button onClick={refetchEvents}>Try again</Button>}
+            />
+          ) : !selectedEventId ? (
+            <EmptyState
+              icon={MessageSquare}
+              title="Select an event"
+              description="Choose an event to view and create message campaigns for its attendees."
+            />
+          ) : loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-24 w-full" />
+              ))}
+            </div>
+          ) : error ? (
+            <EmptyState
+              icon={MessageSquare}
+              title="Failed to load campaigns"
+              description={error.message}
+              action={<Button onClick={refetch}>Try again</Button>}
+            />
+          ) : campaigns.length === 0 ? (
+            <EmptyState
+              icon={MessageSquare}
+              title="No campaigns yet"
+              description="Create a campaign to message attendees by channel and audience segment."
+              action={
+                <Button onClick={() => setDialogOpen(true)}>
+                  <Plus className="size-4" />
+                  New campaign
+                </Button>
+              }
+            />
+          ) : (
+            <div className="space-y-3">
+              {campaigns.map((campaign) => (
+                <Card key={campaign.id}>
+                  <CardContent className="flex flex-col items-start justify-between gap-3 p-4 sm:flex-row sm:items-center">
+                    <div className="flex min-w-0 items-start gap-3">
+                      {campaign.channel === 'email' ? (
+                        <Mail className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <Smartphone className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="break-words font-medium">{campaign.name}</p>
+                        <p className="break-words text-sm text-muted-foreground">
+                          {campaign.audienceLabel} · {campaign.queuedCount} queued
+                          {campaign.sentCount > 0 && ` · ${campaign.sentCount} sent`}
+                          {campaign.deliveredCount > 0 &&
+                            ` · ${campaign.deliveredCount} delivered`}
+                          {campaign.failedCount > 0 && ` · ${campaign.failedCount} failed`}
+                          {campaign.suppressedCount > 0 &&
+                            ` · ${campaign.suppressedCount} suppressed`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
+                      <span className="text-sm text-muted-foreground">
+                        {formatDate(campaign.createdAt)}
+                      </span>
+                      <Badge variant="outline" className="shrink-0">
+                        {campaign.status}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={() => setSelectedCampaignId(campaign.id)}
+                      >
+                        Details
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
 
-      {selectedEventId && selectedCampaignId && (
-        <MessageCampaignDetailPanel eventId={selectedEventId} campaignId={selectedCampaignId} />
-      )}
+          {selectedEventId && selectedCampaignId && (
+            <MessageCampaignDetailPanel eventId={selectedEventId} campaignId={selectedCampaignId} />
+          )}
+        </TabsContent>
+        <TabsContent value="lifecycle" className="mt-4">
+          <LifecycleEmailsView
+            brandId={brandId}
+            eventId={selectedEventId || undefined}
+            eventTitle={selectedEvent?.title}
+          />
+        </TabsContent>
+      </Tabs>
 
       <MessageFormDialog
         eventId={selectedEventId}

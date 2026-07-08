@@ -261,7 +261,7 @@ test.describe('Admin data table filters', () => {
       await filterButton.click();
 
       // Select "paid" from the filter options
-      const paidOption = page.getByRole('option', { name: /paid/i }).first();
+      const paidOption = page.getByRole('dialog').getByRole('button', { name: /^paid$/i });
       await expect(paidOption).toBeVisible({ timeout: 5_000 });
       await paidOption.click();
 
@@ -473,7 +473,9 @@ test.describe('Admin data table filters', () => {
 
       // Look for a "Next" or pagination button
       const nextButton = page.getByRole('button', { name: /next|load\s*more|→/i }).first();
-      const hasNext = await nextButton.isVisible().catch(() => false);
+      const hasNext =
+        (await nextButton.isVisible().catch(() => false)) &&
+        (await nextButton.isEnabled().catch(() => false));
 
       if (hasNext) {
         await nextButton.click();

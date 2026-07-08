@@ -1,8 +1,7 @@
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import * as React from 'react';
 import { toast } from 'sonner';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EventTicketsView } from './event-tickets-view';
 
 type EventTicketsAdminApiMock = {
@@ -11,6 +10,8 @@ type EventTicketsAdminApiMock = {
   listEventOccurrences: ReturnType<typeof vi.fn>;
   getResalePolicy: ReturnType<typeof vi.fn>;
   updateResalePolicy: ReturnType<typeof vi.fn>;
+  getEventFeePolicy: ReturnType<typeof vi.fn>;
+  updateEventFeePolicy: ReturnType<typeof vi.fn>;
   listResaleListings: ReturnType<typeof vi.fn>;
   delistResaleListing: ReturnType<typeof vi.fn>;
   createEventOccurrence: ReturnType<typeof vi.fn>;
@@ -25,6 +26,8 @@ const adminApiMock = vi.hoisted(
     listEventOccurrences: vi.fn(),
     getResalePolicy: vi.fn(),
     updateResalePolicy: vi.fn(),
+    getEventFeePolicy: vi.fn(),
+    updateEventFeePolicy: vi.fn(),
     listResaleListings: vi.fn(),
     delistResaleListing: vi.fn(),
     createEventOccurrence: vi.fn(),
@@ -153,6 +156,16 @@ const waitlistEntry = {
 
 const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 
+beforeAll(() => {
+  if (!globalThis.ResizeObserver) {
+    globalThis.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+});
+
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -196,6 +209,42 @@ function mockEventTicketsData() {
       enabled: false,
       maxMultiplier: 1.1,
       maxAbsoluteCents: 5500,
+    },
+  });
+  adminApiMock.getEventFeePolicy.mockResolvedValue({
+    ok: true,
+    data: {
+      eventId: 'evt_1',
+      passFeesToBuyer: true,
+      rules: [
+        {
+          id: 'fee_1',
+          eventId: 'evt_1',
+          name: 'Service fee',
+          type: 'percentage',
+          value: 500,
+          appliedTo: 'per_ticket',
+          absorbIntoPrice: false,
+        },
+      ],
+    },
+  });
+  adminApiMock.updateEventFeePolicy.mockResolvedValue({
+    ok: true,
+    data: {
+      eventId: 'evt_1',
+      passFeesToBuyer: false,
+      rules: [
+        {
+          id: 'fee_1',
+          eventId: 'evt_1',
+          name: 'Service fee',
+          type: 'percentage',
+          value: 500,
+          appliedTo: 'per_ticket',
+          absorbIntoPrice: true,
+        },
+      ],
     },
   });
   adminApiMock.listResaleListings.mockResolvedValue({
@@ -244,66 +293,27 @@ describe('EventTicketsView occurrences', () => {
 
     const view = render(<EventTicketsView eventId="evt_1" />);
 
+    // Ticket table is on the default "Tickets" tab; occurrence labels resolve there.
     await waitFor(() => {
-      expect(view.getAllByText('Friday evening').length).toBeGreaterThanOrEqual(2);
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
     });
 
-    expect(view.getByText('Saturday matinee')).toBeInTheDocument();
-    const fridayTicketRow = view.getByText('Friday GA').closest('tr');
-    expect(fridayTicketRow).not.toBeNull();
-    expect(
-      within(fridayTicketRow as HTMLTableRowElement).getByText('Friday evening'),
-    ).toBeInTheDocument();
-    const weekendTicketRow = view.getByText('Weekend pass').closest('tr');
-    expect(weekendTicketRow).not.toBeNull();
-    expect(
-      within(weekendTicketRow as HTMLTableRowElement).getByText('All occurrences'),
-    ).toBeInTheDocument();
-  });
-
-  it('creates an occurrence through the admin API and refetches occurrences', async () => {
-    mockEventTicketsData();
-    adminApiMock.createEventOccurrence.mockResolvedValue({
-      ok: true,
-      data: {
-        ...fridayOccurrence,
-        id: 'occ_sunday',
-        title: 'Sunday closing',
-      },
-    });
-
-    const view = render(<EventTicketsView eventId="evt_1" />);
-
-    await waitFor(() => {
-      expect(view.getAllByText('Friday evening').length).toBeGreaterThanOrEqual(2);
-    });
-    fireEvent.change(view.getByLabelText('Title'), {
-      target: { value: 'Sunday closing' },
-    });
-    fireEvent.change(view.getByLabelText('Starts'), {
-      target: { value: '2026-08-17T18:00' },
-    });
-    fireEvent.change(view.getByLabelText('Ends'), {
-      target: { value: '2026-08-17T21:00' },
-    });
-    fireEvent.change(view.getByLabelText('Timezone'), {
-      target: { value: 'America/Chicago' },
-    });
-    fireEvent.click(view.getByRole('button', { name: 'Add' }));
-
-    await waitFor(() => {
-      expect(adminApiMock.createEventOccurrence).toHaveBeenCalledWith('evt_1', {
-        title: 'Sunday closing',
-        startsAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/),
-        endsAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/),
-        timezone: 'America/Chicago',
-      });
-    });
-    const [, input] = adminApiMock.createEventOccurrence.mock.calls[0];
-    expect(new Date(input.endsAt).getTime() - new Date(input.startsAt).getTime()).toBe(
-      3 * 60 * 60 * 1000,
-    );
-    expect(adminApiMock.listEventOccurrences).toHaveBeenCalledTimes(2);
+    const fridayTicketRow = view
+      .getAllByText('Friday GA')
+      .map((node) => node.closest('tr'))
+      .find((row): row is HTMLTableRowElement =>
+        Boolean(row && within(row).queryByText('Friday evening')),
+      );
+    if (!fridayTicketRow) throw new Error('Friday ticket row not found');
+    expect(within(fridayTicketRow).getByText('Friday evening')).toBeInTheDocument();
+    const weekendTicketRow = view
+      .getAllByText('Weekend pass')
+      .map((node) => node.closest('tr'))
+      .find((row): row is HTMLTableRowElement =>
+        Boolean(row && within(row).queryByText('All occurrences')),
+      );
+    if (!weekendTicketRow) throw new Error('Weekend ticket row not found');
+    expect(within(weekendTicketRow).getByText('All occurrences')).toBeInTheDocument();
   });
 });
 
@@ -333,6 +343,12 @@ describe('EventTicketsView waitlist claim links', () => {
     });
 
     const view = render(<EventTicketsView eventId="evt_1" />);
+
+    // Wait for ticket data, then switch to Waitlist tab.
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Waitlist/i }));
 
     const row = (await view.findByText(waitlistEntry.email)).closest('tr');
     expect(row).not.toBeNull();
@@ -380,6 +396,11 @@ describe('EventTicketsView waitlist claim links', () => {
 
     const view = render(<EventTicketsView eventId="evt_1" />);
 
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Waitlist/i }));
+
     const row = (await view.findByText(waitlistEntry.email)).closest('tr');
     expect(row).not.toBeNull();
     fireEvent.click(within(row as HTMLTableRowElement).getByRole('button', { name: 'Offer' }));
@@ -420,6 +441,11 @@ describe('EventTicketsView waitlist claim links', () => {
 
     const view = render(<EventTicketsView eventId="evt_1" />);
 
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Waitlist/i }));
+
     const row = (await view.findByText(waitlistEntry.email)).closest('tr');
     expect(row).not.toBeNull();
     fireEvent.click(within(row as HTMLTableRowElement).getByRole('button', { name: 'Offer' }));
@@ -448,6 +474,11 @@ describe('EventTicketsView resale', () => {
 
     const view = render(<EventTicketsView eventId="evt_1" />);
 
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Fees & Resale/i }));
+
     const panel = await view.findByTestId('resale-policy-panel');
 
     expect(within(panel).getByText('Resale')).toBeInTheDocument();
@@ -457,7 +488,7 @@ describe('EventTicketsView resale', () => {
       'checked',
     );
     expect(within(panel).getByLabelText('Max markup')).toHaveValue(1.2);
-    expect(within(panel).getByLabelText('Absolute cap')).toHaveValue(6000);
+    expect(within(panel).getByLabelText('Absolute cap ($)')).toHaveValue(60);
     expect(within(panel).getByText('tkt_1')).toBeInTheDocument();
     expect(within(panel).getByText('$55.00')).toBeInTheDocument();
     expect(within(panel).getByText('$35.00')).toBeInTheDocument();
@@ -468,13 +499,18 @@ describe('EventTicketsView resale', () => {
 
     const view = render(<EventTicketsView eventId="evt_1" />);
 
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Fees & Resale/i }));
+
     const panel = await view.findByTestId('resale-policy-panel');
     fireEvent.click(within(panel).getByRole('switch', { name: /Resale policy/i }));
     fireEvent.change(within(panel).getByLabelText('Max markup'), {
       target: { value: '1.1' },
     });
-    fireEvent.change(within(panel).getByLabelText('Absolute cap'), {
-      target: { value: '5500' },
+    fireEvent.change(within(panel).getByLabelText('Absolute cap ($)'), {
+      target: { value: '55' },
     });
     fireEvent.click(within(panel).getByRole('button', { name: /Save resale policy/i }));
 
@@ -493,6 +529,11 @@ describe('EventTicketsView resale', () => {
 
     const view = render(<EventTicketsView eventId="evt_1" />);
 
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Fees & Resale/i }));
+
     const panel = await view.findByTestId('resale-policy-panel');
     fireEvent.click(within(panel).getByRole('button', { name: /Delist/i }));
 
@@ -502,5 +543,77 @@ describe('EventTicketsView resale', () => {
       });
     });
     expect(adminApiMock.listResaleListings).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('EventTicketsView fee policy', () => {
+  it('renders fee impact by ticket type using current ticket prices', async () => {
+    mockEventTicketsData();
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Fees & Resale/i }));
+
+    const panel = await view.findByTestId('fee-policy-card');
+    expect(panel).toHaveTextContent('Ticket Fees');
+    expect(within(panel).getByText('Buyer pays')).toBeInTheDocument();
+
+    const fridayRow = within(panel).getByText('Friday GA').closest('tr');
+    expect(fridayRow).not.toBeNull();
+    expect(within(fridayRow as HTMLTableRowElement).getAllByText('$35.00')).toHaveLength(2);
+    expect(within(fridayRow as HTMLTableRowElement).getByText('$1.32')).toBeInTheDocument();
+    expect(within(fridayRow as HTMLTableRowElement).getByText('$1.75')).toBeInTheDocument();
+    expect(within(fridayRow as HTMLTableRowElement).getByText('$38.07')).toBeInTheDocument();
+
+    const weekendRow = within(panel).getByText('Weekend pass').closest('tr');
+    expect(weekendRow).not.toBeNull();
+    expect(within(weekendRow as HTMLTableRowElement).getAllByText('$80.00')).toHaveLength(2);
+    expect(within(weekendRow as HTMLTableRowElement).getByText('$2.62')).toBeInTheDocument();
+    expect(within(weekendRow as HTMLTableRowElement).getByText('$4.00')).toBeInTheDocument();
+    expect(within(weekendRow as HTMLTableRowElement).getByText('$86.62')).toBeInTheDocument();
+  });
+
+  it('updates the fee explanation and save payload when pass-through is toggled off', async () => {
+    mockEventTicketsData();
+
+    const view = render(<EventTicketsView eventId="evt_1" />);
+
+    await waitFor(() => {
+      expect(view.getByText('Friday GA')).toBeInTheDocument();
+    });
+    fireEvent.click(view.getByRole('tab', { name: /Fees & Resale/i }));
+
+    const panel = await view.findByTestId('fee-policy-card');
+    fireEvent.click(within(panel).getByRole('switch', { name: /Pass fees to buyers/i }));
+
+    await waitFor(() => {
+      expect(within(panel).getByText('Organizer absorbs')).toBeInTheDocument();
+    });
+    const fridayRow = within(panel).getByText('Friday GA').closest('tr');
+    expect(fridayRow).not.toBeNull();
+    expect(within(fridayRow as HTMLTableRowElement).getAllByText('$35.00')).toHaveLength(2);
+    expect(within(fridayRow as HTMLTableRowElement).getByText('$1.75')).toBeInTheDocument();
+    expect(within(fridayRow as HTMLTableRowElement).getByText('$31.93')).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole('button', { name: /Save Fees/i }));
+
+    await waitFor(() => {
+      expect(adminApiMock.updateEventFeePolicy).toHaveBeenCalledWith('evt_1', {
+        passFeesToBuyer: false,
+        rules: [
+          {
+            id: 'fee_1',
+            name: 'Service fee',
+            type: 'percentage',
+            value: 500,
+            appliedTo: 'per_ticket',
+          },
+        ],
+      });
+    });
+    expect(adminApiMock.getEventFeePolicy).toHaveBeenCalledTimes(2);
   });
 });

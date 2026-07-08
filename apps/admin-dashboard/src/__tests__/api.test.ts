@@ -458,6 +458,42 @@ describe('AdminApi checkout questions', () => {
   });
 });
 
+describe('AdminApi event fee policy', () => {
+  it('reads and updates event fee pass-through settings', async () => {
+    const initial = await adminApi.getEventFeePolicy('evt_demo_001');
+    expect(initial.ok).toBe(true);
+    if (initial.ok) {
+      expect(initial.data.eventId).toBe('evt_demo_001');
+      expect(initial.data.rules[0]?.absorbIntoPrice).toBe(false);
+    }
+
+    const update = await adminApi.updateEventFeePolicy('evt_demo_001', {
+      passFeesToBuyer: false,
+      rules: [
+        {
+          name: 'Organizer-paid order fee',
+          type: 'fixed',
+          value: 250,
+          appliedTo: 'per_order',
+        },
+      ],
+    });
+    expect(update.ok).toBe(true);
+    if (update.ok) {
+      expect(update.data.passFeesToBuyer).toBe(false);
+      expect(update.data.rules).toEqual([
+        expect.objectContaining({
+          name: 'Organizer-paid order fee',
+          type: 'fixed',
+          value: 250,
+          appliedTo: 'per_order',
+          absorbIntoPrice: true,
+        }),
+      ]);
+    }
+  });
+});
+
 describe('AdminApi reports date range', () => {
   it('getSalesReport reflects the requested from/to range', async () => {
     const from = '2026-01-01';

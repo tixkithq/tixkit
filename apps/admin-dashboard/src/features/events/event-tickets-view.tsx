@@ -3,11 +3,11 @@
 import * as React from 'react';
 import { toast } from 'sonner';
 import {
-  CalendarDays,
   Copy,
   MoreHorizontal,
   Pencil,
   Plus,
+  ReceiptText,
   ShieldCheck,
   Ticket,
   UserPlus,
@@ -44,8 +44,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
+import { cn } from '@/lib/utils';
 import { formatCurrency, formatNumber, formatDateTime } from '@/lib/format';
 import { BoxOfficeOrderPanel } from './box-office-order-panel';
+import { EventFeePolicyCard } from './event-fee-policy-card';
 import { TicketTypeStatusBadge } from './event-status-badge';
 import { TicketTypeFormDrawer } from './ticket-type-form';
 
@@ -53,6 +55,13 @@ const EMPTY_TICKET_TYPES: AdminTicketType[] = [];
 const EMPTY_WAITLIST_ENTRIES: AdminWaitlistEntry[] = [];
 const EMPTY_OCCURRENCES: AdminEventOccurrence[] = [];
 const EMPTY_RESALE_LISTINGS: AdminTicketListing[] = [];
+
+const TICKET_TAB_ITEMS = [
+  { value: 'tickets', label: 'Tickets', icon: Ticket },
+  { value: 'box-office', label: 'Box Office', icon: ReceiptText },
+  { value: 'fees-resale', label: 'Fees & Resale', icon: ShieldCheck },
+  { value: 'waitlist', label: 'Waitlist', icon: UserPlus },
+] as const;
 
 function buildResaleIdempotencyKey(eventId: string): string {
   const random =
@@ -81,6 +90,7 @@ async function copyClaimLinkToClipboard(claimUrl: string): Promise<boolean> {
 export function EventTicketsView({ eventId }: { eventId: string }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [editingTicket, setEditingTicket] = React.useState<AdminTicketType | undefined>(undefined);
+  const [activeTab, setActiveTab] = React.useState('tickets');
   const { data, loading, error, refetch } = useAdminQuery(['listTicketTypes', eventId], () =>
     adminApi.listTicketTypes(eventId),
   );
@@ -90,13 +100,9 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
     error: waitlistError,
     refetch: refetchWaitlist,
   } = useAdminQuery(['listWaitlist', eventId], () => adminApi.listWaitlist(eventId));
-  const {
-    data: occurrencesData,
-    loading: occurrencesLoading,
-    error: occurrencesError,
-    refetch: refetchOccurrences,
-  } = useAdminQuery(['listEventOccurrences', eventId], () =>
-    adminApi.listEventOccurrences(eventId),
+  const { data: occurrencesData, refetch: refetchOccurrences } = useAdminQuery(
+    ['listEventOccurrences', eventId],
+    () => adminApi.listEventOccurrences(eventId),
   );
   const {
     data: resalePolicy,
@@ -174,21 +180,6 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
     void refetchWaitlist();
   };
 
-  const handleCreateOccurrence = async (input: {
-    title: string;
-    startsAt: string;
-    endsAt: string;
-    timezone: string;
-  }) => {
-    const result = await adminApi.createEventOccurrence(eventId, input);
-    if (!result.ok) {
-      toast.error(result.error.message);
-      return;
-    }
-    toast.success('Occurrence created');
-    void refetchOccurrences();
-  };
-
   const handleSaveResalePolicy = async (input: AdminResalePolicy) => {
     const result = await adminApi.updateResalePolicy(eventId, input);
     if (!result.ok) {
@@ -235,34 +226,6 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
   if (ticketTypes.length === 0) {
     return (
       <>
-        <OccurrencesTable
-          occurrences={occurrences}
-          loading={occurrencesLoading}
-          error={occurrencesError?.message}
-          onCreate={handleCreateOccurrence}
-          onRetry={refetchOccurrences}
-        />
-        <BoxOfficeOrderPanel
-          eventId={eventId}
-          ticketTypes={ticketTypes}
-          occurrences={occurrences}
-          onOrderCreated={() => {
-            void refetch();
-          }}
-        />
-        <ResalePolicyPanel
-          policy={resalePolicy}
-          listings={resaleListings}
-          ticketNameById={ticketNameById}
-          loading={resalePolicyLoading || resaleListingsLoading}
-          error={resalePolicyError?.message ?? resaleListingsError?.message}
-          onSavePolicy={handleSaveResalePolicy}
-          onDelistListing={handleDelistResaleListing}
-          onRetry={() => {
-            void refetchResalePolicy();
-            void refetchResaleListings();
-          }}
-        />
         <EmptyState
           icon={Ticket}
           title="No ticket types yet"
@@ -293,150 +256,213 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Ticket Types</p>
-            <p className="text-2xl font-bold">{formatNumber(ticketTypes.length)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Tickets Sold</p>
-            <p className="text-2xl font-bold">{formatNumber(totalSold)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Total Capacity</p>
-            <p className="text-2xl font-bold">
-              {totalCapacity > 0 ? formatNumber(totalCapacity) : '∞'}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="space-y-6">
+        <nav>
+          <ul role="tablist" className="flex flex-row flex-wrap gap-1">
+            {TICKET_TAB_ITEMS.map((tab) => {
+              const isActive = activeTab === tab.value;
+              return (
+                <li key={tab.value}>
+                  <button
+                    type="button"
+                    role="tab"
+                    id={`${tab.value}-tab`}
+                    aria-selected={isActive}
+                    aria-controls={`${tab.value}-panel`}
+                    onClick={() => setActiveTab(tab.value)}
+                    className={cn(
+                      'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-foreground',
+                      isActive ? 'bg-accent text-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    <tab.icon className="size-4" />
+                    {tab.label}
+                    {tab.value === 'waitlist' && waitlistEntries.length > 0 && (
+                      <Badge variant="secondary" className="ml-1 tabular-nums">
+                        {formatNumber(waitlistEntries.length)}
+                      </Badge>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        {activeTab === 'tickets' && (
+          <div
+            role="tabpanel"
+            id="tickets-panel"
+            aria-labelledby="tickets-tab"
+            className="space-y-4"
+          >
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Ticket Types</p>
+                  <p className="text-2xl font-bold">{formatNumber(ticketTypes.length)}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Tickets Sold</p>
+                  <p className="text-2xl font-bold">{formatNumber(totalSold)}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Total Capacity</p>
+                  <p className="text-2xl font-bold">
+                    {totalCapacity > 0 ? formatNumber(totalCapacity) : '\u221e'}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="flex justify-end">
+              <Button size="sm" onClick={handleCreate}>
+                <Plus className="size-4" />
+                Create ticket type
+              </Button>
+            </div>
+
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Name</TableHead>
+                    <TableHead>Price</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Occurrence</TableHead>
+                    <TableHead>Sold</TableHead>
+                    <TableHead>Sales Window</TableHead>
+                    <TableHead>Access Code</TableHead>
+                    <TableHead className="w-[50px]">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ticketTypes.map((tt) => (
+                    <TableRow key={tt.id}>
+                      <TableCell className="font-medium">{tt.name}</TableCell>
+                      <TableCell>{formatCurrency(tt.priceCents, tt.currency)}</TableCell>
+                      <TableCell>
+                        <TicketTypeStatusBadge status={tt.status} />
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {tt.eventOccurrenceId
+                          ? (occurrenceNameById.get(tt.eventOccurrenceId) ?? tt.eventOccurrenceId)
+                          : 'All occurrences'}
+                      </TableCell>
+                      <TableCell>
+                        {formatNumber(tt.quantitySold)}
+                        {tt.quantityTotal ? ` / ${formatNumber(tt.quantityTotal)}` : ''}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {tt.salesStartAt ? `${formatDateTime(tt.salesStartAt)}` : 'Now'}
+                        {tt.salesEndAt ? ` \u2013 ${formatDateTime(tt.salesEndAt)}` : ''}
+                      </TableCell>
+                      <TableCell>
+                        {tt.requiresAccessCode ? (
+                          <Badge variant="secondary">Required</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">No</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8"
+                              aria-label={`Open actions for ${tt.name}`}
+                            >
+                              <MoreHorizontal className="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                            <DropdownMenuItem onClick={() => handleEdit(tt)}>
+                              <Pencil className="size-4" />
+                              Edit
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'box-office' && (
+          <div
+            role="tabpanel"
+            id="box-office-panel"
+            aria-labelledby="box-office-tab"
+            className="space-y-4"
+          >
+            <BoxOfficeOrderPanel
+              eventId={eventId}
+              ticketTypes={ticketTypes}
+              occurrences={occurrences}
+              onOrderCreated={() => {
+                void refetch();
+              }}
+            />
+          </div>
+        )}
+
+        {activeTab === 'fees-resale' && (
+          <div
+            role="tabpanel"
+            id="fees-resale-panel"
+            aria-labelledby="fees-resale-tab"
+            className="space-y-4"
+          >
+            <EventFeePolicyCard eventId={eventId} ticketTypes={ticketTypes} />
+            <ResalePolicyPanel
+              policy={resalePolicy}
+              listings={resaleListings}
+              ticketNameById={ticketNameById}
+              loading={resalePolicyLoading || resaleListingsLoading}
+              error={resalePolicyError?.message ?? resaleListingsError?.message}
+              onSavePolicy={handleSaveResalePolicy}
+              onDelistListing={handleDelistResaleListing}
+              onRetry={() => {
+                void refetchResalePolicy();
+                void refetchResaleListings();
+              }}
+            />
+          </div>
+        )}
+
+        {activeTab === 'waitlist' && (
+          <div
+            role="tabpanel"
+            id="waitlist-panel"
+            aria-labelledby="waitlist-tab"
+            className="space-y-4"
+          >
+            <WaitlistTable
+              entries={waitlistEntries}
+              loading={waitlistLoading}
+              error={waitlistError?.message}
+              ticketNameById={ticketNameById}
+              offeringEntryId={offeringEntryId}
+              claimUrlByEntryId={claimUrlByEntryId}
+              settings={waitlistSettings}
+              onOffer={handleOffer}
+              onSaveSettings={handleSaveWaitlistSettings}
+              onRetry={refetchWaitlist}
+            />
+          </div>
+        )}
       </div>
-
-      <div className="flex justify-end">
-        <Button size="sm" onClick={handleCreate}>
-          <Plus className="size-4" />
-          Create ticket type
-        </Button>
-      </div>
-
-      <OccurrencesTable
-        occurrences={occurrences}
-        loading={occurrencesLoading}
-        error={occurrencesError?.message}
-        onCreate={handleCreateOccurrence}
-        onRetry={refetchOccurrences}
-      />
-
-      <BoxOfficeOrderPanel
-        eventId={eventId}
-        ticketTypes={ticketTypes}
-        occurrences={occurrences}
-        onOrderCreated={() => {
-          void refetch();
-        }}
-      />
-
-      <ResalePolicyPanel
-        policy={resalePolicy}
-        listings={resaleListings}
-        ticketNameById={ticketNameById}
-        loading={resalePolicyLoading || resaleListingsLoading}
-        error={resalePolicyError?.message ?? resaleListingsError?.message}
-        onSavePolicy={handleSaveResalePolicy}
-        onDelistListing={handleDelistResaleListing}
-        onRetry={() => {
-          void refetchResalePolicy();
-          void refetchResaleListings();
-        }}
-      />
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>Name</TableHead>
-              <TableHead>Price</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Occurrence</TableHead>
-              <TableHead>Sold</TableHead>
-              <TableHead>Sales Window</TableHead>
-              <TableHead>Access Code</TableHead>
-              <TableHead className="w-[50px]">
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {ticketTypes.map((tt) => (
-              <TableRow key={tt.id}>
-                <TableCell className="font-medium">{tt.name}</TableCell>
-                <TableCell>{formatCurrency(tt.priceCents, tt.currency)}</TableCell>
-                <TableCell>
-                  <TicketTypeStatusBadge status={tt.status} />
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {tt.eventOccurrenceId
-                    ? (occurrenceNameById.get(tt.eventOccurrenceId) ?? tt.eventOccurrenceId)
-                    : 'All occurrences'}
-                </TableCell>
-                <TableCell>
-                  {formatNumber(tt.quantitySold)}
-                  {tt.quantityTotal ? ` / ${formatNumber(tt.quantityTotal)}` : ''}
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {tt.salesStartAt ? `${formatDateTime(tt.salesStartAt)}` : 'Now'}
-                  {tt.salesEndAt ? ` – ${formatDateTime(tt.salesEndAt)}` : ''}
-                </TableCell>
-                <TableCell>
-                  {tt.requiresAccessCode ? (
-                    <Badge variant="secondary">Required</Badge>
-                  ) : (
-                    <span className="text-muted-foreground">No</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8"
-                        aria-label={`Open actions for ${tt.name}`}
-                      >
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => handleEdit(tt)}>
-                        <Pencil className="size-4" />
-                        Edit
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      <WaitlistTable
-        entries={waitlistEntries}
-        loading={waitlistLoading}
-        error={waitlistError?.message}
-        ticketNameById={ticketNameById}
-        offeringEntryId={offeringEntryId}
-        claimUrlByEntryId={claimUrlByEntryId}
-        settings={waitlistSettings}
-        onOffer={handleOffer}
-        onSaveSettings={handleSaveWaitlistSettings}
-        onRetry={refetchWaitlist}
-      />
 
       <TicketTypeFormDrawer
         eventId={eventId}
@@ -449,160 +475,6 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
         ticketType={editingTicket}
       />
     </>
-  );
-}
-
-function OccurrencesTable({
-  occurrences,
-  loading,
-  error,
-  onCreate,
-  onRetry,
-}: {
-  occurrences: AdminEventOccurrence[];
-  loading: boolean;
-  error?: string;
-  onCreate: (input: {
-    title: string;
-    startsAt: string;
-    endsAt: string;
-    timezone: string;
-  }) => Promise<void>;
-  onRetry: () => void;
-}) {
-  const [title, setTitle] = React.useState('');
-  const [startsAt, setStartsAt] = React.useState('');
-  const [endsAt, setEndsAt] = React.useState('');
-  const [timezone, setTimezone] = React.useState('UTC');
-  const [creating, setCreating] = React.useState(false);
-
-  const create = async () => {
-    if (!title.trim() || !startsAt || !endsAt || !timezone.trim()) {
-      toast.error('Title, start, end, and timezone are required.');
-      return;
-    }
-    if (new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
-      toast.error('Occurrence end must be after start.');
-      return;
-    }
-    setCreating(true);
-    await onCreate({
-      title: title.trim(),
-      startsAt: new Date(startsAt).toISOString(),
-      endsAt: new Date(endsAt).toISOString(),
-      timezone: timezone.trim(),
-    });
-    setCreating(false);
-    setTitle('');
-    setStartsAt('');
-    setEndsAt('');
-  };
-
-  if (loading) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-8 w-44" />
-        <Skeleton className="h-24 w-full" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <EmptyState
-        icon={CalendarDays}
-        title="Failed to load occurrences"
-        description={error}
-        action={<Button onClick={onRetry}>Try again</Button>}
-      />
-    );
-  }
-
-  return (
-    <Card>
-      <CardContent className="space-y-4 p-4">
-        <div className="flex items-center gap-2">
-          <CalendarDays className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Occurrences</h2>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-[1fr_190px_190px_130px_auto]">
-          <div className="space-y-2">
-            <Label htmlFor="occurrence-title">Title</Label>
-            <Input
-              id="occurrence-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Friday evening"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="occurrence-starts">Starts</Label>
-            <Input
-              id="occurrence-starts"
-              type="datetime-local"
-              value={startsAt}
-              onChange={(event) => setStartsAt(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="occurrence-ends">Ends</Label>
-            <Input
-              id="occurrence-ends"
-              type="datetime-local"
-              value={endsAt}
-              onChange={(event) => setEndsAt(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="occurrence-timezone">Timezone</Label>
-            <Input
-              id="occurrence-timezone"
-              value={timezone}
-              onChange={(event) => setTimezone(event.target.value)}
-            />
-          </div>
-          <div className="flex items-end">
-            <Button type="button" variant="outline" disabled={creating} onClick={create}>
-              <Plus className="size-4" />
-              Add
-            </Button>
-          </div>
-        </div>
-        {occurrences.length === 0 ? (
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <CalendarDays className="size-4" />
-            No occurrences yet.
-          </div>
-        ) : (
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Title</TableHead>
-                  <TableHead>Starts</TableHead>
-                  <TableHead>Ends</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {occurrences.map((occurrence) => (
-                  <TableRow key={occurrence.id}>
-                    <TableCell className="font-medium">{occurrence.title}</TableCell>
-                    <TableCell>{formatDateTime(occurrence.startsAt)}</TableCell>
-                    <TableCell>{formatDateTime(occurrence.endsAt)}</TableCell>
-                    <TableCell>
-                      <Badge variant={occurrence.status === 'scheduled' ? 'secondary' : 'outline'}>
-                        {occurrence.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
   );
 }
 
@@ -627,8 +499,8 @@ function ResalePolicyPanel({
 }) {
   const [enabled, setEnabled] = React.useState(policy?.enabled ?? false);
   const [maxMultiplier, setMaxMultiplier] = React.useState(String(policy?.maxMultiplier ?? 1));
-  const [maxAbsoluteCents, setMaxAbsoluteCents] = React.useState(
-    policy?.maxAbsoluteCents === undefined ? '' : String(policy.maxAbsoluteCents),
+  const [maxAbsoluteDollars, setMaxAbsoluteDollars] = React.useState(
+    policy?.maxAbsoluteCents === undefined ? '' : String(policy.maxAbsoluteCents / 100),
   );
   const [saving, setSaving] = React.useState(false);
   const [delistingId, setDelistingId] = React.useState<string | null>(null);
@@ -636,8 +508,8 @@ function ResalePolicyPanel({
   React.useEffect(() => {
     setEnabled(policy?.enabled ?? false);
     setMaxMultiplier(String(policy?.maxMultiplier ?? 1));
-    setMaxAbsoluteCents(
-      policy?.maxAbsoluteCents === undefined ? '' : String(policy.maxAbsoluteCents),
+    setMaxAbsoluteDollars(
+      policy?.maxAbsoluteCents === undefined ? '' : String(policy.maxAbsoluteCents / 100),
     );
   }, [policy?.enabled, policy?.maxMultiplier, policy?.maxAbsoluteCents]);
 
@@ -647,21 +519,21 @@ function ResalePolicyPanel({
       toast.error('Maximum markup must be zero or greater.');
       return;
     }
-    const absoluteCap =
-      maxAbsoluteCents.trim().length === 0 ? undefined : Number(maxAbsoluteCents.trim());
+    const absoluteCapDollars =
+      maxAbsoluteDollars.trim().length === 0 ? undefined : Number(maxAbsoluteDollars.trim());
     if (
-      absoluteCap !== undefined &&
-      (!Number.isInteger(absoluteCap) || absoluteCap < 0 || !Number.isSafeInteger(absoluteCap))
+      absoluteCapDollars !== undefined &&
+      (!Number.isFinite(absoluteCapDollars) || absoluteCapDollars < 0)
     ) {
-      toast.error('Absolute cap must be a non-negative amount in cents.');
+      toast.error('Absolute cap must be a non-negative amount.');
       return;
     }
     const input: AdminResalePolicy = {
       enabled,
       maxMultiplier: multiplier,
     };
-    if (absoluteCap !== undefined) {
-      input.maxAbsoluteCents = absoluteCap;
+    if (absoluteCapDollars !== undefined) {
+      input.maxAbsoluteCents = Math.round(absoluteCapDollars * 100);
     }
 
     setSaving(true);
@@ -728,14 +600,15 @@ function ResalePolicyPanel({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="resale-absolute-cap">Absolute cap</Label>
+            <Label htmlFor="resale-absolute-cap">Absolute cap ($)</Label>
             <Input
               id="resale-absolute-cap"
               type="number"
               min={0}
-              step={1}
-              value={maxAbsoluteCents}
-              onChange={(event) => setMaxAbsoluteCents(event.target.value)}
+              step={0.01}
+              placeholder="60.00"
+              value={maxAbsoluteDollars}
+              onChange={(event) => setMaxAbsoluteDollars(event.target.value)}
             />
           </div>
           <Button

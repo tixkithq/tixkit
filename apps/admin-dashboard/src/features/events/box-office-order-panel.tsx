@@ -294,7 +294,7 @@ export function BoxOfficeOrderPanel({
         </div>
 
         <form className="space-y-5" onSubmit={submit}>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_120px_180px_180px]">
+          <div className="grid gap-3 lg:grid-cols-[1.4fr_120px_180px_180px]">
             <div className="space-y-2">
               <Label htmlFor="box-office-ticket">Ticket</Label>
               <select

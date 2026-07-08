@@ -19,6 +19,8 @@ export const routes = {
   eventCheckIn: (eventId: string) => `/events/${eventId}/check-in`,
   eventMessages: (eventId: string) => `/events/${eventId}/messages`,
   eventReports: (eventId: string) => `/events/${eventId}/reports`,
+  eventSchedule: (eventId: string) => `/events/${eventId}/schedule`,
+  eventMarketing: (eventId: string) => `/events/${eventId}/marketing`,
   orders: '/orders',
   orderDetail: (orderId: string) => `/orders/${orderId}`,
   attendees: '/attendees',
