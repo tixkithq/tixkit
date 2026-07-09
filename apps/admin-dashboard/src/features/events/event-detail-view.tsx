@@ -10,14 +10,14 @@ import {
   PenTool,
   BarChart3,
   ClipboardList,
-  Calendar,
   Package,
   MapPin,
   Globe,
   Pencil,
   Copy,
   ExternalLink,
-  Megaphone,
+  Calendar,
+  FileText,
 } from 'lucide-react';
 import { adminApi } from '@/lib/api';
 import { routes } from '@/lib/routes';
@@ -83,6 +83,10 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   const recentOrders = ordersData?.items ?? [];
   const tickets = ticketTypes ?? [];
   const shareUrl = publicEventUrl(event, brands);
+  const eventDescription =
+    typeof event.description === 'string' && event.description.trim().length > 0
+      ? event.description.trim()
+      : undefined;
 
   const copyShareUrl = async () => {
     const writeText = navigator.clipboard?.writeText;
@@ -101,13 +105,11 @@ export function EventDetailView({ eventId }: { eventId: string }) {
 
   const quickLinks = [
     { title: 'Tickets', icon: Ticket, href: routes.eventTickets(eventId) },
-    { title: 'Schedule', icon: Calendar, href: routes.eventSchedule(eventId) },
     { title: 'Products', icon: Package, href: routes.eventProducts(eventId) },
     { title: 'Checkout Form', icon: ClipboardList, href: routes.eventCheckoutForm(eventId) },
     { title: 'Event Page', icon: PenTool, href: routes.eventContentEventPage(eventId) },
     { title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) },
     { title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) },
-    { title: 'Marketing', icon: Megaphone, href: routes.eventMarketing(eventId) },
     ...(can('messages.write')
       ? [{ title: 'Messages', icon: MessageSquare, href: routes.eventMessages(eventId) }]
       : []),
@@ -170,6 +172,44 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         <MetricCard title="Check-ins" value={formatNumber(event.checkIns)} />
         <MetricCard title="Currency" value={event.currency} />
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="size-5 text-muted-foreground" />
+              Event Description
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Shared event copy used by previews, merge tags, and hosted event page defaults.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+              <Pencil className="size-4" />
+              Edit details
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={routes.eventContentEventPage(eventId)} prefetch={false}>
+                <PenTool className="size-4" />
+                Design page
+              </Link>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {eventDescription ? (
+            <p className="whitespace-pre-line text-sm leading-6 text-foreground">
+              {eventDescription}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No description yet. Add the canonical event copy here, then place or style it in the
+              event page editor.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

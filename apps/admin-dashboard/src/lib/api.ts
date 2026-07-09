@@ -737,6 +737,12 @@ export type AdminContentTestSend = {
   createdAt: string;
 };
 
+export type AdminContentTestSendProvider = {
+  name: string;
+  messageId?: string;
+  status: string;
+};
+
 export type AttendeeStatus = 'active' | 'cancelled' | 'refunded' | 'transferred';
 export type CheckInStatus = 'not_checked_in' | 'checked_in' | 'duplicate' | 'revoked';
 
@@ -1566,7 +1572,8 @@ export type AdminUploadPurpose =
   | 'checkout_answer'
   | 'brand_logo'
   | 'user_avatar'
-  | 'content_email_image';
+  | 'content_email_image'
+  | 'content_event_page_image';
 
 export type CreateUploadArtifactInput = {
   purpose: AdminUploadPurpose;
@@ -1875,6 +1882,7 @@ export type AdminApi = {
       testSend: AdminContentTestSend;
       output: AdminContentRenderOutput;
       renderArtifact?: AdminContentRenderArtifact;
+      provider?: AdminContentTestSendProvider;
     }>
   >;
 
@@ -5947,6 +5955,7 @@ export const adminApi: AdminApi = {
           testSend: AdminContentTestSend;
           output: AdminContentRenderOutput;
           renderArtifact?: AdminContentRenderArtifact;
+          provider?: AdminContentTestSendProvider;
         }>(`/v1/content-documents/${documentId}/test-sends`, {
           method: 'POST',
           body: JSON.stringify(input),
@@ -5956,6 +5965,7 @@ export const adminApi: AdminApi = {
           testSend: AdminContentTestSend;
           output: AdminContentRenderOutput;
           renderArtifact?: AdminContentRenderArtifact;
+          provider?: AdminContentTestSendProvider;
         }>(apiError('fixture_unavailable', 'Content test sends require the live API', 503)),
     );
   },

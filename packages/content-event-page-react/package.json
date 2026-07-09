@@ -26,6 +26,7 @@
   "dependencies": {
     "@puckeditor/core": "0.22.0",
     "@tixkit/content-event-page": "workspace:*",
+    "lucide-react": "^1.8.0",
     "react": "^19.2.0"
   },
   "devDependencies": {
@@ -34,7 +35,7 @@
     "@types/react": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
     "jsdom": "^26.1.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vitest": "^4.1.0"
   }
 }

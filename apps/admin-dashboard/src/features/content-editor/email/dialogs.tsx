@@ -19,14 +19,11 @@ import type {
   AdminBrandSenderIdentity,
   AdminContentDocument,
   AdminEventDetail,
-  SendMessageInput,
 } from '@/lib/api';
 import { validationIssueKey } from './document-rules';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
-type EmailAudience = SendMessageInput['audience'];
 type EmailReviewState = 'idle' | 'checking' | 'checked' | 'error';
-type EmailSendMode = 'now' | 'scheduled';
 type EmailVersionSummary = {
   id: string;
   label: string;
@@ -66,7 +63,6 @@ function tierLabel(tier: TemplateLifecycle['tier']) {
 }
 
 export type EmailDialogsProps = {
-  audience: EmailAudience;
   autosave: AutosaveState;
   brand?: AdminBrand;
   canEdit: boolean;
@@ -78,7 +74,6 @@ export type EmailDialogsProps = {
   historyDialogOpen: boolean;
   jsonDialogOpen: boolean;
   onApplyTemplate: (template: AdminContentDocument) => void;
-  onAudienceChange: (audience: EmailAudience) => void;
   onDetailsDialogOpenChange: (open: boolean) => void;
   onHistoryDialogOpenChange: (open: boolean) => void;
   onJsonDialogOpenChange: (open: boolean) => void;
@@ -86,8 +81,6 @@ export type EmailDialogsProps = {
   onRecipientChange: (recipient: string) => void;
   onReviewConfirmedChange: (confirmed: boolean) => void;
   onReviewDialogOpenChange: (open: boolean) => void;
-  onScheduledAtChange: (value: string) => void;
-  onSendModeChange: (mode: EmailSendMode) => void;
   onSendTest: () => void;
   onTemplatePickerOpenChange: (open: boolean) => void;
   onTestDialogOpenChange: (open: boolean) => void;
@@ -97,20 +90,16 @@ export type EmailDialogsProps = {
   reviewCanConfirm: boolean;
   reviewConfirmed: boolean;
   reviewDialogOpen: boolean;
-  reviewHasInvalidSchedule: boolean;
   reviewIsAnalyzing: boolean;
   reviewState: EmailReviewState;
   reviewWarningIssues: ContentValidationIssue[];
-  scheduledAt: string;
   selectedSenderIdentity?: AdminBrandSenderIdentity;
-  sendMode: EmailSendMode;
   templateChoices: AdminContentDocument[];
   templatePickerOpen: boolean;
   testDialogOpen: boolean;
 };
 
 export function EmailDialogs({
-  audience,
   autosave,
   brand,
   canEdit,
@@ -122,7 +111,6 @@ export function EmailDialogs({
   historyDialogOpen,
   jsonDialogOpen,
   onApplyTemplate,
-  onAudienceChange,
   onDetailsDialogOpenChange,
   onHistoryDialogOpenChange,
   onJsonDialogOpenChange,
@@ -130,8 +118,6 @@ export function EmailDialogs({
   onRecipientChange,
   onReviewConfirmedChange,
   onReviewDialogOpenChange,
-  onScheduledAtChange,
-  onSendModeChange,
   onSendTest,
   onTemplatePickerOpenChange,
   onTestDialogOpenChange,
@@ -141,13 +127,10 @@ export function EmailDialogs({
   reviewCanConfirm,
   reviewConfirmed,
   reviewDialogOpen,
-  reviewHasInvalidSchedule,
   reviewIsAnalyzing,
   reviewState,
   reviewWarningIssues,
-  scheduledAt,
   selectedSenderIdentity,
-  sendMode,
   templateChoices,
   templatePickerOpen,
   testDialogOpen,
@@ -374,78 +357,12 @@ export function EmailDialogs({
       >
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Ready to send?</DialogTitle>
+            <DialogTitle>Publish version?</DialogTitle>
             <DialogDescription>
-              Review the campaign details and checks before this email is queued.
+              Review the template checks before this email version is published.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-              <h3 className="text-sm font-medium text-foreground">Campaign settings</h3>
-              <label className="flex items-center gap-2 py-1">
-                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">To</span>
-                <select
-                  aria-label="Audience"
-                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                  disabled={!canEdit}
-                  onChange={(change) =>
-                    onAudienceChange(change.currentTarget.value as EmailAudience)
-                  }
-                  value={audience}
-                >
-                  <option className="bg-background text-foreground" value="all">
-                    All attendees
-                  </option>
-                  <option className="bg-background text-foreground" value="checked_in">
-                    Checked in
-                  </option>
-                  <option className="bg-background text-foreground" value="not_checked_in">
-                    Not checked in
-                  </option>
-                </select>
-              </label>
-              <div className="flex items-center gap-2 py-1">
-                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">
-                  Subscribe to
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                  {emailDocument.settings.category === 'bulk'
-                    ? `${brand?.name ?? event.title} updates`
-                    : 'Transactional ticket messages'}
-                </span>
-              </div>
-              <label className="flex items-center gap-2 py-1">
-                <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">
-                  When
-                </span>
-                <select
-                  aria-label="Send timing"
-                  className="w-28 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                  disabled={!canEdit}
-                  onChange={(change) =>
-                    onSendModeChange(change.currentTarget.value as EmailSendMode)
-                  }
-                  value={sendMode}
-                >
-                  <option className="bg-background text-foreground" value="now">
-                    Now
-                  </option>
-                  <option className="bg-background text-foreground" value="scheduled">
-                    Scheduled
-                  </option>
-                </select>
-                {sendMode === 'scheduled' && (
-                  <input
-                    aria-label="Scheduled send time"
-                    className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                    disabled={!canEdit}
-                    onChange={(change) => onScheduledAtChange(change.currentTarget.value)}
-                    type="datetime-local"
-                    value={scheduledAt}
-                  />
-                )}
-              </label>
-            </div>
             <dl className="grid gap-2 rounded-md border bg-muted/20 p-3 text-sm sm:grid-cols-[7rem_1fr]">
               <dt className="text-muted-foreground">From</dt>
               <dd className="font-medium text-foreground">
@@ -482,17 +399,12 @@ export function EmailDialogs({
                 </div>
                 <p className="mt-1 opacity-80">
                   {reviewAnalysisFailed
-                    ? 'Review the error message and try again before sending.'
+                    ? 'Review the error message and try again before publishing.'
                     : reviewIsAnalyzing
-                      ? 'Checking the current editor export, links, sender, audience, and unsubscribe requirements from the React Email output.'
-                      : 'The current editor export, links, sender, audience, and unsubscribe requirements were checked from the saved React Email output.'}
+                      ? 'Checking the current editor export, links, sender, and unsubscribe requirements from the React Email output.'
+                      : 'The current editor export, links, sender, and unsubscribe requirements were checked from the saved React Email output.'}
                 </p>
               </output>
-              {reviewHasInvalidSchedule && (
-                <p className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-                  Choose a valid scheduled send time before confirming.
-                </p>
-              )}
               {reviewState !== 'checked' ? null : reviewBlockingIssues.length === 0 ? (
                 <p className="rounded-md border border-emerald-400/40 bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
                   No blocking issues found.
@@ -527,11 +439,9 @@ export function EmailDialogs({
             <div className="rounded-md border p-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="font-medium text-foreground">
-                    {sendMode === 'scheduled' ? 'Slide to schedule' : 'Slide to send'}
-                  </div>
+                  <div className="font-medium text-foreground">Slide to publish</div>
                   <p className="text-muted-foreground">
-                    Confirms the reviewed email, audience, and send time.
+                    Confirms the reviewed email template version.
                   </p>
                 </div>
                 <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-foreground">
@@ -539,7 +449,7 @@ export function EmailDialogs({
                 </span>
               </div>
               <input
-                aria-label="Slide to confirm email campaign send"
+                aria-label="Slide to confirm email version publish"
                 className="mt-3 h-2 w-full accent-foreground"
                 disabled={!reviewCanConfirm}
                 max="100"
@@ -568,7 +478,7 @@ export function EmailDialogs({
               onClick={onPublish}
               type="button"
             >
-              {sendMode === 'scheduled' ? 'Schedule email' : 'Send email'}
+              Publish version
             </Button>
           </DialogFooter>
         </DialogContent>

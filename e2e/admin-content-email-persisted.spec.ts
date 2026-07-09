@@ -254,7 +254,7 @@ async function expectPersistedEmailEditorRegions(
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Preview', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Publish version', exact: true })).toBeVisible();
   await expect(page.getByLabel('More actions')).toBeVisible();
 }
 
@@ -696,16 +696,17 @@ test.describe('persisted admin email content editor', () => {
     await page.getByLabel('Reply-To').fill('support@example.test');
     await expect(page.getByRole('button', { name: 'Preview', exact: true })).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Publish', exact: true }).click();
-    await expect(page.getByRole('dialog', { name: 'Ready to send?' })).toBeVisible();
-    await expect(page.getByText('Campaign settings')).toBeVisible();
-    await expect(page.getByLabel('Audience')).toBeVisible();
-    await expect(page.getByLabel('Send timing')).toBeVisible();
+    await page.getByRole('button', { name: 'Publish version', exact: true }).click();
+    const publishDialog = page.getByRole('dialog', { name: 'Publish version?' });
+    await expect(publishDialog).toBeVisible();
+    await expect(page.getByText('Campaign settings')).toHaveCount(0);
+    await expect(page.getByLabel('Audience')).toHaveCount(0);
+    await expect(page.getByLabel('Send timing')).toHaveCount(0);
     await expect(page.getByText('Content analysis complete')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Send email' })).toBeDisabled();
-    await page.getByLabel('Slide to confirm email campaign send').fill('100');
-    await page.getByRole('button', { name: 'Send email' }).click();
-    await expect(page.getByText('Email campaign queued')).toBeVisible();
+    await expect(publishDialog.getByRole('button', { name: 'Publish version' })).toBeDisabled();
+    await page.getByLabel('Slide to confirm email version publish').fill('100');
+    await publishDialog.getByRole('button', { name: 'Publish version' }).click();
+    await expect(page.getByText('Email version published')).toBeVisible();
 
     await page.getByLabel('More actions').click();
     await page.getByRole('menuitem', { name: 'Send test email' }).click();
@@ -865,8 +866,8 @@ test.describe('persisted admin email content editor', () => {
     await page.getByRole('menuitem', { name: 'Save draft' }).click();
 
     await expect(page.getByText(/Saved draft v\d+/)).toBeVisible();
-    await page.getByRole('button', { name: 'Publish', exact: true }).click();
-    await expect(page.getByText('Resolve email review blockers before sending.')).toBeVisible();
+    await page.getByRole('button', { name: 'Publish version', exact: true }).click();
+    await expect(page.getByText('Resolve email review blockers before publishing.')).toBeVisible();
     await expect(page.getByText('missing_subject').first()).toBeVisible();
     await expect(
       page.getByText('Email templates require a subject line before publishing').first(),

@@ -306,7 +306,8 @@ describe('EventPageClient Puck runtime', () => {
     );
 
     expect(await view.findByText('Rendered from Puck data')).toBeInTheDocument();
-    expect(view.getByText('Domain Event')).toBeInTheDocument();
+    expect(view.getByTestId('published-event-page')).toBeInTheDocument();
+    expect(view.getByTestId('public-event-page-surface')).toBeInTheDocument();
     expect(publicApi.getEventPageBootstrapBySlug).toHaveBeenCalledWith(
       'all-access',
       'events.example.com',

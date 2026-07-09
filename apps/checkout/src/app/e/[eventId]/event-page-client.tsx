@@ -1,23 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  CalendarIcon,
-  ClockIcon,
-  MapPinIcon,
-  TicketIcon,
-  ArrowRightIcon,
-  AlertCircleIcon,
-} from 'lucide-react';
+import { AlertCircleIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Separator } from '@/components/ui/separator';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { EmptyState } from '@/components/empty-state';
-import { BrandFooter } from '@/components/checkout/brand-footer';
 import {
   publicApi,
   CheckoutApiError,
@@ -30,9 +18,18 @@ import {
 } from '@/lib/api';
 import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
 import { useResolvedBrand } from '@/lib/use-brand';
-import { formatCurrency, formatDateTime } from '@/lib/format';
 import { trackMarketingEvent } from '@/lib/marketing';
-import { EventPagePuckRender, isEventPagePuckData } from '@tixkit/content-event-page-react/puck';
+import {
+  createDefaultEventPageDocument,
+  materializeEventPageDocument,
+} from '@tixkit/content-event-page';
+import {
+  EventPagePuckRender,
+  isEventPagePuckData,
+  ticketPriceLabel,
+  type EventPageRuntime,
+  type PublicEventPageTicket,
+} from '@tixkit/content-event-page-react/puck';
 import { RefreshNotifier } from '@/components/refresh-notifier';
 
 type Props = {
@@ -84,7 +81,6 @@ export default function EventPageClient({
     useMemo(
       () => ({
         brandId: brandId ?? event?.brandId,
-        brandName: event ? undefined : undefined,
         supportUrl,
         termsUrl,
         privacyUrl,
@@ -148,7 +144,9 @@ export default function EventPageClient({
           [loadedAvailability, loadedContentPage, loadedResaleListings] = await Promise.all([
             publicApi.getAvailability(loadedEvent.id, controller.signal),
             loadContentPage().catch((err) => {
-              if (err instanceof CheckoutApiError && err.status === 404) return null;
+              // Broken published content should fall back to the default public page,
+              // not hard-fail the entire event page.
+              if (err instanceof CheckoutApiError) return null;
               throw err;
             }),
             publicApi
@@ -191,19 +189,48 @@ export default function EventPageClient({
     [availability],
   );
   const hasActiveTickets = visibleTickets.some((t) => t.status === 'active');
-  const startsAt = event ? formatDateTime(event.startsAt, event.timezone) : null;
-  const venueName = event?.venue?.name;
-  const puckData = contentPage?.page.puckData;
-  const eventTitle = event?.title ?? 'Event';
+  const publishedPuckData = contentPage?.page.puckData;
+  const hasPublishedPuckContent = isEventPagePuckData(publishedPuckData);
 
-  useEffect(() => {
-    if (!event) return;
-    trackMarketingEvent(event.marketingIntegrations, 'view_item', {
+  const pageDocument = useMemo(() => {
+    if (!event) return undefined;
+    const input = {
       eventId: event.id,
-      currency: visibleTickets[0]?.currency,
-      items: [{ id: event.id, name: event.title, quantity: 1 }],
-    });
-  }, [event, visibleTickets]);
+      eventTitle: event.title,
+      eventDescription: event.description ?? undefined,
+      startsAt: event.startsAt,
+      endsAt: event.endsAt ?? undefined,
+      timezone: event.timezone,
+      venue: event.venue
+        ? {
+            name: event.venue.name,
+            address: event.venue.addressLine1,
+            city: event.venue.city,
+            region: event.venue.region,
+            country: event.venue.country,
+          }
+        : undefined,
+      brandName: brand.fallback ? undefined : brand.name,
+      coverImageUrl: event.coverImageUrl,
+      coverImageAlt: event.title,
+      publicUrl: `/e/${event.id}`,
+      locale: 'en',
+    };
+    if (hasPublishedPuckContent && publishedPuckData) {
+      return materializeEventPageDocument(
+        {
+          schemaVersion: 2,
+          editor: { provider: '@puckeditor/core', data: publishedPuckData },
+          settings: {
+            locale: 'en',
+            discovery: { summary: event.description ?? event.title, tags: [] },
+          },
+        },
+        input,
+      );
+    }
+    return materializeEventPageDocument(createDefaultEventPageDocument(input), input);
+  }, [brand.fallback, brand.name, event, hasPublishedPuckContent, publishedPuckData]);
 
   function goToCheckout(resaleListingId?: string) {
     const checkoutEventId = event?.id ?? eventId;
@@ -222,6 +249,90 @@ export default function EventPageClient({
     router.push(`/checkout?${params.toString()}`);
   }
 
+  const runtime = useMemo<EventPageRuntime>(() => {
+    const tickets: PublicEventPageTicket[] = visibleTickets.map((ticket) => {
+      const soldOut = ticket.status === 'sold_out' || ticket.available <= 0;
+      return {
+        id: ticket.ticketTypeId ?? ticket.productId ?? ticket.name,
+        name: ticket.name,
+        description: ticket.description,
+        priceLabel: ticketPriceLabel({
+          kind: ticket.kind,
+          priceCents: ticket.priceCents,
+          currency: ticket.currency,
+          minimumPriceCents: ticket.minimumPriceCents,
+        }),
+        status: soldOut ? 'sold_out' : ticket.status,
+        availabilityLabel:
+          !soldOut && ticket.available <= 10 ? `${ticket.available} left` : undefined,
+      };
+    });
+
+    const footerLinks = [
+      brand.legalUrls.terms ? { label: 'Terms', href: brand.legalUrls.terms } : null,
+      brand.legalUrls.privacy ? { label: 'Privacy', href: brand.legalUrls.privacy } : null,
+      brand.legalUrls.refundPolicy
+        ? { label: 'Refund policy', href: brand.legalUrls.refundPolicy }
+        : null,
+      brand.supportUrl ? { label: 'Support', href: brand.supportUrl } : null,
+    ].filter((link): link is { label: string; href: string } => Boolean(link));
+
+    return {
+      brandName: brand.name,
+      brandFooterLabel: brand.whiteLabel
+        ? brand.name
+        : brand.fallback
+          ? 'Powered by Tixkit'
+          : `${brand.name} · Powered by Tixkit`,
+      footerLinks,
+      tickets,
+      resaleListings: resaleListings.map((listing) => ({
+        id: listing.id,
+        name: listing.ticketTypeName
+          ? `Resale ticket - ${listing.ticketTypeName}`
+          : 'Resale ticket',
+        priceLabel: ticketPriceLabel({
+          kind: 'paid',
+          priceCents: listing.priceCents,
+          currency: listing.currency,
+        }),
+        expiresLabel: listing.expiresAt
+          ? `Listing expires ${new Date(listing.expiresAt).toLocaleString()}`
+          : undefined,
+      })),
+      resaleError: resaleListingsError ?? undefined,
+      showGetTicketsCta: hasActiveTickets,
+      interactive: true,
+      onGetTickets: () => goToCheckout(),
+      onBuyResale: (listingId) => goToCheckout(listingId),
+    };
+  }, [
+    affiliateCode,
+    brand,
+    event?.id,
+    eventId,
+    hasActiveTickets,
+    presetDiscountCode,
+    privacyUrl,
+    refundUrl,
+    resaleListings,
+    resaleListingsError,
+    router,
+    supportUrl,
+    termsUrl,
+    trackingId,
+    visibleTickets,
+  ]);
+
+  useEffect(() => {
+    if (!event) return;
+    trackMarketingEvent(event.marketingIntegrations, 'view_item', {
+      eventId: event.id,
+      currency: visibleTickets[0]?.currency,
+      items: [{ id: event.id, name: event.title, quantity: 1 }],
+    });
+  }, [event, visibleTickets]);
+
   if (loading) {
     return (
       <SurfaceShell brand={brand}>
@@ -229,7 +340,6 @@ export default function EventPageClient({
           <Skeleton className="h-6 w-32" />
           <Skeleton className="h-12 w-full max-w-xl" />
           <Skeleton className="h-4 w-full max-w-md" />
-          <Separator />
           <div className="space-y-3">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />
@@ -262,169 +372,44 @@ export default function EventPageClient({
   }
 
   return (
-    <SurfaceShell brand={brand}>
+    <>
       <RefreshNotifier eventId={eventId ?? event?.id} />
-      <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-10 sm:px-6">
-        <header className="space-y-4">
-          <Badge variant="secondary" className="gap-1.5">
-            <TicketIcon className="size-3.5" />
-            {brand.name}
-          </Badge>
-          <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-            {eventTitle}
-          </h1>
-          {event?.description ? (
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-              {event.description}
-            </p>
-          ) : null}
-
-          <dl className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
-            <div className="flex items-center gap-2">
-              <CalendarIcon className="size-4 text-muted-foreground" />
-              <dd>{startsAt ?? 'Date to be announced'}</dd>
-            </div>
-            {event?.timezone ? (
-              <div className="flex items-center gap-2">
-                <ClockIcon className="size-4 text-muted-foreground" />
-                <dd>{event.timezone}</dd>
-              </div>
-            ) : null}
-            {venueName ? (
-              <div className="flex items-center gap-2">
-                <MapPinIcon className="size-4 text-muted-foreground" />
-                <dd>{venueName}</dd>
-              </div>
-            ) : null}
-          </dl>
-        </header>
-
-        {isEventPagePuckData(puckData) ? (
-          <div data-testid="published-event-page">
-            <EventPagePuckRender data={puckData} />
-          </div>
-        ) : null}
-
-        <Separator />
-
-        <section className="space-y-4">
-          <h2 className="text-lg font-semibold">Tickets</h2>
-
-          {visibleTickets.length === 0 ? (
-            <EmptyState
-              icon={TicketIcon}
-              title="No tickets available"
-              description="Ticket sales have not opened for this event yet. Check back soon."
+      <SurfaceShell brand={brand} testId="public-event-page-surface">
+        <div data-testid={hasPublishedPuckContent ? 'published-event-page' : 'default-event-page'}>
+          {pageDocument ? (
+            <EventPagePuckRender
+              brandVariables={{
+                background: brand.theme.background,
+                foreground: brand.theme.foreground,
+                accent: brand.theme.primary ?? brand.theme.accent,
+                radius: brand.theme.radius,
+              }}
+              document={pageDocument}
+              runtime={runtime}
+              validate={false}
             />
-          ) : (
-            <ul className="space-y-3">
-              {visibleTickets.map((ticket) => {
-                const soldOut = ticket.status === 'sold_out' || ticket.available <= 0;
-                return (
-                  <li key={ticket.ticketTypeId}>
-                    <Card className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-                      <CardContent className="flex w-full flex-1 flex-col gap-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{ticket.name}</span>
-                          {soldOut ? (
-                            <Badge variant="secondary">Sold out</Badge>
-                          ) : ticket.available <= 10 ? (
-                            <Badge variant="outline">{ticket.available} left</Badge>
-                          ) : null}
-                        </div>
-                        {ticket.description ? (
-                          <p className="text-sm text-muted-foreground">{ticket.description}</p>
-                        ) : null}
-                      </CardContent>
-                      <div className="w-full px-6 text-left sm:w-auto sm:text-right">
-                        <div className="font-semibold">
-                          {ticket.kind === 'free'
-                            ? 'Free'
-                            : ticket.kind === 'donation'
-                              ? `From ${formatCurrency(ticket.minimumPriceCents ?? 0, ticket.currency)}`
-                              : formatCurrency(ticket.priceCents, ticket.currency)}
-                        </div>
-                      </div>
-                    </Card>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        {resaleListingsError ? (
-          <Alert>
-            <AlertCircleIcon className="size-4" />
-            <AlertTitle>Resale tickets are temporarily unavailable</AlertTitle>
-            <AlertDescription>{resaleListingsError}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {resaleListings.length > 0 ? (
-          <section className="space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Resale tickets</h2>
-              <Badge variant="outline">Verified listings</Badge>
-            </div>
-            <ul className="space-y-3">
-              {resaleListings.map((listing) => (
-                <li key={listing.id}>
-                  <Card className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-                    <CardContent className="flex w-full flex-1 flex-col gap-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">
-                          {listing.ticketTypeName
-                            ? `Resale ticket - ${listing.ticketTypeName}`
-                            : 'Resale ticket'}
-                        </span>
-                        <Badge variant="secondary">1 available</Badge>
-                      </div>
-                      {listing.expiresAt ? (
-                        <p className="text-sm text-muted-foreground">
-                          Listing expires {new Date(listing.expiresAt).toLocaleString()}
-                        </p>
-                      ) : null}
-                    </CardContent>
-                    <div className="flex w-full flex-col items-start gap-2 px-6 text-left sm:w-auto sm:items-end sm:text-right">
-                      <div className="font-semibold">
-                        {formatCurrency(listing.priceCents, listing.currency)}
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => goToCheckout(listing.id)}
-                        className="gap-1.5"
-                      >
-                        Buy resale
-                        <ArrowRightIcon className="size-4" />
-                      </Button>
-                    </div>
-                  </Card>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        {hasActiveTickets ? (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">Secure checkout powered by Tixkit</p>
-            <Button size="lg" onClick={() => goToCheckout()} className="gap-1.5">
-              Get tickets
-              <ArrowRightIcon className="size-4" />
-            </Button>
-          </div>
-        ) : null}
-
-        <BrandFooter brand={brand} />
-      </div>
-    </SurfaceShell>
+          ) : null}
+        </div>
+      </SurfaceShell>
+    </>
   );
 }
 
-function SurfaceShell({ brand, children }: { brand: ResolvedBrand; children: React.ReactNode }) {
+function SurfaceShell({
+  brand,
+  children,
+  testId,
+}: {
+  brand: ResolvedBrand;
+  children: ReactNode;
+  testId?: string;
+}) {
   return (
-    <main className="min-h-svh bg-background text-foreground" style={brandThemeStyle(brand)}>
+    <main
+      className="min-h-svh bg-background text-foreground"
+      data-testid={testId}
+      style={brandThemeStyle(brand)}
+    >
       {children}
     </main>
   );

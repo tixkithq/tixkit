@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { generateJSON } from '@tiptap/core';
@@ -584,22 +584,23 @@ function closeActiveDialog() {
   fireEvent.click(closeButtons[closeButtons.length - 1]!);
 }
 
-async function confirmReviewSend(buttonName = 'Send email') {
-  fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-  expect(await screen.findByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
-  expect(screen.getByText('Campaign settings')).toBeInTheDocument();
-  expect(screen.getByLabelText('Audience')).toBeInTheDocument();
+async function confirmPublishVersion(buttonName = 'Publish version') {
+  fireEvent.click(screen.getByRole('button', { name: 'Publish version' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Publish version?' });
+  expect(dialog).toBeInTheDocument();
+  expect(screen.queryByText('Campaign settings')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Audience')).not.toBeInTheDocument();
   expect(screen.queryByRole('option', { name: 'Specific attendees' })).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Send timing')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Send timing')).not.toBeInTheDocument();
   expect(screen.getByText('Preflight checks')).toBeInTheDocument();
   expect(await screen.findByText('Content analysis complete')).toBeInTheDocument();
   expect(await screen.findByText('No blocking issues found.')).toBeInTheDocument();
   expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: buttonName })).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('Slide to confirm email campaign send'), {
+  expect(within(dialog).getByRole('button', { name: buttonName })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Slide to confirm email version publish'), {
     target: { value: '100' },
   });
-  fireEvent.click(screen.getByRole('button', { name: buttonName }));
+  fireEvent.click(within(dialog).getByRole('button', { name: buttonName }));
 }
 
 describe('EmailPersistedEditorView', () => {
@@ -1055,7 +1056,7 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.getByRole('dialog', { name: 'Editor JSON' })).toBeInTheDocument();
     closeActiveDialog();
     clickMoreAction('Review blockers');
-    expect(await screen.findByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Publish version?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     clickMoreAction('Details');
     expect(screen.getByRole('dialog', { name: 'Template details' })).toBeInTheDocument();
@@ -1103,18 +1104,11 @@ describe('EmailPersistedEditorView', () => {
     expect(adminApiMock.previewContent).not.toHaveBeenCalled();
     expect(screen.queryByTestId('preview-drawer')).not.toBeInTheDocument();
 
-    await confirmReviewSend();
+    await confirmPublishVersion();
     await waitFor(() => {
       expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_email', 'cver_2');
-      expect(adminApiMock.sendMessage).toHaveBeenCalledWith(
-        'evt_1',
-        expect.objectContaining({
-          channel: 'email',
-          emailTemplateKey: 'order-confirmed',
-          audience: 'all',
-        }),
-      );
     });
+    expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
 
     clickMoreAction('Send test email');
     expect(screen.getByRole('dialog', { name: 'Send test email' })).toBeInTheDocument();
@@ -1446,7 +1440,7 @@ describe('EmailPersistedEditorView', () => {
 
     expect(await screen.findByLabelText('Subject')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish version' })).toBeDisabled();
     openEmailMoreActions();
     expect(screen.getByRole('menuitem', { name: 'Send test email' })).toHaveAttribute(
       'aria-disabled',
@@ -1525,7 +1519,7 @@ describe('EmailPersistedEditorView', () => {
 
     expect(screen.queryByText('Saved draft v2')).not.toBeInTheDocument();
 
-    await confirmReviewSend();
+    await confirmPublishVersion();
     await waitFor(() => {
       expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_email', 'cver_fresh');
     });
@@ -1643,7 +1637,7 @@ describe('EmailPersistedEditorView', () => {
 
     expect(await screen.findByText('missing_subject')).toBeInTheDocument();
     expect(screen.getByText('unknown_variable')).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Publish version?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     openEmailMoreActions();
@@ -1664,16 +1658,32 @@ describe('EmailPersistedEditorView', () => {
     render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
 
     expect(await screen.findByLabelText('Verified sender')).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish version' }));
 
     expect(
-      await screen.findByText('Resolve email review blockers before sending.'),
+      await screen.findByText('Resolve email review blockers before publishing.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Ready to send?' })).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', { name: 'Publish version?' });
     expect(screen.getAllByText('email_sender_identity_missing').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: 'Send email' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Publish version' })).toBeDisabled();
     expect(adminApiMock.publishContentVersion).not.toHaveBeenCalled();
     expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('publishes a version without queuing an audience campaign send', async () => {
+    render(React.createElement(EmailPersistedEditorView, { eventId: 'evt_1' }));
+
+    await screen.findByLabelText('Subject');
+    await confirmPublishVersion();
+
+    await waitFor(() => {
+      expect(adminApiMock.publishContentVersion).toHaveBeenCalledWith('cdoc_email', 'cver_2');
+    });
+    expect(adminApiMock.sendMessage).not.toHaveBeenCalled();
+    expect(adminApiMock.testSendContent).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Audience')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Send timing')).not.toBeInTheDocument();
+    expect(screen.getByText(/Published v2/i)).toBeInTheDocument();
   });
 
   it('applies a saved brand email template while preserving the verified sender', async () => {

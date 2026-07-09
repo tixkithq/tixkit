@@ -1,18 +1,15 @@
 import { type EmailEditorProps } from '@react-email/editor';
 import { applyEmailGlobalCssToHtml, type EmailTemplateDocument } from '@tixkit/content-email';
 import { MERGE_TAG_REGISTRY } from '@tixkit/domain';
-import type { SendMessageInput } from '@/lib/api';
 import {
   applyMergeTagPreviewsToEditorContent,
   mergeTagCanvasAttributeValue,
+  mergeTagKeyFromCanvasAttributeValue,
   mergeTagLiteral,
   sanitizeEmailFontFamily,
   tixkitInlineStyleMarkName,
   tixkitMergeTagMarkName,
 } from '../email-editor-extensions';
-
-export type EmailAudience = SendMessageInput['audience'];
-export type EmailSendMode = 'now' | 'scheduled';
 
 export function initialEditorContent(document: EmailTemplateDocument): EmailEditorProps['content'] {
   const contentJson = document.editor.contentJson;
@@ -51,20 +48,6 @@ function hasStructuredEditorHtml(value: string | null | undefined): boolean {
   );
 }
 
-export function scheduledAtFromInput(mode: EmailSendMode, value: string): string | undefined {
-  if (mode !== 'scheduled' || !value.trim()) return undefined;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return date.toISOString();
-}
-
-export function audienceLabel(audience: EmailAudience): string {
-  if (audience === 'checked_in') return 'Checked in attendees';
-  if (audience === 'not_checked_in') return 'Not checked in attendees';
-  if (audience === 'specific') return 'Specific attendees';
-  return 'All attendees';
-}
-
 export function withEditorExport(
   document: EmailTemplateDocument,
   exported: { html: string; text: string; json: Record<string, unknown> },
@@ -74,19 +57,43 @@ export function withEditorExport(
   const missingMergeTagLiterals = mergeTagLiteralsFromJson(exported.json).filter(
     (literal) => !exportedHtml.includes(literal),
   );
-  const jsonHtml =
-    missingMergeTagLiterals.length > 0 || hasTixkitInlineStyleMarks(exported.json)
-      ? tipTapHtmlFromJson(exported.json)
-      : '';
-  const canonicalHtml = jsonHtml || exportedHtml;
+  // React Email getEmail() returns layout-preserving HTML (often full documents with
+  // tables/styles). Never discard that for the incomplete tipTap text serializer when
+  // the export already has real email layout. JSON rebuild is a last-resort fallback.
+  const exportHasLayout = hasEmailLayoutHtml(exportedHtml);
+  const shouldRebuildFromJson =
+    !exportHasLayout &&
+    (missingMergeTagLiterals.length > 0 ||
+      hasTixkitInlineStyleMarks(exported.json) ||
+      !hasMeaningfulHtml(exportedHtml));
+  const jsonHtml = shouldRebuildFromJson
+    ? canonicalizeMergeTagPreviewHtml(tipTapHtmlFromJson(exported.json))
+    : '';
+  // Prefer structured React Email HTML when present. Otherwise use the JSON
+  // rebuild (needed for merge-tag restoration) before plain export text.
+  const preferredHtml = exportHasLayout ? exportedHtml : jsonHtml || exportedHtml;
+  // Always re-canonicalize so canvas preview href/src values never leak.
+  const canonicalHtml = canonicalizeMergeTagPreviewHtml(preferredHtml);
   const htmlText = plainTextFromHtml(canonicalHtml);
   const contentText = jsonText || exported.text.trim() || htmlText;
   if (!contentText.trim() && !hasMeaningfulHtml(canonicalHtml)) {
     return document;
   }
-  const baseContentHtml =
-    canonicalHtml && (htmlText || !jsonText) ? canonicalHtml : htmlFromPlainText(contentText);
-  const contentHtml = applyEmailGlobalCssToHtml(baseContentHtml, document.editor.globalCss);
+  // If the live editor export is blank/shell-only but the saved document still
+  // has the studio shell, keep the richer saved HTML.
+  const previousHtml = document.editor.contentHtml ?? '';
+  const exportIsBlank = !hasMeaningfulHtml(canonicalHtml);
+  const keepPreviousLayout =
+    exportIsBlank && hasEmailLayoutHtml(previousHtml) && hasMeaningfulHtml(previousHtml);
+  const baseContentHtml = keepPreviousLayout
+    ? previousHtml
+    : canonicalHtml && (htmlText || !jsonText)
+      ? canonicalHtml
+      : htmlFromPlainText(contentText);
+  const contentHtml = applyEmailGlobalCssToHtml(
+    canonicalizeMergeTagPreviewHtml(baseContentHtml),
+    document.editor.globalCss,
+  );
   return {
     ...document,
     editor: {
@@ -106,6 +113,18 @@ function hasMeaningfulHtml(html: string): boolean {
     .replace(/&nbsp;/gi, ' ')
     .trim();
   return withoutEmptyTags.length > 0 || /<(?:img|hr)\b/i.test(html);
+}
+
+function hasEmailLayoutHtml(html: string): boolean {
+  if (!html.trim()) return false;
+  return (
+    /style\s*=\s*["'][^"']*(?:background|padding|border-radius|max-width|font-family)/i.test(
+      html,
+    ) ||
+    /<(?:table|section|header|footer|td|th)\b/i.test(html) ||
+    /data-type=["'](?:container|section)["']/i.test(html) ||
+    /<(?:html|body)\b/i.test(html)
+  );
 }
 
 export function projectEditorTextToLegacyBlocks(
@@ -254,25 +273,81 @@ function tipTapNodeHtml(value: unknown): string {
   const children = Array.isArray(node.content)
     ? node.content.map((child) => tipTapNodeHtml(child)).join('')
     : '';
+  const attrs = tipTapElementAttributes(node.attrs);
   switch (node.type) {
     case 'doc':
-    case 'container':
       return children;
+    case 'body':
+      return `<div${attrs}>${children}</div>`;
+    case 'container':
+      return `<div data-type="container"${attrs}>${children}</div>`;
+    case 'section':
+      return `<section data-type="section"${attrs}>${children}</section>`;
+    case 'div':
+    case 'header':
+    case 'footer':
+      return `<div${attrs}>${children}</div>`;
     case 'paragraph':
-      return `<p${tipTapBlockAttributes(node.attrs)}>${children}</p>`;
+      return `<p${attrs}>${children}</p>`;
     case 'heading': {
       const level = tipTapHeadingLevel(node.attrs);
-      return `<h${level}${tipTapBlockAttributes(node.attrs)}>${children}</h${level}>`;
+      return `<h${level}${attrs}>${children}</h${level}>`;
     }
     case 'bulletList':
-      return `<ul>${children}</ul>`;
+      return `<ul${attrs}>${children}</ul>`;
     case 'orderedList':
-      return `<ol>${children}</ol>`;
+      return `<ol${attrs}>${children}</ol>`;
     case 'listItem':
-      return `<li>${children}</li>`;
+      return `<li${attrs}>${children}</li>`;
+    case 'blockquote':
+      return `<blockquote${attrs}>${children}</blockquote>`;
+    case 'button': {
+      const href =
+        typeof node.attrs?.href === 'string' && node.attrs.href.trim()
+          ? canonicalizeLinkHrefFromMarkAttrs({ href: node.attrs.href, ...node.attrs })
+          : '#';
+      return `<a data-id="react-email-button" href="${escapeHtmlAttribute(href)}"${attrs}>${children}</a>`;
+    }
+    case 'image': {
+      const rawSrc = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
+      const mergeKey =
+        mergeAttrKeyFromRecord(node.attrs, 'src') ||
+        mergeTagKeyFromCanvasAttributeValue(rawSrc) ||
+        emailVariableInserts.find((key) => mergeTagCanvasAttributeValue(key) === rawSrc);
+      const src = mergeKey ? mergeTagLiteral(mergeKey) : rawSrc;
+      const alt = typeof node.attrs?.alt === 'string' ? node.attrs.alt : '';
+      if (!src) return '';
+      return `<img src="${escapeHtmlAttribute(src)}" alt="${escapeHtmlAttribute(alt)}"${attrs} />`;
+    }
+    case 'table':
+      return `<table${attrs}>${children}</table>`;
+    case 'tableRow':
+      return `<tr${attrs}>${children}</tr>`;
+    case 'tableCell':
+      return `<td${attrs}>${children}</td>`;
+    case 'tableHeader':
+      return `<th${attrs}>${children}</th>`;
     default:
       return children;
   }
+}
+
+function tipTapElementAttributes(attrs: Record<string, unknown> | undefined): string {
+  if (!attrs) return '';
+  const parts: string[] = [];
+  if (typeof attrs.style === 'string' && attrs.style.trim()) {
+    parts.push(`style="${escapeHtmlAttribute(attrs.style.trim())}"`);
+  }
+  if (typeof attrs.class === 'string' && attrs.class.trim()) {
+    parts.push(`class="${escapeHtmlAttribute(attrs.class.trim())}"`);
+  }
+  const alignment = tipTapAlignment(attrs);
+  if (alignment && !parts.some((part) => part.startsWith('style='))) {
+    parts.push(`style="text-align: ${alignment}"`);
+  } else if (alignment) {
+    // already have style; leave alignment to the style string when present
+  }
+  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
 }
 
 function tipTapTextHtml(text: string, marks: unknown): string {
@@ -302,16 +377,11 @@ function tipTapTextHtml(text: string, marks: unknown): string {
       continue;
     }
     if (typedMark.type === 'link') {
-      const href = typeof typedMark.attrs?.href === 'string' ? typedMark.attrs.href : '';
+      const href = canonicalizeLinkHrefFromMarkAttrs(typedMark.attrs);
       if (href.trim()) html = `<a href="${escapeHtmlAttribute(href.trim())}">${html}</a>`;
     }
   }
   return html;
-}
-
-function tipTapBlockAttributes(attrs: Record<string, unknown> | undefined): string {
-  const alignment = tipTapAlignment(attrs);
-  return alignment ? ` style="text-align: ${alignment}"` : '';
 }
 
 function tipTapAlignment(attrs: Record<string, unknown> | undefined): string | null {
@@ -351,14 +421,73 @@ function inlineStyleAttribute(attrs: Record<string, unknown> | undefined): strin
   return style.join('; ');
 }
 
+function mergeAttrKeyFromRecord(
+  attrs: Record<string, unknown> | undefined,
+  attribute: 'href' | 'src',
+): string | null {
+  if (!attrs) return null;
+  const candidates = [
+    attrs[`data-tixkit-merge-attr-${attribute}`],
+    attrs[`dataTixkitMergeAttr${attribute === 'href' ? 'Href' : 'Src'}`],
+    attrs.tixkitMergeAttrHref,
+    attrs.tixkitMergeAttrSrc,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
+function canonicalizeLinkHrefFromMarkAttrs(attrs: Record<string, unknown> | undefined): string {
+  const mergeKey = mergeAttrKeyFromRecord(attrs, 'href');
+  if (mergeKey) return mergeTagLiteral(mergeKey);
+  const raw = typeof attrs?.href === 'string' ? attrs.href.trim() : '';
+  if (!raw) return '';
+  const fromPreview = mergeTagKeyFromCanvasAttributeValue(raw);
+  if (fromPreview) return mergeTagLiteral(fromPreview);
+  for (const key of emailVariableInserts) {
+    if (raw === mergeTagCanvasAttributeValue(key)) return mergeTagLiteral(key);
+  }
+  return raw;
+}
+
 function canonicalizeMergeTagPreviewHtml(html: string): string {
   if (!html.trim()) return '';
   if (typeof DOMParser === 'undefined') {
-    return html.replace(
-      /(<span\b[^>]*\bdata-tixkit-merge-tag=["']([^"']+)["'][^>]*>)([\s\S]*?)(<\/span>)/gi,
-      (_match, opening: string, key: string, _content: string, closing: string) =>
-        `${opening}${mergeTagLiteral(key.trim())}${closing}`,
-    );
+    return html
+      .replace(
+        /\b(src|href)=(["'])([\s\S]*?)\2(\s[^>]*?)?\sdata-tixkit-merge-attr-\1=(["'])([^"']+)\5/gi,
+        (
+          _match,
+          attribute: string,
+          quote: string,
+          _value: string,
+          middle = '',
+          _q2: string,
+          key: string,
+        ) => `${attribute}=${quote}${mergeTagLiteral(key.trim())}${quote}${middle}`,
+      )
+      .replace(
+        /\bdata-tixkit-merge-attr-(src|href)=(["'])([^"']+)\2\s+([^>]*?\b)\1=(["'])([\s\S]*?)\5/gi,
+        (_match, attribute: string, _q1: string, key: string, middle: string, quote: string) =>
+          `${middle}${attribute}=${quote}${mergeTagLiteral(key.trim())}${quote}`,
+      )
+      .replace(
+        /\b(src|href)=(["'])([\s\S]*?)\2/gi,
+        (match, attribute: string, quote: string, value: string) => {
+          const key =
+            mergeTagKeyFromCanvasAttributeValue(value) ||
+            emailVariableInserts.find(
+              (candidate) => mergeTagCanvasAttributeValue(candidate) === value,
+            );
+          return key ? `${attribute}=${quote}${mergeTagLiteral(key)}${quote}` : match;
+        },
+      )
+      .replace(
+        /(<span\b[^>]*\bdata-tixkit-merge-tag=["']([^"']+)["'][^>]*>)([\s\S]*?)(<\/span>)/gi,
+        (_match, opening: string, key: string, _content: string, closing: string) =>
+          `${opening}${mergeTagLiteral(key.trim())}${closing}`,
+      );
   }
 
   const parser = new DOMParser();
@@ -383,6 +512,11 @@ function canonicalizeMergeTagPreviewHtml(html: string): string {
     for (const attribute of ['src', 'href'] as const) {
       const value = element.getAttribute(attribute);
       if (!value) continue;
+      const fromPreview = mergeTagKeyFromCanvasAttributeValue(value);
+      if (fromPreview) {
+        element.setAttribute(attribute, mergeTagLiteral(fromPreview));
+        continue;
+      }
       for (const key of emailVariableInserts) {
         if (value === mergeTagCanvasAttributeValue(key)) {
           element.setAttribute(attribute, mergeTagLiteral(key));

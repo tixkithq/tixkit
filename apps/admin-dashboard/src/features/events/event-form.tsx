@@ -31,7 +31,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
+import { EventMarketingView } from './event-marketing-view';
+import { EventScheduleView } from './event-schedule-view';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
 
 export const eventSchema = z
   .object({
@@ -230,10 +234,28 @@ type EventFormProps = {
   onCancel?: () => void;
 };
 
+type ScheduleMode = 'one-time' | 'multiple';
+
 export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
   const [submitting, setSubmitting] = React.useState(false);
+  const [scheduleMode, setScheduleMode] = React.useState<ScheduleMode>('one-time');
   const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap();
   const createDisabled = !event && (bootstrapLoading || !organizationId || !brandId);
+  const { data: existingOccurrences } = useAdminQuery(
+    ['listEventOccurrences', event?.id ?? 'none', 'form-schedule-mode'],
+    () => adminApi.listEventOccurrences(event!.id),
+    { enabled: Boolean(event?.id) },
+  );
+
+  React.useEffect(() => {
+    if (!event) {
+      setScheduleMode('one-time');
+      return;
+    }
+    if ((existingOccurrences?.length ?? 0) > 0) {
+      setScheduleMode('multiple');
+    }
+  }, [event, existingOccurrences]);
 
   const initialValues = React.useMemo<EventFormValues>(
     () =>
@@ -503,58 +525,187 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
             </FormItem>
           )}
         />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField
-            control={form.control}
-            name="startsAt"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Start Date</FormLabel>
-                <FormControl>
-                  <Input type="datetime-local" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="endsAt"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>End Date</FormLabel>
-                <FormControl>
-                  <Input type="datetime-local" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <FormField
-          control={form.control}
-          name="timezone"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Timezone</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select timezone" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {commonTimezones.map((tz) => (
-                    <SelectItem key={tz} value={tz}>
-                      {tz}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
+        <div className="space-y-3 rounded-lg border p-3">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Schedule</p>
+            <p className="text-xs text-muted-foreground">
+              Choose a one-time event or manage multiple occurrences for tickets and check-in.
+            </p>
+          </div>
+          <Tabs
+            value={scheduleMode}
+            onValueChange={(value) => setScheduleMode(value as ScheduleMode)}
+          >
+            <TabsList className="w-full">
+              <TabsTrigger value="one-time" className="flex-1">
+                One-time event
+              </TabsTrigger>
+              <TabsTrigger value="multiple" className="flex-1">
+                Multiple occurrences
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {scheduleMode === 'one-time' ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="startsAt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Start Date</FormLabel>
+                      <FormControl>
+                        <Input type="datetime-local" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="endsAt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>End Date</FormLabel>
+                      <FormControl>
+                        <Input type="datetime-local" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={form.control}
+                name="timezone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Timezone</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select timezone" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {commonTimezones.map((tz) => (
+                          <SelectItem key={tz} value={tz}>
+                            {tz}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          ) : event ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Primary event start/end stay on the event for listings. Add each public occurrence
+                below; ticket types can be scoped to specific ones.
+              </p>
+              {/* Keep required date fields in the form when multi-occurrence is selected. */}
+              <div className="hidden">
+                <FormField
+                  control={form.control}
+                  name="startsAt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Input type="datetime-local" {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="endsAt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Input type="datetime-local" {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="timezone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <EventScheduleView eventId={event.id} embedded />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Set the primary event window now. After creating the event, open Edit to add
+                individual occurrences.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="startsAt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Primary Start</FormLabel>
+                      <FormControl>
+                        <Input type="datetime-local" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="endsAt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Primary End</FormLabel>
+                      <FormControl>
+                        <Input type="datetime-local" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={form.control}
+                name="timezone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Timezone</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select timezone" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {commonTimezones.map((tz) => (
+                          <SelectItem key={tz} value={tz}>
+                            {tz}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
           )}
-        />
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField
             control={form.control}
@@ -667,54 +818,69 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
         </div>
         <div className="space-y-3 rounded-lg border p-3">
           <div className="space-y-1">
-            <p className="text-sm font-medium">SEO</p>
+            <p className="text-sm font-medium">Marketing</p>
             <p className="text-xs text-muted-foreground">
-              Optional page metadata used by hosted event pages and previews.
+              SEO metadata and tracking pixels for hosted event pages and checkout.
             </p>
           </div>
-          <FormField
-            control={form.control}
-            name="seoTitle"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>SEO Title</FormLabel>
-                <FormControl>
-                  <Input placeholder="Summer Music Festival tickets" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="seoDescription"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>SEO Description</FormLabel>
-                <FormControl>
-                  <Textarea
-                    className="resize-none"
-                    placeholder="Short search/social summary"
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="seoImageUrl"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>SEO Image URL</FormLabel>
-                <FormControl>
-                  <Input placeholder="https://cdn.example.com/social.jpg" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">SEO</p>
+              <p className="text-xs text-muted-foreground">
+                Optional page metadata used by hosted event pages and previews.
+              </p>
+            </div>
+            <FormField
+              control={form.control}
+              name="seoTitle"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>SEO Title</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Summer Music Festival tickets" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="seoDescription"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>SEO Description</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      className="resize-none"
+                      placeholder="Short search/social summary"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="seoImageUrl"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>SEO Image URL</FormLabel>
+                  <FormControl>
+                    <Input placeholder="https://cdn.example.com/social.jpg" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+          {event ? (
+            <EventMarketingView eventId={event.id} embedded />
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Tracking pixels can be connected after the event is created.
+            </p>
+          )}
         </div>
         <div className="flex justify-end gap-2 pt-2">
           {onCancel && (

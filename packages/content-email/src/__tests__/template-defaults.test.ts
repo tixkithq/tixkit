@@ -190,7 +190,11 @@ describe('createDefaultEmailTemplateForKey', () => {
         expect(doc.editor.contentHtml, `${key} default should use the Studio card`).toContain(
           'border-radius: 28px',
         );
-        expect(rendered.html, `${key} send render drifted from editor HTML`).toBe(expectedHtml);
+        // Send path wraps the editor body in a full email document shell for clients.
+        expect(rendered.html, `${key} send render dropped the Studio body`).toContain(expectedHtml);
+        expect(rendered.html, `${key} send render should be a full email document`).toContain(
+          '<!DOCTYPE html>',
+        );
       }),
     );
   });

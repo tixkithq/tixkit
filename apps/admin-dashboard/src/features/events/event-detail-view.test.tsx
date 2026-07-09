@@ -26,8 +26,8 @@ vi.mock('@/context/permission-provider', () => ({
 }));
 
 vi.mock('./create-event-drawer', () => ({
-  CreateEventDrawer: ({ open }: { open?: boolean }) =>
-    open ? <div data-testid="event-edit-drawer" /> : null,
+  CreateEventDrawer: ({ open, event }: { open?: boolean; event?: { id: string } }) =>
+    open ? <div data-testid="event-edit-drawer">Edit drawer for {event?.id ?? 'new'}</div> : null,
 }));
 
 vi.mock('sonner', () => ({
@@ -77,15 +77,19 @@ function mockLoadedEventDetail() {
     loading: false,
     error: null,
   });
-  useAdminDataMock
-    .mockReturnValueOnce({ data: event, loading: false, error: null, refetch: vi.fn() })
-    .mockReturnValueOnce({ data: [], loading: false, error: null, refetch: vi.fn() })
-    .mockReturnValueOnce({
-      data: { items: [] },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+  useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+    const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+    if (key === 'getEvent') {
+      return { data: event, loading: false, error: null, refetch: vi.fn() };
+    }
+    if (key === 'listTicketTypes') {
+      return { data: [], loading: false, error: null, refetch: vi.fn() };
+    }
+    if (key === 'listOrders') {
+      return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+    }
+    return { data: undefined, loading: false, error: null, refetch: vi.fn() };
+  });
 }
 
 afterEach(() => {
@@ -165,28 +169,65 @@ describe('EventDetailView', () => {
     );
   });
 
-  it('shows Schedule and Marketing quick links', async () => {
+  it('shows event description copy and links page composition to the editor', async () => {
     mockLoadedEventDetail();
 
     const view = render(<EventDetailView eventId="evt_1" />);
 
-    expect(await view.findByRole('link', { name: 'Schedule' })).toHaveAttribute(
+    expect(await view.findByText('Event Description')).toBeInTheDocument();
+    expect(view.getByText('Opening event')).toBeInTheDocument();
+    expect(view.getByRole('link', { name: 'Design page' })).toHaveAttribute(
       'href',
-      '/events/evt_1/schedule',
-    );
-    expect(view.getByRole('link', { name: 'Marketing' })).toHaveAttribute(
-      'href',
-      '/events/evt_1/marketing',
+      '/events/evt_1/content/event-page',
     );
   });
 
-  it('does not render the marketing integrations panel inline', async () => {
+  it('shows an empty event description state with the same edit paths', async () => {
+    mockLoadedEventDetail();
+    useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+      if (key === 'getEvent') {
+        return {
+          data: { ...event, description: '   ' },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'listTicketTypes') {
+        return { data: [], loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listOrders') {
+        return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+      }
+      return { data: undefined, loading: false, error: null, refetch: vi.fn() };
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(
+      await view.findByText(/No description yet. Add the canonical event copy here/),
+    ).toBeInTheDocument();
+    fireEvent.click(view.getByRole('button', { name: 'Edit details' }));
+    expect(view.getByTestId('event-edit-drawer')).toHaveTextContent('Edit drawer for evt_1');
+    expect(view.getByRole('link', { name: 'Design page' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/content/event-page',
+    );
+  });
+
+  it('keeps Schedule and Marketing out of quick links and opens them via Edit', async () => {
     mockLoadedEventDetail();
 
     const view = render(<EventDetailView eventId="evt_1" />);
 
-    await view.findByRole('link', { name: 'Tickets' });
-    expect(view.queryByText('Marketing Integrations')).not.toBeInTheDocument();
-    expect(view.queryByText('Google Analytics 4')).not.toBeInTheDocument();
+    expect(await view.findByRole('link', { name: 'Tickets' })).toBeInTheDocument();
+    expect(view.queryByRole('link', { name: 'Schedule' })).not.toBeInTheDocument();
+    expect(view.queryByRole('link', { name: 'Marketing' })).not.toBeInTheDocument();
+    expect(view.queryByTestId('inline-event-schedule')).not.toBeInTheDocument();
+    expect(view.queryByTestId('inline-event-marketing')).not.toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Edit' }));
+    expect(view.getByTestId('event-edit-drawer')).toHaveTextContent('Edit drawer for evt_1');
   });
 });

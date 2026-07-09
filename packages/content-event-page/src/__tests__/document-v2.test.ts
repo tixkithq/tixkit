@@ -6,6 +6,7 @@ import {
   PUCK_EVENT_PAGE_PROVIDER,
   createDefaultEventPageDocument,
   eventPageBrandVariablesToCssProperties,
+  formatTimezoneLabel,
   migrateLegacyEventPageBlocksToPuckData,
   migrateLegacyEventPageDocumentToPuck,
   normalizeEventPageDocument,
@@ -41,13 +42,35 @@ describe('EventPageDocument v2', () => {
     expect(document.editor.provider).toBe(PUCK_EVENT_PAGE_PROVIDER);
     expect(document.editor.data.root.props.title).toBe('All Access Chicago');
     expect(document.editor.data.content.map((block) => block.type)).toEqual([
-      'Hero',
-      'EventDetails',
-      'Schedule',
-      'Venue',
-      'FAQ',
+      'EventHeader',
+      'EventDescription',
+      'Divider',
+      'Tickets',
+      'ResaleTickets',
+      'CheckoutCta',
+      'BrandFooter',
     ]);
+    expect(document.editor.data.content[0]).toEqual(
+      expect.objectContaining({
+        type: 'EventHeader',
+        props: expect.objectContaining({
+          title: 'All Access Chicago',
+          brandLabel: 'Tixkit',
+          timezone: expect.not.stringMatching(/^America\//),
+        }),
+      }),
+    );
     expect(validateEventPageDocument(document).valid).toBe(true);
+  });
+
+  it('formats IANA timezones as human-readable labels', () => {
+    expect(formatTimezoneLabel('America/New_York', '2026-07-15T23:00:00.000Z')).toEqual(
+      expect.stringMatching(/Eastern|EDT|EST|New York/i),
+    );
+    expect(formatTimezoneLabel('America/Chicago')).toEqual(
+      expect.stringMatching(/Central|CDT|CST|Chicago/i),
+    );
+    expect(formatTimezoneLabel('Pacific Time')).toBe('Pacific Time');
   });
 
   it('normalizes only the hard-cutover v2 provider shape', () => {
@@ -70,9 +93,10 @@ describe('EventPageDocument v2', () => {
     ).toBeUndefined();
   });
 
-  it('exports the expected content-only Puck vocabulary', () => {
+  it('exports the expected full-page Puck vocabulary', () => {
     expect(EVENT_PAGE_PUCK_COMPONENT_TYPES).toEqual([
-      'Hero',
+      'EventHeader',
+      'EventDescription',
       'RichText',
       'Media',
       'EventDetails',
@@ -85,6 +109,10 @@ describe('EventPageDocument v2', () => {
       'Divider',
       'SocialLinks',
       'CustomEmbed',
+      'Tickets',
+      'ResaleTickets',
+      'CheckoutCta',
+      'BrandFooter',
     ]);
     expect(EVENT_PAGE_LEGACY_COMMERCE_BLOCK_TYPES).toEqual([
       'event_header',
@@ -127,13 +155,20 @@ describe('legacy block migration helper', () => {
       {
         id: 'rich-1',
         type: 'rich_text',
-        content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Story' }] }] },
+        content: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Story' }] }],
+        },
       },
       { id: 'resale-1', type: 'resale_tickets', title: 'Resale' },
       { id: 'button-1', type: 'button', label: 'More', url: 'https://example.test/more' },
     ]);
 
-    expect(data.content.map((block) => block.type)).toEqual(['Hero', 'RichText', 'Button']);
+    expect(data.content.map((block) => block.type)).toEqual([
+      'EventDescription',
+      'RichText',
+      'Button',
+    ]);
     expect(data.content.map((block) => block.props.id)).toEqual(['hero-1', 'rich-1', 'button-1']);
   });
 
@@ -187,7 +222,7 @@ describe('validation', () => {
       expect.arrayContaining([
         expect.objectContaining({
           code: 'commerce_block_not_content',
-          field: 'editor.data.content.5.type',
+          field: 'editor.data.content.7.type',
         }),
       ]),
     );
@@ -209,8 +244,14 @@ describe('validation', () => {
     expect(result.valid).toBe(false);
     expect(result.issues).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: 'unsafe_url', field: 'editor.data.content.5.props.imageUrl' }),
-        expect.objectContaining({ code: 'missing_required_text', field: 'editor.data.content.5.props.imageAlt' }),
+        expect.objectContaining({
+          code: 'unsafe_url',
+          field: 'editor.data.content.7.props.imageUrl',
+        }),
+        expect.objectContaining({
+          code: 'missing_required_text',
+          field: 'editor.data.content.7.props.imageAlt',
+        }),
       ]),
     );
   });
@@ -232,7 +273,7 @@ describe('validation', () => {
       expect.arrayContaining([
         expect.objectContaining({
           code: 'embed_requires_opt_in',
-          field: 'editor.data.content.5.props.allowUnsafeEmbed',
+          field: 'editor.data.content.7.props.allowUnsafeEmbed',
         }),
       ]),
     );

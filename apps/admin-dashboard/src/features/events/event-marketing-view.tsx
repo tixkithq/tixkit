@@ -46,7 +46,14 @@ const MARKETING_PROVIDERS: Array<{
   },
 ];
 
-export function EventMarketingView({ eventId }: { eventId: string }) {
+export function EventMarketingView({
+  eventId,
+  embedded = false,
+}: {
+  eventId: string;
+  /** Compact layout for embedding in the edit-event drawer. */
+  embedded?: boolean;
+}) {
   const {
     data: marketingIntegrations = EMPTY_MARKETING_INTEGRATIONS,
     loading,
@@ -58,9 +65,9 @@ export function EventMarketingView({ eventId }: { eventId: string }) {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64 w-full" />
+      <div className={embedded ? 'space-y-3' : 'space-y-6'}>
+        {!embedded && <Skeleton className="h-8 w-48" />}
+        <Skeleton className={embedded ? 'h-40 w-full' : 'h-64 w-full'} />
       </div>
     );
   }
@@ -68,24 +75,27 @@ export function EventMarketingView({ eventId }: { eventId: string }) {
   if (error) {
     return (
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold tracking-tight">Marketing</h2>
+        {!embedded && <h2 className="text-xl font-semibold tracking-tight">Marketing</h2>}
         <p className="text-sm text-muted-foreground">{error.message}</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-xl font-semibold tracking-tight">Marketing Integrations</h2>
-        <p className="text-sm text-muted-foreground">
-          Connect analytics and tracking pixels to your checkout and event pages.
-        </p>
-      </div>
+    <div className={embedded ? 'space-y-3' : 'space-y-6'}>
+      {!embedded && (
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">Marketing Integrations</h2>
+          <p className="text-sm text-muted-foreground">
+            Connect analytics and tracking pixels to your checkout and event pages.
+          </p>
+        </div>
+      )}
       <MarketingIntegrationsPanel
         eventId={eventId}
         integrations={marketingIntegrations}
         onSaved={refetch}
+        compact={embedded}
       />
     </div>
   );
@@ -95,10 +105,12 @@ function MarketingIntegrationsPanel({
   eventId,
   integrations,
   onSaved,
+  compact = false,
 }: {
   eventId: string;
   integrations: AdminMarketingIntegration[];
   onSaved: () => void | Promise<void>;
+  compact?: boolean;
 }) {
   const [drafts, setDrafts] = React.useState<
     Record<AdminMarketingIntegrationProvider, MarketingDraft>
@@ -152,10 +164,10 @@ function MarketingIntegrationsPanel({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className={compact ? 'pb-3' : undefined}>
         <CardTitle>Tracking Pixels</CardTitle>
       </CardHeader>
-      <CardContent className="grid gap-4 lg:grid-cols-3">
+      <CardContent className={compact ? 'grid gap-4 sm:grid-cols-1' : 'grid gap-4 lg:grid-cols-3'}>
         {MARKETING_PROVIDERS.map((spec) => {
           const draft = drafts[spec.provider];
           const disabled = draft.saving || (draft.status === 'active' && !draft.value.trim());
@@ -211,7 +223,12 @@ function MarketingIntegrationsPanel({
                     }
                   />
                 </div>
-                <Button size="sm" onClick={() => void saveProvider(spec)} disabled={disabled}>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void saveProvider(spec)}
+                  disabled={disabled}
+                >
                   <Save className="size-4" />
                   {draft.saving ? 'Saving' : 'Save'}
                 </Button>

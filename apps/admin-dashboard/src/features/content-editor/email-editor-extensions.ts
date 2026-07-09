@@ -43,8 +43,30 @@ export type EmailVariablePresentation = {
 const ticketQrCanvasPreviewDataUri =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Crect width='160' height='160' fill='white'/%3E%3Cpath fill='%23111827' d='M16 16h40v40H16zM24 24v24h24V24zm80-8h40v40h-40zM112 24v24h24V24zM16 104h40v40H16zM24 112v24h24v-24zm64-32h16v16H88zm24 0h16v16h-16zm16 16h16v16h-16zM72 104h16v16H72zm16 16h16v24H88zm32 0h24v24h-24zM72 32h16v16H72zm0 24h16v16H72zm24 0h16v16H96zm-24 88h16v-16H72z'/%3E%3C/svg%3E";
 
+// Attribute previews must be real http(s) destinations (or a canvas-only data URI for QR)
+// so leaked editor exports still pass link validation after sample-context render, and so
+// canonicalize can match them back to {{merge.tags}}. Chip labels stay human-readable.
 const canvasPreviewAttributeValues: Record<string, string> = {
+  'brand.privacyUrl': 'https://example.test/privacy',
+  'brand.refundUrl': 'https://example.test/refunds',
+  'brand.supportUrl': 'https://help.example.test/preferences',
+  'brand.termsUrl': 'https://example.test/terms',
+  'dashboard.url': 'https://admin.example.test/events/evt_preview',
+  'device.inviteUrl': 'https://scan.example.test/invite/dev_preview',
+  'event.checkoutUrl': 'https://checkout.example.test/checkout?eventId=evt_preview',
+  'event.mapUrl': 'https://maps.example.test/venue',
+  'event.publicUrl': 'https://events.example.test/e/evt_preview',
+  'event.refundPolicyUrl': 'https://help.example.test/refunds',
+  'integration.reconnectUrl': 'https://admin.example.test/integrations/reconnect',
+  'order.manageUrl': 'https://checkout.example.test/orders/ord_preview',
+  'order.receiptUrl': 'https://checkout.example.test/receipts/ord_preview',
+  'order.retryUrl': 'https://checkout.example.test/checkout?retry=ord_preview',
+  'ticket.pdfUrl': 'https://tickets.example.test/pdf/TKT-PREVIEW.pdf',
   'ticket.qrCodeUrl': ticketQrCanvasPreviewDataUri,
+  'ticket.transferUrl': 'https://checkout.example.test/transfer/tkt_preview/claim',
+  'ticket.walletAppleUrl': 'https://tickets.example.test/pass/apple/TKT-PREVIEW.pkpass',
+  'ticket.walletGoogleUrl': 'https://pay.google.com/gp/v/save/preview',
+  'waitlist.inviteUrl': 'https://checkout.example.test/waitlist/claim/preview',
 };
 
 const mergeTagPattern = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
@@ -332,11 +354,24 @@ const TixkitHeading = TiptapHeading.configure({ levels: [1, 2, 3] }).extend({
   },
 });
 
+function looksLikeUrlMergeTagKey(key: string): boolean {
+  const normalized = key.trim().toLowerCase();
+  return (
+    normalized.endsWith('url') ||
+    normalized.endsWith('.url') ||
+    normalized.includes('url') ||
+    normalized.includes('link') ||
+    normalized in canvasPreviewAttributeValues
+  );
+}
+
 export function variablePresentation(key: string): EmailVariablePresentation {
   return (
     variablePresentations[key] ?? {
       label: humanizeVariableKey(key),
-      preview: 'sample value',
+      preview: looksLikeUrlMergeTagKey(key)
+        ? `https://preview.example.test/${encodeURIComponent(key.trim())}`
+        : 'sample value',
       kind: fallbackVariableKind(key),
     }
   );
@@ -392,7 +427,42 @@ function renderMergeTagPreviewHtml(key: string): string {
 }
 
 export function mergeTagCanvasAttributeValue(key: string): string {
-  return canvasPreviewAttributeValues[key] ?? variablePresentation(key).preview;
+  const normalizedKey = key.trim();
+  if (!normalizedKey) return '';
+  if (canvasPreviewAttributeValues[normalizedKey]) {
+    return canvasPreviewAttributeValues[normalizedKey];
+  }
+  if (looksLikeUrlMergeTagKey(normalizedKey)) {
+    return `https://preview.example.test/${encodeURIComponent(normalizedKey)}`;
+  }
+  return variablePresentation(normalizedKey).preview;
+}
+
+/** Reverse lookup for editor export canonicalize when data-* attrs were stripped. */
+export function mergeTagKeyFromCanvasAttributeValue(value: string): string | null {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  for (const [key, preview] of Object.entries(canvasPreviewAttributeValues)) {
+    if (preview === normalized) return key;
+  }
+  if (normalized.startsWith('https://preview.example.test/')) {
+    try {
+      const key = decodeURIComponent(normalized.slice('https://preview.example.test/'.length));
+      if (key && looksLikeUrlMergeTagKey(key)) return key;
+    } catch {
+      return null;
+    }
+  }
+  // Legacy chip previews that used to leak into href/src before URL attribute previews.
+  const legacyTextPreviews: Record<string, string> = {
+    'help center': 'brand.supportUrl',
+    'ticket checkout': 'event.checkoutUrl',
+    'public event page': 'event.publicUrl',
+    'QR image link': 'ticket.qrCodeUrl',
+    'sample value': '', // ambiguous; do not map
+  };
+  const legacyKey = legacyTextPreviews[normalized];
+  return legacyKey || null;
 }
 
 function applyMergeTagPreviewsToJsonAttrs(attrs: unknown): unknown {

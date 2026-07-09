@@ -538,6 +538,7 @@ export type EditorChromeProps = {
   leftRail: React.ReactNode;
   canvas: React.ReactNode;
   inspector: React.ReactNode | null;
+  inspectorLabel?: string;
   reopenInspectorButton?: React.ReactNode;
   /** Floating mobile-only buttons */
   children?: React.ReactNode;
@@ -550,6 +551,7 @@ export function EditorChrome({
   leftRail,
   canvas,
   inspector,
+  inspectorLabel = 'Inspector',
   reopenInspectorButton,
   children,
 }: EditorChromeProps) {
@@ -566,7 +568,7 @@ export function EditorChrome({
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">{canvas}</div>
         {hasInspector && (
           <aside
-            aria-label="Inspector"
+            aria-label={inspectorLabel}
             className="fixed inset-x-0 bottom-0 z-40 h-[min(78svh,42rem)] overflow-hidden rounded-t-2xl border-t bg-background shadow-2xl lg:static lg:z-auto lg:h-auto lg:w-80 lg:shrink-0 lg:rounded-none lg:border-t-0 lg:border-l lg:shadow-none xl:w-[22rem]"
           >
             {inspector}
@@ -583,7 +585,13 @@ export function EditorChrome({
 /*  Floating buttons                                                   */
 /* ------------------------------------------------------------------ */
 
-export function InspectorReopenButton({ onClick }: { onClick: () => void }) {
+export function InspectorReopenButton({
+  label = 'Inspector',
+  onClick,
+}: {
+  label?: string;
+  onClick: () => void;
+}) {
   return (
     <Button
       className="fixed bottom-4 right-4 z-30 shadow-lg"
@@ -592,7 +600,7 @@ export function InspectorReopenButton({ onClick }: { onClick: () => void }) {
       variant="outline"
     >
       <SquarePen className="size-4" />
-      Inspector
+      {label}
     </Button>
   );
 }

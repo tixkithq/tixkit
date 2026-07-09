@@ -1027,7 +1027,17 @@ export default function CheckoutFlow({
                 {event?.title ?? 'Checkout'}
               </h1>
             </div>
-            {phase === 'confirm' || phase === 'payment' ? (
+            {phase === 'select' && eventId ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => router.push(`/e/${eventId}`)}
+                className="gap-1.5"
+              >
+                <ArrowLeftIcon className="size-4" />
+                Back to event
+              </Button>
+            ) : phase === 'confirm' || phase === 'payment' ? (
               <Button
                 variant="ghost"
                 size="sm"

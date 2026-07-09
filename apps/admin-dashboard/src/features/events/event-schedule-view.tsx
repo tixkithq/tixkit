@@ -22,7 +22,14 @@ import {
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { formatDateTime } from '@/lib/format';
 
-export function EventScheduleView({ eventId }: { eventId: string }) {
+export function EventScheduleView({
+  eventId,
+  embedded = false,
+}: {
+  eventId: string;
+  /** Compact layout for embedding in the edit-event drawer. */
+  embedded?: boolean;
+}) {
   const {
     data: occurrences = [],
     loading,
@@ -50,9 +57,9 @@ export function EventScheduleView({ eventId }: { eventId: string }) {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64 w-full" />
+      <div className={embedded ? 'space-y-3' : 'space-y-6'}>
+        {!embedded && <Skeleton className="h-8 w-48" />}
+        <Skeleton className={embedded ? 'h-40 w-full' : 'h-64 w-full'} />
       </div>
     );
   }
@@ -69,14 +76,20 @@ export function EventScheduleView({ eventId }: { eventId: string }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h2 className="text-xl font-semibold tracking-tight">Schedule</h2>
-        <p className="text-sm text-muted-foreground">
-          Manage event dates and times. Ticket types can be scoped to specific occurrences.
-        </p>
-      </div>
-      <OccurrencesTable occurrences={occurrences} onCreate={handleCreateOccurrence} />
+    <div className={embedded ? 'space-y-3' : 'space-y-6'}>
+      {!embedded && (
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">Schedule</h2>
+          <p className="text-sm text-muted-foreground">
+            Manage event dates and times. Ticket types can be scoped to specific occurrences.
+          </p>
+        </div>
+      )}
+      <OccurrencesTable
+        occurrences={occurrences}
+        onCreate={handleCreateOccurrence}
+        compact={embedded}
+      />
     </div>
   );
 }
@@ -84,6 +97,7 @@ export function EventScheduleView({ eventId }: { eventId: string }) {
 function OccurrencesTable({
   occurrences,
   onCreate,
+  compact = false,
 }: {
   occurrences: AdminEventOccurrence[];
   onCreate: (input: {
@@ -92,6 +106,7 @@ function OccurrencesTable({
     endsAt: string;
     timezone: string;
   }) => Promise<boolean>;
+  compact?: boolean;
 }) {
   const [title, setTitle] = React.useState('');
   const [startsAt, setStartsAt] = React.useState('');
@@ -130,7 +145,13 @@ function OccurrencesTable({
           <CalendarDays className="size-4 text-muted-foreground" />
           <h3 className="text-sm font-semibold">Occurrences</h3>
         </div>
-        <div className="grid gap-3 sm:grid-cols-[1fr_190px_190px_130px_auto]">
+        <div
+          className={
+            compact
+              ? 'grid gap-3 sm:grid-cols-2'
+              : 'grid gap-3 sm:grid-cols-[1fr_190px_190px_130px_auto]'
+          }
+        >
           <div className="space-y-2">
             <Label htmlFor="occurrence-title">Title</Label>
             <Input
@@ -166,7 +187,7 @@ function OccurrencesTable({
               onChange={(event) => setTimezone(event.target.value)}
             />
           </div>
-          <div className="flex items-end">
+          <div className={compact ? 'flex items-end sm:col-span-2' : 'flex items-end'}>
             <Button type="button" variant="outline" disabled={creating} onClick={create}>
               <Plus className="size-4" />
               Add

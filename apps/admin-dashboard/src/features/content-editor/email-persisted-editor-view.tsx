@@ -14,7 +14,6 @@ import {
   InsertPopoverButton,
 } from '@tixkit/content-editor-shell';
 import {
-  applyEmailGlobalCssToHtml,
   normalizeEmailTemplateDocument,
   stripEmailGlobalCssFromHtml,
   validateEditorExport,
@@ -71,14 +70,10 @@ import { InsertPalette } from './email/insert-palette';
 import { PreviewDrawer, type EmailEditorPreview } from './email/preview-drawer';
 import type { EmailThemePreset, StyleInspectorProps } from './email/style-inspector';
 import {
-  audienceLabel,
   emailVariableInserts,
   initialEditorContent,
   plainTextFromHtml,
   projectEditorTextToLegacyBlocks,
-  scheduledAtFromInput,
-  type EmailAudience,
-  type EmailSendMode,
   withEditorExport,
 } from './email/render-utils';
 
@@ -163,9 +158,6 @@ export function EmailPersistedEditorView({
   const [templateChoices, setTemplateChoices] = React.useState<EmailTemplateChoice[]>([]);
   const [editorMode, setEditorMode] = React.useState<EditorMode>('editor');
   const [editorRevision, setEditorRevision] = React.useState(0);
-  const [audience, setAudience] = React.useState<EmailAudience>('all');
-  const [sendMode, setSendMode] = React.useState<EmailSendMode>('now');
-  const [scheduledAt, setScheduledAt] = React.useState('');
   const [reviewIssues, setReviewIssues] = React.useState<ContentValidationIssue[]>([]);
   const [reviewState, setReviewState] = React.useState<EmailReviewState>('idle');
   const [recipient, setRecipient] = React.useState('ada@example.test');
@@ -390,17 +382,18 @@ export function EmailPersistedEditorView({
       setLoading(false);
       return;
     }
-    const currentSenderIdentity = findVerifiedSenderIdentity(
-      loadedSenderIdentities,
-      normalized.settings.sender.fromEmail,
-    );
+    // Prefer an exact verified match, otherwise remap legacy placeholders
+    // (tickets@example.test) onto the brand's first verified Resend/sender identity.
+    const currentSenderIdentity =
+      findVerifiedSenderIdentity(loadedSenderIdentities, normalized.settings.sender.fromEmail) ??
+      defaultSenderIdentity;
     const normalizedWithSender = currentSenderIdentity
       ? applySenderIdentity(normalized, currentSenderIdentity)
       : normalized;
     const canvasDocument = restoreDefaultCanvasContent(
       normalizedWithSender,
       loadedEvent,
-      currentSenderIdentity ?? defaultSenderIdentity,
+      currentSenderIdentity,
       templateKey,
     );
 
@@ -494,13 +487,16 @@ export function EmailPersistedEditorView({
     if (!snapshot) return undefined;
     const ref = emailEditorRef.current;
     if (!ref) {
-      const contentHtml = applyEmailGlobalCssToHtml(
-        stripEmailGlobalCssFromHtml(snapshot.editor.contentHtml),
-        snapshot.editor.globalCss,
-      );
-      return contentHtml === snapshot.editor.contentHtml
-        ? snapshot
-        : { ...snapshot, editor: { ...snapshot.editor, contentHtml } };
+      // No live editor export available; still re-canonicalize preview attrs so
+      // stale href/src canvas previews (e.g. "help center") never block review.
+      return withEditorExport(snapshot, {
+        html: stripEmailGlobalCssFromHtml(snapshot.editor.contentHtml),
+        text: snapshot.editor.contentText ?? '',
+        json: (snapshot.editor.contentJson as Record<string, unknown> | undefined) ?? {
+          type: 'doc',
+          content: [],
+        },
+      });
     }
     const exported = await ref.getEmail();
     return withEditorExport(snapshot, {
@@ -651,22 +647,11 @@ export function EmailPersistedEditorView({
     setActionError(undefined);
     setReviewConfirmed(false);
     setReviewDialogOpen(true);
-    if (audience === 'specific') {
-      setAutosave('error');
-      setActionError('Choose an audience with an available recipient selection.');
-      return;
-    }
     const review = await reviewCurrentDraft({ analysisDelayMs: 220 });
     if (!review) return;
     if (hasBlockingIssues(review.issues)) {
       setAutosave('error');
-      setActionError('Resolve email review blockers before sending.');
-      return;
-    }
-    const sendAt = scheduledAtFromInput(sendMode, scheduledAt);
-    if (sendMode === 'scheduled' && !sendAt) {
-      setAutosave('error');
-      setActionError('Choose a valid scheduled send time.');
+      setActionError('Resolve email review blockers before publishing.');
       return;
     }
     setActionError(undefined);
@@ -674,25 +659,12 @@ export function EmailPersistedEditorView({
 
   async function publishDraft() {
     if (!document || !event || !emailDocument || isArchived) return;
-    if (audience === 'specific') {
-      setAutosave('error');
-      setActionError('Choose an audience with an available recipient selection.');
-      setReviewDialogOpen(true);
-      return;
-    }
     const review = await reviewCurrentDraft();
     if (!review) return;
     if (hasBlockingIssues(review.issues)) {
       setAutosave('error');
-      setActionError('Resolve email review blockers before sending.');
+      setActionError('Resolve email review blockers before publishing.');
       setReviewDialogOpen(true);
-      return;
-    }
-    const sendAt = scheduledAtFromInput(sendMode, scheduledAt);
-    if (sendMode === 'scheduled' && !sendAt) {
-      setAutosave('error');
-      setActionError('Choose a valid scheduled send time.');
-      setReviewDialogOpen(false);
       return;
     }
     const operationId = nextOperationId();
@@ -702,19 +674,7 @@ export function EmailPersistedEditorView({
     if (!isCurrentOperation(operationId)) return;
     if (!publishResult.ok) {
       setAutosave('error');
-      setActionError(resultMessage(publishResult.error, 'Unable to prepare email campaign'));
-      return;
-    }
-    const sendResult = await adminApi.sendMessage(event.id, {
-      channel: 'email',
-      emailTemplateKey: saved.document.settings.templateKey,
-      audience,
-      scheduledAt: sendAt,
-    });
-    if (!isCurrentOperation(operationId)) return;
-    if (!sendResult.ok) {
-      setAutosave('error');
-      setActionError(resultMessage(sendResult.error, 'Unable to create email campaign'));
+      setActionError(resultMessage(publishResult.error, 'Unable to publish email version'));
       return;
     }
     setReviewDialogOpen(false);
@@ -726,12 +686,8 @@ export function EmailPersistedEditorView({
       ...current.filter((version) => version.id !== publishResult.data.version.id),
     ]);
     setActionError(undefined);
-    setNotice(
-      sendAt
-        ? `Scheduled ${audienceLabel(audience).toLowerCase()} for ${new Date(sendAt).toLocaleString()}`
-        : `Queued ${audienceLabel(audience).toLowerCase()}`,
-    );
-    toast.success(sendAt ? 'Email campaign scheduled' : 'Email campaign queued');
+    setNotice(`Published v${publishResult.data.version.versionNumber}`);
+    toast.success('Email version published');
   }
 
   async function sendTest() {
@@ -766,24 +722,32 @@ export function EmailPersistedEditorView({
       ),
     );
     if (!isCurrentOperation(operationId)) return;
-    const capturedRecipients: string[] = [];
+    const sentRecipients: string[] = [];
+    let providerName: string | undefined;
     for (const result of testSendResults) {
       if (!result.ok) {
         setAutosave('error');
-        setActionError(resultMessage(result.error, 'Unable to capture email test send'));
+        setActionError(resultMessage(result.error, 'Unable to send email test'));
         return;
       }
-      capturedRecipients.push(result.data.testSend.recipient);
+      sentRecipients.push(result.data.testSend.recipient);
+      providerName = result.data.provider?.name ?? providerName;
     }
     if (!isCurrentOperation(operationId)) return;
     setTestDialogOpen(false);
     setActionError(undefined);
+    const viaProvider =
+      providerName && providerName !== 'capture' ? ` via ${providerName}` : ' (captured)';
     setNotice(
-      capturedRecipients.length === 1
-        ? `Captured test send to ${capturedRecipients[0]}`
-        : `Captured ${capturedRecipients.length} test sends`,
+      sentRecipients.length === 1
+        ? `Test email sent to ${sentRecipients[0]}${viaProvider}`
+        : `Sent ${sentRecipients.length} test emails${viaProvider}`,
     );
-    toast.success('Email test send captured');
+    toast.success(
+      providerName && providerName !== 'capture'
+        ? `Email test sent via ${providerName}`
+        : 'Email test send captured',
+    );
   }
 
   async function applyTemplateChoice(template: EmailTemplateChoice) {
@@ -1039,15 +1003,10 @@ export function EmailPersistedEditorView({
   ];
   const reviewBlockingIssues = reviewIssues.filter((issue) => issue.severity === 'error');
   const reviewWarningIssues = reviewIssues.filter((issue) => issue.severity !== 'error');
-  const reviewScheduledAt = scheduledAtFromInput(sendMode, scheduledAt);
-  const reviewHasInvalidSchedule = sendMode === 'scheduled' && !reviewScheduledAt;
   const reviewIsAnalyzing = reviewState === 'checking';
   const reviewAnalysisFailed = reviewState === 'error';
   const reviewCanConfirm =
-    reviewState === 'checked' &&
-    reviewBlockingIssues.length === 0 &&
-    !reviewHasInvalidSchedule &&
-    autosave !== 'saving';
+    reviewState === 'checked' && reviewBlockingIssues.length === 0 && autosave !== 'saving';
   const variableInsertItems = emailVariableInserts.map((key) => ({
     key,
     presentation: variablePresentation(key),
@@ -1185,7 +1144,7 @@ export function EmailPersistedEditorView({
           notice={notice}
           onPublish={() => void openReviewDialog()}
           publishDisabled={Boolean(archivedReason)}
-          publishLabel="Publish"
+          publishLabel="Publish version"
           secondaryActions={modeToggle}
           status={document.status}
         />
@@ -1294,7 +1253,6 @@ export function EmailPersistedEditorView({
     >
       {previewOpen && <PreviewDrawer onClose={() => setPreviewOpen(false)} preview={preview} />}
       <EmailDialogs
-        audience={audience}
         autosave={autosave}
         brand={brand}
         canEdit={canEdit}
@@ -1306,7 +1264,6 @@ export function EmailPersistedEditorView({
         historyDialogOpen={historyDialogOpen}
         jsonDialogOpen={jsonDialogOpen}
         onApplyTemplate={(template) => void applyTemplateChoice(template)}
-        onAudienceChange={setAudience}
         onDetailsDialogOpenChange={setDetailsDialogOpen}
         onHistoryDialogOpenChange={setHistoryDialogOpen}
         onJsonDialogOpenChange={setJsonDialogOpen}
@@ -1314,8 +1271,6 @@ export function EmailPersistedEditorView({
         onRecipientChange={setRecipient}
         onReviewConfirmedChange={setReviewConfirmed}
         onReviewDialogOpenChange={setReviewDialogOpen}
-        onScheduledAtChange={setScheduledAt}
-        onSendModeChange={setSendMode}
         onSendTest={() => void sendTest()}
         onTemplatePickerOpenChange={setTemplatePickerOpen}
         onTestDialogOpenChange={setTestDialogOpen}
@@ -1325,13 +1280,10 @@ export function EmailPersistedEditorView({
         reviewCanConfirm={reviewCanConfirm}
         reviewConfirmed={reviewConfirmed}
         reviewDialogOpen={reviewDialogOpen}
-        reviewHasInvalidSchedule={reviewHasInvalidSchedule}
         reviewIsAnalyzing={reviewIsAnalyzing}
         reviewState={reviewState}
         reviewWarningIssues={reviewWarningIssues}
-        scheduledAt={scheduledAt}
         selectedSenderIdentity={selectedSenderIdentity}
-        sendMode={sendMode}
         templateChoices={templateChoices}
         templatePickerOpen={templatePickerOpen}
         testDialogOpen={testDialogOpen}

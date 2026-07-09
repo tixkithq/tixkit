@@ -2,6 +2,7 @@
 @import 'tw-animate-css';
 @import '@tixkit/content-event-page-react/styles.css';
 @import '@puckeditor/core/no-external.css';
+@import '@puckeditor/plugin-heading-analyzer/dist/index.css';
 @import '@react-email/editor/themes/default.css';
 @import '@react-email/editor/styles/bubble-menu.css';
 @import '@react-email/editor/styles/slash-command.css';
@@ -11,6 +12,7 @@
 @source not "../../.next-codex-cdp";
 @source not "../../.turbo";
 @source "../../../../packages/content-editor-shell/src";
+@source "../../../../packages/content-event-page-react/src/**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -876,6 +878,69 @@
 }
 .CollapsibleContent[data-state='closed'] {
   animation: slideUp 300ms ease-out;
+}
+
+/* Event page editor settings panel */
+.tk-ep-inspector {
+  --puck-color-text: var(--foreground);
+  --puck-color-text-secondary: var(--muted-foreground);
+  --puck-color-text-muted: var(--muted-foreground);
+  --puck-color-text-subtle: var(--muted-foreground);
+  --puck-color-surface: var(--background);
+  --puck-color-surface-muted: var(--muted);
+  --puck-color-border: var(--border);
+  --puck-field-color-bg: var(--background);
+  --puck-field-color-border: var(--border);
+  --puck-field-color-text: var(--foreground);
+  --puck-field-label-color-text: var(--muted-foreground);
+  --puck-field-radius: 0.5rem;
+  --puck-font-family: inherit;
+}
+
+.tk-ep-fields__list > * + * {
+  margin-top: 0;
+}
+
+.tk-ep-inspector [class*='_PuckFields-field_'] {
+  padding: 0 !important;
+  border-top: 0 !important;
+  margin-top: 0 !important;
+  color: inherit !important;
+}
+
+.tk-ep-inspector [class*='_PuckFields-field_'] + [class*='_PuckFields-field_'] {
+  margin-top: 0.15rem !important;
+}
+
+.tk-ep-inspector [class*='_Input-label_'] {
+  padding-bottom: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--foreground);
+}
+
+.tk-ep-inspector [class*='_Input-input_'],
+.tk-ep-inspector [class*='_InputWrapper_'] select,
+.tk-ep-inspector [class*='_InputWrapper_'] textarea,
+.tk-ep-inspector [class*='_InputWrapper_'] input:not([type='range']):not([type='color']):not([type='file']) {
+  min-height: 2.25rem;
+  border-radius: 0.5rem;
+  border-color: var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+}
+
+.tk-ep-inspector [class*='_ObjectField_'] {
+  border-color: var(--border);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+
+.tk-ep-inspector [class*='_ArrayFieldItem-summary_'] {
+  border-color: var(--border);
+  border-radius: 0.55rem;
+  background: var(--background);
 }
 
 @keyframes slideDown {

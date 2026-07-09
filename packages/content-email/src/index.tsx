@@ -248,8 +248,9 @@ const buttonStyle = {
   textDecoration: 'none',
 } satisfies React.CSSProperties;
 
+// Single quotes keep style="..." attributes valid when font families are quoted.
 const studioFontFamily =
-  '"Inter", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  "'Inter', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
 const shellStyle = {
   backgroundColor: '#dce1e4',
@@ -637,21 +638,24 @@ function defaultStudioEmailContentForKey(
 }
 
 function studioEmailHtml(content: StudioEmailContent): string {
+  // Use plain <div> wrappers (not bare <section>/<header>/<footer>) so the React
+  // Email editor can parse and re-export layout/styles. Section nodes only parse
+  // `section[data-type=section]`; bare sections drop their styles on round-trip.
   return [
     `<div style="${styleAttr(shellStyle)}">`,
-    `<div style="${styleAttr(defaultContainerStyle)}">`,
-    `<section style="${styleAttr(studioEmailCardStyle)}">`,
-    `<header style="${styleAttr(studioHeaderStyle)}">`,
+    `<div data-type="container" style="${styleAttr(defaultContainerStyle)}">`,
+    `<div style="${styleAttr(studioEmailCardStyle)}">`,
+    `<div style="${styleAttr(studioHeaderStyle)}">`,
     `<p style="${styleAttr(eyebrowStyle)}">${content.eyebrow}</p>`,
-    '</header>',
-    `<section style="${styleAttr(cardStyle)}">`,
+    '</div>',
+    `<div style="${styleAttr(cardStyle)}">`,
     `<h1 style="${styleAttr(headingStyle)}">${content.headline}</h1>`,
     `<p style="${styleAttr(paragraphStyle)}">${content.intro}</p>`,
     content.primaryAction
       ? `<p style="${styleAttr({ margin: '20px 0 0' })}"><a href="${content.primaryAction.url}" style="${styleAttr(buttonStyle)}">${content.primaryAction.label}</a></p>`
       : '',
-    '</section>',
-    `<section style="${styleAttr(cardStyle)}">`,
+    '</div>',
+    `<div style="${styleAttr(cardStyle)}">`,
     `<h2 style="${styleAttr(subheadingStyle)}">${content.summaryTitle}</h2>`,
     ...content.rows.map(
       (row) =>
@@ -662,10 +666,10 @@ function studioEmailHtml(content: StudioEmailContent): string {
           margin: '4px 0 0',
         })}">${row.value}</p></div>`,
     ),
-    '</section>',
+    '</div>',
     content.qr
       ? [
-          `<section style="${styleAttr({ ...cardStyle, textAlign: 'center' })}">`,
+          `<div style="${styleAttr({ ...cardStyle, textAlign: 'center' })}">`,
           `<h2 style="${styleAttr(subheadingStyle)}">${content.qr.title}</h2>`,
           `<p style="${styleAttr({ margin: '18px 0 0' })}"><img src="${content.qr.imageUrl}" alt="${content.qr.imageAlt}" style="${styleAttr({
             backgroundColor: '#ffffff',
@@ -675,12 +679,12 @@ function studioEmailHtml(content: StudioEmailContent): string {
             maxWidth: '220px',
             padding: '18px',
           })}" /></p>`,
-          '</section>',
+          '</div>',
         ].join('')
       : '',
     content.secondaryActions.length > 0
       ? [
-          `<section style="${styleAttr(cardStyle)}">`,
+          `<div style="${styleAttr(cardStyle)}">`,
           `<h2 style="${styleAttr(subheadingStyle)}">Next steps</h2>`,
           ...content.secondaryActions.map(
             (action) =>
@@ -691,16 +695,16 @@ function studioEmailHtml(content: StudioEmailContent): string {
                 lineHeight: '24px',
               })}">${action.label}</a></p>`,
           ),
-          '</section>',
+          '</div>',
         ].join('')
       : '',
-    `<footer style="${styleAttr(studioFooterStyle)}">`,
+    `<div style="${styleAttr(studioFooterStyle)}">`,
     content.complianceNote
       ? `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px', margin: '0 0 8px' })}">${content.complianceNote}</p>`
       : '',
     `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px' })}">Need help? Contact <a href="{{brand.supportUrl}}" style="color: #332c2c">{{brand.name}} support</a>.</p>`,
-    '</footer>',
-    '</section>',
+    '</div>',
+    '</div>',
     '</div>',
     '</div>',
   ].join('');
@@ -956,7 +960,11 @@ function stripEmptyImageTags(html: string): string {
 function styleAttr(style: React.CSSProperties): string {
   return Object.entries(style)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([property, value]) => `${kebabCaseCssProperty(property)}: ${String(value)}`)
+    .map(([property, value]) => {
+      // style attributes are double-quoted; normalize nested double quotes in CSS values.
+      const cssValue = String(value).replaceAll('"', "'");
+      return `${kebabCaseCssProperty(property)}: ${cssValue}`;
+    })
     .join('; ');
 }
 
@@ -1128,10 +1136,38 @@ export async function renderEmailTemplate(
   return {
     subject,
     previewText,
-    html: editorHtmlWithFooter,
+    html: wrapEmailDocumentHtml(editorHtmlWithFooter, previewText),
     text: renderPlain(editorTextWithFooter, context),
     validation,
   };
+}
+
+/**
+ * Ensure outbound HTML is a full email document. Many clients (Gmail mobile)
+ * render bare fragments poorly; keep existing documents untouched.
+ */
+function wrapEmailDocumentHtml(html: string, previewText?: string): string {
+  const trimmed = html.trim();
+  if (!trimmed) return trimmed;
+  if (/<html[\s>]/i.test(trimmed)) return trimmed;
+  const preview =
+    previewText && previewText.trim()
+      ? `<div style="display:none;font-size:1px;color:#fff;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${escapeHtmlAttribute(previewText.trim())}</div>`
+      : '';
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+    '<meta name="x-apple-disable-message-reformatting" />',
+    '</head>',
+    '<body style="margin:0;padding:0;background-color:#dce1e4;">',
+    preview,
+    trimmed,
+    '</body>',
+    '</html>',
+  ].join('');
 }
 
 function appendEditorUnsubscribeFooter(

@@ -90,15 +90,23 @@ export function senderIdentityIssues(
   identities: AdminBrandSenderIdentity[],
 ): ContentValidationIssue[] {
   if (findVerifiedSenderIdentity(identities, document.settings.sender.fromEmail)) return [];
-  const verifiedCount = verifiedSenderIdentities(identities).length;
+  const verified = verifiedSenderIdentities(identities);
+  if (verified.length > 0) {
+    return [
+      {
+        code: 'email_sender_identity_mismatch',
+        field: 'settings.sender.fromEmail',
+        message: `Choose a verified sender identity before sending (e.g. ${verified[0]!.email}). Template placeholders like tickets@example.test are rejected by Resend.`,
+        severity: 'error',
+      },
+    ];
+  }
   return [
     {
-      code: verifiedCount > 0 ? 'email_sender_identity_mismatch' : 'email_sender_identity_missing',
+      code: 'email_sender_identity_missing',
       field: 'settings.sender.fromEmail',
       message:
-        verifiedCount > 0
-          ? 'Choose a verified sender identity for this brand before sending.'
-          : 'This brand has no verified email sender identity. Verify a sender before sending.',
+        'This brand has no verified email sender identity. Set RESEND_FROM_EMAIL (onboarding@resend.dev or a verified domain address), restart the API, and reload.',
       severity: 'error',
     },
   ];
