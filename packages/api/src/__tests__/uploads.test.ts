@@ -1266,6 +1266,74 @@ describe('upload artifact routes', () => {
     await app.close();
   });
 
+  it('allows events.write principals to create content event page image uploads', async () => {
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'draft',
+        },
+      ],
+      content_documents: [
+        {
+          id: 'cdoc_page_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          channel: 'event_page',
+        },
+      ],
+    });
+    const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.write'] }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'content_event_page_image',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        fileName: 'hero.png',
+        contentType: 'image/png',
+        sizeBytes: 12,
+        metadata: { source: 'admin_event_page_editor', contentDocumentId: 'cdoc_page_1' },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(tables.upload_artifacts).toHaveLength(1);
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      purpose: 'content_event_page_image',
+      content_type: 'image/png',
+    });
+    expect(String(tables.upload_artifacts[0]?.object_key)).toContain('content-event-page-images');
+
+    tables.upload_artifacts[0] = {
+      ...tables.upload_artifacts[0],
+      status: 'uploaded',
+      scan_status: 'clean',
+    };
+    const download = await app.inject({
+      method: 'GET',
+      url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/download`,
+    });
+
+    expect(download.statusCode).toBe(200);
+    expect(download.json()).toMatchObject({
+      downloadUrl: `/v1/public/content-event-page-images/${tables.upload_artifacts[0]?.id}`,
+      durable: true,
+    });
+    await app.close();
+  });
+
   it('rejects content email image uploads without messages.write', async () => {
     const { db, tables } = createMockDb({
       events: [

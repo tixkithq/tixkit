@@ -15,6 +15,7 @@ import {
   getUploadArtifactDownloadUrl,
   streamBrandLogo,
   streamContentEmailImage,
+  streamContentEventPageImage,
   uploadTokenMatches,
   type UploadPurpose,
 } from '../../services/uploads.js';
@@ -25,6 +26,7 @@ const uploadPurposeSchema = z.enum([
   'brand_logo',
   'user_avatar',
   'content_email_image',
+  'content_event_page_image',
 ]);
 
 const createUploadSchema = z
@@ -101,7 +103,7 @@ async function requireCheckoutFileQuestion(
   }
 }
 
-async function requireContentEmailDocument(
+async function requireContentDocumentForUpload(
   db: Database,
   documentId: string,
   expected: {
@@ -109,6 +111,7 @@ async function requireContentEmailDocument(
     organizationId: string;
     brandId: string;
     eventId: string;
+    channel: 'email' | 'event_page';
   },
 ): Promise<void> {
   const document = await db
@@ -118,9 +121,11 @@ async function requireContentEmailDocument(
     .executeTakeFirst();
 
   if (!document) throw new NotFoundError('ContentDocument', documentId);
-  if (document.channel !== 'email') {
+  if (document.channel !== expected.channel) {
     throw new ValidationError(
-      'metadata.contentDocumentId must reference an email content document',
+      expected.channel === 'email'
+        ? 'metadata.contentDocumentId must reference an email content document'
+        : 'metadata.contentDocumentId must reference an event page content document',
     );
   }
   if (
@@ -186,6 +191,11 @@ function requireUploadArtifactAccess(
     return;
   }
 
+  if (artifact.purpose === 'content_event_page_image') {
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    return;
+  }
+
   throw new ForbiddenError('Upload artifact purpose is not supported');
 }
 
@@ -236,6 +246,16 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
   app.get('/public/content-email-images/:artifactId', async (request, reply) => {
     const { artifactId } = request.params as { artifactId: string };
     const { stream, contentType, fileName } = await streamContentEmailImage(db, artifactId);
+    reply.header('Content-Type', contentType);
+    reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+    return reply.send(stream);
+  });
+
+  app.get('/public/content-event-page-images/:artifactId', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string };
+    const { stream, contentType, fileName } = await streamContentEventPageImage(db, artifactId);
     reply.header('Content-Type', contentType);
     reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
@@ -299,11 +319,28 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       if (hasCheckoutQuestionMetadata(body.metadata)) {
         throw new ValidationError('metadata.questionId is not allowed for user avatar uploads');
       }
-    } else if (body.purpose === 'content_email_image') {
-      ClerkAuthService.requirePermission(principal, 'messages.write');
-      if (!eventId) throw new ValidationError('eventId is required for content email images');
+    } else if (
+      body.purpose === 'content_email_image' ||
+      body.purpose === 'content_event_page_image'
+    ) {
+      const isEventPageImage = body.purpose === 'content_event_page_image';
+      ClerkAuthService.requirePermission(
+        principal,
+        isEventPageImage ? 'events.write' : 'messages.write',
+      );
+      if (!eventId) {
+        throw new ValidationError(
+          isEventPageImage
+            ? 'eventId is required for content event page images'
+            : 'eventId is required for content email images',
+        );
+      }
       if (hasCheckoutQuestionMetadata(body.metadata)) {
-        throw new ValidationError('metadata.questionId is not allowed for content email images');
+        throw new ValidationError(
+          isEventPageImage
+            ? 'metadata.questionId is not allowed for content event page images'
+            : 'metadata.questionId is not allowed for content email images',
+        );
       }
       const contentDocumentId = contentDocumentIdFromMetadata(body.metadata);
       const event = await new EventRepository(db).findById(eventId);
@@ -313,17 +350,22 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       ClerkAuthService.requireBrandScope(principal, event.brand_id);
       ClerkAuthService.requireEventScope(principal, eventId);
       if (brandId && brandId !== event.brand_id) {
-        throw new ValidationError('brandId must match the event brand for content email images');
+        throw new ValidationError(
+          isEventPageImage
+            ? 'brandId must match the event brand for content event page images'
+            : 'brandId must match the event brand for content email images',
+        );
       }
       tenantId = event.tenant_id;
       organizationId = event.organization_id;
       brandId = event.brand_id;
       if (contentDocumentId) {
-        await requireContentEmailDocument(db, contentDocumentId, {
+        await requireContentDocumentForUpload(db, contentDocumentId, {
           tenantId,
           organizationId,
           brandId,
           eventId,
+          channel: isEventPageImage ? 'event_page' : 'email',
         });
       }
     }
@@ -379,6 +421,13 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
     if (artifact.purpose === 'content_email_image') {
       return {
         downloadUrl: `/v1/public/content-email-images/${artifactId}`,
+        durable: true,
+      };
+    }
+
+    if (artifact.purpose === 'content_event_page_image') {
+      return {
+        downloadUrl: `/v1/public/content-event-page-images/${artifactId}`,
         durable: true,
       };
     }

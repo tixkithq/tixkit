@@ -189,6 +189,29 @@ export class EmailProviderRouteRepository extends BaseRepository {
       .where('smoke_send_verified', '=', true)
       .execute();
   }
+
+  async update(
+    id: string,
+    input: {
+      status?: string;
+      smokeSendVerified?: boolean;
+      priority?: number;
+      isFallback?: boolean;
+      rateLimitPerHour?: number | null;
+    },
+  ) {
+    const values: Record<string, unknown> = { updated_at: new Date() };
+    if (input.status !== undefined) values.status = input.status;
+    if (input.smokeSendVerified !== undefined) {
+      values.smoke_send_verified = input.smokeSendVerified;
+    }
+    if (input.priority !== undefined) values.priority = input.priority;
+    if (input.isFallback !== undefined) values.is_fallback = input.isFallback;
+    if (input.rateLimitPerHour !== undefined) {
+      values.rate_limit_per_hour = input.rateLimitPerHour;
+    }
+    return this.updateReturning('email_provider_routes', id, values);
+  }
 }
 
 export class BrandSenderIdentityRepository extends BaseRepository {
@@ -198,9 +221,11 @@ export class BrandSenderIdentityRepository extends BaseRepository {
     email: string;
     name: string;
     replyToEmail?: string;
+    verified?: boolean;
   }) {
     const id = `bsi_${ulid()}`;
     const now = new Date();
+    const verified = input.verified === true;
     return this.insertReturning(
       'brand_sender_identities',
       {
@@ -210,13 +235,22 @@ export class BrandSenderIdentityRepository extends BaseRepository {
         email: input.email,
         name: input.name,
         reply_to_email: input.replyToEmail ?? null,
-        verified: false,
-        verified_at: null,
+        verified,
+        verified_at: verified ? now : null,
         created_at: now,
         updated_at: now,
       },
       id,
     );
+  }
+
+  async markVerified(id: string) {
+    const now = new Date();
+    return this.updateReturning('brand_sender_identities', id, {
+      verified: true,
+      verified_at: now,
+      updated_at: now,
+    });
   }
 
   async findByBrand(tenantId: string, brandId: string) {
@@ -238,12 +272,26 @@ export class BrandSenderIdentityRepository extends BaseRepository {
   }
 
   async findVerifiedByBrandAndDomain(brandId: string, senderDomain: string) {
+    const domain = senderDomain.trim().toLowerCase().split(/[\s#]/)[0] ?? '';
+    if (!domain) return undefined;
     return this.db
       .selectFrom('brand_sender_identities')
       .selectAll()
       .where('brand_id', '=', brandId)
       .where('verified', '=', true)
-      .where('email', 'like', `%@${senderDomain}`)
+      .where('email', 'like', `%@${domain}`)
+      .executeTakeFirst();
+  }
+
+  async findVerifiedByBrandAndEmail(brandId: string, email: string) {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) return undefined;
+    return this.db
+      .selectFrom('brand_sender_identities')
+      .selectAll()
+      .where('brand_id', '=', brandId)
+      .where('verified', '=', true)
+      .where('email', '=', normalized)
       .executeTakeFirst();
   }
 }

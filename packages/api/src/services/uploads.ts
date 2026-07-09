@@ -17,7 +17,8 @@ export type UploadPurpose =
   | 'checkout_answer'
   | 'brand_logo'
   | 'user_avatar'
-  | 'content_email_image';
+  | 'content_email_image'
+  | 'content_event_page_image';
 
 export type CreateUploadInput = {
   tenantId: string;
@@ -75,6 +76,11 @@ const PURPOSE_LIMITS: Record<
     maxSizeBytes: 5 * 1024 * 1024,
     contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
     prefix: 'content-email-images',
+  },
+  content_event_page_image: {
+    maxSizeBytes: 5 * 1024 * 1024,
+    contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+    prefix: 'content-event-page-images',
   },
 };
 
@@ -594,7 +600,7 @@ export type PublicUploadArtifact = {
 async function getPublicUploadArtifact(
   db: Database,
   artifactId: string,
-  purpose: 'brand_logo' | 'content_email_image',
+  purpose: 'brand_logo' | 'content_email_image' | 'content_event_page_image',
 ): Promise<PublicUploadArtifact> {
   const artifact = await db
     .selectFrom('upload_artifacts')
@@ -622,6 +628,13 @@ export async function getContentEmailImageArtifact(
   artifactId: string,
 ): Promise<PublicUploadArtifact> {
   return getPublicUploadArtifact(db, artifactId, 'content_email_image');
+}
+
+export async function getContentEventPageImageArtifact(
+  db: Database,
+  artifactId: string,
+): Promise<PublicUploadArtifact> {
+  return getPublicUploadArtifact(db, artifactId, 'content_event_page_image');
 }
 
 export async function getBrandLogoArtifact(
@@ -663,6 +676,17 @@ export async function streamContentEmailImage(
   fileName: string;
 }> {
   return streamPublicUploadArtifact(await getContentEmailImageArtifact(db, artifactId));
+}
+
+export async function streamContentEventPageImage(
+  db: Database,
+  artifactId: string,
+): Promise<{
+  stream: NodeJS.ReadableStream;
+  contentType: string;
+  fileName: string;
+}> {
+  return streamPublicUploadArtifact(await getContentEventPageImageArtifact(db, artifactId));
 }
 
 export async function streamBrandLogo(

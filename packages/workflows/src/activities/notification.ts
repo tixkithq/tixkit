@@ -12,8 +12,8 @@ import {
   type Database,
 } from '@tixkit/db';
 import {
-  OpenCoreEmailSdkTransport,
-  SmtpEmailTransport,
+  buildEmailTransport,
+  createDefaultEmailTransport,
   FallbackEmailTransport,
   TelnyxSmsTransport,
   TwilioSmsTransport,
@@ -368,20 +368,8 @@ function buildTransport(
   providerType: string,
   credentialsRef: string,
   senderDomain: string,
-): EmailTransport {
-  switch (providerType) {
-    case 'opencore_email_sdk':
-      return new OpenCoreEmailSdkTransport(credentialsRef, senderDomain);
-    case 'smtp':
-      return new SmtpEmailTransport(
-        process.env.SMTP_HOST ?? 'localhost',
-        Number(process.env.SMTP_PORT ?? '587'),
-        process.env.SMTP_USERNAME ?? '',
-        process.env.SMTP_PASSWORD ?? '',
-      );
-    default:
-      return new OpenCoreEmailSdkTransport(credentialsRef, senderDomain);
-  }
+): EmailTransport & { providerName?: string } {
+  return buildEmailTransport(providerType, credentialsRef, senderDomain);
 }
 
 function buildSmsTransport(providerType: string, credentialsRef: string): SmsTransport {
@@ -443,11 +431,14 @@ export async function sendEmailActivity(input: {
       );
     }
     if (routes.length === 0) {
-      const senderDomain = process.env.EMAIL_SENDER_DOMAIN ?? 'tixkit.com';
-      const transport = new OpenCoreEmailSdkTransport(
-        process.env.EMAIL_SDK_CREDENTIALS_REF ?? 'default',
-        senderDomain,
-      );
+      const senderDomain =
+        process.env.EMAIL_SENDER_DOMAIN ??
+        process.env.RESEND_FROM_EMAIL?.split('@')[1] ??
+        'resend.dev';
+      const fromEmail =
+        process.env.RESEND_FROM_EMAIL ?? process.env.EMAIL_FROM_EMAIL ?? `noreply@${senderDomain}`;
+      const fromName = process.env.RESEND_FROM_NAME ?? process.env.EMAIL_FROM_NAME ?? 'Tixkit';
+      const transport = createDefaultEmailTransport();
       const deliveryId = `emd_${ulid()}`;
       const result = await transport.send({
         tenantId: job.tenant_id,
@@ -456,7 +447,7 @@ export async function sendEmailActivity(input: {
         templateKey: job.template_key,
         templateVersionId: job.template_version_id,
         deliveryId,
-        from: { email: `noreply@${senderDomain}`, name: 'Tixkit' },
+        from: { email: fromEmail, name: fromName },
         to: [{ email: job.to_email, name: job.to_name ?? undefined }],
         subject: input.subject,
         html: input.html,

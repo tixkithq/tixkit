@@ -1,6 +1,7 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createInterface } from 'node:readline';
+import { findRepoRoot } from './env.js';
 import { seedSampleData } from './seed-sample-data.js';
 
 export type QuickstartOptions = {
@@ -94,8 +95,9 @@ function runCommand(
   });
 }
 
-function startDevAll(): ChildProcess {
+function startDevAll(cwd: string): ChildProcess {
   const proc = spawn(DEV_ALL_COMMAND[0], DEV_ALL_COMMAND.slice(1), {
+    cwd,
     stdio: 'inherit',
     detached: false,
   });
@@ -111,7 +113,7 @@ function openBrowser(url: string): void {
 }
 
 export async function runQuickstart(options: QuickstartOptions): Promise<QuickstartResult> {
-  const cwd = process.cwd();
+  const cwd = await findRepoRoot(process.cwd());
 
   const dockerOk = await checkDocker();
   if (!dockerOk) {
@@ -148,7 +150,7 @@ export async function runQuickstart(options: QuickstartOptions): Promise<Quickst
   }
 
   console.log('Starting API, worker, checkout, and admin...');
-  const devProc = startDevAll();
+  const devProc = startDevAll(cwd);
 
   // Forward Ctrl+C to the dev process group so all services stop together.
   const cleanup = () => {

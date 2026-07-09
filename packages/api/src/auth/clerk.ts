@@ -35,6 +35,21 @@ export const DEV_TENANT_ID = 'tnt_dev_local';
 export const DEV_ORG_ID = 'org_dev_local';
 export const DEV_BRAND_ID = 'brd_dev_local';
 
+/** Strip inline `#` comments/quotes from env values (common .env.local footgun). */
+function sanitizeEnvText(value: string | undefined, fallback: string): string {
+  const cleaned = (value ?? '')
+    .split('#')[0]
+    ?.trim()
+    .replace(/^['"]|['"]$/g, '')
+    .trim();
+  return cleaned || fallback;
+}
+
+function sanitizeEnvEmail(value: string | undefined, fallback: string): string {
+  const cleaned = sanitizeEnvText(value, fallback).toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned) ? cleaned : fallback;
+}
+
 export const ALL_PERMISSIONS: Permission[] = [
   'events.read',
   'events.write',
@@ -245,6 +260,121 @@ export class ClerkAuthService {
         })
         .execute();
     }
+
+    await this.ensureDevResendProviderRoute();
+  }
+
+  /**
+   * When RESEND_API_KEY is present in local dev, seed a verified sender identity
+   * and an active smoke-verified Resend provider route so Content Studio test
+   * sends and transactional workflows can deliver real mail.
+   */
+  private async ensureDevResendProviderRoute(): Promise<void> {
+    if (!process.env.RESEND_API_KEY?.trim()) return;
+
+    const fromEmail = sanitizeEnvEmail(
+      process.env.RESEND_FROM_EMAIL,
+      'onboarding@resend.dev',
+    );
+    const fromName = sanitizeEnvText(process.env.RESEND_FROM_NAME, 'Tixkit Dev');
+    const senderDomain = fromEmail.includes('@')
+      ? fromEmail.split('@')[1]!.toLowerCase()
+      : 'resend.dev';
+    const now = new Date();
+
+    const existingById = await this.db
+      .selectFrom('brand_sender_identities')
+      .selectAll()
+      .where('id', '=', 'bsi_dev_resend')
+      .executeTakeFirst();
+    const existingByEmail = existingById
+      ? undefined
+      : await this.db
+          .selectFrom('brand_sender_identities')
+          .selectAll()
+          .where('tenant_id', '=', DEV_TENANT_ID)
+          .where('brand_id', '=', DEV_BRAND_ID)
+          .where('email', '=', fromEmail)
+          .executeTakeFirst();
+    const existingSender = existingById ?? existingByEmail;
+
+    if (!existingSender) {
+      await this.db
+        .insertInto('brand_sender_identities')
+        .values({
+          id: 'bsi_dev_resend',
+          tenant_id: DEV_TENANT_ID,
+          brand_id: DEV_BRAND_ID,
+          email: fromEmail,
+          name: fromName,
+          reply_to_email: fromEmail,
+          verified: true,
+          verified_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    } else {
+      // Always re-sync email/name/verified so polluted env values or stale
+      // tickets@example.test rows cannot stick around across restarts.
+      await this.db
+        .updateTable('brand_sender_identities')
+        .set({
+          brand_id: DEV_BRAND_ID,
+          tenant_id: DEV_TENANT_ID,
+          email: fromEmail,
+          name: fromName,
+          reply_to_email: fromEmail,
+          verified: true,
+          verified_at: existingSender.verified_at ?? now,
+          updated_at: now,
+        })
+        .where('id', '=', existingSender.id)
+        .execute();
+    }
+
+    const existingRoute = await this.db
+      .selectFrom('email_provider_routes')
+      .selectAll()
+      .where('brand_id', '=', DEV_BRAND_ID)
+      .where('provider_type', '=', 'resend')
+      .executeTakeFirst();
+
+    if (!existingRoute) {
+      await this.db
+        .insertInto('email_provider_routes')
+        .values({
+          id: 'epr_dev_resend',
+          tenant_id: DEV_TENANT_ID,
+          brand_id: DEV_BRAND_ID,
+          provider_type: 'resend',
+          credentials_ref: 'RESEND_API_KEY',
+          sender_domain: senderDomain,
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['transactional', 'bulk', 'staff', 'system']),
+          status: 'active',
+          smoke_send_verified: true,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      return;
+    }
+
+    // Always keep the active Resend route aligned with the current from-domain.
+    await this.db
+      .updateTable('email_provider_routes')
+      .set({
+        status: 'active',
+        smoke_send_verified: true,
+        sender_domain: senderDomain,
+        credentials_ref: 'RESEND_API_KEY',
+        updated_at: now,
+      })
+      .where('id', '=', existingRoute.id)
+      .execute();
   }
 
   /**

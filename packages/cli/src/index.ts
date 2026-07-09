@@ -19,6 +19,7 @@ import {
   type EmbedPlatform,
   type EmbedTheme,
 } from './embed-generator.js';
+import { findRepoRoot } from './env.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -88,6 +89,12 @@ function parseArg<T extends string>(name: string, fallback: T): T {
 
 function hasFlag(name: string): boolean {
   return args.includes(name);
+}
+
+async function resolveRepoRelativePath(filePath: string): Promise<string> {
+  if (path.isAbsolute(filePath)) return filePath;
+  const repoRoot = await findRepoRoot(process.cwd());
+  return path.join(repoRoot, filePath);
 }
 
 async function main(): Promise<void> {
@@ -181,7 +188,7 @@ async function main(): Promise<void> {
     case 'setup:check': {
       const envFile = parseArg('--env-file', '.env.local');
       const mode = parseArg('--mode', 'local') as 'local' | 'provider' | 'production';
-      const result = await validateEnvFile(envFile, mode);
+      const result = await validateEnvFile(await resolveRepoRelativePath(envFile), mode);
       console.log(formatValidationResult(result));
       process.exit(result.ok ? 0 : 1);
     }
@@ -191,7 +198,12 @@ async function main(): Promise<void> {
       const envFile = parseArg('--env-file', '.env.local');
       const dryRun = hasFlag('--dry-run');
       const writeSecret = !hasFlag('--no-write-secret');
-      const result = await runDevWebhooks({ apiUrl, envFilePath: envFile, dryRun, writeSecret });
+      const result = await runDevWebhooks({
+        apiUrl,
+        envFilePath: await resolveRepoRelativePath(envFile),
+        dryRun,
+        writeSecret,
+      });
       console.log(formatWebhookResult(result));
       if (!result.ok || dryRun) {
         process.exit(result.ok ? 0 : 1);

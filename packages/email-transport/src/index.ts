@@ -182,8 +182,23 @@ type SmsHttpConfig = {
   baseUrl?: string;
 };
 
+function sanitizeEnvCredential(value: string | undefined): string {
+  if (!value) return '';
+  // Strip inline comments and surrounding quotes that often leak from .env.local.
+  return value
+    .split('#')[0]
+    ?.trim()
+    .replace(/^['"]|['"]$/g, '')
+    .trim() ?? '';
+}
+
 function credentialValue(credentialsRef: string, fallbackEnvName: string): string {
-  return process.env[credentialsRef] ?? process.env[fallbackEnvName] ?? credentialsRef;
+  const fromRef = sanitizeEnvCredential(process.env[credentialsRef]);
+  if (fromRef) return fromRef;
+  const fromFallback = sanitizeEnvCredential(process.env[fallbackEnvName]);
+  if (fromFallback) return fromFallback;
+  // credentialsRef may itself be a raw key in tests/dev.
+  return sanitizeEnvCredential(credentialsRef) || credentialsRef;
 }
 
 async function parseJsonResponse(response: Response): Promise<Record<string, unknown>> {
@@ -407,6 +422,143 @@ export class SmtpEmailTransport implements EmailTransport {
 }
 
 /**
+ * Resend HTTP transport. Sends through https://api.resend.com/emails.
+ * credentialsRef may be an env var name (default RESEND_API_KEY) or a raw API key.
+ */
+export class ResendEmailTransport implements EmailTransport {
+  providerName = 'resend';
+  private apiKey: string;
+  private baseUrl: string;
+
+  constructor(credentialsRef = 'RESEND_API_KEY', baseUrl = 'https://api.resend.com') {
+    this.apiKey = credentialValue(credentialsRef, 'RESEND_API_KEY');
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+  }
+
+  async send(input: SendEmailInput): Promise<SendEmailResult> {
+    if (!this.apiKey) {
+      throw new Error('Resend API key is not configured');
+    }
+
+    const from = input.from.name ? `${input.from.name} <${input.from.email}>` : input.from.email;
+    const replyTo = input.replyTo
+      ? input.replyTo.name
+        ? `${input.replyTo.name} <${input.replyTo.email}>`
+        : input.replyTo.email
+      : undefined;
+
+    const payload: Record<string, unknown> = {
+      from,
+      to: input.to.map((recipient) =>
+        recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email,
+      ),
+      subject: input.subject,
+      html: input.html,
+    };
+    if (input.text) payload.text = input.text;
+    if (replyTo) payload.reply_to = replyTo;
+    if (input.headers && Object.keys(input.headers).length > 0) {
+      payload.headers = input.headers;
+    }
+    if (input.tags && input.tags.length > 0) {
+      payload.tags = input.tags.map((tag) => ({ name: tag.name, value: tag.value }));
+    }
+    if (input.attachments && input.attachments.length > 0) {
+      payload.attachments = input.attachments.map((attachment) => ({
+        filename: attachment.filename,
+        content: attachmentContentBase64(attachment.content, attachment.contentEncoding),
+        content_type: attachment.contentType,
+      }));
+    }
+
+    const response = await fetch(`${this.baseUrl}/emails`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': input.idempotencyKey,
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = await parseJsonResponse(response);
+    if (!response.ok) {
+      const message =
+        typeof body.message === 'string'
+          ? body.message
+          : typeof body.name === 'string'
+            ? body.name
+            : `Resend send failed with status ${response.status}`;
+      throw new Error(message);
+    }
+
+    const providerMessageId =
+      typeof body.id === 'string'
+        ? body.id
+        : typeof (body.data as { id?: unknown } | undefined)?.id === 'string'
+          ? (body.data as { id: string }).id
+          : undefined;
+
+    return {
+      deliveryId: input.deliveryId,
+      provider: 'resend',
+      providerMessageId,
+      status: 'accepted',
+      attemptedFallbackProviders: [],
+      sentAt: new Date().toISOString(),
+    };
+  }
+}
+
+function attachmentContentBase64(content: string | Uint8Array, contentEncoding?: 'base64'): string {
+  if (typeof content === 'string') {
+    if (contentEncoding === 'base64') return content;
+    return Buffer.from(content, 'utf8').toString('base64');
+  }
+  return Buffer.from(content).toString('base64');
+}
+
+/**
+ * Build an email transport for a configured provider route.
+ * Unknown providers fall back to capture so local/dev stays safe unless Resend is configured.
+ */
+export function buildEmailTransport(
+  providerType: string,
+  credentialsRef: string,
+  senderDomain?: string,
+): EmailTransport & { providerName?: string } {
+  switch (providerType) {
+    case 'resend':
+      return new ResendEmailTransport(credentialsRef);
+    case 'opencore_email_sdk':
+      return new OpenCoreEmailSdkTransport(credentialsRef, senderDomain ?? 'localhost');
+    case 'smtp':
+      return new SmtpEmailTransport(
+        process.env.SMTP_HOST ?? 'localhost',
+        Number(process.env.SMTP_PORT ?? '587'),
+        process.env.SMTP_USERNAME ?? '',
+        process.env.SMTP_PASSWORD ?? '',
+      );
+    case 'capture':
+      return new CaptureEmailTransport();
+    default:
+      if (process.env.RESEND_API_KEY) {
+        return new ResendEmailTransport('RESEND_API_KEY');
+      }
+      return new CaptureEmailTransport();
+  }
+}
+
+/**
+ * Default API/worker transport: Resend when RESEND_API_KEY is set, otherwise capture.
+ */
+export function createDefaultEmailTransport(): EmailTransport & { providerName?: string } {
+  if (process.env.RESEND_API_KEY) {
+    return new ResendEmailTransport('RESEND_API_KEY');
+  }
+  return new CaptureEmailTransport();
+}
+
+/**
  * Provider route selector. Chooses the appropriate transport based on
  * brand configuration, message category, and fallback rules.
  */
@@ -459,7 +611,7 @@ export function validateProviderFields(
   // Different providers have different field support
   const providerCapabilities: Record<string, string[]> = {
     opencore_email_sdk: ['attachments', 'tags', 'metadata', 'headers'],
-    resend: ['attachments', 'tags', 'metadata'],
+    resend: ['attachments', 'tags', 'metadata', 'headers'],
     postmark: ['attachments', 'metadata'],
     ses: ['attachments', 'tags', 'metadata', 'headers'],
     sendgrid: ['attachments', 'categories', 'custom_args'],

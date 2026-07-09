@@ -15,6 +15,7 @@ import {
 } from '@tixkit/content-core';
 import {
   BrandRepository,
+  BrandSenderIdentityRepository,
   ContentRepository,
   EmailProviderRouteRepository,
   EventRepository,
@@ -30,14 +31,17 @@ import {
   ValidationError,
   type EmailTransport,
   type Principal,
+  type SendEmailResult,
   type SmsTransport,
 } from '@tixkit/domain';
+import { buildEmailTransport } from '@tixkit/email-transport';
 import {
   PUCK_EVENT_PAGE_PROVIDER,
   normalizeEventPageDocumentV2,
   normalizeOrMigrateEventPageDocumentV2,
   resolveEventPageDocumentV2Discovery,
   validateEventPageDocumentV2,
+  type CreateDefaultEventPageDocumentInput,
   type EventPageDiscoveryCard,
   type EventPagePuckData,
   type EventPageRenderContext,
@@ -513,8 +517,8 @@ async function sendEmailTestThroughProvider(input: {
   recipient: string;
   rendered: RenderedEmailTemplate;
   emailDocument: EmailTemplateDocument;
-  transport: EmailTransport;
-}): Promise<void> {
+  transport?: EmailTransport;
+}): Promise<SendEmailResult> {
   const routes = await new EmailProviderRouteRepository(input.db).findActiveByBrand(
     input.document.brandId,
   );
@@ -524,6 +528,41 @@ async function sendEmailTestThroughProvider(input: {
       code: 'email_provider_route_unavailable',
       brandId: input.document.brandId,
     });
+  }
+
+  const senderRepo = new BrandSenderIdentityRepository(input.db);
+  const documentFromEmail = input.emailDocument.settings.sender.fromEmail?.trim().toLowerCase();
+  const verifiedSender =
+    (documentFromEmail
+      ? await senderRepo.findVerifiedByBrandAndEmail(input.document.brandId, documentFromEmail)
+      : undefined) ??
+    (await senderRepo.findVerifiedByBrandAndDomain(
+      input.document.brandId,
+      route.sender_domain,
+    )) ??
+    (await senderRepo.findVerifiedByBrand(input.document.brandId));
+
+  // Always build from the brand route. Injected transports are only for capture
+  // routes used by unit tests; live providers (resend/smtp/...) go through the network.
+  const routeTransport = buildEmailTransport(
+    route.provider_type,
+    route.credentials_ref,
+    route.sender_domain,
+  );
+  const transport =
+    route.provider_type === 'capture' && input.transport ? input.transport : routeTransport;
+
+  // Live providers must never fall back to template placeholders like tickets@example.test.
+  if (route.provider_type !== 'capture' && !verifiedSender) {
+    throw new ValidationError(
+      'Email test send requires a verified sender identity for this brand. Set RESEND_FROM_EMAIL to a Resend-allowed address (onboarding@resend.dev or your verified domain) and restart the API.',
+      {
+        code: 'email_sender_identity_unavailable',
+        brandId: input.document.brandId,
+        provider: route.provider_type,
+        senderDomain: route.sender_domain,
+      },
+    );
   }
 
   const send = createEmailTestSend(input.emailDocument, input.rendered, {
@@ -540,12 +579,45 @@ async function sendEmailTestThroughProvider(input: {
       eventId: input.document.eventId,
     },
   });
-  const result = await input.transport.send(send);
-  if (result.status === 'failed') {
-    throw new ValidationError('Email test send provider rejected the message', {
-      code: 'email_provider_send_failed',
-      provider: result.provider,
-    });
+  if (verifiedSender) {
+    send.from = {
+      email: verifiedSender.email,
+      name: verifiedSender.name || send.from.name,
+    };
+    if (verifiedSender.reply_to_email) {
+      send.replyTo = {
+        email: verifiedSender.reply_to_email,
+        name: verifiedSender.name || send.from.name,
+      };
+    }
+  }
+
+  try {
+    const result = await transport.send(send);
+    if (result.status === 'failed') {
+      throw new ValidationError('Email test send provider rejected the message', {
+        code: 'email_provider_send_failed',
+        provider: result.provider,
+      });
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    const message =
+      error instanceof Error ? error.message : 'Email test send provider rejected the message';
+    const isResendDomainError =
+      route.provider_type === 'resend' &&
+      /domain|verify|resend\.com\/domains|only send testing emails/i.test(message);
+    throw new ValidationError(
+      isResendDomainError
+        ? `${message} From ${send.from.email}: use your Resend account email as the test recipient with onboarding@resend.dev, or set RESEND_FROM_EMAIL to an address on a verified domain at https://resend.com/domains.`
+        : message,
+      {
+        code: 'email_provider_send_failed',
+        provider: route.provider_type,
+        fromEmail: send.from.email,
+      },
+    );
   }
 }
 
@@ -695,6 +767,8 @@ function toPublicContentPage(input: {
   document: ContentDocument;
   version: ContentDocumentVersion;
   context: EventPageRenderContext;
+  event: PublicEventRow;
+  host?: string;
 }): PublicContentPage {
   if (
     input.document.channel !== 'event_page' ||
@@ -703,7 +777,12 @@ function toPublicContentPage(input: {
   ) {
     throw new NotFoundError('ContentDocument', input.document.eventId ?? input.document.id);
   }
-  const pageDocument = normalizeEventPageDocumentV2(input.version.contentJson);
+  const fallback = defaultEventPageDocumentInputForPublicEvent(input.event, input.host);
+  // Prefer migrate/materialize so published leftovers (merge tags, #tickets CTAs, relative paths)
+  // are repaired with live event context before public render validation.
+  const pageDocument =
+    normalizeOrMigrateEventPageDocumentV2(input.version.contentJson, fallback) ??
+    normalizeEventPageDocumentV2(input.version.contentJson);
   if (!pageDocument) {
     throw new ValidationError('Published event page is not a valid Puck event-page document', {
       code: 'invalid_event_page_document',
@@ -718,6 +797,7 @@ function toPublicContentPage(input: {
     });
   }
 
+  const discovery = resolveEventPageDocumentV2Discovery(pageDocument, input.context);
   return {
     document: {
       eventId: input.document.eventId,
@@ -737,7 +817,11 @@ function toPublicContentPage(input: {
       provider: PUCK_EVENT_PAGE_PROVIDER,
       puckData: pageDocument.editor.data,
       settings: pageDocument.settings,
-      discovery: resolveEventPageDocumentV2Discovery(pageDocument, input.context),
+      // Prefer the request-scoped public URL (custom domain / checkout host) over stored path.
+      discovery: {
+        ...discovery,
+        publicPath: publicEventUrl(input.event, input.host) || discovery.publicPath,
+      },
     },
   };
 }
@@ -822,6 +906,95 @@ function priceLabel(row: {
     currency: row.currency,
   }).format(cents / 100);
   return row.kind === 'donation' ? `From ${formatted}` : formatted;
+}
+
+function parseEventVenue(
+  value: PublicEventRow['venue'],
+): CreateDefaultEventPageDocumentInput['venue'] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const venue = parsed as Record<string, unknown>;
+    const addressParts = [
+      typeof venue.address === 'string' ? venue.address : undefined,
+      typeof venue.address1 === 'string' ? venue.address1 : undefined,
+      typeof venue.address2 === 'string' ? venue.address2 : undefined,
+    ].filter(Boolean);
+    return {
+      name: typeof venue.name === 'string' ? venue.name : undefined,
+      address: addressParts.length > 0 ? addressParts.join(', ') : undefined,
+      city: typeof venue.city === 'string' ? venue.city : undefined,
+      region: typeof venue.region === 'string' ? venue.region : undefined,
+      country: typeof venue.country === 'string' ? venue.country : undefined,
+      mapUrl: typeof venue.mapUrl === 'string' ? venue.mapUrl : undefined,
+    };
+  } catch {
+    return { name: value };
+  }
+}
+
+function defaultEventPageDocumentInputForPublicEvent(
+  event: PublicEventRow,
+  host?: string,
+): CreateDefaultEventPageDocumentInput {
+  const publicPath = event.slug ? `/e/${event.slug}` : `/e/${event.id}`;
+  const publicUrl = host ? `https://${host}${publicPath}` : publicPath;
+  const startsAt = new Date(event.starts_at);
+  const endsAt = event.ends_at ? new Date(event.ends_at) : undefined;
+  return {
+    eventId: event.id,
+    eventTitle: event.title,
+    eventDescription: event.description ?? undefined,
+    startsAt: Number.isNaN(startsAt.getTime()) ? String(event.starts_at) : startsAt.toISOString(),
+    endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt.toISOString() : undefined,
+    timezone: event.timezone,
+    venue: parseEventVenue(event.venue),
+    coverImageUrl: event.cover_image_url ?? undefined,
+    coverImageAlt: event.title,
+    publicUrl,
+    locale: 'en',
+  };
+}
+
+async function repairPublishedEventPageVersion(input: {
+  repo: ContentRepository;
+  event: PublicEventRow;
+  version: ContentDocumentVersion;
+  host?: string;
+}): Promise<ContentDocumentVersion> {
+  const fallback = defaultEventPageDocumentInputForPublicEvent(input.event, input.host);
+  const repaired = normalizeOrMigrateEventPageDocumentV2(input.version.contentJson, fallback);
+  if (!repaired) return input.version;
+
+  const before = JSON.stringify(input.version.contentJson);
+  const after = JSON.stringify(repaired);
+  if (before === after) {
+    return {
+      ...input.version,
+      schemaVersion: repaired.schemaVersion,
+      contentJson: repaired,
+    };
+  }
+
+  const validation = validateEventPageDocumentV2(repaired);
+  await input.repo.updateVersionContent({
+    versionId: input.version.id,
+    contentJson: repaired,
+    schemaVersion: repaired.schemaVersion,
+    renderedHtml: null,
+    renderedText: null,
+    validation,
+  });
+
+  return {
+    ...input.version,
+    schemaVersion: repaired.schemaVersion,
+    contentJson: repaired,
+    renderedHtml: undefined,
+    renderedText: undefined,
+    validation,
+  };
 }
 
 export const contentRoutes: FastifyPluginAsync = async (app) => {
@@ -1085,7 +1258,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       const rendered = await renderEmailTemplate(emailDocument, body.context);
-      await sendEmailTestThroughProvider({
+      const providerResult = await sendEmailTestThroughProvider({
         db,
         document,
         version,
@@ -1093,6 +1266,42 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         rendered,
         emailDocument,
         transport: app.context.emailTransport,
+      });
+      const outputForEmail = {
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+      };
+      const send = await repo().recordTestSend({
+        tenantId: principalTenant(request.principal!),
+        documentId,
+        versionId: version.id,
+        channel: document.channel,
+        recipient: body.recipient,
+        status: providerResult.status === 'failed' ? 'failed' : 'captured',
+        renderedSubject: outputForEmail.subject,
+        renderedHtml: outputForEmail.html,
+        renderedText: outputForEmail.text,
+      });
+      const checksum = checksumRenderOutput(outputForEmail);
+      const renderArtifact = await repo().recordRenderArtifact({
+        tenantId: principalTenant(request.principal!),
+        documentId,
+        versionId: version.id,
+        channel: document.channel,
+        outputType: 'test_send',
+        artifactRef: `content-test-send:${send.id}`,
+        checksum,
+      });
+      return reply.status(202).send({
+        testSend: send,
+        output: outputForEmail,
+        renderArtifact,
+        provider: {
+          name: providerResult.provider,
+          messageId: providerResult.providerMessageId,
+          status: providerResult.status,
+        },
       });
     }
     if (document.channel === 'sms') {
@@ -1308,7 +1517,19 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
       const cached = readPublicContentPageCache(publicContentPageCache, cacheKey, now);
       if (cached) return cached;
     }
-    const page = toPublicContentPage({ ...result, context: await contextForEvent(event, host) });
+    const repairedVersion = await repairPublishedEventPageVersion({
+      repo: new ContentRepository(db),
+      event,
+      version: result.version,
+      host,
+    });
+    const page = toPublicContentPage({
+      document: result.document,
+      version: repairedVersion,
+      context: await contextForEvent(event, host),
+      event,
+      host,
+    });
     if (cacheKey) rememberPublicContentPage(publicContentPageCache, cacheKey, page, now + ttlMs);
     return page;
   }
@@ -1321,7 +1542,8 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     try {
       return await loadPublicPageForEvent(event, locale, host);
     } catch (err) {
-      if (err instanceof NotFoundError) return null;
+      // Bootstrap must still load event + tickets when published content is invalid.
+      if (err instanceof NotFoundError || err instanceof ValidationError) return null;
       throw err;
     }
   }

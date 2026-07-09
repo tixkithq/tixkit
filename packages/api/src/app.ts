@@ -45,14 +45,8 @@ import {
   registerObservability,
 } from './observability.js';
 import type Stripe from 'stripe';
-import type {
-  EmailTransport,
-  SendEmailInput,
-  SendEmailResult,
-  SendSmsInput,
-  SendSmsResult,
-  SmsTransport,
-} from '@tixkit/domain';
+import type { EmailTransport, SendSmsInput, SendSmsResult, SmsTransport } from '@tixkit/domain';
+import { createDefaultEmailTransport } from '@tixkit/email-transport';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
 type CorsOriginValidatorOptions = {
@@ -71,19 +65,6 @@ export type AppContext = {
   smsTransport: SmsTransport;
   stripe?: Stripe;
 };
-
-class ApiCaptureEmailTransport implements EmailTransport {
-  async send(input: SendEmailInput): Promise<SendEmailResult> {
-    return {
-      deliveryId: input.deliveryId,
-      provider: 'capture',
-      providerMessageId: `cap_${ulid()}`,
-      status: 'accepted',
-      attemptedFallbackProviders: [],
-      sentAt: new Date().toISOString(),
-    };
-  }
-}
 
 class ApiCaptureSmsTransport implements SmsTransport {
   async send(input: SendSmsInput): Promise<SendSmsResult> {
@@ -352,7 +333,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   const pricingEngine = new PricingEngine();
   const inventoryService = new InventoryService(db);
   const qrService = new QrService();
-  const emailTransport = new ApiCaptureEmailTransport();
+  const emailTransport = createDefaultEmailTransport();
   const smsTransport = new ApiCaptureSmsTransport();
   const authService = createAuthProvider(
     {

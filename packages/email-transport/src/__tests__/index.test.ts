@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CaptureEmailTransport,
   MockEmailTransport,
   FallbackEmailTransport,
   OpenCoreEmailSdkTransport,
+  ResendEmailTransport,
+  buildEmailTransport,
+  createDefaultEmailTransport,
   validateProviderFields,
 } from '../index.js';
 import type { SendEmailInput } from '@tixkit/domain';
@@ -171,12 +174,121 @@ describe('validateProviderFields', () => {
     expect(result.unsupportedFields).toContain('tags');
   });
 
-  it('should flag unsupported headers field', () => {
+  it('should allow headers for resend', () => {
     const input = baseInput({
       headers: { 'X-Custom': 'value' },
     });
     const result = validateProviderFields(input, 'resend');
-    expect(result.valid).toBe(false);
-    expect(result.unsupportedFields).toContain('headers');
+    expect(result.valid).toBe(true);
+    expect(result.unsupportedFields).toHaveLength(0);
+  });
+});
+
+describe('ResendEmailTransport', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it('sends through the Resend emails API', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_key');
+    const fetchMock = vi.fn(async () => Response.json({ id: 'email_123' }, { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const transport = new ResendEmailTransport('RESEND_API_KEY');
+    const result = await transport.send(
+      baseInput({
+        from: { email: 'onboarding@resend.dev', name: 'Tixkit' },
+        text: 'Thanks',
+        replyTo: { email: 'support@example.com' },
+        tags: [{ name: 'template', value: 'order-confirmed' }],
+        attachments: [
+          {
+            filename: 'ticket.pdf',
+            contentType: 'application/pdf',
+            content: 'cGRm',
+            contentEncoding: 'base64',
+          },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      provider: 'resend',
+      providerMessageId: 'email_123',
+      status: 'accepted',
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = call;
+    expect(url).toBe('https://api.resend.com/emails');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer re_test_key',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'idem_1',
+    });
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      from: 'Tixkit <onboarding@resend.dev>',
+      to: ['buyer@example.com'],
+      subject: 'Your tickets are confirmed',
+      html: '<h1>Thank you</h1>',
+      text: 'Thanks',
+      reply_to: 'support@example.com',
+      tags: [{ name: 'template', value: 'order-confirmed' }],
+      attachments: [
+        {
+          filename: 'ticket.pdf',
+          content: 'cGRm',
+          content_type: 'application/pdf',
+        },
+      ],
+    });
+  });
+
+  it('throws when Resend rejects the message', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_key');
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({ message: 'Invalid from address', name: 'validation_error' }, { status: 422 }),
+    ) as unknown as typeof fetch;
+
+    const transport = new ResendEmailTransport('RESEND_API_KEY');
+    await expect(transport.send(baseInput())).rejects.toThrow('Invalid from address');
+  });
+});
+
+describe('buildEmailTransport', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('returns a Resend transport for provider_type resend', () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_key');
+    const transport = buildEmailTransport('resend', 'RESEND_API_KEY');
+    expect(transport).toBeInstanceOf(ResendEmailTransport);
+  });
+
+  it('returns capture when provider is unknown and Resend is not configured', () => {
+    vi.stubEnv('RESEND_API_KEY', '');
+    const transport = buildEmailTransport('unknown', 'unused');
+    expect(transport).toBeInstanceOf(CaptureEmailTransport);
+  });
+});
+
+describe('createDefaultEmailTransport', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('prefers Resend when RESEND_API_KEY is set', () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_key');
+    expect(createDefaultEmailTransport()).toBeInstanceOf(ResendEmailTransport);
+  });
+
+  it('falls back to capture without RESEND_API_KEY', () => {
+    vi.stubEnv('RESEND_API_KEY', '');
+    expect(createDefaultEmailTransport()).toBeInstanceOf(CaptureEmailTransport);
   });
 });

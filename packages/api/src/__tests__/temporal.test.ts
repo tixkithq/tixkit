@@ -6,15 +6,31 @@ const temporalClientMocks = vi.hoisted(() => ({
   client: vi.fn(),
 }));
 
+const temporalOtelMocks = vi.hoisted(() => ({
+  failConstructor: false,
+  OpenTelemetryWorkflowClientInterceptor: vi.fn(function OpenTelemetryWorkflowClientInterceptor() {
+    if (temporalOtelMocks.failConstructor) {
+      throw new TypeError("Cannot read properties of undefined (reading 'AlwaysOn')");
+    }
+    return { interceptor: 'otel' };
+  }),
+}));
+
 vi.mock('@temporalio/client', () => ({
   Connection: { connect: temporalClientMocks.connect },
   Client: temporalClientMocks.client,
+}));
+
+vi.mock('@temporalio/interceptors-opentelemetry', () => ({
+  OpenTelemetryWorkflowClientInterceptor: temporalOtelMocks.OpenTelemetryWorkflowClientInterceptor,
 }));
 
 afterEach(() => {
   vi.unstubAllEnvs();
   temporalClientMocks.connect.mockClear();
   temporalClientMocks.client.mockClear();
+  temporalOtelMocks.failConstructor = false;
+  temporalOtelMocks.OpenTelemetryWorkflowClientInterceptor.mockClear();
 });
 
 describe('TemporalClient connection', () => {
@@ -30,6 +46,29 @@ describe('TemporalClient connection', () => {
       expect.not.objectContaining({
         interceptors: expect.anything(),
       }),
+    );
+  });
+
+  it('continues without workflow tracing when the local OpenTelemetry interceptor fails', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    temporalOtelMocks.failConstructor = true;
+
+    await TemporalClient.connect();
+
+    expect(temporalOtelMocks.OpenTelemetryWorkflowClientInterceptor).toHaveBeenCalledTimes(1);
+    expect(temporalClientMocks.client).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        interceptors: expect.anything(),
+      }),
+    );
+  });
+
+  it('fails startup when the production OpenTelemetry interceptor fails', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    temporalOtelMocks.failConstructor = true;
+
+    await expect(TemporalClient.connect()).rejects.toThrow(
+      "Cannot read properties of undefined (reading 'AlwaysOn')",
     );
   });
 });

@@ -52,7 +52,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.20.0",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "tsx": "^4.22.0",
     "vitest": "^4.1.0"
   }

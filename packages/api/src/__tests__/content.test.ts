@@ -519,8 +519,8 @@ describe('content routes', () => {
           id: 'epr_content_email',
           tenant_id: 'tnt_1',
           brand_id: 'brd_1',
-          provider_type: 'resend',
-          credentials_ref: 'secret://resend/content-email',
+          provider_type: 'capture',
+          credentials_ref: 'capture',
           sender_domain: 'example.test',
           priority: 0,
           is_fallback: false,
@@ -1695,13 +1695,7 @@ describe('content routes', () => {
       expect(payload.page.provider).toBe('@puckeditor/core');
       expect(
         payload.page.puckData.content.map((component: { type: string }) => component.type),
-      ).toEqual([
-        'Hero',
-        'EventDetails',
-        'Schedule',
-        'Venue',
-        'FAQ',
-      ]);
+      ).toEqual(['Hero', 'EventDetails', 'Schedule', 'Venue', 'FAQ']);
       expect(payload.page.puckData.content).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1714,6 +1708,120 @@ describe('content routes', () => {
       expect(JSON.stringify(payload)).not.toContain('tnt_1');
       expect(JSON.stringify(payload)).not.toContain('stored html must not render');
     }
+  });
+
+  it('repairs published legacy event-page documents during public load', async () => {
+    const legacyContent = {
+      settings: {
+        locale: 'en',
+        publicPath: '/e/legacy-public-page',
+        discovery: { summary: 'Legacy public copy.', tags: ['legacy'] },
+      },
+      blocks: [
+        {
+          id: 'hero-legacy',
+          type: 'hero',
+          headline: 'Legacy public page',
+          body: 'Legacy page copy.',
+        },
+        { id: 'tickets-legacy', type: 'tickets', title: 'Tickets' },
+      ],
+    };
+    const { db } = createContentDb({
+      events: [
+        {
+          id: 'evt_legacy_public',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'legacy-public-page',
+          title: 'Legacy public fallback title',
+          description: 'Fallback copy from the event.',
+          status: 'published',
+          visibility: 'public',
+          starts_at: new Date('2026-07-17T19:00:00.000Z'),
+          ends_at: null,
+          timezone: 'America/Chicago',
+          venue: JSON.stringify({ name: 'The Salt Shed', city: 'Chicago' }),
+        },
+      ],
+      ticket_types: [],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_legacy_public',
+          channel: 'event_page',
+          event_id: 'evt_legacy_public',
+          key: 'main',
+          name: 'Legacy public event page',
+          status: 'published',
+          published_version_id: 'cver_legacy_public',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_legacy_public',
+          document_id: 'cdoc_legacy_public',
+          version_number: 1,
+          status: 'published',
+          schema_version: 1,
+          subject: 'Legacy public page',
+          preview_text: 'Legacy public copy.',
+          content_json: JSON.stringify(legacyContent),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          published_at: new Date('2026-06-02T00:00:00.000Z'),
+        }),
+      ],
+    });
+    const app = await setupPublicContentApp(db);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_legacy_public/page',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.json();
+    expect(payload.page.provider).toBe('@puckeditor/core');
+    expect(payload.page.puckData.content).toEqual([
+      expect.objectContaining({
+        type: 'Hero',
+        props: expect.objectContaining({
+          id: 'hero-legacy',
+          headline: 'Legacy public page',
+          body: 'Legacy page copy.',
+        }),
+      }),
+    ]);
+    expect(payload.page.puckData.root.props).toEqual(
+      expect.objectContaining({
+        title: 'Legacy public fallback title',
+        description: 'Fallback copy from the event.',
+      }),
+    );
+
+    const repaired = await db
+      .selectFrom('content_document_versions')
+      .select(['schema_version', 'content_json', 'rendered_html', 'rendered_text'])
+      .where('id', '=', 'cver_legacy_public')
+      .executeTakeFirstOrThrow();
+    expect(repaired.schema_version).toBe(2);
+    expect(repaired.rendered_html).toBeNull();
+    expect(repaired.rendered_text).toBeNull();
+    expect(JSON.parse(repaired.content_json)).toMatchObject({
+      schemaVersion: 2,
+      editor: {
+        provider: '@puckeditor/core',
+        data: {
+          content: [
+            expect.objectContaining({
+              type: 'Hero',
+              props: expect.objectContaining({ headline: 'Legacy public page' }),
+            }),
+          ],
+        },
+      },
+    });
+    await app.close();
   });
 
   it('caches public Puck event pages by event public revision', async () => {
@@ -1796,20 +1904,20 @@ describe('content routes', () => {
     expect(
       first
         .json()
-        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero').props
-        .headline,
+        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero')
+        .props.headline,
     ).toBe('Original headline');
     expect(
       second
         .json()
-        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero').props
-        .headline,
+        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero')
+        .props.headline,
     ).toBe('Original headline');
     expect(
       third
         .json()
-        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero').props
-        .headline,
+        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero')
+        .props.headline,
     ).toBe('Updated headline');
     await app.close();
   });

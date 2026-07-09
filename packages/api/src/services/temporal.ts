@@ -304,9 +304,16 @@ async function createWorkflowClientInterceptors() {
     return [];
   }
 
-  const { OpenTelemetryWorkflowClientInterceptor } =
-    await import('@temporalio/interceptors-opentelemetry');
-  return [new OpenTelemetryWorkflowClientInterceptor()];
+  try {
+    const { OpenTelemetryWorkflowClientInterceptor } =
+      await import('@temporalio/interceptors-opentelemetry');
+    return [new OpenTelemetryWorkflowClientInterceptor()];
+  } catch (err) {
+    if (process.env.NODE_ENV === 'production') {
+      throw err;
+    }
+    return [];
+  }
 }
 
 function isWorkflowAlreadyStartedError(err: unknown): boolean {

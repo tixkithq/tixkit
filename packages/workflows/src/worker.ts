@@ -155,11 +155,17 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
       (ctx) => ({ inbound: new TixkitActivityMetricsInterceptor(ctx, observability.metrics) }),
     ];
     if (!tracingDisabled) {
-      const { OpenTelemetryActivityInboundInterceptor } =
-        await import('@temporalio/interceptors-opentelemetry');
-      activityInterceptors.unshift((ctx) => ({
-        inbound: new OpenTelemetryActivityInboundInterceptor(ctx),
-      }));
+      try {
+        const { OpenTelemetryActivityInboundInterceptor } =
+          await import('@temporalio/interceptors-opentelemetry');
+        activityInterceptors.unshift((ctx) => ({
+          inbound: new OpenTelemetryActivityInboundInterceptor(ctx),
+        }));
+      } catch (err) {
+        if (process.env.NODE_ENV === 'production') {
+          throw err;
+        }
+      }
     }
 
     const workerOptions = {
