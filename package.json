@@ -75,13 +75,12 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
-    "@types/node": "^26.1.0",
+    "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "oxfmt": "0.58.0",
     "oxlint": "^1.73.0",
     "turbo": "^2.10.4",
-    "typescript": "6.0.3",
-    "typescript-tsgo": "npm:typescript@7.0.1-rc",
+    "typescript": "7.0.2",
     "vitest": "^4.1.10"
   },
   "engines": {
@@ -107,6 +106,7 @@
     "@vanilla-extract/integration": "8.0.10"
   },
   "patchedDependencies": {
-    "@react-email/editor@1.6.0": "patches/@react-email%2Feditor@1.6.0.patch"
+    "@react-email/editor@1.6.0": "patches/@react-email%2Feditor@1.6.0.patch",
+    "next@16.2.10": "patches/next@16.2.10.patch"
   }
 }

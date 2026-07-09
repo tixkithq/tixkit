@@ -1,0 +1,26 @@
+diff --git a/dist/esm/lib/verify-typescript-setup.js b/dist/esm/lib/verify-typescript-setup.js
+index 0000000..0000000 100644
+--- a/dist/esm/lib/verify-typescript-setup.js
++++ b/dist/esm/lib/verify-typescript-setup.js
+@@ -12,7 +12,7 @@
+ import { missingDepsError } from './typescript/missingDependencyError';
+ import { resolveFrom } from './resolve-from';
+ const typescriptPackage = {
+-    file: 'typescript/lib/typescript.js',
++    file: 'typescript/lib/version.cjs',
+     pkg: 'typescript',
+     exportsRestrict: true
+ };
+diff --git a/dist/lib/verify-typescript-setup.js b/dist/lib/verify-typescript-setup.js
+index 0000000..0000000 100644
+--- a/dist/lib/verify-typescript-setup.js
++++ b/dist/lib/verify-typescript-setup.js
+@@ -68,7 +68,7 @@
+     return newObj;
+ }
+ const typescriptPackage = {
+-    file: 'typescript/lib/typescript.js',
++    file: 'typescript/lib/version.cjs',
+     pkg: 'typescript',
+     exportsRestrict: true
+ };
