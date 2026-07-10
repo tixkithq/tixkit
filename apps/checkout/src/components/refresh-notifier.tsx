@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { RefreshCwIcon } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 import { publicApi } from '@/lib/api';
 
 type Props = {

@@ -9,7 +9,12 @@ Embed Contract v1 is owned by `@tixkit/embed-core`. The CLI and interactive `doc
 Load the widget script once per page, then mount one or more custom elements.
 
 ```html
-<script type="module" src="https://cdn.tixkit.com/widget/tixkit-widget.js"></script>
+<script
+  type="module"
+  src="https://cdn.tixkit.com/widget/v0.1.0/tixkit-widget-0.1.0.js"
+  integrity="sha384-dekV7a3DQg8bDdculs4uy24zS9CiyMfb4QpROp1Pb878LK63cHRC212CsRjzESAB"
+  crossorigin="anonymous"
+></script>
 ```
 
 For local development against the checkout app:
@@ -183,7 +188,12 @@ Neither peer uses `postMessage(..., '*')`. The widget sends to the checkout orig
 Load the script once and mount multiple elements.
 
 ```html
-<script type="module" src="https://cdn.tixkit.com/widget/tixkit-widget.js"></script>
+<script
+  type="module"
+  src="https://cdn.tixkit.com/widget/v0.1.0/tixkit-widget-0.1.0.js"
+  integrity="sha384-dekV7a3DQg8bDdculs4uy24zS9CiyMfb4QpROp1Pb878LK63cHRC212CsRjzESAB"
+  crossorigin="anonymous"
+></script>
 
 <tixkit-widget brand="brand_demo" event="evt_friday" products="tt_friday"></tixkit-widget>
 <tixkit-widget brand="brand_demo" event="evt_saturday" products="tt_saturday"></tixkit-widget>
@@ -210,19 +220,21 @@ At minimum, allow the widget script and checkout iframe origins. Replace the ori
 ```http
 Content-Security-Policy:
   default-src 'self';
-  script-src 'self' https://cdn.tixkit.com https://www.googletagmanager.com https://connect.facebook.net;
+  script-src 'self' https://cdn.tixkit.com;
   frame-src https://checkout.tixkit.com;
-  child-src https://checkout.tixkit.com;
-  connect-src 'self' https://checkout.tixkit.com https://www.google-analytics.com https://www.googletagmanager.com https:;
-  style-src 'self' 'unsafe-inline';
-  img-src 'self' data: https:;
+  connect-src 'self' https://checkout.tixkit.com;
+  style-src 'self';
+  img-src 'self' data:;
+  object-src 'none';
+  base-uri 'self';
   frame-ancestors 'self';
 ```
 
 Notes:
 
-- `style-src 'unsafe-inline'` is currently required because the widget injects shadow-DOM styles at runtime and supports CSS custom property overrides.
-- Add your brand custom checkout domain to `frame-src`, `child-src`, and `connect-src` when using white-label checkout.
+- The widget uses constructable shadow-DOM stylesheets in supported browsers, so `'unsafe-inline'` is not required.
+- Add only your selected custom checkout origin to `frame-src` and `connect-src` when using white-label checkout.
+- Generate the exact feature profile with `generateCspProfile`; marketing domains appear only when marketing integrations are enabled.
 - If the host page uses a strict `script-src` nonce, serve the widget script from an allowed external origin instead of inlining it.
 - The checkout iframe has its own CSP; host-page CSP controls whether the frame can load, not what checkout can load inside the frame.
 - If widget host marketing integrations are enabled, `script-src` must allow GA4 and/or Meta script origins, and `img-src` must allow the configured generic HTTPS pixel origin.

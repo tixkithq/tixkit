@@ -57,6 +57,51 @@ type MarketingEventName = 'view_item' | 'begin_checkout' | 'purchase';
 const IFRAME_SANDBOX =
   'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
 const IFRAME_ALLOW = 'payment; publickey-credentials-create *; publickey-credentials-get *';
+export const TIXKIT_WIDGET_VERSION = '0.1.0';
+const HANDSHAKE_TIMEOUT_MS = 10_000;
+const handshakeTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+const widgetStartedAt = new WeakMap<HTMLElement, number>();
+
+function recordWidgetPerformance(
+  element: HTMLElement,
+  mode: CheckoutMode,
+  outcome: 'ready' | 'error',
+  errorCode?: string,
+): void {
+  const start = widgetStartedAt.get(element);
+  if (start === undefined || typeof performance?.measure !== 'function') return;
+  try {
+    performance.measure(`tixkit.widget.${outcome}`, {
+      start,
+      end: performance.now(),
+      detail: {
+        widgetVersion: TIXKIT_WIDGET_VERSION,
+        contractVersion: EMBED_CONTRACT_VERSION,
+        mode,
+        ...(errorCode ? { errorCode } : {}),
+      },
+    });
+  } catch {
+    // Performance measurement support is optional and never blocks checkout.
+  }
+}
+
+function cancelHandshakeTimeout(element: HTMLElement): void {
+  const timer = handshakeTimers.get(element);
+  if (timer !== undefined) clearTimeout(timer);
+  handshakeTimers.delete(element);
+}
+
+function scheduleHandshakeTimeout(element: HTMLElement, onTimeout: () => void): void {
+  cancelHandshakeTimeout(element);
+  handshakeTimers.set(
+    element,
+    setTimeout(() => {
+      handshakeTimers.delete(element);
+      onTimeout();
+    }, HANDSHAKE_TIMEOUT_MS),
+  );
+}
 
 const STYLES = `
   :host {
@@ -181,11 +226,29 @@ const STYLES = `
     border: 0;
     background: var(--tk-bg);
   }
+  .tk-launcher {
+    background: var(--tk-primary, oklch(0.208 0.042 265.755));
+    color: white;
+    border: 0;
+    padding: 12px 24px;
+    border-radius: var(--tk-radius, 0.5rem);
+    font: 600 16px var(--tk-font-family, ui-sans-serif, system-ui, sans-serif);
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .tk-launcher:hover { opacity: 0.9; }
+  .tk-launcher:disabled { opacity: 0.5; cursor: not-allowed; }
 `;
 
-function injectStyles(shadow: ShadowRoot): void {
+function injectStyles(shadow: ShadowRoot, themeCss = ''): void {
+  if ('adoptedStyleSheets' in shadow && typeof CSSStyleSheet !== 'undefined') {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(`${STYLES}\n${themeCss}`);
+    shadow.adoptedStyleSheets = [sheet];
+    return;
+  }
   const style = document.createElement('style');
-  style.textContent = STYLES;
+  style.textContent = `${STYLES}\n${themeCss}`;
   shadow.appendChild(style);
 }
 
@@ -242,7 +305,7 @@ function applyElementConfiguration(element: HTMLElement, config: EmbedElementCon
   }
 }
 
-function applyThemeTokenStyles(element: HTMLElement): void {
+function themeTokenStyles(element: HTMLElement): string {
   const tokens = parseEmbedThemeTokens(element.getAttribute('theme-tokens'));
   const styles: Array<[string, string | undefined]> = [
     ['--tk-primary', tokens?.colorPrimary],
@@ -256,10 +319,11 @@ function applyThemeTokenStyles(element: HTMLElement): void {
     ['--tk-button-size', tokens?.buttonSize],
     ['--tk-button-variant', tokens?.buttonVariant],
   ];
-  for (const [name, value] of styles) {
-    if (value === undefined) element.style.removeProperty(name);
-    else element.style.setProperty(name, value);
-  }
+  const declarations = styles
+    .filter((entry): entry is [string, string] => entry[1] !== undefined)
+    .map(([name, value]) => `${name}:${value}`)
+    .join(';');
+  return declarations ? `:host{${declarations}}` : '';
 }
 
 function reportingApiBase(element: HTMLElement): string {
@@ -305,10 +369,10 @@ function newWidgetVisitorId(): string {
 function widgetVisitorId(): string {
   const key = 'tixkit:visitor-id';
   try {
-    const existing = window.localStorage.getItem(key);
+    const existing = window.sessionStorage.getItem(key);
     if (existing) return existing;
     const generated = newWidgetVisitorId();
-    window.localStorage.setItem(key, generated);
+    window.sessionStorage.setItem(key, generated);
     return generated;
   } catch {
     return newWidgetVisitorId();
@@ -320,7 +384,7 @@ function normalizeAnalyticsUrl(value?: string): string | undefined {
   try {
     const url = new URL(value);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
-    return `${url.origin}${url.pathname}`;
+    return url.origin;
   } catch {
     return undefined;
   }
@@ -661,6 +725,7 @@ class TixkitWidget extends HTMLElement {
   }
 
   connectedCallback(): void {
+    widgetStartedAt.set(this, performance.now());
     this.setAttribute('data-tixkit-widget-id', this.widgetId);
     this.render();
     this.listenForCheckoutMessages();
@@ -683,6 +748,7 @@ class TixkitWidget extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    cancelHandshakeTimeout(this);
     this.closeModal(false);
     // Dispatch 'closed' when the widget is removed from the DOM.
     dispatchLifecycle(this, 'closed', this.config.event, { reason: 'disconnected' });
@@ -715,6 +781,9 @@ class TixkitWidget extends HTMLElement {
       if (validation.message.type === 'checkout:ready') {
         if (this.readyReceived) return;
         this.readyReceived = true;
+        cancelHandshakeTimeout(this);
+        this.hideState();
+        recordWidgetPerformance(this, this.config.checkoutMode ?? 'inline', 'ready');
         dispatchLifecycle(this, 'ready', this.config.event);
         return;
       }
@@ -747,8 +816,15 @@ class TixkitWidget extends HTMLElement {
     dispatchLifecycle(this, 'loading', this.config.event);
   }
 
-  private showError(message: string): void {
+  private showError(
+    message: string,
+    errorCode: 'checkout-unreachable' | 'checkout-offline' | 'handshake-timeout' = navigator.onLine
+      ? 'checkout-unreachable'
+      : 'checkout-offline',
+    focusRetry = false,
+  ): void {
     this.errored = true;
+    recordWidgetPerformance(this, this.config.checkoutMode ?? 'inline', 'error', errorCode);
     if (!this.stateEl) return;
     this.stateEl.style.display = 'flex';
     this.stateEl.setAttribute('role', 'alert');
@@ -771,9 +847,16 @@ class TixkitWidget extends HTMLElement {
       this.render();
     });
 
-    this.stateEl.append(icon, text, retry);
+    const fallback = document.createElement('a');
+    fallback.href = this.buildWidgetUrl();
+    fallback.target = '_blank';
+    fallback.rel = 'noopener noreferrer';
+    fallback.textContent = 'Open secure checkout';
+
+    this.stateEl.append(icon, text, retry, fallback);
+    if (focusRetry) retry.focus();
     dispatchLifecycle(this, 'recoverable-error', this.config.event, {
-      errorCode: 'checkout-unreachable',
+      errorCode,
       message,
       retryable: true,
     });
@@ -803,12 +886,12 @@ class TixkitWidget extends HTMLElement {
   }
 
   private render(): void {
+    cancelHandshakeTimeout(this);
     this.handshakeNonce = createEmbedNonce();
     this.activeFrame = null;
     this.readyReceived = false;
     this.shadow.innerHTML = '';
-    applyThemeTokenStyles(this);
-    injectStyles(this.shadow);
+    injectStyles(this.shadow, themeTokenStyles(this));
 
     if (!expectedHostOrigin(this)) {
       const state = document.createElement('div');
@@ -868,7 +951,12 @@ class TixkitWidget extends HTMLElement {
           this.showError('Checkout handshake could not be started.');
           return;
         }
-        this.hideState();
+        scheduleHandshakeTimeout(this, () =>
+          this.showError(
+            'Checkout did not complete its secure handshake.',
+            navigator.onLine ? 'handshake-timeout' : 'checkout-offline',
+          ),
+        );
         // Dispatch 'opened' when the inline iframe finishes loading.
         dispatchLifecycle(this, 'opened', this.config.event);
       }
@@ -886,6 +974,7 @@ class TixkitWidget extends HTMLElement {
     root.className = 'tk-root';
 
     const state = document.createElement('div');
+    this.stateEl = state;
     state.className = 'tk-state';
     state.style.display = 'flex';
 
@@ -973,6 +1062,14 @@ class TixkitWidget extends HTMLElement {
         this.showError('Checkout handshake could not be started.');
         return;
       }
+      scheduleHandshakeTimeout(this, () => {
+        this.closeModal(false);
+        this.showError(
+          'Checkout did not complete its secure handshake.',
+          navigator.onLine ? 'handshake-timeout' : 'checkout-offline',
+          true,
+        );
+      });
       // Dispatch 'opened' when the modal iframe finishes loading.
       dispatchLifecycle(this, 'opened', this.config.event);
     });
@@ -1010,6 +1107,7 @@ class TixkitWidget extends HTMLElement {
   }
 
   private closeModal(emit = true): void {
+    cancelHandshakeTimeout(this);
     if (this.modalKeyHandler) {
       document.removeEventListener('keydown', this.modalKeyHandler);
       this.modalKeyHandler = null;
@@ -1020,7 +1118,7 @@ class TixkitWidget extends HTMLElement {
       this.activeFrame = null;
       if (emit) dispatchLifecycle(this, 'closed', this.config.event, { reason: 'buyer' });
     }
-    if (emit && this.modalRestoreFocus?.isConnected) {
+    if (this.modalRestoreFocus?.isConnected) {
       this.modalRestoreFocus.focus();
     }
     this.modalRestoreFocus = null;
@@ -1120,6 +1218,7 @@ class TixkitButton extends HTMLElement {
   }
 
   connectedCallback(): void {
+    widgetStartedAt.set(this, performance.now());
     this.setAttribute('data-tixkit-widget-id', this.widgetId);
     this.render();
     this.listenForCheckoutMessages();
@@ -1141,6 +1240,7 @@ class TixkitButton extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    cancelHandshakeTimeout(this);
     this.closeModal(false);
     dispatchLifecycle(this, 'closed', this.eventId, { reason: 'disconnected' });
     if (this.messageHandler) {
@@ -1172,6 +1272,8 @@ class TixkitButton extends HTMLElement {
       if (validation.message.type === 'checkout:ready') {
         if (this.readyReceived) return;
         this.readyReceived = true;
+        cancelHandshakeTimeout(this);
+        recordWidgetPerformance(this, this.checkoutMode, 'ready');
         dispatchLifecycle(this, 'ready', this.eventId);
         return;
       }
@@ -1183,42 +1285,59 @@ class TixkitButton extends HTMLElement {
       const name = data.lifecycle;
       if (name === 'checkout-started')
         trackWidgetMarketingEvent(this, this.eventId, 'begin_checkout');
-      if (name === 'order-completed')
-        trackWidgetMarketingEvent(this, this.eventId, 'purchase');
+      if (name === 'order-completed') trackWidgetMarketingEvent(this, this.eventId, 'purchase');
       dispatchLifecycle(this, name, this.eventId, checkoutMessageDetail(this.eventId, data));
     };
     window.addEventListener('message', this.messageHandler);
   }
 
   private render(): void {
+    cancelHandshakeTimeout(this);
     this.shadow.innerHTML = '';
-    applyThemeTokenStyles(this);
-    injectStyles(this.shadow);
-
-    const style = document.createElement('style');
-    style.textContent = `
-      button {
-        background: var(--tk-primary, oklch(0.208 0.042 265.755));
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: var(--tk-radius, 0.5rem);
-        font-size: 16px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: opacity 0.2s;
-        font-family: var(--tk-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-      }
-      button:hover { opacity: 0.9; }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
-    `;
-    this.shadow.appendChild(style);
+    injectStyles(this.shadow, themeTokenStyles(this));
 
     const btn = document.createElement('button');
+    btn.className = 'tk-launcher';
     btn.type = 'button';
     btn.textContent = this.textContent || 'Buy tickets';
     btn.addEventListener('click', () => this.openCheckout());
     this.shadow.appendChild(btn);
+  }
+
+  private showCheckoutFailure(
+    message: string,
+    errorCode: 'handshake-timeout' | 'checkout-unreachable' | 'checkout-offline',
+  ): void {
+    this.closeModal(false);
+    this.shadow.querySelector('.tk-button-error')?.remove();
+    const alert = document.createElement('div');
+    alert.className = 'tk-button-error';
+    alert.setAttribute('role', 'alert');
+    alert.setAttribute('aria-live', 'assertive');
+    const text = document.createElement('p');
+    text.textContent = message;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'tk-retry';
+    retry.textContent = 'Retry checkout';
+    retry.addEventListener('click', () => {
+      alert.remove();
+      this.openCheckout();
+    });
+    const fallback = document.createElement('a');
+    fallback.href = this.buildCheckoutUrl();
+    fallback.target = '_blank';
+    fallback.rel = 'noopener noreferrer';
+    fallback.textContent = 'Open secure checkout';
+    alert.append(text, retry, fallback);
+    this.shadow.appendChild(alert);
+    retry.focus();
+    recordWidgetPerformance(this, this.checkoutMode, 'error', errorCode);
+    dispatchLifecycle(this, 'recoverable-error', this.eventId, {
+      errorCode,
+      message,
+      retryable: true,
+    });
   }
 
   private buildCheckoutUrl(): string {
@@ -1337,7 +1456,16 @@ class TixkitButton extends HTMLElement {
         });
         return;
       }
+      scheduleHandshakeTimeout(this, () => {
+        this.showCheckoutFailure(
+          'Checkout did not complete its secure handshake.',
+          navigator.onLine ? 'handshake-timeout' : 'checkout-offline',
+        );
+      });
       dispatchLifecycle(this, 'opened', this.eventId);
+    });
+    frame.addEventListener('error', () => {
+      this.showCheckoutFailure('Checkout could not be loaded.', 'checkout-unreachable');
     });
 
     modal.appendChild(head);
@@ -1373,6 +1501,7 @@ class TixkitButton extends HTMLElement {
   }
 
   private closeModal(emit = true): void {
+    cancelHandshakeTimeout(this);
     if (this.modalKeyHandler) {
       document.removeEventListener('keydown', this.modalKeyHandler);
       this.modalKeyHandler = null;
@@ -1383,7 +1512,7 @@ class TixkitButton extends HTMLElement {
       this.activeFrame = null;
       if (emit) dispatchLifecycle(this, 'closed', this.eventId, { reason: 'buyer' });
     }
-    if (emit && this.modalRestoreFocus?.isConnected) {
+    if (this.modalRestoreFocus?.isConnected) {
       this.modalRestoreFocus.focus();
     }
     this.modalRestoreFocus = null;

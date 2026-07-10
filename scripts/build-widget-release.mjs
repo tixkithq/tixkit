@@ -1,0 +1,143 @@
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  mkdirSync,
+  copyFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+const root = resolve(import.meta.dirname, '..');
+const packageJson = JSON.parse(readFileSync(join(root, 'packages/widget/package.json'), 'utf8'));
+const version = packageJson.version;
+const widgetSource = readFileSync(join(root, 'packages/widget/src/index.ts'), 'utf8');
+if (!widgetSource.includes(`export const TIXKIT_WIDGET_VERSION = '${version}';`))
+  throw new Error('Widget telemetry version must match packages/widget/package.json.');
+const contractVersion = '1.0';
+const outputDirectory = resolve(root, process.argv[2] ?? 'artifacts/widget');
+const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+  cwd: root,
+  encoding: 'utf8',
+}).trim();
+const commit = process.env.GITHUB_SHA ?? headCommit;
+if (commit !== headCommit) throw new Error('GITHUB_SHA does not match the checked-out commit.');
+const commitEpoch = Number(
+  execFileSync('git', ['show', '-s', '--format=%ct', commit], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim(),
+);
+const sourceDateEpoch = Number(process.env.SOURCE_DATE_EPOCH ?? commitEpoch);
+if (!Number.isInteger(sourceDateEpoch) || sourceDateEpoch < 0)
+  throw new Error('SOURCE_DATE_EPOCH must be a non-negative integer.');
+if (sourceDateEpoch !== commitEpoch)
+  throw new Error('SOURCE_DATE_EPOCH must equal the verified source commit timestamp.');
+const timestamp = new Date(sourceDateEpoch * 1000).toISOString();
+const releaseDirty = execFileSync(
+  'git',
+  [
+    'status',
+    '--porcelain',
+    '--',
+    'packages/widget',
+    'packages/embed-core',
+    'scripts/build-widget-release.mjs',
+  ],
+  { cwd: root, encoding: 'utf8' },
+).trim();
+if (process.env.TIXKIT_RELEASE_BUILD === '1' && releaseDirty)
+  throw new Error('Release builds require clean widget, embed-core, and release-builder sources.');
+
+function hash(bytes, algorithm) {
+  return createHash(algorithm).update(bytes).digest('base64');
+}
+
+function build(directory) {
+  mkdirSync(directory, { recursive: true });
+  const file = `tixkit-widget-${version}.js`;
+  const output = join(directory, file);
+  execFileSync(
+    join(root, 'node_modules/.bin/esbuild'),
+    [
+      'packages/widget/src/index.ts',
+      '--bundle',
+      '--minify',
+      '--format=esm',
+      '--sourcemap=external',
+      '--sources-content=true',
+      `--outfile=${output}`,
+    ],
+    { cwd: root, stdio: 'inherit', env: { ...process.env, TZ: 'UTC' } },
+  );
+  return { file, output, map: `${output}.map` };
+}
+
+const proofA = mkdtempSync(join(tmpdir(), 'tixkit-widget-a-'));
+const proofB = mkdtempSync(join(tmpdir(), 'tixkit-widget-b-'));
+try {
+  const first = build(proofA);
+  const second = build(proofB);
+  const firstBytes = readFileSync(first.output);
+  const secondBytes = readFileSync(second.output);
+  const firstMap = readFileSync(first.map);
+  const secondMap = readFileSync(second.map);
+  if (!firstBytes.equals(secondBytes) || !firstMap.equals(secondMap)) {
+    throw new Error('Widget release build is not reproducible.');
+  }
+  if (firstBytes.length > 50 * 1024) throw new Error('Widget bundle exceeds the 50 KiB budget.');
+  if (firstMap.length > 150 * 1024)
+    throw new Error('Widget source map exceeds the 150 KiB budget.');
+
+  rmSync(outputDirectory, { recursive: true, force: true });
+  mkdirSync(outputDirectory, { recursive: true });
+  copyFileSync(first.output, join(outputDirectory, first.file));
+  copyFileSync(first.map, join(outputDirectory, `${first.file}.map`));
+
+  const sha256 = hash(firstBytes, 'sha256');
+  const sha384 = hash(firstBytes, 'sha384');
+  const mapSha256 = hash(firstMap, 'sha256');
+  const manifest = {
+    schemaVersion: 1,
+    widgetVersion: version,
+    contractVersion,
+    apiCompatibility: { version: '2026-01-01', routeMajor: 'v1' },
+    commit,
+    dirty: Boolean(releaseDirty),
+    timestamp,
+    immutable: true,
+    files: {
+      widget: {
+        path: first.file,
+        bytes: statSync(first.output).size,
+        sha256,
+        sha384,
+        integrity: `sha384-${sha384}`,
+        cacheControl: 'public, max-age=31536000, immutable',
+        contentType: 'text/javascript; charset=utf-8',
+        accessControlAllowOrigin: '*',
+      },
+      sourceMap: {
+        path: `${first.file}.map`,
+        bytes: statSync(first.map).size,
+        sha256: mapSha256,
+        cacheControl: 'public, max-age=31536000, immutable',
+        contentType: 'application/json; charset=utf-8',
+        accessControlAllowOrigin: '*',
+      },
+    },
+  };
+  writeFileSync(join(outputDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(
+    join(outputDirectory, 'checksums.txt'),
+    `${Buffer.from(sha256, 'base64').toString('hex')}  ${first.file}\n${Buffer.from(mapSha256, 'base64').toString('hex')}  ${first.file}.map\n`,
+  );
+  process.stdout.write(`Built reproducible widget ${version} in ${outputDirectory}\n`);
+} finally {
+  rmSync(proofA, { recursive: true, force: true });
+  rmSync(proofB, { recursive: true, force: true });
+}

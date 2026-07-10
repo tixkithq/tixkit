@@ -34,6 +34,34 @@ describe('Embed Contract v1', () => {
     expect(snippet).toContain('host-origin="https://merchant.example.test"');
   });
 
+  it('generates an SRI-pinned script and a usable no-JavaScript fallback', () => {
+    const integrity = `sha384-${'A'.repeat(64)}`;
+    const snippet = generateEmbedSnippet({ ...base, widgetIntegrity: integrity });
+    expect(snippet).toContain(`integrity="${integrity}" crossorigin="anonymous"`);
+    expect(snippet).toContain(
+      '<a href="https://checkout.example.test/checkout?eventId=evt_demo&amp;brand=brd_demo">',
+    );
+    expect(snippet).not.toContain('latest');
+  });
+
+  it('preserves safe checkout preselection in the no-JavaScript fallback', () => {
+    const snippet = generateEmbedSnippet({
+      ...base,
+      locale: 'ar-SA',
+      theme: 'dark',
+      products: 'tt_hidden',
+      items: 'tt_hidden=2',
+      discountCode: 'SAVE10',
+      accessCode: 'LOCKED',
+      trackingId: 'campaign',
+      affiliateCode: 'partner',
+    });
+    expect(snippet).toContain('locale=ar-SA');
+    expect(snippet).toContain('products=tt_hidden');
+    expect(snippet).toContain('accessCode=LOCKED');
+    expect(snippet).toContain('affiliateCode=partner');
+  });
+
   it('generates button attributes consumed by the public contract', () => {
     const snippet = generateEmbedSnippet({
       ...base,

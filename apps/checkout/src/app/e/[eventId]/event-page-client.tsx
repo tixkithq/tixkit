@@ -16,7 +16,8 @@ import {
   type PublicEventPageBootstrap,
   userFacingMessage,
 } from '@/lib/api';
-import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
+import type { ResolvedBrand } from '@/lib/brand';
+import { BrandThemeSurface } from '@/components/brand-theme-surface';
 import { useResolvedBrand } from '@/lib/use-brand';
 import { trackMarketingEvent } from '@/lib/marketing';
 import {
@@ -414,12 +415,13 @@ function SurfaceShell({
   testId?: string;
 }) {
   return (
-    <main
+    <BrandThemeSurface
+      as="main"
+      brand={brand}
       className="min-h-svh bg-background text-foreground"
-      data-testid={testId}
-      style={brandThemeStyle(brand)}
+      testId={testId}
     >
       {children}
-    </main>
+    </BrandThemeSurface>
   );
 }

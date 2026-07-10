@@ -110,6 +110,7 @@
         "@tixkit/content-event-page": "workspace:*",
         "@tixkit/content-event-page-react": "workspace:*",
         "@tixkit/domain": "workspace:*",
+        "@tixkit/embed-core": "1.0.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "lucide-react": "^1.8.0",
@@ -118,7 +119,6 @@
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
         "react-hook-form": "^7.72.1",
-        "sonner": "^2.0.7",
         "tailwind-merge": "^3.5.0",
         "tw-animate-css": "^1.4.0",
         "zod": "^4.3.6",
@@ -288,6 +288,7 @@
         "@tixkit/content-email": "workspace:*",
         "@tixkit/db": "workspace:*",
         "@tixkit/domain": "workspace:*",
+        "@tixkit/embed-core": "1.0.0",
       },
       "devDependencies": {
         "@types/node": "^22.20.0",
@@ -433,6 +434,14 @@
         "vitest": "^4.1.0",
       },
     },
+    "packages/embed-core": {
+      "name": "@tixkit/embed-core",
+      "version": "1.0.0",
+      "devDependencies": {
+        "typescript": "7.0.2",
+        "vitest": "^4.1.0",
+      },
+    },
     "packages/openapi": {
       "name": "@tixkit/openapi",
       "version": "0.1.0",
@@ -553,6 +562,9 @@
     "packages/widget": {
       "name": "@tixkit/widget",
       "version": "0.1.0",
+      "dependencies": {
+        "@tixkit/embed-core": "1.0.0",
+      },
       "devDependencies": {
         "esbuild": "^0.28.0",
         "jsdom": "^26.1.0",
@@ -2299,6 +2311,8 @@
     "@tixkit/domain": ["@tixkit/domain@workspace:packages/domain"],
 
     "@tixkit/email-transport": ["@tixkit/email-transport@workspace:packages/email-transport"],
+
+    "@tixkit/embed-core": ["@tixkit/embed-core@workspace:packages/embed-core"],
 
     "@tixkit/js": ["@tixkit/js@workspace:packages/sdk-js"],
 

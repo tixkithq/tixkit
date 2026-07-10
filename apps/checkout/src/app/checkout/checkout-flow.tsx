@@ -38,7 +38,8 @@ import {
   type ConfirmResult,
   type QuestionsResponse,
 } from '@/lib/api';
-import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
+import type { ResolvedBrand } from '@/lib/brand';
+import { BrandThemeSurface } from '@/components/brand-theme-surface';
 import { useResolvedBrand } from '@/lib/use-brand';
 import { storeSessionToken, getSessionToken } from '@/lib/session-token';
 import { formatCurrency, formatDateTime } from '@/lib/format';
@@ -1461,8 +1462,8 @@ export default function CheckoutFlow({
 
 function Surface({ brand, children }: { brand: ResolvedBrand; children: React.ReactNode }) {
   return (
-    <main className="min-h-svh bg-background text-foreground" style={brandThemeStyle(brand)}>
+    <BrandThemeSurface as="main" className="min-h-svh bg-background text-foreground" brand={brand}>
       {children}
-    </main>
+    </BrandThemeSurface>
   );
 }

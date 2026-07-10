@@ -48,7 +48,8 @@ describe('generateEmbedSnippet', () => {
     expect(snippet).toContain('event="evt_demo"');
     expect(snippet).toContain('brand="brd_demo"');
     expect(snippet).toContain('checkout-mode="inline"');
-    expect(snippet).toContain('tixkit-widget.js');
+    expect(snippet).toContain('tixkit-widget-0.1.0.js');
+    expect(snippet).toContain('integrity="sha384-');
   });
 
   it('generates a button snippet for button mode', () => {

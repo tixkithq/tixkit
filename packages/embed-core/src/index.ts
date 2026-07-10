@@ -110,6 +110,7 @@ export interface TixkitButtonElement extends HTMLElement {
 export interface EmbedGeneratorOptions extends EmbedElementConfig {
   platform: EmbedPlatform;
   widgetScriptUrl?: string;
+  widgetIntegrity?: string;
   includeLifecycle?: boolean;
   lifecycleCallbackName?: string;
   buttonLabel?: string;
@@ -457,6 +458,24 @@ export function validateEmbedOptions(options: EmbedGeneratorOptions): EmbedValid
       code: 'invalid-config',
       message: 'Button label must contain 1-120 characters.',
     });
+  if (
+    options.widgetIntegrity !== undefined &&
+    !/^sha384-[A-Za-z0-9+/]{64}$/.test(options.widgetIntegrity)
+  )
+    issues.push({
+      path: 'widgetIntegrity',
+      code: 'invalid-config',
+      message: 'Widget integrity must be a SHA-384 SRI value from the release manifest.',
+    });
+  if (
+    httpUrl(options.widgetScriptUrl ?? '')?.hostname === 'cdn.tixkit.com' &&
+    options.widgetIntegrity === undefined
+  )
+    issues.push({
+      path: 'widgetIntegrity',
+      code: 'invalid-config',
+      message: 'Production CDN snippets require the matching SHA-384 release integrity.',
+    });
   return [...issues, ...validateEmbedThemeTokens(options.themeTokens)];
 }
 
@@ -600,7 +619,7 @@ export function validateCheckoutMessageEvent(
     };
   if (
     (data.lifecycle === 'recoverable-error' || data.lifecycle === 'fatal-error') &&
-      (!isOneOf(data.errorCode, EMBED_ERROR_CODES) ||
+    (!isOneOf(data.errorCode, EMBED_ERROR_CODES) ||
       typeof data.message !== 'string' ||
       data.message.length > 240 ||
       typeof data.retryable !== 'boolean')
@@ -759,15 +778,33 @@ function htmlSnippet(options: EmbedGeneratorOptions): string {
   const scriptUrl = options.widgetScriptUrl ?? DEFAULT_WIDGET_SCRIPT_URL;
   const elementId = `tixkit-${options.mode}-${options.eventId}`;
   const tagName = options.mode === 'button' ? 'tixkit-button' : 'tixkit-widget';
+  const checkoutUrl = new URL('/checkout', options.checkoutBaseUrl ?? DEFAULT_CHECKOUT_BASE_URL);
+  checkoutUrl.searchParams.set('eventId', options.eventId);
+  if (options.brandId) checkoutUrl.searchParams.set('brand', options.brandId);
+  if (options.locale) checkoutUrl.searchParams.set('locale', options.locale);
+  if (options.theme) checkoutUrl.searchParams.set('theme', options.theme);
+  if (options.products) checkoutUrl.searchParams.set('products', options.products);
+  if (options.items) checkoutUrl.searchParams.set('items', options.items);
+  if (options.discountCode) checkoutUrl.searchParams.set('discount', options.discountCode);
+  if (options.accessCode) checkoutUrl.searchParams.set('accessCode', options.accessCode);
+  if (options.trackingId) checkoutUrl.searchParams.set('tracking', options.trackingId);
+  if (options.affiliateCode) checkoutUrl.searchParams.set('affiliateCode', options.affiliateCode);
+  const fallbackLabel =
+    options.buttonLabel ??
+    (options.mode === 'button' ? 'Buy tickets' : 'Continue to secure checkout');
+  const fallback = `<a href="${escapeHtml(checkoutUrl.toString())}">${escapeHtml(fallbackLabel)}</a>`;
   const opening = `<${tagName} id="${escapeHtml(elementId)}"\n  ${elementAttributes(options)}`;
   const element =
     options.mode === 'button'
-      ? `${opening}>\n  ${escapeHtml(options.buttonLabel ?? 'Buy tickets')}\n</${tagName}>`
-      : `${opening}></${tagName}>`;
+      ? `${opening}>\n  ${fallback}\n</${tagName}>`
+      : `${opening}>\n  ${fallback}\n</${tagName}>`;
   const lifecycle = options.includeLifecycle
     ? `\n\n${lifecycleScript(elementId, options.lifecycleCallbackName ?? 'onTixkitEvent', options.nonce)}`
     : '';
-  return `<!-- Tixkit Embed Contract ${EMBED_CONTRACT_VERSION}: ${escapeHtml(options.platform)} -->\n<script type="module" src="${escapeHtml(scriptUrl)}"${scriptNonceAttribute(options.nonce)}></script>\n\n${element}${lifecycle}`;
+  const integrity = options.widgetIntegrity
+    ? ` integrity="${escapeHtml(options.widgetIntegrity)}" crossorigin="anonymous"`
+    : '';
+  return `<!-- Tixkit Embed Contract ${EMBED_CONTRACT_VERSION}: ${escapeHtml(options.platform)} -->\n<script type="module" src="${escapeHtml(scriptUrl)}"${integrity}${scriptNonceAttribute(options.nonce)}></script>\n\n${element}${lifecycle}`;
 }
 
 function frameworkSnippet(options: EmbedGeneratorOptions): string {
@@ -983,7 +1020,9 @@ export const embedCheckoutMessageSchema = {
         {
           if: {
             properties: {
-              lifecycle: { enum: ['checkout-started', 'checkout-session-created', 'order-completed'] },
+              lifecycle: {
+                enum: ['checkout-started', 'checkout-session-created', 'order-completed'],
+              },
             },
           },
           then: {

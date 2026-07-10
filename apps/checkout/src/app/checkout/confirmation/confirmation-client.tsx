@@ -36,7 +36,8 @@ import {
   type CheckoutResaleListing,
   type PublicEvent,
 } from '@/lib/api';
-import { brandThemeStyle, type ResolvedBrand } from '@/lib/brand';
+import type { ResolvedBrand } from '@/lib/brand';
+import { BrandThemeSurface } from '@/components/brand-theme-surface';
 import { useResolvedBrand } from '@/lib/use-brand';
 import { getSessionToken } from '@/lib/session-token';
 import { formatCurrency, formatDateTime } from '@/lib/format';
@@ -861,8 +862,8 @@ function DeliveryStep({
 
 function Surface({ brand, children }: { brand: ResolvedBrand; children: React.ReactNode }) {
   return (
-    <div className="min-h-svh bg-background text-foreground" style={brandThemeStyle(brand)}>
+    <BrandThemeSurface className="min-h-svh bg-background text-foreground" brand={brand}>
       {children}
-    </div>
+    </BrandThemeSurface>
   );
 }

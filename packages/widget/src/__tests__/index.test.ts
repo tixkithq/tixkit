@@ -133,6 +133,7 @@ function readWidgetImpressionBody(): Record<string, unknown> {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -149,6 +150,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
   while (mountedElements.length > 0) {
     mountedElements.pop()?.disconnectedCallback();
   }
@@ -181,6 +184,44 @@ describe('widget lifecycle events (runtime)', () => {
     expect(spy.mock.calls[0]?.[0]).toBeInstanceOf(CustomEvent);
   });
 
+  it('fails accessibly with a hosted fallback when the exact handshake times out', () => {
+    vi.useFakeTimers();
+    const el = createWidget();
+    const errorSpy = vi.fn();
+    el.addEventListener('tixkit:v1:recoverable-error', errorSpy);
+    el.connectedCallback();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe');
+    expect(frame).not.toBeNull();
+    ensureFrameWindow(frame!);
+    frame!.dispatchEvent(new Event('load'));
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect((errorSpy.mock.calls[0]![0] as CustomEvent).detail).toMatchObject({
+      errorCode: 'handshake-timeout',
+      retryable: true,
+    });
+    const fallback = el.shadowRoot?.querySelector<HTMLAnchorElement>('a');
+    expect(fallback?.textContent).toBe('Open secure checkout');
+    expect(fallback?.href).toContain('/checkout?');
+    expect(el.shadowRoot?.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it('classifies a handshake timeout as offline when the browser is offline', () => {
+    vi.useFakeTimers();
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    const el = createWidget();
+    const errorSpy = vi.fn();
+    el.addEventListener('tixkit:v1:recoverable-error', errorSpy);
+    el.connectedCallback();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe');
+    ensureFrameWindow(frame!);
+    frame!.dispatchEvent(new Event('load'));
+    vi.advanceTimersByTime(10_000);
+    expect((errorSpy.mock.calls[0]![0] as CustomEvent).detail.errorCode).toBe('checkout-offline');
+  });
+
   it('records one persisted widget impression when loaded', () => {
     window.history.replaceState(
       {},
@@ -211,8 +252,8 @@ describe('widget lifecycle events (runtime)', () => {
     expect(body.visitorId).toEqual(expect.any(String));
     expect(body.trackingId).toBe('utm-widget');
     expect(body.affiliateCode).toBe('AFF123');
-    expect(body.pageUrl).toBe(`${window.location.origin}/events/evt_demo`);
-    expect(body.referrer).toBe('https://partner.example.test/campaigns/summer');
+    expect(body.pageUrl).toBe(window.location.origin);
+    expect(body.referrer).toBe('https://partner.example.test');
     expect(String(init?.body)).not.toMatch(
       /[?#]|buyer@example\.test|checkout-token|userinfo@|referrer@example\.test|ref-token/,
     );
@@ -233,7 +274,7 @@ describe('widget lifecycle events (runtime)', () => {
 
     const body = readWidgetImpressionBody();
     expect(body.visitorId).toBe('visitor_000102030405060708090a0b0c0d0e0f');
-    expect(window.localStorage.getItem('tixkit:visitor-id')).toBe(body.visitorId);
+    expect(window.sessionStorage.getItem('tixkit:visitor-id')).toBe(body.visitorId);
   });
 
   it('does not send raw invalid widget impression referrers', () => {
@@ -244,7 +285,7 @@ describe('widget lifecycle events (runtime)', () => {
     el.connectedCallback();
 
     const body = readWidgetImpressionBody();
-    expect(body.pageUrl).toBe(`${window.location.origin}/events/evt_demo`);
+    expect(body.pageUrl).toBe(window.location.origin);
     expect(body.referrer).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain('not a url with token=ref-token');
     expect(JSON.stringify(body)).not.toContain('ref-token');
@@ -691,6 +732,24 @@ describe('widget checkout modes (runtime)', () => {
     expect(el.shadowRoot?.querySelector('iframe.tk-modal-frame')).toBeNull();
   });
 
+  it('restores modal launcher focus and renders retry plus fallback after timeout', () => {
+    vi.useFakeTimers();
+    const el = createWidget({ 'checkout-mode': 'modal' });
+    el.connectedCallback();
+    const launcher = el.shadowRoot?.querySelector<HTMLButtonElement>('button');
+    launcher?.focus();
+    launcher?.click();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe.tk-modal-frame');
+    expect(frame).not.toBeNull();
+    ensureFrameWindow(frame!);
+    frame!.dispatchEvent(new Event('load'));
+    vi.advanceTimersByTime(10_000);
+    expect(el.shadowRoot?.querySelector('iframe.tk-modal-frame')).toBeNull();
+    expect(el.shadowRoot?.querySelector('[role="alert"]')).not.toBeNull();
+    expect(el.shadowRoot?.querySelector('a')?.textContent).toBe('Open secure checkout');
+    expect(el.shadowRoot?.querySelector<HTMLButtonElement>('button.tk-retry')).not.toBeNull();
+  });
+
   it('redirect mode dispatches opened but not checkout_started on click', () => {
     const el = createWidget({ 'checkout-mode': 'redirect' });
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
@@ -730,6 +789,22 @@ describe('TixkitButton lifecycle (runtime)', () => {
     expect(frame).not.toBeNull();
     dispatchFrameLoad(frame!);
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces a button-modal timeout with retry and hosted fallback', () => {
+    vi.useFakeTimers();
+    const el = createButton();
+    el.connectedCallback();
+    const launcher = el.shadowRoot?.querySelector<HTMLButtonElement>('button.tk-launcher');
+    launcher?.click();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe');
+    expect(frame).not.toBeNull();
+    ensureFrameWindow(frame!);
+    frame!.dispatchEvent(new Event('load'));
+    vi.advanceTimersByTime(10_000);
+    expect(el.shadowRoot?.querySelector('[role="alert"]')).not.toBeNull();
+    expect(el.shadowRoot?.querySelector('a')?.textContent).toBe('Open secure checkout');
+    expect(el.shadowRoot?.querySelector('button.tk-retry')?.textContent).toBe('Retry checkout');
   });
 
   it('records button impressions using the reporting API origin', () => {

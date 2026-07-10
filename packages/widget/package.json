@@ -38,6 +38,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -b && esbuild src/index.ts --bundle --minify --format=esm --sourcemap=external --outfile=dist/tixkit-widget.js",
+    "build:release": "node ../../scripts/build-widget-release.mjs",
     "dev": "esbuild src/index.ts --bundle --format=esm --outfile=dist/tixkit-widget.js --watch",
     "lint": "oxlint src",
     "typecheck": "tsc -b",

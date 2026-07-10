@@ -1,0 +1,102 @@
+name: Widget release staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_package:
+        description: Publish @tixkit/widget using npm trusted publishing
+        type: boolean
+        default: false
+      upload_cdn:
+        description: Upload immutable artifacts to the configured staging CDN
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-stage:
+    runs-on: ubuntu-latest
+    environment: widget-staging
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Build reproducible immutable widget artifacts
+        env:
+          TIXKIT_RELEASE_BUILD: '1'
+        run: node scripts/build-widget-release.mjs
+      - name: Verify production snippet pins
+        run: node scripts/validate-widget-release-pins.mjs
+      - name: Verify package contents
+        run: |
+          bun run --filter @tixkit/embed-core build
+          bun run --filter @tixkit/widget build
+          npm pack --dry-run --json ./packages/embed-core
+          npm pack --dry-run --json ./packages/widget
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: widget-release-staging
+          path: artifacts/widget/
+          if-no-files-found: error
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        if: inputs.upload_cdn
+        with:
+          role-to-assume: ${{ secrets.WIDGET_CDN_STAGING_ROLE_ARN }}
+          aws-region: ${{ vars.WIDGET_CDN_STAGING_REGION }}
+      - name: Stage immutable CDN artifacts
+        if: inputs.upload_cdn
+        env:
+          WIDGET_CDN_STAGING_BUCKET: ${{ vars.WIDGET_CDN_STAGING_BUCKET }}
+          WIDGET_CDN_STAGING_BASE_URL: ${{ vars.WIDGET_CDN_STAGING_BASE_URL }}
+        run: node scripts/stage-widget-cdn.mjs artifacts/widget
+
+  publish-package:
+    needs: build-and-stage
+    if: inputs.publish_package
+    runs-on: ubuntu-latest
+    environment: widget-package-production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Require protected version tag
+        run: |
+          test "${GITHUB_REF_TYPE}" = tag
+          test "${GITHUB_REF_PROTECTED}" = true
+          version="$(node -p "require('./packages/widget/package.json').version")"
+          test "${GITHUB_REF_NAME}" = "widget-v${version}"
+          test "$(git tag --points-at HEAD | grep -Fx "widget-v${version}")" = "widget-v${version}"
+      - name: Publish packages with provenance
+        run: |
+          embed_version="$(node -p "require('./packages/embed-core/package.json').version")"
+          if remote_integrity="$(npm view "@tixkit/embed-core@${embed_version}" dist.integrity 2>/dev/null)"; then
+            local_integrity="$(npm pack ./packages/embed-core --json --pack-destination "$RUNNER_TEMP" | node -e "let input='';process.stdin.on('data',c=>input+=c).on('end',()=>process.stdout.write(JSON.parse(input)[0].integrity))")"
+            test "$local_integrity" = "$remote_integrity"
+          else
+            npm publish ./packages/embed-core --provenance --access public
+          fi
+          npm publish ./packages/widget --provenance --access public
+
+  alias-gate:
+    needs: build-and-stage
+    if: inputs.upload_cdn
+    runs-on: ubuntu-latest
+    environment: widget-production-alias
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: widget-release-staging
+          path: artifacts/widget
+      - name: Verify complete immutable candidate prefix
+        env:
+          WIDGET_CDN_STAGING_BASE_URL: ${{ vars.WIDGET_CDN_STAGING_BASE_URL }}
+        run: node scripts/stage-widget-cdn.mjs artifacts/widget --verify-only
+      - name: Require explicit external alias advancement procedure
+        run: |
+          echo 'Artifacts are staged. Advance the production alias only after independent manifest, size, hash, SRI, and browser verification.'
+          echo 'This workflow has no production alias credentials and cannot advance the alias.'

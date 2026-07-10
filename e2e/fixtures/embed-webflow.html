@@ -10,34 +10,56 @@
       <h1>Demo Event Page</h1>
       <p>This page simulates a Webflow site with Tixkit Embed Contract 1.0.</p>
       <!-- Tixkit Embed Contract 1.0: html -->
-<script type="module" src="http://localhost:3201/tixkit-widget.js"></script>
+      <script type="module" src="http://localhost:3201/tixkit-widget.js"></script>
 
-<tixkit-widget id="tixkit-inline-evt_demo"
-  brand="brd_demo"
-  event="evt_demo"
-  checkout-mode="inline"
-  tracking-id="webflow_test"
-  api-base-url="http://localhost:3201"
-  host-origin="http://localhost:3201"></tixkit-widget>
+      <tixkit-widget
+        id="tixkit-inline-evt_demo"
+        brand="brd_demo"
+        event="evt_demo"
+        checkout-mode="inline"
+        tracking-id="webflow_test"
+        api-base-url="http://localhost:3201"
+        host-origin="http://localhost:3201"
+      >
+        <a
+          href="http://localhost:3201/checkout?eventId=evt_demo&amp;brand=brd_demo&amp;tracking=webflow_test"
+          >Continue to secure checkout</a
+        >
+      </tixkit-widget>
 
-<script type="module">
-  const element = document.getElementById('tixkit-inline-evt_demo');
-  function onTixkitEvent(name, detail) {
-    console.log('Tixkit:', name, detail);
-  }
-  for (const name of ["tixkit:v1:loading","tixkit:v1:ready","tixkit:v1:opened","tixkit:v1:closed","tixkit:v1:checkout-started","tixkit:v1:checkout-session-created","tixkit:v1:order-completed","tixkit:v1:recoverable-error","tixkit:v1:fatal-error"]) {
-    element.addEventListener(name, (event) => onTixkitEvent(name, event.detail));
-  }
-</script>
-      <tixkit-button id="tixkit-button-evt_demo"
-  brand="brd_demo"
-  event="evt_demo"
-  checkout-mode="modal"
-  items="tt_general=2"
-  api-base-url="http://localhost:3201"
-  host-origin="http://localhost:3201">
-  Buy tickets
-</tixkit-button>
+      <script type="module">
+        const element = document.getElementById('tixkit-inline-evt_demo');
+        function onTixkitEvent(name, detail) {
+          console.log('Tixkit:', name, detail);
+        }
+        for (const name of [
+          'tixkit:v1:loading',
+          'tixkit:v1:ready',
+          'tixkit:v1:opened',
+          'tixkit:v1:closed',
+          'tixkit:v1:checkout-started',
+          'tixkit:v1:checkout-session-created',
+          'tixkit:v1:order-completed',
+          'tixkit:v1:recoverable-error',
+          'tixkit:v1:fatal-error',
+        ]) {
+          element.addEventListener(name, (event) => onTixkitEvent(name, event.detail));
+        }
+      </script>
+      <tixkit-button
+        id="tixkit-button-evt_demo"
+        brand="brd_demo"
+        event="evt_demo"
+        checkout-mode="modal"
+        items="tt_general=2"
+        api-base-url="http://localhost:3201"
+        host-origin="http://localhost:3201"
+      >
+        <a
+          href="http://localhost:3201/checkout?eventId=evt_demo&amp;brand=brd_demo&amp;items=tt_general%3D2"
+          >Buy tickets</a
+        >
+      </tixkit-button>
     </main>
   </body>
 </html>

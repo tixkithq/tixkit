@@ -10,27 +10,44 @@
       <h1>Framer Demo Page</h1>
       <p>This page simulates a Framer site with Tixkit Embed Contract 1.0.</p>
       <!-- Tixkit Embed Contract 1.0: html -->
-<script type="module" src="http://localhost:3201/tixkit-widget.js"></script>
+      <script type="module" src="http://localhost:3201/tixkit-widget.js"></script>
 
-<tixkit-widget id="tixkit-modal-evt_demo"
-  brand="brd_demo"
-  event="evt_demo"
-  checkout-mode="modal"
-  locale="en"
-  theme="dark"
-  tracking-id="framer_test"
-  api-base-url="http://localhost:3201"
-  host-origin="http://localhost:3201"></tixkit-widget>
+      <tixkit-widget
+        id="tixkit-modal-evt_demo"
+        brand="brd_demo"
+        event="evt_demo"
+        checkout-mode="modal"
+        locale="en"
+        theme="dark"
+        tracking-id="framer_test"
+        api-base-url="http://localhost:3201"
+        host-origin="http://localhost:3201"
+      >
+        <a
+          href="http://localhost:3201/checkout?eventId=evt_demo&amp;brand=brd_demo&amp;locale=en&amp;theme=dark&amp;tracking=framer_test"
+          >Continue to secure checkout</a
+        >
+      </tixkit-widget>
 
-<script type="module">
-  const element = document.getElementById('tixkit-modal-evt_demo');
-  function onTixkitEvent(name, detail) {
-    console.log('Tixkit:', name, detail);
-  }
-  for (const name of ["tixkit:v1:loading","tixkit:v1:ready","tixkit:v1:opened","tixkit:v1:closed","tixkit:v1:checkout-started","tixkit:v1:checkout-session-created","tixkit:v1:order-completed","tixkit:v1:recoverable-error","tixkit:v1:fatal-error"]) {
-    element.addEventListener(name, (event) => onTixkitEvent(name, event.detail));
-  }
-</script>
+      <script type="module">
+        const element = document.getElementById('tixkit-modal-evt_demo');
+        function onTixkitEvent(name, detail) {
+          console.log('Tixkit:', name, detail);
+        }
+        for (const name of [
+          'tixkit:v1:loading',
+          'tixkit:v1:ready',
+          'tixkit:v1:opened',
+          'tixkit:v1:closed',
+          'tixkit:v1:checkout-started',
+          'tixkit:v1:checkout-session-created',
+          'tixkit:v1:order-completed',
+          'tixkit:v1:recoverable-error',
+          'tixkit:v1:fatal-error',
+        ]) {
+          element.addEventListener(name, (event) => onTixkitEvent(name, event.detail));
+        }
+      </script>
     </main>
   </body>
 </html>
