@@ -486,7 +486,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - run: bun install --frozen-lockfile
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        # The hardened trusted runner forbids sudo/no-new-privileges. Its image
+        # owns OS packages; CI installs the pinned browser payload only.
+        run: bunx playwright install chromium
       - name: Write provider CI env file
         run: |
           umask 077
@@ -610,7 +612,9 @@ jobs:
           playwright-cache: 'true'
       - run: bun install --frozen-lockfile
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        # The hardened trusted runner forbids sudo/no-new-privileges. Its image
+        # owns OS packages; CI installs the pinned browser payload only.
+        run: bunx playwright install chromium
       - name: Start Docker-backed services
         run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
       - name: Wait for Temporal

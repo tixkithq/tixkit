@@ -58,7 +58,7 @@ Hosted CI proof:
 - \`.github/workflows/release-dry-run.yml\` runs green on hosted CI.
 - Managed DR proof covers Managed Postgres backup, managed Postgres restore, managed MySQL backup, managed MySQL restore, restore-based rollback, RPO/RTO, \`docs/production-deployment-guide.md\`, and \`docs/incident-runbooks.md\`.
 - Deferred 2026-06-30 PayPal product decision remains documented.
-- C-082 closes only after fresh hosted CI validates the committed suite, \`docs/completion/user-story-test-matrix.md\`, \`Validated 146 user-story rows\`, and \`78 evidence paths\` without cached Turbo-only proof.
+- C-082 closes only after fresh hosted CI validates the committed suite, \`docs/completion/user-story-test-matrix.md\`, \`Validated 146 user-story rows\`, and \`133 evidence paths\` without cached Turbo-only proof.
 
 ## Open-Core Export Validation Gates (C-061..C-070)
 
