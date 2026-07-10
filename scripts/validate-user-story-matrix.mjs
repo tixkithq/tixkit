@@ -480,7 +480,6 @@ function collectUnsupportedEvidenceCodeSpans(evidence) {
 
 function hasDirectBrowserEvidence(evidence, references) {
   return (
-    /\b(?:E2E|e2e|Playwright|browser|Chromium|Firefox|WebKit)\b/.test(evidence) ||
     references.pathReferences.some((path) => path.startsWith('e2e/')) ||
     references.packageScripts.some((script) => script.startsWith('test:e2e'))
   );
@@ -835,11 +834,10 @@ export function validateUserStoryMatrix(markdown, options = {}) {
     if (
       row.status === 'Covered' &&
       layers.includes('E') &&
-      !hasDirectBrowserEvidence(row.evidence, references) &&
-      !hasCompletedCompletionEvidence(references, completionStatuses)
+      !hasDirectBrowserEvidence(row.evidence, references)
     ) {
       errors.push(
-        `${row.id}: Covered E-layer rows must cite E2E/browser evidence or a completed completion item`,
+        `${row.id}: Covered E-layer rows must cite a concrete e2e/ path or test:e2e package script`,
       );
     }
     if (

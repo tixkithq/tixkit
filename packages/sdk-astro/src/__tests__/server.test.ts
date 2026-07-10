@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   completeResaleListing,
+  createCheckoutFormAction,
   createCheckoutTicketResaleListing,
   createTicketResaleListing,
   createTixkitClient,
@@ -21,6 +22,27 @@ function signature(body: string, secret: string, timestamp: number): string {
 }
 
 describe('Astro server helpers', () => {
+  it('allows unrestricted checkout forms to omit date of birth', async () => {
+    const checkoutCreate = vi.fn(async (input: unknown) => input);
+    const action = createCheckoutFormAction({ checkout: { create: checkoutCreate } } as never);
+    const formData = new FormData();
+    formData.set('eventId', 'evt_unrestricted');
+    formData.set('idempotencyKey', 'idem_unrestricted');
+    formData.set('ticketTypeId', 'tt_1');
+    formData.set('quantity', '1');
+    formData.set('buyerEmail', 'buyer@example.test');
+
+    await expect(action({ request: { formData: async () => formData } })).resolves.toMatchObject({
+      success: true,
+    });
+    expect(checkoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+        buyer: expect.not.objectContaining({ dateOfBirth: expect.anything() }),
+      }),
+    );
+  });
+
   it('verifies timestamped Tixkit webhook signatures', () => {
     const body = JSON.stringify({ id: 'wevt_1' });
     const secret = 'whsec_test';
@@ -127,6 +149,7 @@ describe('Astro server helpers', () => {
     await completeResaleListing(client, 'lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });
@@ -150,6 +173,7 @@ describe('Astro server helpers', () => {
     expect(client.tickets.completeResaleListing).toHaveBeenCalledWith('lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });

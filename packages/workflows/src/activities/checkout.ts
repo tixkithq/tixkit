@@ -1419,6 +1419,7 @@ export async function finalizeOrderActivity(input: {
       firstName?: string;
       lastName?: string;
       phone?: string;
+      dateOfBirth?: string;
     }>(session.buyer);
 
     const event = await db
@@ -1869,6 +1870,7 @@ export async function finalizeOrderActivity(input: {
             buyer_first_name: buyer.firstName ?? null,
             buyer_last_name: buyer.lastName ?? null,
             buyer_phone: buyer.phone ?? null,
+            buyer_date_of_birth: buyer.dateOfBirth ?? null,
             payment_intent_id: paymentIntent?.id ?? null,
             payment_provider: paymentIntent?.provider ?? null,
             sales_channel: input.salesChannel ?? 'online',
@@ -1977,6 +1979,7 @@ export async function finalizeOrderActivity(input: {
               last_name: buyer.lastName ?? null,
               email: buyer.email ?? '',
               phone: buyer.phone ?? null,
+              date_of_birth: buyer.dateOfBirth ?? null,
               status: 'confirmed',
               custom_answers: JSON.stringify({
                 resaleListingId: fulfillment.listing.id,
@@ -2162,7 +2165,11 @@ export async function finalizeOrderActivity(input: {
           const itemAttendeeFields =
             item.attendeeFields ?? cart.attendeeFields?.[item.ticketTypeId] ?? [];
           for (let i = 0; i < item.quantity; i++) {
-            const customAnswers = itemAttendeeFields[i] ?? null;
+            const attendeeFields = (itemAttendeeFields[i] ?? {}) as Record<string, unknown>;
+            const { firstName, lastName, email, phone, dateOfBirth, ...customAnswers } =
+              attendeeFields;
+            const attendeeEmail = typeof email === 'string' ? email : (buyer.email ?? '');
+            const attendeePhone = typeof phone === 'string' ? phone : (buyer.phone ?? null);
             const attendeeId = `att_${ulid()}`;
             // eslint-disable-next-line no-await-in-loop -- attendee rows must exist before consent snapshots and tickets link to them.
             await trx
@@ -2175,12 +2182,14 @@ export async function finalizeOrderActivity(input: {
                 ticket_type_id: item.ticketTypeId,
                 event_occurrence_id: item.occurrenceId ?? null,
                 ticket_id: null,
-                first_name: buyer.firstName ?? null,
-                last_name: buyer.lastName ?? null,
-                email: buyer.email ?? '',
-                phone: buyer.phone ?? null,
+                first_name: typeof firstName === 'string' ? firstName : (buyer.firstName ?? null),
+                last_name: typeof lastName === 'string' ? lastName : (buyer.lastName ?? null),
+                email: attendeeEmail,
+                phone: attendeePhone,
+                date_of_birth: typeof dateOfBirth === 'string' ? dateOfBirth : null,
                 status: 'confirmed',
-                custom_answers: customAnswers ? JSON.stringify(customAnswers) : null,
+                custom_answers:
+                  Object.keys(customAnswers).length > 0 ? JSON.stringify(customAnswers) : null,
                 checked_in_at: null,
                 check_in_device_id: null,
                 created_at: now,
@@ -2190,11 +2199,7 @@ export async function finalizeOrderActivity(input: {
 
             const consentAnswers = {
               ...cart.buyerFields,
-              ...(customAnswers &&
-              typeof customAnswers === 'object' &&
-              !Array.isArray(customAnswers)
-                ? customAnswers
-                : {}),
+              ...customAnswers,
             } as Record<string, unknown>;
             for (const question of consentQuestions) {
               const appliesToAttendee =
@@ -2207,6 +2212,10 @@ export async function finalizeOrderActivity(input: {
               if (!appliesToAttendee || !ticketMatches || !isConsentAccepted(consentAnswer))
                 continue;
               const snapshot = isConsentAnswerSnapshot(consentAnswer) ? consentAnswer : undefined;
+              const consentEmail =
+                question.applies_to === 'buyer' ? (buyer.email ?? '') : attendeeEmail;
+              const consentPhone =
+                question.applies_to === 'buyer' ? (buyer.phone ?? null) : attendeePhone;
               // eslint-disable-next-line no-await-in-loop -- consent snapshots are tied to the attendee being created in this loop iteration.
               await trx
                 .insertInto('message_consents')
@@ -2214,8 +2223,8 @@ export async function finalizeOrderActivity(input: {
                   id: `mc_${ulid()}`,
                   tenant_id: input.tenantId,
                   attendee_id: attendeeId,
-                  email: buyer.email ?? '',
-                  phone: buyer.phone ?? null,
+                  email: consentEmail,
+                  phone: consentPhone,
                   email_opt_in: true,
                   sms_opt_in: false,
                   consent_text: snapshot?.consentText ?? question.consent_text ?? question.label,
@@ -2418,7 +2427,7 @@ export async function sendConfirmationEmailActivity(input: {
         .executeTakeFirst(),
       db
         .selectFrom('brands')
-        .select(['id', 'name'])
+        .select(['id', 'name', 'theme'])
         .where('id', '=', input.brandId)
         .executeTakeFirst(),
     ]);

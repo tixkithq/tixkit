@@ -101,6 +101,7 @@ describe('Next server webhook helpers', () => {
     await completeResaleListing(client, 'lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });
@@ -124,6 +125,7 @@ describe('Next server webhook helpers', () => {
     expect(client.tickets.completeResaleListing).toHaveBeenCalledWith('lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });

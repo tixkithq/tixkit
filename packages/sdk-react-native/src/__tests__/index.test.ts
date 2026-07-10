@@ -699,6 +699,11 @@ describe('TixkitScannerClient', () => {
       if (url.includes('/ticket-listings/lst_2/complete')) {
         expect(init?.method).toBe('POST');
         expect(headers['Idempotency-Key']).toBe('idem_complete');
+        expect(JSON.parse(String(init?.body))).toEqual({
+          buyerId: 'usr_1',
+          buyerEmail: 'buyer@example.test',
+          externalPaymentReference: 'pi_1',
+        });
         return new Response(
           JSON.stringify({
             listing: { id: 'lst_2', status: 'sold' },

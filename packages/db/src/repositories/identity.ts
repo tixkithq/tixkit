@@ -431,4 +431,126 @@ export class PermissionGrantRepository extends BaseRepository {
       .where('principal_id', '=', principalId)
       .execute();
   }
+
+  /**
+   * Replaces organization-managed role grants for a user principal.
+   * Brand/event scoped grants are written when those IDs are provided; otherwise
+   * one organization-scoped grant is written per permission.
+   */
+  async replaceRoleGrants(input: {
+    tenantId: string;
+    principalId: string;
+    organizationId: string;
+    permissions: Permission[];
+    brandIds?: string[];
+    eventIds?: string[];
+  }) {
+    const now = new Date();
+    const brandIds = input.brandIds?.filter(Boolean) ?? [];
+    const eventIds = input.eventIds?.filter(Boolean) ?? [];
+
+    // Remove all role-managed grants for this membership's organization, including
+    // brand/event grants under that org, so scope changes do not leave stale access.
+    const orgBrandRows = await this.db
+      .selectFrom('brands')
+      .select('id')
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute();
+    const orgEventRows = await this.db
+      .selectFrom('events')
+      .select('id')
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute();
+    const orgBrandIds = orgBrandRows.map((row) => row.id);
+    const orgEventIds = orgEventRows.map((row) => row.id);
+
+    await this.db
+      .deleteFrom('permission_grants')
+      .where('tenant_id', '=', input.tenantId)
+      .where('principal_type', '=', 'user')
+      .where('principal_id', '=', input.principalId)
+      .where((eb) =>
+        eb.or([
+          eb.and([
+            eb('scope_type', '=', 'organization'),
+            eb('scope_id', '=', input.organizationId),
+          ]),
+          ...(orgBrandIds.length > 0
+            ? [eb.and([eb('scope_type', '=', 'brand'), eb('scope_id', 'in', orgBrandIds)])]
+            : []),
+          ...(orgEventIds.length > 0
+            ? [eb.and([eb('scope_type', '=', 'event'), eb('scope_id', 'in', orgEventIds)])]
+            : []),
+        ]),
+      )
+      .execute();
+
+    const rows: Array<{
+      id: string;
+      tenant_id: string;
+      principal_type: string;
+      principal_id: string;
+      permission: string;
+      scope_type: string;
+      scope_id: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }> = [];
+
+    for (const permission of input.permissions) {
+      if (brandIds.length > 0) {
+        for (const brandId of brandIds) {
+          rows.push({
+            id: `pg_${ulid()}`,
+            tenant_id: input.tenantId,
+            principal_type: 'user',
+            principal_id: input.principalId,
+            permission,
+            scope_type: 'brand',
+            scope_id: brandId,
+            created_at: now,
+            updated_at: now,
+          });
+        }
+        continue;
+      }
+
+      if (eventIds.length > 0) {
+        for (const eventId of eventIds) {
+          rows.push({
+            id: `pg_${ulid()}`,
+            tenant_id: input.tenantId,
+            principal_type: 'user',
+            principal_id: input.principalId,
+            permission,
+            scope_type: 'event',
+            scope_id: eventId,
+            created_at: now,
+            updated_at: now,
+          });
+        }
+        continue;
+      }
+
+      rows.push({
+        id: `pg_${ulid()}`,
+        tenant_id: input.tenantId,
+        principal_type: 'user',
+        principal_id: input.principalId,
+        permission,
+        scope_type: 'organization',
+        scope_id: input.organizationId,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    if (rows.length === 0) return [];
+    for (const row of rows) {
+      await this.db.insertInto('permission_grants').values(row).execute();
+    }
+    return rows;
+  }
 }

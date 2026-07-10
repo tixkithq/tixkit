@@ -8,9 +8,20 @@ import {
   BrandSenderIdentityRepository,
   BrandRepository,
   PaymentAccountRepository,
+  PermissionGrantRepository,
   AuditLogRepository,
+  EventRepository,
+  ContentRepository,
+  EmailJobRepository,
 } from '@tixkit/db';
-import { ForbiddenError, ValidationError } from '@tixkit/domain';
+import type { Database } from '@tixkit/db';
+import {
+  ForbiddenError,
+  ConflictError,
+  ValidationError,
+  isDoorOnlyPermissionSet,
+  permissionsForRole,
+} from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
   addBrandDomainSchema,
@@ -19,6 +30,7 @@ import {
   createOrganizationSchema,
   parseBody,
   updateBrandSchema,
+  updateOrganizationMemberSchema,
   updateOrganizationSchema,
 } from '../../http/schemas.js';
 import {
@@ -28,6 +40,7 @@ import {
   serializeOrganization,
 } from '../../http/contracts.js';
 import Stripe from 'stripe';
+import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
 type PaymentAccountRow = {
   id: string;
@@ -83,6 +96,44 @@ function requireBrandCreationPrincipal(principal: Principal): void {
   }
 }
 
+async function requireOrganizationScopedPermission(
+  db: Database,
+  principal: Principal,
+  organizationId: string,
+  permission: Permission,
+): Promise<void> {
+  ClerkAuthService.requirePermission(principal, permission);
+  ClerkAuthService.requireOrganizationScope(principal, organizationId);
+  if (principal.type === 'system') return;
+  if (principal.type !== 'user') {
+    throw new ForbiddenError('This organization-wide operation requires a user principal');
+  }
+  const grant = await db
+    .selectFrom('permission_grants')
+    .select('id')
+    .where('tenant_id', '=', principal.tenantId)
+    .where('principal_type', '=', 'user')
+    .where('principal_id', '=', principal.id)
+    .where('permission', '=', permission)
+    .where('scope_type', '=', 'organization')
+    .where('scope_id', '=', organizationId)
+    .executeTakeFirst();
+  if (grant) return;
+  // Legacy/unscoped principals have no resource filters and are organization-wide.
+  // For mixed multi-org principals, the exact DB grant above is authoritative.
+  if (
+    !principal.brandIds?.length &&
+    !principal.eventIds?.length &&
+    principal.organizationIds.length === 1 &&
+    principal.organizationIds[0] === organizationId
+  ) {
+    return;
+  }
+  throw new ForbiddenError(
+    `Organization-scoped ${permission} permission is required for this operation`,
+  );
+}
+
 const dashboardContextPermissions: Permission[] = [
   'events.read',
   'events.write',
@@ -94,12 +145,59 @@ const dashboardContextPermissions: Permission[] = [
   'attendees.write',
   'checkins.read',
   'checkins.write',
+  'box_office.write',
   'messages.write',
   'reports.read',
   'settings.write',
   'developers.write',
   'billing.write',
 ];
+
+function adminDashboardOrigin(): string {
+  return (
+    process.env.ADMIN_DASHBOARD_URL ??
+    process.env.NEXT_PUBLIC_ADMIN_ORIGIN ??
+    'http://localhost:3001'
+  ).replace(/\/$/, '');
+}
+
+async function queueOrganizationInvitationEmail(input: {
+  db: Database;
+  tenantId: string;
+  organizationName: string;
+  brandId: string;
+  email: string;
+  idempotencyKey: string;
+  returnTo?: string;
+}) {
+  const signUpUrl = new URL('/sign-up', adminDashboardOrigin());
+  if (input.returnTo) signUpUrl.searchParams.set('redirect_url', input.returnTo);
+  const inviteUrl = signUpUrl.toString();
+  const publishedTemplate = await new ContentRepository(input.db).findPublishedEmailTemplate({
+    tenantId: input.tenantId,
+    brandId: input.brandId,
+    key: 'organization-member-invited',
+  });
+  const emailRepo = new EmailJobRepository(input.db);
+  const existing = await emailRepo.findByIdempotencyKey(input.tenantId, input.idempotencyKey);
+  if (existing) return existing;
+  return emailRepo.create({
+    tenantId: input.tenantId,
+    brandId: input.brandId,
+    templateKey: 'organization-member-invited',
+    templateVersionId: publishedTemplate?.version.id ?? 'system_organization_member_invited_v1',
+    toEmail: input.email,
+    variables: {
+      recipient: { name: input.email.split('@')[0] || input.email },
+      brand: { name: input.organizationName },
+      dashboard: { url: inviteUrl },
+      notificationType: 'staff',
+    },
+    providerRouteId: 'system_default',
+    priority: 'high',
+    idempotencyKey: input.idempotencyKey,
+  });
+}
 
 function serializePaymentAccount(account: PaymentAccountRow, onboardingUrl?: string) {
   return {
@@ -262,15 +360,32 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   async function scopedBrandsFor(principal: Principal) {
     const brands = await new BrandRepository(db).findByTenant(principal.tenantId);
-    return principal.type === 'system'
-      ? brands
-      : brands.filter(
-          (brand) =>
-            principal.organizationIds.includes(brand.organization_id) &&
-            (!principal.brandIds ||
-              principal.brandIds.length === 0 ||
-              principal.brandIds.includes(brand.id)),
-        );
+    if (principal.type === 'system') return brands;
+
+    let allowedBrandIds = principal.brandIds;
+    // Event-scoped door staff have eventIds but may not have brandIds. Derive
+    // allowed brands from those events so bootstrap does not leak every org brand.
+    if ((!allowedBrandIds || allowedBrandIds.length === 0) && principal.eventIds?.length) {
+      const eventRows = await db
+        .selectFrom('events')
+        .select(['id', 'brand_id'])
+        .where('tenant_id', '=', principal.tenantId)
+        .where('id', 'in', principal.eventIds)
+        .execute();
+      allowedBrandIds = [
+        ...new Set(
+          eventRows
+            .map((row) => row.brand_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ] as Principal['brandIds'];
+    }
+
+    return brands.filter(
+      (brand) =>
+        principal.organizationIds.includes(brand.organization_id) &&
+        (!allowedBrandIds || allowedBrandIds.length === 0 || allowedBrandIds.includes(brand.id)),
+    );
   }
 
   app.post('/organizations', async (request, reply) => {
@@ -313,7 +428,11 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/bootstrap-context', async (request) => {
     const principal = request.principal!;
     requireAnyPermission(principal, dashboardContextPermissions);
-    ClerkAuthService.requireNoEventScope(principal, 'brand-wide dashboard context');
+    // Door-only / event-scoped staff still need org+brand context for the door shell.
+    // Full dashboard surfaces continue to reject event-scoped principals.
+    if (!isDoorOnlyPermissionSet(principal.scopes)) {
+      ClerkAuthService.requireNoEventScope(principal, 'brand-wide dashboard context');
+    }
     const includeSettings = ClerkAuthService.hasPermission(principal, 'settings.write');
     const [organizations, brands] = await Promise.all([
       scopedOrganizationsFor(principal),
@@ -353,12 +472,11 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/organizations/:organizationId', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'settings.write');
     const { organizationId } = request.params as { organizationId: string };
     const current = await new OrganizationRepository(db).findById(organizationId);
     if (!current) throw new ValidationError('Organization not found');
     ClerkAuthService.requireResourceTenant(principal, current, 'Organization', organizationId);
-    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    await requireOrganizationScopedPermission(db, principal, organizationId, 'settings.write');
 
     const body = parseBody(updateOrganizationSchema, request.body);
     await requireUniqueClerkOrganizationId(db, body.clerkOrganizationId, organizationId);
@@ -403,32 +521,86 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/organizations/:organizationId/members', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'settings.write');
     const { organizationId } = request.params as { organizationId: string };
     const organization = await new OrganizationRepository(db).findById(organizationId);
     if (!organization) throw new ValidationError('Organization not found');
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
-    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    await requireOrganizationScopedPermission(db, principal, organizationId, 'settings.write');
 
     const rows = await new OrganizationMemberRepository(db).findByOrganization(
       principal.tenantId,
       organizationId,
     );
-    return rows.map((row) => ({
-      id: row.id,
-      organizationId: row.organization_id,
-      name: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.email,
-      email: row.email,
-      role: row.role,
-      status: row.accepted_at ? row.user_status : 'invited',
-      invitedAt: row.invited_at,
-      joinedAt: row.accepted_at,
-    }));
+    const userIds = rows.map((row) => row.user_id);
+    const [organizationBrands, organizationEvents, grants] = await Promise.all([
+      db
+        .selectFrom('brands')
+        .select('id')
+        .where('tenant_id', '=', principal.tenantId)
+        .where('organization_id', '=', organizationId)
+        .execute(),
+      db
+        .selectFrom('events')
+        .select('id')
+        .where('tenant_id', '=', principal.tenantId)
+        .where('organization_id', '=', organizationId)
+        .execute(),
+      userIds.length > 0
+        ? db
+            .selectFrom('permission_grants')
+            .select(['principal_id', 'scope_type', 'scope_id'])
+            .where('tenant_id', '=', principal.tenantId)
+            .where('principal_type', '=', 'user')
+            .where('principal_id', 'in', userIds)
+            .execute()
+        : Promise.resolve([]),
+    ]);
+    const organizationBrandIds = new Set(organizationBrands.map((brand) => brand.id));
+    const organizationEventIds = new Set(organizationEvents.map((event) => event.id));
+
+    return rows.map((row) => {
+      const memberGrants = grants.filter((grant) => grant.principal_id === row.user_id);
+      const brandIds = [
+        ...new Set(
+          memberGrants
+            .filter(
+              (grant) =>
+                grant.scope_type === 'brand' &&
+                grant.scope_id &&
+                organizationBrandIds.has(grant.scope_id),
+            )
+            .map((grant) => grant.scope_id as string),
+        ),
+      ];
+      const eventIds = [
+        ...new Set(
+          memberGrants
+            .filter(
+              (grant) =>
+                grant.scope_type === 'event' &&
+                grant.scope_id &&
+                organizationEventIds.has(grant.scope_id),
+            )
+            .map((grant) => grant.scope_id as string),
+        ),
+      ];
+      return {
+        id: row.id,
+        organizationId: row.organization_id,
+        name: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.email,
+        email: row.email,
+        role: row.role,
+        status: row.accepted_at ? row.user_status : 'invited',
+        invitedAt: row.invited_at,
+        joinedAt: row.accepted_at,
+        brandIds,
+        eventIds,
+      };
+    });
   });
 
   app.post('/organizations/:organizationId/members/invitations', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'settings.write');
     if (principal.type !== 'user') {
       throw new ForbiddenError('Organization member invitations require a user principal');
     }
@@ -436,36 +608,287 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const organization = await new OrganizationRepository(db).findById(organizationId);
     if (!organization) throw new ValidationError('Organization not found');
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
-    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    await requireOrganizationScopedPermission(db, principal, organizationId, 'settings.write');
 
     const body = parseBody(createOrganizationInvitationSchema, request.body);
-    const { email, role } = body;
+    const { email, role, brandIds, eventIds, returnTo } = body;
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+      throw new ValidationError('Idempotency-Key header is required for member invitations');
+    }
 
-    const member = await new OrganizationMemberRepository(db).invite({
-      tenantId: principal.tenantId,
-      organizationId,
-      email,
-      role,
+    if (brandIds?.length) {
+      const brandRepo = new BrandRepository(db);
+      for (const brandId of brandIds) {
+        const brand = await brandRepo.findById(brandId);
+        if (!brand || brand.organization_id !== organizationId) {
+          throw new ValidationError(`Brand ${brandId} is not part of this organization`);
+        }
+        ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+        ClerkAuthService.requireBrandScope(principal, brandId);
+      }
+    }
+
+    const eventBrandIds = new Set<string>();
+    if (eventIds?.length) {
+      const eventRepo = new EventRepository(db);
+      for (const eventId of eventIds) {
+        const event = await eventRepo.findById(eventId);
+        if (!event || event.organization_id !== organizationId) {
+          throw new ValidationError(`Event ${eventId} is not part of this organization`);
+        }
+        ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+        ClerkAuthService.requireEventScope(principal, eventId);
+        ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+        if (event.brand_id) eventBrandIds.add(String(event.brand_id));
+      }
+      if (eventBrandIds.size > 1) {
+        throw new ValidationError('Event-scoped invitations must target events from one brand');
+      }
+    }
+
+    const invitationBrandId =
+      brandIds?.[0] ??
+      [...eventBrandIds][0] ??
+      (await new BrandRepository(db).findByOrganization(organizationId))[0]?.id;
+    if (!invitationBrandId) {
+      throw new ValidationError('An invitation email requires at least one workspace brand');
+    }
+
+    const permissions = permissionsForRole(role);
+    const result = await withIdempotency(
+      db,
+      {
+        key: idempotencyKey,
+        tenantId: principal.tenantId,
+        requestHash: hashRequest({ organizationId, ...body }),
+      },
+      async () => {
+        const emailJobKey = `organization-invitation:${hashRequest({ organizationId, email, idempotencyKey })}`;
+        // Resolve the conflict-prone user/member creation in autocommit mode.
+        // PostgreSQL aborts an explicit transaction after a unique violation,
+        // so the transaction below only performs locked, exception-free updates.
+        const invited = await new OrganizationMemberRepository(db).invite({
+          tenantId: principal.tenantId,
+          organizationId,
+          email,
+          role,
+          updateExistingRole: false,
+        });
+        const { member, emailJob } = await db.transaction().execute(async (trx) => {
+          const transactionDb = trx as Database;
+          const memberRepo = new OrganizationMemberRepository(transactionDb);
+          const lockedMember = await memberRepo.findByIdForUpdate(
+            principal.tenantId,
+            organizationId,
+            invited.id,
+          );
+          if (!lockedMember) throw new ValidationError('Organization member not found');
+          if (lockedMember.accepted_at) {
+            throw new ConflictError(
+              'This person is already a member. Use Edit member to change their role or scope.',
+            );
+          }
+          const updatedMember =
+            lockedMember.role === role
+              ? lockedMember
+              : await memberRepo.updateRole(invited.id, role);
+          await new PermissionGrantRepository(transactionDb).replaceRoleGrants({
+            tenantId: principal.tenantId,
+            principalId: lockedMember.user_id as string,
+            organizationId,
+            permissions,
+            brandIds,
+            eventIds,
+          });
+          const queuedEmail = await queueOrganizationInvitationEmail({
+            db: transactionDb,
+            tenantId: principal.tenantId,
+            organizationName: String(organization.name),
+            brandId: String(invitationBrandId),
+            email,
+            idempotencyKey: emailJobKey,
+            returnTo,
+          });
+          return { member: updatedMember, emailJob: queuedEmail };
+        });
+
+        const variables = {
+          recipient: { name: email.split('@')[0] || email },
+          brand: { name: String(organization.name) },
+          dashboard: {
+            url: (() => {
+              const url = new URL('/sign-up', adminDashboardOrigin());
+              if (returnTo) url.searchParams.set('redirect_url', returnTo);
+              return url.toString();
+            })(),
+          },
+          notificationType: 'staff' as const,
+        };
+        try {
+          const workflowHandle = await app.context.temporalClient.startNotificationDelivery({
+            jobId: emailJob.id,
+            tenantId: principal.tenantId,
+            brandId: String(invitationBrandId),
+            templateKey: 'organization-member-invited',
+            templateVersionId: emailJob.template_version_id,
+            toEmail: email,
+            variables,
+            providerRouteId: emailJob.provider_route_id,
+            notificationType: 'staff',
+          });
+          await new EmailJobRepository(db).update(emailJob.id, {
+            status: 'queued',
+            workflow_id:
+              workflowHandle && typeof workflowHandle.workflowId === 'string'
+                ? workflowHandle.workflowId
+                : `notification:${emailJob.id}`,
+          });
+        } catch (error) {
+          await new EmailJobRepository(db).update(emailJob.id, {
+            status: 'start_failed',
+            workflow_id: null,
+          });
+          throw new Error('Invitation was queued but delivery could not be started', {
+            cause: error,
+          });
+        }
+
+        await writeAuditLog(audit(), request, principal, {
+          action: 'organization_member.invited',
+          organizationId,
+          resourceType: 'Organization',
+          resourceId: organizationId,
+          diffSummary: { email, role, brandIds, eventIds, permissions, emailJobId: emailJob.id },
+        });
+
+        return {
+          status: 201,
+          body: {
+            id: member.id,
+            organizationId: member.organization_id,
+            name: email.split('@')[0] || email,
+            email,
+            role: member.role,
+            status: 'invited',
+            invitedAt: member.invited_at,
+            joinedAt: member.accepted_at,
+            brandIds: brandIds ?? [],
+            eventIds: eventIds ?? [],
+            invitationDelivery: 'queued',
+            invitationProvider: 'temporal',
+          },
+        };
+      },
+    );
+
+    return reply.status(result.status).send(result.body);
+  });
+
+  app.patch('/organizations/:organizationId/members/:memberId', async (request) => {
+    const principal = request.principal!;
+    if (principal.type !== 'user') {
+      throw new ForbiddenError('Organization member updates require a user principal');
+    }
+
+    const { organizationId, memberId } = request.params as {
+      organizationId: string;
+      memberId: string;
+    };
+    const organization = await new OrganizationRepository(db).findById(organizationId);
+    if (!organization) throw new ValidationError('Organization not found');
+    ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
+    await requireOrganizationScopedPermission(db, principal, organizationId, 'settings.write');
+
+    const body = parseBody(updateOrganizationMemberSchema, request.body);
+    const { role, brandIds, eventIds } = body;
+
+    if (brandIds?.length) {
+      const brandRepo = new BrandRepository(db);
+      for (const brandId of brandIds) {
+        const brand = await brandRepo.findById(brandId);
+        if (!brand || brand.organization_id !== organizationId) {
+          throw new ValidationError(`Brand ${brandId} is not part of this organization`);
+        }
+        ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', brandId);
+        ClerkAuthService.requireBrandScope(principal, brandId);
+      }
+    }
+
+    if (eventIds?.length) {
+      const eventRepo = new EventRepository(db);
+      for (const eventId of eventIds) {
+        const event = await eventRepo.findById(eventId);
+        if (!event || event.organization_id !== organizationId) {
+          throw new ValidationError(`Event ${eventId} is not part of this organization`);
+        }
+        ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+        ClerkAuthService.requireEventScope(principal, eventId);
+        ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
+      }
+    }
+
+    const memberRepo = new OrganizationMemberRepository(db);
+    const existing = await memberRepo.findById(principal.tenantId, organizationId, memberId);
+    if (!existing) throw new ValidationError('Organization member not found');
+
+    if (existing.role === 'owner') {
+      throw new ValidationError('Owner role cannot be changed through this endpoint');
+    }
+    if (existing.user_id === principal.id && role !== 'admin') {
+      throw new ValidationError('You cannot remove your own admin access');
+    }
+
+    const permissions = permissionsForRole(role);
+    const previousRole = existing.role;
+    const updated = await db.transaction().execute(async (trx) => {
+      const transactionDb = trx as Database;
+      const transactionMembers = new OrganizationMemberRepository(transactionDb);
+      await transactionMembers.updateRole(memberId, role);
+      await new PermissionGrantRepository(transactionDb).replaceRoleGrants({
+        tenantId: principal.tenantId,
+        principalId: existing.user_id as string,
+        organizationId,
+        permissions,
+        brandIds,
+        eventIds,
+      });
+      const result = await transactionMembers.findById(
+        principal.tenantId,
+        organizationId,
+        memberId,
+      );
+      if (!result) throw new ValidationError('Organization member not found');
+      return result;
     });
 
     await writeAuditLog(audit(), request, principal, {
-      action: 'organization_member.invited',
+      action: 'organization_member.role_updated',
       organizationId,
-      resourceType: 'Organization',
-      resourceId: organizationId,
-      diffSummary: { email, role },
+      resourceType: 'OrganizationMember',
+      resourceId: memberId,
+      diffSummary: {
+        previousRole,
+        role,
+        brandIds,
+        eventIds,
+        permissions,
+        userId: updated.user_id,
+      },
     });
 
-    return reply.status(201).send({
-      id: member.id,
-      organizationId: member.organization_id,
-      name: email.split('@')[0] || email,
-      email,
-      role: member.role,
-      status: 'invited',
-      invitedAt: member.invited_at,
-      joinedAt: member.accepted_at,
-    });
+    return {
+      id: updated.id,
+      organizationId: updated.organization_id,
+      name: [updated.first_name, updated.last_name].filter(Boolean).join(' ') || updated.email,
+      email: updated.email,
+      role: updated.role,
+      status: updated.accepted_at ? updated.user_status : 'invited',
+      invitedAt: updated.invited_at,
+      joinedAt: updated.accepted_at,
+      brandIds: brandIds ?? [],
+      eventIds: eventIds ?? [],
+    };
   });
 
   app.post('/brands', async (request, reply) => {
@@ -500,7 +923,11 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       brandId: brand.id,
       resourceType: 'Brand',
       resourceId: brand.id,
-      diffSummary: { name: body.name, slug: body.slug, organizationId: body.organizationId },
+      diffSummary: {
+        name: body.name,
+        slug: body.slug,
+        organizationId: body.organizationId,
+      },
     });
 
     return reply.status(201).send(serializeBrand(brand));
@@ -659,12 +1086,11 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/organizations/:organizationId/payment-accounts', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'billing.write');
     const { organizationId } = request.params as { organizationId: string };
     const organization = await new OrganizationRepository(db).findById(organizationId);
     if (!organization) throw new ValidationError('Organization not found');
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
-    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
 
     const accounts = await new PaymentAccountRepository(db).findByOrganization(organizationId);
     return accounts.map((account) => serializePaymentAccount(account));
@@ -674,7 +1100,6 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     '/organizations/:organizationId/payment-accounts/stripe-connect',
     async (request, reply) => {
       const principal = request.principal!;
-      ClerkAuthService.requirePermission(principal, 'billing.write');
       const { organizationId } = request.params as { organizationId: string };
       const organization = await new OrganizationRepository(db).findById(organizationId);
       if (!organization) throw new ValidationError('Organization not found');
@@ -684,7 +1109,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         'Organization',
         organizationId,
       );
-      ClerkAuthService.requireOrganizationScope(principal, organizationId);
+      await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
 
       const paymentAccounts = new PaymentAccountRepository(db);
       const activeStripe = await paymentAccounts.findByOrganizationAndProvider(
@@ -782,7 +1207,6 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     '/organizations/:organizationId/payment-accounts/:paymentAccountId/stripe-connect/refresh',
     async (request) => {
       const principal = request.principal!;
-      ClerkAuthService.requirePermission(principal, 'billing.write');
       const { organizationId, paymentAccountId } = request.params as {
         organizationId: string;
         paymentAccountId: string;
@@ -795,7 +1219,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         'Organization',
         organizationId,
       );
-      ClerkAuthService.requireOrganizationScope(principal, organizationId);
+      await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
 
       const paymentAccounts = new PaymentAccountRepository(db);
       const account = await paymentAccounts.findById(paymentAccountId);
@@ -868,12 +1292,11 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/organizations/:organizationId/billing', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, 'billing.write');
     const { organizationId } = request.params as { organizationId: string };
     const organization = await new OrganizationRepository(db).findById(organizationId);
     if (!organization) throw new ValidationError('Organization not found');
     ClerkAuthService.requireResourceTenant(principal, organization, 'Organization', organizationId);
-    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    await requireOrganizationScopedPermission(db, principal, organizationId, 'billing.write');
 
     const tenant = await db
       .selectFrom('tenants')

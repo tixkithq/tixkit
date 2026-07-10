@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ClerkAuthService, DEV_TENANT_ID, DEV_ORG_ID } from '../auth/clerk.js';
-import { ForbiddenError, NotFoundError, UnauthorizedError } from '@tixkit/domain';
+import { ALL_PERMISSIONS, ForbiddenError, NotFoundError, UnauthorizedError } from '@tixkit/domain';
 import type { Principal, Permission } from '@tixkit/domain';
 import { requireAssignableScopes } from '../http/contracts.js';
 
@@ -273,7 +273,7 @@ describe('ClerkAuthService local dev mode', () => {
     expect(result.principal.type).toBe('user');
     expect(result.principal.tenantId).toBe(DEV_TENANT_ID);
     expect(result.principal.organizationIds).toEqual([DEV_ORG_ID]);
-    expect(result.principal.scopes.length).toBe(15);
+    expect(result.principal.scopes).toHaveLength(ALL_PERMISSIONS.length);
     expect(result.principal.scopes).toContain('events.read');
     expect(result.principal.scopes).toContain('events.write');
     expect(result.principal.scopes).toContain('refunds.write');

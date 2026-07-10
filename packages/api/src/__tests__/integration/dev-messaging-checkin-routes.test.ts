@@ -17,6 +17,16 @@ import { publicRoutes } from '../../routes/modules/public.js';
 import { PricingEngine } from '../../services/pricing.js';
 import { hashWaitlistClaimToken } from '../../routes/modules/waitlist.js';
 
+const checkInActivityEvents = vi.hoisted(() => ({
+  publish: vi.fn(async (..._args: unknown[]) => undefined),
+  subscribe: vi.fn(async (..._args: unknown[]) => undefined),
+}));
+
+vi.mock('../../services/check-in-activity-events.js', () => ({
+  publishCheckInActivityEvent: (...args: unknown[]) => checkInActivityEvents.publish(...args),
+  createCheckInActivitySubscriber: (...args: unknown[]) => checkInActivityEvents.subscribe(...args),
+}));
+
 const getMockColumnValue = (row: Record<string, unknown>, column: string) =>
   row[column] ?? row[column.split('.').at(-1) ?? column];
 
@@ -116,7 +126,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
   };
   function createQuery(table: string) {
     const filters: MockCondition[] = [];
-    const joins: Array<[string, string, string]> = [];
+    const joins: Array<[string, string, string, unknown?]> = [];
     let countAlias: string | null = null;
     let rowLimit: number | null = null;
     const expressionBuilder = Object.assign(
@@ -148,6 +158,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
         return query;
       },
       selectAll: () => query,
+      clearSelect: () => query,
       innerJoin: (...args: unknown[]) => {
         if (
           typeof args[0] === 'string' &&
@@ -155,6 +166,30 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
           typeof args[2] === 'string'
         ) {
           joins.push([args[0], args[1], args[2]]);
+        }
+        return query;
+      },
+      leftJoin: (...args: unknown[]) => {
+        if (
+          typeof args[0] === 'string' &&
+          typeof args[1] === 'string' &&
+          typeof args[2] === 'string'
+        ) {
+          joins.push([args[0], args[1], args[2]]);
+        } else if (typeof args[0] === 'string') {
+          // Kysely builder form: leftJoin('tickets', (join) => join.onRef(...).on(...))
+          let tenantId: unknown;
+          const joinBuilder = {
+            onRef: () => joinBuilder,
+            on: (column: string, operator: string, value: unknown) => {
+              if (column.endsWith('.tenant_id') && operator === '=') tenantId = value;
+              return joinBuilder;
+            },
+          };
+          if (typeof args[1] === 'function') {
+            (args[1] as (join: typeof joinBuilder) => unknown)(joinBuilder);
+          }
+          joins.push([args[0], '', '', tenantId]);
         }
         return query;
       },
@@ -175,7 +210,7 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
       fn: { sum: () => 'sum', countAll: () => 'count' },
       rows() {
         let rows = getRows(table);
-        for (const [joinedTable, leftColumn, rightColumn] of joins) {
+        for (const [joinedTable, leftColumn, rightColumn, tenantId] of joins) {
           if (table === 'attendees' && joinedTable === 'events') {
             rows = rows.flatMap((row) => {
               const joined = getRows('events').find((event) =>
@@ -194,6 +229,63 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
                   'events.tenant_id': joined.tenant_id,
                 },
               ];
+            });
+          }
+          if (table === 'organization_members' && joinedTable === 'user_profiles') {
+            rows = rows.flatMap((row) => {
+              // Kysely: innerJoin('user_profiles', 'user_profiles.id', 'organization_members.user_id')
+              const joined = getRows('user_profiles').find((profile) =>
+                mockValuesEqual(
+                  getMockColumnValue(profile, leftColumn.split('.').at(-1) ?? leftColumn),
+                  getMockColumnValue(row, rightColumn.split('.').at(-1) ?? rightColumn),
+                ),
+              );
+              if (!joined) return [];
+              return [
+                {
+                  ...row,
+                  email: joined.email,
+                  first_name: joined.first_name,
+                  last_name: joined.last_name,
+                  user_status: joined.status,
+                },
+              ];
+            });
+          }
+          if (table === 'scan_logs' && (joinedTable === 'tickets' || joinedTable === 'attendees')) {
+            rows = rows.map((row) => {
+              if (joinedTable === 'tickets') {
+                const ticket = getRows('tickets').find((candidate) => {
+                  if (tenantId !== undefined && candidate.tenant_id !== tenantId) return false;
+                  const leftKey = leftColumn ? (leftColumn.split('.').at(-1) ?? leftColumn) : 'id';
+                  const rightKey = rightColumn
+                    ? (rightColumn.split('.').at(-1) ?? rightColumn)
+                    : 'ticket_id';
+                  return mockValuesEqual(
+                    getMockColumnValue(candidate, leftKey),
+                    getMockColumnValue(row, rightKey),
+                  );
+                });
+                if (!ticket) return row;
+                return {
+                  ...row,
+                  ticket_type_id: ticket.ticket_type_id,
+                  attendee_id: ticket.attendee_id,
+                };
+              }
+              const attendeeId = row.attendee_id;
+              const attendee = getRows('attendees').find(
+                (candidate) =>
+                  (tenantId === undefined || candidate.tenant_id === tenantId) &&
+                  mockValuesEqual(candidate.id, attendeeId),
+              );
+              if (!attendee) return row;
+              return {
+                ...row,
+                first_name: attendee.first_name,
+                last_name: attendee.last_name,
+                email: attendee.email,
+              };
             });
           }
         }
@@ -425,6 +517,7 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
 function invitationTables() {
   const userProfiles: Record<string, unknown>[] = [];
   const organizationMembers: Record<string, unknown>[] = [];
+  const permissionGrants: Record<string, unknown>[] = [];
   const auditLogs: Record<string, unknown>[] = [];
 
   return {
@@ -440,9 +533,26 @@ function invitationTables() {
         updated_at: new Date(),
       },
     ],
+    brands: [
+      {
+        id: 'brd_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        name: 'Brand One',
+        slug: 'brand-one',
+        status: 'active',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ],
     user_profiles: userProfiles,
     organization_members: organizationMembers,
+    permission_grants: permissionGrants,
     audit_logs: auditLogs,
+    content_documents: [] as Record<string, unknown>[],
+    content_document_versions: [] as Record<string, unknown>[],
+    email_jobs: [] as Record<string, unknown>[],
+    idempotency_records: [] as Record<string, unknown>[],
   };
 }
 
@@ -577,6 +687,16 @@ async function setupApp(
       getQrPayload: () => ({ valid: true, ticketId: 'tkt_1' }),
     },
     authService: {},
+    emailTransport: {
+      send: vi.fn(async (input: { deliveryId: string }) => ({
+        deliveryId: input.deliveryId,
+        provider: 'capture',
+        status: 'accepted',
+        attemptedFallbackProviders: [],
+        sentAt: new Date().toISOString(),
+      })),
+    },
+    smsTransport: {},
     temporalClient: {
       startRefund: vi.fn(),
       startExport: vi.fn(),
@@ -1281,10 +1401,14 @@ describe('brand domain creation', () => {
 
   it('POST /organizations/:organizationId/members/invitations persists an invited member', async () => {
     const tables = invitationTables();
-    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const startNotificationDelivery = vi.fn(async () => undefined);
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      temporalClient: { startNotificationDelivery },
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_teammate_1' },
       payload: { email: '  Teammate@Example.COM  ', role: 'organizer' },
     });
     expect(res.statusCode).toBe(201);
@@ -1293,11 +1417,369 @@ describe('brand domain creation', () => {
       email: 'teammate@example.com',
       role: 'organizer',
       status: 'invited',
+      invitationDelivery: 'queued',
+      invitationProvider: 'temporal',
     });
     expect(tables.user_profiles).toHaveLength(1);
     expect(tables.user_profiles[0]).toMatchObject({ email: 'teammate@example.com' });
     expect(tables.organization_members).toHaveLength(1);
     expect(tables.organization_members[0]).toMatchObject({ role: 'organizer' });
+    expect(tables.permission_grants.length).toBeGreaterThan(0);
+    expect(tables.permission_grants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          permission: 'checkins.write',
+          scope_type: 'organization',
+          scope_id: 'org_1',
+        }),
+      ]),
+    );
+    expect(tables.email_jobs).toHaveLength(1);
+    expect(startNotificationDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brandId: 'brd_1',
+        templateKey: 'organization-member-invited',
+        toEmail: 'teammate@example.com',
+        notificationType: 'staff',
+      }),
+    );
+    await app.close();
+  });
+
+  it('GET organization members returns the saved event and brand scanner scopes', async () => {
+    const tables = invitationTables();
+    (tables as typeof tables & { events: Record<string, unknown>[] }).events = [
+      {
+        id: 'evt_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        title: 'Launch Night',
+      },
+    ];
+    tables.user_profiles.push({
+      id: 'usr_scoped',
+      tenant_id: 'tnt_1',
+      clerk_user_id: 'clerk_scoped',
+      email: 'scoped@example.com',
+      first_name: 'Scoped',
+      last_name: 'Staff',
+      status: 'active',
+    });
+    tables.organization_members.push({
+      id: 'mem_scoped',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      user_id: 'usr_scoped',
+      role: 'door_staff',
+      invited_at: new Date(),
+      accepted_at: new Date(),
+    });
+    tables.permission_grants.push(
+      {
+        id: 'pg_event',
+        tenant_id: 'tnt_1',
+        principal_type: 'user',
+        principal_id: 'usr_scoped',
+        permission: 'checkins.write',
+        scope_type: 'event',
+        scope_id: 'evt_1',
+      },
+      {
+        id: 'pg_other_tenant_scope',
+        tenant_id: 'tnt_1',
+        principal_type: 'user',
+        principal_id: 'usr_scoped',
+        permission: 'checkins.write',
+        scope_type: 'event',
+        scope_id: 'evt_other_org',
+      },
+    );
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_1/members',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      expect.objectContaining({
+        id: 'mem_scoped',
+        eventIds: ['evt_1'],
+        brandIds: [],
+      }),
+    ]);
+    await app.close();
+  });
+
+  it('rejects brand-scoped settings and billing grants on organization-wide surfaces', async () => {
+    const tables = invitationTables();
+    tables.permission_grants.push(
+      {
+        id: 'pg_brand_settings',
+        tenant_id: 'tnt_1',
+        principal_type: 'user',
+        principal_id: 'usr_1',
+        permission: 'settings.write',
+        scope_type: 'brand',
+        scope_id: 'brd_1',
+      },
+      {
+        id: 'pg_brand_billing',
+        tenant_id: 'tnt_1',
+        principal_type: 'user',
+        principal_id: 'usr_1',
+        permission: 'billing.write',
+        scope_type: 'brand',
+        scope_id: 'brd_1',
+      },
+    );
+    const scopedPrincipal = makePrincipal({ brandIds: ['brd_1'] });
+    const app = await setupApp(tenantRoutes, scopedPrincipal, tables);
+
+    const members = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_1/members',
+    });
+    const billing = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_1/payment-accounts',
+    });
+
+    expect(members.statusCode).toBe(403);
+    expect(billing.statusCode).toBe(403);
+    await app.close();
+
+    const multiOrgTables = invitationTables();
+    multiOrgTables.permission_grants.push({
+      id: 'pg_other_org_settings',
+      tenant_id: 'tnt_1',
+      principal_type: 'user',
+      principal_id: 'usr_1',
+      permission: 'settings.write',
+      scope_type: 'organization',
+      scope_id: 'org_2',
+    });
+    const multiOrgApp = await setupApp(
+      tenantRoutes,
+      makePrincipal({ organizationIds: ['org_1', 'org_2'], brandIds: undefined }),
+      multiOrgTables,
+    );
+    const crossOrganization = await multiOrgApp.inject({
+      method: 'GET',
+      url: '/organizations/org_1/members',
+    });
+    expect(crossOrganization.statusCode).toBe(403);
+    await multiOrgApp.close();
+  });
+
+  it('POST member invitations refuses to demote an accepted owner through the invite path', async () => {
+    const tables = invitationTables();
+    tables.user_profiles.push({
+      id: 'usr_1',
+      tenant_id: 'tnt_1',
+      clerk_user_id: 'clerk_owner',
+      email: 'owner@example.com',
+      status: 'active',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    tables.organization_members.push({
+      id: 'mem_owner',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      user_id: 'usr_1',
+      role: 'owner',
+      invited_at: new Date(),
+      accepted_at: new Date(),
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    tables.permission_grants.push({
+      id: 'pg_owner',
+      tenant_id: 'tnt_1',
+      principal_type: 'user',
+      principal_id: 'usr_1',
+      permission: 'settings.write',
+      scope_type: 'organization',
+      scope_id: 'org_1',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    const startNotificationDelivery = vi.fn();
+    const app = await setupApp(tenantRoutes, makePrincipal({ id: 'usr_1' }), tables, {
+      temporalClient: { startNotificationDelivery },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_owner_conflict_1' },
+      payload: { email: 'owner@example.com', role: 'door_staff' },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(tables.organization_members[0]).toMatchObject({ role: 'owner' });
+    expect(tables.permission_grants).toHaveLength(1);
+    expect(startNotificationDelivery).not.toHaveBeenCalled();
+    expect(tables.email_jobs).toHaveLength(0);
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/members/invitations safely resends a pending invitation', async () => {
+    const tables = invitationTables();
+    const startNotificationDelivery = vi.fn(async () => undefined);
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      temporalClient: { startNotificationDelivery },
+    });
+    const request = {
+      method: 'POST' as const,
+      url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_door_replay_1' },
+      payload: { email: 'door@example.com', role: 'door_staff' },
+    };
+
+    expect((await app.inject(request)).statusCode).toBe(201);
+    expect((await app.inject(request)).statusCode).toBe(201);
+    expect(startNotificationDelivery).toHaveBeenCalledTimes(1);
+    expect(tables.email_jobs).toHaveLength(1);
+    expect(
+      (
+        await app.inject({
+          ...request,
+          headers: { 'Idempotency-Key': 'invite_door_resend_2' },
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(tables.user_profiles).toHaveLength(1);
+    expect(tables.organization_members).toHaveLength(1);
+    expect(tables.email_jobs).toHaveLength(2);
+    expect(startNotificationDelivery).toHaveBeenCalledTimes(2);
+
+    await app.close();
+  });
+
+  it('retries a failed invitation workflow handoff with the same idempotency key', async () => {
+    const tables = invitationTables();
+    const startNotificationDelivery = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Temporal unavailable'))
+      .mockResolvedValueOnce({ workflowId: 'notification:emj_invite_retry' });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      temporalClient: { startNotificationDelivery },
+    });
+    const request = {
+      method: 'POST' as const,
+      url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_retry_1' },
+      payload: { email: 'retry@example.com', role: 'organizer' },
+    };
+
+    expect((await app.inject(request)).statusCode).toBe(500);
+    expect(tables.email_jobs).toHaveLength(1);
+    expect(tables.email_jobs[0]).toMatchObject({ status: 'start_failed', workflow_id: null });
+
+    expect((await app.inject(request)).statusCode).toBe(201);
+    expect(startNotificationDelivery).toHaveBeenCalledTimes(2);
+    expect(tables.organization_members).toHaveLength(1);
+    expect(tables.email_jobs).toHaveLength(1);
+    expect(tables.email_jobs[0]).toMatchObject({
+      status: 'queued',
+      workflow_id: 'notification:emj_invite_retry',
+    });
+    await app.close();
+  });
+
+  it('POST /organizations/:organizationId/members/invitations grants door staff brand-scoped check-in only', async () => {
+    const tables = invitationTables();
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_door_brand_1' },
+      payload: {
+        email: 'door@example.com',
+        role: 'door_staff',
+        brandIds: ['brd_1'],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      role: 'door_staff',
+      brandIds: ['brd_1'],
+    });
+    expect(tables.permission_grants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          permission: 'checkins.write',
+          scope_type: 'brand',
+          scope_id: 'brd_1',
+        }),
+      ]),
+    );
+    expect(tables.permission_grants.every((grant) => grant.permission !== 'orders.write')).toBe(
+      true,
+    );
+    await app.close();
+  });
+
+  it('POST member invitations grants event-only access and links back to that kiosk', async () => {
+    const tables = invitationTables();
+    (tables as typeof tables & { events: Record<string, unknown>[] }).events = [
+      {
+        id: 'evt_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        title: 'Launch Night',
+        status: 'published',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ];
+    const startNotificationDelivery = vi.fn(async () => undefined);
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables, {
+      temporalClient: { startNotificationDelivery },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_door_event_1' },
+      payload: {
+        email: 'door@example.com',
+        role: 'door_staff',
+        eventIds: ['evt_1'],
+        returnTo: '/kiosk/evt_1?tab=scan',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      eventIds: ['evt_1'],
+      invitationDelivery: 'queued',
+      invitationProvider: 'temporal',
+    });
+    expect(tables.permission_grants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          permission: 'checkins.write',
+          scope_type: 'event',
+          scope_id: 'evt_1',
+        }),
+      ]),
+    );
+    expect(startNotificationDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brandId: 'brd_1',
+        variables: expect.objectContaining({
+          dashboard: {
+            url: expect.stringContaining('/sign-up?redirect_url=%2Fkiosk%2Fevt_1%3Ftab%3Dscan'),
+          },
+        }),
+      }),
+    );
     await app.close();
   });
 
@@ -1307,6 +1789,7 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_invalid_email_1' },
       payload: { email: 'not-an-email', role: 'viewer' },
     });
     expect(res.statusCode).toBe(400);
@@ -1322,6 +1805,7 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_invalid_role_1' },
       payload: { email: 'teammate@example.com', role: 'super_admin' },
     });
     expect(res.statusCode).toBe(400);
@@ -1337,6 +1821,7 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_owner_role_1' },
       payload: { email: 'owner@example.com', role: 'owner' },
     });
     expect(res.statusCode).toBe(400);
@@ -1356,12 +1841,117 @@ describe('brand domain creation', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/organizations/org_1/members/invitations',
+      headers: { 'Idempotency-Key': 'invite_api_key_1' },
       payload: { email: 'teammate@example.com', role: 'viewer' },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().message).toContain('user principal');
     expect(tables.user_profiles).toHaveLength(0);
     expect(tables.organization_members).toHaveLength(0);
+    await app.close();
+  });
+
+  it('PATCH /organizations/:organizationId/members/:memberId updates role and replaces grants', async () => {
+    const tables = invitationTables();
+    tables.user_profiles.push({
+      id: 'usr_door',
+      tenant_id: 'tnt_1',
+      email: 'door@example.com',
+      first_name: 'Door',
+      last_name: 'Staff',
+      status: 'active',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    tables.organization_members.push({
+      id: 'mem_door',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      user_id: 'usr_door',
+      role: 'door_staff',
+      invited_at: new Date(),
+      accepted_at: new Date(),
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    tables.permission_grants.push({
+      id: 'pg_old',
+      tenant_id: 'tnt_1',
+      principal_type: 'user',
+      principal_id: 'usr_door',
+      permission: 'checkins.write',
+      scope_type: 'organization',
+      scope_id: 'org_1',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/organizations/org_1/members/mem_door',
+      payload: {
+        role: 'door_staff_sales',
+        brandIds: ['brd_1'],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: 'mem_door',
+      role: 'door_staff_sales',
+      brandIds: ['brd_1'],
+    });
+    expect(tables.organization_members[0]).toMatchObject({ role: 'door_staff_sales' });
+    expect(tables.permission_grants.some((grant) => grant.id === 'pg_old')).toBe(false);
+    expect(tables.permission_grants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          permission: 'box_office.write',
+          scope_type: 'brand',
+          scope_id: 'brd_1',
+        }),
+        expect.objectContaining({
+          permission: 'checkins.write',
+          scope_type: 'brand',
+          scope_id: 'brd_1',
+        }),
+      ]),
+    );
+    await app.close();
+  });
+
+  it('PATCH /organizations/:organizationId/members/:memberId rejects owner role changes', async () => {
+    const tables = invitationTables();
+    tables.user_profiles.push({
+      id: 'usr_owner',
+      tenant_id: 'tnt_1',
+      email: 'owner@example.com',
+      first_name: 'Org',
+      last_name: 'Owner',
+      status: 'active',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    tables.organization_members.push({
+      id: 'mem_owner',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      user_id: 'usr_owner',
+      role: 'owner',
+      invited_at: new Date(),
+      accepted_at: new Date(),
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    const app = await setupApp(tenantRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/organizations/org_1/members/mem_owner',
+      payload: { role: 'viewer' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain('Owner role cannot be changed');
+    expect(tables.organization_members[0]).toMatchObject({ role: 'owner' });
     await app.close();
   });
 
@@ -5640,9 +6230,16 @@ describe('ticket transfer and attendee update', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/tickets/tkt_1/transfer',
-      payload: { toEmail: 'new@example.com' },
+      payload: { toEmail: 'new@example.com', dateOfBirth: '1990-01-01' },
     });
     expect(res.statusCode).toBe(400);
+    const blank = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/transfer',
+      headers: { 'Idempotency-Key': '   ' },
+      payload: { toEmail: 'new@example.com', dateOfBirth: '1990-01-01' },
+    });
+    expect(blank.statusCode).toBe(400);
     await app.close();
   });
 
@@ -5752,7 +6349,7 @@ describe('ticket transfer and attendee update', () => {
       method: 'POST',
       url: '/tickets/tkt_1/transfer',
       headers: { 'Idempotency-Key': 'transfer_1' },
-      payload: { toEmail: 'new@example.com' },
+      payload: { toEmail: 'new@example.com', dateOfBirth: '1990-01-01' },
     });
     expect(transfer.statusCode).toBe(200);
     const transferredBody = transfer.json();
@@ -5764,7 +6361,7 @@ describe('ticket transfer and attendee update', () => {
       method: 'POST',
       url: '/tickets/tkt_1/transfer',
       headers: { 'Idempotency-Key': 'transfer_1' },
-      payload: { toEmail: 'new@example.com' },
+      payload: { toEmail: 'new@example.com', dateOfBirth: '1990-01-01' },
     });
     expect(replay.statusCode).toBe(200);
     expect(replay.json().id).toBe(transferredBody.id);
@@ -5781,10 +6378,20 @@ describe('ticket transfer and attendee update', () => {
       qr_payload: transferredBody.qrPayload,
       qr_hash: transferredBody.qrHash,
     });
+    expect(
+      (tables.attendees as Record<string, unknown>[]).find(
+        (attendee) => attendee.id === transferredBody.attendeeId,
+      ),
+    ).toMatchObject({ date_of_birth: null });
     expect((tables.wallet_passes as Record<string, unknown>[])[0]).toMatchObject({
       status: 'revoked',
     });
     expect(tables.order_timeline_events).toHaveLength(1);
+
+    checkInActivityEvents.publish.mockClear();
+    checkInActivityEvents.publish.mockImplementation(async () => {
+      expect((tables.scan_logs as Record<string, unknown>[]).length).toBeGreaterThan(0);
+    });
 
     const oldScan = await app.inject({
       method: 'POST',
@@ -5817,7 +6424,246 @@ describe('ticket transfer and attendee update', () => {
     expect(tickets.find((ticket) => ticket.id === transferredBody.id)).toMatchObject({
       status: 'checked_in',
     });
+    expect(checkInActivityEvents.publish).toHaveBeenCalledTimes(2);
+    expect(checkInActivityEvents.publish).toHaveBeenLastCalledWith(
+      'cil_1',
+      expect.stringMatching(/^scan_/),
+    );
 
+    await app.close();
+  });
+
+  it('GET /events/:eventId/check-in-lists/:checkInListId/activity/stream starts live without replaying history', async () => {
+    const scannedAt = new Date('2026-06-01T12:00:00.000Z');
+    const tables = {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: new Date(),
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      check_in_lists: [
+        {
+          id: 'cil_1',
+          event_id: 'evt_1',
+          name: 'Main Door',
+          ticket_type_ids: '[]',
+          status: 'active',
+          event_occurrence_id: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      tickets: [
+        {
+          id: 'tkt_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          attendee_id: 'att_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          status: 'checked_in',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_1',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_1',
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          email: 'ada@test.com',
+          status: 'checked_in',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      scan_logs: [
+        {
+          id: 'scan_1',
+          activity_sequence: 1,
+          tenant_id: 'tnt_1',
+          check_in_list_id: 'cil_1',
+          device_id: 'dev_1',
+          ticket_id: 'tkt_1',
+          qr_hash: 'hash_1',
+          outcome: 'accepted',
+          scanned_at: scannedAt,
+          offline: false,
+          metadata: null,
+          created_at: scannedAt,
+        },
+      ],
+    };
+    const app = await setupApp(checkInRoutes, makePrincipal(), tables);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/check-in-lists/cil_1/activity/stream',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.body).toContain('event: ready');
+    expect(res.body).toMatch(/id: time:\d+/);
+    expect(res.body).toContain('"checkInListId":"cil_1"');
+    expect(res.body).not.toContain('event: scan');
+    await app.close();
+  });
+
+  it('GET activity stream skips history initially and drains reconnect backlog after Last-Event-ID', async () => {
+    const now = new Date('2026-06-01T12:00:00.000Z');
+    const event = {
+      id: 'evt_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      status: 'published',
+      slug: 'evt',
+      title: 'Event',
+      timezone: 'UTC',
+      starts_at: now,
+      visibility: 'public',
+      seo: '{}',
+    };
+    const list = {
+      id: 'cil_1',
+      event_id: 'evt_1',
+      name: 'Main Door',
+      ticket_type_ids: '[]',
+      status: 'active',
+      event_occurrence_id: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const scanLogs = Array.from({ length: 125 }, (_, index) => ({
+      id: index < 120 ? `scan_${String(index + 1).padStart(3, '0')}` : `scan_0late${index - 119}`,
+      activity_sequence: index + 1,
+      tenant_id: 'tnt_1',
+      check_in_list_id: 'cil_1',
+      device_id: 'dev_1',
+      ticket_id: null,
+      qr_hash: `hash_${index + 1}`,
+      outcome: 'accepted',
+      scanned_at: now,
+      offline: index % 2 === 0,
+      metadata: null,
+      created_at: now,
+    }));
+    const app = await setupApp(checkInRoutes, makePrincipal(), {
+      events: [event],
+      check_in_lists: [list],
+      scan_logs: scanLogs,
+    });
+
+    const full = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/check-in-lists/cil_1/activity/stream',
+    });
+    expect(full.statusCode).toBe(200);
+    expect(full.body).not.toContain('event: scan');
+
+    const replay = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/check-in-lists/cil_1/activity/stream',
+      headers: { 'Last-Event-ID': 'scan_120' },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.body.match(/event: scan/g)).toHaveLength(5);
+    expect(replay.body).not.toContain('"id":"scan_120"');
+    expect(replay.body).toContain('id: scan_0late5');
+    await app.close();
+  });
+
+  it('GET activity does not join cross-tenant ticket or attendee PII', async () => {
+    const now = new Date('2026-06-01T12:00:00.000Z');
+    const app = await setupApp(checkInRoutes, makePrincipal(), {
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'published',
+          slug: 'evt',
+          title: 'Event',
+          timezone: 'UTC',
+          starts_at: now,
+          visibility: 'public',
+          seo: '{}',
+        },
+      ],
+      check_in_lists: [
+        {
+          id: 'cil_1',
+          event_id: 'evt_1',
+          name: 'Main Door',
+          ticket_type_ids: '[]',
+          status: 'active',
+          event_occurrence_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      scan_logs: [
+        {
+          id: 'scan_1',
+          tenant_id: 'tnt_1',
+          check_in_list_id: 'cil_1',
+          device_id: 'dev_1',
+          ticket_id: 'tkt_shared',
+          qr_hash: 'hash_1',
+          outcome: 'accepted',
+          scanned_at: now,
+          offline: false,
+          metadata: null,
+          created_at: now,
+        },
+      ],
+      tickets: [
+        {
+          id: 'tkt_shared',
+          tenant_id: 'tnt_other',
+          attendee_id: 'att_other',
+          event_id: 'evt_other',
+          ticket_type_id: 'tt_other',
+          status: 'valid',
+        },
+      ],
+      attendees: [
+        {
+          id: 'att_other',
+          tenant_id: 'tnt_other',
+          first_name: 'Grace',
+          last_name: 'Hopper',
+          email: 'grace@example.test',
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/check-in-lists/cil_1/activity',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items[0]).toMatchObject({
+      ticketId: 'tkt_shared',
+      attendeeName: null,
+      attendeeEmail: null,
+      ticketTypeId: null,
+    });
     await app.close();
   });
 
@@ -6009,6 +6855,13 @@ describe('resale listing routes', () => {
       payload: { priceCents: 5500 },
     });
     expect(missingKey.statusCode).toBe(400);
+    const blankKey = await app.inject({
+      method: 'POST',
+      url: '/tickets/tkt_1/resale-listings',
+      headers: { 'Idempotency-Key': '   ' },
+      payload: { priceCents: 5500 },
+    });
+    expect(blankKey.statusCode).toBe(400);
 
     const capped = await app.inject({
       method: 'POST',
@@ -6340,6 +7193,72 @@ describe('custom questions CRUD', () => {
 });
 
 describe('checkout confirm', () => {
+  it('PATCH /checkout/sessions/:sessionId preserves stored DOB on partial buyer updates', async () => {
+    const session = {
+      id: 'cs_age_restricted',
+      tenant_id: 'tnt_1',
+      event_id: 'evt_age_restricted',
+      brand_id: 'brd_1',
+      status: 'open',
+      currency: 'USD',
+      quote: {},
+      buyer: { email: 'buyer@test.com', dateOfBirth: '1990-01-01' },
+      cart: {
+        items: [
+          {
+            ticketTypeId: 'tt_age_restricted',
+            quantity: 1,
+            attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+          },
+        ],
+      },
+      expires_at: new Date(Date.now() + 60_000),
+      hold_id: 'hld_1',
+      order_id: null,
+      client_token: 'tok_age_restricted',
+      success_url: null,
+      cancel_url: null,
+      idempotency_key: 'key_age_restricted',
+      payment_intent_id: null,
+    };
+    const tables = {
+      checkout_sessions: [session],
+      events: [
+        {
+          id: 'evt_age_restricted',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          starts_at: new Date('2030-07-10T01:00:00.000Z'),
+          timezone: 'America/Chicago',
+          minimum_age: 18,
+        },
+      ],
+      ticket_types: [
+        {
+          id: 'tt_age_restricted',
+          event_id: 'evt_age_restricted',
+          event_occurrence_id: null,
+        },
+      ],
+      event_occurrences: [],
+    };
+    const app = await setupApp(checkoutRoutes, makePrincipal(), tables);
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/checkout/sessions/cs_age_restricted',
+      headers: { 'x-checkout-session-token': 'tok_age_restricted' },
+      payload: { buyer: { firstName: 'Ada' } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(String(session.buyer))).toMatchObject({
+      email: 'buyer@test.com',
+      firstName: 'Ada',
+      dateOfBirth: '1990-01-01',
+    });
+    await app.close();
+  });
+
   it('PATCH /checkout/sessions/:sessionId rejects open sessions that already have a payment intent', async () => {
     const session = {
       id: 'cs_1',

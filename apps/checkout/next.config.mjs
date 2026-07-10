@@ -1,3 +1,6 @@
+const refineScriptSources =
+  process.env.NODE_ENV === 'production' ? [] : ['http://localhost:7331', 'https://esm.sh'];
+
 const checkoutSecurityHeaders = [
   {
     key: 'Content-Security-Policy',
@@ -12,7 +15,13 @@ const checkoutSecurityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "style-src-elem 'self' 'unsafe-inline'",
       "style-src-attr 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline' https://js.stripe.com https://www.googletagmanager.com https://connect.facebook.net",
+      [
+        "script-src 'self' 'unsafe-inline'",
+        ...refineScriptSources,
+        'https://js.stripe.com',
+        'https://www.googletagmanager.com',
+        'https://connect.facebook.net',
+      ].join(' '),
       "connect-src 'self' http://localhost:* http://127.0.0.1:* https:",
       "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com",
       "worker-src 'self' blob:",
@@ -26,6 +35,9 @@ const checkoutSecurityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? '.next',
+  // Next 16's embedded checker uses removed TypeScript internals. The repo's
+  // mandatory TS 7 `typecheck` gate runs separately before every CI build.
+  typescript: { ignoreBuildErrors: true },
   transpilePackages: ['@tixkit/content-event-page-react', '@tixkit/content-event-page'],
   env: {
     NEXT_PUBLIC_TIXKIT_API_BASE_URL:

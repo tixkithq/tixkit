@@ -14,6 +14,7 @@ import type { AccessRuleRecord, Question } from '@tixkit/domain';
 import {
   parseJsonValue,
   serializeBrandTheme,
+  serializeEventOccurrence,
   serializeEventOccurrenceStatus,
   serializeMarketingIntegration,
   serializeResalePolicy,
@@ -151,6 +152,7 @@ export type PublicEventRow = {
   venue: string | null;
   visibility: string | null;
   cover_image_url?: string | null;
+  minimum_age: number | null;
   resale_enabled?: boolean | number;
   resale_max_multiplier?: number;
   resale_max_absolute_cents?: number | null;
@@ -188,6 +190,7 @@ function publicAvailabilityMetadataCacheTtlMs(): number {
 }
 
 function publicAvailabilityMetadataCacheKey(eventId: string, requested: readonly string[]): string {
+  // eslint-disable-next-line unicorn/no-array-sort -- API targets ES2022; sort a copy to preserve caller data.
   return JSON.stringify({ eventId, requested: [...requested].sort() });
 }
 
@@ -232,6 +235,7 @@ export async function loadPublicEventById(db: Database, eventId: string): Promis
       'venue',
       'visibility',
       'cover_image_url',
+      'minimum_age',
       'resale_enabled',
       'resale_max_multiplier',
       'resale_max_absolute_cents',
@@ -268,6 +272,7 @@ export function serializePublicEvent(
     venue: parseJsonValue(event.venue, null),
     brandId: event.brand_id,
     coverImageUrl: event.cover_image_url ?? undefined,
+    minimumAge: event.minimum_age,
     marketingIntegrations: marketingIntegrations.map((row) =>
       serializeMarketingIntegration(row, { public: true }),
     ),
@@ -341,8 +346,8 @@ async function loadPublicAvailabilityMetadata(
       .execute(),
   ]);
   const metadata = {
-    ticketTypes: ticketTypes.map((row) => ({ ...row })),
-    products: products.map((row) => ({ ...row })),
+    ticketTypes: ticketTypes.map((row) => Object.assign({}, row)),
+    products: products.map((row) => Object.assign({}, row)),
   };
   if (cache && key) rememberPublicAvailabilityMetadata(cache, key, metadata, now + ttlMs);
   return clonePublicAvailabilityMetadata(metadata);
@@ -517,6 +522,7 @@ async function loadPublicResaleListingById(db: Database, event: PublicEventRow, 
       'ticket_listings.event_id as event_id',
       'ticket_types.id as ticket_type_id',
       'ticket_types.name as ticket_type_name',
+      'tickets.event_occurrence_id as event_occurrence_id',
       'ticket_listings.status as status',
       'ticket_listings.price_cents as price_cents',
       'ticket_listings.currency as currency',
@@ -549,6 +555,7 @@ async function loadPublicResaleListingById(db: Database, event: PublicEventRow, 
     eventId: listing.event_id,
     ticketTypeId: listing.ticket_type_id,
     ticketTypeName: listing.ticket_type_name,
+    eventOccurrenceId: listing.event_occurrence_id ?? undefined,
     status: listing.status,
     priceCents: Number(listing.price_cents),
     currency: listing.currency,
@@ -585,6 +592,7 @@ export async function loadPublicResaleListings(
             'tickets.id as ticket_id',
             'ticket_types.id as ticket_type_id',
             'ticket_types.name as ticket_type_name',
+            'tickets.event_occurrence_id as event_occurrence_id',
           ])
           .where('tickets.tenant_id', '=', event.tenant_id)
           .where('tickets.id', 'in', ticketIds)
@@ -600,6 +608,7 @@ export async function loadPublicResaleListings(
         eventId: listing.event_id,
         ticketTypeId: ticketType?.ticket_type_id,
         ticketTypeName: ticketType?.ticket_type_name,
+        eventOccurrenceId: ticketType?.event_occurrence_id ?? undefined,
         status: listing.status,
         priceCents: Number(listing.price_cents),
         currency: listing.currency,
@@ -689,6 +698,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       endsAt: event.ends_at,
       venue: parseJsonValue(event.venue, null),
       brandId: event.brand_id,
+      minimumAge: event.minimum_age ?? null,
       marketingIntegrations: marketingIntegrations.map((row) =>
         serializeMarketingIntegration(row, { public: true }),
       ),
@@ -827,25 +837,32 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const requestedProducts = parseRequestedProducts(query.products);
     const resaleListingId = firstQueryParam(query.resaleListingId).trim() || undefined;
     const event = await loadPublicEventById(db, eventId);
-    const [marketingIntegrations, availability, questions, resaleListing] = await Promise.all([
-      loadPublicMarketingIntegrations(db, eventId),
-      loadPublicAvailability(
-        db,
-        inventoryService,
-        eventId,
-        requestedProducts,
-        availabilityMetadataCache,
-      ),
-      loadPublicCheckoutQuestions(db, eventId),
-      resaleListingId
-        ? loadPublicResaleListingById(db, event, resaleListingId)
-        : Promise.resolve(null),
-    ]);
+    const [marketingIntegrations, availability, questions, resaleListing, occurrences] =
+      await Promise.all([
+        loadPublicMarketingIntegrations(db, eventId),
+        loadPublicAvailability(
+          db,
+          inventoryService,
+          eventId,
+          requestedProducts,
+          availabilityMetadataCache,
+        ),
+        loadPublicCheckoutQuestions(db, eventId),
+        resaleListingId
+          ? loadPublicResaleListingById(db, event, resaleListingId)
+          : Promise.resolve(null),
+        new EventOccurrenceRepository(db).findByEvent(eventId),
+      ]);
     return {
       event: serializePublicEvent(event, marketingIntegrations),
       availability,
       questions,
       resaleListing,
+      occurrences: occurrences.flatMap((occurrence) =>
+        serializeEventOccurrenceStatus(occurrence.status) === 'scheduled'
+          ? [serializeEventOccurrence(occurrence as unknown as Record<string, unknown>)]
+          : [],
+      ),
     };
   });
 
@@ -978,6 +995,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       .filter((v) => v != null)
       .map((v) => (v instanceof Date ? v.toISOString() : String(v)));
 
+    // eslint-disable-next-line unicorn/no-array-sort -- API targets ES2022 and this array is local.
     return { revision: candidates.length > 0 ? candidates.sort().at(-1)! : null };
   });
 

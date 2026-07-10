@@ -307,8 +307,19 @@ describe('box-office order route', () => {
       payload: {
         tenderType: 'cash',
         amountCents: 2500,
-        buyer: { email: 'door@example.com', firstName: 'Door', lastName: 'Buyer' },
-        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+        buyer: {
+          email: 'door@example.com',
+          firstName: 'Door',
+          lastName: 'Buyer',
+          dateOfBirth: '1990-01-01',
+        },
+        items: [
+          {
+            ticketTypeId: 'tt_ga',
+            quantity: 1,
+            attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+          },
+        ],
       },
     });
 
@@ -328,8 +339,19 @@ describe('box-office order route', () => {
       payload: {
         tenderType: 'cash',
         amountCents: 2500,
-        buyer: { email: 'door@example.com', firstName: 'Door', lastName: 'Buyer' },
-        items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+        buyer: {
+          email: 'door@example.com',
+          firstName: 'Door',
+          lastName: 'Buyer',
+          dateOfBirth: '1990-01-01',
+        },
+        items: [
+          {
+            ticketTypeId: 'tt_ga',
+            quantity: 1,
+            attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+          },
+        ],
       },
     });
 
@@ -355,6 +377,12 @@ describe('box-office order route', () => {
         tenderType: 'cash',
         amountCents: 2500,
       }),
+    );
+    expect(JSON.parse(String(tables.checkout_sessions[0]?.buyer))).not.toHaveProperty(
+      'dateOfBirth',
+    );
+    expect(JSON.parse(String(tables.checkout_sessions[0]?.cart)).items[0]).not.toHaveProperty(
+      'attendeeFields',
     );
   });
 

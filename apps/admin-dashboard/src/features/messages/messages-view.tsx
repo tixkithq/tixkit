@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Plus, MessageSquare, Mail, Smartphone } from 'lucide-react';
+import { Check, ChevronsUpDown, Mail, MessageSquare, Plus, Smartphone } from 'lucide-react';
 import {
   type AdminMessageCampaign,
   type AdminMessageDeliveryLog,
@@ -15,13 +15,14 @@ import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
 import { useBootstrap } from '@/context/bootstrap-provider';
@@ -29,11 +30,75 @@ import { formatDate } from '@/lib/format';
 import { LifecycleEmailsView } from './lifecycle-emails-view';
 import { MessageFormDialog } from './message-form';
 
-export function MessagesView() {
+type MessagesViewProps = {
+  initialEventId?: string;
+  initialLifecycleTemplateKey?: import('@tixkit/domain').TemplateKey;
+  initialTab?: 'campaigns' | 'lifecycle';
+};
+
+function EventPicker({
+  disabled,
+  events,
+  onValueChange,
+  value,
+}: {
+  disabled: boolean;
+  events: Array<{ id: string; title: string }>;
+  onValueChange: (value: string) => void;
+  value: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const selectedEvent = events.find((event) => event.id === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          className="w-full justify-between sm:w-[24rem]"
+          disabled={disabled}
+          variant="outline"
+        >
+          <span className="sr-only">Event: </span>
+          <span className="truncate">{selectedEvent?.title ?? 'Select an event'}</span>
+          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(24rem,calc(100vw-2rem))] p-0">
+        <Command>
+          <CommandInput id="message-event-search" name="eventSearch" placeholder="Search events…" />
+          <CommandList>
+            <CommandEmpty>No events found.</CommandEmpty>
+            {events.map((event) => (
+              <CommandItem
+                key={event.id}
+                onSelect={() => {
+                  onValueChange(event.id);
+                  setOpen(false);
+                }}
+                value={`${event.title} ${event.id}`}
+              >
+                <Check className={event.id === value ? 'opacity-100' : 'opacity-0'} />
+                <span className="truncate">{event.title}</span>
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export function MessagesView({
+  initialEventId,
+  initialLifecycleTemplateKey,
+  initialTab = 'campaigns',
+}: MessagesViewProps = {}) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [selectedEventId, setSelectedEventId] = React.useState<string>('');
   const [selectedCampaignId, setSelectedCampaignId] = React.useState<string>('');
-  const [activeTab, setActiveTab] = React.useState<'campaigns' | 'lifecycle'>('campaigns');
+  const [activeTab, setActiveTab] = React.useState<'campaigns' | 'lifecycle'>(initialTab);
 
   const { organizationId, brandId } = useBootstrap();
   const {
@@ -59,31 +124,29 @@ export function MessagesView() {
     setSelectedCampaignId('');
   }, [organizationId, brandId]);
 
+  React.useEffect(() => {
+    if (eventsLoading || events.length === 0 || selectedEventId) return;
+    const requestedEvent = initialEventId
+      ? events.find((event) => event.id === initialEventId)
+      : undefined;
+    setSelectedEventId(requestedEvent?.id ?? events[0].id);
+  }, [events, eventsLoading, initialEventId, selectedEventId]);
+
   const campaigns = data ?? [];
   const selectedEvent = events.find((event) => event.id === selectedEventId);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Select
+        <EventPicker
           disabled={eventsLoading || Boolean(eventsError)}
+          events={events}
           value={selectedEventId}
           onValueChange={(value) => {
             setSelectedEventId(value);
             setSelectedCampaignId('');
           }}
-        >
-          <SelectTrigger className="w-full max-w-xs" aria-label="Message event">
-            <SelectValue placeholder="Select an event" />
-          </SelectTrigger>
-          <SelectContent>
-            {events.map((event) => (
-              <SelectItem key={event.id} value={event.id}>
-                {event.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        />
         {activeTab === 'campaigns' && (
           <Button
             onClick={() => setDialogOpen(true)}
@@ -160,8 +223,7 @@ export function MessagesView() {
                         <p className="break-words text-sm text-muted-foreground">
                           {campaign.audienceLabel} · {campaign.queuedCount} queued
                           {campaign.sentCount > 0 && ` · ${campaign.sentCount} sent`}
-                          {campaign.deliveredCount > 0 &&
-                            ` · ${campaign.deliveredCount} delivered`}
+                          {campaign.deliveredCount > 0 && ` · ${campaign.deliveredCount} delivered`}
                           {campaign.failedCount > 0 && ` · ${campaign.failedCount} failed`}
                           {campaign.suppressedCount > 0 &&
                             ` · ${campaign.suppressedCount} suppressed`}
@@ -199,6 +261,7 @@ export function MessagesView() {
             brandId={brandId}
             eventId={selectedEventId || undefined}
             eventTitle={selectedEvent?.title}
+            initialTemplateKey={initialLifecycleTemplateKey}
           />
         </TabsContent>
       </Tabs>

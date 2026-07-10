@@ -36,6 +36,7 @@ vi.mock('@temporalio/client', () => ({
 }));
 
 const s3Mock = vi.hoisted(() => {
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- vi.hoisted factories cannot reference outer runtime bindings.
   async function defaultSend(command: unknown) {
     const body = (command as { input?: { Body?: unknown } }).input?.Body;
     if (
@@ -364,11 +365,11 @@ vi.mock('@tixkit/db', () => {
         if (table === 'orders') return applyQueryWindow(dbState.orders.filter(matchesConditions));
         if (table === 'questions') return dbState.questions;
         if (table === 'scan_logs') {
-          // eslint-disable-next-line unicorn/no-array-sort -- this sorts the filtered copy and keeps compatibility with the package TS target.
           const rows = applyQueryWindow(
             dbState.scanLogs
               .map(withJoinedEvent)
               .filter(matchesConditions)
+              // oxlint-disable-next-line unicorn/no-array-sort -- filter creates a copy, and this package intentionally targets an ES2022 runtime without Array.prototype.toSorted.
               .sort((a, b) => {
                 for (const orderBy of orderBys) {
                   const column = orderBy.column.includes('.')

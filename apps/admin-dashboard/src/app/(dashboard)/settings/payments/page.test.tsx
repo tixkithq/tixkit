@@ -133,9 +133,7 @@ describe('PaymentsPage brand payment routing', () => {
   it('keeps the saved payment account binding selected on load', async () => {
     render(<PaymentsPage />);
 
-    expect(
-      await screen.findByText('stripe_connect - acct_stripe_1 (pending)'),
-    ).toBeVisible();
+    expect(await screen.findByText('stripe_connect - acct_stripe_1 (pending)')).toBeVisible();
     expect(adminApiMock.updateBrand).not.toHaveBeenCalled();
   });
 
@@ -163,9 +161,7 @@ describe('PaymentsPage brand payment routing', () => {
         paymentAccountId: pendingAccount.id,
       });
     });
-    expect(
-      await screen.findByText('stripe_connect - acct_stripe_1 (pending)'),
-    ).toBeVisible();
+    expect(await screen.findByText('stripe_connect - acct_stripe_1 (pending)')).toBeVisible();
     expect(toast.success).toHaveBeenCalledWith('Payment account binding updated');
   });
 });

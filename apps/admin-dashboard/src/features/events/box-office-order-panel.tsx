@@ -7,9 +7,15 @@ import { toast } from 'sonner';
 import {
   type AdminBoxOfficeOrderResult,
   type AdminEventOccurrence,
+  type AdminEventListItem,
   type AdminTicketType,
   adminApi,
 } from '@/lib/api';
+import {
+  evaluateDateOfBirthEligibility,
+  maximumEligibleDateOfBirth,
+  requiresDateOfBirthVerification,
+} from '@tixkit/domain';
 import { routes } from '@/lib/routes';
 import { formatCurrency } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -25,6 +31,7 @@ type AttendeeDraft = {
   firstName: string;
   lastName: string;
   email: string;
+  dateOfBirth: string;
 };
 
 const TENDER_OPTIONS: Array<{
@@ -92,11 +99,13 @@ export function BoxOfficeOrderPanel({
   eventId,
   ticketTypes,
   occurrences,
+  event,
   onOrderCreated,
 }: {
   eventId: string;
   ticketTypes: AdminTicketType[];
   occurrences: AdminEventOccurrence[];
+  event: Pick<AdminEventListItem, 'startsAt' | 'timezone' | 'minimumAge'>;
   onOrderCreated?: () => void;
 }) {
   const sellableTickets = React.useMemo(
@@ -111,8 +120,9 @@ export function BoxOfficeOrderPanel({
   const [buyerLastName, setBuyerLastName] = React.useState('');
   const [buyerEmail, setBuyerEmail] = React.useState('');
   const [buyerPhone, setBuyerPhone] = React.useState('');
+  const [buyerDateOfBirth, setBuyerDateOfBirth] = React.useState('');
   const [attendees, setAttendees] = React.useState<AttendeeDraft[]>([
-    { firstName: '', lastName: '', email: '' },
+    { firstName: '', lastName: '', email: '', dateOfBirth: '' },
   ]);
   const [notes, setNotes] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
@@ -146,6 +156,7 @@ export function BoxOfficeOrderPanel({
             firstName: '',
             lastName: '',
             email: '',
+            dateOfBirth: '',
           },
       ),
     );
@@ -165,6 +176,7 @@ export function BoxOfficeOrderPanel({
         firstName: attendee.firstName || buyerFirstName,
         lastName: attendee.lastName || buyerLastName,
         email: attendee.email || buyerEmail,
+        dateOfBirth: attendee.dateOfBirth || buyerDateOfBirth,
       })),
     );
   };
@@ -186,12 +198,32 @@ export function BoxOfficeOrderPanel({
     if (!buyerFirstName.trim() || !buyerLastName.trim())
       return 'Buyer first and last name are required.';
     if (!EMAIL_PATTERN.test(buyerEmail.trim())) return 'Enter a valid buyer email.';
+    const participationTarget = {
+      participationAt: selectedOccurrence?.startsAt ?? event.startsAt,
+      timezone: selectedOccurrence?.timezone ?? event.timezone,
+    };
+    if (requiresDateOfBirthVerification(event.minimumAge)) {
+      const buyerEligibility = evaluateDateOfBirthEligibility({
+        dateOfBirth: buyerDateOfBirth,
+        minimumAge: event.minimumAge,
+        ...participationTarget,
+      });
+      if (!buyerEligibility.eligible) return `Buyer: ${buyerEligibility.message}`;
+    }
     for (const [index, attendee] of attendees.entries()) {
       const label = `Attendee ${index + 1}`;
       if (!attendee.firstName.trim() || !attendee.lastName.trim()) {
         return `${label} first and last name are required.`;
       }
       if (!EMAIL_PATTERN.test(attendee.email.trim())) return `Enter a valid email for ${label}.`;
+      if (requiresDateOfBirthVerification(event.minimumAge)) {
+        const attendeeEligibility = evaluateDateOfBirthEligibility({
+          dateOfBirth: attendee.dateOfBirth,
+          minimumAge: event.minimumAge,
+          ...participationTarget,
+        });
+        if (!attendeeEligibility.eligible) return `${label}: ${attendeeEligibility.message}`;
+      }
     }
     if (tenderType === 'comp' && amountCents !== 0) return 'Comp orders must be zero dollars.';
     if (tenderType !== 'comp' && expectedTotalCents <= 0) {
@@ -204,8 +236,8 @@ export function BoxOfficeOrderPanel({
     return null;
   };
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submit = async (formEvent: React.FormEvent<HTMLFormElement>) => {
+    formEvent.preventDefault();
     const validationError = validate();
     if (validationError) {
       setError(validationError);
@@ -229,6 +261,9 @@ export function BoxOfficeOrderPanel({
             firstName: attendee.firstName.trim(),
             lastName: attendee.lastName.trim(),
             email: attendee.email.trim(),
+            ...(requiresDateOfBirthVerification(event.minimumAge)
+              ? { dateOfBirth: attendee.dateOfBirth }
+              : {}),
           })),
         },
       ],
@@ -237,6 +272,9 @@ export function BoxOfficeOrderPanel({
         lastName: buyerLastName.trim(),
         email: buyerEmail.trim(),
         phone: buyerPhone.trim() || undefined,
+        ...(requiresDateOfBirthVerification(event.minimumAge)
+          ? { dateOfBirth: buyerDateOfBirth }
+          : {}),
       },
       notes: notes.trim() || undefined,
     });
@@ -301,7 +339,7 @@ export function BoxOfficeOrderPanel({
                 id="box-office-ticket"
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 value={ticketTypeId}
-                onChange={(event) => setTicketTypeId(event.target.value)}
+                onChange={(changeEvent) => setTicketTypeId(changeEvent.target.value)}
               >
                 {sellableTickets.map((ticket) => {
                   const remaining = availableFor(ticket);
@@ -327,7 +365,9 @@ export function BoxOfficeOrderPanel({
                 min={1}
                 max={selectedTicket?.maxPerOrder ?? undefined}
                 value={quantity}
-                onChange={(event) => setQuantity(Math.max(1, Number(event.target.value) || 1))}
+                onChange={(changeEvent) =>
+                  setQuantity(Math.max(1, Number(changeEvent.target.value) || 1))
+                }
               />
             </div>
             <div className="space-y-2">
@@ -336,7 +376,7 @@ export function BoxOfficeOrderPanel({
                 id="box-office-tender"
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 value={tenderType}
-                onChange={(event) => setTenderType(event.target.value as TenderType)}
+                onChange={(changeEvent) => setTenderType(changeEvent.target.value as TenderType)}
               >
                 {TENDER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -352,18 +392,18 @@ export function BoxOfficeOrderPanel({
                 inputMode="decimal"
                 value={amount}
                 disabled={tenderType === 'comp'}
-                onChange={(event) => setAmount(event.target.value)}
+                onChange={(changeEvent) => setAmount(changeEvent.target.value)}
               />
             </div>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="space-y-2">
               <Label htmlFor="box-office-buyer-first">Buyer first name</Label>
               <Input
                 id="box-office-buyer-first"
                 value={buyerFirstName}
-                onChange={(event) => setBuyerFirstName(event.target.value)}
+                onChange={(changeEvent) => setBuyerFirstName(changeEvent.target.value)}
                 autoComplete="given-name"
               />
             </div>
@@ -372,7 +412,7 @@ export function BoxOfficeOrderPanel({
               <Input
                 id="box-office-buyer-last"
                 value={buyerLastName}
-                onChange={(event) => setBuyerLastName(event.target.value)}
+                onChange={(changeEvent) => setBuyerLastName(changeEvent.target.value)}
                 autoComplete="family-name"
               />
             </div>
@@ -382,7 +422,7 @@ export function BoxOfficeOrderPanel({
                 id="box-office-buyer-email"
                 type="email"
                 value={buyerEmail}
-                onChange={(event) => setBuyerEmail(event.target.value)}
+                onChange={(changeEvent) => setBuyerEmail(changeEvent.target.value)}
                 autoComplete="email"
               />
             </div>
@@ -391,10 +431,33 @@ export function BoxOfficeOrderPanel({
               <Input
                 id="box-office-buyer-phone"
                 value={buyerPhone}
-                onChange={(event) => setBuyerPhone(event.target.value)}
+                onChange={(changeEvent) => setBuyerPhone(changeEvent.target.value)}
                 autoComplete="tel"
               />
             </div>
+            {requiresDateOfBirthVerification(event.minimumAge) ? (
+              <div className="space-y-2">
+                <Label htmlFor="box-office-buyer-dob">Buyer date of birth</Label>
+                <Input
+                  id="box-office-buyer-dob"
+                  type="date"
+                  value={buyerDateOfBirth}
+                  max={
+                    maximumEligibleDateOfBirth({
+                      participationAt: selectedOccurrence?.startsAt ?? event.startsAt,
+                      timezone: selectedOccurrence?.timezone ?? event.timezone,
+                      minimumAge: event.minimumAge,
+                    }) ?? undefined
+                  }
+                  onChange={(changeEvent) => setBuyerDateOfBirth(changeEvent.target.value)}
+                  autoComplete="bday"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Must be at least {event.minimumAge} on the event date.
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3">
@@ -407,7 +470,10 @@ export function BoxOfficeOrderPanel({
             </div>
             <div className="space-y-3">
               {attendees.map((attendee, index) => (
-                <div key={index} className="grid gap-3 rounded-md border p-3 lg:grid-cols-3">
+                <div
+                  key={index}
+                  className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4"
+                >
                   <div className="space-y-2">
                     <Label htmlFor={`box-office-attendee-${index}-first`}>
                       Attendee {index + 1} first name
@@ -415,7 +481,9 @@ export function BoxOfficeOrderPanel({
                     <Input
                       id={`box-office-attendee-${index}-first`}
                       value={attendee.firstName}
-                      onChange={(event) => updateAttendee(index, 'firstName', event.target.value)}
+                      onChange={(changeEvent) =>
+                        updateAttendee(index, 'firstName', changeEvent.target.value)
+                      }
                       autoComplete="given-name"
                     />
                   </div>
@@ -426,7 +494,9 @@ export function BoxOfficeOrderPanel({
                     <Input
                       id={`box-office-attendee-${index}-last`}
                       value={attendee.lastName}
-                      onChange={(event) => updateAttendee(index, 'lastName', event.target.value)}
+                      onChange={(changeEvent) =>
+                        updateAttendee(index, 'lastName', changeEvent.target.value)
+                      }
                       autoComplete="family-name"
                     />
                   </div>
@@ -438,10 +508,36 @@ export function BoxOfficeOrderPanel({
                       id={`box-office-attendee-${index}-email`}
                       type="email"
                       value={attendee.email}
-                      onChange={(event) => updateAttendee(index, 'email', event.target.value)}
+                      onChange={(changeEvent) =>
+                        updateAttendee(index, 'email', changeEvent.target.value)
+                      }
                       autoComplete="email"
                     />
                   </div>
+                  {requiresDateOfBirthVerification(event.minimumAge) ? (
+                    <div className="space-y-2">
+                      <Label htmlFor={`box-office-attendee-${index}-dob`}>
+                        Attendee {index + 1} date of birth
+                      </Label>
+                      <Input
+                        id={`box-office-attendee-${index}-dob`}
+                        type="date"
+                        value={attendee.dateOfBirth}
+                        max={
+                          maximumEligibleDateOfBirth({
+                            participationAt: selectedOccurrence?.startsAt ?? event.startsAt,
+                            timezone: selectedOccurrence?.timezone ?? event.timezone,
+                            minimumAge: event.minimumAge,
+                          }) ?? undefined
+                        }
+                        onChange={(changeEvent) =>
+                          updateAttendee(index, 'dateOfBirth', changeEvent.target.value)
+                        }
+                        autoComplete="bday"
+                        required
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -452,7 +548,7 @@ export function BoxOfficeOrderPanel({
             <Textarea
               id="box-office-notes"
               value={notes}
-              onChange={(event) => setNotes(event.target.value)}
+              onChange={(changeEvent) => setNotes(changeEvent.target.value)}
               placeholder="Cash drawer, comp reason, or manual card reference"
             />
           </div>

@@ -48,3 +48,8 @@ export { EventPublicRevisionMigration } from './0047_event_public_revision.js';
 export { HotQueryIndexesMigration } from './0048_hot_query_indexes.js';
 export { EventFeePassThroughMigration } from './0049_event_fee_pass_through.js';
 export { PaymentEventRecoveryMigration } from './0050_payment_event_recovery.js';
+export { RolePermissionGrantsSeedMigration } from './0051_role_permission_grants_seed.js';
+export { EventAgeEligibilityMigration } from './0052_event_age_eligibility.js';
+export { OrganizationMemberUniqueMigration } from './0053_organization_member_unique.js';
+export { CheckInActivityIndexesMigration } from './0054_check_in_activity_indexes.js';
+export { CheckInActivitySequenceMigration } from './0055_check_in_activity_sequence.js';

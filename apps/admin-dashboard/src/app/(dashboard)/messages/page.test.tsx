@@ -15,8 +15,8 @@ vi.mock('@/components/permission-guard', () => ({
 }));
 
 vi.mock('@/features/messages/messages-view', () => ({
-  MessagesView: () => {
-    messagesViewMock();
+  MessagesView: (props: Record<string, unknown>) => {
+    messagesViewMock(props);
     return <div data-testid="messages-view" />;
   },
 }));
@@ -29,13 +29,35 @@ vi.mock('@/features/events/event-messages-view', () => ({
 }));
 
 describe('Messages route permission guards', () => {
-  it('requires messages.write before mounting the global messages view', () => {
-    const view = render(<Page />);
+  it('requires messages.write before mounting the global messages view', async () => {
+    const element = await Page({});
+    const view = render(element);
 
     expect(permissionGuardMock).toHaveBeenCalledWith('messages.write');
-    expect(messagesViewMock).toHaveBeenCalledTimes(1);
+    expect(messagesViewMock).toHaveBeenCalledWith({
+      initialEventId: undefined,
+      initialLifecycleTemplateKey: undefined,
+      initialTab: 'campaigns',
+    });
     expect(view.getByTestId('permission-guard-messages.write')).toBeInTheDocument();
     expect(view.getByTestId('messages-view')).toBeInTheDocument();
+  });
+
+  it('deep-links the global view to a lifecycle template and event', async () => {
+    const element = await Page({
+      searchParams: Promise.resolve({
+        eventId: 'evt_1',
+        tab: 'lifecycle',
+        templateKey: 'tickets-issued',
+      }),
+    });
+    render(element);
+
+    expect(messagesViewMock).toHaveBeenCalledWith({
+      initialEventId: 'evt_1',
+      initialLifecycleTemplateKey: 'tickets-issued',
+      initialTab: 'lifecycle',
+    });
   });
 
   it('requires messages.write before mounting the event messages view', async () => {

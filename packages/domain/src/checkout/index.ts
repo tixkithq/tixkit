@@ -19,6 +19,7 @@ export type BuyerInfo = {
   firstName?: string;
   lastName?: string;
   phone?: string;
+  dateOfBirth?: string;
 };
 
 export type CheckoutSession = BaseEntity & {
@@ -129,7 +130,7 @@ export type CreateCheckoutSessionInput = {
   affiliateCode?: string;
   trackingId?: string;
   buyerFields?: Record<string, unknown>;
-  buyer?: BuyerInfo;
+  buyer: BuyerInfo & { email: string; dateOfBirth?: string };
   successUrl?: string;
   cancelUrl?: string;
   accessCode?: string;

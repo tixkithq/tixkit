@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import path from 'node:path';
 import { validateEnvFile, formatValidationResult } from './setup-check.js';
 import { runDevWebhooks, formatWebhookResult } from './dev-webhooks.js';
@@ -19,7 +21,6 @@ import {
   type EmbedPlatform,
   type EmbedTheme,
 } from './embed-generator.js';
-import { findRepoRoot } from './env.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -31,10 +32,11 @@ function help(): string {
     'Commands:',
     '  init                 Scaffold a new app using a Tixkit SDK template',
     '  embed:generate       Generate a no-code embed snippet for Webflow/Framer',
+    '  doctor               Alias for setup:check',
     '  setup:check          Validate .env.local for required and mode-specific values',
     '  dev:webhooks         Start Stripe CLI webhook forwarding for local development',
     '  seed:sample-data     Seed idempotent sample tenant / event / order data',
-    '  seed:email-templates Seed P0 email template defaults for a brand/event scope',
+    '  seed:email-templates Seed or safely restyle lifecycle email defaults for a brand/event scope',
     '  quickstart           Start local infrastructure, apps, and sample data',
     '',
     'Options for init:',
@@ -93,14 +95,24 @@ function hasFlag(name: string): boolean {
 
 async function resolveRepoRelativePath(filePath: string): Promise<string> {
   if (path.isAbsolute(filePath)) return filePath;
-  const repoRoot = await findRepoRoot(process.cwd());
-  return path.join(repoRoot, filePath);
+  return path.resolve(process.cwd(), filePath);
 }
 
 async function main(): Promise<void> {
   switch (command) {
+    case '--help':
+    case '-h':
+    case 'help': {
+      console.log(help());
+      break;
+    }
+
     case 'init': {
       const targetDir = args[1];
+      if (targetDir === '--help' || targetDir === '-h') {
+        console.log(help());
+        break;
+      }
       if (!targetDir) {
         console.log('Usage: tixkit init <dir> [options]');
         process.exit(1);
@@ -185,6 +197,7 @@ async function main(): Promise<void> {
       process.exit(0);
     }
 
+    case 'doctor':
     case 'setup:check': {
       const envFile = parseArg('--env-file', '.env.local');
       const mode = parseArg('--mode', 'local') as 'local' | 'provider' | 'production';
@@ -224,7 +237,7 @@ async function main(): Promise<void> {
       const brandId = parseArg('--brand-id', '');
       if (!tenantId || !organizationId || !brandId) {
         console.log(
-          'Usage: tixkit seed:email-templates --tenant-id <id> --organization-id <id> --brand-id <id> [--event-id <id>] [--created-by <id>]',
+          'Usage: tixkit seed:email-templates --tenant-id <id> --organization-id <id> --brand-id <id> [--event-id <id>] [--created-by <id>] [--force-restyle] [--dry-run]',
         );
         process.exit(1);
       }
@@ -236,6 +249,8 @@ async function main(): Promise<void> {
         brandId,
         eventId: eventId || undefined,
         createdBy: createdBy || undefined,
+        forceRestyle: hasFlag('--force-restyle'),
+        dryRun: hasFlag('--dry-run'),
       });
       console.log(result.message);
       process.exit(result.ok ? 0 : 1);

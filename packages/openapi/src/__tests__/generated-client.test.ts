@@ -1,36 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { openApiSpec } from '../index.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { openApiSpec, generateOpenApiTypes } from '../index.js';
 
 /**
  * Generated-client compile validation (T33).
  *
- * Uses `openapi-typescript` to generate TypeScript types from the OpenAPI spec
- * and verifies the output is non-empty and contains expected type definitions.
+ * Uses TixKit's TypeScript 7-compatible generator to generate types from the
+ * OpenAPI spec and verifies the output contains the supported SDK contracts.
  * This catches schema regressions that would break generated SDK clients.
  */
 
 async function generateTypes(): Promise<string> {
-  const tmpDir = join(
-    import.meta.dirname,
-    `.tmp-gen-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
-  const specPath = join(tmpDir, 'spec.json');
-  if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
-  writeFileSync(specPath, JSON.stringify(openApiSpec));
-
-  const { default: openapiTS, astToString } = await import('openapi-typescript');
-  const ast = await openapiTS(new URL(`file://${specPath}`));
-  const output = astToString(ast);
-  rmSync(tmpDir, { recursive: true, force: true });
-  return output;
+  return generateOpenApiTypes(openApiSpec);
 }
 
 describe('Generated client compile validation (T33)', () => {
-  const tmpDir = join(import.meta.dirname, '.tmp-gen');
-
-  it('openapi-typescript generates valid TypeScript from the spec', async () => {
+  it('generates valid TypeScript from the spec', async () => {
     const output = await generateTypes();
 
     // Verify the output is non-empty and contains expected patterns.
@@ -48,6 +36,28 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('Organization');
     expect(output).toContain('Brand');
     expect(output).toContain('paymentAccountId');
+
+    const directory = mkdtempSync(join(tmpdir(), 'tixkit-openapi-types-'));
+    try {
+      const generatedPath = join(directory, 'openapi.generated.ts');
+      const compilerPath = resolve(
+        import.meta.dirname,
+        '../../../../node_modules/typescript/bin/tsc',
+      );
+      writeFileSync(
+        generatedPath,
+        `${output}\n\ntype CheckoutRequest = paths["/checkout/sessions"]["post"]["requestBody"]["content"]["application/json"];\ntype MemberUpdateResponse = paths["/organizations/{organizationId}/members/{memberId}"]["patch"]["responses"][200]["content"]["application/json"];\nconst validCheckout: CheckoutRequest = { eventId: "evt_1", items: [{ ticketTypeId: "tt_1", quantity: 1 }], buyer: { email: "buyer@example.test" } };\nconst validMember: MemberUpdateResponse = { id: "mem_1", organizationId: "org_1", name: "Ada Lovelace", email: "ada@example.test", role: "organizer", status: "invited", invitedAt: "2026-01-01T00:00:00.000Z", joinedAt: null, brandIds: [], eventIds: [] };\n// @ts-expect-error member update responses always include joinedAt, even when null\nconst invalidMember: MemberUpdateResponse = { id: "mem_1", organizationId: "org_1", name: "Ada Lovelace", email: "ada@example.test", role: "organizer", status: "invited", invitedAt: "2026-01-01T00:00:00.000Z", brandIds: [], eventIds: [] };\n// @ts-expect-error ticket and product identifiers are mutually exclusive\nconst invalidMixedCheckout: CheckoutRequest = { eventId: "evt_1", items: [{ ticketTypeId: "tt_1", productId: "prod_1", quantity: 1 }], buyer: { email: "buyer@example.test" } };\nvoid validCheckout;\nvoid validMember;\nvoid invalidMember;\nvoid invalidMixedCheckout;\n`,
+      );
+      execFileSync(
+        process.execPath,
+        [compilerPath, '--ignoreConfig', '--noEmit', '--strict', generatedPath],
+        {
+          stdio: 'pipe',
+        },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }, 30000);
 
   it('generated types include all paginated envelope schemas', async () => {
@@ -77,13 +87,13 @@ describe('Generated client compile validation (T33)', () => {
       '/public/events/{eventId}/page-bootstrap',
       '/public/events/{eventId}/content-page',
       '/public/events/{eventId}/discovery-card',
-      '/public/events/{eventId}/draft-preview',
       '/public/events/by-slug/{slug}',
       '/public/events/{eventId}/revision',
       '/public/events/{eventId}/resale-listings',
       '/public/events/by-slug/{slug}/page',
       '/public/events/by-slug/{slug}/page-bootstrap',
       '/public/brand-logos/{artifactId}',
+      '/public/content-event-page-images/{artifactId}',
       '/s/{slug}',
       '/tickets/{ticketId}/resale-listings',
       '/checkout/sessions/{sessionId}/tickets/{ticketId}/resale-listing',
@@ -119,7 +129,7 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('DraftPreviewPage');
     expect(output).toContain('data: components["schemas"]["PuckData"]');
     expect(output).toContain('puckData: components["schemas"]["PuckData"]');
-    expect(output).toContain('content: components["schemas"]["PuckComponentData"][]');
+    expect(output).toContain('content: Array<components["schemas"]["PuckComponentData"]>');
     expect(output).not.toContain('ResolvedEventPage');
     expect(output).not.toContain('headless: components["schemas"]["PublicEventPageBlock"][]');
     expect(output).not.toContain('renderModel:');
@@ -127,7 +137,7 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('versionNumber: number');
     expect(output).toContain('status: string');
     expect(output).toContain(
-      'marketingIntegrations: components["schemas"]["PublicMarketingIntegration"][]',
+      'marketingIntegrations: Array<components["schemas"]["PublicMarketingIntegration"]>',
     );
   });
 
@@ -171,9 +181,12 @@ describe('Generated client compile validation (T33)', () => {
     );
   });
 
-  // Cleanup temp files after all tests.
-  it('cleanup', () => {
-    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
-    expect(true).toBe(true);
+  it('preserves schema combinators and array element unions', async () => {
+    const output = await generateTypes();
+
+    expect(output).toContain('PrivacyRequestInput: ({');
+    expect(output).not.toContain('PrivacyRequestInput: unknown');
+    expect(output).toContain('items: Array<(');
+    expect(output).not.toContain('PuckComponentData>[] |');
   });
 });

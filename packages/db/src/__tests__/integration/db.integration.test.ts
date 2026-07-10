@@ -2,15 +2,21 @@ import { afterEach, beforeEach, beforeAll, afterAll, describe, expect, it } from
 import type { Database } from '../../client.js';
 import { createDb } from '../../client.js';
 import { runMigrations, truncateAllData } from '../../migrate.js';
+import { RolePermissionGrantsSeedMigration } from '../../migrations/0051_role_permission_grants_seed.js';
+import { permissionsForRole } from '@tixkit/domain';
 import {
   BrandRepository,
   ContentRepository,
   EventRepository,
   InventoryPoolRepository,
   OrganizationRepository,
+  OrganizationMemberRepository,
+  PermissionGrantRepository,
   CheckoutSessionRepository,
   OrderRepository,
   AttendeeRepository,
+  CheckInListRepository,
+  ScanLogRepository,
   TicketRepository,
   TicketListingRepository,
   TenantRepository,
@@ -149,6 +155,284 @@ describe.sequential.each(driverCases)('database integration: $driver', ({ driver
       tenant_id: tenant.id,
       organization_id: organization.id,
     });
+  });
+
+  it('coalesces concurrent invitations into one user and one organization membership', async () => {
+    const { tenant, organization } = await createCatalog(db);
+    const repo = new OrganizationMemberRepository(db);
+    const email = `concurrent-${driver}@example.test`;
+
+    const invitations = await Promise.all([
+      repo.invite({ tenantId: tenant.id, organizationId: organization.id, email, role: 'viewer' }),
+      repo.invite({ tenantId: tenant.id, organizationId: organization.id, email, role: 'viewer' }),
+    ]);
+
+    expect(new Set(invitations.map((invitation) => invitation.id)).size).toBe(1);
+    await expect(
+      db
+        .selectFrom('user_profiles')
+        .select('id')
+        .where('tenant_id', '=', tenant.id)
+        .where('email', '=', email)
+        .execute(),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .selectFrom('organization_members')
+        .select('id')
+        .where('tenant_id', '=', tenant.id)
+        .where('organization_id', '=', organization.id)
+        .execute(),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('serializes concurrent invitation role and scope replacement', async () => {
+    const { tenant, organization, brand, event } = await createCatalog(db);
+    const invited = await new OrganizationMemberRepository(db).invite({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      email: `scope-race-${driver}@example.test`,
+      role: 'viewer',
+    });
+
+    const applyInvitation = async (input: {
+      role: 'admin' | 'viewer';
+      brandIds?: string[];
+      eventIds?: string[];
+    }) =>
+      db.transaction().execute(async (trx) => {
+        const members = new OrganizationMemberRepository(trx);
+        const locked = await members.findByIdForUpdate(tenant.id, organization.id, invited.id);
+        if (!locked) throw new Error('Expected locked invitation member');
+        await members.updateRole(invited.id, input.role);
+        await new PermissionGrantRepository(trx).replaceRoleGrants({
+          tenantId: tenant.id,
+          organizationId: organization.id,
+          principalId: invited.user_id,
+          permissions: permissionsForRole(input.role),
+          brandIds: input.brandIds,
+          eventIds: input.eventIds,
+        });
+      });
+
+    await Promise.all([
+      applyInvitation({ role: 'admin', brandIds: [brand.id] }),
+      applyInvitation({ role: 'viewer', eventIds: [event.id] }),
+    ]);
+
+    const finalMember = await db
+      .selectFrom('organization_members')
+      .select(['role'])
+      .where('id', '=', invited.id)
+      .executeTakeFirstOrThrow();
+    const grants = await db
+      .selectFrom('permission_grants')
+      .select(['permission', 'scope_type', 'scope_id'])
+      .where('principal_id', '=', invited.user_id)
+      .execute();
+    const expectedPermissions = new Set(permissionsForRole(finalMember.role));
+    expect(new Set(grants.map((grant) => grant.permission))).toEqual(expectedPermissions);
+    expect(grants.length).toBe(expectedPermissions.size);
+    if (finalMember.role === 'admin') {
+      expect(
+        grants.every((grant) => grant.scope_type === 'brand' && grant.scope_id === brand.id),
+      ).toBe(true);
+    } else {
+      expect(
+        grants.every((grant) => grant.scope_type === 'event' && grant.scope_id === event.id),
+      ).toBe(true);
+    }
+  });
+
+  it('rolls back a pending invitation role change with its grant replacement', async () => {
+    const { tenant, organization, event } = await createCatalog(db);
+    const invited = await new OrganizationMemberRepository(db).invite({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      email: `rollback-${driver}@example.test`,
+      role: 'viewer',
+    });
+    await new PermissionGrantRepository(db).replaceRoleGrants({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      principalId: invited.user_id,
+      permissions: permissionsForRole('viewer'),
+      eventIds: [event.id],
+    });
+
+    await expect(
+      db.transaction().execute(async (trx) => {
+        const members = new OrganizationMemberRepository(trx);
+        const locked = await members.findByIdForUpdate(tenant.id, organization.id, invited.id);
+        if (!locked) throw new Error('Expected locked invitation member');
+        await members.updateRole(invited.id, 'admin');
+        await new PermissionGrantRepository(trx).replaceRoleGrants({
+          tenantId: tenant.id,
+          organizationId: organization.id,
+          principalId: invited.user_id,
+          permissions: permissionsForRole('admin'),
+        });
+        throw new Error('simulated invitation delivery queue failure');
+      }),
+    ).rejects.toThrow('simulated invitation delivery queue failure');
+
+    await expect(
+      db
+        .selectFrom('organization_members')
+        .select('role')
+        .where('id', '=', invited.id)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toMatchObject({ role: 'viewer' });
+    const grants = await db
+      .selectFrom('permission_grants')
+      .select(['permission', 'scope_type', 'scope_id'])
+      .where('principal_id', '=', invited.user_id)
+      .execute();
+    expect(new Set(grants.map((grant) => grant.permission))).toEqual(
+      new Set(permissionsForRole('viewer')),
+    );
+    expect(
+      grants.every((grant) => grant.scope_type === 'event' && grant.scope_id === event.id),
+    ).toBe(true);
+  });
+
+  it('does not broaden brand/event-scoped grants during the legacy role backfill', async () => {
+    const first = await createCatalog(db);
+    const secondOrganization = await new OrganizationRepository(db).create({
+      tenantId: first.tenant.id,
+      name: 'Second Integration Org',
+      slug: 'second-integration-org',
+    });
+    const secondBrand = await new BrandRepository(db).create({
+      tenantId: first.tenant.id,
+      organizationId: secondOrganization.id,
+      name: 'Second Integration Brand',
+      slug: 'second-integration-brand',
+    });
+    const secondEvent = await new EventRepository(db).create({
+      tenantId: first.tenant.id,
+      organizationId: secondOrganization.id,
+      brandId: secondBrand.id,
+      slug: 'second-integration-event',
+      title: 'Second Integration Event',
+      currency: 'USD',
+      timezone: 'UTC',
+      startsAt: new Date('2028-01-01T18:00:00.000Z'),
+    });
+    const now = new Date();
+    await db
+      .insertInto('user_profiles')
+      .values([
+        {
+          id: 'usr_scoped_migration',
+          tenant_id: first.tenant.id,
+          clerk_user_id: 'clerk_scoped_migration',
+          email: 'scoped-migration@example.test',
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'active',
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: 'usr_custom_role',
+          tenant_id: first.tenant.id,
+          clerk_user_id: 'clerk_custom_role',
+          email: 'custom-role@example.test',
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'active',
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+    await db
+      .insertInto('organization_members')
+      .values([
+        {
+          id: 'mem_scoped_brand',
+          tenant_id: first.tenant.id,
+          organization_id: first.organization.id,
+          user_id: 'usr_scoped_migration',
+          role: 'admin',
+          invited_at: now,
+          accepted_at: now,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: 'mem_scoped_event',
+          tenant_id: first.tenant.id,
+          organization_id: secondOrganization.id,
+          user_id: 'usr_scoped_migration',
+          role: 'admin',
+          invited_at: now,
+          accepted_at: now,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: 'mem_custom_role',
+          tenant_id: first.tenant.id,
+          organization_id: first.organization.id,
+          user_id: 'usr_custom_role',
+          role: 'custom_finance_observer',
+          invited_at: now,
+          accepted_at: now,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+    await db
+      .insertInto('permission_grants')
+      .values([
+        {
+          id: 'pg_scoped_brand',
+          tenant_id: first.tenant.id,
+          principal_type: 'user',
+          principal_id: 'usr_scoped_migration',
+          permission: 'settings.write',
+          scope_type: 'brand',
+          scope_id: first.brand.id,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: 'pg_scoped_event',
+          tenant_id: first.tenant.id,
+          principal_type: 'user',
+          principal_id: 'usr_scoped_migration',
+          permission: 'events.write',
+          scope_type: 'event',
+          scope_id: secondEvent.id,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+
+    await RolePermissionGrantsSeedMigration.up(db);
+
+    const grants = await db
+      .selectFrom('permission_grants')
+      .select(['scope_type', 'scope_id'])
+      .where('principal_id', '=', 'usr_scoped_migration')
+      .execute();
+    expect(grants).toHaveLength(2);
+    expect(grants.some((grant) => grant.scope_type === 'organization')).toBe(false);
+    await expect(
+      db
+        .selectFrom('permission_grants')
+        .select('id')
+        .where('principal_id', '=', 'usr_custom_role')
+        .execute(),
+    ).resolves.toHaveLength(0);
   });
 
   it('persists resale listings and enforces one active listing per ticket', async () => {
@@ -729,6 +1013,47 @@ describe.sequential.each(driverCases)('database integration: $driver', ({ driver
         })
         .execute(),
     ).rejects.toThrow();
+  });
+
+  it('allocates monotonic check-in activity sequences under concurrent scans', async () => {
+    const { tenant, event } = await createCatalog(db);
+    const checkInList = await new CheckInListRepository(db).create({
+      eventId: event.id,
+      name: 'Main entrance',
+      ticketTypeIds: [],
+    });
+    const scanLogs = new ScanLogRepository(db);
+
+    const created = await Promise.all(
+      Array.from({ length: 20 }, (_, index) =>
+        scanLogs.create({
+          tenantId: tenant.id,
+          checkInListId: checkInList.id,
+          deviceId: `device_${index % 3}`,
+          qrHash: `hash_${index}`,
+          outcome: 'accepted',
+          scannedAt: new Date(`2027-01-01T18:00:${String(index).padStart(2, '0')}.000Z`),
+          offline: false,
+        }),
+      ),
+    );
+    const allocatedSequences = created.map((entry) => Number(entry.activity_sequence));
+    expect(new Set(allocatedSequences).size).toBe(20);
+    for (let expected = 1; expected <= 20; expected += 1) {
+      expect(allocatedSequences).toContain(expected);
+    }
+    const cursor = created.find((entry) => Number(entry.activity_sequence) === 10);
+    expect(cursor).toBeDefined();
+
+    const replay = await scanLogs.findByListSince({
+      tenantId: tenant.id,
+      listId: checkInList.id,
+      afterId: cursor?.id,
+      limit: 20,
+    });
+    expect(replay.map((entry) => Number(entry.activity_sequence))).toEqual(
+      Array.from({ length: 10 }, (_, index) => index + 11),
+    );
   });
 
   it('persists export job events for replay', async () => {

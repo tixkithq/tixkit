@@ -19,6 +19,16 @@ import {
   OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES,
 } from '../http/schemas.js';
 
+const checkInActivityEvents = vi.hoisted(() => ({
+  publish: vi.fn(async (..._args: unknown[]) => undefined),
+  subscribe: vi.fn(async (..._args: unknown[]) => undefined),
+}));
+
+vi.mock('../services/check-in-activity-events.js', () => ({
+  publishCheckInActivityEvent: (...args: unknown[]) => checkInActivityEvents.publish(...args),
+  createCheckInActivitySubscriber: (...args: unknown[]) => checkInActivityEvents.subscribe(...args),
+}));
+
 const list = {
   id: 'cil_1',
   event_id: 'evt_1',
@@ -861,6 +871,10 @@ describe('offline sync endpoint', () => {
       eventIds: ['evt_1'],
     };
     const { db, inserts, updates } = buildOfflineSyncMockDb();
+    checkInActivityEvents.publish.mockClear();
+    checkInActivityEvents.publish.mockImplementation(async () => {
+      expect(inserts.some((insert) => insert.table === 'scan_logs')).toBe(true);
+    });
     const app = Fastify();
     app.decorate('context', {
       db,
@@ -913,6 +927,11 @@ describe('offline sync endpoint', () => {
           values: expect.objectContaining({ device_id: 'sd_public' }),
         }),
       ]),
+    );
+    expect(checkInActivityEvents.publish).toHaveBeenCalledTimes(1);
+    expect(checkInActivityEvents.publish).toHaveBeenCalledWith(
+      'cil_1',
+      expect.stringMatching(/^scan_/),
     );
 
     await app.close();
@@ -1975,6 +1994,10 @@ describe('bulk offline sync endpoint', () => {
 
   it('accepts out-of-order chunks and processes each chunk once across replay', async () => {
     const { app, db, inserts } = await setupBulkApp();
+    checkInActivityEvents.publish.mockClear();
+    checkInActivityEvents.publish.mockImplementation(async () => {
+      expect(inserts.some((insert) => insert.table === 'scan_logs')).toBe(true);
+    });
     const job = await createBulkJob(app);
 
     const secondChunk = await app.inject({
@@ -2017,6 +2040,11 @@ describe('bulk offline sync endpoint', () => {
           values: expect.objectContaining({ qr_hash: 'missing_hash', outcome: 'not_found' }),
         }),
       ]),
+    );
+    expect(checkInActivityEvents.publish).toHaveBeenCalledTimes(1);
+    expect(checkInActivityEvents.publish).toHaveBeenCalledWith(
+      'cil_1',
+      expect.stringMatching(/^scan_/),
     );
 
     await processPendingBulkSyncChunks(db as unknown as Database, job.id);

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 process.env.CHECKOUT_URL = 'https://checkout.test';
 const {
   buildEventContext,
+  buildBrandContext,
   buildRecipientContext,
   buildOrderContext,
   buildRefundContext,
@@ -49,6 +50,34 @@ describe('buildEventContext', () => {
   it('returns undefined for a missing event', () => {
     expect(buildEventContext(null)).toBeUndefined();
     expect(buildEventContext(undefined)).toBeUndefined();
+  });
+});
+
+describe('buildBrandContext', () => {
+  it('reads the durable logo URL from an object theme', () => {
+    expect(
+      buildBrandContext({
+        id: 'brd_1',
+        name: 'Northstar Events',
+        theme: { logoUrl: 'https://assets.example.test/northstar.png' },
+      }),
+    ).toEqual({
+      name: 'Northstar Events',
+      logoUrl: 'https://assets.example.test/northstar.png',
+    });
+  });
+
+  it('accepts JSON database themes and ignores malformed themes', () => {
+    expect(
+      buildBrandContext({
+        id: 'brd_1',
+        name: 'Northstar Events',
+        theme: '{"logoUrl":"https://assets.example.test/northstar.png"}',
+      })?.logoUrl,
+    ).toBe('https://assets.example.test/northstar.png');
+    expect(
+      buildBrandContext({ id: 'brd_1', name: 'Northstar Events', theme: '{' })?.logoUrl,
+    ).toBeUndefined();
   });
 });
 

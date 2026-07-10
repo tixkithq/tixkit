@@ -30,6 +30,7 @@ vi.mock('@/lib/api', () => {
       getCheckoutBootstrap: vi.fn(),
       getResaleListings: vi.fn(),
       getQuestions: vi.fn(),
+      getOccurrences: vi.fn(),
       getBrand: vi.fn(),
     },
     checkoutApi: {
@@ -72,6 +73,10 @@ const publicApiMock = publicApi as unknown as {
   getQuestions: MockedCallable<
     Parameters<typeof publicApi.getQuestions>,
     ReturnType<typeof publicApi.getQuestions>
+  >;
+  getOccurrences: MockedCallable<
+    Parameters<typeof publicApi.getOccurrences>,
+    ReturnType<typeof publicApi.getOccurrences>
   >;
   getBrand: MockedCallable<
     Parameters<typeof publicApi.getBrand>,
@@ -121,6 +126,12 @@ function renderCheckoutFlow(props: Partial<React.ComponentProps<typeof CheckoutF
   );
 }
 
+function fillRequiredDatesOfBirth(view: ReturnType<typeof renderCheckoutFlow>) {
+  for (const field of view.queryAllByLabelText(/Date of birth/)) {
+    fireEvent.change(field, { target: { value: '1990-01-01' } });
+  }
+}
+
 describe('CheckoutFlow buyer validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -131,16 +142,18 @@ describe('CheckoutFlow buyer validation', () => {
       buyerQuestions: [],
       attendeeQuestions: [],
     });
+    publicApiMock.getOccurrences.mockResolvedValue([]);
     publicApiMock.getCheckoutBootstrap.mockImplementation(
       async (
         eventId: string,
         signal?: AbortSignal,
         input?: { products?: string; resaleListingId?: string },
       ) => {
-        const [loadedEvent, loadedAvailability, questions] = await Promise.all([
+        const [loadedEvent, loadedAvailability, questions, occurrences] = await Promise.all([
           publicApiMock.getEvent(eventId, signal),
           publicApiMock.getAvailability(eventId, signal, input?.products),
           publicApiMock.getQuestions(eventId, signal),
+          publicApiMock.getOccurrences(eventId, signal),
         ]);
         let resaleListing = null;
         let cursor: string | undefined;
@@ -157,7 +170,13 @@ describe('CheckoutFlow buyer validation', () => {
           if (resaleListing || !page.hasMore || !page.nextCursor) break;
           cursor = page.nextCursor;
         }
-        return { event: loadedEvent, availability: loadedAvailability, questions, resaleListing };
+        return {
+          event: loadedEvent,
+          availability: loadedAvailability,
+          questions,
+          resaleListing,
+          occurrences,
+        };
       },
     );
     publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
@@ -244,6 +263,7 @@ describe('CheckoutFlow buyer validation', () => {
     });
     fireEvent.click(view.getByLabelText(/I agree to the photo policy/));
     fireEvent.click(view.getByLabelText(/I agree to the photo policy/));
+    fillRequiredDatesOfBirth(view);
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     expect(await view.findByText('Please check I agree to the photo policy.')).toBeInTheDocument();
@@ -273,6 +293,7 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.change(view.getByLabelText(/Email/), {
       target: { value: 'buyer@example.com' },
     });
+    fillRequiredDatesOfBirth(view);
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     const message = 'Choose at least one option for Interests.';
@@ -306,6 +327,7 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.change(view.getByLabelText('Backup email'), {
       target: { value: 'not-an-email' },
     });
+    fillRequiredDatesOfBirth(view);
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     const message = 'Backup email must be a valid email.';
@@ -339,10 +361,32 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.change(view.getByLabelText(/Member ID/), {
       target: { value: 'BAD' },
     });
+    fillRequiredDatesOfBirth(view);
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     expect(await view.findAllByText('Member ID format is invalid.')).toHaveLength(2);
     expect(view.getByLabelText(/Member ID/)).toHaveAttribute('aria-invalid', 'true');
+    expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
+  });
+
+  it('blocks an underage ticket attendee before calling the checkout API', async () => {
+    const restrictedEvent = { ...event, minimumAge: 21 };
+    publicApiMock.getEvent.mockResolvedValue(restrictedEvent);
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    const dateFields = view.getAllByLabelText(/Date of birth/);
+    fireEvent.change(dateFields[0]!, { target: { value: '1990-01-01' } });
+    fireEvent.change(dateFields[1]!, { target: { value: '2010-01-01' } });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    expect(
+      await view.findAllByText(/General Admission attendee 1: Attendees must be at least 21/),
+    ).not.toHaveLength(0);
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 
@@ -386,6 +430,7 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.change(view.getByLabelText(/Email/), {
       target: { value: 'buyer@example.com' },
     });
+    fillRequiredDatesOfBirth(view);
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => {
@@ -466,6 +511,7 @@ describe('CheckoutFlow buyer validation', () => {
     fireEvent.change(view.getByLabelText(/Email/), {
       target: { value: 'buyer@example.com' },
     });
+    fillRequiredDatesOfBirth(view);
     fireEvent.click(view.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => {
@@ -477,5 +523,63 @@ describe('CheckoutFlow buyer validation', () => {
         }),
       );
     });
+  });
+
+  it('uses the ticket occurrence date for resale age eligibility', async () => {
+    publicApiMock.getEvent.mockResolvedValue({ ...event, minimumAge: 21 });
+    publicApiMock.getAvailability.mockResolvedValue([]);
+    publicApiMock.getOccurrences.mockResolvedValue([
+      {
+        id: 'occ_next_day',
+        eventId: event.id,
+        title: 'Next-day show',
+        startsAt: '2026-07-18T19:00:00.000Z',
+        timezone: 'America/Chicago',
+        sortOrder: 0,
+        status: 'scheduled',
+      },
+    ]);
+    publicApiMock.getResaleListings.mockResolvedValue({
+      items: [
+        {
+          id: 'lst_occurrence',
+          eventId: event.id,
+          eventOccurrenceId: 'occ_next_day',
+          status: 'listed',
+          priceCents: 5500,
+          currency: 'USD',
+          faceValueCents: 5000,
+          createdAt: '2026-06-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+    checkoutApiMock.createSession.mockResolvedValue({
+      id: 'cs_occurrence',
+      eventId: event.id,
+      status: 'open',
+      currency: 'USD',
+      clientToken: 'token_occurrence',
+      quote: {
+        subtotalCents: 5500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        totalCents: 5500,
+      },
+      expiresAt: '2026-07-09T22:00:00.000Z',
+    });
+    const view = renderCheckoutFlow({ resaleListingId: 'lst_occurrence' });
+
+    expect(await view.findAllByText('Resale ticket')).not.toHaveLength(0);
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.change(view.getByLabelText(/Date of birth/), {
+      target: { value: '2005-07-18' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledOnce());
   });
 });

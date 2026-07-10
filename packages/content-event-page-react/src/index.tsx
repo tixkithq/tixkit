@@ -12,6 +12,7 @@ import {
   eventPageBrandVariablesToCssProperties,
   formatTimezoneLabel,
   normalizeEventPageDocument,
+  sanitizeEventPageEmbedHtml,
   sanitizeEventPageHtml,
   validateEventPageDocument,
   type EventPageBrandFooterProps,
@@ -27,6 +28,7 @@ import {
   type EventPageFaqProps,
   type EventPageMediaProps,
   type EventPagePuckComponentType,
+  type EventPageProductAddOnsProps,
   type EventPagePuckData,
   type EventPageResaleTicketsProps,
   type EventPageRichTextProps,
@@ -44,6 +46,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import {
   CalendarIcon,
   CheckIcon,
+  ChevronDownIcon,
   ClockIcon,
   ImageIcon,
   MapPinIcon,
@@ -53,6 +56,7 @@ import {
   BrandFooterBlock,
   CheckoutCtaBlock,
   EventPageRuntimeProvider,
+  ProductAddOnsBlock,
   ResaleTicketsBlock,
   TicketsBlock,
   type EventPageRuntime,
@@ -75,16 +79,17 @@ export type EventPagePuckComponentProps = {
   SocialLinks: EventPageSocialLinksProps;
   CustomEmbed: EventPageCustomEmbedProps;
   Tickets: EventPageTicketsProps;
+  ProductAddOns: EventPageProductAddOnsProps;
   ResaleTickets: EventPageResaleTicketsProps;
   CheckoutCta: EventPageCheckoutCtaProps;
   BrandFooter: EventPageBrandFooterProps;
 };
 
 export type EventPagePuckCategory =
-  | 'page'
-  | 'content'
-  | 'event'
-  | 'people'
+  | 'essentials'
+  | 'story'
+  | 'information'
+  | 'peopleAndPartners'
   | 'actions'
   | 'commerce';
 type EventPageEditorUiProps = {
@@ -105,8 +110,10 @@ export type EventPagePuckConfig = Config<
 export type EventPagePuckCoreData = Data<EventPagePuckComponentProps, EventPageRootProps>;
 export type EventPagePuckUploadImage = (file: File) => Promise<{ url: string }>;
 export type EventPagePuckConfigOptions = {
+  allowUnsafeEmbeds?: boolean;
   onUploadImage?: EventPagePuckUploadImage;
   hasCommerceItems?: boolean;
+  hasProductItems?: boolean;
 };
 
 type WithBlockId<T> = T & { id?: string };
@@ -134,7 +141,12 @@ type OverlaySlotRender = (props?: {
   style?: CSSProperties;
   minEmptyHeight?: CSSProperties['minHeight'] | number;
 }) => ReactNode;
-type InlineTextField = { type: 'text'; label: string; contentEditable: true; visible: false };
+type InlineTextField = {
+  type: 'text';
+  label: string;
+  contentEditable: true;
+  visible: false;
+};
 type InlineTextareaField = {
   type: 'textarea';
   label: string;
@@ -147,8 +159,6 @@ type InlineRichTextField = {
   contentEditable: true;
   visible: false;
 };
-type HiddenTextField = { type: 'text'; label: string; visible: false };
-type HiddenTextareaField = { type: 'textarea'; label: string; visible: false };
 
 export type EventPageRenderProps = {
   document?: EventPageDocument | unknown;
@@ -302,7 +312,10 @@ const fontChoices = [
     value: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   { label: 'Editorial serif', value: 'Georgia, "Times New Roman", serif' },
-  { label: 'Mono', value: '"SFMono-Regular", Consolas, "Liberation Mono", monospace' },
+  {
+    label: 'Mono',
+    value: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+  },
 ] as const;
 
 const radiusChoices = [
@@ -328,14 +341,6 @@ function inlineTextareaField(label: string): InlineTextareaField {
 
 function inlineRichTextField(label: string): InlineRichTextField {
   return { type: 'richtext', label, contentEditable: true, visible: false };
-}
-
-function hiddenTextField(label: string): HiddenTextField {
-  return { type: 'text', label, visible: false };
-}
-
-function hiddenTextareaField(label: string): HiddenTextareaField {
-  return { type: 'textarea', label, visible: false };
 }
 
 const lengthUnits: LengthUnit[] = ['px', 'rem', 'em', '%', 'vh', 'vw', 'ch'];
@@ -460,22 +465,61 @@ function FieldIcon({ name }: { name: string }) {
   }
 }
 
-function sectionField(title: string, description?: string, icon?: string): AnyField {
-  return {
-    type: 'custom' as const,
-    label: title,
-    render: () => (
-      <div className="tk-ep-field-section" data-field-section={title}>
-        <div className="tk-ep-field-section__title">
+function FieldSectionControl({
+  defaultExpanded,
+  description,
+  icon,
+  title,
+}: {
+  defaultExpanded: boolean;
+  description?: string;
+  icon?: string;
+  title: string;
+}) {
+  const [expanded, setExpanded] = React.useState(defaultExpanded);
+  return (
+    <div
+      className="tk-ep-field-section"
+      data-field-section={title}
+      data-section-expanded={expanded ? 'true' : 'false'}
+    >
+      <button
+        aria-expanded={expanded}
+        className="tk-ep-field-section__trigger"
+        onClick={() => setExpanded((current) => !current)}
+        type="button"
+      >
+        <span className="tk-ep-field-section__title">
           {icon ? (
             <span className="tk-ep-field-section__icon" aria-hidden>
               <FieldIcon name={icon} />
             </span>
           ) : null}
           {title}
-        </div>
-        {description ? <p className="tk-ep-field-section__desc">{description}</p> : null}
-      </div>
+        </span>
+        <ChevronDownIcon aria-hidden="true" className="tk-ep-field-section__chevron" />
+      </button>
+      {description ? <p className="tk-ep-field-section__desc">{description}</p> : null}
+    </div>
+  );
+}
+
+function sectionField(
+  title: string,
+  description?: string,
+  icon?: string,
+  defaultExpanded = false,
+): AnyField {
+  return {
+    type: 'custom' as const,
+    label: title,
+    render: () => (
+      <FieldSectionControl
+        defaultExpanded={defaultExpanded}
+        description={description}
+        icon={icon}
+        title={title}
+      />
     ),
   };
 }
@@ -484,26 +528,8 @@ function advancedToggleField(label = 'Advanced styling'): AnyField {
   return {
     type: 'custom' as const,
     label,
-    render: ({ value, onChange, readOnly }: CustomFieldRenderProps<boolean>) => {
-      const enabled = Boolean(value);
-      return (
-        <button
-          type="button"
-          className="tk-ep-field-advanced-toggle"
-          aria-pressed={enabled}
-          disabled={readOnly}
-          onClick={() => onChange(!enabled)}
-        >
-          <span className="tk-ep-field-advanced-toggle__icon" aria-hidden>
-            <FieldIcon name="tune" />
-          </span>
-          <span>{enabled ? 'Hide advanced styling' : 'Show advanced styling'}</span>
-          <span className="tk-ep-field-advanced-toggle__hint" aria-hidden>
-            {enabled ? '−' : '+'}
-          </span>
-        </button>
-      );
-    },
+    visible: false,
+    render: () => null,
   };
 }
 
@@ -529,12 +555,12 @@ function toggleField(
             className={enabled ? 'tk-ep-field-toggle tk-ep-field-toggle--on' : 'tk-ep-field-toggle'}
             onClick={() => onChange(!enabled)}
           >
-            <span className="tk-ep-field-toggle__track" aria-hidden>
-              <span className="tk-ep-field-toggle__thumb" />
-            </span>
             <span className="tk-ep-field-toggle__copy">
               <span className="tk-ep-field-toggle__label">{field.label ?? label}</span>
               {help ? <span className="tk-ep-field-toggle__help">{help}</span> : null}
+            </span>
+            <span className="tk-ep-field-toggle__track" aria-hidden>
+              <span className="tk-ep-field-toggle__thumb" />
             </span>
           </button>
         </div>
@@ -630,7 +656,7 @@ function alignmentIconField(
       const current = normalizeFieldValue(value) || 'left';
       return (
         <FieldControl field={field} help={help || undefined}>
-          <div className="tk-ep-field__icon-group" role="group" aria-label={field.label ?? label}>
+          <fieldset className="tk-ep-field__icon-group" aria-label={field.label ?? label}>
             {options.map((option) => {
               const selected = current === option.value;
               return (
@@ -652,7 +678,7 @@ function alignmentIconField(
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </FieldControl>
       );
     },
@@ -671,7 +697,7 @@ function stackIconField(
       const current = normalizeFieldValue(value) || 'center';
       return (
         <FieldControl field={field} help={help || undefined}>
-          <div className="tk-ep-field__icon-group" role="group" aria-label={field.label ?? label}>
+          <fieldset className="tk-ep-field__icon-group" aria-label={field.label ?? label}>
             {options.map((option) => {
               const selected = current === option.value;
               return (
@@ -693,7 +719,7 @@ function stackIconField(
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </FieldControl>
       );
     },
@@ -712,8 +738,8 @@ function placementGridField(
       const current = normalizeFieldValue(value) || options[0]?.value || '';
       return (
         <FieldControl field={field} help={help || undefined}>
-          <div className="tk-ep-field__placement" role="group" aria-label={field.label ?? label}>
-            <div className="tk-ep-field__placement-frame" aria-hidden>
+          <fieldset className="tk-ep-field__placement" aria-label={field.label ?? label}>
+            <div className="tk-ep-field__placement-frame">
               <div className="tk-ep-field__placement-grid">
                 {options.map((option) => {
                   const selected = current === option.value;
@@ -741,7 +767,7 @@ function placementGridField(
             <p className="tk-ep-field__placement-label">
               {options.find((option) => option.value === current)?.label ?? 'Choose a corner'}
             </p>
-          </div>
+          </fieldset>
         </FieldControl>
       );
     },
@@ -831,7 +857,7 @@ function choiceField(
       return (
         <FieldControl field={field} help={help || undefined}>
           {preview ? <div className="tk-ep-field__preview">{preview(stringValue)}</div> : null}
-          <div className="tk-ep-field__chips" role="group" aria-label={field.label ?? label}>
+          <fieldset className="tk-ep-field__chips" aria-label={field.label ?? label}>
             {choices.map((choice) => {
               const selected = stringValue === choice.value;
               return (
@@ -849,7 +875,7 @@ function choiceField(
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </FieldControl>
       );
     },
@@ -1164,7 +1190,9 @@ function HeroImageCanvasEditor({
 
   React.useEffect(() => {
     if (!toolsOpen) return undefined;
-    return registerOverlayPortal(activePortalRef.current, { disableDrag: true });
+    return registerOverlayPortal(activePortalRef.current, {
+      disableDrag: true,
+    });
   }, [toolsOpen]);
 
   function commitPlacement(next: Partial<ImagePlacementValue>) {
@@ -1178,7 +1206,11 @@ function HeroImageCanvasEditor({
 
   function commitFit(nextFit: NonNullable<EventPageEventDescriptionProps['imageFit']>) {
     if (!id) return;
-    dispatchHeroImageEdit(editorRef.current?.ownerDocument, { id, blockType, imageFit: nextFit });
+    dispatchHeroImageEdit(editorRef.current?.ownerDocument, {
+      id,
+      blockType,
+      imageFit: nextFit,
+    });
   }
 
   function commitPointer(event: React.PointerEvent<HTMLElement>) {
@@ -1693,125 +1725,13 @@ type EventPageRichTextFields = AnyFields;
 type EventPageMediaFields = AnyFields;
 type EventPageDetailsFields = AnyFields;
 
-const EVENT_DESCRIPTION_ADVANCED_FIELD_KEYS = [
-  '_sectionTypography',
-  'eyebrowFontSize',
-  'eyebrowColor',
-  'titleFontSize',
-  'titleColor',
-  'bodyFontSize',
-  'bodyColor',
-  '_sectionPanel',
-  'contentBackgroundColor',
-  'contentPadding',
-  'contentRadius',
-  'contentGap',
-  '_sectionOverlayFine',
-  'overlayMinHeight',
-  'overlayPadding',
-  'imageOpacity',
-  'backgroundOverlayColor',
-  'backgroundOverlayOpacity',
-] as const;
-
-const EVENT_HEADER_ADVANCED_FIELD_KEYS = [
-  '_sectionImageFine',
-  'imagePosition',
-  'imageOpacity',
-  'backgroundOverlayColor',
-  'backgroundOverlayOpacity',
-  '_sectionTitleStyle',
-  'titleFontSize',
-  'titleColor',
-  'descriptionFontSize',
-  'descriptionColor',
-  '_sectionBadgeStyle',
-  'badgeFontSize',
-  'badgeTextColor',
-  'badgeBackgroundColor',
-  'badgeBorderColor',
-] as const;
-
-const TICKETS_ADVANCED_FIELD_KEYS = [
-  '_sectionTicketStyle',
-  'titleFontSize',
-  'titleColor',
-  'itemRadius',
-  'itemBackgroundColor',
-  'itemBorderColor',
-  'itemTextColor',
-  'itemDescriptionColor',
-  'priceTextColor',
-  'emptyBackgroundColor',
-  'emptyBorderColor',
-] as const;
-
-const BUTTON_ADVANCED_FIELD_KEYS = [
-  '_sectionButtonStyle',
-  'backgroundColor',
-  'textColor',
-  'borderColor',
-  'fontSize',
-  'lineHeight',
-  'letterSpacing',
-  'paddingX',
-  'paddingY',
-  'minHeight',
-  'borderWidth',
-  'customRadius',
-] as const;
-
-const RICH_TEXT_ADVANCED_FIELD_KEYS = [
-  '_sectionRichTextStyle',
-  'fontSize',
-  'lineHeight',
-  'paragraphGap',
-] as const;
-
-const MEDIA_ADVANCED_FIELD_KEYS = [
-  '_sectionMediaStyle',
-  'maxWidth',
-  'customRadius',
-  'captionFontSize',
-  'overlayMinHeight',
-  'overlayPadding',
-  'imageOpacity',
-] as const;
-
-const DETAILS_ADVANCED_FIELD_KEYS = [
-  '_sectionDetailsStyle',
-  'titleFontSize',
-  'titleColor',
-  'labelFontSize',
-  'valueFontSize',
-  'labelColor',
-  'valueColor',
-] as const;
-
-const SECTION_TITLE_ADVANCED_FIELD_KEYS = [
-  '_sectionTitleStyle',
-  'titleFontSize',
-  'titleColor',
-] as const;
-
-function propsShowAdvanced(props: unknown): boolean {
-  return Boolean(
-    props &&
-    typeof props === 'object' &&
-    'showAdvanced' in props &&
-    (props as { showAdvanced?: unknown }).showAdvanced,
-  );
-}
-
 function resolveEventDescriptionFields(
-  data: { props?: EventPageEventDescriptionProps & { showAdvanced?: boolean } },
+  _data: {
+    props?: EventPageEventDescriptionProps & { showAdvanced?: boolean };
+  },
   params: { fields: EventPageEventDescriptionFields },
 ): AnyFields {
-  let fields = params.fields;
-  if (!propsShowAdvanced(data.props)) {
-    fields = omitFields(fields, EVENT_DESCRIPTION_ADVANCED_FIELD_KEYS);
-  }
-  return fields;
+  return params.fields;
 }
 
 function resolveEventHeaderFields(
@@ -1829,26 +1749,21 @@ function resolveEventHeaderFields(
       'badgeBorderColor',
     ] as const);
   }
-  if (!propsShowAdvanced(data.props)) {
-    fields = omitFields(fields, EVENT_HEADER_ADVANCED_FIELD_KEYS);
-  }
   return fields;
 }
 
 function resolveButtonFields(
-  data: { props?: { showAdvanced?: boolean } },
+  _data: { props?: { showAdvanced?: boolean } },
   params: { fields: EventPageButtonFields },
 ): AnyFields {
-  if (propsShowAdvanced(data.props)) return params.fields;
-  return omitFields(params.fields, BUTTON_ADVANCED_FIELD_KEYS);
+  return params.fields;
 }
 
 function resolveRichTextFields(
-  data: { props?: { showAdvanced?: boolean } },
+  _data: { props?: { showAdvanced?: boolean } },
   params: { fields: EventPageRichTextFields },
 ): AnyFields {
-  if (propsShowAdvanced(data.props)) return params.fields;
-  return omitFields(params.fields, RICH_TEXT_ADVANCED_FIELD_KEYS);
+  return params.fields;
 }
 
 function resolveMediaFields(
@@ -1865,26 +1780,21 @@ function resolveMediaFields(
       'imageOverlay',
     ]);
   }
-  if (!propsShowAdvanced(data.props)) {
-    fields = omitFields(fields, MEDIA_ADVANCED_FIELD_KEYS);
-  }
   return fields;
 }
 
 function resolveDetailsFields(
-  data: { props?: { showAdvanced?: boolean } },
+  _data: { props?: { showAdvanced?: boolean } },
   params: { fields: EventPageDetailsFields },
 ): AnyFields {
-  if (propsShowAdvanced(data.props)) return params.fields;
-  return omitFields(params.fields, DETAILS_ADVANCED_FIELD_KEYS);
+  return params.fields;
 }
 
 function resolveSectionTitleAdvancedFields(
-  data: { props?: { showAdvanced?: boolean } },
+  _data: { props?: { showAdvanced?: boolean } },
   params: { fields: AnyFields },
 ): AnyFields {
-  if (propsShowAdvanced(data.props)) return params.fields;
-  return omitFields(params.fields, SECTION_TITLE_ADVANCED_FIELD_KEYS);
+  return params.fields;
 }
 
 function resolveTicketsFields(hasCommerceItems: boolean): AnyField {
@@ -1904,10 +1814,6 @@ function resolveTicketsFields(hasCommerceItems: boolean): AnyField {
         'emptyBorderColor',
       ]);
     }
-    if (!propsShowAdvanced(data.props)) {
-      // Canvas/preview controls stay available; styling stays under advanced.
-      fields = omitFields(fields, TICKETS_ADVANCED_FIELD_KEYS);
-    }
     return fields;
   };
 }
@@ -1915,50 +1821,80 @@ function resolveTicketsFields(hasCommerceItems: boolean): AnyField {
 export function createEventPagePuckConfig(
   options: EventPagePuckConfigOptions = {},
 ): EventPagePuckConfig {
-  const { hasCommerceItems = true, onUploadImage } = options;
+  const {
+    allowUnsafeEmbeds = false,
+    hasCommerceItems = true,
+    hasProductItems = hasCommerceItems,
+    onUploadImage,
+  } = options;
 
   return {
     categories: {
-      page: {
-        title: 'Page chrome',
-        components: ['EventHeader', 'Tickets', 'ResaleTickets', 'CheckoutCta', 'BrandFooter'],
+      essentials: {
+        title: 'Essentials',
+        components: ['EventHeader', 'EventDescription', 'Tickets', 'CheckoutCta', 'BrandFooter'],
         defaultExpanded: true,
       },
-      content: {
-        title: 'Content',
-        components: ['EventDescription', 'RichText', 'Media', 'Button', 'Divider', 'CustomEmbed'],
+      story: {
+        title: 'Story',
+        components: ['RichText', 'Media', 'Divider', 'CustomEmbed'],
         defaultExpanded: true,
       },
-      event: {
-        title: 'Event',
+      information: {
+        title: 'Event information',
         components: ['EventDetails', 'Schedule', 'Venue', 'FAQ'],
         defaultExpanded: false,
       },
-      people: {
-        title: 'People',
+      peopleAndPartners: {
+        title: 'People & partners',
         components: ['Speakers', 'Sponsors', 'SocialLinks'],
         defaultExpanded: false,
       },
       commerce: {
         title: 'Commerce',
-        components: ['Tickets', 'ResaleTickets', 'CheckoutCta'],
+        components: ['ProductAddOns', 'ResaleTickets'],
         defaultExpanded: false,
       },
       actions: {
         title: 'Actions',
-        components: ['Button', 'CheckoutCta'],
+        components: ['Button'],
         defaultExpanded: false,
       },
     },
     root: {
       fields: {
         _sectionPage: sectionField(
-          'Page',
-          'SEO-facing title and description for this page.',
+          'Discovery & SEO',
+          'Control how this page appears in search, social previews, and event discovery.',
           'page',
+          true,
         ),
-        title: { type: 'text', label: 'Page title' },
-        description: { type: 'textarea', label: 'Page description' },
+        marketingSummary: {
+          type: 'textarea',
+          label: 'Marketing summary',
+        },
+        category: { type: 'text', label: 'Category' },
+        tags: {
+          type: 'text',
+          label: 'Tags',
+        },
+        title: { type: 'text', label: 'SEO title' },
+        description: { type: 'textarea', label: 'SEO description' },
+        _sectionSocial: sectionField(
+          'Images',
+          'Optional overrides for discovery cards and social sharing.',
+          'image',
+        ),
+        coverImageUrl: imageUrlField(
+          'Discovery cover',
+          'Used on discovery cards when set.',
+          onUploadImage,
+        ),
+        socialImageUrl: imageUrlField(
+          'Social preview',
+          'Used when this page is shared.',
+          onUploadImage,
+        ),
         _sectionColors: sectionField(
           'Colors',
           'Brand colors applied across the hosted page.',
@@ -1993,6 +1929,7 @@ export function createEventPagePuckConfig(
       },
       defaultProps: {
         _sectionPage: true,
+        _sectionSocial: true,
         _sectionColors: true,
         _sectionTypography: true,
         backgroundColor: '#ffffff',
@@ -2002,6 +1939,11 @@ export function createEventPagePuckConfig(
         fontFamily: 'Inter, system-ui, sans-serif',
         headingFontFamily: 'Inter, system-ui, sans-serif',
         radius: '14px',
+        marketingSummary: '',
+        category: '',
+        tags: '',
+        coverImageUrl: '',
+        socialImageUrl: '',
       },
       render: (props) => <EventPageRoot {...props} />,
     },
@@ -2009,7 +1951,6 @@ export function createEventPagePuckConfig(
       EventDescription: {
         label: 'Description',
         fields: {
-          _sectionContent: sectionField('Content', undefined, 'panel'),
           eyebrow: inlineTextField('Eyebrow'),
           title: inlineTextField('Title (h2)'),
           body: inlineTextareaField('Body'),
@@ -2017,6 +1958,7 @@ export function createEventPagePuckConfig(
             'Image',
             'Inline or background image for the event description.',
             'image',
+            true,
           ),
           imageUrl: imageUrlField(
             'Image',
@@ -2182,7 +2124,7 @@ export function createEventPagePuckConfig(
               heading: { levels: [2, 3] },
             },
           },
-          _sectionLayout: sectionField('Layout', undefined, 'layout'),
+          _sectionLayout: sectionField('Layout', undefined, 'layout', true),
           alignment: alignmentIconField('Alignment'),
           textSize: segmentField('Text size', textSizeOptions),
           spacing: segmentField('Spacing', dividerSpacingOptions),
@@ -2212,7 +2154,7 @@ export function createEventPagePuckConfig(
       Media: {
         label: 'Image / media',
         fields: {
-          _sectionImage: sectionField('Image', undefined, 'image'),
+          _sectionImage: sectionField('Image', undefined, 'image', true),
           imageUrl: imageUrlField('Image', 'Upload or paste a hosted image URL.', onUploadImage),
           imageAlt: { type: 'text', label: 'Alt text' },
           caption: inlineTextField('Caption'),
@@ -2280,14 +2222,19 @@ export function createEventPagePuckConfig(
         label: 'Event details',
         fields: {
           title: inlineTextField('Title'),
+          _sectionItems: sectionField(
+            'Details',
+            'Add, remove, and edit the facts shown in this section.',
+            'panel',
+            true,
+          ),
           items: {
             type: 'array',
             label: 'Details',
             min: 1,
-            visible: false,
             arrayFields: {
-              label: hiddenTextField('Label'),
-              value: hiddenTextField('Value'),
+              label: { type: 'text', label: 'Label' },
+              value: { type: 'text', label: 'Value' },
             },
             defaultItemProps: { label: 'Detail', value: '' },
             getItemSummary: (item) => item.label || 'Detail',
@@ -2328,17 +2275,22 @@ export function createEventPagePuckConfig(
         label: 'Schedule',
         fields: {
           title: inlineTextField('Title'),
+          _sectionItems: sectionField(
+            'Schedule items',
+            'Manage session times, locations, and descriptions.',
+            'panel',
+            true,
+          ),
           items: {
             type: 'array',
             label: 'Schedule items',
             min: 1,
-            visible: false,
             arrayFields: {
-              title: hiddenTextField('Title'),
-              startsAt: hiddenTextField('Starts at'),
-              endsAt: hiddenTextField('Ends at'),
-              location: hiddenTextField('Location'),
-              description: hiddenTextareaField('Description'),
+              title: { type: 'text', label: 'Title' },
+              startsAt: { type: 'text', label: 'Starts at' },
+              endsAt: { type: 'text', label: 'Ends at' },
+              location: { type: 'text', label: 'Location' },
+              description: { type: 'textarea', label: 'Description' },
             },
             defaultItemProps: {
               title: 'Session',
@@ -2410,14 +2362,19 @@ export function createEventPagePuckConfig(
         label: 'FAQ',
         fields: {
           title: inlineTextField('Title'),
+          _sectionItems: sectionField(
+            'Questions & answers',
+            'Add, remove, and edit FAQ entries.',
+            'panel',
+            true,
+          ),
           items: {
             type: 'array',
             label: 'Questions',
             min: 1,
-            visible: false,
             arrayFields: {
-              question: hiddenTextField('Question'),
-              answer: hiddenTextareaField('Answer'),
+              question: { type: 'text', label: 'Question' },
+              answer: { type: 'textarea', label: 'Answer' },
             },
             defaultItemProps: { question: 'Question', answer: '' },
             getItemSummary: (item) => item.question || 'Question',
@@ -2450,17 +2407,27 @@ export function createEventPagePuckConfig(
         label: 'Sponsors',
         fields: {
           title: inlineTextField('Title'),
+          _sectionItems: sectionField(
+            'Sponsors',
+            'Manage sponsor names, logos, and links.',
+            'logo',
+            true,
+          ),
           items: {
             type: 'array',
             label: 'Sponsors',
-            visible: false,
             arrayFields: {
-              name: hiddenTextField('Name'),
+              name: { type: 'text', label: 'Name' },
               url: urlField('Sponsor link', 'Optional destination for this sponsor.'),
               imageUrl: imageUrlField('Logo', 'Hosted sponsor logo URL.', onUploadImage),
               imageAlt: { type: 'text', label: 'Logo alt text' },
             },
-            defaultItemProps: { name: 'Sponsor', url: '', imageUrl: '', imageAlt: '' },
+            defaultItemProps: {
+              name: 'Sponsor',
+              url: '',
+              imageUrl: '',
+              imageAlt: '',
+            },
             getItemSummary: (item) => item.name || 'Sponsor',
           },
           _sectionLayout: sectionField('Layout', undefined, 'layout'),
@@ -2491,14 +2458,19 @@ export function createEventPagePuckConfig(
         label: 'Speakers',
         fields: {
           title: inlineTextField('Title'),
+          _sectionItems: sectionField(
+            'People',
+            'Manage names, roles, biographies, headshots, and profile links.',
+            'panel',
+            true,
+          ),
           items: {
             type: 'array',
             label: 'Speakers',
-            visible: false,
             arrayFields: {
-              name: hiddenTextField('Name'),
-              role: hiddenTextField('Role'),
-              bio: hiddenTextareaField('Bio'),
+              name: { type: 'text', label: 'Name' },
+              role: { type: 'text', label: 'Role' },
+              bio: { type: 'textarea', label: 'Bio' },
               imageUrl: imageUrlField('Headshot', 'Hosted speaker image URL.', onUploadImage),
               imageAlt: { type: 'text', label: 'Image alt text' },
               url: urlField('Profile link', 'Optional website, bio, or social profile.'),
@@ -2542,7 +2514,7 @@ export function createEventPagePuckConfig(
         fields: {
           label: inlineTextField('Label'),
           url: urlField('Button link', 'Where this button should send guests.'),
-          _sectionLayout: sectionField('Appearance', undefined, 'layout'),
+          _sectionLayout: sectionField('Appearance', undefined, 'layout', true),
           style: segmentField('Style', buttonStyleOptions),
           alignment: alignmentIconField('Alignment'),
           size: segmentField('Size', buttonSizeOptions),
@@ -2606,13 +2578,18 @@ export function createEventPagePuckConfig(
         label: 'Social links',
         fields: {
           title: inlineTextField('Title'),
+          _sectionItems: sectionField(
+            'Links',
+            'Manage link labels and destinations.',
+            'panel',
+            true,
+          ),
           links: {
             type: 'array',
             label: 'Links',
             min: 1,
-            visible: false,
             arrayFields: {
-              label: hiddenTextField('Label'),
+              label: { type: 'text', label: 'Label' },
               url: urlField('Link URL', 'Social, website, email, or phone link.'),
             },
             defaultItemProps: { label: 'Link', url: '' },
@@ -2644,14 +2621,36 @@ export function createEventPagePuckConfig(
       },
       CustomEmbed: {
         label: 'Custom embed',
-        fields: {
-          _sectionEmbed: sectionField('Embed', 'Only renders after approval is enabled.', 'panel'),
-          html: embedHtmlField('Embed HTML', 'Paste provider embed code.'),
-          allowUnsafeEmbed: toggleField(
-            'Approved embed',
-            'Only enable after you trust this embed code.',
-          ),
-        },
+        fields: allowUnsafeEmbeds
+          ? {
+              _sectionEmbed: sectionField(
+                'Embed',
+                'Only renders after approval is enabled.',
+                'panel',
+                true,
+              ),
+              html: embedHtmlField('Embed HTML', 'Paste provider embed code.'),
+              allowUnsafeEmbed: toggleField(
+                'Approved embed',
+                'Only enable after you trust this embed code.',
+              ),
+            }
+          : {
+              _sectionEmbed: sectionField(
+                'Restricted embed',
+                'Settings permission is required to edit or approve custom HTML.',
+                'panel',
+                true,
+              ),
+              html: {
+                ...embedHtmlField('Embed HTML', 'Restricted'),
+                visible: false,
+              },
+              allowUnsafeEmbed: {
+                ...toggleField('Approved embed'),
+                visible: false,
+              },
+            },
         defaultProps: {
           _sectionEmbed: true,
           html: '',
@@ -2662,9 +2661,9 @@ export function createEventPagePuckConfig(
       EventHeader: {
         label: 'Event header',
         fields: {
-          _sectionContent: sectionField('Content', undefined, 'panel'),
           title: inlineTextField('Title (h1)'),
           description: inlineTextareaField('Description'),
+          _sectionVisibility: sectionField('Visibility', undefined, 'tune', true),
           showBrandBadge: toggleField(
             'Show brand badge',
             'Show the badge above the header title.',
@@ -2672,10 +2671,11 @@ export function createEventPagePuckConfig(
               defaultEnabled: true,
             },
           ),
-          brandLabel: { type: 'text', label: 'Badge label' },
-          _sectionVisibility: sectionField('Visibility', undefined, 'tune'),
+          brandLabel: inlineTextField('Badge label'),
           showDate: toggleField('Show date', '', { defaultEnabled: true }),
-          showTimezone: toggleField('Show timezone', '', { defaultEnabled: true }),
+          showTimezone: toggleField('Show timezone', '', {
+            defaultEnabled: true,
+          }),
           showVenue: toggleField('Show venue', '', { defaultEnabled: true }),
           _sectionImage: sectionField(
             'Background image',
@@ -2819,7 +2819,7 @@ export function createEventPagePuckConfig(
         label: 'Tickets',
         fields: {
           title: inlineTextField('Section title (h2)'),
-          _sectionLayout: sectionField('Layout', undefined, 'layout'),
+          _sectionLayout: sectionField('Layout', undefined, 'layout', true),
           alignment: alignmentIconField('Align'),
           spacing: segmentField('Section padding', dividerSpacingOptions),
           sectionGap: lengthField('Title gap', 'Space under the section title.'),
@@ -2827,8 +2827,8 @@ export function createEventPagePuckConfig(
           itemPadding: lengthField('Card padding', 'Inner padding of each ticket card.'),
           _sectionCanvas: sectionField('Canvas', undefined, 'tune'),
           previewState: segmentField('Preview data', commercePreviewStateOptions),
-          emptyTitle: { type: 'text', label: 'Empty title' },
-          emptyDescription: { type: 'textarea', label: 'Empty description' },
+          emptyTitle: inlineTextField('Empty title'),
+          emptyDescription: inlineTextareaField('Empty description'),
           showAdvanced: advancedToggleField(),
           _sectionTicketStyle: sectionField('Style', undefined, 'tune'),
           titleFontSize: lengthField('Title size', ''),
@@ -2870,6 +2870,49 @@ export function createEventPagePuckConfig(
         render: (props) => <TicketsBlock {...props} />,
         resolveFields: resolveTicketsFields(hasCommerceItems),
       },
+      ProductAddOns: {
+        label: 'Product add-ons',
+        fields: {
+          title: inlineTextField('Section title (h2)'),
+          _sectionLayout: sectionField('Layout', undefined, 'layout', true),
+          alignment: alignmentIconField('Align'),
+          spacing: segmentField('Section padding', dividerSpacingOptions),
+          previewState: segmentField('Preview data', commercePreviewStateOptions),
+          emptyTitle: inlineTextField('Empty title'),
+          emptyDescription: inlineTextareaField('Empty description'),
+          showAdvanced: advancedToggleField(),
+          _sectionProductStyle: sectionField('Style', undefined, 'tune'),
+          titleFontSize: lengthField('Title size', ''),
+          titleColor: colorField('Title color', ''),
+          itemRadius: lengthField('Card radius', ''),
+          itemBackgroundColor: colorField('Card background', ''),
+          itemBorderColor: colorField('Card border', ''),
+          itemTextColor: colorField('Card text', ''),
+          itemDescriptionColor: colorField('Description color', ''),
+          priceTextColor: colorField('Price color', ''),
+        },
+        defaultProps: {
+          title: 'Add-ons',
+          _sectionLayout: true,
+          showAdvanced: false,
+          _sectionProductStyle: true,
+          alignment: 'left',
+          spacing: 'normal',
+          previewState: 'live',
+          emptyTitle: 'No add-ons available',
+          emptyDescription: 'Optional products will appear here when available.',
+          titleFontSize: '',
+          titleColor: '',
+          itemRadius: '',
+          itemBackgroundColor: '',
+          itemBorderColor: '',
+          itemTextColor: '',
+          itemDescriptionColor: '',
+          priceTextColor: '',
+        },
+        render: (props) => <ProductAddOnsBlock {...props} />,
+        resolveFields: resolveTicketsFields(hasProductItems),
+      },
       ResaleTickets: {
         label: 'Resale tickets',
         fields: {
@@ -2879,7 +2922,7 @@ export function createEventPagePuckConfig(
             label: 'Canvas state',
             options: commercePreviewStateOptions,
           },
-          badgeLabel: { type: 'text', label: 'Badge label' },
+          badgeLabel: inlineTextField('Badge label'),
         },
         defaultProps: {
           title: 'Resale tickets',
@@ -2892,7 +2935,7 @@ export function createEventPagePuckConfig(
         label: 'Get tickets CTA',
         fields: {
           label: inlineTextField('Button label'),
-          supportingText: { type: 'text', label: 'Supporting text' },
+          supportingText: inlineTextField('Supporting text'),
         },
         defaultProps: {
           label: 'Get tickets',
@@ -2903,7 +2946,7 @@ export function createEventPagePuckConfig(
       BrandFooter: {
         label: 'Brand footer',
         fields: {
-          label: { type: 'text', label: 'Footer label override' },
+          label: inlineTextField('Footer label'),
         },
         defaultProps: {
           label: '',
@@ -2936,7 +2979,10 @@ export function EventPageRender({
         ({
           schemaVersion: 2,
           editor: { provider: PUCK_EVENT_PAGE_PROVIDER, data: renderData },
-          settings: { locale: 'en', discovery: { summary: 'Event page', tags: [] } },
+          settings: {
+            locale: 'en',
+            discovery: { summary: 'Event page', tags: [] },
+          },
         } satisfies EventPageDocument),
       validationOptions,
     );
@@ -3066,6 +3112,8 @@ function trimmedText(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value.trim() : fallback;
 }
 
+const EMPTY_EVENT_DESCRIPTION_LOGOS: NonNullable<EventPageEventDescriptionProps['logos']> = [];
+
 function renderImageLogoStrip({
   logos,
   logoPosition = 'top-left',
@@ -3074,6 +3122,7 @@ function renderImageLogoStrip({
   logoMaxWidth,
   ariaLabel,
   extraClassName,
+  outlineTargetPrefix,
 }: {
   logos?: EventPageEventDescriptionProps['logos'];
   logoPosition?: EventPageEventDescriptionProps['logoPosition'];
@@ -3082,6 +3131,7 @@ function renderImageLogoStrip({
   logoMaxWidth?: string;
   ariaLabel: string;
   extraClassName?: string;
+  outlineTargetPrefix?: string;
 }) {
   const visibleLogos = Array.isArray(logos)
     ? logos.filter((logo) => Boolean(logo?.imageUrl || logo?.name))
@@ -3107,6 +3157,7 @@ function renderImageLogoStrip({
       )}
       style={logoStripStyle}
       aria-label={ariaLabel}
+      data-event-page-outline-target={outlineTargetPrefix}
     >
       {visibleLogos.map((logo, index) => {
         const content = logo.imageUrl ? (
@@ -3115,7 +3166,12 @@ function renderImageLogoStrip({
           <span>{logo.name}</span>
         );
         return (
-          <li key={`${logo.name ?? 'logo'}-${index}`}>
+          <li
+            key={`${logo.name ?? 'logo'}-${index}`}
+            data-event-page-outline-target={
+              outlineTargetPrefix ? `${outlineTargetPrefix}:${index}` : undefined
+            }
+          >
             {logo.url ? (
               <a href={logo.url} rel="noreferrer">
                 {content}
@@ -3158,7 +3214,7 @@ export function EventDescriptionBlock({
   backgroundOverlayColor,
   backgroundOverlayOpacity,
   imageOverlay: ImageOverlay,
-  logos = [],
+  logos = EMPTY_EVENT_DESCRIPTION_LOGOS,
   logoPosition = 'top-left',
   logoSize = 'md',
   logoMaxHeight,
@@ -3174,7 +3230,9 @@ export function EventDescriptionBlock({
   contentRadius,
   contentGap,
   puck,
-}: WithBlockId<EventPageEventDescriptionProps> & { puck?: { isEditing?: boolean } }) {
+}: WithBlockId<EventPageEventDescriptionProps> & {
+  puck?: { isEditing?: boolean };
+}) {
   const renderImageOverlay = (className: string, minEmptyHeight: number) =>
     typeof ImageOverlay === 'function'
       ? (ImageOverlay as OverlaySlotRender)({ className, minEmptyHeight })
@@ -3217,6 +3275,7 @@ export function EventDescriptionBlock({
     logoMaxWidth,
     ariaLabel: 'Description logos',
     extraClassName: 'tk-ep-event-description__logos',
+    outlineTargetPrefix: `${id}:Logos`,
   });
   const copy = (
     <div
@@ -3236,6 +3295,7 @@ export function EventDescriptionBlock({
       {eyebrow ? (
         <p
           className="tk-ep-eyebrow"
+          data-event-page-outline-target={`${id}:eyebrow`}
           style={{
             ...styleFromLengths({ fontSize: eyebrowFontSize }),
             ...alignmentStyle(titleAlignment ?? alignment),
@@ -3247,6 +3307,7 @@ export function EventDescriptionBlock({
       ) : null}
       {title ? (
         <h2
+          data-event-page-outline-target={`${id}:title`}
           style={{
             ...styleFromLengths({ fontSize: titleFontSize }),
             ...alignmentStyle(titleAlignment ?? alignment),
@@ -3259,6 +3320,7 @@ export function EventDescriptionBlock({
       {body ? (
         <p
           className="tk-ep-event-description__body"
+          data-event-page-outline-target={`${id}:body`}
           style={{
             ...styleFromLengths({ fontSize: bodyFontSize }),
             ...alignmentStyle(bodyAlignment ?? alignment),
@@ -3271,7 +3333,10 @@ export function EventDescriptionBlock({
     </div>
   );
   const overlaySurfaceStyle = {
-    ...styleFromLengths({ minHeight: overlayMinHeight, padding: overlayPadding }),
+    ...styleFromLengths({
+      minHeight: overlayMinHeight,
+      padding: overlayPadding,
+    }),
     ...(imageOpacity ? { '--tk-ep-image-opacity': imageOpacity } : {}),
     ...(backgroundOverlayColor ? { '--tk-ep-overlay-color': backgroundOverlayColor } : {}),
     ...(backgroundOverlayOpacity ? { '--tk-ep-overlay-opacity': backgroundOverlayOpacity } : {}),
@@ -3303,6 +3368,7 @@ export function EventDescriptionBlock({
         >
           <img
             className={`tk-ep-overlay-image tk-ep-radius-${imageRadius}`}
+            data-event-page-outline-target={`${id}:image`}
             src={imageUrl}
             alt={imageAlt ?? ''}
             loading="lazy"
@@ -3314,6 +3380,7 @@ export function EventDescriptionBlock({
               'tk-ep-overlay-content',
               `tk-ep-overlay-align-${overlayContentHorizontalPosition}`,
             )}
+            data-event-page-outline-target={`${id}:imageOverlay`}
           >
             {copy}
             {renderImageOverlay('tk-ep-overlay-slot', 96)}
@@ -3350,13 +3417,16 @@ export function EventDescriptionBlock({
         >
           <img
             className={`tk-ep-hero__image tk-ep-radius-${imageRadius}`}
+            data-event-page-outline-target={`${id}:image`}
             src={imageUrl}
             alt={imageAlt ?? ''}
             loading="lazy"
             style={imageStyle}
           />
           {logoStrip}
-          {renderImageOverlay(overlayClassName('tk-ep-overlay-slot', overlayContentPosition), 72)}
+          <div data-event-page-outline-target={`${id}:imageOverlay`}>
+            {renderImageOverlay(overlayClassName('tk-ep-overlay-slot', overlayContentPosition), 72)}
+          </div>
           {canvasImageEditor}
         </div>
       ) : (
@@ -3389,6 +3459,8 @@ export function RichTextBlock({
         `tk-ep-text-${textSize}`,
       ])}
       data-block-id={id}
+      data-block-type="RichText"
+      data-event-page-outline-target={`${id}:body`}
       style={
         {
           ...styleFromLengths({ fontSize, lineHeight }),
@@ -3446,9 +3518,14 @@ export function EventHeaderBlock({
   badgeBackgroundColor,
   badgeBorderColor,
   puck,
-}: WithBlockId<EventPageEventHeaderProps> & { puck?: { isEditing?: boolean } }) {
+}: WithBlockId<EventPageEventHeaderProps> & {
+  puck?: { isEditing?: boolean };
+}) {
   const runtime = useEventPageRuntime();
-  const resolvedBrand = trimmedText(brandLabel) || runtime.brandName;
+  const resolvedBrand =
+    typeof brandLabel === 'string' || brandLabel == null
+      ? trimmedText(brandLabel) || runtime.brandName
+      : (brandLabel as ReactNode);
   const resolvedTitle =
     typeof title === 'string' || title == null ? trimmedText(title, 'Event') : title;
   const resolvedDescription =
@@ -3503,15 +3580,22 @@ export function EventHeaderBlock({
     logoMaxWidth,
     ariaLabel: 'Event header logos',
     extraClassName: 'tk-ep-event-header__logos',
+    outlineTargetPrefix: `${id}:Logos`,
   });
   const overlaySurfaceStyle = {
-    ...styleFromLengths({ minHeight: overlayMinHeight, padding: overlayPadding }),
+    ...styleFromLengths({
+      minHeight: overlayMinHeight,
+      padding: overlayPadding,
+    }),
     ...(imageOpacity ? { '--tk-ep-image-opacity': imageOpacity } : {}),
     ...(backgroundOverlayColor ? { '--tk-ep-overlay-color': backgroundOverlayColor } : {}),
     ...(backgroundOverlayOpacity ? { '--tk-ep-overlay-opacity': backgroundOverlayOpacity } : {}),
   } as CSSProperties;
 
-  const contentStyle = styleFromLengths({ padding: contentPadding, gap: contentGap });
+  const contentStyle = styleFromLengths({
+    padding: contentPadding,
+    gap: contentGap,
+  });
   const badgeStyle = {
     ...styleFromLengths({ fontSize: badgeFontSize }),
     ...(badgeTextColor ? { color: badgeTextColor } : {}),
@@ -3543,20 +3627,35 @@ export function EventHeaderBlock({
       style={contentStyle}
     >
       {showBrandBadge ? (
-        <span className="tk-ep-event-header__badge" data-slot="badge" style={badgeStyle}>
+        <span
+          className="tk-ep-event-header__badge"
+          data-event-page-outline-target={`${id}:badge`}
+          data-slot="badge"
+          style={badgeStyle}
+        >
           <TicketIcon className="tk-ep-event-header__icon" />
           {resolvedBrand}
         </span>
       ) : null}
-      <h1 style={titleStyle}>{resolvedTitle}</h1>
+      <h1 data-event-page-outline-target={`${id}:title`} style={titleStyle}>
+        {resolvedTitle}
+      </h1>
       {resolvedDescription ? (
-        <p className="tk-ep-event-header__description" style={descriptionStyle}>
+        <p
+          className="tk-ep-event-header__description"
+          data-event-page-outline-target={`${id}:description`}
+          style={descriptionStyle}
+        >
           {resolvedDescription}
         </p>
       ) : null}
 
       {showDate || showTimezone || showVenue ? (
-        <dl className="tk-ep-event-header__meta" style={metaStyle}>
+        <dl
+          className="tk-ep-event-header__meta"
+          data-event-page-outline-target={`${id}:details`}
+          style={metaStyle}
+        >
           {showDate ? (
             <div>
               <CalendarIcon
@@ -3610,6 +3709,7 @@ export function EventHeaderBlock({
         >
           <img
             className="tk-ep-overlay-image"
+            data-event-page-outline-target={`${id}:image`}
             src={imageUrl}
             alt={imageAlt ?? ''}
             loading="lazy"
@@ -3667,6 +3767,7 @@ export function MediaBlock({
   const image = (
     <img
       className={`tk-ep-radius-${radius}`}
+      data-event-page-outline-target={`${id}:image`}
       src={imageUrl}
       alt={imageAlt}
       loading="lazy"
@@ -3684,6 +3785,7 @@ export function MediaBlock({
         `tk-ep-section-spacing-${spacing}`,
       )}
       data-block-id={id}
+      data-block-type="Media"
       style={styleFromLengths({ maxWidth })}
     >
       {overlayEnabled ? (
@@ -3694,19 +3796,32 @@ export function MediaBlock({
           )}
           style={
             {
-              ...styleFromLengths({ minHeight: overlayMinHeight, padding: overlayPadding }),
+              ...styleFromLengths({
+                minHeight: overlayMinHeight,
+                padding: overlayPadding,
+              }),
               ...(imageOpacity ? { '--tk-ep-image-opacity': imageOpacity } : {}),
             } as CSSProperties
           }
         >
           <div className="tk-ep-overlay-image">{image}</div>
-          <div className="tk-ep-overlay-content">{renderImageOverlay()}</div>
+          <div
+            className="tk-ep-overlay-content"
+            data-event-page-outline-target={`${id}:imageOverlay`}
+          >
+            {renderImageOverlay()}
+          </div>
         </div>
       ) : (
         image
       )}
       {caption ? (
-        <figcaption style={styleFromLengths({ fontSize: captionFontSize })}>{caption}</figcaption>
+        <figcaption
+          data-event-page-outline-target={`${id}:caption`}
+          style={styleFromLengths({ fontSize: captionFontSize })}
+        >
+          {caption}
+        </figcaption>
       ) : null}
     </figure>
   );
@@ -3728,17 +3843,40 @@ export function EventDetailsBlock({
 }: WithBlockId<EventPageDetailsProps>) {
   return (
     <section
-      className={sectionClassNames('tk-ep-details', { alignment, spacing, sectionStyle })}
+      className={sectionClassNames('tk-ep-details', {
+        alignment,
+        spacing,
+        sectionStyle,
+      })}
       data-block-id={id}
+      data-block-type="EventDetails"
     >
-      <h2 style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}>{title}</h2>
-      <dl>
-        {items.map((item) => (
-          <div key={`${item.label}:${item.value}`}>
-            <dt style={styleFromLengths({ fontSize: labelFontSize, color: labelColor })}>
+      <h2
+        data-event-page-outline-target={`${id}:title`}
+        style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}
+      >
+        {title}
+      </h2>
+      <dl data-event-page-outline-target={`${id}:Details`}>
+        {items.map((item, index) => (
+          <div
+            key={`${item.label}:${item.value}`}
+            data-event-page-outline-target={`${id}:Details:${index}`}
+          >
+            <dt
+              style={styleFromLengths({
+                fontSize: labelFontSize,
+                color: labelColor,
+              })}
+            >
               {item.label}
             </dt>
-            <dd style={styleFromLengths({ fontSize: valueFontSize, color: valueColor })}>
+            <dd
+              style={styleFromLengths({
+                fontSize: valueFontSize,
+                color: valueColor,
+              })}
+            >
               {item.value}
             </dd>
           </div>
@@ -3760,13 +3898,26 @@ export function ScheduleBlock({
 }: WithBlockId<EventPageScheduleProps>) {
   return (
     <section
-      className={sectionClassNames('tk-ep-schedule', { alignment, spacing, sectionStyle })}
+      className={sectionClassNames('tk-ep-schedule', {
+        alignment,
+        spacing,
+        sectionStyle,
+      })}
       data-block-id={id}
+      data-block-type="Schedule"
     >
-      <h2 style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}>{title}</h2>
-      <ol>
+      <h2
+        data-event-page-outline-target={`${id}:title`}
+        style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}
+      >
+        {title}
+      </h2>
+      <ol data-event-page-outline-target={`${id}:Schedule items`}>
         {items.map((item, index) => (
-          <li key={`${item.title}:${item.startsAt}:${index}`}>
+          <li
+            key={`${item.title}:${item.startsAt}:${index}`}
+            data-event-page-outline-target={`${id}:Schedule items:${index}`}
+          >
             <div>
               <strong>{item.title}</strong>
               <span>{formatScheduleRange(item.startsAt, item.endsAt)}</span>
@@ -3794,14 +3945,26 @@ export function VenueBlock({
 }: WithBlockId<EventPageVenueProps>) {
   return (
     <section
-      className={sectionClassNames('tk-ep-venue', { alignment, spacing, sectionStyle })}
+      className={sectionClassNames('tk-ep-venue', {
+        alignment,
+        spacing,
+        sectionStyle,
+      })}
       data-block-id={id}
+      data-block-type="Venue"
     >
-      <h2 style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}>{title}</h2>
-      <p className="tk-ep-venue__name">{venueName}</p>
-      {address ? <p>{address}</p> : null}
+      <h2
+        data-event-page-outline-target={`${id}:title`}
+        style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}
+      >
+        {title}
+      </h2>
+      <p className="tk-ep-venue__name" data-event-page-outline-target={`${id}:venue`}>
+        {venueName}
+      </p>
+      {address ? <p data-event-page-outline-target={`${id}:address`}>{address}</p> : null}
       {mapUrl ? (
-        <a className="tk-ep-link" href={mapUrl}>
+        <a className="tk-ep-link" data-event-page-outline-target={`${id}:map`} href={mapUrl}>
           View map
         </a>
       ) : null}
@@ -3822,18 +3985,33 @@ export function FAQBlock({
 }: WithBlockId<EventPageFaqProps> & { editorPreview?: boolean }) {
   return (
     <section
-      className={sectionClassNames('tk-ep-faq', { alignment, spacing, sectionStyle })}
+      className={sectionClassNames('tk-ep-faq', {
+        alignment,
+        spacing,
+        sectionStyle,
+      })}
       data-block-id={id}
+      data-block-type="FAQ"
+      data-event-page-outline-target={`${id}:Questions`}
     >
-      <h2 style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}>{title}</h2>
-      {items.map((item) =>
+      <h2
+        data-event-page-outline-target={`${id}:title`}
+        style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}
+      >
+        {title}
+      </h2>
+      {items.map((item, index) =>
         editorPreview ? (
-          <div className="tk-ep-faq__item" key={item.question}>
+          <div
+            className="tk-ep-faq__item"
+            key={item.question}
+            data-event-page-outline-target={`${id}:Questions:${index}`}
+          >
             <h3>{item.question}</h3>
             <p>{item.answer}</p>
           </div>
         ) : (
-          <details key={item.question}>
+          <details key={item.question} data-event-page-outline-target={`${id}:Questions:${index}`}>
             <summary>{item.question}</summary>
             <p>{item.answer}</p>
           </details>
@@ -3855,13 +4033,23 @@ export function SponsorsBlock({
 }: WithBlockId<EventPageSponsorsProps>) {
   return (
     <section
-      className={sectionClassNames('tk-ep-sponsors', { alignment, spacing, sectionStyle })}
+      className={sectionClassNames('tk-ep-sponsors', {
+        alignment,
+        spacing,
+        sectionStyle,
+      })}
       data-block-id={id}
+      data-block-type="Sponsors"
     >
-      <h2 style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}>{title}</h2>
-      <ul className="tk-ep-logo-list">
-        {items.map((item) => (
-          <li key={item.name}>
+      <h2
+        data-event-page-outline-target={`${id}:title`}
+        style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}
+      >
+        {title}
+      </h2>
+      <ul className="tk-ep-logo-list" data-event-page-outline-target={`${id}:Sponsors`}>
+        {items.map((item, index) => (
+          <li key={item.name} data-event-page-outline-target={`${id}:Sponsors:${index}`}>
             {item.imageUrl ? (
               <img src={item.imageUrl} alt={item.imageAlt ?? item.name} loading="lazy" />
             ) : null}
@@ -3885,13 +4073,23 @@ export function SpeakersBlock({
 }: WithBlockId<EventPageSpeakersProps>) {
   return (
     <section
-      className={sectionClassNames('tk-ep-speakers', { alignment, spacing, sectionStyle })}
+      className={sectionClassNames('tk-ep-speakers', {
+        alignment,
+        spacing,
+        sectionStyle,
+      })}
       data-block-id={id}
+      data-block-type="Speakers"
     >
-      <h2 style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}>{title}</h2>
-      <ul className="tk-ep-person-list">
-        {items.map((item) => (
-          <li key={item.name}>
+      <h2
+        data-event-page-outline-target={`${id}:title`}
+        style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}
+      >
+        {title}
+      </h2>
+      <ul className="tk-ep-person-list" data-event-page-outline-target={`${id}:Speakers`}>
+        {items.map((item, index) => (
+          <li key={item.name} data-event-page-outline-target={`${id}:Speakers:${index}`}>
             {item.imageUrl ? (
               <img src={item.imageUrl} alt={item.imageAlt ?? item.name} loading="lazy" />
             ) : null}
@@ -3931,7 +4129,11 @@ export function ButtonBlock({
   lineHeight,
 }: WithBlockId<EventPageButtonProps>) {
   return (
-    <section className={`tk-ep-button-row tk-ep-align-${alignment}`} data-block-id={id}>
+    <section
+      className={`tk-ep-button-row tk-ep-align-${alignment}`}
+      data-block-id={id}
+      data-block-type="Button"
+    >
       <a
         className={joinClassNames(
           'tk-ep-button',
@@ -3942,6 +4144,7 @@ export function ButtonBlock({
           `tk-ep-button-text-${textStyle}`,
         )}
         href={url}
+        data-event-page-outline-target={`${id}:label`}
         target={openInNewTab ? '_blank' : undefined}
         rel={openInNewTab ? 'noreferrer' : undefined}
         style={{
@@ -3968,8 +4171,8 @@ export function ButtonBlock({
 
 export function DividerBlock({ id, spacing = 'normal' }: WithBlockId<EventPageDividerProps>) {
   return (
-    <div data-block-id={id} data-block-type="Divider" aria-hidden="true">
-      <hr className={`tk-ep-divider tk-ep-divider--${spacing}`} />
+    <div data-block-id={id} data-block-type="Divider">
+      <hr aria-label="Divider" className={`tk-ep-divider tk-ep-divider--${spacing}`} />
     </div>
   );
 }
@@ -3986,15 +4189,31 @@ export function SocialLinksBlock({
 }: WithBlockId<EventPageSocialLinksProps>) {
   return (
     <section
-      className={sectionClassNames('tk-ep-social-links', { alignment, spacing, sectionStyle })}
+      className={sectionClassNames('tk-ep-social-links', {
+        alignment,
+        spacing,
+        sectionStyle,
+      })}
       data-block-id={id}
+      data-block-type="SocialLinks"
     >
       {title ? (
-        <h2 style={styleFromLengths({ fontSize: titleFontSize, color: titleColor })}>{title}</h2>
+        <h2
+          data-event-page-outline-target={`${id}:title`}
+          style={styleFromLengths({
+            fontSize: titleFontSize,
+            color: titleColor,
+          })}
+        >
+          {title}
+        </h2>
       ) : null}
-      <ul>
-        {links.map((link) => (
-          <li key={`${link.label}:${link.url}`}>
+      <ul data-event-page-outline-target={`${id}:Links`}>
+        {links.map((link, index) => (
+          <li
+            key={`${link.label}:${link.url}`}
+            data-event-page-outline-target={`${id}:Links:${index}`}
+          >
             <a href={link.url}>{link.label}</a>
           </li>
         ))}
@@ -4009,7 +4228,9 @@ export function CustomEmbedBlock({ id, html }: WithBlockId<EventPageCustomEmbedP
     <section
       className="tk-ep-embed"
       data-block-id={id}
-      dangerouslySetInnerHTML={{ __html: sanitizeEventPageHtml(html) }}
+      data-block-type="CustomEmbed"
+      data-event-page-outline-target={`${id}:embed`}
+      dangerouslySetInnerHTML={{ __html: sanitizeEventPageEmbedHtml(html) }}
     />
   );
 }
@@ -4063,6 +4284,7 @@ export {
   BrandFooterBlock,
   CheckoutCtaBlock,
   EventPageRuntimeProvider,
+  ProductAddOnsBlock,
   PublicEventPageSurface,
   ResaleTicketsBlock,
   TicketsBlock,
@@ -4074,6 +4296,7 @@ export type {
   EventPageRuntime,
   PublicEventPageChrome,
   PublicEventPageFooterLink,
+  PublicEventPageProduct,
   PublicEventPageResaleListing,
   PublicEventPageSurfaceProps,
   PublicEventPageTicket,

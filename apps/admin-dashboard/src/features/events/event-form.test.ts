@@ -43,6 +43,12 @@ describe('eventSchema date order refinement', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('accepts an optional minimum age and rejects unrealistic values', () => {
+    expect(eventSchema.safeParse({ ...validBase, minimumAge: 21 }).success).toBe(true);
+    expect(eventSchema.safeParse({ ...validBase, minimumAge: -1 }).success).toBe(false);
+    expect(eventSchema.safeParse({ ...validBase, minimumAge: 121 }).success).toBe(false);
+  });
 });
 
 describe('buildEventDatePayload', () => {
@@ -112,6 +118,7 @@ describe('buildEventUpdatePayload', () => {
     expect(
       buildEventUpdatePayload(fullValues, {
         capacity: true,
+        minimumAge: true,
         coverImageUrl: true,
         externalUrl: true,
         endsAt: true,
@@ -119,6 +126,7 @@ describe('buildEventUpdatePayload', () => {
       }),
     ).toMatchObject({
       capacity: null,
+      minimumAge: null,
       coverImageUrl: null,
       externalUrl: null,
       endsAt: null,
@@ -141,6 +149,7 @@ describe('buildEventUpdatePayload', () => {
           postalCode: '10001',
           country: 'US',
           capacity: 250,
+          minimumAge: 21,
           coverImageUrl: 'https://example.com/cover.jpg',
           externalUrl: 'https://example.com/event',
           seoTitle: 'SEO title',
@@ -157,6 +166,7 @@ describe('buildEventUpdatePayload', () => {
           postalCode: true,
           country: true,
           capacity: true,
+          minimumAge: true,
           coverImageUrl: true,
           externalUrl: true,
           seoTitle: true,
@@ -179,6 +189,7 @@ describe('buildEventUpdatePayload', () => {
         country: 'US',
       },
       capacity: 250,
+      minimumAge: 21,
       coverImageUrl: 'https://example.com/cover.jpg',
       externalUrl: 'https://example.com/event',
       seo: {

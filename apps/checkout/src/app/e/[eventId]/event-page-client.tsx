@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircleIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -131,7 +131,10 @@ export default function EventPageClient({
           loadedEvent = bootstrap.event;
           loadedAvailability = bootstrap.availability;
           loadedContentPage = bootstrap.contentPage;
-          loadedResaleListings = { items: bootstrap.resaleListings.items, error: null };
+          loadedResaleListings = {
+            items: bootstrap.resaleListings.items,
+            error: null,
+          };
         } catch (bootstrapError) {
           if (controller.signal.aborted) throw bootstrapError;
           loadedEvent = eventId
@@ -232,22 +235,38 @@ export default function EventPageClient({
     return materializeEventPageDocument(createDefaultEventPageDocument(input), input);
   }, [brand.fallback, brand.name, event, hasPublishedPuckContent, publishedPuckData]);
 
-  function goToCheckout(resaleListingId?: string) {
-    const checkoutEventId = event?.id ?? eventId;
-    if (!checkoutEventId) return;
-    const params = new URLSearchParams();
-    params.set('eventId', checkoutEventId);
-    if (resaleListingId) params.set('resaleListing', resaleListingId);
-    if (brand.id && !brand.fallback) params.set('brand', brand.id);
-    if (supportUrl) params.set('supportUrl', supportUrl);
-    if (termsUrl) params.set('termsUrl', termsUrl);
-    if (privacyUrl) params.set('privacyUrl', privacyUrl);
-    if (refundUrl) params.set('refundUrl', refundUrl);
-    if (presetDiscountCode) params.set('discount', presetDiscountCode);
-    if (trackingId) params.set('tracking', trackingId);
-    if (affiliateCode) params.set('affiliateCode', affiliateCode);
-    router.push(`/checkout?${params.toString()}`);
-  }
+  const goToCheckout = useCallback(
+    (resaleListingId?: string) => {
+      const checkoutEventId = event?.id ?? eventId;
+      if (!checkoutEventId) return;
+      const params = new URLSearchParams();
+      params.set('eventId', checkoutEventId);
+      if (resaleListingId) params.set('resaleListing', resaleListingId);
+      if (brand.id && !brand.fallback) params.set('brand', brand.id);
+      if (supportUrl) params.set('supportUrl', supportUrl);
+      if (termsUrl) params.set('termsUrl', termsUrl);
+      if (privacyUrl) params.set('privacyUrl', privacyUrl);
+      if (refundUrl) params.set('refundUrl', refundUrl);
+      if (presetDiscountCode) params.set('discount', presetDiscountCode);
+      if (trackingId) params.set('tracking', trackingId);
+      if (affiliateCode) params.set('affiliateCode', affiliateCode);
+      router.push(`/checkout?${params.toString()}`);
+    },
+    [
+      affiliateCode,
+      brand.fallback,
+      brand.id,
+      event?.id,
+      eventId,
+      presetDiscountCode,
+      privacyUrl,
+      refundUrl,
+      router,
+      supportUrl,
+      termsUrl,
+      trackingId,
+    ],
+  );
 
   const runtime = useMemo<EventPageRuntime>(() => {
     const tickets: PublicEventPageTicket[] = visibleTickets.map((ticket) => {
@@ -267,6 +286,11 @@ export default function EventPageClient({
           !soldOut && ticket.available <= 10 ? `${ticket.available} left` : undefined,
       };
     });
+    const productIds = new Set(
+      visibleTickets.filter((item) => Boolean(item.productId)).map((item) => item.productId!),
+    );
+    const products = tickets.filter((item) => productIds.has(item.id));
+    const ticketItems = tickets.filter((item) => !productIds.has(item.id));
 
     const footerLinks = [
       brand.legalUrls.terms ? { label: 'Terms', href: brand.legalUrls.terms } : null,
@@ -285,7 +309,8 @@ export default function EventPageClient({
           ? 'Powered by Tixkit'
           : `${brand.name} · Powered by Tixkit`,
       footerLinks,
-      tickets,
+      tickets: ticketItems,
+      products,
       resaleListings: resaleListings.map((listing) => ({
         id: listing.id,
         name: listing.ticketTypeName
@@ -306,23 +331,7 @@ export default function EventPageClient({
       onGetTickets: () => goToCheckout(),
       onBuyResale: (listingId) => goToCheckout(listingId),
     };
-  }, [
-    affiliateCode,
-    brand,
-    event?.id,
-    eventId,
-    hasActiveTickets,
-    presetDiscountCode,
-    privacyUrl,
-    refundUrl,
-    resaleListings,
-    resaleListingsError,
-    router,
-    supportUrl,
-    termsUrl,
-    trackingId,
-    visibleTickets,
-  ]);
+  }, [brand, goToCheckout, hasActiveTickets, resaleListings, resaleListingsError, visibleTickets]);
 
   useEffect(() => {
     if (!event) return;

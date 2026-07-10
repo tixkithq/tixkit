@@ -8,7 +8,7 @@
  * import { createTixkitClient, verifyTixkitWebhook } from '@tixkit/sveltekit/server';
  * ```
  */
-import { TixkitClient } from '@tixkit/js';
+import { TixkitClient, type CheckoutCreateItem } from '@tixkit/js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export { TIXKIT_API_VERSION } from '@tixkit/js';
@@ -146,11 +146,7 @@ export async function createCheckoutTicketResaleListing(
 
 export async function createCheckoutAction(
   client: TixkitClient,
-  formData: {
-    eventId: string;
-    items: { ticketTypeId: string; quantity: number }[];
-    idempotencyKey: string;
-  },
+  formData: Parameters<TixkitClient['checkout']['create']>[0],
 ) {
   return client.checkout.create(formData);
 }
@@ -172,11 +168,25 @@ function parsePositiveIntegerString(value: string): number | null {
 }
 
 function parseCheckoutItems(formData: FormData): {
-  items: { ticketTypeId?: string; productId?: string; quantity: number }[];
+  items: CheckoutCreateItem[];
   fieldErrors: Record<string, string>;
 } {
-  const items: { ticketTypeId?: string; productId?: string; quantity: number }[] = [];
+  const items: CheckoutCreateItem[] = [];
   const fieldErrors: Record<string, string> = {};
+  const attendeeDatesOfBirth = formData
+    .getAll('attendeeDateOfBirth')
+    .map((value) => optionalString(value));
+  let attendeeOffset = 0;
+  const attendeeFieldsFor = (quantity: number) => {
+    if (attendeeDatesOfBirth.length === 0) return undefined;
+    const values = attendeeDatesOfBirth.slice(attendeeOffset, attendeeOffset + quantity);
+    attendeeOffset += quantity;
+    if (values.length !== quantity || values.some((value) => !value)) {
+      fieldErrors.attendeeDateOfBirth = 'Date of birth is required for every ticket attendee.';
+      return undefined;
+    }
+    return values.map((dateOfBirth) => ({ dateOfBirth: dateOfBirth! }));
+  };
 
   const ticketTypeIds = formData.getAll('ticketTypeId');
   const ticketQuantities = formData.getAll('quantity');
@@ -188,7 +198,8 @@ function parseCheckoutItems(formData: FormData): {
       fieldErrors.quantity = 'Ticket quantity must be a positive integer.';
       continue;
     }
-    items.push({ ticketTypeId, quantity });
+    const attendeeFields = attendeeFieldsFor(quantity);
+    items.push({ ticketTypeId, quantity, ...(attendeeFields ? { attendeeFields } : {}) });
   }
 
   const productIds = formData.getAll('productId');
@@ -215,7 +226,8 @@ function parseCheckoutItems(formData: FormData): {
           'Encoded items must use ticketTypeId=quantity pairs with positive integer quantities.';
         continue;
       }
-      items.push({ ticketTypeId, quantity });
+      const attendeeFields = attendeeFieldsFor(quantity);
+      if (attendeeFields) items.push({ ticketTypeId, quantity, attendeeFields });
     }
   }
 
@@ -237,9 +249,12 @@ export function createCheckoutFormAction(
     const eventId = optionalString(formData.get('eventId'));
     const idempotencyKey = optionalString(formData.get('idempotencyKey'));
     const { items, fieldErrors } = parseCheckoutItems(formData);
+    const buyerEmail = optionalString(formData.get('buyerEmail'));
+    const buyerDateOfBirth = optionalString(formData.get('buyerDateOfBirth'));
 
     if (!eventId) fieldErrors.eventId = 'Event is required.';
     if (!idempotencyKey) fieldErrors.idempotencyKey = 'Idempotency key is required.';
+    if (!buyerEmail) fieldErrors.buyerEmail = 'Buyer email is required.';
 
     if (Object.keys(fieldErrors).length > 0) {
       return {
@@ -256,7 +271,8 @@ export function createCheckoutFormAction(
         items,
         idempotencyKey: idempotencyKey!,
         buyer: {
-          email: optionalString(formData.get('buyerEmail')),
+          email: buyerEmail!,
+          ...(buyerDateOfBirth ? { dateOfBirth: buyerDateOfBirth } : {}),
           firstName: optionalString(formData.get('buyerFirstName')),
           lastName: optionalString(formData.get('buyerLastName')),
           phone: optionalString(formData.get('buyerPhone')),

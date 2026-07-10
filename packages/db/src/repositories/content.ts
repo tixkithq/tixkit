@@ -111,13 +111,26 @@ export class ContentRepository extends BaseRepository {
     return this.toDocument(row);
   }
 
+  async renameDocument(id: string, name: string): Promise<ContentDocumentRecord> {
+    const existing = await this.findDocumentById(id);
+    if (!existing) throw new Error(`Content document not found: ${id}`);
+    const row = await this.updateReturning('content_documents', id, {
+      name,
+      updated_at: new Date(),
+    });
+    return this.toDocument(row);
+  }
+
   async duplicateDocument(input: {
     documentId: string;
     tenantId: string;
     key?: string;
     name?: string;
     createdBy: string;
-  }): Promise<{ document: ContentDocumentRecord; versions: ContentDocumentVersion[] }> {
+  }): Promise<{
+    document: ContentDocumentRecord;
+    versions: ContentDocumentVersion[];
+  }> {
     return this.db.transaction().execute(async (trx: TixkitDatabase) => {
       const txRepo = new ContentRepository(trx);
       const source = await txRepo.findDocumentById(input.documentId);
@@ -257,7 +270,11 @@ export class ContentRepository extends BaseRepository {
       : undefined;
     return (
       eventScoped ??
-      (await this.findPublishedContentByScope({ ...input, channel: 'email', eventId: undefined }))
+      (await this.findPublishedContentByScope({
+        ...input,
+        channel: 'email',
+        eventId: undefined,
+      }))
     );
   }
 
@@ -275,11 +292,19 @@ export class ContentRepository extends BaseRepository {
     | undefined
   > {
     const eventScoped = input.eventId
-      ? await this.findPublishedContentByScope({ ...input, channel: 'sms', eventId: input.eventId })
+      ? await this.findPublishedContentByScope({
+          ...input,
+          channel: 'sms',
+          eventId: input.eventId,
+        })
       : undefined;
     return (
       eventScoped ??
-      (await this.findPublishedContentByScope({ ...input, channel: 'sms', eventId: undefined }))
+      (await this.findPublishedContentByScope({
+        ...input,
+        channel: 'sms',
+        eventId: undefined,
+      }))
     );
   }
 
@@ -402,10 +427,10 @@ export class ContentRepository extends BaseRepository {
       .execute();
   }
 
-  async publishVersion(input: {
-    documentId: string;
-    versionId: string;
-  }): Promise<{ document: ContentDocumentRecord; version: ContentDocumentVersion }> {
+  async publishVersion(input: { documentId: string; versionId: string }): Promise<{
+    document: ContentDocumentRecord;
+    version: ContentDocumentVersion;
+  }> {
     const now = new Date();
     await (this.db as any)
       .updateTable('content_document_versions')

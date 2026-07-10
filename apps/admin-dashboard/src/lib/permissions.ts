@@ -1,3 +1,8 @@
+import {
+  isDoorOnlyPermissionSet as isDomainDoorOnlyPermissionSet,
+  isLocalKioskReturnTo as isDomainLocalKioskReturnTo,
+} from '@tixkit/domain';
+
 export type TixkitPermission =
   | 'events.read'
   | 'events.write'
@@ -9,6 +14,7 @@ export type TixkitPermission =
   | 'attendees.write'
   | 'checkins.read'
   | 'checkins.write'
+  | 'box_office.write'
   | 'messages.write'
   | 'reports.read'
   | 'settings.write'
@@ -32,12 +38,26 @@ export const LOCAL_DEV_PERMISSIONS: TixkitPermission[] = [
   'attendees.write',
   'checkins.read',
   'checkins.write',
+  'box_office.write',
   'messages.write',
   'reports.read',
   'settings.write',
   'developers.write',
   'billing.write',
 ];
+
+/** Door-only principals should land on the standalone kiosk surface. */
+export function isDoorOnlyPermissionSet(
+  permissions: readonly TixkitPermission[] | undefined,
+): boolean {
+  if (!permissions || permissions.length === 0) return false;
+  return isDomainDoorOnlyPermissionSet(permissions);
+}
+
+/** True when returnTo is a safe local kiosk path after invite accept. */
+export function isLocalKioskReturnTo(value: string): boolean {
+  return isDomainLocalKioskReturnTo(value);
+}
 
 /**
  * Check whether a set of permissions satisfies a required permission.

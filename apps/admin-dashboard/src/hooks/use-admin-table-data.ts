@@ -132,7 +132,7 @@ export function useAdminQuery<TData>(
   data: TData | undefined;
   loading: boolean;
   error: { code: string; message: string; status?: number } | undefined;
-  refetch: () => void;
+  refetch: () => Promise<void>;
 } {
   const result = useQuery({
     queryKey,
@@ -155,6 +155,8 @@ export function useAdminQuery<TData>(
         ? { code: 'fetch_error', message: result.error.message }
         : (result.error as { code: string; message: string; status?: number })
       : undefined,
-    refetch: () => result.refetch(),
+    refetch: async () => {
+      await result.refetch();
+    },
   };
 }

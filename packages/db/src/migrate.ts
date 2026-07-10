@@ -51,6 +51,11 @@ import { EventPublicRevisionMigration } from './migrations/0047_event_public_rev
 import { HotQueryIndexesMigration } from './migrations/0048_hot_query_indexes.js';
 import { EventFeePassThroughMigration } from './migrations/0049_event_fee_pass_through.js';
 import { PaymentEventRecoveryMigration } from './migrations/0050_payment_event_recovery.js';
+import { RolePermissionGrantsSeedMigration } from './migrations/0051_role_permission_grants_seed.js';
+import { EventAgeEligibilityMigration } from './migrations/0052_event_age_eligibility.js';
+import { OrganizationMemberUniqueMigration } from './migrations/0053_organization_member_unique.js';
+import { CheckInActivityIndexesMigration } from './migrations/0054_check_in_activity_indexes.js';
+import { CheckInActivitySequenceMigration } from './migrations/0055_check_in_activity_sequence.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -225,6 +230,11 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0048_hot_query_indexes': HotQueryIndexesMigration,
       '0049_event_fee_pass_through': EventFeePassThroughMigration,
       '0050_payment_event_recovery': PaymentEventRecoveryMigration,
+      '0051_role_permission_grants_seed': RolePermissionGrantsSeedMigration,
+      '0052_event_age_eligibility': EventAgeEligibilityMigration,
+      '0053_organization_member_unique': OrganizationMemberUniqueMigration,
+      '0054_check_in_activity_indexes': CheckInActivityIndexesMigration,
+      '0055_check_in_activity_sequence': CheckInActivitySequenceMigration,
     };
   }
 }

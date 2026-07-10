@@ -59,6 +59,7 @@ vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
         | { ok: true; data: unknown }
         | { ok: false; error: { code: string; message: string; status?: number } }
       >,
+      options?: { enabled?: boolean },
     ) => {
       const [data, setData] = React.useState<unknown>(undefined);
       const [loading, setLoading] = React.useState(true);
@@ -66,10 +67,17 @@ vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
         { code: string; message: string; status?: number } | undefined
       >(undefined);
       const [nonce, setNonce] = React.useState(0);
+      const refetchResolvers = React.useRef<Array<() => void>>([]);
+      const enabled = options?.enabled ?? true;
       // Serialize query key for dep tracking (JSON.stringify is stable enough for tests)
       const keyStr = JSON.stringify(queryKey);
 
       React.useEffect(() => {
+        if (!enabled) {
+          setLoading(false);
+          setError(undefined);
+          return;
+        }
         let cancelled = false;
         setLoading(true);
         setError(undefined);
@@ -88,14 +96,25 @@ vi.mock('@/hooks/use-admin-table-data', async (importOriginal) => {
           })
           .finally(() => {
             if (!cancelled) setLoading(false);
+            const resolvers = refetchResolvers.current.splice(0);
+            for (const resolve of resolvers) resolve();
           });
         return () => {
           cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [nonce, keyStr]);
+      }, [enabled, nonce, keyStr]);
 
-      return { data, loading, error, refetch: () => setNonce((n) => n + 1) };
+      return {
+        data,
+        loading,
+        error,
+        refetch: () =>
+          new Promise<void>((resolve) => {
+            refetchResolvers.current.push(resolve);
+            setNonce((n) => n + 1);
+          }),
+      };
     },
   };
 });

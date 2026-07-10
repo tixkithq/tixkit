@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Upload, ImageIcon } from 'lucide-react';
+import { ImageIcon, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,6 +27,7 @@ function BrandingPageContent() {
     brandId,
     loading: bootstrapLoading,
     error: bootstrapError,
+    updateBrand: updateBootstrapBrand,
   } = useBootstrap();
   const [brand, setBrand] = React.useState<AdminBrand | null>(null);
   const [brandName, setBrandName] = React.useState('');
@@ -41,6 +42,7 @@ function BrandingPageContent() {
   const [saving, setSaving] = React.useState(false);
   const [addingDomain, setAddingDomain] = React.useState(false);
   const [uploadingLogo, setUploadingLogo] = React.useState(false);
+  const [uploadingIcon, setUploadingIcon] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const loadBranding = React.useCallback(async () => {
@@ -138,6 +140,7 @@ function BrandingPageContent() {
     }
 
     setBrand(result.data);
+    updateBootstrapBrand(result.data);
     setBrandName(result.data.name);
     setSupportUrl(result.data.supportUrl ?? '');
     setTermsUrl(result.data.legalUrls.terms ?? '');
@@ -146,34 +149,41 @@ function BrandingPageContent() {
     toast.success('Brand settings saved');
   };
 
-  const handleLogoUpload = async (file: File | undefined) => {
+  const handleBrandAssetUpload = async (file: File | undefined, variant: 'wordmark' | 'icon') => {
     if (!file) return;
     if (!brand) {
       toast.error('No brand is available for logo upload');
       return;
     }
 
-    setUploadingLogo(true);
+    const setUploading = variant === 'wordmark' ? setUploadingLogo : setUploadingIcon;
+    setUploading(true);
     const uploadResult = await adminApi.uploadArtifact({
       purpose: 'brand_logo',
       file,
       brandId: brand.id,
-      metadata: { source: 'admin_branding' },
+      metadata: { source: 'admin_branding', variant },
     });
     if (!uploadResult.ok) {
-      setUploadingLogo(false);
+      setUploading(false);
       toast.error(uploadResult.error.message);
       return;
     }
 
+    const assetTheme =
+      variant === 'wordmark'
+        ? {
+            logoUrl: uploadResult.data.downloadUrl,
+            logoArtifactId: uploadResult.data.artifactId,
+          }
+        : {
+            iconUrl: uploadResult.data.downloadUrl,
+            iconArtifactId: uploadResult.data.artifactId,
+          };
     const updateResult = await adminApi.updateBrand(brand.id, {
-      theme: {
-        ...brand.theme,
-        logoUrl: uploadResult.data.downloadUrl,
-        logoArtifactId: uploadResult.data.artifactId,
-      },
+      theme: { ...brand.theme, ...assetTheme },
     });
-    setUploadingLogo(false);
+    setUploading(false);
 
     if (!updateResult.ok) {
       toast.error(updateResult.error.message);
@@ -181,7 +191,31 @@ function BrandingPageContent() {
     }
 
     setBrand(updateResult.data);
-    toast.success('Logo uploaded');
+    updateBootstrapBrand(updateResult.data);
+    toast.success(variant === 'wordmark' ? 'Wordmark uploaded' : 'Brand icon uploaded');
+  };
+
+  const handleBrandAssetRemove = async (variant: 'wordmark' | 'icon') => {
+    if (!brand) return;
+    const setUploading = variant === 'wordmark' ? setUploadingLogo : setUploadingIcon;
+    setUploading(true);
+    const nextTheme = { ...brand.theme };
+    if (variant === 'wordmark') {
+      delete nextTheme.logoUrl;
+      delete nextTheme.logoArtifactId;
+    } else {
+      delete nextTheme.iconUrl;
+      delete nextTheme.iconArtifactId;
+    }
+    const result = await adminApi.updateBrand(brand.id, { theme: nextTheme });
+    setUploading(false);
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    setBrand(result.data);
+    updateBootstrapBrand(result.data);
+    toast.success(variant === 'wordmark' ? 'Custom wordmark removed' : 'Custom icon removed');
   };
 
   return (
@@ -237,44 +271,139 @@ function BrandingPageContent() {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Logo</CardTitle>
+              <CardTitle>Brand logo system</CardTitle>
               <CardDescription>
-                Upload the brand logo for checkout pages and emails.
+                Add a wide wordmark for customer-facing headers and a square icon for compact app
+                surfaces.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                <div className="flex size-16 items-center justify-center overflow-hidden rounded-lg border bg-muted">
+              <div className="flex flex-col gap-4 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center">
+                <div className="flex h-28 w-full items-center justify-center overflow-hidden rounded-lg border bg-[#fbfaf7] p-5 sm:w-56">
                   {typeof brand.theme.logoUrl === 'string' && brand.theme.logoUrl ? (
                     <img
                       src={brand.theme.logoUrl}
                       alt={`${brand.name} logo`}
-                      className="size-full object-contain"
+                      className="h-full w-full object-contain"
                     />
                   ) : (
-                    <ImageIcon className="size-6 text-muted-foreground" />
+                    <div className="space-y-2 text-center text-muted-foreground">
+                      <ImageIcon className="mx-auto size-6" />
+                      <p className="text-xs">No custom logo</p>
+                    </div>
                   )}
                 </div>
-                {uploadingLogo ? (
-                  <Button type="button" variant="outline" disabled>
-                    <Upload className="size-4" />
-                    Uploading...
-                  </Button>
-                ) : (
-                  <Button asChild variant="outline">
-                    <Label htmlFor="brand-logo-upload" className="cursor-pointer">
-                      <Upload className="size-4" />
-                      Upload Logo
-                    </Label>
-                  </Button>
-                )}
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {brand.theme.logoUrl ? 'Wordmark active' : 'Add your wordmark'}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Used in lifecycle emails, checkout, and event-page headers. A transparent PNG
+                      or WebP with wide proportions works best.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {uploadingLogo ? (
+                      <Button type="button" variant="outline" disabled>
+                        <Upload className="size-4" />
+                        Updating…
+                      </Button>
+                    ) : (
+                      <Button asChild variant="outline">
+                        <Label htmlFor="brand-logo-upload" className="cursor-pointer">
+                          <Upload className="size-4" />
+                          {brand.theme.logoUrl ? 'Replace wordmark' : 'Upload wordmark'}
+                        </Label>
+                      </Button>
+                    )}
+                    {brand.theme.logoUrl ? (
+                      <Button
+                        disabled={uploadingLogo}
+                        onClick={() => void handleBrandAssetRemove('wordmark')}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Trash2 className="size-4" />
+                        Remove
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
                 <Input
                   id="brand-logo-upload"
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   className="sr-only"
                   onChange={(event) => {
-                    void handleLogoUpload(event.target.files?.[0]);
+                    void handleBrandAssetUpload(event.target.files?.[0], 'wordmark');
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </div>
+              <div className="flex flex-col gap-4 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center">
+                <div className="flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-[#fbfaf7] p-4">
+                  {typeof brand.theme.iconUrl === 'string' && brand.theme.iconUrl ? (
+                    <img
+                      src={brand.theme.iconUrl}
+                      alt={`${brand.name} icon`}
+                      className="size-full object-contain"
+                    />
+                  ) : (
+                    <img
+                      src="/brand/tixkit-symbol.svg"
+                      alt="Tixkit default icon"
+                      className="size-full object-contain"
+                    />
+                  )}
+                </div>
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {brand.theme.iconUrl
+                        ? 'Custom app icon active'
+                        : 'Using the Tixkit fallback icon'}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Used in the sidebar, collapsed navigation, and other square brand surfaces.
+                      Upload a transparent square PNG or WebP.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {uploadingIcon ? (
+                      <Button type="button" variant="outline" disabled>
+                        <Upload className="size-4" />
+                        Updating…
+                      </Button>
+                    ) : (
+                      <Button asChild variant="outline">
+                        <Label htmlFor="brand-icon-upload" className="cursor-pointer">
+                          <Upload className="size-4" />
+                          {brand.theme.iconUrl ? 'Replace icon' : 'Upload icon'}
+                        </Label>
+                      </Button>
+                    )}
+                    {brand.theme.iconUrl ? (
+                      <Button
+                        disabled={uploadingIcon}
+                        onClick={() => void handleBrandAssetRemove('icon')}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Trash2 className="size-4" />
+                        Remove
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <Input
+                  id="brand-icon-upload"
+                  aria-label={brand.theme.iconUrl ? 'Replace icon' : 'Upload icon'}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="sr-only"
+                  onChange={(event) => {
+                    void handleBrandAssetUpload(event.target.files?.[0], 'icon');
                     event.currentTarget.value = '';
                   }}
                 />

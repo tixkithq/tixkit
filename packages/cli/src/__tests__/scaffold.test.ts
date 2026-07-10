@@ -37,15 +37,23 @@ describe('scaffold', () => {
     await rm(targetDir, { recursive: true, force: true });
   });
 
-  it('rejects target directories outside the repo', async () => {
+  it('scaffolds a standalone app outside the repo with published dependencies and TypeScript 7', async () => {
     const result = await scaffold({
       targetDir,
       template: 'nextjs',
       projectName: 'my-app',
       skipGit: true,
     });
-    expect(result.ok).toBe(false);
-    expect(result.message).toContain('must be inside the Tixkit monorepo');
+    expect(result.ok).toBe(true);
+    const pkg = JSON.parse(await readFile(path.join(targetDir, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    expect(pkg.dependencies['@tixkit/next']).toBe('^0.1.0');
+    expect(pkg.devDependencies.typescript).toBe('7.0.2');
+    const tsconfig = await readFile(path.join(targetDir, 'tsconfig.json'), 'utf8');
+    expect(tsconfig).not.toContain('tsconfig.base.json');
+    expect(tsconfig).not.toContain('__ROOT__');
   });
 
   it('rejects a non-empty target directory', async () => {
@@ -106,10 +114,10 @@ describe('scaffold inside repo', () => {
       dependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-event-app');
-    expect(pkg.dependencies['@tixkit/next']).toBe('workspace:*');
+    expect(pkg.dependencies['@tixkit/next']).toBe('^0.1.0');
 
     const tsconfig = await readFile(path.join(targetDir, 'tsconfig.json'), 'utf8');
-    expect(tsconfig).toContain('tsconfig.base.json');
+    expect(tsconfig).not.toContain('tsconfig.base.json');
     expect(tsconfig).not.toContain('__ROOT__');
 
     const demo = await readFile(path.join(targetDir, 'app', 'tixkit-demo.tsx'), 'utf8');
@@ -149,14 +157,16 @@ describe('scaffold inside repo', () => {
       dependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-vue-app');
-    expect(pkg.dependencies['@tixkit/vue']).toBe('workspace:*');
+    expect(pkg.dependencies['@tixkit/vue']).toBe('^0.1.0');
 
     const appVue = await readFile(path.join(targetDir, 'app.vue'), 'utf8');
-    expect(appVue).toContain('brd_vue');
-    expect(appVue).toContain('evt_vue');
-    expect(appVue).toContain('tt_vue');
-    expect(appVue).not.toContain('__BRAND_ID__');
-    expect(appVue).toContain('tixkitWidgetIframeAttributes');
+    expect(appVue).toContain('useTixkitDemoState');
+    const appState = await readFile(path.join(targetDir, 'app-state.ts'), 'utf8');
+    expect(appState).toContain('brd_vue');
+    expect(appState).toContain('evt_vue');
+    expect(appState).toContain('tt_vue');
+    expect(appState).not.toContain('__BRAND_ID__');
+    expect(appState).toContain('tixkitWidgetIframeAttributes');
 
     const webhook = await readFile(
       path.join(targetDir, 'server', 'api', 'tixkit', 'webhook.post.ts'),
@@ -195,7 +205,7 @@ describe('scaffold inside repo', () => {
       devDependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-astro-app');
-    expect(pkg.dependencies['@tixkit/astro']).toBe('workspace:*');
+    expect(pkg.dependencies['@tixkit/astro']).toBe('^0.1.0');
     expect(pkg.devDependencies['@astrojs/node']).toBeDefined();
 
     const config = await readFile(path.join(targetDir, 'astro.config.mjs'), 'utf8');
@@ -241,7 +251,7 @@ describe('scaffold inside repo', () => {
       dependencies: Record<string, string>;
     };
     expect(pkg.name).toBe('my-remix-app');
-    expect(pkg.dependencies['@tixkit/remix']).toBe('workspace:*');
+    expect(pkg.dependencies['@tixkit/remix']).toBe('^0.1.0');
 
     const index = await readFile(path.join(targetDir, 'app', 'routes', '_index.tsx'), 'utf8');
     expect(index).toContain('brd_remix');
@@ -258,5 +268,50 @@ describe('scaffold inside repo', () => {
       'utf8',
     );
     expect(webhook).toContain('Invalid JSON body');
+  });
+
+  it('generates a SvelteKit app with TS7 server helpers and webhook verification', async () => {
+    const result = await scaffold({
+      targetDir,
+      template: 'sveltekit',
+      projectName: 'my-sveltekit-app',
+      port: 3800,
+      brandId: 'brd_svelte',
+      eventId: 'evt_svelte',
+      ticketTypeId: 'tt_svelte',
+      skipGit: true,
+    });
+    if (!result.ok) throw new Error(result.message);
+
+    const files = await readdir(targetDir, { recursive: true });
+    expect(files).toContain('package.json');
+    expect(files).toContain('svelte.config.js');
+    expect(files).toContain('vite.config.ts');
+    expect(files).toContain(path.join('src', 'routes', '+page.svelte'));
+    expect(files).toContain(path.join('src', 'routes', '+page.server.ts'));
+    expect(files).toContain(path.join('src', 'routes', 'api', 'tixkit', 'webhook', '+server.ts'));
+
+    const pkg = JSON.parse(await readFile(path.join(targetDir, 'package.json'), 'utf8')) as {
+      name: string;
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    expect(pkg.name).toBe('my-sveltekit-app');
+    expect(pkg.dependencies['@tixkit/sveltekit']).toBe('^0.1.0');
+    expect(pkg.devDependencies.typescript).toBe('7.0.2');
+
+    const page = await readFile(path.join(targetDir, 'src', 'routes', '+page.svelte'), 'utf8');
+    expect(page).toContain('brd_svelte');
+    expect(page).toContain('evt_svelte');
+    expect(page).toContain('tt_svelte');
+    expect(page).not.toContain('__EVENT_ID__');
+    const webhook = await readFile(
+      path.join(targetDir, 'src', 'routes', 'api', 'tixkit', 'webhook', '+server.ts'),
+      'utf8',
+    );
+    expect(webhook).toContain('verifyTixkitWebhook');
+    expect(webhook).toContain('Invalid JSON body');
+    const vite = await readFile(path.join(targetDir, 'vite.config.ts'), 'utf8');
+    expect(vite).toContain('3800');
   });
 });

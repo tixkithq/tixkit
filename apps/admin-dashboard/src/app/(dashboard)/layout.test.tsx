@@ -233,6 +233,58 @@ describe('DashboardLayout auth handoff', () => {
     expect(screen.getByTestId('dashboard-child')).toBeInTheDocument();
   });
 
+  it('redirects door-only staff to the kiosk surface', async () => {
+    enableClerk();
+    mocks.auth.mockResolvedValue({
+      userId: 'clerk_door_user',
+      getToken: vi.fn().mockResolvedValue('clerk_session_jwt'),
+    });
+    mocks.getPrincipal.mockResolvedValue({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationIds: ['org_1'],
+        permissions: ['events.read', 'attendees.read', 'checkins.read', 'checkins.write'],
+      },
+    });
+
+    await expect(
+      DashboardLayout({
+        children: <div />,
+      }),
+    ).rejects.toThrow('redirect:/kiosk');
+  });
+
+  it('keeps organizers on the dashboard shell', async () => {
+    enableClerk();
+    mocks.auth.mockResolvedValue({
+      userId: 'clerk_org_user',
+      getToken: vi.fn().mockResolvedValue('clerk_session_jwt'),
+    });
+    mocks.getPrincipal.mockResolvedValue({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationIds: ['org_1'],
+        permissions: [
+          'events.read',
+          'events.write',
+          'checkins.read',
+          'checkins.write',
+          'orders.read',
+        ],
+      },
+    });
+
+    const element = await DashboardLayout({
+      children: <div data-testid="dashboard-child">Dashboard</div>,
+    });
+    render(element);
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(screen.getByTestId('dashboard-child')).toBeInTheDocument();
+  });
+
   it('redirects signed-in Clerk users when Tixkit identity sync has not created a principal', async () => {
     enableClerk();
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

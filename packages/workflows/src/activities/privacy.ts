@@ -19,6 +19,7 @@ type PrivacyRequestRow = {
 type CheckoutSessionPrivacyRow = {
   id: string;
   buyer: unknown;
+  cart: unknown;
 };
 
 type BrandPrivacyRow = {
@@ -360,7 +361,7 @@ async function collectMessagingPrivacyRows(
   };
 }
 
-function redactJsonValue(
+export function redactJsonValue(
   value: unknown,
   replacementEmail: string,
   options: {
@@ -387,6 +388,12 @@ function redactJsonValue(
       redacted[key] = replacementEmail;
     } else if (normalizedKey.includes('phone')) {
       redacted[key] = options.replacementPhone ?? null;
+    } else if (
+      normalizedKey.includes('dateofbirth') ||
+      normalizedKey.includes('date_of_birth') ||
+      normalizedKey === 'dob'
+    ) {
+      redacted[key] = null;
     } else if (
       normalizedKey.includes('name') ||
       normalizedKey.includes('taxid') ||
@@ -442,6 +449,7 @@ function baseAttendeeQuery(db: Database, request: PrivacyRequestRow) {
       'attendees.last_name as last_name',
       'attendees.email as email',
       'attendees.phone as phone',
+      'attendees.date_of_birth as date_of_birth',
       'attendees.status as status',
       'attendees.custom_answers as custom_answers',
       'attendees.checked_in_at as checked_in_at',
@@ -554,6 +562,7 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
       buyerFirstName: order.buyer_first_name,
       buyerLastName: order.buyer_last_name,
       buyerPhone: order.buyer_phone,
+      buyerDateOfBirth: order.buyer_date_of_birth,
       paidAt: order.paid_at,
       refundedAt: order.refunded_at,
       createdAt: order.created_at,
@@ -569,6 +578,7 @@ async function buildPrivacyExport(db: Database, request: PrivacyRequestRow) {
       lastName: attendee.last_name,
       email: attendee.email,
       phone: attendee.phone,
+      dateOfBirth: attendee.date_of_birth,
       status: attendee.status,
       customAnswers: normalizeJson(attendee.custom_answers),
       checkedInAt: attendee.checked_in_at,
@@ -679,6 +689,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
           buyer_first_name: null,
           buyer_last_name: null,
           buyer_phone: null,
+          buyer_date_of_birth: null,
           updated_at: now,
         })
         .where('id', '=', order.id)
@@ -722,7 +733,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
   if (orderIds.length > 0) {
     const sessions = await db
       .selectFrom('checkout_sessions')
-      .select(['id', 'buyer'])
+      .select(['id', 'buyer', 'cart'])
       .where('tenant_id', '=', request.tenant_id)
       .where('order_id', 'in', orderIds)
       .execute();
@@ -734,6 +745,12 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
           .set({
             buyer: JSON.stringify(
               redactJsonValue(session.buyer, redactedSubjectEmail, {
+                subjectEmails,
+                subjectPhones,
+              }),
+            ),
+            cart: JSON.stringify(
+              redactJsonValue(session.cart, redactedSubjectEmail, {
                 subjectEmails,
                 subjectPhones,
               }),
@@ -750,7 +767,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
   if (request.subject_email && (!request.subject_id || buyerOrderId) && scopedBrandIds.length > 0) {
     let retainedSessionQuery = db
       .selectFrom('checkout_sessions')
-      .select(['id', 'buyer'])
+      .select(['id', 'buyer', 'cart'])
       .where('tenant_id', '=', request.tenant_id)
       .where('brand_id', 'in', scopedBrandIds);
     if (buyerOrderId)
@@ -761,7 +778,9 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
       retainedSessions
         .filter(
           (session) =>
-            buyerOrderId || jsonContainsString(session.buyer, String(request.subject_email)),
+            buyerOrderId ||
+            jsonContainsString(session.buyer, String(request.subject_email)) ||
+            jsonContainsString(session.cart, String(request.subject_email)),
         )
         .map((session) =>
           db
@@ -769,6 +788,12 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
             .set({
               buyer: JSON.stringify(
                 redactJsonValue(session.buyer, redactedSubjectEmail, {
+                  subjectEmails,
+                  subjectPhones,
+                }),
+              ),
+              cart: JSON.stringify(
+                redactJsonValue(session.cart, redactedSubjectEmail, {
                   subjectEmails,
                   subjectPhones,
                 }),
@@ -791,6 +816,7 @@ async function erasePrivacyData(db: Database, request: PrivacyRequestRow) {
           first_name: null,
           last_name: null,
           phone: null,
+          date_of_birth: null,
           custom_answers: null,
           updated_at: now,
         })

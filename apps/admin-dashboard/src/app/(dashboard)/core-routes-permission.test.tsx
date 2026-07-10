@@ -18,17 +18,27 @@ const routeMocks = vi.hoisted(() => ({
   ordersTable: vi.fn(),
   orderDetailView: vi.fn(),
   attendeesTable: vi.fn(),
-  checkInView: vi.fn(),
+  checkInConsole: vi.fn(),
   reportsView: vi.fn(),
   eventAttendeesView: vi.fn(),
-  eventCheckInView: vi.fn(),
   eventReportsView: vi.fn(),
 }));
 
 vi.mock('@/components/permission-guard', () => ({
-  PermissionGuard: ({ required, children }: { required: string; children: React.ReactNode }) => {
-    routeMocks.permissionGuard(required);
-    return <section data-testid={`permission-guard-${required}`}>{children}</section>;
+  PermissionGuard: ({
+    required,
+    anyOf,
+    children,
+  }: {
+    required?: string;
+    anyOf?: readonly string[];
+    children: React.ReactNode;
+  }) => {
+    const requirement = required ?? anyOf;
+    routeMocks.permissionGuard(requirement);
+    return (
+      <section data-testid={`permission-guard-${required ?? anyOf?.join(',')}`}>{children}</section>
+    );
   },
 }));
 
@@ -67,10 +77,10 @@ vi.mock('@/features/attendees/attendees-table', () => ({
   },
 }));
 
-vi.mock('@/features/check-in/scan-view', () => ({
-  CheckInView: () => {
-    routeMocks.checkInView();
-    return <div data-testid="check-in-view" />;
+vi.mock('@/features/kiosk/check-in-console', () => ({
+  CheckInConsole: (props: { mode?: string; initialEventId?: string; lockEvent?: boolean }) => {
+    routeMocks.checkInConsole(props);
+    return <div data-testid="check-in-console" />;
   },
 }));
 
@@ -88,13 +98,6 @@ vi.mock('@/features/events/event-attendees-view', () => ({
   },
 }));
 
-vi.mock('@/features/events/event-check-in-view', () => ({
-  EventCheckInView: ({ eventId }: { eventId: string }) => {
-    routeMocks.eventCheckInView(eventId);
-    return <div data-testid="event-check-in-view" />;
-  },
-}));
-
 vi.mock('@/features/events/event-reports-view', () => ({
   EventReportsView: ({ eventId }: { eventId: string }) => {
     routeMocks.eventReportsView(eventId);
@@ -109,7 +112,7 @@ describe('core dashboard route permission guards', () => {
     }
   });
 
-  it('guards global Events, Orders, Attendees, Check-in, and Reports routes', () => {
+  it('guards global Events, Orders, Attendees, Check-in, and Reports routes', async () => {
     const events = render(<EventsPage />);
     expect(routeMocks.permissionGuard).toHaveBeenLastCalledWith('events.read');
     expect(routeMocks.eventsTable).toHaveBeenCalledTimes(1);
@@ -129,10 +132,21 @@ describe('core dashboard route permission guards', () => {
     expect(attendees.getByTestId('permission-guard-attendees.read')).toBeInTheDocument();
     attendees.unmount();
 
-    const checkIn = render(<CheckInPage />);
-    expect(routeMocks.permissionGuard).toHaveBeenLastCalledWith('checkins.write');
-    expect(routeMocks.checkInView).toHaveBeenCalledTimes(1);
-    expect(checkIn.getByTestId('permission-guard-checkins.write')).toBeInTheDocument();
+    const checkInElement = await CheckInPage({});
+    const checkIn = render(checkInElement);
+    const checkInPermissions = [
+      'checkins.write',
+      'checkins.read',
+      'box_office.write',
+      'orders.write',
+    ];
+    expect(routeMocks.permissionGuard).toHaveBeenLastCalledWith(checkInPermissions);
+    expect(routeMocks.checkInConsole).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'embedded' }),
+    );
+    expect(
+      checkIn.getByTestId(`permission-guard-${checkInPermissions.join(',')}`),
+    ).toBeInTheDocument();
     checkIn.unmount();
 
     const reports = render(<ReportsPage />);
@@ -164,9 +178,23 @@ describe('core dashboard route permission guards', () => {
       params: Promise.resolve({ eventId: 'evt_1' }),
     });
     const eventCheckIn = render(eventCheckInElement);
-    expect(routeMocks.permissionGuard).toHaveBeenLastCalledWith('checkins.write');
-    expect(routeMocks.eventCheckInView).toHaveBeenCalledWith('evt_1');
-    expect(eventCheckIn.getByTestId('permission-guard-checkins.write')).toBeInTheDocument();
+    const checkInPermissions = [
+      'checkins.write',
+      'checkins.read',
+      'box_office.write',
+      'orders.write',
+    ];
+    expect(routeMocks.permissionGuard).toHaveBeenLastCalledWith(checkInPermissions);
+    expect(routeMocks.checkInConsole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'embedded',
+        lockEvent: true,
+        initialEventId: 'evt_1',
+      }),
+    );
+    expect(
+      eventCheckIn.getByTestId(`permission-guard-${checkInPermissions.join(',')}`),
+    ).toBeInTheDocument();
     eventCheckIn.unmount();
 
     const eventReportsElement = await EventReportsPage({

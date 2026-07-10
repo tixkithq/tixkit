@@ -330,6 +330,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       visibility: body.visibility,
       seo: body.seo as Record<string, unknown> | undefined,
       capacity: body.capacity,
+      minimumAge: body.minimumAge,
       coverImageUrl: body.coverImageUrl,
       externalUrl: body.externalUrl,
     });
@@ -564,6 +565,7 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (body.visibility !== undefined) updateData.visibility = body.visibility;
     if (body.seo !== undefined) updateData.seo = JSON.stringify(body.seo);
     if (body.capacity !== undefined) updateData.capacity = body.capacity;
+    if (body.minimumAge !== undefined) updateData.minimum_age = body.minimumAge;
     if (body.coverImageUrl !== undefined) updateData.cover_image_url = body.coverImageUrl;
     if (body.externalUrl !== undefined) updateData.external_url = body.externalUrl;
 

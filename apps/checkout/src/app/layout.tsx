@@ -12,6 +12,9 @@ export const metadata = {
   description: 'Secure event ticket checkout',
 };
 
+const refineInjectorSrc =
+  process.env.NODE_ENV === 'production' ? null : 'http://localhost:7331/inject.js';
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   // Default to 'ltr'. A future brand/locale resolver can override this
   // by passing a `dir` prop or reading brand configuration.
@@ -22,6 +25,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {children}
           <Toaster position="bottom-right" />
         </ThemeProvider>
+        {refineInjectorSrc ? (
+          <script id="transitions-refine-injector" type="module" src={refineInjectorSrc} />
+        ) : null}
       </body>
     </html>
   );

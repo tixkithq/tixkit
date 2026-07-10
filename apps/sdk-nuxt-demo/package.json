@@ -8,7 +8,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "typecheck": "nuxt typecheck",
+    "typecheck": "nuxt prepare && node scripts/validate-vue-sfc.mjs",
     "clean": "rm -rf .nuxt .output"
   },
   "dependencies": {
@@ -17,7 +17,7 @@
     "vue": "^3.5.0"
   },
   "devDependencies": {
-    "typescript": "7.0.2",
-    "vue-tsc": "^2.1.0"
+    "@vue/compiler-sfc": "3.5.39",
+    "typescript": "7.0.2"
   }
 }

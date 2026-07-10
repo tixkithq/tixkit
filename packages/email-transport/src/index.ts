@@ -185,11 +185,13 @@ type SmsHttpConfig = {
 function sanitizeEnvCredential(value: string | undefined): string {
   if (!value) return '';
   // Strip inline comments and surrounding quotes that often leak from .env.local.
-  return value
-    .split('#')[0]
-    ?.trim()
-    .replace(/^['"]|['"]$/g, '')
-    .trim() ?? '';
+  return (
+    value
+      .split('#')[0]
+      ?.trim()
+      .replace(/^['"]|['"]$/g, '')
+      .trim() ?? ''
+  );
 }
 
 function credentialValue(credentialsRef: string, fallbackEnvName: string): string {

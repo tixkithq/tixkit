@@ -172,8 +172,9 @@ export async function notificationDeliveryWorkflow(
     return { status: 'suppressed' };
   }
 
-  // Step 1b: Check consent for non-transactional sends
-  if (input.notificationType !== 'transactional') {
+  // Marketing consent is required only for bulk lifecycle messages. Staff and
+  // system lifecycle emails (such as account invitations) are operational.
+  if (input.notificationType === 'bulk') {
     const consentResult = await checkConsentActivity({
       email: input.toEmail,
       tenantId: input.tenantId,

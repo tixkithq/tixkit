@@ -82,6 +82,11 @@ describe('isAllowedDestination', () => {
     expect(isAllowedDestination('http://10.0.0.1')).toBe(false);
     expect(isAllowedDestination('http://169.254.169.254/latest/meta-data')).toBe(false);
     expect(isAllowedDestination('http://service.local')).toBe(false);
+    expect(isAllowedDestination('http://localhost./admin')).toBe(false);
+    expect(isAllowedDestination('https://[fc00::1]/admin')).toBe(false);
+    expect(isAllowedDestination('https://[fd12:3456::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[fe80::1]/')).toBe(false);
+    expect(isAllowedDestination('https://[::ffff:127.0.0.1]/')).toBe(false);
   });
 
   it('allows private hosts when explicitly permitted (dev)', () => {

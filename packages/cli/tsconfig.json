@@ -5,9 +5,10 @@
     "rootDir": "./src",
     "composite": true,
     "incremental": true,
-    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+    "tsBuildInfoFile": "./.turbo/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*"],
+  "exclude": ["src/__tests__"],
   "references": [
     {
       "path": "../content-email"

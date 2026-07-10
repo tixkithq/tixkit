@@ -20,6 +20,8 @@ import {
   ValidationError,
   normalizeEmailDomainAccessRuleValue,
   validateResalePrice,
+  evaluateDateOfBirthEligibility,
+  requiresDateOfBirthVerification,
 } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import { ulid } from 'ulid';
@@ -186,6 +188,14 @@ function toResaleValidationError(error: unknown): never {
   throw error;
 }
 
+function requireIdempotencyKey(request: FastifyRequest, action: string): string {
+  const key = request.headers['idempotency-key'];
+  if (typeof key !== 'string' || key.trim() === '') {
+    throw new ValidationError(`Idempotency-Key header is required for ${action}`);
+  }
+  return key.trim();
+}
+
 export const ticketingRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
   const inventoryService = app.context.inventoryService;
@@ -251,10 +261,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketId } = request.params as { ticketId: string };
     const body = parseBody(createResaleListingSchema, request.body);
-    const idempotencyKey = request.headers['idempotency-key'];
-    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
-      throw new ValidationError('Idempotency-Key header is required for resale listings');
-    }
+    const idempotencyKey = requireIdempotencyKey(request, 'resale listings');
 
     const ticketRepo = new TicketRepository(db);
     const ticket = await ticketRepo.findById(ticketId);
@@ -322,10 +329,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { listingId } = request.params as { listingId: string };
-    const idempotencyKey = request.headers['idempotency-key'];
-    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
-      throw new ValidationError('Idempotency-Key header is required for resale delisting');
-    }
+    const idempotencyKey = requireIdempotencyKey(request, 'resale delisting');
 
     const listingRepo = new TicketListingRepository(db);
     const listing = await listingRepo.findById(listingId);
@@ -363,10 +367,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { listingId } = request.params as { listingId: string };
     const body = parseBody(completeResaleListingSchema, request.body);
-    const idempotencyKey = request.headers['idempotency-key'];
-    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
-      throw new ValidationError('Idempotency-Key header is required for resale completion');
-    }
+    const idempotencyKey = requireIdempotencyKey(request, 'resale completion');
 
     const listingRepo = new TicketListingRepository(db);
     const listing = await listingRepo.findById(listingId);
@@ -376,6 +377,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     }
     const event = await loadEvent(listing.event_id as string);
     requireEventAccess(principal, event, listing.event_id as string);
+    const requiresDateOfBirth = requiresDateOfBirthVerification(event.minimum_age);
 
     const requestHash = hashRequest({
       listingId,
@@ -384,6 +386,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       buyerFirstName: body.buyerFirstName ?? null,
       buyerLastName: body.buyerLastName ?? null,
       buyerPhone: body.buyerPhone ?? null,
+      buyerDateOfBirth: requiresDateOfBirth ? body.buyerDateOfBirth : undefined,
       externalPaymentReference: body.externalPaymentReference ?? null,
     });
 
@@ -432,6 +435,23 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
               `Ticket status is ${sellerTicket.status}, cannot complete resale`,
             );
           }
+          const occurrence = sellerTicket.event_occurrence_id
+            ? await new EventOccurrenceRepository(txDb).findById(sellerTicket.event_occurrence_id)
+            : undefined;
+          if (requiresDateOfBirth) {
+            const eligibility = evaluateDateOfBirthEligibility({
+              dateOfBirth: body.buyerDateOfBirth,
+              minimumAge: event.minimum_age,
+              participationAt: occurrence?.starts_at ?? event.starts_at,
+              timezone: occurrence?.timezone ?? event.timezone,
+            });
+            if (!eligibility.eligible) {
+              throw new ValidationError(`Resale buyer: ${eligibility.message}`, {
+                code: eligibility.code,
+                field: 'buyerDateOfBirth',
+              });
+            }
+          }
 
           const sellerAttendee = await txAttendeeRepo.findById(sellerTicket.attendee_id as string);
           if (
@@ -454,6 +474,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             firstName: body.buyerFirstName ?? undefined,
             lastName: body.buyerLastName ?? undefined,
             phone: body.buyerPhone ?? undefined,
+            dateOfBirth: requiresDateOfBirth ? body.buyerDateOfBirth : undefined,
             customAnswers: {
               resaleListingId: listingId,
               resaleSellerAttendeeId: sellerAttendee.id,

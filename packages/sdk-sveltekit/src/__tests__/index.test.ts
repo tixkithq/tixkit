@@ -135,6 +135,7 @@ describe('SvelteKit server helpers', () => {
     await completeResaleListing(client, 'lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });
@@ -158,6 +159,7 @@ describe('SvelteKit server helpers', () => {
     expect(client.tickets.completeResaleListing).toHaveBeenCalledWith('lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });
@@ -182,6 +184,9 @@ describe('SvelteKit server helpers', () => {
     formData.append('productId', 'prod_1');
     formData.append('productQuantity', '1');
     formData.set('buyerEmail', 'buyer@example.test');
+    formData.set('buyerDateOfBirth', '1990-01-01');
+    formData.append('attendeeDateOfBirth', '1990-01-01');
+    formData.append('attendeeDateOfBirth', '1991-02-02');
     formData.set('discountCode', 'SAVE20');
     formData.set('trackingId', 'campaign_1');
 
@@ -194,10 +199,17 @@ describe('SvelteKit server helpers', () => {
           eventId: 'evt_1',
           idempotencyKey: 'idem_1',
           items: [
-            { ticketTypeId: 'tt_1', quantity: 2 },
+            {
+              ticketTypeId: 'tt_1',
+              quantity: 2,
+              attendeeFields: [{ dateOfBirth: '1990-01-01' }, { dateOfBirth: '1991-02-02' }],
+            },
             { productId: 'prod_1', quantity: 1 },
           ],
-          buyer: expect.objectContaining({ email: 'buyer@example.test' }),
+          buyer: expect.objectContaining({
+            email: 'buyer@example.test',
+            dateOfBirth: '1990-01-01',
+          }),
           discountCode: 'SAVE20',
           trackingId: 'campaign_1',
           successUrl: 'https://app.example.test/success',
@@ -224,10 +236,43 @@ describe('SvelteKit server helpers', () => {
       fieldErrors: {
         eventId: 'Event is required.',
         idempotencyKey: 'Idempotency key is required.',
+        buyerEmail: 'Buyer email is required.',
         quantity: 'Ticket quantity must be a positive integer.',
       },
     });
     expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows unrestricted checkout forms to omit date of birth', async () => {
+    const checkoutCreate = vi.fn(async (input: unknown) => input);
+    const action = createCheckoutFormAction({ checkout: { create: checkoutCreate } } as never);
+    const formData = new FormData();
+    formData.set('eventId', 'evt_unrestricted');
+    formData.set('idempotencyKey', 'idem_unrestricted');
+    formData.set('ticketTypeId', 'tt_1');
+    formData.set('quantity', '1');
+    formData.set('buyerEmail', 'buyer@example.test');
+
+    await expect(action({ request: { formData: async () => formData } })).resolves.toMatchObject({
+      success: true,
+    });
+    expect(checkoutCreate).toHaveBeenCalledWith({
+      eventId: 'evt_unrestricted',
+      idempotencyKey: 'idem_unrestricted',
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      buyer: {
+        email: 'buyer@example.test',
+        firstName: undefined,
+        lastName: undefined,
+        phone: undefined,
+      },
+      accessCode: undefined,
+      affiliateCode: undefined,
+      cancelUrl: undefined,
+      discountCode: undefined,
+      successUrl: undefined,
+      trackingId: undefined,
+    });
   });
 });
 

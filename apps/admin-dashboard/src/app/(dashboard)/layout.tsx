@@ -87,6 +87,16 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       }
       redirect('/sign-in?error=unauthorized');
     }
+
+    const { isDoorOnlyPermissionSet } = await import('@/lib/permissions');
+    const permissions = (principalRes.data.permissions ?? []).filter(
+      (permission): permission is import('@/lib/permissions').TixkitPermission =>
+        typeof permission === 'string',
+    );
+    if (isDoorOnlyPermissionSet(permissions)) {
+      const { routes } = await import('@/lib/routes');
+      redirect(routes.kiosk);
+    }
   }
 
   return (

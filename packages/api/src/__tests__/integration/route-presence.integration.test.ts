@@ -45,7 +45,7 @@ type CapturedRoute = {
   url: string;
 };
 
-const operationalRoutesExcludedFromOpenApi = new Set(['GET /health', 'GET /metrics']);
+const operationalRoutesExcludedFromOpenApi = new Set(['GET /health', 'GET /ready', 'GET /metrics']);
 
 async function buildRouteManifest(): Promise<CapturedRoute[]> {
   const routes: CapturedRoute[] = [];
@@ -74,6 +74,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
 
   // Health check (outside /v1 prefix, documented separately in OpenAPI).
   app.get('/health', async () => ({ status: 'ok' }));
+  app.get('/ready', async () => ({ status: 'ready' }));
   registerMetricsRoute(app, await createApiObservability(), () => mockContext.db, {
     requireBearerToken: false,
   });

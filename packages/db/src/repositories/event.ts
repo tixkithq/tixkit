@@ -29,6 +29,7 @@ export class EventRepository extends BaseRepository {
     visibility?: string;
     seo?: Record<string, unknown>;
     capacity?: number;
+    minimumAge?: number | null;
     coverImageUrl?: string;
     externalUrl?: string;
   }) {
@@ -53,6 +54,7 @@ export class EventRepository extends BaseRepository {
         visibility: input.visibility ?? 'public',
         seo: JSON.stringify(input.seo ?? {}),
         capacity: input.capacity ?? null,
+        minimum_age: input.minimumAge ?? null,
         cover_image_url: input.coverImageUrl ?? null,
         external_url: input.externalUrl ?? null,
         public_revision: now,

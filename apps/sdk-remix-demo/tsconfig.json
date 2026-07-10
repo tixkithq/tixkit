@@ -12,7 +12,6 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "baseUrl": ".",
     "paths": {
       "@tixkit/remix": ["../../packages/sdk-remix/src/index.ts"],
       "@tixkit/remix/client": ["../../packages/sdk-remix/src/client.ts"],

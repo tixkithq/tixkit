@@ -179,6 +179,7 @@ export function EmailPersistedEditorView({
   const [notice, setNotice] = React.useState<string>();
   const editorCanvasRef = React.useRef<HTMLElement | null>(null);
   const operationIdRef = React.useRef(0);
+  const loadInFlightRef = React.useRef(false);
   const emailEditorRef = React.useRef<EmailEditorRef | null>(null);
   const brandTheme = React.useMemo(
     () =>
@@ -256,165 +257,175 @@ export function EmailPersistedEditorView({
   }
 
   const load = React.useCallback(async () => {
-    setLoading(true);
-    setError(undefined);
-    setActionError(undefined);
-    setNotice(undefined);
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
+    try {
+      setLoading(true);
+      setError(undefined);
+      setActionError(undefined);
+      setNotice(undefined);
 
-    const eventResult = await adminApi.getEvent(eventId);
-    if (!eventResult.ok) {
-      setError(resultMessage(eventResult.error, 'Unable to load event'));
-      setLoading(false);
-      return;
-    }
-    const loadedEvent = eventResult.data;
-    if (!loadedEvent.organizationId || !loadedEvent.brandId) {
-      setError('Event is missing organization or brand scope for persisted email content.');
-      setLoading(false);
-      return;
-    }
+      const eventResult = await adminApi.getEvent(eventId);
+      if (!eventResult.ok) {
+        setError(resultMessage(eventResult.error, 'Unable to load event'));
+        setLoading(false);
+        return;
+      }
+      const loadedEvent = eventResult.data;
+      if (!loadedEvent.organizationId || !loadedEvent.brandId) {
+        setError('Event is missing organization or brand scope for persisted email content.');
+        setLoading(false);
+        return;
+      }
 
-    const senderIdentitiesResult = await adminApi.listBrandEmailSenderIdentities(
-      loadedEvent.brandId,
-    );
-    if (!senderIdentitiesResult.ok) {
-      setError(resultMessage(senderIdentitiesResult.error, 'Unable to load email senders'));
-      setLoading(false);
-      return;
-    }
-    const loadedSenderIdentities = listItemsFromResponse<AdminBrandSenderIdentity>(
-      senderIdentitiesResult.data,
-    ).filter((identity) => identity.brandId === loadedEvent.brandId);
-    const defaultSenderIdentity = verifiedSenderIdentities(loadedSenderIdentities)[0];
-    const brandsResult = await adminApi.listBrands();
-    let loadedBrand: AdminBrand | undefined;
-    if (brandsResult.ok) {
-      loadedBrand = listItemsFromResponse<AdminBrand>(brandsResult.data).find(
-        (candidateBrand) => candidateBrand.id === loadedEvent.brandId,
+      const senderIdentitiesResult = await adminApi.listBrandEmailSenderIdentities(
+        loadedEvent.brandId,
       );
-    }
+      if (!senderIdentitiesResult.ok) {
+        setError(resultMessage(senderIdentitiesResult.error, 'Unable to load email senders'));
+        setLoading(false);
+        return;
+      }
+      const loadedSenderIdentities = listItemsFromResponse<AdminBrandSenderIdentity>(
+        senderIdentitiesResult.data,
+      ).filter((identity) => identity.brandId === loadedEvent.brandId);
+      const defaultSenderIdentity = verifiedSenderIdentities(loadedSenderIdentities)[0];
+      const brandsResult = await adminApi.listBrands();
+      let loadedBrand: AdminBrand | undefined;
+      if (brandsResult.ok) {
+        loadedBrand = listItemsFromResponse<AdminBrand>(brandsResult.data).find(
+          (candidateBrand) => candidateBrand.id === loadedEvent.brandId,
+        );
+      }
 
-    const documentsResult = await adminApi.listContentDocuments({
-      channel: 'email',
-      brandId: loadedEvent.brandId,
-      eventId: loadedEvent.id,
-      limit: 20,
-    });
-    if (!documentsResult.ok) {
-      setError(resultMessage(documentsResult.error, 'Unable to load email content documents'));
-      setLoading(false);
-      return;
-    }
-
-    let loadedDocument = listItemsFromResponse<AdminContentDocument>(documentsResult.data).find(
-      (item) =>
-        item.channel === 'email' && item.eventId === loadedEvent.id && item.key === templateKey,
-    );
-    if (!loadedDocument) {
-      const lifecycle = getTemplateLifecycle(templateKey);
-      const createResult = await adminApi.createContentDocument({
-        organizationId: loadedEvent.organizationId,
+      const documentsResult = await adminApi.listContentDocuments({
+        channel: 'email',
         brandId: loadedEvent.brandId,
         eventId: loadedEvent.id,
+        limit: 20,
+      });
+      if (!documentsResult.ok) {
+        setError(resultMessage(documentsResult.error, 'Unable to load email content documents'));
+        setLoading(false);
+        return;
+      }
+
+      let loadedDocument = listItemsFromResponse<AdminContentDocument>(documentsResult.data).find(
+        (item) =>
+          item.channel === 'email' && item.eventId === loadedEvent.id && item.key === templateKey,
+      );
+      if (!loadedDocument) {
+        const lifecycle = getTemplateLifecycle(templateKey);
+        const createResult = await adminApi.createContentDocument({
+          organizationId: loadedEvent.organizationId,
+          brandId: loadedEvent.brandId,
+          eventId: loadedEvent.id,
+          channel: 'email',
+          key: templateKey,
+          name:
+            templateKey === 'order-confirmed'
+              ? `${loadedEvent.title} email template`
+              : lifecycle?.name
+                ? `${loadedEvent.title} ${lifecycle.name}`
+                : `${loadedEvent.title} email template`,
+          locale: 'en',
+        });
+        if (!createResult.ok) {
+          setError(resultMessage(createResult.error, 'Unable to create email content document'));
+          setLoading(false);
+          return;
+        }
+        loadedDocument = createResult.data;
+      }
+
+      const templatesResult = await adminApi.listContentDocuments({
         channel: 'email',
-        key: templateKey,
-        name:
-          templateKey === 'order-confirmed'
-            ? `${loadedEvent.title} email template`
-            : lifecycle?.name
-              ? `${loadedEvent.title} ${lifecycle.name}`
-              : `${loadedEvent.title} email template`,
-        locale: 'en',
+        brandId: loadedEvent.brandId,
+        limit: 100,
       });
-      if (!createResult.ok) {
-        setError(resultMessage(createResult.error, 'Unable to create email content document'));
+      const loadedTemplateChoices = templatesResult.ok
+        ? listItemsFromResponse<AdminContentDocument>(templatesResult.data).filter(
+            (item) =>
+              item.channel === 'email' &&
+              item.brandId === loadedEvent.brandId &&
+              item.id !== loadedDocument.id &&
+              item.status !== 'archived',
+          )
+        : [];
+
+      const versionsResult = await adminApi.listContentVersions(loadedDocument.id);
+      if (!versionsResult.ok) {
+        setError(resultMessage(versionsResult.error, 'Unable to load email versions'));
         setLoading(false);
         return;
       }
-      loadedDocument = createResult.data;
-    }
 
-    const templatesResult = await adminApi.listContentDocuments({
-      channel: 'email',
-      brandId: loadedEvent.brandId,
-      limit: 100,
-    });
-    const loadedTemplateChoices = templatesResult.ok
-      ? listItemsFromResponse<AdminContentDocument>(templatesResult.data).filter(
-          (item) =>
-            item.channel === 'email' &&
-            item.brandId === loadedEvent.brandId &&
-            item.id !== loadedDocument.id &&
-            item.status !== 'archived',
-        )
-      : [];
+      let loadedVersions = listItemsFromResponse<AdminContentDocumentVersion>(versionsResult.data);
+      let loadedDraft = latestDraft(loadedVersions, loadedDocument);
+      if (!loadedDraft) {
+        const initialDocument = defaultEmailDocument(
+          loadedEvent,
+          defaultSenderIdentity,
+          templateKey,
+        );
+        const saveResult = await adminApi.saveContentVersion(loadedDocument.id, {
+          contentJson: initialDocument,
+          subject: initialDocument.settings.subject,
+          previewText: initialDocument.settings.previewText,
+          renderedHtml: initialDocument.editor.contentHtml,
+          renderedText: initialDocument.editor.contentText ?? '',
+        });
+        if (!saveResult.ok) {
+          setError(resultMessage(saveResult.error, 'Unable to create the initial email draft'));
+          setLoading(false);
+          return;
+        }
+        loadedDraft = saveResult.data;
+        loadedVersions = [saveResult.data];
+      }
 
-    const versionsResult = await adminApi.listContentVersions(loadedDocument.id);
-    if (!versionsResult.ok) {
-      setError(resultMessage(versionsResult.error, 'Unable to load email versions'));
-      setLoading(false);
-      return;
-    }
-
-    let loadedVersions = listItemsFromResponse<AdminContentDocumentVersion>(versionsResult.data);
-    let loadedDraft = latestDraft(loadedVersions, loadedDocument);
-    if (!loadedDraft) {
-      const initialDocument = defaultEmailDocument(loadedEvent, defaultSenderIdentity, templateKey);
-      const saveResult = await adminApi.saveContentVersion(loadedDocument.id, {
-        contentJson: initialDocument,
-        subject: initialDocument.settings.subject,
-        previewText: initialDocument.settings.previewText,
-        renderedHtml: initialDocument.editor.contentHtml,
-        renderedText: initialDocument.editor.contentText ?? '',
-      });
-      if (!saveResult.ok) {
-        setError(resultMessage(saveResult.error, 'Unable to create the initial email draft'));
+      const normalized = normalizeEmailTemplateDocument(loadedDraft.contentJson);
+      if (!normalized) {
+        setError('Saved email draft is not canonical Tixkit React Email template JSON.');
         setLoading(false);
         return;
       }
-      loadedDraft = saveResult.data;
-      loadedVersions = [saveResult.data];
-    }
+      // Prefer an exact verified match, otherwise remap legacy placeholders
+      // (tickets@example.test) onto the brand's first verified Resend/sender identity.
+      const currentSenderIdentity =
+        findVerifiedSenderIdentity(loadedSenderIdentities, normalized.settings.sender.fromEmail) ??
+        defaultSenderIdentity;
+      const normalizedWithSender = currentSenderIdentity
+        ? applySenderIdentity(normalized, currentSenderIdentity)
+        : normalized;
+      const canvasDocument = restoreDefaultCanvasContent(
+        normalizedWithSender,
+        loadedEvent,
+        currentSenderIdentity,
+        templateKey,
+      );
 
-    const normalized = normalizeEmailTemplateDocument(loadedDraft.contentJson);
-    if (!normalized) {
-      setError('Saved email draft is not canonical Tixkit React Email template JSON.');
+      setEvent(loadedEvent);
+      setBrand(loadedBrand);
+      setDocument(loadedDocument);
+      setDraft(loadedDraft);
+      setVersions(loadedVersions);
+      setSenderIdentities(loadedSenderIdentities);
+      setTemplateChoices(loadedTemplateChoices);
+      setEmailDocument(canvasDocument);
+      setPreview(previewFromEditorDocument('Editor snapshot', canvasDocument));
+      setReviewIssues(
+        mergeValidationIssues([
+          ...validateEmailTemplate(canvasDocument, { provider: 'resend' }).issues,
+          ...senderIdentityIssues(canvasDocument, loadedSenderIdentities),
+        ]),
+      );
+      setReviewState('checked');
+      setAutosave('saved');
       setLoading(false);
-      return;
+    } finally {
+      loadInFlightRef.current = false;
     }
-    // Prefer an exact verified match, otherwise remap legacy placeholders
-    // (tickets@example.test) onto the brand's first verified Resend/sender identity.
-    const currentSenderIdentity =
-      findVerifiedSenderIdentity(loadedSenderIdentities, normalized.settings.sender.fromEmail) ??
-      defaultSenderIdentity;
-    const normalizedWithSender = currentSenderIdentity
-      ? applySenderIdentity(normalized, currentSenderIdentity)
-      : normalized;
-    const canvasDocument = restoreDefaultCanvasContent(
-      normalizedWithSender,
-      loadedEvent,
-      currentSenderIdentity,
-      templateKey,
-    );
-
-    setEvent(loadedEvent);
-    setBrand(loadedBrand);
-    setDocument(loadedDocument);
-    setDraft(loadedDraft);
-    setVersions(loadedVersions);
-    setSenderIdentities(loadedSenderIdentities);
-    setTemplateChoices(loadedTemplateChoices);
-    setEmailDocument(canvasDocument);
-    setPreview(previewFromEditorDocument('Editor snapshot', canvasDocument));
-    setReviewIssues(
-      mergeValidationIssues([
-        ...validateEmailTemplate(canvasDocument, { provider: 'resend' }).issues,
-        ...senderIdentityIssues(canvasDocument, loadedSenderIdentities),
-      ]),
-    );
-    setReviewState('checked');
-    setAutosave('saved');
-    setLoading(false);
   }, [eventId, templateKey]);
 
   React.useEffect(() => {
@@ -598,7 +609,7 @@ export function EmailPersistedEditorView({
       contentJson: saved.document,
       subject: saved.document.settings.subject,
       previewText: saved.document.settings.previewText,
-      context: sampleContext(event),
+      context: sampleContext(event, brand),
     });
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
@@ -717,7 +728,7 @@ export function EmailPersistedEditorView({
         adminApi.testSendContent(document.id, {
           versionId: saved.version.id,
           recipient: testRecipient,
-          context: event ? sampleContext(event) : undefined,
+          context: event ? sampleContext(event, brand) : undefined,
         }),
       ),
     );
@@ -1221,6 +1232,7 @@ export function EmailPersistedEditorView({
                       hideWhenActiveNodes: emailBubbleHiddenNodes,
                       placement: 'top',
                       offset: 18,
+                      showDefaultImageMenu: false,
                       trigger: emailBubbleMenuTrigger,
                       children: <TixkitEmailBubbleMenu />,
                     }}
@@ -1242,7 +1254,7 @@ export function EmailPersistedEditorView({
                     ref={emailEditorRef}
                     theme={brandTheme}
                   >
-                    <StyleInspector />
+                    <StyleInspector onUploadImage={uploadInlineEmailImage} />
                   </EmailEditor>
                 </>
               )}

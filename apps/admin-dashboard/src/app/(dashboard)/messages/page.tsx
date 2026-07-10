@@ -1,7 +1,29 @@
 import { PermissionGuard } from '@/components/permission-guard';
 import { MessagesView } from '@/features/messages/messages-view';
+import { isTemplateKey } from '@tixkit/domain';
 
-export default function Page() {
+export default async function Page({
+  searchParams,
+}: {
+  searchParams?: Promise<{
+    eventId?: string | string[];
+    tab?: string | string[];
+    templateKey?: string | string[];
+  }>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const eventIdParam = Array.isArray(resolvedSearchParams?.eventId)
+    ? resolvedSearchParams.eventId[0]
+    : resolvedSearchParams?.eventId;
+  const tabParam = Array.isArray(resolvedSearchParams?.tab)
+    ? resolvedSearchParams.tab[0]
+    : resolvedSearchParams?.tab;
+  const templateKeyParam = Array.isArray(resolvedSearchParams?.templateKey)
+    ? resolvedSearchParams.templateKey[0]
+    : resolvedSearchParams?.templateKey;
+  const initialLifecycleTemplateKey =
+    templateKeyParam && isTemplateKey(templateKeyParam) ? templateKeyParam : undefined;
+
   return (
     <PermissionGuard required="messages.write">
       <div className="space-y-6">
@@ -13,7 +35,11 @@ export default function Page() {
             </p>
           </div>
         </div>
-        <MessagesView />
+        <MessagesView
+          initialEventId={eventIdParam}
+          initialLifecycleTemplateKey={initialLifecycleTemplateKey}
+          initialTab={tabParam === 'lifecycle' ? 'lifecycle' : 'campaigns'}
+        />
       </div>
     </PermissionGuard>
   );

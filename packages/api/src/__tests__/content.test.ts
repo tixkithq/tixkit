@@ -218,7 +218,11 @@ function versionRow(overrides: Record<string, unknown> = {}) {
     rendered_html: '<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>',
     rendered_text: 'Hi {{recipient.name}}',
     variables: JSON.stringify([]),
-    validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+    validation: JSON.stringify({
+      valid: true,
+      severity: 'warning',
+      issues: [],
+    }),
     created_by: 'usr_1',
     created_at: new Date('2026-06-01T00:00:00.000Z'),
     published_at: null,
@@ -306,7 +310,10 @@ function legacyEventPageJson(
         title: 'Event details',
         items: [
           { label: 'Date', value: overrides.startsAt ?? 'TBA' },
-          { label: 'Venue', value: overrides.venue?.name ?? 'Venue to be announced' },
+          {
+            label: 'Venue',
+            value: overrides.venue?.name ?? 'Venue to be announced',
+          },
         ],
       },
       {
@@ -440,6 +447,49 @@ describe('content routes', () => {
     );
   });
 
+  it('renames an authorized content document without creating a content version', async () => {
+    const seed = {
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [documentRow()],
+      content_document_versions: [versionRow()],
+    };
+    const { db, inserted, updated } = createContentDb(seed);
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/content-documents/cdoc_1',
+      payload: { name: '  Summer event page  ' },
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: 'cdoc_1',
+      name: 'Summer event page',
+      currentDraftVersionId: 'cver_1',
+    });
+    expect(inserted).toHaveLength(0);
+    expect(updated).toEqual([expect.objectContaining({ name: 'Summer event page' })]);
+    expect(seed.content_document_versions).toHaveLength(1);
+  });
+
+  it('rejects blank content document names', async () => {
+    const { db, updated } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [documentRow()],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/content-documents/cdoc_1',
+      payload: { name: '   ' },
+    });
+
+    expect(response.statusCode, response.body).toBe(400);
+    expect(updated).toHaveLength(0);
+  });
+
   it('renders email previews through the React Email adapter and records artifacts', async () => {
     const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
@@ -459,7 +509,10 @@ describe('content routes', () => {
             title: 'All Access',
             checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_1',
           },
-          brand: { name: 'Tixkit', supportUrl: 'https://help.example.test/preferences' },
+          brand: {
+            name: 'Tixkit',
+            supportUrl: 'https://help.example.test/preferences',
+          },
           recipient: { name: 'Ada' },
           ticket: { type: 'General Admission' },
           order: { total: '$35.00' },
@@ -567,7 +620,10 @@ describe('content routes', () => {
         title: 'All Access',
         checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_1',
       },
-      brand: { name: 'Tixkit', supportUrl: 'https://help.example.test/preferences' },
+      brand: {
+        name: 'Tixkit',
+        supportUrl: 'https://help.example.test/preferences',
+      },
       recipient: { name: 'Ada' },
       ticket: { type: 'General Admission' },
       order: { total: '$35.00' },
@@ -720,13 +776,23 @@ describe('content routes', () => {
       content_document_versions: [
         versionRow({
           id: 'cver_email_bad_shape',
-          content_json: JSON.stringify({ editor: { provider: 'legacy-html-editor' } }),
-          validation: JSON.stringify({ valid: false, severity: 'error', issues: [] }),
+          content_json: JSON.stringify({
+            editor: { provider: 'legacy-html-editor' },
+          }),
+          validation: JSON.stringify({
+            valid: false,
+            severity: 'error',
+            issues: [],
+          }),
         }),
         versionRow({
           id: 'cver_email_invalid',
           content_json: JSON.stringify(invalidEmail),
-          validation: JSON.stringify({ valid: false, severity: 'error', issues: [] }),
+          validation: JSON.stringify({
+            valid: false,
+            severity: 'error',
+            issues: [],
+          }),
         }),
       ],
     });
@@ -735,7 +801,10 @@ describe('content routes', () => {
     const malformedPreview = await app.inject({
       method: 'POST',
       url: '/content-documents/cdoc_1/preview',
-      payload: { versionId: 'cver_email_bad_shape', context: { recipient: { name: 'Ada' } } },
+      payload: {
+        versionId: 'cver_email_bad_shape',
+        context: { recipient: { name: 'Ada' } },
+      },
     });
     const invalidTestSend = await app.inject({
       method: 'POST',
@@ -774,8 +843,14 @@ describe('content routes', () => {
         versionId: 'cver_1',
         recipient: 'ada@example.test',
         context: {
-          event: { title: 'All Access', checkoutUrl: 'https://checkout.example.test' },
-          brand: { name: 'Tixkit', supportUrl: 'https://help.example.test/preferences' },
+          event: {
+            title: 'All Access',
+            checkoutUrl: 'https://checkout.example.test',
+          },
+          brand: {
+            name: 'Tixkit',
+            supportUrl: 'https://help.example.test/preferences',
+          },
           recipient: { name: 'Ada' },
           ticket: { type: 'General Admission' },
           order: { total: '$35.00' },
@@ -866,14 +941,22 @@ describe('content routes', () => {
     );
     expect(updated).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ current_draft_version_id: body.versions[0].id }),
+        expect.objectContaining({
+          current_draft_version_id: body.versions[0].id,
+        }),
       ]),
     );
   });
 
   it('does not duplicate content documents across tenant boundaries', async () => {
     const { db, inserted } = createContentDb({
-      brands: [{ id: 'brd_other', tenant_id: 'tnt_other', organization_id: 'org_other' }],
+      brands: [
+        {
+          id: 'brd_other',
+          tenant_id: 'tnt_other',
+          organization_id: 'org_other',
+        },
+      ],
       content_documents: [
         documentRow({
           id: 'cdoc_other',
@@ -899,8 +982,14 @@ describe('content routes', () => {
   it('saves, previews, and captures canonical SMS template test sends', async () => {
     const smsTransport = new TestCaptureSmsTransport();
     const smsDocument = createDefaultSmsTemplate({
-      editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
-      settings: { templateKey: 'event-update', segmentLimit: 2, estimatedCostPerSegmentCents: 4 },
+      editor: {
+        body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.',
+      },
+      settings: {
+        templateKey: 'event-update',
+        segmentLimit: 2,
+        estimatedCostPerSegmentCents: 4,
+      },
     });
     const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
@@ -1203,6 +1292,53 @@ describe('content routes', () => {
     );
   });
 
+  it('requires server-side settings approval before saving a custom embed', async () => {
+    const eventPageDocument = eventPageJson();
+    eventPageDocument.editor.data.content.push({
+      type: 'CustomEmbed',
+      props: {
+        id: 'external-embed',
+        html: '<iframe src="https://video.example.test/embed/abc"></iframe>',
+        allowUnsafeEmbed: true,
+      },
+    });
+    const { db } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_event_page',
+          channel: 'event_page',
+          key: 'main',
+          name: 'Main event page',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          document_id: 'cdoc_event_page',
+          schema_version: 2,
+          content_json: JSON.stringify(eventPageDocument),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        }),
+      ],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const save = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/versions',
+      payload: { contentJson: eventPageDocument },
+    });
+
+    expect(save.statusCode).toBe(403);
+    expect(save.json().message ?? save.json().error?.message).toContain('settings.write');
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/versions/cver_1/publish',
+    });
+    expect(publish.statusCode).toBe(403);
+  });
+
   it('saves event-page previews as Puck JSON, ignoring caller-supplied renderedHtml', async () => {
     const eventPageDocument = eventPageJson();
     const { db } = createContentDb({
@@ -1298,14 +1434,13 @@ describe('content routes', () => {
       provider: '@puckeditor/core',
       puckData: {
         content: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'Hero',
-            props: expect.objectContaining({ headline: 'Published page' }),
-          }),
+          expect.objectContaining({ type: 'EventHeader' }),
+          expect.objectContaining({ type: 'EventDescription' }),
+          expect.objectContaining({ type: 'Tickets' }),
         ]),
       },
-      discovery: { title: 'Published page' },
     });
+    expect(JSON.stringify(preview.json().output.puckData.content)).not.toContain('"Hero"');
     expect(preview.json().validation.valid).toBe(true);
   });
 
@@ -1316,7 +1451,11 @@ describe('content routes', () => {
       content_json: JSON.stringify(legacyEventPageJson()),
       rendered_html: '<main>legacy rendered html</main>',
       rendered_text: 'legacy rendered text',
-      validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+      validation: JSON.stringify({
+        valid: true,
+        severity: 'warning',
+        issues: [],
+      }),
     });
     const { db } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
@@ -1360,14 +1499,22 @@ describe('content routes', () => {
     });
     expect(version.rendered_html).toBeNull();
     expect(version.rendered_text).toBeNull();
-    expect(JSON.parse(String(version.validation))).toMatchObject({ valid: true });
+    expect(JSON.parse(String(version.validation))).toMatchObject({
+      valid: true,
+    });
   });
 
   it('fails closed for SMS test sends without an active verified provider route', async () => {
     const smsTransport = new TestCaptureSmsTransport();
     const smsDocument = createDefaultSmsTemplate({
-      editor: { body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.' },
-      settings: { templateKey: 'event-update', segmentLimit: 2, estimatedCostPerSegmentCents: 4 },
+      editor: {
+        body: 'Hi {{recipient.name}}, {{event.title}} starts {{event.startsAt}}.',
+      },
+      settings: {
+        templateKey: 'event-update',
+        segmentLimit: 2,
+        estimatedCostPerSegmentCents: 4,
+      },
     });
     const { db, inserted } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
@@ -1385,7 +1532,11 @@ describe('content routes', () => {
           document_id: 'cdoc_sms',
           content_json: JSON.stringify(smsDocument),
           rendered_text: smsDocument.editor.body,
-          validation: JSON.stringify({ valid: true, severity: 'info', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'info',
+            issues: [],
+          }),
         }),
       ],
       content_test_sends: [],
@@ -1436,9 +1587,15 @@ describe('content routes', () => {
         versionRow({
           id: 'cver_sms_bad',
           document_id: 'cdoc_sms',
-          content_json: JSON.stringify({ editor: { provider: 'legacy', body: 'Hi' } }),
+          content_json: JSON.stringify({
+            editor: { provider: 'legacy', body: 'Hi' },
+          }),
           rendered_text: 'Hi {{recipient.name}}',
-          validation: JSON.stringify({ valid: false, severity: 'error', issues: [] }),
+          validation: JSON.stringify({
+            valid: false,
+            severity: 'error',
+            issues: [],
+          }),
         }),
       ],
     });
@@ -1447,7 +1604,10 @@ describe('content routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/content-documents/cdoc_sms/preview',
-      payload: { versionId: 'cver_sms_bad', context: { recipient: { name: 'Ada' } } },
+      payload: {
+        versionId: 'cver_sms_bad',
+        context: { recipient: { name: 'Ada' } },
+      },
     });
 
     expect(response.statusCode).toBe(400);
@@ -1521,7 +1681,11 @@ describe('content routes', () => {
           rendered_html: '<script>alert(1)</script><main>stored html must not render</main>',
           rendered_text: 'stored text must not render',
           variables: JSON.stringify([{ key: 'buyer.name', required: false }]),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           created_by: 'usr_private',
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
@@ -1554,10 +1718,9 @@ describe('content routes', () => {
         provider: '@puckeditor/core',
         puckData: {
           content: expect.arrayContaining([
-            expect.objectContaining({
-              type: 'Hero',
-              props: expect.objectContaining({ headline: 'Published page' }),
-            }),
+            expect.objectContaining({ type: 'EventHeader' }),
+            expect.objectContaining({ type: 'EventDescription' }),
+            expect.objectContaining({ type: 'Tickets' }),
           ]),
         },
         settings: {
@@ -1663,7 +1826,11 @@ describe('content routes', () => {
           rendered_html: '<main>stored html must not render</main>',
           rendered_text: 'stored text must not render',
           variables: JSON.stringify([]),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           created_by: 'usr_private',
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
@@ -1695,15 +1862,23 @@ describe('content routes', () => {
       expect(payload.page.provider).toBe('@puckeditor/core');
       expect(
         payload.page.puckData.content.map((component: { type: string }) => component.type),
-      ).toEqual(['Hero', 'EventDetails', 'Schedule', 'Venue', 'FAQ']);
+      ).toEqual([
+        'EventHeader',
+        'EventDescription',
+        'Divider',
+        'Tickets',
+        'ResaleTickets',
+        'CheckoutCta',
+        'BrandFooter',
+      ]);
       expect(payload.page.puckData.content).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({
-            type: 'Hero',
-            props: expect.objectContaining({ headline: 'Published page' }),
-          }),
+          expect.objectContaining({ type: 'EventHeader' }),
+          expect.objectContaining({ type: 'EventDescription' }),
+          expect.objectContaining({ type: 'Tickets' }),
         ]),
       );
+      expect(JSON.stringify(payload.page.puckData.content)).not.toContain('"Hero"');
       expect(payload.version).not.toHaveProperty('renderedHtml');
       expect(JSON.stringify(payload)).not.toContain('tnt_1');
       expect(JSON.stringify(payload)).not.toContain('stored html must not render');
@@ -1767,7 +1942,11 @@ describe('content routes', () => {
           subject: 'Legacy public page',
           preview_text: 'Legacy public copy.',
           content_json: JSON.stringify(legacyContent),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
       ],
@@ -1782,16 +1961,15 @@ describe('content routes', () => {
     expect(response.statusCode).toBe(200);
     const payload = response.json();
     expect(payload.page.provider).toBe('@puckeditor/core');
-    expect(payload.page.puckData.content).toEqual([
-      expect.objectContaining({
-        type: 'Hero',
-        props: expect.objectContaining({
-          id: 'hero-legacy',
-          headline: 'Legacy public page',
-          body: 'Legacy page copy.',
-        }),
-      }),
-    ]);
+    expect(payload.page.puckData.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'EventHeader' }),
+        expect.objectContaining({ type: 'EventDescription' }),
+        expect.objectContaining({ type: 'Tickets' }),
+      ]),
+    );
+    expect(JSON.stringify(payload.page.puckData.content)).not.toContain('hero-legacy');
+    expect(JSON.stringify(payload.page.puckData.content)).not.toContain('Legacy public page');
     expect(payload.page.puckData.root.props).toEqual(
       expect.objectContaining({
         title: 'Legacy public fallback title',
@@ -1812,15 +1990,21 @@ describe('content routes', () => {
       editor: {
         provider: '@puckeditor/core',
         data: {
-          content: [
-            expect.objectContaining({
-              type: 'Hero',
-              props: expect.objectContaining({ headline: 'Legacy public page' }),
-            }),
-          ],
+          content: expect.arrayContaining([
+            expect.objectContaining({ type: 'EventHeader' }),
+            expect.objectContaining({ type: 'EventDescription' }),
+            expect.objectContaining({ type: 'Tickets' }),
+          ]),
         },
       },
     });
+    expect(JSON.parse(repaired.content_json).editor.data.content).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          props: expect.objectContaining({ id: 'hero-legacy' }),
+        }),
+      ]),
+    );
     await app.close();
   });
 
@@ -1856,7 +2040,11 @@ describe('content routes', () => {
       rendered_html: '<main>stored html must not render</main>',
       rendered_text: 'stored text must not render',
       variables: JSON.stringify([]),
-      validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+      validation: JSON.stringify({
+        valid: true,
+        severity: 'warning',
+        issues: [],
+      }),
       created_by: 'usr_private',
       published_at: new Date('2026-06-02T00:00:00.000Z'),
     });
@@ -1885,7 +2073,7 @@ describe('content routes', () => {
     const updatedPageDocument = eventPageJson({
       eventId: 'evt_render_cache',
       eventTitle: 'Updated headline',
-      eventDescription: 'Preview copy',
+      eventDescription: 'Updated preview copy',
     });
     version.content_json = JSON.stringify(updatedPageDocument);
     const second = await app.inject({
@@ -1904,21 +2092,24 @@ describe('content routes', () => {
     expect(
       first
         .json()
-        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero')
-        .props.headline,
-    ).toBe('Original headline');
+        .page.puckData.content.find(
+          (component: { type: string }) => component.type === 'EventDescription',
+        ).props.body,
+    ).toBe('Preview copy');
     expect(
       second
         .json()
-        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero')
-        .props.headline,
-    ).toBe('Original headline');
+        .page.puckData.content.find(
+          (component: { type: string }) => component.type === 'EventDescription',
+        ).props.body,
+    ).toBe('Preview copy');
     expect(
       third
         .json()
-        .page.puckData.content.find((component: { type: string }) => component.type === 'Hero')
-        .props.headline,
-    ).toBe('Updated headline');
+        .page.puckData.content.find(
+          (component: { type: string }) => component.type === 'EventDescription',
+        ).props.body,
+    ).toBe('Updated preview copy');
     await app.close();
   });
 
@@ -1992,7 +2183,11 @@ describe('content routes', () => {
           version_number: 1,
           status: 'published',
           content_json: JSON.stringify(eventPageJson()),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
       ],
@@ -2019,10 +2214,9 @@ describe('content routes', () => {
           provider: '@puckeditor/core',
           puckData: {
             content: expect.arrayContaining([
-              expect.objectContaining({
-                type: 'Hero',
-                props: expect.objectContaining({ headline: 'Published page' }),
-              }),
+              expect.objectContaining({ type: 'EventHeader' }),
+              expect.objectContaining({ type: 'EventDescription' }),
+              expect.objectContaining({ type: 'Tickets' }),
             ]),
           },
         },
@@ -2093,7 +2287,11 @@ describe('content routes', () => {
           ),
           rendered_html: '<main>private draft must not leak</main>',
           rendered_text: 'private draft must not leak',
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
         versionRow({
@@ -2109,7 +2307,11 @@ describe('content routes', () => {
           ),
           rendered_html: '<main>stale draft must not leak</main>',
           rendered_text: 'stale draft must not leak',
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           published_at: null,
         }),
       ],
@@ -2188,7 +2390,11 @@ describe('content routes', () => {
               venue: { name: 'The Salt Shed', city: 'Chicago' },
             }),
           ),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
       ],
@@ -2333,14 +2539,21 @@ describe('content routes', () => {
           document_id: 'cdoc_public',
           status: 'published',
           content_json: JSON.stringify({ privateEditorState: true }),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
       ],
     });
     const app = await setupPublicContentApp(db);
 
-    const response = await app.inject({ method: 'GET', url: '/public/events/evt_1/page' });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/page',
+    });
 
     expect(response.statusCode).toBe(400);
     expect(response.json().message ?? response.json().error?.message).toContain(

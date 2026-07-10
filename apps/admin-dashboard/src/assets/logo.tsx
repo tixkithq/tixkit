@@ -5,22 +5,26 @@ export function Logo({ className, ...props }: SVGProps<SVGSVGElement>) {
   return (
     <svg
       id="tixkit-logo"
-      viewBox="0 0 24 24"
+      viewBox="0 0 512 512"
       xmlns="http://www.w3.org/2000/svg"
-      height="24"
-      width="24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
       className={cn('size-6', className)}
       {...props}
     >
       <title>Tixkit</title>
-      <path d="M2 9a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3z" />
-      <path d="M2 12h4M18 12h4M9 9v6M15 9v6" />
-      <path d="M9 9a3 3 0 0 0 0 6M15 9a3 3 0 0 1 0 6" />
+      <defs>
+        <linearGradient id="tixkit-logo-indigo" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#6366f1" />
+          <stop offset="1" stopColor="#4338ca" />
+        </linearGradient>
+      </defs>
+      <path
+        fill="#06233f"
+        d="M76 44h276c46 0 84 38 84 84 0 31-17 59-44 74l-62 35h-95l109-62c15-9 25-25 25-43 0-11-9-20-20-20H164c-29 0-53 24-53 53v182c0 29 24 53 53 53h92l69 68H164c-67 0-121-54-121-121V165C43 98 97 44 164 44Z"
+      />
+      <path
+        fill="url(#tixkit-logo-indigo)"
+        d="M436 111v87l-91 58 91 58v111c0 24-28 37-46 21L241 307c-30-28-30-74 0-102L390 66c18-16 46-3 46 21v24Zm-70 62-86 80c-2 2-2 4 0 6l86 80v-33l-78-50 78-50v-33Z"
+      />
     </svg>
   );
 }

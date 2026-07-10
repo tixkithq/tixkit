@@ -152,11 +152,11 @@ function puckDataFixture(): EventPagePuckData {
     root: { props: {} },
     content: [
       {
-        type: 'Hero',
+        type: 'EventDescription',
         props: {
-          id: 'puck-hero',
+          id: 'puck-description',
           eyebrow: 'Featured night',
-          headline: 'Rendered from Puck data',
+          title: 'Rendered from Puck data',
           body: 'Puck owns this content block.',
         },
       },

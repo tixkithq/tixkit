@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ValidationError } from '@tixkit/domain';
 import {
   API_JSON_BODY_LIMIT_BYTES,
@@ -16,6 +16,7 @@ import {
   serializeOrder,
 } from '../http/contracts.js';
 import { MAX_OFFLINE_SYNC_SCANS, OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES } from '../http/schemas.js';
+import type { AppContext } from '../app.js';
 
 describe('API contract helpers', () => {
   it('parses cursor pagination with documented defaults and max limit', () => {
@@ -50,17 +51,21 @@ describe('API contract helpers', () => {
     });
   });
 
-  it('derives durable brand logo URLs from logo artifact IDs', () => {
+  it('derives durable brand wordmark and icon URLs from artifact IDs', () => {
     expect(
       serializeBrandTheme({
         primaryColor: '#222222',
         logoArtifactId: 'upl_logo',
         logoUrl: 'https://s3.test/logo.png?X-Amz-Signature=expired',
+        iconArtifactId: 'upl_icon',
+        iconUrl: 'https://s3.test/icon.png?X-Amz-Signature=expired',
       }),
     ).toEqual({
       primaryColor: '#222222',
       logoArtifactId: 'upl_logo',
       logoUrl: '/v1/public/brand-logos/upl_logo',
+      iconArtifactId: 'upl_icon',
+      iconUrl: '/v1/public/brand-logos/upl_icon',
     });
   });
 
@@ -376,5 +381,31 @@ describe('API error envelope', () => {
     expect(firstNormal.statusCode).toBe(200);
     expect(secondNormal.statusCode).toBe(429);
     await app.close();
+  });
+
+  it('reports readiness from a bounded database probe', async () => {
+    const readyApp = Fastify({ logger: false });
+    const execute = vi.fn(async () => []);
+    const query = { select: () => query, limit: () => query, execute };
+    readyApp.decorate('context', {
+      db: { selectFrom: () => query },
+    } as unknown as AppContext);
+    registerHealthRoute(readyApp);
+    expect((await readyApp.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+    await readyApp.close();
+
+    const unreadyApp = Fastify({ logger: false });
+    const failedQuery = {
+      select: () => failedQuery,
+      limit: () => failedQuery,
+      execute: vi.fn(async () => Promise.reject(new Error('database unavailable'))),
+    };
+    unreadyApp.decorate('context', {
+      db: { selectFrom: () => failedQuery },
+    } as unknown as AppContext);
+    registerHealthRoute(unreadyApp);
+    expect((await unreadyApp.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(503);
+    await unreadyApp.close();
   });
 });

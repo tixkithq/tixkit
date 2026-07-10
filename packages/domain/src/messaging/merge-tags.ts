@@ -39,6 +39,7 @@ export type MergeTagEventContext = {
 
 export type MergeTagBrandContext = {
   name?: string;
+  logoUrl?: string;
   supportUrl?: string;
   termsUrl?: string;
   privacyUrl?: string;
@@ -196,6 +197,11 @@ export const MERGE_TAG_REGISTRY: readonly MergeTagVariable[] = [
     example: 'A full night of music and access.',
   },
   { key: 'brand.name', description: 'Brand/organizer name', example: 'Acme Events' },
+  {
+    key: 'brand.logoUrl',
+    description: 'Public brand logo URL',
+    example: 'https://assets.example.test/brand/logo.png',
+  },
   {
     key: 'brand.supportUrl',
     description: 'Brand support URL',
@@ -486,6 +492,8 @@ function resolveTag(key: string, context: MergeTagContext): string | undefined {
       return context.event?.description;
     case 'brand.name':
       return context.brand?.name;
+    case 'brand.logoUrl':
+      return context.brand?.logoUrl;
     case 'brand.supportUrl':
       return context.brand?.supportUrl;
     case 'brand.termsUrl':

@@ -15,7 +15,7 @@ Rules:
   - Weak: `graphify query "checkout flow"`, `graphify query "orders"`, or `graphify query "observability workflows metrics"` because this repo has many docs and duplicate labels such as `index.ts`, `page.tsx`, `Order`, `routes`, `config`, `types`, and `Page()`.
 - If the first query starts from generic docs or wrong nodes, immediately rerun a narrower query. Use `rg` only to discover exact anchors, then rerun Graphify with:
   - package/app path prefixes: `packages/api`, `packages/domain`, `packages/db`, `packages/workflows`, `packages/shared`, `apps/admin-dashboard`, `apps/checkout`
-  - concrete file paths: `packages/api/src/routes/modules/checkout.ts`, `apps/admin-dashboard/src/features/events/event-detail-view.tsx`, `apps/admin-dashboard/src/features/check-in/scan-view.tsx`
+  - concrete file paths: `packages/api/src/routes/modules/checkout.ts`, `apps/admin-dashboard/src/features/events/event-detail-view.tsx`, `apps/admin-dashboard/src/features/kiosk/check-in-console.tsx`
   - exported symbols from source or graph output: route builders, repositories, activities, workflows, domain types, React components, schemas
   - runtime surfaces: HTTP routes, query keys, database table names, Temporal workflow/activity names, provider operation names
 - For implementation traces, run both directions when useful: an anchored `graphify query` for the local cluster, then `graphify path "<UI/component/symbol>" "<API/domain/repository symbol>"` for cross-layer relationships. If `graphify path` reports ambiguity or no path, fall back to targeted `graphify query` calls on each endpoint and compare the source files manually.

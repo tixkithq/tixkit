@@ -57,6 +57,10 @@
     "./developer": {
       "types": "./dist/developer/index.d.ts",
       "import": "./dist/developer/index.js"
+    },
+    "./eligibility": {
+      "types": "./dist/eligibility/index.d.ts",
+      "import": "./dist/eligibility/index.js"
     }
   },
   "scripts": {

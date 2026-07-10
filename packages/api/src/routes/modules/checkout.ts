@@ -26,6 +26,7 @@ import type { CheckoutState } from '@tixkit/workflows';
 import { assertCompletedUploadArtifacts } from '../../services/uploads.js';
 import type {
   CreateCheckoutSessionInput,
+  BuyerInfo,
   CartInput,
   AccessRuleRecord,
   DiscountCode,
@@ -45,6 +46,8 @@ import {
   normalizeQuestionAnswers,
   validateBoxOfficeOrder,
   BoxOfficeError,
+  evaluateDateOfBirthEligibility,
+  requiresDateOfBirthVerification,
 } from '@tixkit/domain';
 import type { Question } from '@tixkit/domain';
 import {
@@ -67,10 +70,10 @@ import { hashWaitlistClaimToken } from './waitlist.js';
 
 function requireIdempotencyKey(request: FastifyRequest): string {
   const key = request.headers['idempotency-key'];
-  if (!key || typeof key !== 'string') {
+  if (typeof key !== 'string' || key.trim() === '') {
     throw new ValidationError('Idempotency-Key header is required for this mutation');
   }
-  return key;
+  return key.trim();
 }
 
 function requireCheckoutSessionToken(request: FastifyRequest): string {
@@ -349,7 +352,7 @@ function cartItemWithoutAttendeeFields(
   };
 }
 
-function normalizeAttendeeFieldsForCartItems(
+export function normalizeAttendeeFieldsForCartItems(
   items: CartInput['items'],
   eventQuestions: Question[],
   answeredAt: string,
@@ -359,25 +362,35 @@ function normalizeAttendeeFieldsForCartItems(
     if (!item.ticketTypeId) return item;
 
     const itemQuestions = applicableQuestions(eventQuestions, 'attendee', item.ticketTypeId);
-    if (itemQuestions.length === 0) {
-      return cartItemWithoutAttendeeFields(item);
-    }
-
-    const fields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
-      normalizeQuestionAnswers(
-        itemQuestions,
-        item.attendeeFields?.[attendeeIndex] ?? {},
-        answeredAt,
-      ),
+    const customFields = Array.from({ length: item.quantity }, (_, attendeeIndex) =>
+      itemQuestions.length > 0
+        ? normalizeQuestionAnswers(
+            itemQuestions,
+            item.attendeeFields?.[attendeeIndex] ?? {},
+            answeredAt,
+          )
+        : {},
     );
+    const fields = customFields.map((answers, attendeeIndex) => {
+      const submitted = item.attendeeFields?.[attendeeIndex] ?? {};
+      const systemFields = Object.fromEntries(
+        ['firstName', 'lastName', 'email', 'phone', 'dateOfBirth'].flatMap((field) => {
+          const value = submitted[field];
+          return typeof value === 'string' && value.trim() ? [[field, value.trim()]] : [];
+        }),
+      );
+      return { ...answers, ...systemFields };
+    });
     if (!fields.some((fieldSet) => Object.keys(fieldSet).length > 0)) {
       return cartItemWithoutAttendeeFields(item);
     }
 
-    attendeeFieldsByTicketType[item.ticketTypeId] = [
-      ...(attendeeFieldsByTicketType[item.ticketTypeId] ?? []),
-      ...fields,
-    ];
+    if (customFields.some((fieldSet) => Object.keys(fieldSet).length > 0)) {
+      attendeeFieldsByTicketType[item.ticketTypeId] = [
+        ...(attendeeFieldsByTicketType[item.ticketTypeId] ?? []),
+        ...customFields,
+      ];
+    }
     return { ...item, attendeeFields: fields };
   });
 
@@ -666,15 +679,119 @@ function assertWaitlistOfferUsable(
   }
 }
 
-function normalizeCheckoutBuyer(
-  buyer: CreateCheckoutSessionInput['buyer'],
-): CreateCheckoutSessionInput['buyer'] | undefined {
+function normalizeCheckoutBuyer(buyer: BuyerInfo | undefined): BuyerInfo | undefined {
   if (!buyer) return undefined;
   const normalizedEmail = buyer.email?.trim().toLowerCase();
   return {
     ...buyer,
     ...(normalizedEmail ? { email: normalizedEmail } : {}),
   };
+}
+
+type AgeEligibilityEvent = {
+  starts_at: Date | string;
+  timezone: string;
+  minimum_age: number | null;
+};
+
+type AgeEligibilityOccurrence = {
+  id: string;
+  starts_at: Date | string;
+  timezone: string;
+};
+
+function assertEligibleDateOfBirth(input: {
+  label: string;
+  dateOfBirth: unknown;
+  event: AgeEligibilityEvent;
+  occurrence?: AgeEligibilityOccurrence;
+}): void {
+  const result = evaluateDateOfBirthEligibility({
+    dateOfBirth: typeof input.dateOfBirth === 'string' ? input.dateOfBirth : undefined,
+    minimumAge: input.event.minimum_age,
+    participationAt: input.occurrence?.starts_at ?? input.event.starts_at,
+    timezone: input.occurrence?.timezone ?? input.event.timezone,
+  });
+  if (!result.eligible) {
+    throw new ValidationError(`${input.label}: ${result.message}`, {
+      code: result.code,
+      field: 'dateOfBirth',
+    });
+  }
+}
+
+export function assertOrderDateOfBirthEligibility(input: {
+  event: AgeEligibilityEvent;
+  buyer: { dateOfBirth?: string };
+  items: Array<{
+    ticketTypeId?: string;
+    occurrenceId?: string;
+    quantity: number;
+    attendeeFields?: Record<string, unknown>[];
+  }>;
+  ticketTypeOccurrences: Map<string, string | null>;
+  occurrences: Map<string, AgeEligibilityOccurrence>;
+}): void {
+  if (!requiresDateOfBirthVerification(input.event.minimum_age)) return;
+
+  const targetOccurrenceIds = input.items.map(
+    (item) => item.occurrenceId ?? input.ticketTypeOccurrences.get(item.ticketTypeId ?? '') ?? null,
+  );
+  const buyerTargets = targetOccurrenceIds.length > 0 ? targetOccurrenceIds : [null];
+  for (const occurrenceId of buyerTargets) {
+    assertEligibleDateOfBirth({
+      label: 'Buyer date of birth',
+      dateOfBirth: input.buyer.dateOfBirth,
+      event: input.event,
+      occurrence: occurrenceId ? input.occurrences.get(occurrenceId) : undefined,
+    });
+  }
+
+  for (const [itemIndex, item] of input.items.entries()) {
+    if (!item.ticketTypeId) continue;
+    if (!item.attendeeFields || item.attendeeFields.length !== item.quantity) {
+      throw new ValidationError(
+        `Ticket item ${itemIndex + 1} requires date of birth details for all ${item.quantity} attendees`,
+      );
+    }
+    const occurrenceId = targetOccurrenceIds[itemIndex];
+    for (let attendeeIndex = 0; attendeeIndex < item.quantity; attendeeIndex++) {
+      assertEligibleDateOfBirth({
+        label: `Ticket item ${itemIndex + 1}, attendee ${attendeeIndex + 1}`,
+        dateOfBirth: item.attendeeFields[attendeeIndex]?.dateOfBirth,
+        event: input.event,
+        occurrence: occurrenceId ? input.occurrences.get(occurrenceId) : undefined,
+      });
+    }
+  }
+}
+
+async function assertStoredCheckoutDateOfBirthEligibility(input: {
+  db: Database;
+  event: AgeEligibilityEvent & { id: string };
+  buyer: { dateOfBirth?: string };
+  cart: {
+    items?: Array<{
+      ticketTypeId?: string;
+      occurrenceId?: string;
+      quantity: number;
+      attendeeFields?: Record<string, unknown>[];
+    }>;
+  };
+}): Promise<void> {
+  const [ticketTypes, occurrences] = await Promise.all([
+    new TicketTypeRepository(input.db).findByEvent(input.event.id),
+    new EventOccurrenceRepository(input.db).findByEvent(input.event.id),
+  ]);
+  assertOrderDateOfBirthEligibility({
+    event: input.event,
+    buyer: input.buyer,
+    items: input.cart.items ?? [],
+    ticketTypeOccurrences: new Map(
+      ticketTypes.map((ticketType) => [ticketType.id, ticketType.event_occurrence_id ?? null]),
+    ),
+    occurrences: new Map(occurrences.map((occurrence) => [occurrence.id, occurrence])),
+  });
 }
 
 async function releaseExpiredWaitlistReservation(input: {
@@ -957,7 +1074,8 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: authenticateAdmin },
     async (request, reply) => {
       const principal = request.principal!;
-      ClerkAuthService.requirePermission(principal, 'orders.write');
+      // Prefer dedicated box_office.write; keep orders.write for backward compatibility.
+      ClerkAuthService.requireAnyPermission(principal, ['box_office.write', 'orders.write']);
       const { eventId } = request.params as { eventId: string };
       const body = parseBody(createBoxOfficeOrderSchema, request.body);
       const idempotencyKey = requireIdempotencyKey(request);
@@ -994,6 +1112,17 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       if (boxOfficeSettings.requireBuyerEmail && !body.buyer?.email) {
         throw new ValidationError('Buyer email is required for box-office sales');
       }
+      if (requiresDateOfBirthVerification(event.minimum_age) && !body.buyer?.dateOfBirth) {
+        throw new ValidationError('Buyer date of birth is required for box-office sales');
+      }
+      if (!requiresDateOfBirthVerification(event.minimum_age)) {
+        delete body.buyer?.dateOfBirth;
+        for (const item of body.items) {
+          for (const attendeeFields of item.attendeeFields ?? []) {
+            delete attendeeFields.dateOfBirth;
+          }
+        }
+      }
 
       try {
         validateBoxOfficeOrder({
@@ -1028,18 +1157,22 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           const ttRepo = new TicketTypeRepository(db);
           const ticketTypes = await ttRepo.findByEvent(eventId);
           const ttById = new Map(ticketTypes.map((ticketType) => [ticketType.id, ticketType]));
-          const occurrenceIds = [
-            ...new Set(
-              body.items.map((item) => item.occurrenceId).filter((id): id is string => Boolean(id)),
-            ),
-          ];
-          const occurrenceRows =
-            occurrenceIds.length > 0
-              ? await new EventOccurrenceRepository(db).findByEvent(eventId)
-              : [];
+          const occurrenceRows = await new EventOccurrenceRepository(db).findByEvent(eventId);
           const occurrenceById = new Map(
             occurrenceRows.map((occurrence) => [occurrence.id, occurrence]),
           );
+          assertOrderDateOfBirthEligibility({
+            event,
+            buyer: body.buyer!,
+            items: body.items,
+            ticketTypeOccurrences: new Map(
+              ticketTypes.map((ticketType) => [
+                ticketType.id,
+                ticketType.event_occurrence_id ?? null,
+              ]),
+            ),
+            occurrences: occurrenceById,
+          });
           const questionRows = (await db
             .selectFrom('questions')
             .selectAll()
@@ -1280,6 +1413,9 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     if (body.waitlistClaimToken && !checkoutBuyer?.email) {
       throw new ValidationError('Waitlist offer requires the checkout buyer email');
     }
+    if (!checkoutBuyer?.email) {
+      throw new ValidationError('Buyer email is required for checkout');
+    }
 
     const eventRepo = new EventRepository(db);
     const event = await eventRepo.findById(body.eventId);
@@ -1289,6 +1425,18 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     }
     if (event.visibility === 'private') {
       throw new NotFoundError('Event', body.eventId);
+    }
+    const requiresDateOfBirth = requiresDateOfBirthVerification(event.minimum_age);
+    if (requiresDateOfBirth && !checkoutBuyer.dateOfBirth) {
+      throw new ValidationError('Buyer date of birth is required for checkout');
+    }
+    if (!requiresDateOfBirth) {
+      delete checkoutBuyer.dateOfBirth;
+      for (const item of body.items) {
+        for (const attendeeFields of item.attendeeFields ?? []) {
+          delete attendeeFields.dateOfBirth;
+        }
+      }
     }
 
     const result = await withIdempotency(
@@ -1336,6 +1484,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               'tickets.order_id as ticket_order_id',
               'tickets.status as ticket_status',
               'tickets.ticket_type_id as ticket_type_id',
+              'tickets.event_occurrence_id as event_occurrence_id',
               'ticket_types.name as ticket_type_name',
               'seller_order.buyer_email as seller_buyer_email',
             ])
@@ -1367,6 +1516,17 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             new Date(listing.reserved_until as Date | string) > now
           ) {
             throw new ValidationError(`Ticket listing ${listingId} is already reserved`);
+          }
+          const resaleOccurrence = listing.event_occurrence_id
+            ? await new EventOccurrenceRepository(db).findById(listing.event_occurrence_id)
+            : undefined;
+          if (requiresDateOfBirthVerification(event.minimum_age)) {
+            assertEligibleDateOfBirth({
+              label: 'Buyer date of birth',
+              dateOfBirth: checkoutBuyer?.dateOfBirth,
+              event,
+              occurrence: resaleOccurrence,
+            });
           }
           const buyerEmail = checkoutBuyer?.email;
           if (
@@ -1430,7 +1590,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             expiresAt: reservedUntil.toISOString(),
           };
           const cart: CartInput = {
-            items: [{ resaleListingId: listingId, quantity: 1 }],
+            items: [
+              {
+                resaleListingId: listingId,
+                occurrenceId: listing.event_occurrence_id ?? undefined,
+                quantity: 1,
+              },
+            ],
             affiliateCode: body.affiliateCode,
             trackingId: body.trackingId,
             buyerFields,
@@ -1495,15 +1661,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
         ]);
         const ttById = new Map(ticketTypes.map((t) => [t.id, t]));
         const productById = new Map(products.map((product) => [product.id, product]));
-        const occurrenceIds = [
-          ...new Set(
-            body.items.map((item) => item.occurrenceId).filter((id): id is string => Boolean(id)),
-          ),
-        ];
-        const occurrenceRows =
-          occurrenceIds.length > 0
-            ? await new EventOccurrenceRepository(db).findByEvent(body.eventId)
-            : [];
+        const occurrenceRows = await new EventOccurrenceRepository(db).findByEvent(body.eventId);
         const occurrenceById = new Map(
           occurrenceRows.map((occurrence) => [occurrence.id, occurrence]),
         );
@@ -1524,6 +1682,18 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             );
           }
         }
+        assertOrderDateOfBirthEligibility({
+          event,
+          buyer: checkoutBuyer!,
+          items: body.items,
+          ticketTypeOccurrences: new Map(
+            ticketTypes.map((ticketType) => [
+              ticketType.id,
+              ticketType.event_occurrence_id ?? null,
+            ]),
+          ),
+          occurrences: occurrenceById,
+        });
         const waitlistEntry = body.waitlistClaimToken
           ? await db
               .selectFrom('waitlist_entries')
@@ -2117,10 +2287,22 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       },
     );
     if (updateData.buyer) {
-      const cart = parseJsonValue<{ waitlistEntryId?: string }>(session.cart, {});
-      const nextBuyer = normalizeCheckoutBuyer(
-        updateData.buyer as CreateCheckoutSessionInput['buyer'],
-      );
+      const cart = parseJsonValue<{
+        waitlistEntryId?: string;
+        items?: Array<{
+          ticketTypeId?: string;
+          occurrenceId?: string;
+          quantity: number;
+          attendeeFields?: Record<string, unknown>[];
+        }>;
+      }>(session.cart, {});
+      const storedBuyer = parseJsonValue<CreateCheckoutSessionInput['buyer']>(session.buyer, {
+        email: '',
+      });
+      const nextBuyer = normalizeCheckoutBuyer({
+        ...storedBuyer,
+        ...(updateData.buyer as Partial<CreateCheckoutSessionInput['buyer']>),
+      });
       if (cart.waitlistEntryId) {
         if (!nextBuyer?.email) {
           throw new ValidationError('Waitlist checkout buyer email cannot be removed');
@@ -2136,6 +2318,17 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           throw new ValidationError('Waitlist checkout buyer email cannot be changed');
         }
       }
+      const event = await new EventRepository(db).findById(session.event_id);
+      if (!event) throw new NotFoundError('Event', session.event_id);
+      if (!requiresDateOfBirthVerification(event.minimum_age)) {
+        delete nextBuyer?.dateOfBirth;
+      }
+      await assertStoredCheckoutDateOfBirthEligibility({
+        db,
+        event,
+        buyer: nextBuyer ?? {},
+        cart,
+      });
       updateData.buyer = JSON.stringify(nextBuyer ?? {});
     }
     const updated = await repo.update(sessionId, updateData);
@@ -2162,6 +2355,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       if (!order) throw new NotFoundError('Order', session.order_id!);
       return reply.status(200).send({ order, sessionId, status: 'completed' });
     }
+
+    await assertStoredCheckoutDateOfBirthEligibility({
+      db,
+      event,
+      buyer: parseJsonValue<{ dateOfBirth?: string }>(session.buyer, {}),
+      cart: parseJsonValue(session.cart, {}),
+    });
 
     if (event.status !== 'published') {
       await cancelCheckoutSessionForUnavailableEvent({

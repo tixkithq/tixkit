@@ -1,16 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createDefaultEmailTemplateForKey,
-  validateEmailTemplate,
-} from '@tixkit/content-email';
+import { createDefaultEmailTemplateForKey, validateEmailTemplate } from '@tixkit/content-email';
 import {
   applyMergeTagPreviewsToEditorContent,
   mergeTagCanvasAttributeValue,
   mergeTagKeyFromCanvasAttributeValue,
 } from '../email-editor-extensions';
-import { withEditorExport } from './render-utils';
+import { makeLegacyBrandLogoEditable, withEditorExport } from './render-utils';
 
 describe('email merge-tag canvas attribute previews', () => {
+  it('removes only the legacy logo constraints that blocked size and alignment editing', () => {
+    const legacy =
+      '<img src="{{brand.logoUrl}}" alt="Brand logo" width="160" style="display: block; height: auto; margin: 0 auto; max-width: 160px; width: 100%;" />';
+    const migrated = makeLegacyBrandLogoEditable(legacy);
+
+    expect(migrated).toContain('width="160"');
+    expect(migrated).toContain('style="display: inline-block; height: auto;"');
+    expect(migrated).not.toContain('max-width');
+    expect(migrated).not.toContain('width: 100%');
+    expect(
+      makeLegacyBrandLogoEditable(
+        '<img src="https://example.test/custom.png" style="width: 100%" />',
+      ),
+    ).toContain('width: 100%');
+  });
+
   it('uses http(s) destinations for URL merge tags used in href/src', () => {
     expect(mergeTagCanvasAttributeValue('brand.supportUrl')).toMatch(/^https:\/\//);
     expect(mergeTagCanvasAttributeValue('event.publicUrl')).toMatch(/^https:\/\//);
@@ -31,7 +44,7 @@ describe('withEditorExport layout preservation', () => {
   it('keeps React Email layout HTML instead of flattening to plain paragraphs', () => {
     const document = createDefaultEmailTemplateForKey('order-cancelled');
     const layoutHtml = document.editor.contentHtml;
-    expect(layoutHtml).toMatch(/background-color:\s*#dce1e4/i);
+    expect(layoutHtml).toMatch(/background-color:\s*#f6f6f6/i);
 
     const exported = withEditorExport(document, {
       // Simulate React Email getEmail() returning styled layout while JSON only has text.
@@ -59,7 +72,7 @@ describe('withEditorExport layout preservation', () => {
       },
     });
 
-    expect(exported.editor.contentHtml).toMatch(/background-color:\s*#dce1e4/i);
+    expect(exported.editor.contentHtml).toMatch(/background-color:\s*#f6f6f6/i);
     expect(exported.editor.contentHtml).toContain('href="{{brand.supportUrl}}"');
     expect(exported.editor.contentHtml).not.toBe('<p>{{event.title}}</p>');
   });
@@ -71,16 +84,44 @@ describe('withEditorExport layout preservation', () => {
       text: '',
       json: { type: 'doc', content: [] },
     });
-    expect(exported.editor.contentHtml).toMatch(/background-color:\s*#dce1e4/i);
+    expect(exported.editor.contentHtml).toMatch(/background-color:\s*#f6f6f6/i);
+  });
+
+  it('preserves intentionally empty structural layouts', () => {
+    const document = createDefaultEmailTemplateForKey('order-cancelled');
+    const layoutHtml =
+      '<table><tbody><tr><td align="right" data-id="__react-email-column"><p><br /></p></td></tr></tbody></table>';
+    const exported = withEditorExport(document, {
+      html: layoutHtml,
+      text: '',
+      json: {
+        type: 'doc',
+        content: [
+          {
+            type: 'twoColumns',
+            content: [
+              {
+                type: 'columnsColumn',
+                attrs: { align: 'right' },
+                content: [{ type: 'paragraph' }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(exported.editor.contentHtml).toContain(
+      '<td align="right" data-id="__react-email-column">',
+    );
+    expect(exported.editor.contentHtml).not.toBe(document.editor.contentHtml);
   });
 });
 
 describe('withEditorExport merge-tag canonicalize', () => {
   it('restores canvas preview hrefs so order-cancelled validates after export', () => {
     const document = createDefaultEmailTemplateForKey('order-cancelled');
-    const previewedHtml = String(
-      applyMergeTagPreviewsToEditorContent(document.editor.contentHtml),
-    );
+    const previewedHtml = String(applyMergeTagPreviewsToEditorContent(document.editor.contentHtml));
 
     expect(previewedHtml).toContain(mergeTagCanvasAttributeValue('brand.supportUrl'));
     expect(previewedHtml).toContain('data-tixkit-merge-attr-href="brand.supportUrl"');

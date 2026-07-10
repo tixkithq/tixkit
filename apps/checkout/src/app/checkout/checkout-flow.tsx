@@ -52,6 +52,12 @@ import {
 } from '@/lib/checkout-questions';
 import { trackMarketingEvent, type MarketingEventItem } from '@/lib/marketing';
 import { RefreshNotifier } from '@/components/refresh-notifier';
+import {
+  evaluateDateOfBirthEligibility,
+  maximumEligibleDateOfBirth,
+  requiresDateOfBirthVerification,
+} from '@tixkit/domain/eligibility';
+import type { PublicEventOccurrence } from '@/lib/api';
 
 type Props = {
   initialEventId: string;
@@ -150,6 +156,7 @@ export default function CheckoutFlow({
   const [sessionToken, setSessionToken] = useState(initialSessionToken);
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [availability, setAvailability] = useState<AvailabilityItem[]>([]);
+  const [occurrences, setOccurrences] = useState<PublicEventOccurrence[]>([]);
   const [resaleListing, setResaleListing] = useState<CheckoutPublicResaleListing | null>(null);
   const [questions, setQuestions] = useState<QuestionsResponse | null>(null);
   const [questionsLoading, setQuestionsLoading] = useState(false);
@@ -162,9 +169,11 @@ export default function CheckoutFlow({
     firstName: '',
     lastName: '',
     phone: '',
+    dateOfBirth: '',
   });
   const [buyerAnswers, setBuyerAnswers] = useState<AttendeeAnswers>({});
   const [attendeeAnswers, setAttendeeAnswers] = useState<AttendeeAnswers>({});
+  const [attendeeDateOfBirths, setAttendeeDateOfBirths] = useState<Record<string, string>>({});
   const [discountCode, setDiscountCode] = useState<string | undefined>(presetDiscountCode);
   // Initialize accessCode with presetDiscountCode so locked-ticket direct links
   // (e.g. ?discount=VIP&products=locked_tt) prefill the access code field.
@@ -181,6 +190,10 @@ export default function CheckoutFlow({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [buyerQuestionErrors, setBuyerQuestionErrors] = useState<Record<string, string>>({});
   const [attendeeQuestionErrors, setAttendeeQuestionErrors] = useState<Record<string, string>>({});
+  const [buyerDateOfBirthError, setBuyerDateOfBirthError] = useState<string>();
+  const [attendeeDateOfBirthErrors, setAttendeeDateOfBirthErrors] = useState<
+    Record<string, string>
+  >({});
   const [waitlistMessage, setWaitlistMessage] = useState<string | null>(null);
   const [waitlistTicketTypeIds, setWaitlistTicketTypeIds] = useState<Set<string>>(() => new Set());
   const [claimTicketTypeId, setClaimTicketTypeId] = useState<string | null>(null);
@@ -281,14 +294,16 @@ export default function CheckoutFlow({
         questions?.attendeeQuestions.filter(
           (q) => !q.ticketTypeId || q.ticketTypeId === item.ticketTypeId,
         ) ?? [];
-      if (ticketQuestions.length === 0) return item;
-
       const attendeeFields: Record<string, unknown>[] = [];
       for (let i = 0; i < item.quantity; i++) {
         const answersForAttendee = Object.fromEntries(
           ticketQuestions.map((q) => [q.id, attendeeAnswers[`${lineId}:${i}:${q.id}`]]),
         );
         const fields: Record<string, unknown> = {};
+        const dateOfBirth = attendeeDateOfBirths[`${lineId}:${i}`];
+        if (requiresDateOfBirthVerification(event?.minimumAge) && dateOfBirth) {
+          fields.dateOfBirth = dateOfBirth;
+        }
         for (const q of visibleCheckoutQuestions(ticketQuestions, answersForAttendee)) {
           const key = `${lineId}:${i}:${q.id}`;
           const answer = attendeeAnswers[key];
@@ -300,7 +315,16 @@ export default function CheckoutFlow({
       }
       return Object.assign({}, item, { attendeeFields });
     });
-  }, [visibleAvailability, quantities, donationAmounts, questions, attendeeAnswers, resaleListing]);
+  }, [
+    visibleAvailability,
+    quantities,
+    donationAmounts,
+    questions,
+    attendeeAnswers,
+    attendeeDateOfBirths,
+    event?.minimumAge,
+    resaleListing,
+  ]);
 
   const previewTotal = useMemo(
     () =>
@@ -349,14 +373,47 @@ export default function CheckoutFlow({
   function validateCart(): string | null {
     setBuyerQuestionErrors({});
     setAttendeeQuestionErrors({});
+    setBuyerDateOfBirthError(undefined);
+    setAttendeeDateOfBirthErrors({});
 
     if (!questions) {
       return questionsError ?? 'Required checkout fields are still loading. Please try again.';
     }
 
+    const defaultTarget = {
+      participationAt: event?.startsAt ?? '',
+      timezone: event?.timezone ?? 'UTC',
+    };
+    const targetForItem = (item: CartItem) => {
+      const occurrenceId =
+        item.occurrenceId ?? (item.resaleListingId ? resaleListing?.eventOccurrenceId : undefined);
+      const occurrence = occurrenceId
+        ? occurrences.find((candidate) => candidate.id === occurrenceId)
+        : undefined;
+      return occurrence
+        ? { participationAt: occurrence.startsAt, timezone: occurrence.timezone }
+        : defaultTarget;
+    };
+    if (requiresDateOfBirthVerification(event?.minimumAge)) {
+      const buyerTargets =
+        selectedItems.length > 0 ? selectedItems.map(targetForItem) : [defaultTarget];
+      for (const target of buyerTargets) {
+        const result = evaluateDateOfBirthEligibility({
+          dateOfBirth: buyer.dateOfBirth,
+          minimumAge: event?.minimumAge,
+          ...target,
+        });
+        if (!result.eligible) {
+          setBuyerDateOfBirthError(result.message);
+          return result.message;
+        }
+      }
+    }
+
     for (const item of selectedItems) {
       if (!item.ticketTypeId) continue;
       const lineId = cartItemId(item);
+      const target = targetForItem(item);
       const ticket = visibleAvailability.find((t) => availabilityItemId(t) === lineId);
       if (!ticket) continue;
       if (item.quantity > 0 && item.quantity < ticket.minPerOrder) {
@@ -366,6 +423,21 @@ export default function CheckoutFlow({
         const amount = donationAmounts[lineId] ?? item.unitAmountCents ?? 0;
         if (amount < (ticket.minimumPriceCents ?? 0)) {
           return `Donation for ${ticket.name} must be at least ${formatCurrency(ticket.minimumPriceCents ?? 0, ticket.currency)}.`;
+        }
+      }
+      if (requiresDateOfBirthVerification(event?.minimumAge)) {
+        for (let index = 0; index < item.quantity; index++) {
+          const key = `${lineId}:${index}`;
+          const result = evaluateDateOfBirthEligibility({
+            dateOfBirth: attendeeDateOfBirths[key],
+            minimumAge: event?.minimumAge,
+            ...target,
+          });
+          if (!result.eligible) {
+            const message = `${ticket.name} attendee ${index + 1}: ${result.message}`;
+            setAttendeeDateOfBirthErrors({ [key]: message });
+            return message;
+          }
         }
       }
     }
@@ -537,6 +609,7 @@ export default function CheckoutFlow({
           | undefined
           | null;
         let loadedQuestions: Awaited<ReturnType<typeof publicApi.getQuestions>> | null = null;
+        let loadedOccurrences: PublicEventOccurrence[] = [];
 
         try {
           const bootstrap = await publicApi.getCheckoutBootstrap(eventId, controller.signal, {
@@ -547,15 +620,20 @@ export default function CheckoutFlow({
           loadedAvailability = bootstrap.availability;
           selectedResaleListing = bootstrap.resaleListing ?? undefined;
           loadedQuestions = bootstrap.questions;
+          loadedOccurrences = bootstrap.occurrences ?? [];
         } catch (bootstrapError) {
           if (controller.signal.aborted) throw bootstrapError;
-          [loadedEvent, loadedAvailability, selectedResaleListing] = await Promise.all([
-            publicApi.getEvent(eventId, controller.signal),
-            publicApi.getAvailability(eventId, controller.signal, productFilterParam),
-            resaleListingId
-              ? findPublicResaleListing(eventId, resaleListingId, controller.signal)
-              : Promise.resolve(undefined),
-          ]);
+          [loadedEvent, loadedAvailability, selectedResaleListing, loadedOccurrences] =
+            await Promise.all([
+              publicApi.getEvent(eventId, controller.signal),
+              publicApi.getAvailability(eventId, controller.signal, productFilterParam),
+              resaleListingId
+                ? findPublicResaleListing(eventId, resaleListingId, controller.signal)
+                : Promise.resolve(undefined),
+              typeof publicApi.getOccurrences === 'function'
+                ? publicApi.getOccurrences(eventId, controller.signal)
+                : Promise.resolve([]),
+            ]);
         }
 
         if (cancelled) return;
@@ -568,6 +646,7 @@ export default function CheckoutFlow({
         }
         setEvent(loadedEvent);
         setAvailability(loadedAvailability);
+        setOccurrences(loadedOccurrences);
         setResaleListing(selectedResaleListing ?? null);
         setQuantities((current) => {
           const initialPrefilledItems = didApplyPrefilledItemsRef.current ? [] : prefilledItems;
@@ -953,6 +1032,36 @@ export default function CheckoutFlow({
   const venueName = event?.venue?.name;
   const isFreeOrder = session?.quote.totalCents === 0;
 
+  const buyerParticipationTarget = useMemo(() => {
+    const targets = selectedItems.map((item) => {
+      const occurrenceId =
+        item.occurrenceId ?? (item.resaleListingId ? resaleListing?.eventOccurrenceId : undefined);
+      const occurrence = occurrenceId
+        ? occurrences.find((candidate) => candidate.id === occurrenceId)
+        : undefined;
+      return occurrence
+        ? { participationAt: occurrence.startsAt, timezone: occurrence.timezone }
+        : { participationAt: event?.startsAt ?? '', timezone: event?.timezone ?? 'UTC' };
+    });
+    const fallback = {
+      participationAt: event?.startsAt ?? '',
+      timezone: event?.timezone ?? 'UTC',
+    };
+    return (targets.length > 0 ? targets : [fallback]).reduce((strictest, candidate) => {
+      const candidateMax = maximumEligibleDateOfBirth({
+        participationAt: candidate.participationAt,
+        timezone: candidate.timezone,
+        minimumAge: event?.minimumAge,
+      });
+      const strictestMax = maximumEligibleDateOfBirth({
+        participationAt: strictest.participationAt,
+        timezone: strictest.timezone,
+        minimumAge: event?.minimumAge,
+      });
+      return candidateMax && (!strictestMax || candidateMax < strictestMax) ? candidate : strictest;
+    });
+  }, [event, occurrences, resaleListing, selectedItems]);
+
   // Build attendee question groups for the AttendeeForm.
   const attendeeQuestionGroups = useMemo(() => {
     if (!questions) return [];
@@ -963,16 +1072,21 @@ export default function CheckoutFlow({
         const itemQuestions = questions.attendeeQuestions.filter(
           (q) => !q.ticketTypeId || q.ticketTypeId === item.ticketTypeId,
         );
+        const occurrence = item.occurrenceId
+          ? occurrences.find((candidate) => candidate.id === item.occurrenceId)
+          : undefined;
         return {
           lineId: cartItemId(item),
           ticketTypeId: item.ticketTypeId,
           ticketName: ticket?.name ?? 'Ticket',
           quantity: item.quantity,
           questions: itemQuestions,
+          participationAt: occurrence?.startsAt ?? event?.startsAt ?? '',
+          timezone: occurrence?.timezone ?? event?.timezone ?? 'UTC',
         };
       })
-      .filter((g) => g.questions.length > 0);
-  }, [questions, selectedItems, visibleAvailability]);
+      .filter((group) => group.quantity > 0);
+  }, [event, occurrences, questions, selectedItems, visibleAvailability]);
 
   if (initialLoading) {
     return (
@@ -1184,6 +1298,10 @@ export default function CheckoutFlow({
                       onChange={setBuyer}
                       disabled={loading && phase === 'confirm'}
                       emailError={emailError}
+                      buyerDateOfBirthError={buyerDateOfBirthError}
+                      minimumAge={event?.minimumAge}
+                      participationAt={buyerParticipationTarget.participationAt}
+                      timezone={buyerParticipationTarget.timezone}
                       eventId={eventId}
                       buyerQuestions={questions.buyerQuestions}
                       buyerAnswers={buyerAnswers}
@@ -1195,6 +1313,12 @@ export default function CheckoutFlow({
                       attendeeQuestionGroups={attendeeQuestionGroups}
                       attendeeAnswers={attendeeAnswers}
                       attendeeQuestionErrors={attendeeQuestionErrors}
+                      attendeeDateOfBirths={attendeeDateOfBirths}
+                      attendeeDateOfBirthErrors={attendeeDateOfBirthErrors}
+                      onAttendeeDateOfBirthsChange={(values) => {
+                        setAttendeeDateOfBirths(values);
+                        setAttendeeDateOfBirthErrors({});
+                      }}
                       onAttendeeAnswersChange={(answers) => {
                         setAttendeeAnswers(answers);
                         setAttendeeQuestionErrors({});

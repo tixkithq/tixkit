@@ -327,10 +327,33 @@ describe('notification activity deliverability gating', () => {
       ok: true,
       value: {
         subject: 'Update for All Access',
-        html: '<p>Hello &lt;script&gt;alert(1)&lt;/script&gt;</p>',
         text: 'Hello <script>alert(1)</script>',
       },
     });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.value.html).toContain('<!DOCTYPE html>');
+    expect(result.value.html).toContain('<p>Hello &lt;script&gt;alert(1)&lt;/script&gt;</p>');
+    expect(result.value.html).not.toContain('<script>alert(1)</script>');
+  });
+
+  it('renders the versioned system invitation fallback for durable invite jobs', async () => {
+    dbState.contentVersion = undefined;
+    const result = await renderTemplateActivity({
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      templateKey: 'organization-member-invited',
+      templateVersionId: 'system_organization_member_invited_v1',
+      variables: {
+        recipient: { name: 'Ada' },
+        brand: { name: 'Tixkit Events' },
+        dashboard: { url: 'https://admin.example.test/sign-up' },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.value.html).toContain('Tixkit Events');
+    expect(result.value.html).toContain('https://admin.example.test/sign-up');
   });
 
   it('renders content email versions from canonical JSON instead of stored HTML', async () => {
@@ -355,10 +378,14 @@ describe('notification activity deliverability gating', () => {
       ok: true,
       value: {
         subject: 'Update for All Access',
-        html: '<p>Hello Ada</p>',
         text: 'Hello Ada',
       },
     });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.value.html).toContain('<!DOCTYPE html>');
+    expect(result.value.html).toContain('<p>Hello Ada</p>');
+    expect(result.value.html).not.toContain('Stored Ada');
+    expect(result.value.html).not.toContain('alert("stored")');
   });
 
   it('fails closed when a published content email version is not canonical JSON', async () => {

@@ -81,12 +81,10 @@ describe('WorkspaceSwitcher', () => {
     expect(screen.getByRole('button', { name: /switch workspace and brand/i })).toBeInTheDocument();
   });
 
-  it('shows static info (no dropdown) when there is only one workspace and one brand', () => {
+  it('keeps the workspace and brand switcher available with one current option', () => {
     render(<WorkspaceSwitcher />);
 
-    expect(
-      screen.queryByRole('button', { name: /switch workspace and brand/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /switch workspace and brand/i })).toBeInTheDocument();
     expect(screen.getAllByText('Tixkit Dev').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -98,7 +96,7 @@ describe('WorkspaceSwitcher', () => {
           id: 'brd_1',
           organizationId: 'org_1',
           name: 'Festival Brand',
-          theme: { logoUrl: 'https://example.test/logo.png' },
+          theme: { iconUrl: 'https://example.test/icon.png' },
         },
       ],
       availableBrands: [
@@ -106,7 +104,7 @@ describe('WorkspaceSwitcher', () => {
           id: 'brd_1',
           organizationId: 'org_1',
           name: 'Festival Brand',
-          theme: { logoUrl: 'https://example.test/logo.png' },
+          theme: { iconUrl: 'https://example.test/icon.png' },
         },
       ],
     };
@@ -115,7 +113,34 @@ describe('WorkspaceSwitcher', () => {
 
     const img = container.querySelector('img') as HTMLImageElement;
     expect(img).not.toBeNull();
-    expect(img.src).toBe('https://example.test/logo.png');
+    expect(img.src).toBe('https://example.test/icon.png');
+  });
+
+  it('does not squeeze the wide email wordmark into the compact sidebar slot', () => {
+    bootstrapState.value = {
+      ...bootstrapState.value,
+      brands: [
+        {
+          id: 'brd_1',
+          organizationId: 'org_1',
+          name: 'Festival Brand',
+          theme: { logoUrl: 'https://example.test/wordmark.png' },
+        },
+      ],
+      availableBrands: [
+        {
+          id: 'brd_1',
+          organizationId: 'org_1',
+          name: 'Festival Brand',
+          theme: { logoUrl: 'https://example.test/wordmark.png' },
+        },
+      ],
+    };
+
+    const { container } = render(<WorkspaceSwitcher />);
+    const img = container.querySelector('img') as HTMLImageElement;
+    expect(img.src).toContain('/brand/tixkit-symbol.svg');
+    expect(img.src).not.toContain('wordmark.png');
   });
 
   it('shows a loading label while bootstrap is loading', () => {

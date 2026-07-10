@@ -14,6 +14,7 @@ import type {
   EventPageBrandVariables,
   EventPageCheckoutCtaProps,
   EventPageEventHeaderProps,
+  EventPageProductAddOnsProps,
   EventPageResaleTicketsProps,
   EventPageTicketsProps,
 } from '@tixkit/content-event-page';
@@ -30,6 +31,8 @@ export type PublicEventPageTicket = {
   status: 'active' | 'sold_out' | string;
   availabilityLabel?: string;
 };
+
+export type PublicEventPageProduct = PublicEventPageTicket;
 
 export type PublicEventPageResaleListing = {
   id: string;
@@ -48,6 +51,7 @@ export type EventPageRuntime = {
   brandFooterLabel: string;
   footerLinks?: PublicEventPageFooterLink[];
   tickets: PublicEventPageTicket[];
+  products?: PublicEventPageProduct[];
   resaleListings?: PublicEventPageResaleListing[];
   resaleError?: string;
   showGetTicketsCta?: boolean;
@@ -146,7 +150,10 @@ export function EventHeaderBlock({
   showVenue = true,
 }: WithBlockId<EventPageEventHeaderProps>) {
   const runtime = useEventPageRuntime();
-  const resolvedBrand = textProp(brandLabel) || runtime.brandName;
+  const resolvedBrand =
+    typeof brandLabel === 'string' || brandLabel == null
+      ? textProp(brandLabel) || runtime.brandName
+      : (brandLabel as ReactNode);
   const resolvedTitle =
     typeof title === 'string' || title == null ? textProp(title, 'Event') : title;
   const resolvedDescription =
@@ -155,11 +162,10 @@ export function EventHeaderBlock({
     typeof startsAtLabel === 'string' || startsAtLabel == null
       ? textProp(startsAtLabel, 'Date to be announced')
       : startsAtLabel;
-  const rawTimezone =
-    typeof timezone === 'string' || timezone == null ? textProp(timezone) : '';
+  const rawTimezone = typeof timezone === 'string' || timezone == null ? textProp(timezone) : '';
   const resolvedTimezone =
     (typeof rawTimezone === 'string' && rawTimezone
-      ? formatTimezoneLabel(rawTimezone) ?? rawTimezone
+      ? (formatTimezoneLabel(rawTimezone) ?? rawTimezone)
       : '') || 'Timezone to be announced';
   const resolvedVenue =
     typeof venueName === 'string' || venueName == null
@@ -168,21 +174,34 @@ export function EventHeaderBlock({
 
   return (
     <header className="space-y-5" data-block-id={id} data-block-type="EventHeader">
-      <span className={`${badgeSecondaryClass} gap-1.5`} data-slot="badge">
+      <span
+        className={`${badgeSecondaryClass} gap-1.5`}
+        data-event-page-outline-target={`${id}:badge`}
+        data-slot="badge"
+      >
         <TicketIcon className="size-3.5" />
         {resolvedBrand}
       </span>
-      <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-5xl">
+      <h1
+        className="text-3xl font-bold tracking-tight text-balance sm:text-5xl"
+        data-event-page-outline-target={`${id}:title`}
+      >
         {resolvedTitle}
       </h1>
       {resolvedDescription ? (
-        <p className="text-muted-foreground max-w-3xl text-sm leading-relaxed sm:text-base">
+        <p
+          className="text-muted-foreground max-w-3xl text-sm leading-relaxed sm:text-base"
+          data-event-page-outline-target={`${id}:description`}
+        >
           {resolvedDescription}
         </p>
       ) : null}
 
       {showDate || showTimezone || showVenue ? (
-        <dl className="text-foreground flex flex-wrap gap-x-6 gap-y-3 text-sm">
+        <dl
+          className="text-foreground flex flex-wrap gap-x-6 gap-y-3 text-sm"
+          data-event-page-outline-target={`${id}:details`}
+        >
           {showDate ? (
             <div className="flex min-w-0 items-center gap-2">
               <CalendarIcon className="text-muted-foreground size-4 shrink-0" aria-hidden />
@@ -238,7 +257,10 @@ export function TicketsBlock({
   priceTextColor,
   emptyBackgroundColor,
   emptyBorderColor,
-}: WithBlockId<EventPageTicketsProps>) {
+  blockType = 'Tickets',
+}: WithBlockId<EventPageTicketsProps> & {
+  blockType?: 'Tickets' | 'ProductAddOns';
+}) {
   const runtime = useEventPageRuntime();
   const interactive = runtime.interactive !== false;
   const usePreviewState = interactive ? 'live' : previewState;
@@ -271,23 +293,22 @@ export function TicketsBlock({
     margin: 0,
     padding: 0,
     ...styleFromLengths({
-      gap:
-        itemGap ||
-        (spacing === 'compact' ? '8px' : spacing === 'loose' ? '20px' : '12px'),
+      gap: itemGap || (spacing === 'compact' ? '8px' : spacing === 'loose' ? '20px' : '12px'),
     }),
   };
 
   return (
     <section
       className={`tk-ep-section-spacing-${spacing}`}
-      id="tickets"
+      id={blockType === 'Tickets' ? 'tickets' : 'product-add-ons'}
       aria-label={title}
       data-block-id={id}
-      data-block-type="Tickets"
+      data-block-type={blockType}
       style={sectionStyle}
     >
       <h2
         className="text-lg font-semibold"
+        data-event-page-outline-target={`${id}:title`}
         style={{
           ...styleFromLengths({ fontSize: titleFontSize }),
           ...(titleColor ? { color: titleColor } : {}),
@@ -299,8 +320,12 @@ export function TicketsBlock({
       {tickets.length === 0 ? (
         <div
           className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center"
+          data-event-page-outline-target={`${id}:ticketList`}
           style={{
-            ...styleFromLengths({ borderRadius: itemRadius, padding: itemPadding }),
+            ...styleFromLengths({
+              borderRadius: itemRadius,
+              padding: itemPadding,
+            }),
             ...(emptyBackgroundColor ? { backgroundColor: emptyBackgroundColor } : {}),
             ...(emptyBorderColor ? { borderColor: emptyBorderColor } : {}),
           }}
@@ -314,7 +339,7 @@ export function TicketsBlock({
           </div>
         </div>
       ) : (
-        <ul style={listStyle}>
+        <ul data-event-page-outline-target={`${id}:ticketList`} style={listStyle}>
           {tickets.map((ticket) => {
             const soldOut = ticket.status === 'sold_out';
             return (
@@ -323,7 +348,10 @@ export function TicketsBlock({
                   className={cardClass}
                   data-slot="card"
                   style={{
-                    ...styleFromLengths({ borderRadius: itemRadius, padding: itemPadding }),
+                    ...styleFromLengths({
+                      borderRadius: itemRadius,
+                      padding: itemPadding,
+                    }),
                     ...(itemBackgroundColor ? { backgroundColor: itemBackgroundColor } : {}),
                     ...(itemBorderColor ? { borderColor: itemBorderColor } : {}),
                     ...(itemTextColor ? { color: itemTextColor } : {}),
@@ -369,6 +397,15 @@ export function TicketsBlock({
   );
 }
 
+export function ProductAddOnsBlock(props: WithBlockId<EventPageProductAddOnsProps>) {
+  const runtime = useEventPageRuntime();
+  return (
+    <EventPageRuntimeProvider value={{ ...runtime, tickets: runtime.products ?? [] }}>
+      <TicketsBlock {...props} blockType="ProductAddOns" />
+    </EventPageRuntimeProvider>
+  );
+}
+
 /** Resale chrome — section h2 when listings exist. */
 export function ResaleTicketsBlock({
   id,
@@ -395,7 +432,14 @@ export function ResaleTicketsBlock({
         : runtimeListings;
   const resaleError = runtime.resaleError;
 
-  if (!resaleError && listings.length === 0 && usePreviewState !== 'empty') return null;
+  if (!resaleError && listings.length === 0 && usePreviewState !== 'empty') {
+    if (interactive) return null;
+    return (
+      <span className="sr-only" data-block-id={id} data-block-type="ResaleTickets">
+        {title}
+      </span>
+    );
+  }
   if (!resaleError && listings.length === 0 && usePreviewState === 'empty') {
     return (
       <section
@@ -404,8 +448,15 @@ export function ResaleTicketsBlock({
         data-block-id={id}
         data-block-type="ResaleTickets"
       >
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="text-muted-foreground text-sm">No resale listings available yet.</p>
+        <h2 className="text-lg font-semibold" data-event-page-outline-target={`${id}:title`}>
+          {title}
+        </h2>
+        <p
+          className="text-muted-foreground text-sm"
+          data-event-page-outline-target={`${id}:resaleList`}
+        >
+          No resale listings available yet.
+        </p>
       </section>
     );
   }
@@ -430,12 +481,14 @@ export function ResaleTicketsBlock({
       {listings.length > 0 ? (
         <section className="space-y-4" aria-label={title}>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">{title}</h2>
+            <h2 className="text-lg font-semibold" data-event-page-outline-target={`${id}:title`}>
+              {title}
+            </h2>
             <span className={badgeOutlineClass} data-slot="badge">
               {badgeLabel}
             </span>
           </div>
-          <ul className="space-y-3">
+          <ul className="space-y-3" data-event-page-outline-target={`${id}:resaleList`}>
             {listings.map((listing) => (
               <li key={listing.id}>
                 <div className={cardClass} data-slot="card">
@@ -496,10 +549,16 @@ export function CheckoutCtaBlock({
       data-block-id={id}
       data-block-type="CheckoutCta"
     >
-      <p className="text-muted-foreground text-sm">{supportingText}</p>
+      <p
+        className="text-muted-foreground text-sm"
+        data-event-page-outline-target={`${id}:supportingText`}
+      >
+        {supportingText}
+      </p>
       {interactive ? (
         <button
           className={`${buttonLgClass} gap-1.5`}
+          data-event-page-outline-target={`${id}:label`}
           onClick={() => runtime.onGetTickets?.()}
           type="button"
         >
@@ -507,7 +566,10 @@ export function CheckoutCtaBlock({
           <ArrowRightIcon className="size-4" />
         </button>
       ) : (
-        <span className={`${buttonLgClass} pointer-events-none gap-1.5 opacity-90`}>
+        <span
+          className={`${buttonLgClass} pointer-events-none gap-1.5 opacity-90`}
+          data-event-page-outline-target={`${id}:label`}
+        >
           {label}
           <ArrowRightIcon className="size-4" />
         </span>
@@ -518,14 +580,17 @@ export function CheckoutCtaBlock({
 
 export function BrandFooterBlock({ id, label }: WithBlockId<EventPageBrandFooterProps>) {
   const runtime = useEventPageRuntime();
-  const footerLabel = textProp(label) || runtime.brandFooterLabel;
+  const footerLabel =
+    typeof label === 'string' || label == null
+      ? textProp(label) || runtime.brandFooterLabel
+      : (label as ReactNode);
   const footerLinks = runtime.footerLinks ?? [];
 
   return (
     <footer className="space-y-4 pt-4" data-block-id={id} data-block-type="BrandFooter">
       <hr className="bg-border h-px w-full shrink-0 border-0" data-slot="separator" />
       <div className="text-muted-foreground flex flex-col items-start justify-between gap-3 text-xs sm:flex-row sm:items-center">
-        <p>{footerLabel}</p>
+        <p data-event-page-outline-target={`${id}:label`}>{footerLabel}</p>
         {footerLinks.length > 0 ? (
           <nav className="flex flex-wrap gap-x-4 gap-y-1.5" aria-label="Brand links">
             {footerLinks.map((link) => (

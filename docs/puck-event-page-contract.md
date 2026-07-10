@@ -14,7 +14,7 @@ Public checkout consumes `PublicEventPagePayloadV2.page.puckData`. The payload k
 Responsibility split:
 
 - Checkout Form remains the checkout data-collection editor.
-- Event Page owns Puck content blocks only.
-- Public checkout owns commerce chrome: header, tickets, resale, checkout CTA behavior, and footer.
+- Event Page owns the complete Puck page composition, including editable header, ticket, product add-on, resale, checkout CTA, and footer blocks.
+- Public checkout supplies live runtime data and interaction handlers to those blocks; it does not inject a second visual chrome outside the Puck document.
 
-The v2 guards reject checkout chrome component types inside Puck `content` or `zones`, including `event_header`, `tickets`, `products`, `resale_tickets`, and `brand_footer`.
+The v2 guards accept canonical PascalCase component types such as `EventHeader`, `Tickets`, `ProductAddOns`, `ResaleTickets`, `CheckoutCta`, and `BrandFooter`. Legacy snake_case commerce types such as `event_header`, `tickets`, `products`, `resale_tickets`, and `brand_footer` are rejected after migration.

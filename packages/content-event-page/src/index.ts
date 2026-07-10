@@ -26,6 +26,7 @@ export const EVENT_PAGE_PUCK_COMPONENT_TYPES = [
   'SocialLinks',
   'CustomEmbed',
   'Tickets',
+  'ProductAddOns',
   'ResaleTickets',
   'CheckoutCta',
   'BrandFooter',
@@ -81,6 +82,11 @@ export type EventPageSettings = {
 export type EventPageRootProps = {
   title?: string;
   description?: string;
+  marketingSummary?: string;
+  category?: string;
+  tags?: string;
+  coverImageUrl?: string;
+  socialImageUrl?: string;
   backgroundColor?: string;
   foregroundColor?: string;
   accentColor?: string;
@@ -383,6 +389,8 @@ export type EventPageTicketsProps = EventPageSectionDesignProps & {
   emptyBorderColor?: string;
 };
 
+export type EventPageProductAddOnsProps = EventPageTicketsProps;
+
 /** Live resale list chrome. Section title is an h2 for outline/heading audit. */
 export type EventPageResaleTicketsProps = {
   title?: string;
@@ -417,6 +425,7 @@ export type EventPagePuckComponentData =
   | EventPagePuckContentItem<'SocialLinks', EventPageSocialLinksProps>
   | EventPagePuckContentItem<'CustomEmbed', EventPageCustomEmbedProps>
   | EventPagePuckContentItem<'Tickets', EventPageTicketsProps>
+  | EventPagePuckContentItem<'ProductAddOns', EventPageProductAddOnsProps>
   | EventPagePuckContentItem<'ResaleTickets', EventPageResaleTicketsProps>
   | EventPagePuckContentItem<'CheckoutCta', EventPageCheckoutCtaProps>
   | EventPagePuckContentItem<'BrandFooter', EventPageBrandFooterProps>;
@@ -580,6 +589,11 @@ export function createDefaultEventPageData(
       props: {
         title,
         description,
+        marketingSummary: description,
+        category: '',
+        tags: '',
+        coverImageUrl: cleanOptionalString(input.coverImageUrl),
+        socialImageUrl: cleanOptionalString(input.coverImageUrl),
         backgroundColor: '#ffffff',
         foregroundColor: '#111111',
         accentColor: '#111111',
@@ -797,8 +811,8 @@ export function ensureEventPageChromeBlocks(
       props: {
         ...defaults.root.props,
         ...pickRootThemeProps(storedRoot),
-        title: defaults.root.props.title,
-        description: defaults.root.props.description ?? cleanOptionalString(storedRoot.description),
+        title: cleanOptionalString(storedRoot.title) ?? defaults.root.props.title,
+        description: cleanOptionalString(storedRoot.description) ?? defaults.root.props.description,
       },
     },
     content,
@@ -814,6 +828,11 @@ function pickRootThemeProps(props: Record<string, unknown>): Partial<EventPageRo
     'fontFamily',
     'headingFontFamily',
     'radius',
+    'marketingSummary',
+    'category',
+    'tags',
+    'coverImageUrl',
+    'socialImageUrl',
   ] as const;
   const next: Partial<EventPageRootProps> = {};
   for (const key of themeKeys) {
@@ -848,7 +867,7 @@ function materializeEventPageComponent<Block extends EventPagePuckComponentData>
 ): Block {
   return {
     ...block,
-    props: materializeRecord(block.props, replacements, block.type) as Block['props'],
+    props: materializeRecord(block.props, replacements) as Block['props'],
   };
 }
 
@@ -1100,7 +1119,7 @@ export function isSafeEventPageUrl(value: unknown, allowRelative = true): value 
 }
 
 export function sanitizeEventPageHtml(html: string): string {
-  return html
+  const sanitized = html
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, '')
     .replace(/\s+on[a-z]+\s*=\s*'[^']*'/gi, '')
@@ -1108,6 +1127,53 @@ export function sanitizeEventPageHtml(html: string): string {
     .replace(/\s+(href|src)\s*=\s*"(?:(?:javascript|data|file):)[^"]*"/gi, '')
     .replace(/\s+(href|src)\s*=\s*'(?:(?:javascript|data|file):)[^']*'/gi, '')
     .replace(/\s+(href|src)\s*=\s*(?:(?:javascript|data|file):)[^\s>]+/gi, '');
+
+  return sanitized.replace(
+    /<iframe\b([^>]*)>[\s\S]*?<\/iframe>/gi,
+    (_iframe, attributes: string) => {
+      const source = attributes.match(/\ssrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+      const sourceUrl = source?.[1] ?? source?.[2] ?? source?.[3];
+      if (
+        !sourceUrl ||
+        !sourceUrl.toLowerCase().startsWith('https://') ||
+        !isAllowedDestination(sourceUrl)
+      ) {
+        return '';
+      }
+      const safeAttributes = attributes
+        .replace(/\s+sandbox(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '')
+        .replace(/\s+referrerpolicy\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+      return `<iframe sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer"${safeAttributes}></iframe>`;
+    },
+  );
+}
+
+/** Custom embeds preserve only remote HTTPS iframes rebuilt with a fixed sandbox. */
+export function sanitizeEventPageEmbedHtml(html: string): string {
+  const frames: string[] = [];
+  for (const match of html.matchAll(/<iframe\b([^>]*)>[\s\S]*?<\/iframe>/gi)) {
+    const attributes = match[1] ?? '';
+    const source = attributes.match(/\ssrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+    const sourceUrl = source?.[1] ?? source?.[2] ?? source?.[3];
+    if (
+      !sourceUrl ||
+      !sourceUrl.toLowerCase().startsWith('https://') ||
+      !isAllowedDestination(sourceUrl)
+    ) {
+      continue;
+    }
+    const titleMatch = attributes.match(/\stitle\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+    const title = (titleMatch?.[1] ?? titleMatch?.[2] ?? 'Embedded content')
+      .replaceAll('&', '&amp;')
+      .replaceAll('"', '&quot;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+    const safeSource = sourceUrl.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+    frames.push(
+      `<iframe src="${safeSource}" title="${title}" sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer" loading="lazy"></iframe>`,
+    );
+  }
+  return frames.join('');
 }
 
 export function hasUnsafeEventPageHtml(html: string): boolean {
@@ -1183,61 +1249,6 @@ export function migrateLegacyEventPageBlocksToPuckData(
     const id = cleanOptionalString(block.id) ?? `migrated-${index + 1}`;
     switch (type) {
       case 'hero':
-        content.push({
-          type: 'EventDescription',
-          props: {
-            id,
-            eyebrow: cleanOptionalString(block.eyebrow),
-            title: nonEmpty(block.headline, 'About this event'),
-            body: cleanOptionalString(block.body),
-            imageUrl: cleanOptionalString(block.imageUrl),
-            imageAlt: cleanOptionalString(block.imageAlt),
-            alignment: readAlignment(block.alignment),
-            titleAlignment: readAlignment(block.headlineAlignment),
-            bodyAlignment: readAlignment(block.bodyAlignment),
-            imageAlignment: readAlignment(block.imageAlignment),
-            spacing: readSpacing(block.spacing),
-            backgroundColor: cleanOptionalString(block.backgroundColor),
-            imageRadius: readRadiusPreset(block.imageRadius),
-            imageLayout: readHeroImageLayout(block.imageLayout),
-            imageFit: readHeroImageFit(block.imageFit),
-            imagePosition: readHeroImagePosition(block.imagePosition),
-            imagePositionX: cleanOptionalString(block.imagePositionX),
-            imagePositionY: cleanOptionalString(block.imagePositionY),
-            imagePlacement: readHeroImagePlacement(block.imagePlacement),
-            overlayContentPosition: readOverlayContentPosition(block.overlayContentPosition),
-            overlayContentHorizontalPosition: readAlignment(block.overlayContentHorizontalPosition),
-            overlayMinHeight: cleanOptionalString(block.overlayMinHeight),
-            overlayPadding: cleanOptionalString(block.overlayPadding),
-            imageOpacity: cleanOptionalString(block.imageOpacity),
-            backgroundOverlayColor: cleanOptionalString(block.backgroundOverlayColor),
-            backgroundOverlayOpacity: cleanOptionalString(block.backgroundOverlayOpacity),
-            logos: Array.isArray(block.logos)
-              ? block.logos
-                  .filter((item): item is Record<string, unknown> => isRecord(item))
-                  .map((item) => ({
-                    name: nonEmpty(item.name, 'Logo'),
-                    url: cleanOptionalString(item.url),
-                    imageUrl: cleanOptionalString(item.imageUrl),
-                    imageAlt: cleanOptionalString(item.imageAlt),
-                  }))
-              : undefined,
-            logoPosition: readHeroLogoPosition(block.logoPosition),
-            logoSize: readHeroLogoSize(block.logoSize),
-            logoMaxHeight: cleanOptionalString(block.logoMaxHeight),
-            logoMaxWidth: cleanOptionalString(block.logoMaxWidth),
-            eyebrowFontSize: cleanOptionalString(block.eyebrowFontSize),
-            titleFontSize: cleanOptionalString(block.headlineFontSize),
-            bodyFontSize: cleanOptionalString(block.bodyFontSize),
-            eyebrowColor: cleanOptionalString(block.eyebrowColor),
-            titleColor: cleanOptionalString(block.headlineColor),
-            bodyColor: cleanOptionalString(block.bodyColor),
-            contentBackgroundColor: cleanOptionalString(block.contentBackgroundColor),
-            contentPadding: cleanOptionalString(block.contentPadding),
-            contentRadius: cleanOptionalString(block.contentRadius),
-            contentGap: cleanOptionalString(block.contentGap),
-          },
-        });
         break;
       case 'rich_text':
         content.push({
@@ -1883,6 +1894,7 @@ function validateComponentProps(
       validateOptionalColor(issues, props.badgeBorderColor, `${field}.badgeBorderColor`);
       break;
     case 'Tickets':
+    case 'ProductAddOns':
       validateSectionDesignProps(issues, props, field);
       validateOptionalLength(issues, props.sectionGap, `${field}.sectionGap`);
       validateOptionalLength(issues, props.itemGap, `${field}.itemGap`);
@@ -1912,6 +1924,8 @@ function validateRootProps(
   validateOptionalColor(issues, root.foregroundColor, `${field}.foregroundColor`);
   validateOptionalColor(issues, root.accentColor, `${field}.accentColor`);
   validateOptionalColor(issues, root.accentForegroundColor, `${field}.accentForegroundColor`);
+  validateOptionalUrl(issues, root.coverImageUrl, `${field}.coverImageUrl`);
+  validateOptionalUrl(issues, root.socialImageUrl, `${field}.socialImageUrl`);
   if (root.radius !== undefined && typeof root.radius !== 'string') {
     issues.push(
       issue('invalid_radius', 'Root radius must be a CSS string.', 'error', `${field}.radius`),
@@ -2502,7 +2516,6 @@ function sanitizeOptionalEventPageUrl(value: unknown): string | undefined {
 function materializeRecord(
   value: Record<string, unknown>,
   replacements: Record<string, string>,
-  componentType?: string,
 ): Record<string, unknown> {
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
@@ -2521,12 +2534,12 @@ function materializeRecord(
     }
     if (Array.isArray(entry)) {
       next[key] = entry.map((item) =>
-        isRecord(item) ? materializeRecord(item, replacements, componentType) : item,
+        isRecord(item) ? materializeRecord(item, replacements) : item,
       );
       continue;
     }
     if (isRecord(entry)) {
-      next[key] = materializeRecord(entry, replacements, componentType);
+      next[key] = materializeRecord(entry, replacements);
       continue;
     }
     next[key] = entry;
@@ -2544,46 +2557,6 @@ function readSpacing(value: unknown): EventPageSpacing | undefined {
 
 function readTextSize(value: unknown): EventPageTextSize | undefined {
   return value === 'small' || value === 'normal' || value === 'large' ? value : undefined;
-}
-
-function readHeroImageLayout(value: unknown): EventPageEventDescriptionProps['imageLayout'] {
-  return value === 'background' || value === 'inline' ? value : undefined;
-}
-
-function readHeroLogoPosition(value: unknown): EventPageEventDescriptionProps['logoPosition'] {
-  return value === 'top-left' ||
-    value === 'top-center' ||
-    value === 'top-right' ||
-    value === 'bottom-left' ||
-    value === 'bottom-center' ||
-    value === 'bottom-right'
-    ? value
-    : undefined;
-}
-function readHeroLogoSize(value: unknown): EventPageEventDescriptionProps['logoSize'] {
-  return value === 'sm' || value === 'md' || value === 'lg' ? value : undefined;
-}
-
-function readHeroImageFit(value: unknown): EventPageEventDescriptionProps['imageFit'] {
-  return value === 'contain' || value === 'cover' ? value : undefined;
-}
-
-function readHeroImagePosition(value: unknown): EventPageEventDescriptionProps['imagePosition'] {
-  return value === 'center' ||
-    value === 'top' ||
-    value === 'bottom' ||
-    value === 'left' ||
-    value === 'right'
-    ? value
-    : undefined;
-}
-
-function readHeroImagePlacement(value: unknown): EventPageEventDescriptionProps['imagePlacement'] {
-  if (!isRecord(value)) return undefined;
-  const x = cleanOptionalString(value.x);
-  const y = cleanOptionalString(value.y);
-  const scale = cleanOptionalString(value.scale);
-  return x || y || scale ? { x, y, scale } : undefined;
 }
 
 function readOverlayContentPosition(

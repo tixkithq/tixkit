@@ -152,7 +152,7 @@ describe('EventProductsView', () => {
     expect(view.getByText('Unknown category')).toBeInTheDocument();
 
     fireEvent.click(view.getByRole('button', { name: 'Try again' }));
-    expect(adminApiMock.listProductCategories).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(adminApiMock.listProductCategories).toHaveBeenCalledTimes(2));
     expect(adminApiMock.listProducts).toHaveBeenCalledTimes(1);
   });
 
@@ -184,7 +184,7 @@ describe('EventProductsView', () => {
         sortOrder: 4,
       });
     });
-    expect(adminApiMock.listProductCategories).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(adminApiMock.listProductCategories).toHaveBeenCalledTimes(2));
   });
 
   it('creates products with category, price, and order-limit payloads', async () => {
@@ -232,6 +232,6 @@ describe('EventProductsView', () => {
         sortOrder: undefined,
       });
     });
-    expect(adminApiMock.listProducts).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(adminApiMock.listProducts).toHaveBeenCalledTimes(2));
   });
 });

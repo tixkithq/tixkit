@@ -1,21 +1,50 @@
+import { Suspense } from 'react';
 import { PermissionGuard } from '@/components/permission-guard';
-import { EventCheckInView } from '@/features/events/event-check-in-view';
+import { CheckInConsole } from '@/features/kiosk/check-in-console';
+import { Skeleton } from '@/components/ui/skeleton';
 
-export default async function Page({ params }: { params: Promise<{ eventId: string }> }) {
+type SearchParams =
+  | Promise<Record<string, string | string[] | undefined>>
+  | Record<string, string | string[] | undefined>;
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function Page({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ eventId: string }>;
+  searchParams?: SearchParams;
+}) {
   const { eventId } = await params;
+  const resolvedSearch = (await searchParams) ?? {};
+  const listId = first(resolvedSearch.listId);
+  const tabValue = first(resolvedSearch.tab);
+  const tab =
+    tabValue === 'scan' || tabValue === 'activity' || tabValue === 'sales' ? tabValue : undefined;
+
   return (
-    <PermissionGuard required="checkins.write">
-      <div className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">Check-in</h1>
-            <p className="text-sm text-muted-foreground">
-              Scan tickets and admit attendees for this event
-            </p>
+    <PermissionGuard
+      anyOf={['checkins.write', 'checkins.read', 'box_office.write', 'orders.write']}
+    >
+      <Suspense
+        fallback={
+          <div className="space-y-4">
+            <Skeleton className="h-10 w-full max-w-xs" />
+            <Skeleton className="h-40 w-full" />
           </div>
-        </div>
-        <EventCheckInView eventId={eventId} />
-      </div>
+        }
+      >
+        <CheckInConsole
+          mode="embedded"
+          lockEvent
+          initialEventId={eventId}
+          initialListId={listId}
+          initialTab={tab}
+        />
+      </Suspense>
     </PermissionGuard>
   );
 }

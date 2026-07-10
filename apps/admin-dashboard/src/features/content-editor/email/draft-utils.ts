@@ -75,7 +75,9 @@ export function defaultEmailDocument(
       templateKey,
       subject:
         lifecycle?.defaultSubject ??
-        (event ? `Your ${event.title} tickets are ready` : 'Your {{event.title}} tickets are ready'),
+        (event
+          ? `Your ${event.title} tickets are ready`
+          : 'Your {{event.title}} tickets are ready'),
       previewText: lifecycle?.defaultPreviewText ?? 'Everything you need before arrival.',
       locale: 'en',
       category: lifecycle?.category ?? 'transactional',

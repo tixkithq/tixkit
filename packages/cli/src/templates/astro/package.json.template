@@ -11,12 +11,12 @@
     "clean": "rm -rf dist .astro"
   },
   "dependencies": {
-    "@tixkit/astro": "workspace:*",
+    "@tixkit/astro": "^0.1.0",
     "astro": "^7.0.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
     "@astrojs/node": "^11.0.0",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }

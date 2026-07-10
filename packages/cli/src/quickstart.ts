@@ -113,7 +113,16 @@ function openBrowser(url: string): void {
 }
 
 export async function runQuickstart(options: QuickstartOptions): Promise<QuickstartResult> {
-  const cwd = await findRepoRoot(process.cwd());
+  let cwd: string;
+  try {
+    cwd = await findRepoRoot(process.cwd());
+  } catch {
+    return {
+      ok: false,
+      message:
+        'quickstart runs from a Tixkit source checkout because it starts the repository Docker and application stack. Clone the OSS repository, run bun install, then run tixkit quickstart from that checkout. Use tixkit init from any directory for a headless integration.',
+    };
+  }
 
   const dockerOk = await checkDocker();
   if (!dockerOk) {

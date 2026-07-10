@@ -1,0 +1,28 @@
+import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { checkoutUrl, parseTixkitWidgetMessage, tixkitWidgetIframeAttributes } from '@tixkit/vue';
+
+export function useTixkitDemoState() {
+  const config = useRuntimeConfig();
+  const checkoutBaseUrl = config.public.tixkitCheckoutUrl as string;
+  const events = ref<string[]>([]);
+  const widgetAttrs = tixkitWidgetIframeAttributes({
+    widgetBaseUrl: checkoutBaseUrl,
+    brand: '__BRAND_ID__',
+    event: '__EVENT_ID__',
+    mode: 'inline',
+    title: 'Tixkit Ticket Widget',
+  });
+  const checkoutHandoffUrl = checkoutUrl({
+    event: '__EVENT_ID__',
+    brand: '__BRAND_ID__',
+    items: [{ ticketTypeId: '__TICKET_TYPE_ID__', quantity: 2 }],
+    checkoutBaseUrl,
+  });
+  const handleMessage = (message: MessageEvent) => {
+    const parsed = parseTixkitWidgetMessage(message, new URL(checkoutBaseUrl).origin);
+    if (parsed) events.value.push(parsed.type);
+  };
+  onMounted(() => window.addEventListener('message', handleMessage));
+  onBeforeUnmount(() => window.removeEventListener('message', handleMessage));
+  return { events, widgetAttrs, checkoutHandoffUrl };
+}

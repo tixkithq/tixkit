@@ -41,7 +41,7 @@ export function NavigationProgress() {
 
   return (
     <div
-      className="fixed inset-x-0 top-0 z-[9999] h-0.5 bg-primary transition-[width] duration-200 ease-out"
+      className="fixed inset-x-0 top-0 z-[9999] h-0.5 bg-primary transition-[width] duration-[250ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
       style={{ width: `${progress}%` }}
       aria-hidden="true"
     />

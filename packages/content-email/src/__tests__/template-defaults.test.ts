@@ -13,6 +13,7 @@ import {
   renderMergeTags,
   type MergeTagContext,
 } from '@tixkit/domain';
+import { STUDIO_TEMPLATE_CONTENT, type StudioArchetype } from '../studio-templates.js';
 
 const distinctiveContext: MergeTagContext = {
   event: {
@@ -30,7 +31,11 @@ const distinctiveContext: MergeTagContext = {
     changeSummary: 'Venue moved to The Forum',
     cancellationReason: 'Unforeseen weather',
   },
-  brand: { name: 'Brand Tixkit', supportUrl: 'https://help.example.test/support-777' },
+  brand: {
+    name: 'Brand Tixkit',
+    logoUrl: 'https://assets.example.test/brand-tixkit.png',
+    supportUrl: 'https://help.example.test/support-777',
+  },
   recipient: { name: 'Recipient Ada', email: 'ada@example.test', phone: '+15551234567' },
   attendee: { name: 'Attendee Ada', checkedIn: false },
   ticket: {
@@ -124,6 +129,41 @@ const requiredVarValue: Record<string, string> = {
   'chargeback.dueAt': distinctiveContext.chargeback!.dueAt!,
 };
 
+const archetypesByKey: Record<(typeof TEMPLATE_KEYS)[number], StudioArchetype> = {
+  'order-confirmed': 'receipt',
+  'tickets-issued': 'access',
+  'payment-failed': 'recovery',
+  'order-cancelled': 'receipt',
+  'order-refunded': 'receipt',
+  'event-updated': 'announcement',
+  'event-cancelled': 'announcement',
+  'event-reminder': 'access',
+  'attendee-message': 'announcement',
+  'staff-order-notification': 'ops',
+  'organization-member-invited': 'invite',
+  'checkin-device-invited': 'invite',
+  'waitlist-joined': 'invite',
+  'waitlist-invite': 'recovery',
+  'waitlist-invite-expiring': 'recovery',
+  'abandoned-checkout': 'recovery',
+  'ticket-transfer-started': 'invite',
+  'ticket-transfer-accepted': 'receipt',
+  'ticket-transfer-cancelled': 'receipt',
+  'wallet-pass-ready': 'access',
+  'post-event-thank-you': 'announcement',
+  'review-request': 'announcement',
+  'daily-sales-digest': 'ops',
+  'payout-scheduled': 'ops',
+  'payout-paid': 'ops',
+  'payout-failed': 'ops',
+  'brand-sender-verification': 'ops',
+  'integration-disconnected': 'ops',
+  'webhook-failed': 'ops',
+  'chargeback-opened': 'ops',
+  'chargeback-won': 'ops',
+  'chargeback-lost': 'ops',
+};
+
 describe('createDefaultEmailTemplateForKey', () => {
   it('covers every lifecycle template key with a default document', () => {
     for (const key of TEMPLATE_KEYS) {
@@ -184,18 +224,81 @@ describe('createDefaultEmailTemplateForKey', () => {
           escape: 'html',
         });
 
-        expect(doc.editor.contentHtml, `${key} default should use the Studio shell`).toContain(
-          'background-color: #dce1e4',
+        expect(doc.editor.contentHtml, `${key} default should use the Studio canvas`).toContain(
+          'background-color: #F6F6F6',
         );
-        expect(doc.editor.contentHtml, `${key} default should use the Studio card`).toContain(
-          'border-radius: 28px',
+        expect(doc.editor.contentHtml, `${key} default should identify its archetype`).toContain(
+          `data-studio-archetype="${archetypesByKey[key]}"`,
         );
+        expect(
+          doc.editor.contentHtml,
+          `${key} default should use editor-safe wrappers`,
+        ).not.toMatch(/<(?:section|header|footer)\b/i);
         // Send path wraps the editor body in a full email document shell for clients.
         expect(rendered.html, `${key} send render dropped the Studio body`).toContain(expectedHtml);
         expect(rendered.html, `${key} send render should be a full email document`).toContain(
           '<!DOCTYPE html>',
         );
+        expect(rendered.html).toContain('background-color:#ffffff');
+        expect(rendered.html).toContain('fonts.googleapis.com');
+        expect(doc.editor.contentHtml, `${key} default should inherit the brand logo`).toContain(
+          '{{brand.logoUrl}}',
+        );
+        expect(rendered.html, `${key} should render the configured brand logo`).toContain(
+          'https://assets.example.test/brand-tixkit.png',
+        );
       }),
+    );
+  });
+
+  it('uses the faithful Studio tokens and a hand-authored definition for every key', () => {
+    expect(Object.keys(STUDIO_TEMPLATE_CONTENT)).toEqual(TEMPLATE_KEYS);
+    for (const key of TEMPLATE_KEYS) {
+      const doc = createDefaultEmailTemplateForKey(key);
+      expect(STUDIO_TEMPLATE_CONTENT[key].archetype).toBe(archetypesByKey[key]);
+      expect(doc.editor.contentHtml).toContain('font-family: Geist, Inter, Arial, sans-serif');
+      expect(doc.editor.contentHtml).toContain(
+        archetypesByKey[key] === 'ops' ? 'font-size: 24px' : 'font-size: 40px',
+      );
+      if ('primaryAction' in STUDIO_TEMPLATE_CONTENT[key]) {
+        expect(doc.editor.contentHtml).toContain('border: 1px solid #E8E9E9');
+        expect(doc.editor.contentHtml).toContain('box-shadow: 0px 3px 2px');
+      }
+      expect(doc.editor.contentHtml).not.toMatch(/<(?:style|link|script|iframe|svg|meta)\b/i);
+    }
+  });
+
+  it('removes optional rows and actions cleanly when their context is absent', async () => {
+    await Promise.all(
+      TEMPLATE_KEYS.map(async (key) => {
+        const lifecycle = getTemplateLifecycle(key)!;
+        const minimalContext = minimalContextFor(lifecycle.requiredVariables);
+        const rendered = await renderEmailTemplate(
+          createDefaultEmailTemplateForKey(key),
+          minimalContext,
+        );
+        expect(rendered.validation.valid, `${key} minimal render should validate`).toBe(true);
+        expect(rendered.html, `${key} left an empty optional marker`).not.toContain(
+          'data-studio-optional-value=""',
+        );
+        expect(rendered.html, `${key} left an empty action URL`).not.toContain('href=""');
+        expect(rendered.html, `${key} left a blank labeled fact row`).not.toMatch(
+          /data-studio-row="true"[^>]*>[\s\S]*?<p[^>]*>[^<]+<\/p><p[^>]*>\s*<\/p>/i,
+        );
+      }),
+    );
+  });
+
+  it('keeps CTA destinations readable in plain-text output', async () => {
+    const rendered = await renderEmailTemplate(
+      createDefaultEmailTemplateForKey('order-confirmed'),
+      distinctiveContext,
+    );
+    expect(rendered.text).toContain(
+      'View your order → (https://checkout.example.test/orders/ORDER-777)',
+    );
+    expect(rendered.text).toContain(
+      'View receipt (https://checkout.example.test/receipts/ORDER-777)',
     );
   });
 
@@ -262,3 +365,18 @@ describe('createDefaultEmailTemplateForKey', () => {
     }
   });
 });
+
+function minimalContextFor(requiredVariables: string[]): MergeTagContext {
+  const context = {
+    recipient: { name: distinctiveContext.recipient!.name },
+    brand: { ...distinctiveContext.brand },
+  } as MergeTagContext;
+  for (const variable of requiredVariables) {
+    const [namespace, key] = variable.split('.') as [keyof MergeTagContext, string];
+    const source = distinctiveContext[namespace] as Record<string, unknown> | undefined;
+    const target = (context[namespace] ?? {}) as Record<string, unknown>;
+    target[key] = source?.[key];
+    Object.assign(context, { [namespace]: target });
+  }
+  return context;
+}

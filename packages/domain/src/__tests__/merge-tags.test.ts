@@ -23,7 +23,11 @@ const baseContext: MergeTagContext = {
     publicUrl: 'https://example.test/e/evt_1',
     checkoutUrl: 'https://checkout.example.test/checkout?eventId=evt_1',
   },
-  brand: { name: 'Acme Events', supportUrl: 'https://help.example.test' },
+  brand: {
+    name: 'Acme Events',
+    logoUrl: 'https://assets.example.test/acme-logo.png',
+    supportUrl: 'https://help.example.test',
+  },
   recipient: { name: 'Jordan Lee', email: 'jordan@example.test' },
   attendee: { name: 'Jordan Lee', checkedIn: false },
   ticket: {
@@ -49,6 +53,13 @@ describe('merge-tag registry', () => {
   it('includes ticket QR image URLs for rendered email QR blocks', () => {
     const qrCodeUrl = MERGE_TAG_REGISTRY.find((v) => v.key === 'ticket.qrCodeUrl');
     expect(qrCodeUrl?.example).toContain('https://');
+  });
+
+  it('registers and resolves the brand logo URL', () => {
+    expect(MERGE_TAG_REGISTRY.some((variable) => variable.key === 'brand.logoUrl')).toBe(true);
+    expect(renderMergeTags('{{brand.logoUrl}}', baseContext, { channel: 'email' })).toBe(
+      'https://assets.example.test/acme-logo.png',
+    );
   });
 });
 

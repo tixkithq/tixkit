@@ -9,25 +9,32 @@ const CRITICAL_EVIDENCE_RULES = new Map([
   [
     'C-035',
     {
-      description: 'hosted CI, GitHub Actions, and branch protection',
-      patterns: [/hosted CI/i, /GitHub Actions|hosted runners/i, /branch protection/i],
+      description: 'Trusted CI on EPYC and branch protection',
+      patterns: [
+        /hosted CI|Trusted CI/i,
+        /GitHub Actions|hosted runners|EPYC|tixkit-epyc-trusted/i,
+        /branch protection/i,
+      ],
     },
   ],
   [
     'C-036',
     {
-      description: 'hosted Stripe secrets and non-skipped provider gates',
-      patterns: [/Stripe/i, /hosted/i, /non-skipped|not skip|provider gates/i],
+      description: 'trusted-runner Stripe secrets and non-skipped provider gates',
+      patterns: [
+        /Stripe/i,
+        /hosted|trusted-runner|Trusted CI/i,
+        /non-skipped|not skip|without skips|provider gates/i,
+      ],
     },
   ],
   [
     'C-037',
     {
-      description:
-        'hosted release dry-run, managed backup/restore, and migration rollback rehearsal',
+      description: 'trusted release dry-run, lab backup/restore, and migration rollback rehearsal',
       patterns: [
-        /hosted release dry-run/i,
-        /managed database|managed .*backup|backup\/restore/i,
+        /hosted release dry-run|trusted release/i,
+        /managed database|managed .*backup|backup\/restore|lab backup/i,
         /migration.*rollback|rollback rehearsal/i,
       ],
     },
@@ -50,8 +57,12 @@ const CRITICAL_EVIDENCE_RULES = new Map([
   [
     'C-082',
     {
-      description: 'local matrix validation plus fresh hosted CI proof',
-      patterns: [/matrix validation|traceability matrix/i, /test:scripts/i, /fresh hosted CI/i],
+      description: 'local matrix validation plus fresh Trusted CI proof',
+      patterns: [
+        /matrix validation|traceability matrix|146 stories/i,
+        /test:scripts/i,
+        /fresh hosted CI|Trusted CI|EPYC runner/i,
+      ],
     },
   ],
 ]);

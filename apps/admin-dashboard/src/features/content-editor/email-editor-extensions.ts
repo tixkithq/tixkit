@@ -15,7 +15,17 @@ import {
   imageSlashCommand,
   type EditorThemeInput,
 } from '@react-email/editor/plugins';
-import { CalendarDays, Code, Image, MapPin, QrCode, Share2, Ticket, Variable } from 'lucide-react';
+import {
+  CalendarDays,
+  Code,
+  Image,
+  MapPin,
+  PanelTop,
+  QrCode,
+  Share2,
+  Ticket,
+  Variable,
+} from 'lucide-react';
 import { defaultSlashCommands, type SlashCommandItem } from '@react-email/editor/ui';
 
 type BrandEmailEditorThemeInput = {
@@ -47,6 +57,7 @@ const ticketQrCanvasPreviewDataUri =
 // so leaked editor exports still pass link validation after sample-context render, and so
 // canonicalize can match them back to {{merge.tags}}. Chip labels stay human-readable.
 const canvasPreviewAttributeValues: Record<string, string> = {
+  'brand.logoUrl': '/brand/tixkit-wordmark.png',
   'brand.privacyUrl': 'https://example.test/privacy',
   'brand.refundUrl': 'https://example.test/refunds',
   'brand.supportUrl': 'https://help.example.test/preferences',
@@ -96,6 +107,11 @@ let lastChipClickKey: string | null = null;
 let lastChipClickRange: { from: number; to: number } | null = null;
 
 const variablePresentations: Record<string, EmailVariablePresentation> = {
+  'brand.logoUrl': {
+    label: 'Brand logo',
+    preview: 'Brand logo',
+    kind: 'brand',
+  },
   'event.title': {
     label: 'Event name',
     preview: 'Sample Summer Showcase',
@@ -2379,6 +2395,16 @@ export function createEmailSlashCommands(input: {
         insertEmailComponent(editor, customItems[8], range);
       },
     },
+    {
+      title: 'Background hero',
+      description: 'Add a branded image header with overlaid logo and text',
+      icon: React.createElement(PanelTop, { className: 'size-4' }),
+      category: 'Tixkit',
+      searchTerms: ['hero', 'header', 'background', 'image', 'banner', 'logo'],
+      command: ({ editor, range }) => {
+        insertEmailComponent(editor, customItems[9], range);
+      },
+    },
   ];
 
   return [
@@ -2559,6 +2585,43 @@ export function insertEmailComponent(
       );
       return;
     }
+    case 'Background hero':
+      commandChain(editor, range)
+        .insertContent({
+          type: 'section',
+          attrs: {
+            style:
+              'background-color: #06233f; border-radius: 18px; color: #ffffff; min-height: 320px; padding: 48px 32px; text-align: center',
+          },
+          content: [
+            {
+              type: 'image',
+              attrs: {
+                src: mergeTagCanvasAttributeValue('brand.logoUrl'),
+                alt: 'Brand logo',
+                alignment: 'center',
+                width: '160',
+              },
+            },
+            {
+              type: 'paragraph',
+              attrs: {
+                style:
+                  'color: #ffffff; font-size: 40px; font-weight: 700; line-height: 1.1; margin: 28px 0 12px',
+              },
+              content: [{ type: 'text', text: '{{event.title}}' }],
+            },
+            {
+              type: 'paragraph',
+              attrs: {
+                style: 'color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0',
+              },
+              content: [{ type: 'text', text: 'An unforgettable experience is waiting for you.' }],
+            },
+          ],
+        })
+        .run();
+      return;
     case 'Ticket summary':
       commandChain(editor, range)
         .insertContent({

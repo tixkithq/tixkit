@@ -29,34 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { checkoutUrl, tixkitWidgetIframeAttributes, parseTixkitWidgetMessage } from '@tixkit/vue';
+import { useTixkitDemoState } from './app-state';
 
-const config = useRuntimeConfig();
-const checkoutBaseUrl = config.public.tixkitCheckoutUrl as string;
-
-const events = ref<string[]>([]);
-
-const widgetAttrs = tixkitWidgetIframeAttributes({
-  widgetBaseUrl: checkoutBaseUrl,
-  brand: '__BRAND_ID__',
-  event: '__EVENT_ID__',
-  mode: 'inline',
-  title: 'Tixkit Ticket Widget',
-});
-
-const checkoutHandoffUrl = checkoutUrl({
-  event: '__EVENT_ID__',
-  brand: '__BRAND_ID__',
-  items: [{ ticketTypeId: '__TICKET_TYPE_ID__', quantity: 2 }],
-  checkoutBaseUrl,
-});
-
-onMounted(() => {
-  window.addEventListener('message', (message) => {
-    const parsed = parseTixkitWidgetMessage(message, new URL(checkoutBaseUrl).origin);
-    if (parsed) {
-      events.value.push(parsed.type);
-    }
-  });
-});
+const { events, widgetAttrs, checkoutHandoffUrl } = useTixkitDemoState();
 </script>

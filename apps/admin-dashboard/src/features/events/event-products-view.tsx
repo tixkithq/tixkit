@@ -396,7 +396,7 @@ function ProductCategoryDialog({
   eventId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
+  onSuccess: () => Promise<void>;
 }) {
   const [name, setName] = React.useState('');
   const [sortOrder, setSortOrder] = React.useState('');
@@ -426,9 +426,9 @@ function ProductCategoryDialog({
       toast.error(result.error.message);
       return;
     }
+    await onSuccess();
     toast.success('Product category created.');
     onOpenChange(false);
-    onSuccess();
   };
 
   return (
@@ -486,7 +486,7 @@ function ProductSheet({
   product?: AdminProduct;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
+  onSuccess: () => Promise<void>;
 }) {
   const [values, setValues] = React.useState<ProductFormState>(() => productFormState(product));
   const [submitting, setSubmitting] = React.useState(false);
@@ -510,9 +510,9 @@ function ProductSheet({
       toast.error(result.error.message);
       return;
     }
+    await onSuccess();
     toast.success(product ? 'Product updated.' : 'Product created.');
     onOpenChange(false);
-    onSuccess();
   };
 
   return (

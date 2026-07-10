@@ -1,11 +1,14 @@
 import type { ContentValidationIssue } from '@tixkit/content-core';
 import type { EmailTemplateDocument } from '@tixkit/content-email';
-import type { AdminBrandSenderIdentity, AdminEventDetail } from '@/lib/api';
+import type { AdminBrand, AdminBrandSenderIdentity, AdminEventDetail } from '@/lib/api';
 
 export const emailCategoryOptions = ['transactional', 'bulk', 'staff', 'system'] as const;
 
-export function sampleContext(event: AdminEventDetail): Record<string, unknown> {
-  const brandName = event.title.trim() || 'Event';
+export function sampleContext(
+  event: AdminEventDetail,
+  brand?: AdminBrand,
+): Record<string, unknown> {
+  const brandName = brand?.name.trim() || event.title.trim() || 'Event';
   return {
     event: {
       title: event.title,
@@ -16,6 +19,7 @@ export function sampleContext(event: AdminEventDetail): Record<string, unknown> 
     },
     brand: {
       name: brandName,
+      logoUrl: brand?.theme.logoUrl || '/brand/tixkit-wordmark.png',
       supportUrl: `https://events.example.test/e/${event.id}/preferences`,
     },
     recipient: {

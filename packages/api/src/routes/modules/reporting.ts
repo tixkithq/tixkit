@@ -18,6 +18,8 @@ import { ulid } from 'ulid';
 import { createExportSchema, parseBody } from '../../http/schemas.js';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import { config } from '../../config/index.js';
+import { writeSseEvent } from '../../services/sse.js';
+import { redactErrorFields } from '@tixkit/shared';
 
 const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
 const DEFAULT_REPORTING_CACHE_TTL_MS = 30_000;
@@ -1008,23 +1010,21 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const stream = new PassThrough();
     let ended = false;
     let subscriber: InstanceType<typeof Redis> | undefined;
-    const sendEvent = (event: string, data: unknown, id?: string) => {
-      if (ended || stream.destroyed || stream.writableEnded) return;
-      if (id) stream.write(`id: ${id}\n`);
-      stream.write(`event: ${event}\n`);
-      stream.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+    let replayInFlight: Promise<void> | undefined;
+    let replayQueued = false;
+    const sendEvent = (event: string, data: unknown, id?: string) =>
+      ended ? Promise.resolve(false) : writeSseEvent(stream, event, data, id);
     const closeStream = () => {
       if (ended) return;
       ended = true;
       subscriber?.disconnect();
       if (!stream.destroyed && !stream.writableEnded) stream.end();
     };
-    const replayEvents = async () => {
+    const replayEventsOnce = async () => {
       const events = await loadExportJobEvents(db, principal.tenantId, exportId, lastSentEventId);
       for (const event of events) {
         const payload = parseExportEventPayload(event.payload);
-        sendEvent('export', payload, event.id);
+        if (!(await sendEvent('export', payload, event.id))) break;
         lastSentEventId = event.id;
         if (isTerminalExportStatus(payload.status)) {
           closeStream();
@@ -1032,6 +1032,26 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
         }
       }
       return events.length;
+    };
+    const replayEvents = async () => {
+      if (replayInFlight) {
+        replayQueued = true;
+        await replayInFlight;
+        return 0;
+      }
+      let replayed = 0;
+      replayInFlight = (async () => {
+        do {
+          replayQueued = false;
+          replayed += await replayEventsOnce();
+        } while (replayQueued && !ended);
+      })();
+      try {
+        await replayInFlight;
+        return replayed;
+      } finally {
+        replayInFlight = undefined;
+      }
     };
 
     request.raw.on('close', () => {
@@ -1052,7 +1072,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
 
     const replayedCount = await replayEvents();
     if (replayedCount === 0 && (!lastSentEventId || isTerminalExportStatus(exportJob.status))) {
-      sendEvent('export', serializeExportJob(exportJob));
+      await sendEvent('export', serializeExportJob(exportJob));
     }
     if (isTerminalExportStatus(exportJob.status)) {
       closeStream();
@@ -1065,12 +1085,13 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
         const replayedTerminalEvents = await replayEvents();
         if (replayedTerminalEvents === 0) {
           const latestExportJob = await loadScopedExportJob(principal, exportId);
-          sendEvent('export', serializeExportJob(latestExportJob));
+          await sendEvent('export', serializeExportJob(latestExportJob));
         }
       } catch (err) {
-        sendEvent('error', {
+        request.log.error({ err: redactErrorFields(err), exportId }, 'Export status stream failed');
+        await sendEvent('error', {
           code: 'EXPORT_STREAM_FAILED',
-          message: err instanceof Error ? err.message : 'Export status stream failed',
+          message: 'Export status stream failed',
         });
       } finally {
         closeStream();
@@ -1164,7 +1185,7 @@ async function createExportEventSubscriber(exportId: string, onEvent: () => Prom
   });
   subscriber.on('error', () => undefined);
   subscriber.on('message', (_channel: string, _message: string) => {
-    void onEvent();
+    void onEvent().catch(() => undefined);
   });
   try {
     await subscriber.connect();

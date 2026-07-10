@@ -25,6 +25,8 @@ export const routes = {
   orderDetail: (orderId: string) => `/orders/${orderId}`,
   attendees: '/attendees',
   checkIn: '/check-in',
+  kiosk: '/kiosk',
+  kioskEvent: (eventId: string) => `/kiosk/${eventId}`,
   messages: '/messages',
   reports: '/reports',
   developer: '/developer',

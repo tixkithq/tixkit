@@ -203,6 +203,7 @@ export interface EventTable {
   visibility: string;
   seo: string;
   capacity: number | null;
+  minimum_age: number | null;
   cover_image_url: string | null;
   external_url: string | null;
   waitlist_auto_offer_enabled: Generated<boolean>;
@@ -335,6 +336,7 @@ export interface OrderTable {
   buyer_first_name: string | null;
   buyer_last_name: string | null;
   buyer_phone: string | null;
+  buyer_date_of_birth: string | null;
   payment_intent_id: string | null;
   payment_provider: string | null;
   sales_channel: Generated<SalesChannel>;
@@ -431,6 +433,7 @@ export interface AttendeeTable {
   last_name: string | null;
   email: string;
   phone: string | null;
+  date_of_birth: string | null;
   status: string;
   custom_answers: string | null;
   checked_in_at: Timestamp | null;
@@ -592,6 +595,7 @@ export interface CheckInListTable {
   status: string;
   created_at: Timestamp;
   updated_at: Timestamp;
+  next_activity_sequence: Generated<number | string | bigint>;
 }
 
 export interface ScanLogTable {
@@ -607,6 +611,7 @@ export interface ScanLogTable {
   offline: boolean;
   metadata: string | null;
   created_at: Timestamp;
+  activity_sequence: Generated<number | string | bigint>;
 }
 
 export interface OfflineCheckInSyncJobTable {

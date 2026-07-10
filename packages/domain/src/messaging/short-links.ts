@@ -82,7 +82,7 @@ export function sanitizeUtmParams(params: Record<string, unknown>): Record<strin
   return clean;
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '[::1]']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::', '::1']);
 const PRIVATE_IP_PREFIXES = [
   '10.',
   '172.16.',
@@ -114,10 +114,16 @@ export function isAllowedDestination(url: string, allowPrivate = false): boolean
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
   if (allowPrivate) return true;
-  const host = parsed.hostname.toLowerCase();
+  const host = parsed.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
   if (LOOPBACK_HOSTS.has(host)) return false;
   if (host.endsWith('.local') || host.endsWith('.internal')) return false;
   if (PRIVATE_IP_PREFIXES.some((prefix) => host.startsWith(prefix))) return false;
+  if (/^(?:fc|fd)[0-9a-f]{2}:/i.test(host)) return false;
+  if (/^fe[89ab][0-9a-f]:/i.test(host)) return false;
+  if (host.startsWith('::ffff:')) return false;
   return true;
 }
 

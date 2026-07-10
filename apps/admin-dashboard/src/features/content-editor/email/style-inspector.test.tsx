@@ -1,8 +1,14 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { StyleInspector } from './style-inspector';
+
+const inspectorState = vi.hoisted(() => ({
+  nodeType: 'image',
+  style: '',
+  setAttr: vi.fn(),
+}));
 
 vi.mock('@react-email/editor/ui', () => ({
   Inspector: {
@@ -15,8 +21,8 @@ vi.mock('@react-email/editor/ui', () => ({
     }: {
       children?: (context: {
         nodeType: string;
-        getAttr: () => undefined;
-        setAttr: () => undefined;
+        getAttr: (name: string) => unknown;
+        setAttr: (name: string, value: unknown) => void;
         getStyle: () => undefined;
         setStyle: () => undefined;
         batchSetStyle: () => undefined;
@@ -26,9 +32,9 @@ vi.mock('@react-email/editor/ui', () => ({
         'section',
         null,
         children?.({
-          nodeType: 'image',
-          getAttr: () => undefined,
-          setAttr: () => undefined,
+          nodeType: inspectorState.nodeType,
+          getAttr: (name: string) => (name === 'style' ? inspectorState.style : undefined),
+          setAttr: inspectorState.setAttr,
           getStyle: () => undefined,
           setStyle: () => undefined,
           batchSetStyle: () => undefined,
@@ -45,14 +51,47 @@ vi.mock('@react-email/editor/ui', () => ({
 
 describe('StyleInspector', () => {
   it('renders document and node style sections', () => {
-    render(<StyleInspector />);
+    const { container } = render(<StyleInspector />);
 
     expect(screen.getByText('Page style')).toBeInTheDocument();
+    expect(container.querySelector('.tixkit-email-native-inspector')).toBeInTheDocument();
     expect(screen.getByText('Document styles')).toBeInTheDocument();
     expect(screen.getByText('Attributes')).toBeInTheDocument();
     expect(screen.getByText('Size')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Image alignment' })).toBeInTheDocument();
     expect(screen.getByText('Background')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit theme/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Global CSS')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Right' }));
+    expect(inspectorState.setAttr).toHaveBeenCalledWith('alignment', 'right');
+  });
+
+  it('uploads a hero background and applies email-safe image styles', async () => {
+    inspectorState.nodeType = 'section';
+    inspectorState.style = 'background-color: #06233f; min-height: 320px';
+    inspectorState.setAttr.mockClear();
+    const onUploadImage = vi.fn().mockResolvedValue({
+      url: 'https://assets.example.test/hero.jpg',
+    });
+    const { container } = render(<StyleInspector onUploadImage={onUploadImage} />);
+
+    const fileInput = container.querySelector('input[type="file"]');
+    expect(screen.getByText('Hero background')).toBeInTheDocument();
+    fireEvent.change(fileInput!, {
+      target: { files: [new File(['hero'], 'hero.jpg', { type: 'image/jpeg' })] },
+    });
+
+    await waitFor(() => expect(onUploadImage).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(inspectorState.setAttr).toHaveBeenCalledWith(
+        'style',
+        expect.stringContaining('url("https://assets.example.test/hero.jpg")'),
+      ),
+    );
+    expect(inspectorState.setAttr).toHaveBeenCalledWith(
+      'style',
+      expect.stringContaining('background-size: cover'),
+    );
   });
 });

@@ -52,15 +52,22 @@ export type DropdownMenuItemConfig = {
 /*  Badges                                                             */
 /* ------------------------------------------------------------------ */
 
-export function AutosaveBadge({ state }: { state: ContentEditorAutosaveState }) {
+export function AutosaveBadge({
+  state,
+  label: labelOverride,
+}: {
+  state: ContentEditorAutosaveState;
+  label?: string;
+}) {
   const label =
-    state === 'saving'
+    labelOverride ??
+    (state === 'saving'
       ? 'Saving'
       : state === 'saved'
         ? 'Saved'
         : state === 'error'
           ? 'Save failed'
-          : 'Ready';
+          : 'Ready');
   const tone = cn(
     'rounded-md border px-2 py-0.5 text-xs font-medium',
     state === 'error'
@@ -96,6 +103,8 @@ export type EditorTopBarProps = {
   documentName: string;
   status: string;
   autosave: ContentEditorAutosaveState;
+  autosaveLabel?: string;
+  onBackClick?: React.MouseEventHandler<HTMLAnchorElement>;
   onDocumentNameClick?: () => void;
   notice?: string;
   error?: string;
@@ -112,6 +121,8 @@ export function EditorTopBar({
   documentName,
   status,
   autosave,
+  autosaveLabel,
+  onBackClick,
   onDocumentNameClick,
   notice,
   error,
@@ -132,6 +143,7 @@ export function EditorTopBar({
           aria-label="Back"
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
           href={backHref}
+          onClick={onBackClick}
         >
           <ChevronLeft className="size-4" />
         </a>
@@ -146,7 +158,7 @@ export function EditorTopBar({
           {documentName}
         </button>
         <StatusBadge status={status} />
-        <AutosaveBadge state={autosave} />
+        <AutosaveBadge label={autosaveLabel} state={autosave} />
       </div>
 
       {/* Center: notice / error */}
@@ -163,7 +175,9 @@ export function EditorTopBar({
 
       {/* Right: actions */}
       <div className="flex shrink-0 items-center gap-1.5">
-        {secondaryActions}
+        {secondaryActions ? (
+          <div className="hidden items-center gap-1.5 lg:flex">{secondaryActions}</div>
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button aria-label="More actions" size="icon" variant="outline">

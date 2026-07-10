@@ -669,6 +669,8 @@
 
   .tixkit-email-native-inspector [data-re-inspector-input] {
     min-width: 0;
+    width: 100%;
+    max-width: none;
     height: 2rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
@@ -677,6 +679,12 @@
     color: var(--foreground);
     font: inherit;
     outline: none;
+  }
+
+  .tixkit-email-native-inspector textarea[data-re-inspector-input] {
+    min-height: 3.75rem;
+    padding-block: 0.5rem;
+    resize: vertical;
   }
 
   .tixkit-email-native-inspector [data-re-inspector-color-hex] {
@@ -901,15 +909,48 @@
   margin-top: 0;
 }
 
+.tk-ep-inspector__fields {
+  background: var(--background);
+  scrollbar-gutter: stable;
+}
+
+.tk-ep-inspector__fields [class*='_PuckFields_']:not([class*='_PuckFields-field_']) {
+  padding: 0.35rem 0.8rem 1.5rem;
+}
+
 .tk-ep-inspector [class*='_PuckFields-field_'] {
-  padding: 0 !important;
+  padding: 0.35rem 0.4rem !important;
   border-top: 0 !important;
   margin-top: 0 !important;
   color: inherit !important;
+  border-radius: 0.65rem;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .tk-ep-inspector [class*='_PuckFields-field_'] + [class*='_PuckFields-field_'] {
-  margin-top: 0.15rem !important;
+  margin-top: 0.1rem !important;
+}
+
+.tk-ep-inspector [class*='_PuckFields-field_']:not(:has(.tk-ep-field-section)):hover {
+  background: color-mix(in srgb, var(--muted) 42%, transparent);
+}
+
+.tk-ep-inspector [class*='_PuckFields-field_']:has(.tk-ep-field-section) {
+  margin-top: 0.65rem !important;
+  padding: 0.8rem 0.4rem 0.4rem !important;
+  border-top: 1px solid var(--border) !important;
+  border-radius: 0;
+}
+
+.tk-ep-inspector [class*='_PuckFields-field_']:first-child:has(.tk-ep-field-section) {
+  margin-top: 0 !important;
+  border-top: 0 !important;
+}
+
+.tk-ep-inspector [data-settings-filter-hidden] {
+  display: none !important;
 }
 
 .tk-ep-inspector [class*='_Input-label_'] {
@@ -922,7 +963,9 @@
 .tk-ep-inspector [class*='_Input-input_'],
 .tk-ep-inspector [class*='_InputWrapper_'] select,
 .tk-ep-inspector [class*='_InputWrapper_'] textarea,
-.tk-ep-inspector [class*='_InputWrapper_'] input:not([type='range']):not([type='color']):not([type='file']) {
+.tk-ep-inspector
+  [class*='_InputWrapper_']
+  input:not([type='range']):not([type='color']):not([type='file']) {
   min-height: 2.25rem;
   border-radius: 0.5rem;
   border-color: var(--border);

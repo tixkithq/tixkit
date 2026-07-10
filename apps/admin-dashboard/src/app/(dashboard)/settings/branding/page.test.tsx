@@ -20,6 +20,7 @@ const bootstrapState = vi.hoisted(() => ({
       },
     ],
     brandId: 'brd_1',
+    updateBrand: vi.fn(),
     loading: false,
     error: null,
   },
@@ -62,6 +63,7 @@ import BrandingPage from './page';
 describe('BrandingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    bootstrapState.value.updateBrand = vi.fn();
     guardMock.allowed = true;
   });
 
@@ -196,7 +198,7 @@ describe('BrandingPage', () => {
     render(<BrandingPage />);
 
     const file = new File(['png'], 'logo.png', { type: 'image/png' });
-    fireEvent.change(await screen.findByLabelText('Upload Logo'), {
+    fireEvent.change(await screen.findByLabelText('Upload wordmark'), {
       target: { files: [file] },
     });
 
@@ -205,7 +207,7 @@ describe('BrandingPage', () => {
       purpose: 'brand_logo',
       file,
       brandId: 'brd_1',
-      metadata: { source: 'admin_branding' },
+      metadata: { source: 'admin_branding', variant: 'wordmark' },
     });
     await waitFor(() => expect(apiMock.updateBrand).toHaveBeenCalledTimes(1));
     expect(apiMock.updateBrand).toHaveBeenCalledWith('brd_1', {
@@ -216,5 +218,50 @@ describe('BrandingPage', () => {
       },
     });
     expect(apiMock.updateBrand.mock.calls[0]?.[1].theme.logoUrl).not.toContain('X-Amz-Signature');
+  });
+
+  it('stores a separate square icon for compact app surfaces', async () => {
+    apiMock.uploadArtifact.mockResolvedValue({
+      ok: true,
+      data: {
+        artifactId: 'upl_icon',
+        status: 'uploaded',
+        scanStatus: 'clean',
+        downloadUrl: 'http://localhost:4000/v1/public/brand-logos/upl_icon',
+      },
+    });
+    apiMock.updateBrand.mockResolvedValue({
+      ok: true,
+      data: {
+        ...bootstrapState.value.availableBrands[0],
+        theme: {
+          primaryColor: '#222222',
+          iconArtifactId: 'upl_icon',
+          iconUrl: 'http://localhost:4000/v1/public/brand-logos/upl_icon',
+        },
+      },
+    });
+
+    render(<BrandingPage />);
+    const file = new File(['png'], 'icon.png', { type: 'image/png' });
+    fireEvent.change(await screen.findByLabelText('Upload icon'), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() =>
+      expect(apiMock.uploadArtifact).toHaveBeenCalledWith({
+        purpose: 'brand_logo',
+        file,
+        brandId: 'brd_1',
+        metadata: { source: 'admin_branding', variant: 'icon' },
+      }),
+    );
+    expect(apiMock.updateBrand).toHaveBeenCalledWith('brd_1', {
+      theme: {
+        primaryColor: '#222222',
+        iconArtifactId: 'upl_icon',
+        iconUrl: 'http://localhost:4000/v1/public/brand-logos/upl_icon',
+      },
+    });
   });
 });

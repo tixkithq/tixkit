@@ -64,14 +64,22 @@ const occurrences = [
   },
 ];
 
+const event = {
+  startsAt: '2026-08-15T23:00:00.000Z',
+  timezone: 'America/New_York',
+  minimumAge: 18,
+};
+
 function renderPanel(
   onOrderCreated = vi.fn(),
   panelTicketTypes: typeof ticketTypes = ticketTypes,
   panelOccurrences: typeof occurrences = occurrences,
+  panelEvent: typeof event = event,
 ) {
   render(
     <BoxOfficeOrderPanel
       eventId="evt_1"
+      event={panelEvent}
       ticketTypes={panelTicketTypes}
       occurrences={panelOccurrences}
       onOrderCreated={onOrderCreated}
@@ -86,12 +94,18 @@ function fillBuyerAndAttendee() {
   fireEvent.change(screen.getByLabelText('Buyer email'), {
     target: { value: 'ada@example.test' },
   });
+  fireEvent.change(screen.getByLabelText('Buyer date of birth'), {
+    target: { value: '1990-01-01' },
+  });
   fireEvent.change(screen.getByLabelText('Attendee 1 first name'), { target: { value: 'Ada' } });
   fireEvent.change(screen.getByLabelText('Attendee 1 last name'), {
     target: { value: 'Lovelace' },
   });
   fireEvent.change(screen.getByLabelText('Attendee 1 email'), {
     target: { value: 'ada@example.test' },
+  });
+  fireEvent.change(screen.getByLabelText('Attendee 1 date of birth'), {
+    target: { value: '1990-01-01' },
   });
 }
 
@@ -101,6 +115,77 @@ afterEach(() => {
 });
 
 describe('BoxOfficeOrderPanel', () => {
+  it('does not collect date of birth for unrestricted events', async () => {
+    adminApiMock.createBoxOfficeOrder.mockResolvedValue({
+      ok: true,
+      data: {
+        sessionId: 'cs_unrestricted',
+        status: 'completed',
+        order: {
+          id: 'ord_unrestricted',
+          eventId: 'evt_1',
+          status: 'paid',
+          totalCents: 2500,
+          currency: 'USD',
+        },
+      },
+    });
+    renderPanel(vi.fn(), ticketTypes, occurrences, { ...event, minimumAge: 0 });
+
+    expect(screen.queryByLabelText('Buyer date of birth')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Attendee 1 date of birth')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Buyer first name'), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText('Buyer last name'), { target: { value: 'Lovelace' } });
+    fireEvent.change(screen.getByLabelText('Buyer email'), {
+      target: { value: 'ada@example.test' },
+    });
+    fireEvent.change(screen.getByLabelText('Attendee 1 first name'), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText('Attendee 1 last name'), {
+      target: { value: 'Lovelace' },
+    });
+    fireEvent.change(screen.getByLabelText('Attendee 1 email'), {
+      target: { value: 'ada@example.test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Issue door order' }));
+
+    await waitFor(() => expect(adminApiMock.createBoxOfficeOrder).toHaveBeenCalledTimes(1));
+    expect(adminApiMock.createBoxOfficeOrder).toHaveBeenCalledWith(
+      'evt_1',
+      expect.objectContaining({
+        buyer: expect.not.objectContaining({ dateOfBirth: expect.anything() }),
+        items: [
+          expect.objectContaining({
+            attendeeFields: [expect.not.objectContaining({ dateOfBirth: expect.anything() })],
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('copies buyer details locally without issuing an API request', () => {
+    renderPanel();
+    fireEvent.change(screen.getByLabelText('Buyer first name'), {
+      target: { value: 'Ada' },
+    });
+    fireEvent.change(screen.getByLabelText('Buyer last name'), {
+      target: { value: 'Lovelace' },
+    });
+    fireEvent.change(screen.getByLabelText('Buyer email'), {
+      target: { value: 'ada@example.test' },
+    });
+    fireEvent.change(screen.getByLabelText('Buyer date of birth'), {
+      target: { value: '1990-01-01' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use buyer details' }));
+
+    expect(screen.getByLabelText('Attendee 1 first name')).toHaveValue('Ada');
+    expect(screen.getByLabelText('Attendee 1 last name')).toHaveValue('Lovelace');
+    expect(screen.getByLabelText('Attendee 1 email')).toHaveValue('ada@example.test');
+    expect(screen.getByLabelText('Attendee 1 date of birth')).toHaveValue('1990-01-01');
+    expect(adminApiMock.createBoxOfficeOrder).not.toHaveBeenCalled();
+  });
+
   it('rejects cash tender when the entered amount does not match the ticket total', async () => {
     renderPanel();
     fillBuyerAndAttendee();
@@ -108,6 +193,18 @@ describe('BoxOfficeOrderPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Issue door order' }));
 
     expect(await screen.findByText('Tender amount must match $25.00.')).toBeInTheDocument();
+    expect(adminApiMock.createBoxOfficeOrder).not.toHaveBeenCalled();
+  });
+
+  it('blocks an underage attendee before issuing the door order', async () => {
+    renderPanel();
+    fillBuyerAndAttendee();
+    fireEvent.change(screen.getByLabelText('Attendee 1 date of birth'), {
+      target: { value: '2010-01-01' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Issue door order' }));
+
+    expect(screen.getByLabelText('Attendee 1 date of birth')).toBeInvalid();
     expect(adminApiMock.createBoxOfficeOrder).not.toHaveBeenCalled();
   });
 
@@ -143,7 +240,14 @@ describe('BoxOfficeOrderPanel', () => {
             ticketTypeId: 'tt_ga',
             occurrenceId: 'occ_friday',
             quantity: 1,
-            attendeeFields: [{ firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.test' }],
+            attendeeFields: [
+              {
+                firstName: 'Ada',
+                lastName: 'Lovelace',
+                email: 'ada@example.test',
+                dateOfBirth: '1990-01-01',
+              },
+            ],
           },
         ],
         buyer: {
@@ -151,6 +255,7 @@ describe('BoxOfficeOrderPanel', () => {
           lastName: 'Lovelace',
           email: 'ada@example.test',
           phone: undefined,
+          dateOfBirth: '1990-01-01',
         },
         notes: 'Drawer A cash sale',
       });

@@ -97,17 +97,17 @@ test('validateCompletionBacklog rejects weak evidence for critical hosted gates'
   const result = validateCompletionBacklog(backlog);
 
   assert.deepEqual(result.errors, [
-    'C-035: evidence must cite hosted CI, GitHub Actions, and branch protection',
-    'C-036: evidence must cite hosted Stripe secrets and non-skipped provider gates',
-    'C-037: evidence must cite hosted release dry-run, managed backup/restore, and migration rollback rehearsal',
+    'C-035: evidence must cite Trusted CI on EPYC and branch protection',
+    'C-036: evidence must cite trusted-runner Stripe secrets and non-skipped provider gates',
+    'C-037: evidence must cite trusted release dry-run, lab backup/restore, and migration rollback rehearsal',
     'C-069: evidence must cite public remote ruleset application with the export GitHub App as the only bypass actor',
     'C-071: evidence must cite dated PayPal deferral decision',
-    'C-082: evidence must cite local matrix validation plus fresh hosted CI proof',
-    'C-035: evidence must cite hosted CI, GitHub Actions, and branch protection',
-    'C-036: evidence must cite hosted Stripe secrets and non-skipped provider gates',
-    'C-037: evidence must cite hosted release dry-run, managed backup/restore, and migration rollback rehearsal',
+    'C-082: evidence must cite local matrix validation plus fresh Trusted CI proof',
+    'C-035: evidence must cite Trusted CI on EPYC and branch protection',
+    'C-036: evidence must cite trusted-runner Stripe secrets and non-skipped provider gates',
+    'C-037: evidence must cite trusted release dry-run, lab backup/restore, and migration rollback rehearsal',
     'C-069: evidence must cite public remote ruleset application with the export GitHub App as the only bypass actor',
     'C-071: evidence must cite dated PayPal deferral decision',
-    'C-082: evidence must cite local matrix validation plus fresh hosted CI proof',
+    'C-082: evidence must cite local matrix validation plus fresh Trusted CI proof',
   ]);
 });

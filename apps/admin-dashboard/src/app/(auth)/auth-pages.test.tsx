@@ -64,9 +64,13 @@ describe('admin auth pages', () => {
     expect(mocks.signUpProps).toHaveBeenCalledWith(
       expect.objectContaining({
         fallbackRedirectUrl: routes.dashboard,
-        forceRedirectUrl: routes.dashboard,
         signInFallbackRedirectUrl: routes.dashboard,
-        signInForceRedirectUrl: routes.dashboard,
+      }),
+    );
+    expect(mocks.signUpProps).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        forceRedirectUrl: expect.anything(),
+        signInForceRedirectUrl: expect.anything(),
       }),
     );
   });

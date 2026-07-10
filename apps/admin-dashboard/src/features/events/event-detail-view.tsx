@@ -174,28 +174,14 @@ export function EventDetailView({ eventId }: { eventId: string }) {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="size-5 text-muted-foreground" />
-              Event Description
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Shared event copy used by previews, merge tags, and hosted event page defaults.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-              <Pencil className="size-4" />
-              Edit details
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={routes.eventContentEventPage(eventId)} prefetch={false}>
-                <PenTool className="size-4" />
-                Design page
-              </Link>
-            </Button>
-          </div>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="size-5 text-muted-foreground" />
+            Event Description
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Shared event copy used by previews, merge tags, and hosted event page defaults.
+          </p>
         </CardHeader>
         <CardContent>
           {eventDescription ? (
@@ -204,8 +190,8 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              No description yet. Add the canonical event copy here, then place or style it in the
-              event page editor.
+              No description yet. Add the canonical event copy via Edit, then place or style it in
+              the Event Page editor.
             </p>
           )}
         </CardContent>

@@ -15,6 +15,9 @@ import {
   type SendEmailInput,
   type TemplateKey,
 } from '@tixkit/domain';
+import { composeStudioTemplate } from './studio-sections.js';
+import { STUDIO_TEMPLATE_CONTENT } from './studio-templates.js';
+import { STUDIO_BUTTON_STYLE, STUDIO_COLORS, STUDIO_TYPE, styleAttr } from './theme.js';
 
 export const REACT_EMAIL_EDITOR_PACKAGE = '@react-email/editor' as const;
 export { MERGE_TAG_REGISTRY };
@@ -30,6 +33,7 @@ export const SEEDABLE_EMAIL_TEMPLATE_KEYS = [
   'event-reminder',
   'attendee-message',
   'staff-order-notification',
+  'organization-member-invited',
   'checkin-device-invited',
   'waitlist-joined',
   'waitlist-invite',
@@ -225,35 +229,23 @@ const defaultContainerStyle = {
   margin: '0 auto',
   padding: '24px',
   width: '100%',
-  maxWidth: '600px',
+  maxWidth: '640px',
 } satisfies React.CSSProperties;
 
 const paragraphStyle = {
-  color: '#726a6a',
-  fontSize: '15px',
-  lineHeight: '24px',
+  ...STUDIO_TYPE.body,
+  color: STUDIO_COLORS.fg2,
   margin: '0 0 16px',
 } satisfies React.CSSProperties;
 
-const buttonStyle = {
-  backgroundColor: '#332c2c',
-  border: '1px solid #332c2c',
-  borderRadius: '999px',
-  color: '#ffffff',
-  display: 'inline-block',
-  fontSize: '14px',
-  fontWeight: 600,
-  lineHeight: '20px',
-  padding: '12px 18px',
-  textDecoration: 'none',
-} satisfies React.CSSProperties;
+const buttonStyle = STUDIO_BUTTON_STYLE;
 
 // Single quotes keep style="..." attributes valid when font families are quoted.
 const studioFontFamily =
   "'Inter', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
 const shellStyle = {
-  backgroundColor: '#dce1e4',
+  backgroundColor: STUDIO_COLORS.bg2,
   fontFamily: studioFontFamily,
 } satisfies React.CSSProperties;
 
@@ -385,17 +377,24 @@ function validateEmailGlobalCss(css: string | undefined): ContentValidationIssue
 export function createDefaultEmailTemplate(
   overrides: Partial<EmailTemplateDocument> = {},
 ): EmailTemplateDocument {
+  const defaultHtml = composeStudioTemplate({
+    archetype: 'receipt',
+    headline: 'Your {{event.title}} tickets are ready',
+    intro: ['Hi {{recipient.name}} — your order is confirmed.'],
+    primaryAction: { label: 'View tickets →', url: '{{event.checkoutUrl}}' },
+    item: { title: '{{ticket.type}}', meta: ['Ticket {{ticket.code}}'] },
+    facts: [
+      { label: 'Order', value: '{{order.id}}' },
+      { label: 'Total', value: '{{order.total}}' },
+    ],
+    qr: { imageUrl: '{{ticket.qrCodeUrl}}', code: '{{ticket.code}}' },
+  });
   const base: EmailTemplateDocument = {
     schemaVersion: 1,
     editor: {
       provider: REACT_EMAIL_EDITOR_PACKAGE,
-      contentHtml: [
-        '<h1>{{event.title}}</h1>',
-        '<p>Hi {{recipient.name}}, your tickets are ready.</p>',
-        '<p>{{ticket.type}} - {{order.total}}</p>',
-        '<p>Ticket code: {{ticket.code}}</p>',
-        '<p><img src="{{ticket.qrCodeUrl}}" alt="Ticket QR code" /></p>',
-      ].join(''),
+      contentHtml: defaultHtml,
+      contentText: plainTextFromHtml(defaultHtml),
     },
     settings: {
       templateKey: 'custom',
@@ -441,11 +440,18 @@ export function createDefaultEmailTemplate(
     Array.isArray(overrides.blocks) && !hasEditorHtmlOverride
       ? legacyEditorContentFromBlocks(overrides.blocks)
       : undefined;
+  const editorOverrides =
+    hasEditorHtmlOverride && overrides.editor?.contentText === undefined
+      ? {
+          ...overrides.editor,
+          contentText: plainTextFromHtml(overrides.editor?.contentHtml ?? ''),
+        }
+      : overrides.editor;
 
   return {
     ...base,
     ...overrides,
-    editor: { ...base.editor, ...legacyEditorContent, ...overrides.editor },
+    editor: { ...base.editor, ...legacyEditorContent, ...editorOverrides },
     settings: {
       ...base.settings,
       ...overrides.settings,
@@ -498,32 +504,6 @@ export function createDefaultEmailTemplateForKey(key: TemplateKey): EmailTemplat
   };
 }
 
-type StudioEmailRow = {
-  label: string;
-  value: string;
-};
-
-type StudioEmailAction = {
-  label: string;
-  url: string;
-};
-
-type StudioEmailContent = {
-  eyebrow: string;
-  headline: string;
-  intro: string;
-  summaryTitle: string;
-  rows: StudioEmailRow[];
-  primaryAction?: StudioEmailAction;
-  secondaryActions: StudioEmailAction[];
-  qr?: {
-    title: string;
-    imageUrl: string;
-    imageAlt: string;
-  };
-  complianceNote?: string;
-};
-
 function defaultBlocksForKey(key: TemplateKey): EmailTemplateBlock[] {
   const lifecycle = getTemplateLifecycle(key);
   if (!lifecycle) {
@@ -547,293 +527,22 @@ function defaultEditorContentForKey(
   if (!lifecycle) {
     throw new Error(`No lifecycle metadata registered for template key: ${key}`);
   }
-  const html = studioEmailHtml(defaultStudioEmailContentForKey(lifecycle));
-  return {
-    html,
-    text: plainTextFromHtml(html),
-  };
-}
-
-function defaultStudioEmailContentForKey(
-  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
-): StudioEmailContent {
-  const variables = Array.from(
-    new Set([
-      'recipient.name',
-      ...lifecycle.requiredVariables,
-      ...defaultOptionalVariablesForLifecycle(lifecycle),
-    ]),
-  );
-  const qrVariable = variables.includes('ticket.qrCodeUrl') ? 'ticket.qrCodeUrl' : undefined;
-  const actionVariables = variables.filter(
-    (variable) => variable !== qrVariable && isActionVariable(variable),
-  );
-  const primaryActionVariable = actionVariables[0];
-  const secondaryActionVariables = actionVariables
-    .filter((variable) => variable !== primaryActionVariable)
-    .slice(0, 3);
-  const nonRowVariables = new Set(['recipient.name', 'event.title', qrVariable]);
-  const rows = variables
-    .filter((variable) => variable && !nonRowVariables.has(variable) && !isActionVariable(variable))
-    .slice(0, 7)
-    .map((variable) => ({
-      label: mergeTagLabel(variable),
-      value: `{{${variable}}}`,
-    }));
-  const requiredFallbackRows = lifecycle.requiredVariables
-    .filter(
-      (variable) =>
-        !studioContentHasVariable(
-          {
-            headline: headlineForLifecycle(lifecycle),
-            intro: introForLifecycle(lifecycle),
-            rows,
-            primaryAction: primaryActionVariable
-              ? { label: actionLabel(primaryActionVariable), url: `{{${primaryActionVariable}}}` }
-              : undefined,
-            secondaryActions: secondaryActionVariables.map((secondaryVariable) => ({
-              label: actionLabel(secondaryVariable),
-              url: `{{${secondaryVariable}}}`,
-            })),
-            qr: qrVariable
-              ? {
-                  title: 'Your ticket QR',
-                  imageUrl: `{{${qrVariable}}}`,
-                  imageAlt: 'Ticket QR code',
-                }
-              : undefined,
-          },
-          variable,
-        ),
-    )
-    .map((variable) => ({
-      label: mergeTagLabel(variable),
-      value: `{{${variable}}}`,
-    }));
-  return {
-    eyebrow: '{{brand.name}}',
-    headline: headlineForLifecycle(lifecycle),
-    intro: introForLifecycle(lifecycle),
-    summaryTitle: summaryTitleForLifecycle(lifecycle),
-    rows: dedupeRows([...requiredFallbackRows, ...rows]),
-    primaryAction: primaryActionVariable
-      ? { label: actionLabel(primaryActionVariable), url: `{{${primaryActionVariable}}}` }
-      : undefined,
-    secondaryActions: secondaryActionVariables.map((variable) => ({
-      label: actionLabel(variable),
-      url: `{{${variable}}}`,
-    })),
-    qr: qrVariable
-      ? {
-          title: 'Your ticket QR',
-          imageUrl: `{{${qrVariable}}}`,
-          imageAlt: 'Ticket QR code',
-        }
-      : undefined,
+  const definition = STUDIO_TEMPLATE_CONTENT[key];
+  const html = composeStudioTemplate(definition, {
     complianceNote:
       lifecycle.category === 'bulk'
         ? 'You are receiving this because you subscribed to updates from {{brand.name}} or attended this event.'
         : undefined,
-  };
-}
-
-function studioEmailHtml(content: StudioEmailContent): string {
-  // Use plain <div> wrappers (not bare <section>/<header>/<footer>) so the React
-  // Email editor can parse and re-export layout/styles. Section nodes only parse
-  // `section[data-type=section]`; bare sections drop their styles on round-trip.
-  return [
-    `<div style="${styleAttr(shellStyle)}">`,
-    `<div data-type="container" style="${styleAttr(defaultContainerStyle)}">`,
-    `<div style="${styleAttr(studioEmailCardStyle)}">`,
-    `<div style="${styleAttr(studioHeaderStyle)}">`,
-    `<p style="${styleAttr(eyebrowStyle)}">${content.eyebrow}</p>`,
-    '</div>',
-    `<div style="${styleAttr(cardStyle)}">`,
-    `<h1 style="${styleAttr(headingStyle)}">${content.headline}</h1>`,
-    `<p style="${styleAttr(paragraphStyle)}">${content.intro}</p>`,
-    content.primaryAction
-      ? `<p style="${styleAttr({ margin: '20px 0 0' })}"><a href="${content.primaryAction.url}" style="${styleAttr(buttonStyle)}">${content.primaryAction.label}</a></p>`
-      : '',
-    '</div>',
-    `<div style="${styleAttr(cardStyle)}">`,
-    `<h2 style="${styleAttr(subheadingStyle)}">${content.summaryTitle}</h2>`,
-    ...content.rows.map(
-      (row) =>
-        `<div style="${styleAttr(panelStyle)}"><p style="${styleAttr(mutedStyle)}">${row.label}</p><p style="${styleAttr({
-          ...paragraphStyle,
-          color: '#332c2c',
-          fontWeight: 600,
-          margin: '4px 0 0',
-        })}">${row.value}</p></div>`,
-    ),
-    '</div>',
-    content.qr
-      ? [
-          `<div style="${styleAttr({ ...cardStyle, textAlign: 'center' })}">`,
-          `<h2 style="${styleAttr(subheadingStyle)}">${content.qr.title}</h2>`,
-          `<p style="${styleAttr({ margin: '18px 0 0' })}"><img src="${content.qr.imageUrl}" alt="${content.qr.imageAlt}" style="${styleAttr({
-            backgroundColor: '#ffffff',
-            borderRadius: '18px',
-            display: 'block',
-            margin: '0 auto',
-            maxWidth: '220px',
-            padding: '18px',
-          })}" /></p>`,
-          '</div>',
-        ].join('')
-      : '',
-    content.secondaryActions.length > 0
-      ? [
-          `<div style="${styleAttr(cardStyle)}">`,
-          `<h2 style="${styleAttr(subheadingStyle)}">Next steps</h2>`,
-          ...content.secondaryActions.map(
-            (action) =>
-              `<p style="${styleAttr({ margin: '0 0 10px' })}"><a href="${action.url}" style="${styleAttr({
-                color: '#332c2c',
-                fontSize: '15px',
-                fontWeight: 600,
-                lineHeight: '24px',
-              })}">${action.label}</a></p>`,
-          ),
-          '</div>',
-        ].join('')
-      : '',
-    `<div style="${styleAttr(studioFooterStyle)}">`,
-    content.complianceNote
-      ? `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px', margin: '0 0 8px' })}">${content.complianceNote}</p>`
-      : '',
-    `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px' })}">Need help? Contact <a href="{{brand.supportUrl}}" style="color: #332c2c">{{brand.name}} support</a>.</p>`,
-    '</div>',
-    '</div>',
-    '</div>',
-    '</div>',
-  ].join('');
-}
-
-function headlineForLifecycle(
-  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
-): string {
-  if (lifecycle.requiredVariables.includes('event.title')) return '{{event.title}}';
-  if (lifecycle.optionalVariables.includes('event.title')) return '{{event.title}}';
-  if (lifecycle.requiredVariables.includes('integration.name')) return '{{integration.name}}';
-  return lifecycle.name;
-}
-
-function introForLifecycle(
-  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
-): string {
-  const detail = lifecycle.defaultPreviewText ?? sentenceCase(lifecycle.trigger);
-  return `Hi {{recipient.name}}, ${detail}`;
-}
-
-function summaryTitleForLifecycle(
-  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
-): string {
-  switch (lifecycle.category) {
-    case 'staff':
-      return 'Operational details';
-    case 'system':
-      return 'Account details';
-    case 'bulk':
-      return 'Message details';
-    case 'transactional':
-      return 'Details';
-  }
-}
-
-function studioContentHasVariable(
-  content: Pick<
-    StudioEmailContent,
-    'headline' | 'intro' | 'primaryAction' | 'qr' | 'rows' | 'secondaryActions'
-  >,
-  variable: string,
-): boolean {
-  const token = `{{${variable}}}`;
-  return [
-    content.headline,
-    content.intro,
-    content.primaryAction?.url,
-    content.qr?.imageUrl,
-    ...content.rows.flatMap((row) => [row.label, row.value]),
-    ...content.secondaryActions.flatMap((action) => [action.label, action.url]),
-  ].some((value) => value?.includes(token));
-}
-
-function isActionVariable(variable: string): boolean {
-  return variable.endsWith('Url') || variable === 'dashboard.url';
-}
-
-function defaultOptionalVariablesForLifecycle(
-  lifecycle: NonNullable<ReturnType<typeof getTemplateLifecycle>>,
-): string[] {
-  const allowedByKey: Partial<Record<TemplateKey, string[]>> = {
-    'tickets-issued': ['ticket.pdfUrl', 'ticket.walletAppleUrl', 'ticket.walletGoogleUrl'],
-    'event-reminder': ['ticket.qrCodeUrl'],
-    'wallet-pass-ready': ['ticket.walletAppleUrl', 'ticket.walletGoogleUrl', 'ticket.qrCodeUrl'],
-  };
-  const allowed = allowedByKey[lifecycle.key] ?? [];
-  return lifecycle.optionalVariables.filter((variable) => allowed.includes(variable));
-}
-
-function actionLabel(variable: string): string {
-  switch (variable) {
-    case 'dashboard.url':
-      return 'Open dashboard';
-    case 'brand.supportUrl':
-      return 'Contact support';
-    case 'event.checkoutUrl':
-      return 'Finish checkout';
-    case 'event.publicUrl':
-      return 'View event';
-    case 'event.mapUrl':
-      return 'Open map';
-    case 'order.manageUrl':
-      return 'Manage order';
-    case 'order.receiptUrl':
-      return 'View receipt';
-    case 'order.retryUrl':
-      return 'Retry payment';
-    case 'ticket.pdfUrl':
-      return 'Download tickets';
-    case 'ticket.transferUrl':
-      return 'Accept ticket';
-    case 'ticket.walletAppleUrl':
-      return 'Add to Apple Wallet';
-    case 'ticket.walletGoogleUrl':
-      return 'Save to Google Wallet';
-    case 'waitlist.inviteUrl':
-      return 'Claim tickets';
-    case 'device.inviteUrl':
-      return 'Open scanner';
-    case 'integration.reconnectUrl':
-      return 'Reconnect integration';
-    case 'chargeback.evidenceUrl':
-      return 'Submit evidence';
-    default:
-      return mergeTagLabel(variable);
-  }
-}
-
-function mergeTagLabel(variable: string): string {
-  const [, name = variable] = variable.split('.');
-  return name
-    .replace(/Url$/, '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/^\w/, (match) => match.toUpperCase());
-}
-
-function dedupeRows(rows: StudioEmailRow[]): StudioEmailRow[] {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    if (seen.has(row.value)) return false;
-    seen.add(row.value);
-    return true;
   });
-}
-
-function sentenceCase(value: string): string {
-  if (!value) return value;
-  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+  for (const variable of lifecycle.requiredVariables) {
+    if (!html.includes(`{{${variable}}}`)) {
+      throw new Error(`Studio default for ${key} is missing required merge tag {{${variable}}}`);
+    }
+  }
+  return {
+    html,
+    text: plainTextFromHtml(html),
+  };
 }
 
 function legacyEditorContentFromBlocks(
@@ -846,16 +555,16 @@ function legacyEditorContentFromBlocks(
   const html = [
     `<div style="${styleAttr(shellStyle)}">`,
     `<div style="${styleAttr(defaultContainerStyle)}">`,
-    `<section style="${styleAttr(studioEmailCardStyle)}">`,
-    `<header style="${styleAttr(studioHeaderStyle)}">`,
+    `<div style="${styleAttr(studioEmailCardStyle)}">`,
+    `<div style="${styleAttr(studioHeaderStyle)}">`,
     `<p style="${styleAttr(eyebrowStyle)}">{{brand.name}}</p>`,
-    '</header>',
+    '</div>',
     ...blockHtml,
     ...requiredRecipientFallback,
-    `<footer style="${styleAttr(studioFooterStyle)}">`,
+    `<div style="${styleAttr(studioFooterStyle)}">`,
     `<p style="${styleAttr({ ...mutedStyle, fontSize: '12px' })}">Need help? Contact <a href="{{brand.supportUrl}}" style="color: #332c2c">{{brand.name}} support</a>.</p>`,
-    '</footer>',
-    '</section>',
+    '</div>',
+    '</div>',
     '</div>',
     '</div>',
   ].join('');
@@ -866,7 +575,7 @@ function legacyEditorHtmlFromBlock(block: EmailTemplateBlock): string[] {
   switch (block.type) {
     case 'event_hero':
       return [
-        `<section style="${styleAttr(cardStyle)}">`,
+        `<div style="${styleAttr(cardStyle)}">`,
         block.imageUrl
           ? `<p><img src="${block.imageUrl}" alt="${block.imageAlt ?? ''}" style="${styleAttr({
               borderRadius: '12px',
@@ -879,33 +588,35 @@ function legacyEditorHtmlFromBlock(block: EmailTemplateBlock): string[] {
         block.ctaLabel && block.ctaUrl
           ? `<p><a href="${block.ctaUrl}" style="${styleAttr(buttonStyle)}">${block.ctaLabel}</a></p>`
           : '',
-        '</section>',
+        '</div>',
       ].filter(Boolean);
     case 'ticket_summary':
       return [
-        `<section style="${styleAttr(cardStyle)}">`,
+        `<div style="${styleAttr(cardStyle)}">`,
         `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
         `<p style="${styleAttr(paragraphStyle)}">${block.body}</p>`,
-        '</section>',
+        '</div>',
       ];
     case 'order_summary':
       return [
-        `<section style="${styleAttr(cardStyle)}">`,
+        `<div style="${styleAttr(cardStyle)}">`,
         `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
         ...block.rows.map(
           (row) =>
-            `<div style="${styleAttr(panelStyle)}"><p style="${styleAttr(mutedStyle)}">${row.label}</p><p style="${styleAttr({
-              ...paragraphStyle,
-              color: '#332c2c',
-              fontWeight: 600,
-              margin: '4px 0 0',
-            })}">${row.value}</p></div>`,
+            `<div style="${styleAttr(panelStyle)}"><p style="${styleAttr(mutedStyle)}">${row.label}</p><p style="${styleAttr(
+              {
+                ...paragraphStyle,
+                color: '#332c2c',
+                fontWeight: 600,
+                margin: '4px 0 0',
+              },
+            )}">${row.value}</p></div>`,
         ),
-        '</section>',
+        '</div>',
       ];
     case 'qr_code':
       return [
-        `<section style="${styleAttr({ ...cardStyle, textAlign: 'center' })}">`,
+        `<div style="${styleAttr({ ...cardStyle, textAlign: 'center' })}">`,
         `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
         `<p><img src="${block.imageUrl}" alt="${block.imageAlt ?? ''}" style="${styleAttr({
           backgroundColor: '#ffffff',
@@ -914,31 +625,31 @@ function legacyEditorHtmlFromBlock(block: EmailTemplateBlock): string[] {
           maxWidth: '220px',
           padding: '18px',
         })}" /></p>`,
-        '</section>',
+        '</div>',
       ];
     case 'calendar_button':
       return [
-        `<section style="${styleAttr(cardStyle)}">`,
+        `<div style="${styleAttr(cardStyle)}">`,
         `<p><a href="${block.url}" style="${styleAttr(buttonStyle)}">${block.label}</a></p>`,
-        '</section>',
+        '</div>',
       ];
     case 'venue_block':
       return [
-        `<section style="${styleAttr(cardStyle)}">`,
+        `<div style="${styleAttr(cardStyle)}">`,
         `<h2 style="${styleAttr(subheadingStyle)}">${block.title}</h2>`,
         `<p style="${styleAttr(paragraphStyle)}">${block.address}</p>`,
         block.mapUrl ? `<p><a href="${block.mapUrl}">Open map</a></p>` : '',
-        '</section>',
+        '</div>',
       ].filter(Boolean);
     case 'social_links':
       return [
-        `<section style="${styleAttr(cardStyle)}">`,
+        `<div style="${styleAttr(cardStyle)}">`,
         ...block.links.map((link) => `<p><a href="${link.url}">${link.label}</a></p>`),
-        '</section>',
+        '</div>',
       ];
     case 'unsubscribe_footer':
       return [
-        `<section style="${styleAttr({
+        `<div style="${styleAttr({
           color: '#71717a',
           fontSize: '12px',
           padding: '12px 4px 0',
@@ -946,7 +657,7 @@ function legacyEditorHtmlFromBlock(block: EmailTemplateBlock): string[] {
         '<hr>',
         `<p>${block.body}</p>`,
         `<p><a href="${block.unsubscribeUrl}">Manage preferences</a></p>`,
-        '</section>',
+        '</div>',
       ];
     case 'raw_html':
       return [`<div style="${styleAttr(cardStyle)}">${block.safe ? block.html : ''}</div>`];
@@ -957,19 +668,17 @@ function stripEmptyImageTags(html: string): string {
   return html.replace(/<img\b(?=[^>]*\ssrc=(["'])\1)[^>]*>/gi, '');
 }
 
-function styleAttr(style: React.CSSProperties): string {
-  return Object.entries(style)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([property, value]) => {
-      // style attributes are double-quoted; normalize nested double quotes in CSS values.
-      const cssValue = String(value).replaceAll('"', "'");
-      return `${kebabCaseCssProperty(property)}: ${cssValue}`;
-    })
-    .join('; ');
-}
-
-function kebabCaseCssProperty(property: string): string {
-  return property.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
+function stripEmptyStudioElements(html: string): string {
+  let result = html;
+  let previous: string;
+  do {
+    previous = result;
+    result = result.replace(
+      /<(div|p)\b(?=[^>]*\bdata-studio-optional-value=(?:["']{2}))[^>]*>[\s\S]*?<\/\1>/gi,
+      '',
+    );
+  } while (result !== previous);
+  return result;
 }
 
 /**
@@ -1124,14 +833,16 @@ export async function renderEmailTemplate(
   const previewText = document.settings.previewText
     ? renderPlain(document.settings.previewText, context)
     : undefined;
-  const editorHtml = stripEmptyImageTags(
-    renderHtml(
-      applyEmailGlobalCssToHtml(document.editor.contentHtml, document.editor.globalCss),
-      context,
+  const editorHtml = stripEmptyStudioElements(
+    stripEmptyImageTags(
+      renderHtml(
+        applyEmailGlobalCssToHtml(document.editor.contentHtml, document.editor.globalCss),
+        context,
+      ),
     ),
   );
   const editorHtmlWithFooter = appendEditorUnsubscribeFooter(editorHtml, document, context);
-  const editorText = document.editor.contentText?.trim() || plainTextFromHtml(editorHtml) || '';
+  const editorText = plainTextFromHtml(editorHtml) || document.editor.contentText?.trim() || '';
   const editorTextWithFooter = appendEditorUnsubscribeText(editorText, document, context);
   return {
     subject,
@@ -1161,8 +872,11 @@ function wrapEmailDocumentHtml(html: string, previewText?: string): string {
     '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
     '<meta name="x-apple-disable-message-reformatting" />',
+    '<link rel="preconnect" href="https://fonts.googleapis.com" />',
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />',
+    '<link href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />',
     '</head>',
-    '<body style="margin:0;padding:0;background-color:#dce1e4;">',
+    '<body style="margin:0;padding:0;background-color:#ffffff;">',
     preview,
     trimmed,
     '</body>',
@@ -1671,6 +1385,10 @@ function plainTextFromHtml(html: string): string {
   return html
     .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(
+      /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+      (_match, href: string, label: string) => `${label} (${href})`,
+    )
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(?:p|div|section|article|h[1-6]|li|tr)>/gi, '\n')
     .replace(/<[^>]*>/g, ' ')
@@ -1704,6 +1422,7 @@ function sampleContext(): MergeTagContext {
     },
     brand: {
       name: 'Tixkit',
+      logoUrl: 'https://assets.example.test/brand/tixkit-wordmark.png',
       supportUrl: 'https://help.example.test',
     },
     recipient: {

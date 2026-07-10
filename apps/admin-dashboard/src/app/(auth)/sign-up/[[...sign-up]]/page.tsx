@@ -24,12 +24,7 @@ export default function SignUpPage() {
   }
   return (
     <main className="flex min-h-svh items-center justify-center p-4">
-      <SignUp
-        fallbackRedirectUrl={routes.dashboard}
-        forceRedirectUrl={routes.dashboard}
-        signInFallbackRedirectUrl={routes.dashboard}
-        signInForceRedirectUrl={routes.dashboard}
-      />
+      <SignUp fallbackRedirectUrl={routes.dashboard} signInFallbackRedirectUrl={routes.dashboard} />
     </main>
   );
 }

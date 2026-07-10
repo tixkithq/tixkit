@@ -10,6 +10,7 @@ import {
   EventDescriptionBlock,
   EventPageRuntimeProvider,
   EventPageRender,
+  ProductAddOnsBlock,
   ResaleTicketsBlock,
   TicketsBlock,
   createEventPagePuckConfig,
@@ -50,6 +51,7 @@ describe('eventPagePuckConfig', () => {
       'CustomEmbed',
       'EventHeader',
       'Tickets',
+      'ProductAddOns',
       'ResaleTickets',
       'CheckoutCta',
       'BrandFooter',
@@ -96,6 +98,22 @@ describe('eventPagePuckConfig', () => {
         contentEditable: true,
       }),
     );
+    for (const [component, field] of [
+      ['EventHeader', 'brandLabel'],
+      ['Tickets', 'emptyTitle'],
+      ['Tickets', 'emptyDescription'],
+      ['ResaleTickets', 'badgeLabel'],
+      ['CheckoutCta', 'supportingText'],
+      ['BrandFooter', 'label'],
+    ] as const) {
+      const fields = eventPagePuckConfig.components[component].fields as unknown as Record<
+        string,
+        unknown
+      >;
+      expect(fields[field]).toEqual(
+        expect.objectContaining({ contentEditable: true, visible: false }),
+      );
+    }
     expect(eventPagePuckIframeConfig).toEqual({
       enabled: true,
       waitForStyles: true,
@@ -132,10 +150,118 @@ describe('eventPagePuckConfig', () => {
     expect(changes).toContain('#0f172a');
   });
 
+  it('exposes complete discovery settings and editable collection content', () => {
+    expect(eventPagePuckConfig.root?.fields).toEqual(
+      expect.objectContaining({
+        marketingSummary: expect.objectContaining({ type: 'textarea' }),
+        category: expect.objectContaining({ type: 'text' }),
+        tags: expect.objectContaining({ type: 'text' }),
+        coverImageUrl: expect.objectContaining({ type: 'custom' }),
+        socialImageUrl: expect.objectContaining({ type: 'custom' }),
+      }),
+    );
+
+    for (const component of ['EventDetails', 'Schedule', 'FAQ', 'Sponsors', 'Speakers'] as const) {
+      const items = eventPagePuckConfig.components[component].fields?.items as unknown as {
+        visible?: boolean;
+        arrayFields?: Record<string, { visible?: boolean }>;
+      };
+      expect(items.visible).not.toBe(false);
+      expect(Object.values(items.arrayFields ?? {}).some((field) => field.visible !== false)).toBe(
+        true,
+      );
+    }
+    const links = eventPagePuckConfig.components.SocialLinks.fields?.links as unknown as {
+      visible?: boolean;
+      arrayFields?: Record<string, { visible?: boolean }>;
+    };
+    expect(links.visible).not.toBe(false);
+    expect(links.arrayFields?.label?.visible).not.toBe(false);
+    expect(eventPagePuckConfig.components.ProductAddOns).toBeDefined();
+  });
+
+  it('gates custom embed editing behind unsafe-content permission', () => {
+    const restricted = createEventPagePuckConfig({
+      allowUnsafeEmbeds: false,
+    }).components.CustomEmbed.fields as unknown as Record<string, { visible?: boolean }>;
+    expect(restricted.html?.visible).toBe(false);
+    expect(restricted.allowUnsafeEmbed?.visible).toBe(false);
+
+    const permitted = createEventPagePuckConfig({
+      allowUnsafeEmbeds: true,
+    }).components.CustomEmbed.fields as unknown as Record<string, { visible?: boolean }>;
+    expect(permitted.html?.visible).not.toBe(false);
+    expect(permitted.allowUnsafeEmbed?.visible).not.toBe(false);
+  });
+
+  it('keeps every event-header setting inside a navigable group', () => {
+    const fieldNames = Object.keys(eventPagePuckConfig.components.EventHeader.fields ?? {});
+    expect(fieldNames.indexOf('_sectionVisibility')).toBeLessThan(
+      fieldNames.indexOf('showBrandBadge'),
+    );
+  });
+
+  it('uses collapsed groups instead of a second advanced-styling gate', () => {
+    const headerFields = eventPagePuckConfig.components.EventHeader.fields;
+    expect(headerFields?.showAdvanced).toEqual(
+      expect.objectContaining({ type: 'custom', visible: false }),
+    );
+    const resolveFields = eventPagePuckConfig.components.EventHeader.resolveFields as unknown as (
+      data: { props: { id: string; showAdvanced: boolean } },
+      params: { fields: Record<string, unknown> },
+    ) => Record<string, unknown>;
+    const resolved = resolveFields(
+      { props: { id: 'header', showAdvanced: false } },
+      { fields: headerFields as Record<string, unknown> },
+    );
+    expect(resolved).toHaveProperty('_sectionImageFine');
+    expect(resolved).toHaveProperty('_sectionTitleStyle');
+    expect(resolved).toHaveProperty('_sectionBadgeStyle');
+  });
+
+  it('renders product add-ons separately from event tickets', () => {
+    render(
+      <EventPageRuntimeProvider
+        value={{
+          brandName: 'Tixkit',
+          brandFooterLabel: 'Powered by Tixkit',
+          tickets: [
+            {
+              id: 'ticket-1',
+              name: 'General admission',
+              priceLabel: '$25',
+              status: 'active',
+            },
+          ],
+          products: [
+            {
+              id: 'product-1',
+              name: 'Parking pass',
+              priceLabel: '$10',
+              status: 'active',
+            },
+          ],
+          interactive: true,
+        }}
+      >
+        <ProductAddOnsBlock id="addons" title="Add-ons" />
+      </EventPageRuntimeProvider>,
+    );
+
+    expect(screen.getByText('Parking pass')).toBeVisible();
+    expect(screen.queryByText('General admission')).not.toBeInTheDocument();
+    expect(screen.getByText('Add-ons').closest('section')).toHaveAttribute(
+      'data-block-type',
+      'ProductAddOns',
+    );
+  });
+
   it('uploads event header logos directly from the add logo control', async () => {
     const changes: unknown[] = [];
     const config = createEventPagePuckConfig({
-      onUploadImage: async () => ({ url: 'https://assets.example.test/header-logo.png' }),
+      onUploadImage: async () => ({
+        url: 'https://assets.example.test/header-logo.png',
+      }),
     });
     const field = config.components.EventHeader.fields?.logos as unknown as {
       label?: string;
@@ -162,7 +288,9 @@ describe('eventPagePuckConfig', () => {
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
     expect(fileInput).not.toBeNull();
     fireEvent.change(fileInput!, {
-      target: { files: [new File(['logo'], 'venue.svg', { type: 'image/svg+xml' })] },
+      target: {
+        files: [new File(['logo'], 'venue.svg', { type: 'image/svg+xml' })],
+      },
     });
 
     await waitFor(() => {
@@ -179,13 +307,52 @@ describe('eventPagePuckConfig', () => {
     });
   });
 
+  it('keeps image upload failures visible beside the affected field', async () => {
+    const config = createEventPagePuckConfig({
+      onUploadImage: async () => {
+        throw new Error('Image storage unavailable');
+      },
+    });
+    const field = config.components.Media.fields?.imageUrl as unknown as {
+      label?: string;
+      render: (props: {
+        field: { label?: string };
+        id: string;
+        name: string;
+        value: string;
+        onChange: (value: string) => void;
+      }) => ReactElement;
+    };
+    const { container } = render(
+      field.render({
+        field,
+        id: 'media-image-upload-error',
+        name: 'imageUrl',
+        value: '',
+        onChange: () => undefined,
+      }),
+    );
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(['image'], 'venue.png', { type: 'image/png' })],
+      },
+    });
+
+    expect(await screen.findByText('Image storage unavailable')).toBeVisible();
+  });
+
   it('dispatches image canvas edits on the canvas document', async () => {
     const ownerEvents: unknown[] = [];
     const parentEvents: unknown[] = [];
     globalThis.document.addEventListener('tixkit:event-page-hero-image-edit', (event: Event) =>
       parentEvents.push((event as CustomEvent).detail),
     );
+    // oxlint-disable-next-line react/iframe-missing-sandbox -- DOM construction requires applying the sandbox immediately after creation.
     const iframe = globalThis.document.createElement('iframe');
+    iframe.setAttribute('sandbox', 'allow-same-origin');
     globalThis.document.body.append(iframe);
     const ownerDocument = iframe.contentDocument;
     if (!ownerDocument) throw new Error('iframe document unavailable');
@@ -235,7 +402,9 @@ describe('eventPagePuckConfig', () => {
 
   it('exposes design controls and upload-capable media fields in the Puck schema', () => {
     const config = createEventPagePuckConfig({
-      onUploadImage: async () => ({ url: 'https://assets.example.test/uploaded.png' }),
+      onUploadImage: async () => ({
+        url: 'https://assets.example.test/uploaded.png',
+      }),
     });
 
     expect(config.components.Button.fields).toEqual(
@@ -283,25 +452,49 @@ describe('eventPagePuckConfig', () => {
         imageAlignment: expect.objectContaining({ label: 'Image align' }),
         backgroundColor: expect.objectContaining({ type: 'custom' }),
         imageLayout: expect.objectContaining({ label: 'Image mode' }),
-        imageFit: expect.objectContaining({ label: 'Image fit', visible: false }),
-        imagePosition: expect.objectContaining({ label: 'Image anchor', visible: false }),
-        imagePlacement: expect.objectContaining({ label: 'Image placement', visible: false }),
+        imageFit: expect.objectContaining({
+          label: 'Image fit',
+          visible: false,
+        }),
+        imagePosition: expect.objectContaining({
+          label: 'Image anchor',
+          visible: false,
+        }),
+        imagePlacement: expect.objectContaining({
+          label: 'Image placement',
+          visible: false,
+        }),
         logos: expect.objectContaining({ label: 'Logos', type: 'custom' }),
-        logoPosition: expect.objectContaining({ type: 'custom', label: 'Placement' }),
-        logoMaxHeight: expect.objectContaining({ type: 'custom', label: 'Logo height' }),
-        logoMaxWidth: expect.objectContaining({ type: 'custom', label: 'Logo width' }),
+        logoPosition: expect.objectContaining({
+          type: 'custom',
+          label: 'Placement',
+        }),
+        logoMaxHeight: expect.objectContaining({
+          type: 'custom',
+          label: 'Logo height',
+        }),
+        logoMaxWidth: expect.objectContaining({
+          type: 'custom',
+          label: 'Logo width',
+        }),
         overlayContentPosition: expect.objectContaining({ type: 'custom' }),
-        overlayContentHorizontalPosition: expect.objectContaining({ type: 'custom' }),
+        overlayContentHorizontalPosition: expect.objectContaining({
+          type: 'custom',
+        }),
         overlayMinHeight: expect.objectContaining({ type: 'custom' }),
         overlayPadding: expect.objectContaining({ type: 'custom' }),
         imageOpacity: expect.objectContaining({ type: 'custom' }),
         backgroundOverlayColor: expect.objectContaining({ type: 'custom' }),
         backgroundOverlayOpacity: expect.objectContaining({ type: 'custom' }),
-        imageOverlay: expect.objectContaining({ label: 'Extra overlay content' }),
+        imageOverlay: expect.objectContaining({
+          label: 'Extra overlay content',
+        }),
         eyebrowColor: expect.objectContaining({ label: 'Eyebrow color' }),
         titleColor: expect.objectContaining({ label: 'Title color' }),
         bodyColor: expect.objectContaining({ label: 'Body color' }),
-        contentBackgroundColor: expect.objectContaining({ label: 'Panel background' }),
+        contentBackgroundColor: expect.objectContaining({
+          label: 'Panel background',
+        }),
         contentPadding: expect.objectContaining({ label: 'Panel padding' }),
         contentRadius: expect.objectContaining({ label: 'Panel radius' }),
         titleFontSize: expect.objectContaining({ type: 'custom' }),
@@ -320,12 +513,18 @@ describe('eventPagePuckConfig', () => {
         itemGap: expect.objectContaining({ label: 'List gap' }),
         itemPadding: expect.objectContaining({ label: 'Card padding' }),
         itemRadius: expect.objectContaining({ label: 'Card radius' }),
-        itemBackgroundColor: expect.objectContaining({ label: 'Card background' }),
+        itemBackgroundColor: expect.objectContaining({
+          label: 'Card background',
+        }),
         itemBorderColor: expect.objectContaining({ label: 'Card border' }),
         itemTextColor: expect.objectContaining({ label: 'Card text' }),
-        itemDescriptionColor: expect.objectContaining({ label: 'Description color' }),
+        itemDescriptionColor: expect.objectContaining({
+          label: 'Description color',
+        }),
         priceTextColor: expect.objectContaining({ label: 'Price color' }),
-        emptyBackgroundColor: expect.objectContaining({ label: 'Empty background' }),
+        emptyBackgroundColor: expect.objectContaining({
+          label: 'Empty background',
+        }),
         emptyBorderColor: expect.objectContaining({ label: 'Empty border' }),
         showAdvanced: expect.objectContaining({ type: 'custom' }),
       }),
@@ -422,7 +621,9 @@ describe('eventPagePuckConfig', () => {
     const imageEditor = screen.getByTestId('hero-image-canvas-editor');
     expect(imageEditor).toBeInTheDocument();
     expect(imageEditor).not.toHaveAttribute('data-puck-overlay-portal');
-    const editImageButton = screen.getByRole('button', { name: 'Edit image placement' });
+    const editImageButton = screen.getByRole('button', {
+      name: 'Edit image placement',
+    });
     expect(editImageButton).toBeInTheDocument();
     expect(editImageButton).toHaveAttribute('data-puck-overlay-portal', 'true');
     expect(screen.queryByRole('slider', { name: 'Image zoom' })).not.toBeInTheDocument();
@@ -470,7 +671,9 @@ describe('eventPagePuckConfig', () => {
 
   it('hides ticket empty-state controls unless the canvas is rendering an empty state', () => {
     const withCommerce = createEventPagePuckConfig({ hasCommerceItems: true });
-    const withoutCommerce = createEventPagePuckConfig({ hasCommerceItems: false });
+    const withoutCommerce = createEventPagePuckConfig({
+      hasCommerceItems: false,
+    });
     const commerceFields = withCommerce.components.Tickets.fields;
     const emptyCommerceFields = withoutCommerce.components.Tickets.fields;
     const resolveWithCommerce = withCommerce.components.Tickets.resolveFields;
@@ -525,9 +728,9 @@ describe('eventPagePuckConfig', () => {
     expect(liveFields).not.toHaveProperty('emptyBorderColor');
     expect(populatedFields).not.toHaveProperty('emptyTitle');
     expect(forcedEmptyFields).toHaveProperty('emptyTitle');
-    expect(forcedEmptyFields).not.toHaveProperty('emptyBackgroundColor');
+    expect(forcedEmptyFields).toHaveProperty('emptyBackgroundColor');
     expect(liveEmptyFields).toHaveProperty('emptyTitle');
-    expect(liveEmptyFields).not.toHaveProperty('emptyBorderColor');
+    expect(liveEmptyFields).toHaveProperty('emptyBorderColor');
 
     const advancedEmptyFields = resolveWithCommerce(
       {
@@ -602,8 +805,14 @@ describe('EventPageRender', () => {
       fontSize: '30px',
       color: '#2563eb',
     });
-    expect(screen.getByText('Starts')).toHaveStyle({ fontSize: '12px', color: '#64748b' });
-    expect(screen.getByText('7 PM')).toHaveStyle({ fontSize: '16px', color: '#111827' });
+    expect(screen.getByText('Starts')).toHaveStyle({
+      fontSize: '12px',
+      color: '#64748b',
+    });
+    expect(screen.getByText('7 PM')).toHaveStyle({
+      fontSize: '16px',
+      color: '#111827',
+    });
   });
 
   it('renders description logos over the background image', () => {
@@ -1056,7 +1265,7 @@ describe('EventPageRender', () => {
       color: '#475569',
     });
     expect(screen.getByText('Free')).toHaveStyle({ color: '#2563eb' });
-    expect(screen.queryByText('Resale tickets')).not.toBeInTheDocument();
+    expect(screen.getByText('Resale tickets')).toHaveClass('sr-only');
 
     rerender(
       <EventPageRuntimeProvider value={runtime}>
@@ -1095,7 +1304,11 @@ describe('EventPageRender', () => {
     const { container } = render(
       <EventPageRender
         document={document}
-        brandVariables={{ background: '#101010', foreground: '#ffffff', accent: '#ffcc00' }}
+        brandVariables={{
+          background: '#101010',
+          foreground: '#ffffff',
+          accent: '#ffcc00',
+        }}
       />,
     );
 
@@ -1142,7 +1355,12 @@ describe('EventPageRender', () => {
   });
 
   it('maps brand variables for host style application', () => {
-    expect(createEventPageRenderStyle({ accentForeground: '#000000', radius: '6px' })).toEqual({
+    expect(
+      createEventPageRenderStyle({
+        accentForeground: '#000000',
+        radius: '6px',
+      }),
+    ).toEqual({
       '--tk-brand-accent-fg': '#000000',
       '--tk-brand-radius': '6px',
     });

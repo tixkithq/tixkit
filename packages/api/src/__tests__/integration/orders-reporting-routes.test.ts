@@ -623,7 +623,14 @@ function makePrincipal(overrides: Partial<Principal> = {}): Principal {
   };
 }
 
-async function setupApp(routes: any, principal: Principal) {
+async function setupApp(
+  routes: any,
+  principal: Principal,
+  options: {
+    temporalClient?: ReturnType<typeof createMockTemporalClient>;
+    logError?: ReturnType<typeof vi.fn>;
+  } = {},
+) {
   const app = Fastify();
   app.decorate('context', {
     db: createMockDb() as unknown as Database,
@@ -631,10 +638,11 @@ async function setupApp(routes: any, principal: Principal) {
     inventoryService: {},
     qrService: {},
     authService: {},
-    temporalClient: createMockTemporalClient(),
+    temporalClient: options.temporalClient ?? createMockTemporalClient(),
   } as unknown as AppContext);
   app.addHook('onRequest', async (request) => {
     request.principal = principal;
+    if (options.logError) request.log.error = options.logError as typeof request.log.error;
   });
   await app.register(routes);
   return app;
@@ -1320,6 +1328,47 @@ describe('order routes', () => {
     expect(res.body).toContain('"downloadUrl":"/v1/exports/exp_stream/download"');
     expect(res.body).not.toContain('"fileUrl"');
     expect(res.body).not.toContain('https://exports.example.test/exp_stream.csv');
+    await app.close();
+  });
+
+  it('redacts secret-bearing export stream failures in logs and client events', async () => {
+    dbState.exportJobs = [
+      {
+        id: 'exp_stream_failure',
+        tenant_id: 'tnt_1',
+        event_id: 'evt_1',
+        type: 'sales',
+        format: 'csv',
+        status: 'pending',
+        file_url: null,
+        requested_by: 'usr_1',
+        filters: null,
+        created_at: new Date('2026-06-01'),
+        completed_at: null,
+      },
+    ];
+    const temporalClient = createMockTemporalClient();
+    temporalClient.waitForExport.mockRejectedValueOnce(
+      new Error('provider failed with Bearer sk_test_secret for buyer@example.test'),
+    );
+    const logError = vi.fn();
+    const app = await setupApp(reportingRoutes, makePrincipal(), { temporalClient, logError });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/exports/exp_stream_failure/events',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('event: error');
+    expect(res.body).toContain('Export status stream failed');
+    expect(res.body).not.toContain('sk_test_secret');
+    expect(res.body).not.toContain('buyer@example.test');
+    expect(logError).toHaveBeenCalledOnce();
+    const serializedLog = JSON.stringify(logError.mock.calls[0]);
+    expect(serializedLog).toContain('[REDACTED]');
+    expect(serializedLog).not.toContain('sk_test_secret');
+    expect(serializedLog).not.toContain('buyer@example.test');
     await app.close();
   });
 

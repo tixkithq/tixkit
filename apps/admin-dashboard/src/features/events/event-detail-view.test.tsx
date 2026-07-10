@@ -169,20 +169,23 @@ describe('EventDetailView', () => {
     );
   });
 
-  it('shows event description copy and links page composition to the editor', async () => {
+  it('shows event description copy without duplicate edit actions', async () => {
     mockLoadedEventDetail();
 
     const view = render(<EventDetailView eventId="evt_1" />);
 
     expect(await view.findByText('Event Description')).toBeInTheDocument();
     expect(view.getByText('Opening event')).toBeInTheDocument();
-    expect(view.getByRole('link', { name: 'Design page' })).toHaveAttribute(
+    expect(view.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
+    expect(view.queryByRole('link', { name: 'Design page' })).not.toBeInTheDocument();
+    expect(view.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(view.getByRole('link', { name: 'Event Page' })).toHaveAttribute(
       'href',
       '/events/evt_1/content/event-page',
     );
   });
 
-  it('shows an empty event description state with the same edit paths', async () => {
+  it('shows an empty event description state and keeps existing edit entry points', async () => {
     mockLoadedEventDetail();
     useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
       const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
@@ -206,11 +209,13 @@ describe('EventDetailView', () => {
     const view = render(<EventDetailView eventId="evt_1" />);
 
     expect(
-      await view.findByText(/No description yet. Add the canonical event copy here/),
+      await view.findByText(/No description yet. Add the canonical event copy via Edit/),
     ).toBeInTheDocument();
-    fireEvent.click(view.getByRole('button', { name: 'Edit details' }));
+    expect(view.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
+    expect(view.queryByRole('link', { name: 'Design page' })).not.toBeInTheDocument();
+    fireEvent.click(view.getByRole('button', { name: 'Edit' }));
     expect(view.getByTestId('event-edit-drawer')).toHaveTextContent('Edit drawer for evt_1');
-    expect(view.getByRole('link', { name: 'Design page' })).toHaveAttribute(
+    expect(view.getByRole('link', { name: 'Event Page' })).toHaveAttribute(
       'href',
       '/events/evt_1/content/event-page',
     );

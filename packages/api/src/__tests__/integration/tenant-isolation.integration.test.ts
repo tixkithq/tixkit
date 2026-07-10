@@ -1662,7 +1662,7 @@ describe('cross-tenant denial', () => {
       method: 'POST',
       url: '/tickets/tkt_1/transfer',
       headers: { 'idempotency-key': 'key-x-transfer' },
-      payload: { toEmail: 'new@test.com' },
+      payload: { toEmail: 'new@test.com', dateOfBirth: '1990-01-01' },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -3183,7 +3183,9 @@ describe('brand and event scope denial', () => {
     };
     expect(migrated.schemaVersion).toBe(2);
     expect(migrated.editor.provider).toBe('@puckeditor/core');
-    expect(migrated.editor.data.content.map((component) => component.type)).toContain('Hero');
+    expect(migrated.editor.data.content.map((component) => component.type)).toContain(
+      'EventHeader',
+    );
     expect(untouched.schemaVersion).toBe(1);
     await app.close();
   });

@@ -5,6 +5,14 @@ import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReportsView } from './reports-view';
 
+function MockSelectValue() {
+  return null;
+}
+
+function MockSelectContent({ children }: { children: React.ReactNode }) {
+  return children;
+}
+
 if (typeof window === 'undefined') {
   const dom = new JSDOM('<!doctype html><html><body></body></html>');
   Object.assign(globalThis, {
@@ -45,12 +53,12 @@ vi.mock('recharts', () => ({
 }));
 
 vi.mock('@/components/ui/select', async () => {
-  const React = await vi.importActual<typeof import('react')>('react');
-  const SelectContext = React.createContext<{
+  const ReactModule = await vi.importActual<typeof import('react')>('react');
+  const SelectContext = ReactModule.createContext<{
     value: string;
-    onValueChange: (value: string) => void;
+    onValueChange: (nextValue: string) => void;
     items: { value: string; label: string }[];
-    registerItem: (value: string, label: string) => void;
+    registerItem: (itemValue: string, label: string) => void;
   } | null>(null);
 
   function Select({
@@ -62,18 +70,20 @@ vi.mock('@/components/ui/select', async () => {
     onValueChange: (value: string) => void;
     children: React.ReactNode;
   }) {
-    const [items, setItems] = React.useState<{ value: string; label: string }[]>([]);
-    const registerItem = React.useCallback((value: string, label: string) => {
+    const [items, setItems] = ReactModule.useState<{ value: string; label: string }[]>([]);
+    const registerItem = ReactModule.useCallback((itemValue: string, label: string) => {
       setItems((current) =>
-        current.some((item) => item.value === value) ? current : [...current, { value, label }],
+        current.some((item) => item.value === itemValue)
+          ? current
+          : [...current, { value: itemValue, label }],
       );
     }, []);
-
-    return (
-      <SelectContext.Provider value={{ value, onValueChange, items, registerItem }}>
-        {children}
-      </SelectContext.Provider>
+    const contextValue = ReactModule.useMemo(
+      () => ({ value, onValueChange, items, registerItem }),
+      [value, onValueChange, items, registerItem],
     );
+
+    return <SelectContext.Provider value={contextValue}>{children}</SelectContext.Provider>;
   }
 
   function SelectTrigger({
@@ -84,7 +94,7 @@ vi.mock('@/components/ui/select', async () => {
     children?: React.ReactNode;
     'aria-label'?: string;
   }) {
-    const context = React.useContext(SelectContext);
+    const context = ReactModule.useContext(SelectContext);
     return (
       <select
         className={className}
@@ -102,24 +112,22 @@ vi.mock('@/components/ui/select', async () => {
     );
   }
 
-  function SelectValue() {
-    return null;
-  }
-
-  function SelectContent({ children }: { children: React.ReactNode }) {
-    return children;
-  }
-
   function SelectItem({ value, children }: { value: string; children: React.ReactNode }) {
-    const context = React.useContext(SelectContext);
+    const context = ReactModule.useContext(SelectContext);
     const registerItem = context?.registerItem;
-    React.useEffect(() => {
+    ReactModule.useEffect(() => {
       registerItem?.(value, String(children));
     }, [value, children, registerItem]);
     return null;
   }
 
-  return { Select, SelectContent, SelectItem, SelectTrigger, SelectValue };
+  return {
+    Select,
+    SelectContent: MockSelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue: MockSelectValue,
+  };
 });
 
 vi.mock('@/components/ui/tabs', () => {

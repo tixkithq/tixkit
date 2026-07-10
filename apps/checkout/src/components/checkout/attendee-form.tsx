@@ -6,6 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { publicApi, type Buyer, type CheckoutQuestion } from '@/lib/api';
 import {
+  maximumEligibleDateOfBirth,
+  requiresDateOfBirthVerification,
+} from '@tixkit/domain/eligibility';
+import {
   type CheckoutAnswers,
   type CheckoutAnswerValue,
   isCheckoutQuestionVisible,
@@ -20,6 +24,8 @@ type AttendeeQuestionGroup = {
   ticketName: string;
   quantity: number;
   questions: CheckoutQuestion[];
+  participationAt?: string;
+  timezone?: string;
 };
 
 type Props = {
@@ -27,6 +33,10 @@ type Props = {
   onChange: (buyer: Buyer) => void;
   disabled: boolean;
   emailError?: string;
+  buyerDateOfBirthError?: string;
+  minimumAge?: number | null;
+  participationAt?: string;
+  timezone?: string;
   /** Dynamic buyer questions rendered after the standard fields. */
   buyerQuestions?: CheckoutQuestion[];
   /** Buyer question answers keyed by question id. */
@@ -41,6 +51,9 @@ type Props = {
   attendeeAnswers?: CheckoutAnswers;
   /** Field-level validation messages keyed by `${lineId}:${attendeeIndex}:${questionId}`. */
   attendeeQuestionErrors?: Record<string, string | undefined>;
+  attendeeDateOfBirths?: Record<string, string>;
+  attendeeDateOfBirthErrors?: Record<string, string | undefined>;
+  onAttendeeDateOfBirthsChange?: (values: Record<string, string>) => void;
   /** Callback when attendee answers change. */
   onAttendeeAnswersChange?: (answers: CheckoutAnswers) => void;
   eventId?: string;
@@ -50,12 +63,17 @@ const EMPTY_BUYER_QUESTIONS: CheckoutQuestion[] = [];
 const EMPTY_BUYER_ANSWERS: AttendeeAnswers = {};
 const EMPTY_ATTENDEE_QUESTION_GROUPS: AttendeeQuestionGroup[] = [];
 const EMPTY_ATTENDEE_ANSWERS: CheckoutAnswers = {};
+const EMPTY_ATTENDEE_DATES_OF_BIRTH: Record<string, string> = {};
 
 export function AttendeeForm({
   buyer,
   onChange,
   disabled,
   emailError,
+  buyerDateOfBirthError,
+  minimumAge,
+  participationAt = new Date().toISOString(),
+  timezone = 'UTC',
   buyerQuestions = EMPTY_BUYER_QUESTIONS,
   buyerAnswers = EMPTY_BUYER_ANSWERS,
   buyerQuestionErrors,
@@ -63,6 +81,9 @@ export function AttendeeForm({
   attendeeQuestionGroups = EMPTY_ATTENDEE_QUESTION_GROUPS,
   attendeeAnswers = EMPTY_ATTENDEE_ANSWERS,
   attendeeQuestionErrors,
+  attendeeDateOfBirths = EMPTY_ATTENDEE_DATES_OF_BIRTH,
+  attendeeDateOfBirthErrors,
+  onAttendeeDateOfBirthsChange,
   onAttendeeAnswersChange,
   eventId,
 }: Props) {
@@ -96,6 +117,19 @@ export function AttendeeForm({
           </p>
         )}
       </div>
+
+      {requiresDateOfBirthVerification(minimumAge) ? (
+        <DateOfBirthField
+          id="buyer-date-of-birth"
+          value={buyer.dateOfBirth ?? ''}
+          disabled={disabled}
+          minimumAge={minimumAge}
+          participationAt={participationAt}
+          timezone={timezone}
+          validationError={buyerDateOfBirthError}
+          onChange={(dateOfBirth) => onChange({ ...buyer, dateOfBirth })}
+        />
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-2">
@@ -156,7 +190,7 @@ export function AttendeeForm({
       ) : null}
 
       {attendeeQuestionGroups.map((group) => {
-        if (group.questions.length === 0 || group.quantity === 0) return null;
+        if (group.quantity === 0) return null;
         return (
           <div key={group.lineId} className="space-y-4 border-t pt-4">
             <p className="text-sm font-medium">{group.ticketName} - attendee details</p>
@@ -166,6 +200,23 @@ export function AttendeeForm({
                 className="space-y-3 rounded-md border bg-muted/30 p-3"
               >
                 <p className="text-xs font-medium text-muted-foreground">Attendee {i + 1}</p>
+                {requiresDateOfBirthVerification(minimumAge) ? (
+                  <DateOfBirthField
+                    id={`attendee-${group.lineId}-${i}-date-of-birth`}
+                    value={attendeeDateOfBirths[`${group.lineId}:${i}`] ?? ''}
+                    disabled={disabled}
+                    minimumAge={minimumAge}
+                    participationAt={group.participationAt ?? participationAt}
+                    timezone={group.timezone ?? timezone}
+                    validationError={attendeeDateOfBirthErrors?.[`${group.lineId}:${i}`]}
+                    onChange={(value) =>
+                      onAttendeeDateOfBirthsChange?.({
+                        ...attendeeDateOfBirths,
+                        [`${group.lineId}:${i}`]: value,
+                      })
+                    }
+                  />
+                ) : null}
                 {group.questions
                   .filter((q) => {
                     const answersForAttendee = Object.fromEntries(
@@ -201,6 +252,60 @@ export function AttendeeForm({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function DateOfBirthField({
+  id,
+  value,
+  disabled,
+  minimumAge,
+  participationAt,
+  timezone,
+  validationError,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  disabled: boolean;
+  minimumAge?: number | null;
+  participationAt: string;
+  timezone: string;
+  validationError?: string;
+  onChange: (value: string) => void;
+}) {
+  const errorId = validationError ? `${id}-error` : undefined;
+  const descriptionId = `${id}-description`;
+  const max = maximumEligibleDateOfBirth({ participationAt, timezone, minimumAge });
+  const requirement = `You must be at least ${minimumAge} on the event date.`;
+
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>
+        Date of birth <span className="text-destructive">*</span>
+      </Label>
+      <Input
+        id={id}
+        name="dateOfBirth"
+        type="date"
+        value={value}
+        max={max ?? undefined}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete="bday"
+        required
+        disabled={disabled}
+        aria-invalid={Boolean(validationError)}
+        aria-describedby={[descriptionId, errorId].filter(Boolean).join(' ')}
+      />
+      <p id={descriptionId} className="text-xs text-muted-foreground">
+        {requirement}
+      </p>
+      {validationError ? (
+        <p id={errorId} className="text-sm text-destructive">
+          {validationError}
+        </p>
+      ) : null}
     </div>
   );
 }

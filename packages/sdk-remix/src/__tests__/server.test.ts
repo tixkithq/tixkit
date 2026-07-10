@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TixkitClient } from '@tixkit/js';
 import {
   completeResaleListing,
+  createCheckoutFormAction,
   createCheckoutTicketResaleListing,
   createTicketResaleListing,
   createTixkitClient,
@@ -14,6 +15,27 @@ import {
 } from '../server.js';
 
 describe('Remix server helpers', () => {
+  it('allows unrestricted checkout forms to omit date of birth', async () => {
+    const checkoutCreate = vi.fn(async (input: unknown) => input);
+    const action = createCheckoutFormAction({ checkout: { create: checkoutCreate } } as never);
+    const formData = new FormData();
+    formData.set('eventId', 'evt_unrestricted');
+    formData.set('idempotencyKey', 'idem_unrestricted');
+    formData.set('ticketTypeId', 'tt_1');
+    formData.set('quantity', '1');
+    formData.set('buyerEmail', 'buyer@example.test');
+
+    await expect(action({ request: { formData: async () => formData } })).resolves.toMatchObject({
+      success: true,
+    });
+    expect(checkoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+        buyer: expect.not.objectContaining({ dateOfBirth: expect.anything() }),
+      }),
+    );
+  });
+
   it('creates a server-side Tixkit client', () => {
     expect(createTixkitClient({ apiKey: 'tk_test_placeholder' })).toBeInstanceOf(TixkitClient);
   });
@@ -79,6 +101,7 @@ describe('Remix server helpers', () => {
     await completeResaleListing(client, 'lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });
@@ -102,6 +125,7 @@ describe('Remix server helpers', () => {
     expect(client.tickets.completeResaleListing).toHaveBeenCalledWith('lst_2', {
       buyerId: 'usr_1',
       buyerEmail: 'buyer@example.test',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'pi_1',
       idempotencyKey: 'idem_complete',
     });

@@ -842,6 +842,79 @@ test.describe('persisted admin email content editor', () => {
       .toBe('archived');
   });
 
+  test('round-trips representative Studio archetypes with CDP style proof', async ({
+    browserName,
+    page,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    await requireReachable(page, `${apiBaseUrl}/health`, 'api');
+    await seedEmailCaptureProviderRoute();
+    const event = await seedContentEvent(
+      page,
+      `studio-archetypes-${testInfo.workerIndex}-${Date.now()}`,
+    );
+    const cases = [
+      { key: 'tickets-issued', headline: 'Your tickets are ready', fontSize: '40px' },
+      { key: 'abandoned-checkout', headline: 'Pick up where you left off', fontSize: '40px' },
+      { key: 'daily-sales-digest', headline: 'Today at a glance', fontSize: '24px' },
+    ] as const;
+
+    for (const emailCase of cases) {
+      await page.goto(
+        `${adminBaseUrl}/events/${event.id}/content/email?templateKey=${emailCase.key}`,
+      );
+      await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
+      await expect(page.getByLabel('Email body')).toBeVisible();
+      const emailBody = page.getByLabel('Email body');
+      await expect(emailBody).toContainText(emailCase.headline);
+      await expect(emailBody.locator('h1').first()).toHaveCSS('font-size', emailCase.fontSize);
+
+      await page.getByLabel('More actions').click();
+      await page.getByRole('menuitem', { name: 'Save draft' }).click();
+      await expect(page.getByText(/Saved draft v\d+/)).toBeVisible();
+      await page.reload();
+      await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
+      await expect(page.getByLabel('Email body')).toBeVisible();
+      await expect(page.getByLabel('Email body')).toContainText(emailCase.headline);
+
+      if (browserName === 'chromium') {
+        const client = await page.context().newCDPSession(page);
+        const snapshot = await client.send('Runtime.evaluate', {
+          expression: `(() => {
+            const body = document.querySelector('[aria-label="Email body"]');
+            const heading = body?.querySelector('h1');
+            const studioRoot = body?.querySelector('[data-studio-email="true"]');
+            const canvas = Array.from(body?.querySelectorAll('div') ?? []).find((node) =>
+              getComputedStyle(node).backgroundColor === 'rgb(246, 246, 246)'
+            );
+            const button = body?.querySelector('a');
+            return {
+              headline: heading?.textContent?.trim() ?? null,
+              headlineFontSize: heading ? getComputedStyle(heading).fontSize : null,
+              hasStudioRoot: Boolean(studioRoot),
+              canvasBackground: canvas ? getComputedStyle(canvas).backgroundColor : null,
+              buttonBorderRadius: button ? getComputedStyle(button).borderRadius : null,
+              buttonBackground: button ? getComputedStyle(button).backgroundColor : null,
+            };
+          })()`,
+          returnByValue: true,
+        });
+        await testInfo.attach(`cdp-studio-${emailCase.key}`, {
+          body: JSON.stringify(snapshot.result.value, null, 2),
+          contentType: 'application/json',
+        });
+        expect(snapshot.result.value).toMatchObject({
+          headline: expect.stringContaining(emailCase.headline),
+          headlineFontSize: emailCase.fontSize,
+          canvasBackground: 'rgb(246, 246, 246)',
+        });
+      }
+    }
+
+    await attachScreenshot(page, testInfo, 'admin-content-email-studio-archetypes');
+    await expectNoAxeViolations(page, testInfo, '[aria-label="Email body"]');
+  });
+
   test('surfaces publish blockers for invalid email content with axe and CDP proof', async ({
     browserName,
     page,
@@ -980,6 +1053,46 @@ test.describe('persisted admin email content editor', () => {
     const sectionHtml = sectionState.versions[0]?.contentJson.editor?.contentHtml ?? '';
     expect(sectionHtml).toMatch(/align="right"|align:right|text-align:\s*right/);
 
+    const heroEvent = await openSeededEmailEditor('slash-background-hero');
+    await runSlashCommand('Background hero');
+    const heroSection = page.locator('[data-type="section"]').last();
+    await expect(heroSection).toBeVisible();
+    await heroSection.click();
+    const sectionBreadcrumb = page
+      .getByTestId('native-email-inspector-host')
+      .getByRole('button', { name: 'Section' });
+    await expect(sectionBreadcrumb).toBeVisible();
+    await sectionBreadcrumb.click();
+    const heroControls = page.getByTestId('hero-background-controls');
+    await expect(heroControls).toBeVisible();
+    const heroUploadComplete = page.waitForResponse(
+      (response) =>
+        /\/v1\/upload-artifacts\/[^/]+\/download$/.test(new URL(response.url()).pathname) &&
+        response.ok(),
+    );
+    await heroControls
+      .getByLabel('Upload hero background image')
+      .setInputFiles('apps/admin-dashboard/public/brand/tixkit-wordmark.png');
+    await heroUploadComplete;
+    await heroSection.click();
+    await expect(sectionBreadcrumb).toBeVisible();
+    await sectionBreadcrumb.click();
+    await expect(heroControls.getByLabel('Replace hero background image')).toBeVisible();
+    await heroControls.getByLabel('Image fit').selectOption('contain');
+    await heroControls.getByRole('slider', { name: /Horizontal focus/ }).fill('65');
+    await heroControls.getByRole('slider', { name: /Overlay/ }).fill('55');
+    await expect(
+      heroControls.getByRole('button', { name: /Remove hero background image/ }),
+    ).toBeVisible();
+    await saveCurrentDraft();
+    const heroState = await loadEmailContentState(heroEvent.id, page);
+    const heroHtml = heroState.versions[0]?.contentJson.editor?.contentHtml ?? '';
+    expect(heroHtml).toContain('src="{{brand.logoUrl}}"');
+    expect(heroHtml).toContain('background-image:');
+    expect(heroHtml).toMatch(/background-size:\s*contain/);
+    expect(heroHtml).toMatch(/background-position:\s*65% 50%/);
+    expect(heroHtml).toContain('Sample Summer Showcase');
+
     const columnsEvent = await openSeededEmailEditor('slash-columns');
     await runSlashCommand('2 columns');
     await expect(page.locator('[data-type="two-columns"]')).toBeVisible();
@@ -1107,35 +1220,33 @@ test.describe('persisted admin email content editor', () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
 
-    const paragraphComputedColor = await emailBody.evaluate((root) => {
-      const p = root.querySelector('p');
-      return p ? window.getComputedStyle(p).color : null;
-    });
-    expect(paragraphComputedColor).not.toBeNull();
-
-    const paragraphPoint = await emailBody.evaluate((root) => {
-      const p = root.querySelector('p');
-      if (!p) throw new Error('No p');
-      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
-      while (walker.nextNode()) {
-        const node = walker.currentNode;
-        if (
-          node.textContent?.trim() &&
-          !node.parentElement?.closest('.tixkit-email-variable-chip')
-        ) {
-          const range = document.createRange();
-          range.selectNodeContents(node);
-          const rect = range.getBoundingClientRect();
-          range.detach();
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    const paragraphSelection = await emailBody.evaluate((root) => {
+      for (const paragraph of root.querySelectorAll('p')) {
+        const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (
+            node.textContent?.trim() &&
+            !node.parentElement?.closest('.tixkit-email-variable-chip')
+          ) {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const rect = range.getBoundingClientRect();
+            range.detach();
+            return {
+              color: window.getComputedStyle(paragraph).color,
+              x: rect.x + rect.width / 2,
+              y: rect.y + rect.height / 2,
+            };
+          }
         }
       }
       throw new Error('No plain text in paragraph');
     });
-    await page.mouse.click(paragraphPoint.x, paragraphPoint.y);
+    await page.mouse.click(paragraphSelection.x, paragraphSelection.y);
     await expect(packageTooltip).toBeVisible();
     const paragraphBubbleColor = await packageTooltip.getByLabel('Selection color').inputValue();
-    const paragraphHex = paragraphComputedColor!.replace(
+    const paragraphHex = paragraphSelection.color.replace(
       /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/,
       (_, r, g, b) => `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`,
     );
@@ -1163,7 +1274,7 @@ test.describe('persisted admin email content editor', () => {
     // Only the current word should get the new color, not the whole row.
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
-    await page.mouse.click(paragraphPoint.x, paragraphPoint.y);
+    await page.mouse.click(paragraphSelection.x, paragraphSelection.y);
     await expect(packageTooltip).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
 
@@ -1174,9 +1285,7 @@ test.describe('persisted admin email content editor', () => {
     await expect
       .poll(() =>
         emailBody.evaluate((root) => {
-          const p = root.querySelector('p');
-          if (!p) return 'not-found';
-          const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
           while (walker.nextNode()) {
             const node = walker.currentNode;
             const parent = node.parentElement;
@@ -1221,22 +1330,22 @@ test.describe('persisted admin email content editor', () => {
     // First, click on paragraph text outside the chip to clear any
     // existing full-tag selection from the previous step.
     const paragraphTextPoint = await emailBody.evaluate((root) => {
-      const p = root.querySelector('p');
-      if (!p) return null;
-      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
-      while (walker.nextNode()) {
-        const node = walker.currentNode;
-        if (
-          node.textContent.includes('tickets') &&
-          !node.parentElement?.closest('.tixkit-email-variable-chip')
-        ) {
-          const range = document.createRange();
-          const idx = node.textContent.indexOf('tickets');
-          range.setStart(node, idx);
-          range.setEnd(node, Math.min(idx + 3, node.textContent.length));
-          const rect = range.getBoundingClientRect();
-          range.detach();
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      for (const paragraph of root.querySelectorAll('p')) {
+        const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (
+            node.textContent.includes('tickets') &&
+            !node.parentElement?.closest('.tixkit-email-variable-chip')
+          ) {
+            const range = document.createRange();
+            const idx = node.textContent.indexOf('tickets');
+            range.setStart(node, idx);
+            range.setEnd(node, Math.min(idx + 3, node.textContent.length));
+            const rect = range.getBoundingClientRect();
+            range.detach();
+            return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+          }
         }
       }
       return null;

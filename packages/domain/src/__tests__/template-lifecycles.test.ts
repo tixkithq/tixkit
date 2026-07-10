@@ -29,6 +29,7 @@ describe('template lifecycle registry', () => {
       'event-cancelled',
       'attendee-message',
       'staff-order-notification',
+      'organization-member-invited',
       'checkin-device-invited',
     ] as const) {
       expect(TEMPLATE_KEYS).toContain(key);
@@ -47,6 +48,15 @@ describe('template lifecycle registry', () => {
   it('represents every current TemplateKey in the lifecycle registry', () => {
     for (const key of TEMPLATE_KEYS) {
       expect(getTemplateLifecycle(key), `missing lifecycle entry for ${key}`).toBeDefined();
+    }
+  });
+
+  it('ships concise subject and preview copy for every lifecycle', () => {
+    for (const entry of TEMPLATE_LIFECYCLES) {
+      expect(entry.defaultSubject.trim(), `${entry.key} subject`).not.toBe('');
+      expect(entry.defaultPreviewText?.trim(), `${entry.key} preview`).toBeTruthy();
+      expect(entry.defaultSubject, `${entry.key} subject tone`).not.toContain('!');
+      expect(entry.defaultPreviewText, `${entry.key} preview tone`).not.toContain('!');
     }
   });
 
@@ -223,7 +233,7 @@ describe('template lifecycle registry', () => {
     expect(new Set(union)).toEqual(new Set(TEMPLATE_KEYS));
 
     // Expected counts.
-    expect(P0_TEMPLATE_KEYS.length).toBe(11);
+    expect(P0_TEMPLATE_KEYS.length).toBe(12);
     expect(P1_TEMPLATE_KEYS.length).toBe(11);
     expect(P2_TEMPLATE_KEYS.length).toBe(9);
   });

@@ -333,6 +333,7 @@ export class AttendeeRepository extends BaseRepository {
     firstName?: string;
     lastName?: string;
     phone?: string;
+    dateOfBirth?: string;
     customAnswers?: Record<string, unknown>;
   }) {
     const id = `att_${ulid()}`;
@@ -351,6 +352,7 @@ export class AttendeeRepository extends BaseRepository {
         last_name: input.lastName ?? null,
         email: input.email,
         phone: input.phone ?? null,
+        date_of_birth: input.dateOfBirth ?? null,
         status: 'pending',
         custom_answers: input.customAnswers ? JSON.stringify(input.customAnswers) : null,
         checked_in_at: null,

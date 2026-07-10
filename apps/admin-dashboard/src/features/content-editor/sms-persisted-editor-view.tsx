@@ -501,10 +501,7 @@ export function SmsPersistedEditorView({ eventId }: { eventId: string }) {
         </p>
       )}
 
-      <section
-        aria-label="SMS draft controls"
-        className="grid gap-3 lg:grid-cols-[1fr_18rem]"
-      >
+      <section aria-label="SMS draft controls" className="grid gap-3 lg:grid-cols-[1fr_18rem]">
         <label className="space-y-2 text-sm font-medium">
           SMS body
           <textarea

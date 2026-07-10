@@ -34,7 +34,7 @@ spec:
                 name: {{ .Values.secrets.name }}
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: http
           livenessProbe:
             httpGet:

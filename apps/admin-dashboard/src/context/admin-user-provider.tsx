@@ -5,6 +5,7 @@ import { useUser } from '@clerk/nextjs';
 import { type AdminUser, LOCAL_DEV_USER, hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
 
 const AdminUserContext = createContext<AdminUser>(LOCAL_DEV_USER);
+const UNAVAILABLE_ADMIN_USER: AdminUser = { name: '', email: '', imageUrl: null };
 
 function ClerkUserProvider({ children }: { children: React.ReactNode }) {
   const { user, isLoaded, isSignedIn } = useUser();
@@ -17,7 +18,7 @@ function ClerkUserProvider({ children }: { children: React.ReactNode }) {
             email: user.primaryEmailAddress?.emailAddress ?? '',
             imageUrl: user.imageUrl ?? null,
           }
-        : { name: '', email: '', imageUrl: null },
+        : UNAVAILABLE_ADMIN_USER,
     [isLoaded, isSignedIn, user],
   );
 
@@ -31,9 +32,7 @@ function LocalUserProvider({ children }: { children: React.ReactNode }) {
 export function AdminUserProvider({ children }: { children: React.ReactNode }) {
   if (hasClerkKey()) return <ClerkUserProvider>{children}</ClerkUserProvider>;
   if (usesLocalDevAuth()) return <LocalUserProvider>{children}</LocalUserProvider>;
-  return (
-    <AdminUserContext value={{ name: '', email: '', imageUrl: null }}>{children}</AdminUserContext>
-  );
+  return <AdminUserContext value={UNAVAILABLE_ADMIN_USER}>{children}</AdminUserContext>;
 }
 
 export const useAdminUser = () => useContext(AdminUserContext);

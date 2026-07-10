@@ -44,6 +44,7 @@ import {
   type CreateDefaultEventPageDocumentInput,
   type EventPageDiscoveryCard,
   type EventPagePuckData,
+  type EventPageDocumentV2,
   type EventPageRenderContext,
   type EventPageSettings,
 } from '@tixkit/content-event-page';
@@ -178,6 +179,12 @@ const duplicateDocumentSchema = z
       .regex(/^[a-z0-9][a-z0-9._-]*$/)
       .optional(),
     name: z.string().min(1).max(160).optional(),
+  })
+  .strict();
+
+const updateDocumentSchema = z
+  .object({
+    name: z.string().trim().min(1).max(160),
   })
   .strict();
 
@@ -343,6 +350,20 @@ function validationFor(channel: ContentChannel, body: z.infer<typeof saveVersion
     },
     channel,
   );
+}
+
+function eventPageContainsCustomEmbed(document: EventPageDocumentV2): boolean {
+  const items = [
+    ...document.editor.data.content,
+    ...Object.values(document.editor.data.zones ?? {}).flat(),
+  ];
+  return items.some((item) => item.type === 'CustomEmbed');
+}
+
+function requireUnsafeEmbedApproval(principal: Principal, document: EventPageDocumentV2): void {
+  if (eventPageContainsCustomEmbed(document)) {
+    ClerkAuthService.requirePermission(principal, 'settings.write');
+  }
 }
 
 function invalidEventPageValidation() {
@@ -536,10 +557,7 @@ async function sendEmailTestThroughProvider(input: {
     (documentFromEmail
       ? await senderRepo.findVerifiedByBrandAndEmail(input.document.brandId, documentFromEmail)
       : undefined) ??
-    (await senderRepo.findVerifiedByBrandAndDomain(
-      input.document.brandId,
-      route.sender_domain,
-    )) ??
+    (await senderRepo.findVerifiedByBrandAndDomain(input.document.brandId, route.sender_domain)) ??
     (await senderRepo.findVerifiedByBrand(input.document.brandId));
 
   // Always build from the brand route. Injected transports are only for capture
@@ -1054,6 +1072,20 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     return loadAuthorizedDocument(repo(), db, request.principal!, documentId, 'read');
   });
 
+  app.patch('/content-documents/:documentId', async (request) => {
+    const { documentId } = request.params as { documentId: string };
+    const document = await loadAuthorizedDocument(
+      repo(),
+      db,
+      request.principal!,
+      documentId,
+      'write',
+    );
+    assertChannelAvailable(document.channel);
+    const body = parseBody(updateDocumentSchema, request.body);
+    return repo().renameDocument(documentId, body.name);
+  });
+
   app.post('/content-documents/:documentId/duplicate', async (request, reply) => {
     const { documentId } = request.params as { documentId: string };
     const document = await loadAuthorizedDocument(
@@ -1101,8 +1133,14 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         code: 'invalid_event_page_document',
       });
     }
+    if (eventPageDocument) {
+      requireUnsafeEmbedApproval(request.principal!, eventPageDocument);
+    }
     const contentJson = eventPageDocument ?? body.contentJson;
-    const validation = validationFor(document.channel, { ...body, contentJson });
+    const validation = validationFor(document.channel, {
+      ...body,
+      contentJson,
+    });
     const smsDocument =
       document.channel === 'sms' ? normalizeSmsTemplateDocument(body.contentJson) : undefined;
     const emailDocument =
@@ -1177,7 +1215,10 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/content-documents/:documentId/versions/:versionId/publish', async (request) => {
-    const { documentId, versionId } = request.params as { documentId: string; versionId: string };
+    const { documentId, versionId } = request.params as {
+      documentId: string;
+      versionId: string;
+    };
     const document = await loadAuthorizedDocument(
       repo(),
       db,
@@ -1199,6 +1240,7 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
                 code: 'invalid_event_page_document',
               });
             }
+            requireUnsafeEmbedApproval(request.principal!, eventPageDocument);
             return validateEventPageDocumentV2(eventPageDocument);
           })()
         : version.validation;
@@ -1372,7 +1414,11 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
 
     let versionsChecked = 0;
     let versionsMigrated = 0;
-    const migrated: { documentId: string; versionId: string; versionNumber: number }[] = [];
+    const migrated: {
+      documentId: string;
+      versionId: string;
+      versionNumber: number;
+    }[] = [];
 
     for (const doc of documents) {
       const versions = await repo().listVersions(doc.id);

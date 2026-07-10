@@ -25,6 +25,7 @@ Tixkit gives you everything you need to sell tickets, run checkout, fulfill orde
 - [Webhooks](#webhooks)
 - [Deploy and self-host](#deploy-and-self-host)
 - [Testing and quality](#testing-and-quality)
+- [Performance contracts](#performance-contracts)
 - [Documentation](#documentation)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -176,6 +177,10 @@ bun run seed:sample-data    # optional: load demo brand, event, and tickets
 ```
 
 Stop infrastructure with `bun run infra:down`.
+
+## Performance contracts
+
+Bundle size, API load-harness latency, query/heap limits, and Lighthouse user-experience budgets are machine-enforced in Trusted CI. See the [published performance envelope](docs/performance.md) for exact thresholds, reproduction commands, and the limits of the claim.
 
 ---
 

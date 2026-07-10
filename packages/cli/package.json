@@ -1,13 +1,27 @@
 {
-  "name": "@tixkit/cli",
+  "name": "tixkit",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "description": "Tixkit developer-experience CLI: quickstart, setup validation, and local webhook automation",
   "license": "MIT",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
+  "bin": {
+    "tixkit": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc -b",
+    "build": "rm -rf dist && tsc -b --force && cp -R src/templates dist/templates",
+    "prepack": "bun run build",
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test:unit": "vitest run src/__tests__",

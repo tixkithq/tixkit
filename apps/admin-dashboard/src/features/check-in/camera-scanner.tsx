@@ -1,9 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser';
+import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser';
 import type { Result } from '@zxing/library';
-import { CameraOff, Loader2, RefreshCw, ScanLine } from 'lucide-react';
+import { Camera, CameraOff, Loader2, ScanLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { CheckInScanResult } from '@/lib/api';
 import { isCameraSupported } from './camera-support';
@@ -21,13 +21,20 @@ export type CameraScannerProps = {
   cooldownMs?: number;
 };
 
-type CameraStatus = 'starting' | 'scanning' | 'paused' | 'denied' | 'unsupported' | 'error';
+type CameraStatus =
+  | 'idle'
+  | 'starting'
+  | 'scanning'
+  | 'paused'
+  | 'denied'
+  | 'unsupported'
+  | 'error';
 
 const COOLDOWN_DEFAULT_MS = 1500;
 
 /**
- * Live camera QR scanner built on @zxing/browser. Auto-starts on mount when a
- * camera is available, releases the stream on unmount, and degrades to a
+ * Live camera QR scanner built on @zxing/browser. Starts after an explicit user
+ * action, releases the stream on unmount, and degrades to a
  * graceful fallback message when the browser lacks camera support or the user
  * denies permission.
  */
@@ -43,8 +50,9 @@ export function CameraScanner({
   const onScanRef = React.useRef(onScan);
 
   const [status, setStatus] = React.useState<CameraStatus>(() =>
-    isCameraSupported() ? 'starting' : 'unsupported',
+    isCameraSupported() ? 'idle' : 'unsupported',
   );
+  const [cameraEnabled, setCameraEnabled] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [retryNonce, setRetryNonce] = React.useState(0);
 
@@ -61,29 +69,40 @@ export function CameraScanner({
       setStatus('unsupported');
       return;
     }
+    if (!cameraEnabled) {
+      setStatus('idle');
+      return;
+    }
 
     let cancelled = false;
     let controls: IScannerControls | null = null;
     setStatus('starting');
     setErrorMessage(null);
 
-    const reader = new BrowserMultiFormatReader();
+    const reader = new BrowserQRCodeReader();
     const video = videoRef.current;
 
     void reader
-      .decodeFromVideoDevice(undefined, video ?? undefined, (result: Result | undefined) => {
-        if (cancelled || disabledRef.current || !result) return;
-        const payload = result.getText();
-        if (!payload.trim()) return;
-        const now = Date.now();
-        const last = lastScanRef.current;
-        if (last && last.payload === payload && now - last.at < cooldownMs) return;
-        lastScanRef.current = { payload, at: now };
-        setStatus('paused');
-        void onScanRef.current(payload).finally(() => {
-          if (!cancelled) setStatus('scanning');
-        });
-      })
+      .decodeFromConstraints(
+        {
+          audio: false,
+          video: { facingMode: { ideal: 'environment' } },
+        },
+        video ?? undefined,
+        (result: Result | undefined) => {
+          if (cancelled || disabledRef.current || !result) return;
+          const payload = result.getText();
+          if (!payload.trim()) return;
+          const now = Date.now();
+          const last = lastScanRef.current;
+          if (last && last.payload === payload && now - last.at < cooldownMs) return;
+          lastScanRef.current = { payload, at: now };
+          setStatus('paused');
+          void onScanRef.current(payload).finally(() => {
+            if (!cancelled) setStatus('scanning');
+          });
+        },
+      )
       .then((resolvedControls) => {
         if (cancelled) {
           resolvedControls.stop();
@@ -104,11 +123,30 @@ export function CameraScanner({
       controlsRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cooldownMs, retryNonce]);
+  }, [cameraEnabled, cooldownMs, retryNonce]);
+
+  const handleEnable = React.useCallback(() => {
+    setStatus('starting');
+    setCameraEnabled(true);
+  }, []);
 
   const handleRetry = React.useCallback(() => {
+    setStatus('starting');
+    setCameraEnabled(true);
     setRetryNonce((n) => n + 1);
   }, []);
+
+  if (status === 'idle') {
+    return (
+      <CameraFallback
+        icon={ScanLine}
+        title="Ready to scan"
+        description="Camera access starts only after you choose Enable camera. Your browser may ask for permission."
+        actionLabel="Enable camera"
+        onRetry={handleEnable}
+      />
+    );
+  }
 
   if (status === 'unsupported') {
     return (
@@ -187,11 +225,13 @@ function CameraFallback({
   title,
   description,
   onRetry,
+  actionLabel = 'Retry camera',
 }: {
   icon: typeof CameraOff;
   title: string;
   description: string;
   onRetry?: () => void;
+  actionLabel?: string;
 }) {
   return (
     <div
@@ -207,8 +247,8 @@ function CameraFallback({
       </div>
       {onRetry && (
         <Button variant="outline" size="sm" onClick={onRetry} className="mt-1 gap-1.5">
-          <RefreshCw className="size-3.5" />
-          Retry camera
+          <Camera className="size-3.5" />
+          {actionLabel}
         </Button>
       )}
     </div>

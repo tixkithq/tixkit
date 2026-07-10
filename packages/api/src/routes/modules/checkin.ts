@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import { PassThrough } from 'node:stream';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   type Database,
@@ -10,6 +11,7 @@ import {
   ScanLogRepository,
   AttendeeRepository,
   OrderRepository,
+  EventOccurrenceRepository,
   getDriver,
   executeTableQuery,
 } from '@tixkit/db';
@@ -21,7 +23,12 @@ import {
   type AdminTableQuery,
   type AdminTablePage,
 } from '@tixkit/admin-table-core';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import {
+  evaluateDateOfBirthEligibility,
+  NotFoundError,
+  requiresDateOfBirthVerification,
+  ValidationError,
+} from '@tixkit/domain';
 import type { ScanRequest, SyncScanInput } from '@tixkit/domain';
 import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import { ulid } from 'ulid';
@@ -47,6 +54,12 @@ import {
   transferTicketSchema,
   parseBody,
 } from '../../http/schemas.js';
+import {
+  createCheckInActivitySubscriber,
+  publishCheckInActivityEvent,
+} from '../../services/check-in-activity-events.js';
+import { writeSseEvent } from '../../services/sse.js';
+import { redactErrorFields } from '@tixkit/shared';
 
 type Principal = NonNullable<FastifyRequest['principal']>;
 type CheckInListRow = NonNullable<Awaited<ReturnType<CheckInListRepository['findById']>>>;
@@ -535,9 +548,10 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const { ticketId } = request.params as { ticketId: string };
     const body = parseBody(transferTicketSchema, request.body);
     const idempotencyKey = request.headers['idempotency-key'];
-    if (typeof idempotencyKey !== 'string') {
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.trim() === '') {
       throw new ValidationError('Idempotency-Key header is required for ticket transfers');
     }
+    const normalizedIdempotencyKey = idempotencyKey.trim();
 
     const ticketRepo = new TicketRepository(db);
     const ticket = await ticketRepo.findById(ticketId);
@@ -546,13 +560,35 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const event = await loadEvent(ticket.event_id);
     ClerkAuthService.requireResourceTenant(principal, ticket, 'Ticket', ticketId);
     requireEventAccess(principal, event, ticket.event_id);
+    const occurrence = ticket.event_occurrence_id
+      ? await new EventOccurrenceRepository(db).findById(ticket.event_occurrence_id)
+      : undefined;
+    const requiresDateOfBirth = requiresDateOfBirthVerification(event.minimum_age);
+    if (requiresDateOfBirth) {
+      const eligibility = evaluateDateOfBirthEligibility({
+        dateOfBirth: body.dateOfBirth,
+        minimumAge: event.minimum_age,
+        participationAt: occurrence?.starts_at ?? event.starts_at,
+        timezone: occurrence?.timezone ?? event.timezone,
+      });
+      if (!eligibility.eligible) {
+        throw new ValidationError(`Transfer recipient: ${eligibility.message}`, {
+          code: eligibility.code,
+          field: 'dateOfBirth',
+        });
+      }
+    }
 
     const result = await withIdempotency(
       db,
       {
-        key: idempotencyKey,
+        key: normalizedIdempotencyKey,
         tenantId: principal.tenantId,
-        requestHash: hashRequest({ ticketId, toEmail: body.toEmail }),
+        requestHash: hashRequest({
+          ticketId,
+          toEmail: body.toEmail,
+          dateOfBirth: requiresDateOfBirth ? body.dateOfBirth : undefined,
+        }),
       },
       async () => {
         const reissuedTicket = await db.transaction().execute(async (trx) => {
@@ -590,6 +626,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
             ticketTypeId: sourceTicket.ticket_type_id as string,
             eventOccurrenceId: (sourceTicket.event_occurrence_id as string | null) ?? undefined,
             email: body.toEmail,
+            dateOfBirth: requiresDateOfBirth ? body.dateOfBirth : undefined,
             customAnswers: {
               transferSourceTicketId: sourceTicket.id,
               transferSourceAttendeeId: sourceAttendee.id,
@@ -741,6 +778,223 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     return buildOfflineManifest({ eventId, checkInListId, rows });
   });
 
+  app.get('/events/:eventId/check-in-lists/:checkInListId/activity', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'checkins.read');
+    const { eventId, checkInListId } = request.params as {
+      eventId: string;
+      checkInListId: string;
+    };
+    const query = request.query as {
+      since?: string;
+      afterId?: string;
+      limit?: string;
+    };
+    const event = await loadEvent(eventId);
+    requireEventAccess(principal, event, eventId);
+
+    const listRepo = new CheckInListRepository(db);
+    const list = await listRepo.findById(checkInListId);
+    if (!list || list.event_id !== eventId) throw new NotFoundError('CheckInList', checkInListId);
+
+    const limit = Math.min(Math.max(Number(query.limit ?? 50) || 50, 1), 200);
+    const since =
+      typeof query.since === 'string' && query.since.trim() ? new Date(query.since) : undefined;
+    if (since && Number.isNaN(since.getTime())) {
+      throw new ValidationError('since must be a valid ISO-8601 timestamp');
+    }
+
+    const items = await loadCheckInActivity({
+      db,
+      tenantId: principal.tenantId,
+      checkInListId,
+      since,
+      afterId: typeof query.afterId === 'string' ? query.afterId : undefined,
+      limit,
+      latest: !since && !query.afterId,
+    });
+    const summary = await loadCheckInActivitySummary({
+      db,
+      tenantId: principal.tenantId,
+      eventId,
+      list,
+    });
+
+    return {
+      items,
+      summary,
+      nextCursor: items.length > 0 ? items[items.length - 1]?.id : undefined,
+    };
+  });
+
+  app.get(
+    '/events/:eventId/check-in-lists/:checkInListId/activity/stream',
+    { compress: false },
+    async (request, reply) => {
+      const principal = request.principal!;
+      ClerkAuthService.requirePermission(principal, 'checkins.read');
+      const { eventId, checkInListId } = request.params as {
+        eventId: string;
+        checkInListId: string;
+      };
+      const event = await loadEvent(eventId);
+      requireEventAccess(principal, event, eventId);
+
+      const listRepo = new CheckInListRepository(db);
+      const list = await listRepo.findById(checkInListId);
+      if (!list || list.event_id !== eventId) throw new NotFoundError('CheckInList', checkInListId);
+
+      const lastEventIdHeader = request.headers['last-event-id'];
+      const reconnectTime =
+        typeof lastEventIdHeader === 'string' && lastEventIdHeader.startsWith('time:')
+          ? new Date(Number(lastEventIdHeader.slice(5)))
+          : undefined;
+      let lastSentEventId =
+        typeof lastEventIdHeader === 'string' &&
+        lastEventIdHeader.trim() &&
+        !lastEventIdHeader.startsWith('time:')
+          ? lastEventIdHeader
+          : undefined;
+      const streamStartedAt =
+        reconnectTime && !Number.isNaN(reconnectTime.getTime()) ? reconnectTime : new Date();
+      const stream = new PassThrough();
+      let ended = false;
+      let pollTimer: NodeJS.Timeout | undefined;
+      let subscriber: Awaited<ReturnType<typeof createCheckInActivitySubscriber>>;
+      let pushInFlight: Promise<void> | undefined;
+      let pushQueued = false;
+      // Poll is the safety net. When Redis pub/sub is available, poll less often.
+      const FALLBACK_POLL_MS = 1_500;
+      const REDIS_SAFETY_POLL_MS = 10_000;
+
+      const sendEvent = (eventName: string, data: unknown, id?: string) =>
+        ended ? Promise.resolve(false) : writeSseEvent(stream, eventName, data, id);
+      const closeStream = () => {
+        if (ended) return;
+        ended = true;
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = undefined;
+        subscriber?.disconnect();
+        if (!stream.destroyed && !stream.writableEnded) stream.end();
+      };
+
+      const pushUpdates = async () => {
+        const pageSize = 100;
+        let emitted = 0;
+        // Drain backlog in pages so large offline syncs are not stuck behind the safety poll.
+        for (;;) {
+          const items = await loadCheckInActivity({
+            db,
+            tenantId: principal.tenantId,
+            checkInListId,
+            afterId: lastSentEventId,
+            createdSince: lastSentEventId ? undefined : streamStartedAt,
+            limit: pageSize,
+          });
+          if (items.length === 0) break;
+          for (const item of items) {
+            if (!(await sendEvent('scan', item, item.id))) return;
+            lastSentEventId = item.id;
+            emitted += 1;
+          }
+          if (items.length < pageSize) break;
+        }
+        if (emitted > 0) {
+          const summary = await loadCheckInActivitySummary({
+            db,
+            tenantId: principal.tenantId,
+            eventId,
+            list,
+          });
+          await sendEvent('summary', summary);
+        }
+      };
+
+      const schedulePush = () => {
+        if (ended) return;
+        if (pushInFlight) {
+          pushQueued = true;
+          return;
+        }
+        pushInFlight = (async () => {
+          do {
+            pushQueued = false;
+            await pushUpdates();
+          } while (pushQueued && !ended);
+        })();
+        void pushInFlight
+          .catch((err) => {
+            request.log.error(
+              { err: redactErrorFields(err), eventId, checkInListId },
+              'Check-in activity stream failed',
+            );
+            void sendEvent('error', {
+              code: 'ACTIVITY_STREAM_FAILED',
+              message: 'Activity stream failed',
+            }).finally(closeStream);
+          })
+          .finally(() => {
+            pushInFlight = undefined;
+            if (pushQueued && !ended) {
+              pushQueued = false;
+              schedulePush();
+            }
+          });
+      };
+
+      const startPolling = (intervalMs: number) => {
+        if (ended) return;
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(schedulePush, intervalMs);
+      };
+
+      request.raw.on('close', () => {
+        closeStream();
+      });
+
+      reply
+        .header('Content-Type', 'text/event-stream')
+        .header('Cache-Control', 'no-cache, no-transform')
+        .header('Connection', 'keep-alive')
+        .send(stream);
+
+      await sendEvent(
+        'ready',
+        { checkInListId, eventId },
+        lastSentEventId ?? `time:${streamStartedAt.getTime()}`,
+      );
+      try {
+        // Redis fanout wakes the stream immediately after scans on any API instance.
+        // DB re-read remains the source of truth (same pattern as export job SSE).
+        subscriber = await createCheckInActivitySubscriber(checkInListId, async () => {
+          schedulePush();
+        });
+        subscriber?.once('end', () => {
+          startPolling(FALLBACK_POLL_MS);
+        });
+        schedulePush();
+        await pushInFlight;
+      } catch (err) {
+        request.log.error(
+          { err: redactErrorFields(err), eventId, checkInListId },
+          'Check-in activity stream failed',
+        );
+        await sendEvent('error', {
+          code: 'ACTIVITY_STREAM_FAILED',
+          message: 'Activity stream failed',
+        });
+        closeStream();
+        return;
+      }
+      // light-my-request/inject waits for stream end; keep production streams open.
+      if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+        closeStream();
+        return;
+      }
+      startPolling(subscriber ? REDIS_SAFETY_POLL_MS : FALLBACK_POLL_MS);
+    },
+  );
+
   app.post('/check-ins/scan', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'checkins.write');
@@ -783,7 +1037,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         requireVerifiedTicketId: true,
       });
 
-      await scanRepo.create({
+      const scanLog = await scanRepo.create({
         tenantId: principal.tenantId,
         checkInListId: body.checkInListId!,
         deviceId: effectiveDeviceId,
@@ -794,6 +1048,7 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
         offline: body.offline ?? false,
         metadata: metadataWithClockWarning(result.metadata, normalizedScannedAt),
       });
+      void publishCheckInActivityEvent(body.checkInListId!, scanLog.id);
 
       return {
         status: 200,
@@ -884,8 +1139,17 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
               scans: sortedScans,
             }),
           );
+          // Publish only after the durable transaction commits.
+          if (result.lastScanLogId) {
+            void publishCheckInActivityEvent(body.checkInListId, result.lastScanLogId);
+          }
 
-          const { errorSamples: _errorSamples, metrics: _metrics, ...syncBody } = result;
+          const {
+            errorSamples: _errorSamples,
+            metrics: _metrics,
+            lastScanLogId: _lastScanLogId,
+            ...syncBody
+          } = result;
           return { status: 200, body: syncBody };
         },
       );
@@ -1548,7 +1812,8 @@ async function processBulkSyncJob(
   const processingStartedAt = new Date();
   const transactionStartedAt = performance.now();
   try {
-    return await db.transaction().execute(async (trx) => {
+    let activityNotify: { checkInListId: string; scanLogId: string } | undefined;
+    const processed = await db.transaction().execute(async (trx) => {
       let jobQuery = trx
         .selectFrom('offline_check_in_sync_jobs')
         .selectAll()
@@ -1650,6 +1915,7 @@ async function processBulkSyncJob(
         attendeeUpdateDurationMs: 0,
       };
       const sampleErrors: BulkSyncErrorSample[] = [];
+      let lastScanLogId: string | undefined;
 
       for (
         let offset = 0;
@@ -1678,6 +1944,7 @@ async function processBulkSyncJob(
         metrics.ticketUpdateDurationMs += result.metrics.ticketUpdateDurationMs;
         metrics.attendeeUpdateDurationMs += result.metrics.attendeeUpdateDurationMs;
         sampleErrors.push(...result.errorSamples);
+        if (result.lastScanLogId) lastScanLogId = result.lastScanLogId;
 
         for (const [index, scanResult] of result.results.entries()) {
           const scan = scanBatch[index];
@@ -1758,8 +2025,19 @@ async function processBulkSyncJob(
         .where('attempt_count', '=', claim.attemptCount)
         .executeTakeFirst()) as { numUpdatedRows?: bigint | number | string } | undefined;
 
-      return countValue(completed?.numUpdatedRows ?? 0) > 0;
+      const ok = countValue(completed?.numUpdatedRows ?? 0) > 0;
+      if (ok && lastScanLogId) {
+        activityNotify = {
+          checkInListId: job.check_in_list_id,
+          scanLogId: lastScanLogId,
+        };
+      }
+      return ok;
     });
+    if (processed && activityNotify) {
+      void publishCheckInActivityEvent(activityNotify.checkInListId, activityNotify.scanLogId);
+    }
+    return processed;
   } catch (error) {
     await markBulkSyncJobFailed(db, jobId, error, claim);
     return true;
@@ -1849,6 +2127,7 @@ async function processOfflineSyncBatch(input: {
   results: { qrHash: string; outcome: string }[];
   errorSamples: BulkSyncErrorSample[];
   metrics: OfflineSyncBatchMetrics;
+  lastScanLogId?: string;
 }> {
   const allowedTicketTypeIds = new Set(parseJsonValue<string[]>(input.list.ticket_type_ids, []));
   const ticketsByQrHash = await loadTicketsByQrHash(
@@ -1910,14 +2189,13 @@ async function processOfflineSyncBatch(input: {
   );
   const attendeeUpdateDurationMs = Math.round(performance.now() - attendeeUpdateStartedAt);
   const scanLogInsertStartedAt = performance.now();
-  await bulkInsertOfflineScanLogs({
+  const lastScanLogId = await bulkInsertOfflineScanLogs({
     db: input.db,
     tenantId: input.tenantId,
     checkInListId: input.checkInListId,
     deviceId: input.deviceId,
     scans: input.scans,
     results,
-    syncJobId: input.syncJobId,
   });
   const scanLogInsertDurationMs = Math.round(performance.now() - scanLogInsertStartedAt);
 
@@ -1953,6 +2231,7 @@ async function processOfflineSyncBatch(input: {
       outcome: result.outcome,
     })),
     errorSamples,
+    lastScanLogId,
     metrics: {
       rowsProcessed: input.scans.length,
       clockWarnings: input.scans.filter((scan) => scan.clockWarning).length,
@@ -2137,17 +2416,28 @@ async function bulkInsertOfflineScanLogs(input: {
   deviceId: string;
   scans: NormalizedOfflineScan[];
   results: OfflineScanResult[];
-  syncJobId?: string;
-}): Promise<void> {
+}): Promise<string | undefined> {
+  if (input.scans.length === 0) return undefined;
+  const list = await input.db
+    .selectFrom('check_in_lists')
+    .select('next_activity_sequence')
+    .where('id', '=', input.checkInListId)
+    .forUpdate()
+    .executeTakeFirstOrThrow();
+  const firstActivitySequence = Number(list.next_activity_sequence ?? 0) + 1;
+  await input.db
+    .updateTable('check_in_lists')
+    .set({ next_activity_sequence: firstActivitySequence + input.scans.length - 1 })
+    .where('id', '=', input.checkInListId)
+    .execute();
+  let lastScanLogId: string | undefined;
   for (let offset = 0; offset < input.scans.length; offset += OFFLINE_SYNC_DB_CHUNK_SIZE) {
     const scanChunk = input.scans.slice(offset, offset + OFFLINE_SYNC_DB_CHUNK_SIZE);
     const rows = scanChunk.map((scan, index) => {
       const result = input.results[offset + index];
       const metadata = metadataWithClockWarning(result.metadata, scan);
       return {
-        id: input.syncJobId
-          ? bulkOfflineScanLogId(input.syncJobId, scan, offset + index)
-          : `scan_${ulid()}`,
+        id: `scan_${ulid()}`,
         tenant_id: input.tenantId,
         check_in_list_id: input.checkInListId,
         device_id: input.deviceId,
@@ -2159,27 +2449,16 @@ async function bulkInsertOfflineScanLogs(input: {
         offline: true,
         metadata: metadata ? JSON.stringify(metadata) : null,
         created_at: new Date(),
+        activity_sequence: firstActivitySequence + offset + index,
       };
     });
     if (rows.length === 0) continue;
+    lastScanLogId = rows[rows.length - 1]?.id;
 
     // eslint-disable-next-line no-await-in-loop -- chunked inserts keep max-sized sync under query parameter limits.
     await input.db.insertInto('scan_logs').values(rows).execute();
   }
-}
-
-function bulkOfflineScanLogId(
-  syncJobId: string,
-  scan: NormalizedOfflineScan,
-  fallbackIndex: number,
-): string {
-  const sequence = scan.chunkSequence ?? 0;
-  const scanIndex = scan.chunkScanIndex ?? fallbackIndex;
-  const digest = createHash('sha256')
-    .update(`${syncJobId}:${sequence}:${scanIndex}`)
-    .digest('hex')
-    .slice(0, 26);
-  return `scan_bulk_${digest}`;
+  return lastScanLogId;
 }
 
 export async function processScan(input: {
@@ -2376,4 +2655,154 @@ export function verifyOfflineManifestSignature(manifest: {
     .digest('hex');
 
   return timingSafeEqual(Buffer.from(expectedSignature, 'hex'), Buffer.from(signature, 'hex'));
+}
+
+type CheckInActivityItem = {
+  id: string;
+  checkInListId: string;
+  ticketId: string | null;
+  deviceId: string;
+  outcome: string;
+  scannedAt: string;
+  offline: boolean;
+  attendeeName: string | null;
+  attendeeEmail: string | null;
+  ticketTypeId: string | null;
+};
+
+async function loadCheckInActivity(input: {
+  db: Database;
+  tenantId: string;
+  checkInListId: string;
+  since?: Date;
+  afterId?: string;
+  createdSince?: Date;
+  limit: number;
+  latest?: boolean;
+}): Promise<CheckInActivityItem[]> {
+  const cursor = input.afterId
+    ? await input.db
+        .selectFrom('scan_logs')
+        .select('activity_sequence')
+        .where('tenant_id', '=', input.tenantId)
+        .where('check_in_list_id', '=', input.checkInListId)
+        .where('id', '=', input.afterId)
+        .executeTakeFirst()
+    : undefined;
+  if (input.afterId && !cursor) return [];
+  let query = input.db
+    .selectFrom('scan_logs')
+    .leftJoin('tickets', (join) =>
+      join
+        .onRef('tickets.id', '=', 'scan_logs.ticket_id')
+        .on('tickets.tenant_id', '=', input.tenantId),
+    )
+    .leftJoin('attendees', (join) =>
+      join
+        .onRef('attendees.id', '=', 'tickets.attendee_id')
+        .on('attendees.tenant_id', '=', input.tenantId),
+    )
+    .select([
+      'scan_logs.id as id',
+      'scan_logs.check_in_list_id as check_in_list_id',
+      'scan_logs.ticket_id as ticket_id',
+      'scan_logs.device_id as device_id',
+      'scan_logs.outcome as outcome',
+      'scan_logs.scanned_at as scanned_at',
+      'scan_logs.offline as offline',
+      'attendees.first_name as first_name',
+      'attendees.last_name as last_name',
+      'attendees.email as email',
+      'tickets.ticket_type_id as ticket_type_id',
+    ])
+    .where('scan_logs.tenant_id', '=', input.tenantId)
+    .where('scan_logs.check_in_list_id', '=', input.checkInListId)
+    .orderBy('scan_logs.activity_sequence', input.latest ? 'desc' : 'asc')
+    .limit(input.limit);
+
+  if (input.since) {
+    query = query.where('scan_logs.scanned_at', '>=', input.since);
+  }
+  if (cursor?.activity_sequence != null) {
+    query = query.where('scan_logs.activity_sequence', '>', cursor.activity_sequence);
+  } else if (input.afterId) {
+    query = query.where('scan_logs.id', '>', input.afterId);
+  }
+  if (input.createdSince) {
+    query = query.where('scan_logs.created_at', '>=', input.createdSince);
+  }
+
+  const rows = await query.execute();
+  if (input.latest) rows.reverse();
+  return rows.map((row) => ({
+    id: row.id,
+    checkInListId: row.check_in_list_id,
+    ticketId: row.ticket_id ?? null,
+    deviceId: row.device_id,
+    outcome: row.outcome,
+    scannedAt:
+      row.scanned_at instanceof Date ? row.scanned_at.toISOString() : String(row.scanned_at),
+    offline: Boolean(row.offline),
+    attendeeName: [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || null,
+    attendeeEmail: row.email ?? null,
+    ticketTypeId: row.ticket_type_id ?? null,
+  }));
+}
+
+async function loadCheckInActivitySummary(input: {
+  db: Database;
+  tenantId: string;
+  eventId: string;
+  list: CheckInListRow;
+}): Promise<{
+  checkedIn: number;
+  remaining: number;
+  total: number;
+  acceptedScans: number;
+}> {
+  const allowedTicketTypeIds = parseJsonValue<string[]>(input.list.ticket_type_ids, []);
+  let ticketQuery = input.db
+    .selectFrom('tickets')
+    .select(['tickets.id as id', 'tickets.status as status'])
+    .where('tickets.tenant_id', '=', input.tenantId)
+    .where('tickets.event_id', '=', input.eventId);
+
+  if (allowedTicketTypeIds.length > 0) {
+    ticketQuery = ticketQuery.where('tickets.ticket_type_id', 'in', allowedTicketTypeIds);
+  }
+  if (input.list.event_occurrence_id) {
+    ticketQuery = ticketQuery.where(
+      'tickets.event_occurrence_id',
+      '=',
+      input.list.event_occurrence_id,
+    );
+  }
+
+  const ticketCounts = await ticketQuery
+    .clearSelect()
+    .select([
+      sql<number | string | bigint>`count(*)`.as('total'),
+      sql<number | string | bigint>`sum(case when status = 'checked_in' then 1 else 0 end)`.as(
+        'checked_in',
+      ),
+    ])
+    .executeTakeFirst();
+  const total = Number(ticketCounts?.total ?? 0);
+  const checkedIn = Number(ticketCounts?.checked_in ?? 0);
+  const remaining = Math.max(0, total - checkedIn);
+
+  const accepted = await input.db
+    .selectFrom('scan_logs')
+    .select((eb) => eb.fn.countAll<number | string | bigint>().as('count'))
+    .where('tenant_id', '=', input.tenantId)
+    .where('check_in_list_id', '=', input.list.id)
+    .where('outcome', '=', 'accepted')
+    .executeTakeFirst();
+
+  return {
+    checkedIn,
+    remaining,
+    total,
+    acceptedScans: Number(accepted?.count ?? 0),
+  };
 }

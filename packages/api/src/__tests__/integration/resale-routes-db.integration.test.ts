@@ -667,6 +667,78 @@ describeWithIntegrationDatabase(
       expect(publicList.json().items).toHaveLength(0);
     });
 
+    it('retains the resale occurrence when revalidating age eligibility', async () => {
+      const occurrenceId = `occ_resale_age_${RUN_ID}`;
+      const now = new Date();
+      await db
+        .insertInto('event_occurrences')
+        .values({
+          id: occurrenceId,
+          event_id: EVENT_ID,
+          title: 'Future performance',
+          starts_at: new Date('2028-07-10T18:00:00.000Z'),
+          ends_at: new Date('2028-07-10T21:00:00.000Z'),
+          timezone: 'UTC',
+          venue: null,
+          capacity: null,
+          sort_order: 0,
+          status: 'scheduled',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await db
+        .updateTable('events')
+        .set({ minimum_age: 18, starts_at: new Date('2026-07-10T18:00:00.000Z') })
+        .where('id', '=', EVENT_ID)
+        .execute();
+      await db
+        .updateTable('tickets')
+        .set({ event_occurrence_id: occurrenceId })
+        .where('id', '=', TICKET_ID)
+        .execute();
+
+      try {
+        const createListing = await app.inject({
+          method: 'POST',
+          url: `/tickets/${TICKET_ID}/resale-listings`,
+          headers: { 'Idempotency-Key': `resale_db_age_listing_${RUN_ID}` },
+          payload: { priceCents: 5500 },
+        });
+        expect(createListing.statusCode).toBe(201);
+        const checkout = await app.inject({
+          method: 'POST',
+          url: '/checkout/sessions',
+          headers: { 'Idempotency-Key': `resale_db_age_checkout_${RUN_ID}` },
+          payload: {
+            eventId: EVENT_ID,
+            items: [{ resaleListingId: createListing.json().id, quantity: 1 }],
+            buyer: { email: 'future-buyer@example.test', dateOfBirth: '2009-07-10' },
+          },
+        });
+        expect(checkout.statusCode).toBe(201);
+        const update = await app.inject({
+          method: 'PATCH',
+          url: `/checkout/sessions/${checkout.json().id}`,
+          headers: { 'X-Checkout-Session-Token': checkout.json().clientToken },
+          payload: { buyer: { firstName: 'Future' } },
+        });
+        expect(update.statusCode).toBe(200);
+      } finally {
+        await db
+          .updateTable('tickets')
+          .set({ event_occurrence_id: null })
+          .where('id', '=', TICKET_ID)
+          .execute();
+        await db
+          .updateTable('events')
+          .set({ minimum_age: null, starts_at: new Date(Date.now() + 86_400_000) })
+          .where('id', '=', EVENT_ID)
+          .execute();
+        await db.deleteFrom('event_occurrences').where('id', '=', occurrenceId).execute();
+      }
+    });
+
     it('rejects a resale checkout when a required buyer question is missing', async () => {
       const questionId = `q_resale_required_${RUN_ID}`;
       const now = new Date();
@@ -999,6 +1071,7 @@ describeWithIntegrationDatabase(
         buyerFirstName: 'Resale',
         buyerLastName: 'Buyer',
         externalPaymentReference: `stripe_pi_${RUN_ID}`,
+        buyerDateOfBirth: '1990-01-01',
       };
       const first = await app.inject({
         method: 'POST',
@@ -1039,6 +1112,12 @@ describeWithIntegrationDatabase(
         status: 'confirmed',
         ticketId: body.buyerTicket.id,
       });
+      const buyerAttendeeRow = await db
+        .selectFrom('attendees')
+        .select('date_of_birth')
+        .where('id', '=', body.buyerAttendee.id)
+        .executeTakeFirstOrThrow();
+      expect(buyerAttendeeRow.date_of_birth).toBeNull();
 
       const qr = new QrService('resale-db-test-secret').getQrPayload(body.buyerTicket.qrPayload);
       expect(qr).toMatchObject({ valid: true, ticketId: body.buyerTicket.id });
@@ -1102,6 +1181,7 @@ describeWithIntegrationDatabase(
               buyerFirstName: 'Race',
               buyerLastName: `Buyer ${index}`,
               externalPaymentReference: `stripe_pi_race_${RUN_ID}_${index}`,
+              buyerDateOfBirth: '1990-01-01',
             },
           }),
         ),
@@ -1171,6 +1251,7 @@ describeWithIntegrationDatabase(
           buyerFirstName: 'Expired',
           buyerLastName: 'Buyer',
           externalPaymentReference: `stripe_pi_expired_${RUN_ID}`,
+          buyerDateOfBirth: '1990-01-01',
         },
       });
       expect(expired.statusCode).toBe(400);
@@ -1256,6 +1337,7 @@ describeWithIntegrationDatabase(
             buyerFirstName: 'Load',
             buyerLastName: `Buyer ${index}`,
             externalPaymentReference: `stripe_pi_load_${RUN_ID}_${index}`,
+            buyerDateOfBirth: '1990-01-01',
           },
         }),
       );

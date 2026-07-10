@@ -76,6 +76,9 @@ vi.mock('@tixkit/db', () => {
         where() {
           return query;
         },
+        forUpdate() {
+          return query;
+        },
         async executeTakeFirst() {
           if (table === 'orders') return mockState.order;
           if (table === 'checkout_sessions') return mockState.checkoutSession;

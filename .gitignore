@@ -97,3 +97,5 @@ artifacts/
 .continue-*
 .next-codex-cdp*/
 .next-*/
+.agents*
+.refine-relay.json

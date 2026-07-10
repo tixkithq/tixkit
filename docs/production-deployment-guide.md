@@ -490,7 +490,7 @@ Handlers store the provider event before processing and skip duplicates by provi
 
 ## Health Checks
 
-- `GET /health` returns `200 { "status": "ok", "timestamp": "..." }` with no auth. Use this for load balancer and container health checks.
+- `GET /health` returns `200 { "status": "ok", "timestamp": "..." }` with no auth and is a liveness check. Use `GET /ready` for load balancer/readiness checks; it returns `503 { "status": "not_ready" }` when the bounded database probe fails.
 - Worker health: monitor process liveness and Temporal worker metrics. The worker exits non-zero on startup failure with an actionable diagnostic.
 - Checkout/admin: standard Next.js health checks; both should render their entry shell without crashing.
 
@@ -500,7 +500,8 @@ Recommended alerts:
 
 | Signal                            | Source                                        | Action                                  |
 | --------------------------------- | --------------------------------------------- | --------------------------------------- |
-| `GET /health` non-200             | uptime probe                                  | Page on-call                            |
+| `GET /health` non-200             | liveness probe                                | Page on-call                            |
+| `GET /ready` non-200              | readiness/load-balancer probe                 | Remove from traffic and investigate DB  |
 | API 5xx rate                      | Fastify logs / APM                            | Investigate `requestId`                 |
 | Worker startup failure            | process exit / logs                           | Check Temporal + DB reachability        |
 | `workflow_failed`                 | Temporal metrics                              | Inspect failing workflow type in UI     |

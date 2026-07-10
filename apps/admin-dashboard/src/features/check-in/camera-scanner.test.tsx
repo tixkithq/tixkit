@@ -16,12 +16,12 @@ type DecodeCallback = (
 
 let mockDecodeCallback: DecodeCallback | null = null;
 let mockStopFn: ReturnType<typeof vi.fn>;
-let mockDecodeFromVideoDevice: ReturnType<typeof vi.fn>;
+let mockDecodeFromConstraints: ReturnType<typeof vi.fn>;
 
 vi.mock('@zxing/browser', () => {
   return {
-    BrowserMultiFormatReader: class MockBrowserMultiFormatReader {
-      decodeFromVideoDevice = mockDecodeFromVideoDevice;
+    BrowserQRCodeReader: class MockBrowserQRCodeReader {
+      decodeFromConstraints = mockDecodeFromConstraints;
     },
   };
 });
@@ -64,6 +64,11 @@ function fireDecode(payload: string) {
   });
 }
 
+async function enableCamera() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
+  return screen.findByTestId('camera-viewport');
+}
+
 function makeAcceptedResult(): CheckInScanResult {
   return {
     status: 'accepted',
@@ -77,7 +82,7 @@ function makeAcceptedResult(): CheckInScanResult {
 beforeEach(() => {
   mockStopFn = vi.fn();
   mockDecodeCallback = null;
-  mockDecodeFromVideoDevice = vi.fn((_deviceId, _video, callback: DecodeCallback) => {
+  mockDecodeFromConstraints = vi.fn((_constraints, _video, callback: DecodeCallback) => {
     mockDecodeCallback = callback;
     return Promise.resolve({ stop: mockStopFn });
   });
@@ -120,12 +125,14 @@ describe('CameraScanner', () => {
     expect(screen.getByText('Camera not available')).toBeInTheDocument();
   });
 
-  it('starts the camera and renders the live viewport when supported', async () => {
+  it('starts after an explicit action and prefers the rear camera', async () => {
     render(<CameraScanner onScan={vi.fn()} />);
-    expect(await screen.findByTestId('camera-viewport')).toBeInTheDocument();
+    expect(await screen.findByText('Ready to scan')).toBeInTheDocument();
+    expect(mockDecodeFromConstraints).not.toHaveBeenCalled();
+    await enableCamera();
     expect(screen.getByTestId('camera-video')).toBeInTheDocument();
-    expect(mockDecodeFromVideoDevice).toHaveBeenCalledWith(
-      undefined,
+    expect(mockDecodeFromConstraints).toHaveBeenCalledWith(
+      { audio: false, video: { facingMode: { ideal: 'environment' } } },
       expect.any(Object),
       expect.any(Function),
     );
@@ -138,7 +145,7 @@ describe('CameraScanner', () => {
         onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>}
       />,
     );
-    await screen.findByTestId('camera-viewport');
+    await enableCamera();
     fireDecode('tkt_demo_001');
     expect(onScan).toHaveBeenCalledWith('tkt_demo_001');
   });
@@ -150,7 +157,7 @@ describe('CameraScanner', () => {
         onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>}
       />,
     );
-    await screen.findByTestId('camera-viewport');
+    await enableCamera();
     fireDecode('   ');
     fireDecode('');
     expect(onScan).not.toHaveBeenCalled();
@@ -166,7 +173,7 @@ describe('CameraScanner', () => {
         cooldownMs={2000}
       />,
     );
-    await screen.findByTestId('camera-viewport');
+    await enableCamera();
     fireDecode('tkt_cooldown');
     expect(onScan).toHaveBeenCalledTimes(1);
     // Same payload, same time -> within cooldown -> ignored
@@ -186,7 +193,7 @@ describe('CameraScanner', () => {
         onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>}
       />,
     );
-    await screen.findByTestId('camera-viewport');
+    await enableCamera();
     fireDecode('tkt_a');
     fireDecode('tkt_b');
     expect(onScan).toHaveBeenCalledWith('tkt_a');
@@ -201,7 +208,7 @@ describe('CameraScanner', () => {
         disabled={false}
       />,
     );
-    await screen.findByTestId('camera-viewport');
+    await enableCamera();
     rerender(
       <CameraScanner
         onScan={onScan as unknown as (p: string) => Promise<CheckInScanResult | null>}
@@ -214,44 +221,48 @@ describe('CameraScanner', () => {
 
   it('stops the camera stream on unmount', async () => {
     const { unmount } = render(<CameraScanner onScan={vi.fn()} />);
-    await screen.findByTestId('camera-viewport');
+    await enableCamera();
     unmount();
     expect(mockStopFn).toHaveBeenCalled();
   });
 
   it('shows the denied permission fallback when getUserMedia is blocked', async () => {
-    mockDecodeFromVideoDevice = vi.fn(() =>
+    mockDecodeFromConstraints = vi.fn(() =>
       Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),
     );
     render(<CameraScanner onScan={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
     expect(await screen.findByText('Camera permission denied')).toBeInTheDocument();
     expect(screen.getByTestId('camera-fallback')).toBeInTheDocument();
   });
 
   it('shows the unsupported fallback when no camera device is found', async () => {
-    mockDecodeFromVideoDevice = vi.fn(() =>
+    mockDecodeFromConstraints = vi.fn(() =>
       Promise.reject(new DOMException('Not found', 'NotFoundError')),
     );
     render(<CameraScanner onScan={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
     expect(await screen.findByTestId('camera-fallback')).toBeInTheDocument();
     expect(screen.getByText('Camera not available')).toBeInTheDocument();
   });
 
   it('shows a generic error fallback with a retry button', async () => {
-    mockDecodeFromVideoDevice = vi.fn(() => Promise.reject(new Error('Something broke')));
+    mockDecodeFromConstraints = vi.fn(() => Promise.reject(new Error('Something broke')));
     render(<CameraScanner onScan={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
     expect(await screen.findByText('Camera error')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry camera' })).toBeInTheDocument();
   });
 
   it('retry button re-initialises the scanner after an error', async () => {
     let shouldFail = true;
-    mockDecodeFromVideoDevice = vi.fn((_a: unknown, _b: unknown, cb: DecodeCallback) => {
+    mockDecodeFromConstraints = vi.fn((_a: unknown, _b: unknown, cb: DecodeCallback) => {
       if (shouldFail) return Promise.reject(new Error('boom'));
       mockDecodeCallback = cb;
       return Promise.resolve({ stop: vi.fn() });
     });
     render(<CameraScanner onScan={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
     expect(await screen.findByText('Camera error')).toBeInTheDocument();
     shouldFail = false;
     fireEvent.click(screen.getByRole('button', { name: 'Retry camera' }));

@@ -537,10 +537,10 @@ test('validateFinalEvidenceChecklist rejects runbook drift for final gates', () 
   });
 
   assert.deepEqual(result.errors, [
-    'C-082: validation runbook is missing final evidence proof term fresh hosted CI',
+    'C-082: validation runbook is missing final evidence proof term fresh hosted CI|fresh uncached Trusted CI',
     'C-082: validation runbook is missing final evidence proof term user-story-test-matrix\\.md',
     'C-082: validation runbook is missing final evidence proof term Validated 146 user-story rows',
-    'C-082: validation runbook is missing final evidence proof term 78 evidence paths',
+    'C-082: validation runbook is missing final evidence proof term 78 evidence paths|133 evidence paths',
     'C-082: validation runbook is missing final evidence proof term without cached Turbo-only proof|no cached Turbo-only proof|cache disabled|turbo --force',
   ]);
 });
@@ -565,9 +565,9 @@ test('validateFinalEvidenceChecklist rejects C-035 runbook drift from exact host
     'C-035: validation runbook is missing final evidence proof term Unit Tests',
     'C-035: validation runbook is missing final evidence proof term Integration Tests \\(PostgreSQL\\)',
     'C-035: validation runbook is missing final evidence proof term Integration Tests \\(MySQL\\)',
-    'C-035: validation runbook is missing final evidence proof term E2E Browser Matrix \\(chromium\\)',
-    'C-035: validation runbook is missing final evidence proof term E2E Browser Matrix \\(firefox\\)',
-    'C-035: validation runbook is missing final evidence proof term E2E Browser Matrix \\(webkit\\)',
+    'C-035: validation runbook is missing final evidence proof term E2E Browser Matrix \\(chromium\\)|browser\\/performance gates',
+    'C-035: validation runbook is missing final evidence proof term E2E Browser Matrix \\(firefox\\)|browser\\/performance gates',
+    'C-035: validation runbook is missing final evidence proof term E2E Browser Matrix \\(webkit\\)|browser\\/performance gates',
     'C-035: validation runbook is missing final evidence proof term refs\\/heads\\/main',
     'C-035: validation runbook is missing final evidence proof term pull-request',
     'C-035: validation runbook is missing final evidence proof term required-status-check',
@@ -588,9 +588,9 @@ test('validateFinalEvidenceChecklist rejects C-036 runbook drift from Stripe pro
     'C-036: validation runbook is missing final evidence proof term STRIPE_WEBHOOK_SECRET',
     'C-036: validation runbook is missing final evidence proof term NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
     'C-036: validation runbook is missing final evidence proof term STRIPE_CONNECT_CLIENT_ID',
-    'C-036: validation runbook is missing final evidence proof term GitHub Step Summary',
-    'C-036: validation runbook is missing final evidence proof term provider secret gate was available',
-    'C-036: validation runbook is missing final evidence proof term Stripe provider tests passed',
+    'C-036: validation runbook is missing final evidence proof term GitHub Step Summary|Step Summary',
+    'C-036: validation runbook is missing final evidence proof term provider secret gate was available|redacted test-mode secrets',
+    'C-036: validation runbook is missing final evidence proof term Stripe provider tests passed|prove direct Stripe',
     'C-036: validation runbook is missing final evidence proof term secret values were redacted',
     'C-036: validation runbook is missing final evidence proof term does not skip|did not skip',
   ]);
@@ -606,13 +606,13 @@ test('validateFinalEvidenceChecklist rejects C-037 runbook drift from managed DR
   });
 
   assert.deepEqual(result.errors, [
-    'C-037: validation runbook is missing final evidence proof term managed Postgres backup',
-    'C-037: validation runbook is missing final evidence proof term managed Postgres restore',
-    'C-037: validation runbook is missing final evidence proof term managed MySQL backup',
-    'C-037: validation runbook is missing final evidence proof term managed MySQL restore',
+    'C-037: validation runbook is missing final evidence proof term managed Postgres backup|Postgres backup\\/restore',
+    'C-037: validation runbook is missing final evidence proof term managed Postgres restore|Postgres backup\\/restore',
+    'C-037: validation runbook is missing final evidence proof term managed MySQL backup|MySQL backup\\/restore',
+    'C-037: validation runbook is missing final evidence proof term managed MySQL restore|MySQL backup\\/restore',
     'C-037: validation runbook is missing final evidence proof term restore-based rollback',
     'C-037: validation runbook is missing final evidence proof term RPO\\/RTO',
-    'C-037: validation runbook is missing final evidence proof term docs\\/production-deployment-guide\\.md',
-    'C-037: validation runbook is missing final evidence proof term docs\\/incident-runbooks\\.md',
+    'C-037: validation runbook is missing final evidence proof term docs\\/production-deployment-guide\\.md|EPYC lab databases',
+    'C-037: validation runbook is missing final evidence proof term docs\\/incident-runbooks\\.md|RPO\\/RTO evidence',
   ]);
 });

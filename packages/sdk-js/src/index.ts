@@ -55,9 +55,13 @@ export type Event = {
   visibility: string;
   seo: Record<string, unknown>;
   capacity?: number;
+  minimumAge: number | null;
   coverImageUrl?: string;
   externalUrl?: string;
   resalePolicy: ResalePolicy;
+  grossSalesCents: number;
+  ticketsSold: number;
+  checkIns: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -73,14 +77,15 @@ export type PublicEvent = {
   id: string;
   slug: string;
   title: string;
-  description?: string;
+  description: string | null;
   status: string;
   timezone: string;
   startsAt: string;
-  endsAt?: string;
-  venue?: Record<string, unknown> | null;
+  endsAt: string | null;
+  venue: Record<string, unknown> | null;
   brandId: string;
   coverImageUrl?: string;
+  minimumAge: number | null;
   marketingIntegrations: PublicMarketingIntegration[];
 };
 
@@ -400,6 +405,17 @@ export type CheckoutConfirmPending = {
 
 export type CheckoutConfirmResult = CheckoutConfirmCompleted | CheckoutConfirmPending;
 
+export type CheckoutCreateItem =
+  | {
+      ticketTypeId: string;
+      occurrenceId?: string;
+      quantity: number;
+      unitAmountCents?: number;
+      attendeeFields?: Array<Record<string, unknown> & { dateOfBirth?: string }>;
+    }
+  | { productId: string; quantity: number }
+  | { resaleListingId: string; quantity: 1 };
+
 export type BoxOfficeOrderInput = {
   tenderType: 'comp' | 'cash' | 'manual_card';
   amountCents: number;
@@ -407,9 +423,15 @@ export type BoxOfficeOrderInput = {
     ticketTypeId: string;
     occurrenceId?: string;
     quantity: number;
-    attendeeFields?: Record<string, unknown>[];
+    attendeeFields?: Array<Record<string, unknown> & { dateOfBirth?: string }>;
   }[];
-  buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+  buyer: {
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    dateOfBirth?: string;
+  };
   buyerFields?: Record<string, unknown>;
   notes?: string;
 } & IdempotencyOptions;
@@ -669,6 +691,10 @@ export type CreateContentDocumentInput = {
   key: string;
   name: string;
   locale?: string;
+};
+
+export type UpdateContentDocumentInput = {
+  name: string;
 };
 
 export type ContentDocumentListParams = {
@@ -954,6 +980,46 @@ export type Organization = {
   updatedAt: string;
 };
 
+export type OrganizationMemberRole =
+  | 'owner'
+  | 'admin'
+  | 'organizer'
+  | 'viewer'
+  | 'door_staff'
+  | 'door_staff_sales';
+
+export type OrganizationMember = {
+  id: string;
+  organizationId: string;
+  name: string;
+  email: string;
+  role: OrganizationMemberRole;
+  status: string;
+  invitedAt: string;
+  joinedAt: string | null;
+  brandIds: string[];
+  eventIds: string[];
+};
+
+type OrganizationMemberScopeInput =
+  | { brandIds?: string[]; eventIds?: never }
+  | { brandIds?: never; eventIds?: string[] };
+
+export type UpdateOrganizationMemberInput = OrganizationMemberScopeInput & {
+  role: Exclude<OrganizationMemberRole, 'owner'>;
+};
+
+export type InviteOrganizationMemberInput = OrganizationMemberScopeInput & {
+  email: string;
+  role?: Exclude<OrganizationMemberRole, 'owner'>;
+  returnTo?: string;
+};
+
+export type OrganizationInvitation = OrganizationMember & {
+  invitationDelivery: 'queued';
+  invitationProvider: string;
+};
+
 export type BoxOfficeSettings = {
   enabled: boolean;
   allowedTenderTypes: Array<'cash' | 'manual_card' | 'comp'>;
@@ -1079,6 +1145,32 @@ export type CheckInList = {
   status: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CheckInActivityItem = {
+  id: string;
+  checkInListId: string;
+  ticketId: string | null;
+  deviceId: string;
+  outcome: string;
+  scannedAt: string;
+  offline: boolean;
+  attendeeName: string | null;
+  attendeeEmail: string | null;
+  ticketTypeId: string | null;
+};
+
+export type CheckInActivitySummary = {
+  checkedIn: number;
+  remaining: number;
+  total: number;
+  acceptedScans: number;
+};
+
+export type CheckInActivityPage = {
+  items: CheckInActivityItem[];
+  summary: CheckInActivitySummary;
+  nextCursor?: string;
 };
 
 export type OfflineManifest = {
@@ -1757,6 +1849,18 @@ export type CheckInListListParams = PaginationParams & {
   headers?: Record<string, string>;
 };
 
+export type CheckInActivityListParams = {
+  since?: string;
+  afterId?: string;
+  limit?: number;
+  headers?: Record<string, string>;
+};
+
+export type CheckInActivityStreamOptions = {
+  lastEventId?: string;
+  headers?: Record<string, string>;
+};
+
 export type CheckoutSessionGetOptions = {
   clientToken?: string;
   paymentIntentClientSecret?: string;
@@ -2172,20 +2276,18 @@ class CheckoutResource {
   async create(
     input: {
       eventId: string;
-      items: {
-        ticketTypeId?: string;
-        occurrenceId?: string;
-        productId?: string;
-        resaleListingId?: string;
-        quantity: number;
-        unitAmountCents?: number;
-        attendeeFields?: Record<string, unknown>[];
-      }[];
+      items: CheckoutCreateItem[];
       discountCode?: string;
       affiliateCode?: string;
       trackingId?: string;
       buyerFields?: Record<string, unknown>;
-      buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+      buyer: {
+        email: string;
+        firstName?: string;
+        lastName?: string;
+        phone?: string;
+        dateOfBirth?: string;
+      };
       successUrl?: string;
       cancelUrl?: string;
       accessCode?: string;
@@ -2245,7 +2347,13 @@ class CheckoutResource {
     sessionId: string,
     input: {
       clientToken: string;
-      buyer?: { email?: string; firstName?: string; lastName?: string; phone?: string };
+      buyer?: {
+        email?: string;
+        firstName?: string;
+        lastName?: string;
+        phone?: string;
+        dateOfBirth?: string;
+      };
       successUrl?: string;
       cancelUrl?: string;
     },
@@ -2318,6 +2426,7 @@ class EventResource {
     startsAt: string;
     endsAt?: string;
     visibility?: string;
+    minimumAge?: number | null;
   }): Promise<Event> {
     return this.client.request('POST', '/events', { body: input });
   }
@@ -2339,6 +2448,7 @@ class EventResource {
         | 'endsAt'
         | 'visibility'
         | 'capacity'
+        | 'minimumAge'
         | 'coverImageUrl'
         | 'externalUrl'
         | 'venue'
@@ -2537,11 +2647,11 @@ class TicketResource {
 
   async transfer(
     ticketId: string,
-    input: { toEmail: string } & IdempotencyOptions,
+    input: { toEmail: string; dateOfBirth?: string } & IdempotencyOptions,
   ): Promise<Ticket> {
-    const { idempotencyKey, toEmail } = input;
+    const { idempotencyKey, toEmail, dateOfBirth } = input;
     return this.client.request('POST', `/tickets/${ticketId}/transfer`, {
-      body: { toEmail },
+      body: { toEmail, ...(dateOfBirth === undefined ? {} : { dateOfBirth }) },
       idempotencyKey,
     });
   }
@@ -2569,6 +2679,7 @@ class TicketResource {
     input: {
       buyerId: string;
       buyerEmail: string;
+      buyerDateOfBirth?: string;
       buyerFirstName?: string | null;
       buyerLastName?: string | null;
       buyerPhone?: string | null;
@@ -2601,6 +2712,28 @@ class OrganizationResource {
     input: Partial<Pick<Organization, 'name' | 'slug' | 'status' | 'boxOfficeSettings'>>,
   ): Promise<Organization> {
     return this.client.request('PATCH', `/organizations/${organizationId}`, { body: input });
+  }
+  async updateMember(
+    organizationId: string,
+    memberId: string,
+    input: UpdateOrganizationMemberInput,
+  ): Promise<OrganizationMember> {
+    return this.client.request('PATCH', `/organizations/${organizationId}/members/${memberId}`, {
+      body: input,
+    });
+  }
+  async listMembers(organizationId: string): Promise<OrganizationMember[]> {
+    return this.client.request('GET', `/organizations/${organizationId}/members`);
+  }
+  async inviteMember(
+    organizationId: string,
+    input: InviteOrganizationMemberInput & IdempotencyOptions,
+  ): Promise<OrganizationInvitation> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/organizations/${organizationId}/members/invitations`, {
+      body,
+      idempotencyKey,
+    });
   }
 }
 
@@ -2780,6 +2913,39 @@ class CheckInListResource {
       'GET',
       `/events/${eventId}/check-in-lists/${checkInListId}/manifest`,
       { headers },
+    );
+  }
+  async listActivity(
+    eventId: string,
+    checkInListId: string,
+    params?: CheckInActivityListParams,
+  ): Promise<CheckInActivityPage> {
+    const { headers, ...filters } = params ?? {};
+    const query: Record<string, string> = {};
+    if (filters.since) query.since = filters.since;
+    if (filters.afterId) query.afterId = filters.afterId;
+    if (filters.limit !== undefined) query.limit = String(filters.limit);
+    return this.client.request(
+      'GET',
+      `/events/${eventId}/check-in-lists/${checkInListId}/activity`,
+      { params: Object.keys(query).length > 0 ? query : undefined, headers },
+    );
+  }
+  async getActivityStream(
+    eventId: string,
+    checkInListId: string,
+    options?: CheckInActivityStreamOptions,
+  ): Promise<Response> {
+    return this.client.requestRaw(
+      'GET',
+      `/events/${eventId}/check-in-lists/${checkInListId}/activity/stream`,
+      {
+        headers: {
+          ...options?.headers,
+          Accept: 'text/event-stream',
+          ...(options?.lastEventId ? { 'Last-Event-ID': options.lastEventId } : {}),
+        },
+      },
     );
   }
 }
@@ -3098,6 +3264,10 @@ class ContentResource {
 
   async get(documentId: string): Promise<ContentDocument> {
     return this.client.request('GET', `/content-documents/${documentId}`);
+  }
+
+  async update(documentId: string, input: UpdateContentDocumentInput): Promise<ContentDocument> {
+    return this.client.request('PATCH', `/content-documents/${documentId}`, { body: input });
   }
 
   async duplicate(

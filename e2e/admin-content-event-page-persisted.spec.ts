@@ -153,7 +153,9 @@ async function seedContentEvent(page: Page, suffix: string): Promise<SeededConte
     201,
   );
   await jsonResponse<Omit<SeededContentEvent, 'ticketType'>>(
-    await page.request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, { data: {} }),
+    await page.request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
+      data: {},
+    }),
     200,
   );
   return { ...event, ticketType };
@@ -185,13 +187,26 @@ async function loadEventPageContentState(eventId: string, page: Page) {
 async function expectPersistedEventPageEditorRegions(page: Page): Promise<void> {
   await expect(page.getByRole('region', { name: 'Editor header' })).toBeVisible();
   await expect(page.getByRole('main', { name: 'Event page editable document' })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Editor tools' })).toBeVisible();
   await expect(page.locator('[data-testid="content-editor-shell"]').first()).toBeVisible();
   await expect(page.locator('[data-testid="editor-canvas"]').first()).toBeVisible();
-  const editorTools = page.getByRole('navigation', { name: 'Editor tools' });
-  await expect(editorTools.getByRole('button', { name: 'Editor', exact: true })).toBeVisible();
-  await expect(editorTools.getByRole('button', { name: 'Preview', exact: true })).toBeVisible();
-  await expect(editorTools.getByRole('button', { name: 'Code', exact: true })).toBeVisible();
+  const viewportWidth = page.viewportSize()?.width ?? desktopViewport.width;
+  if (viewportWidth < 1024) {
+    const mobileTools = page.getByRole('navigation', {
+      name: 'Event page tools',
+    });
+    await expect(mobileTools).toBeVisible();
+    await expect(mobileTools.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+    await expect(mobileTools.getByRole('button', { name: 'Sections', exact: true })).toBeVisible();
+    await expect(mobileTools.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
+    await expect(mobileTools.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
+    await expect(mobileTools.getByRole('button', { name: 'Preview', exact: true })).toBeVisible();
+  } else {
+    const header = page.getByRole('region', { name: 'Editor header' });
+    await expect(header.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+    await expect(header.getByRole('button', { name: 'Preview', exact: true })).toBeVisible();
+    await expect(header.getByRole('button', { name: 'Page builder' })).toBeVisible();
+    await expect(header.getByRole('button', { name: 'Settings' })).toBeVisible();
+  }
   await expect(page.getByRole('button', { name: 'Publish' })).toBeVisible();
   await expect(page.getByLabel('More actions')).toBeVisible();
 }
@@ -252,6 +267,11 @@ async function saveDraftFromHeader(page: Page): Promise<void> {
 async function publishFromHeader(page: Page): Promise<void> {
   const header = page.getByRole('region', { name: 'Editor header' });
   await header.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByTestId('publish-review-drawer')).toBeVisible();
+  await page
+    .getByTestId('publish-review-drawer')
+    .getByRole('button', { name: 'Publish now' })
+    .click();
   await expect(page.getByText(/Published v\d+/)).toBeVisible();
 }
 
@@ -307,12 +327,18 @@ async function eventPageSelectionStateViaCdp(client: CDPSession) {
             .map((node) => node.textContent?.replace(/\\s+/g, ' ').trim())
             .filter((text) => text === 'Description')
         : [];
+      const selectedCanvasTarget = frameDocument?.querySelector(
+        '[data-event-page-outline-selected="true"]',
+      );
 
       return {
         selectedType: selectedBlock?.type || null,
         selectedId: selectedBlock?.props?.id || null,
         selectedOutlineText: selectedOutline?.textContent?.replace(/\\s+/g, ' ').trim() || null,
         ancestorOutlineText: ancestorOutline?.textContent?.replace(/\\s+/g, ' ').trim() || null,
+        selectedCanvasTargetTagName: selectedCanvasTarget?.tagName || null,
+        selectedCanvasTargetText:
+          selectedCanvasTarget?.textContent?.replace(/\\s+/g, ' ').trim() || null,
         descriptionToolbarLabelVisible: exactFrameLabels.length > 0,
         inspectorHasDescriptionFields: inspectorText.includes(
           'Inline or background image for the event description',
@@ -328,6 +354,8 @@ async function eventPageSelectionStateViaCdp(client: CDPSession) {
     selectedId: string | null;
     selectedOutlineText: string | null;
     ancestorOutlineText: string | null;
+    selectedCanvasTargetTagName: string | null;
+    selectedCanvasTargetText: string | null;
     descriptionToolbarLabelVisible: boolean;
     inspectorHasDescriptionFields: boolean;
     inspectorHasHeaderFields: boolean;
@@ -394,17 +422,18 @@ async function seedDescriptionBackgroundImageViaCdp(client: CDPSession): Promise
         : [...content, descriptionBlock];
 
       dispatch({
-        type: 'set',
-        state: (state) => ({
-          ...state,
-          data: { ...state.data, content: nextContent },
-          ui: { ...state.ui, itemSelector: null },
-        }),
+        type: 'setData',
+        data: (data) => ({ ...data, content: nextContent }),
       });
+      dispatch({ type: 'setUi', ui: { itemSelector: null }, recordHistory: false });
       return { ok: true, descriptionId };
     })()`,
   });
-  const value = result.result.value as { ok?: boolean; descriptionId?: string; error?: string };
+  const value = result.result.value as {
+    ok?: boolean;
+    descriptionId?: string;
+    error?: string;
+  };
   expect(value?.ok, value?.error ?? 'Unable to seed description background image').toBe(true);
   expect(value.descriptionId).toBeTruthy();
   return value.descriptionId!;
@@ -497,6 +526,7 @@ test.describe('persisted admin event-page Puck editor', () => {
 
   test('saves, previews, publishes, renders publicly, and reloads a canonical Puck event page', async ({
     browserName,
+    consoleErrors,
     page,
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
@@ -517,8 +547,10 @@ test.describe('persisted admin event-page Puck editor', () => {
 
     await saveDraftFromHeader(page);
 
-    await page.getByRole('button', { name: 'Preview' }).click();
-    await expect(page.getByText('Preview opened from the saved Puck document')).toBeVisible();
+    await page
+      .getByRole('region', { name: 'Editor header' })
+      .getByRole('button', { name: 'Preview', exact: true })
+      .click();
     const canvasPreview = page.locator('[data-testid="editor-canvas"]');
     await expect(
       canvasPreview.locator('[data-testid="preview-surface"].tixkit-event-page-puck-scope'),
@@ -529,25 +561,36 @@ test.describe('persisted admin event-page Puck editor', () => {
     );
     await expect(canvasPreview.getByRole('heading', { name: event.title, level: 1 })).toBeVisible();
     await expect(
-      canvasPreview.getByRole('heading', { name: 'Tickets', level: 2, exact: true }),
+      canvasPreview.getByRole('heading', {
+        name: 'Tickets',
+        level: 2,
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(canvasPreview.locator('.tk-ep-hero')).toHaveCount(0);
-    await page.getByTestId('preview-drawer').getByRole('button', { name: 'Close' }).click();
-    await expect(page.getByTestId('preview-drawer')).toBeHidden();
-    await page.getByRole('button', { name: 'Editor' }).click();
+    await expect(page.getByTestId('publish-review-drawer')).toBeHidden();
+    await page
+      .getByRole('region', { name: 'Editor header' })
+      .getByRole('button', { name: 'Edit', exact: true })
+      .click();
     await expectPuckEditorCanvas(page, event);
 
-    // Outline + heading audit should surface the default chrome hierarchy.
-    await page.getByRole('tab', { name: /Outline/i }).click();
+    // The consolidated sections panel surfaces the default chrome hierarchy.
     const outline = page.getByTestId('event-page-outline');
     await expect(outline).toBeVisible();
     await expect(outline.getByText('Event header')).toBeVisible();
-    await expect(outline.getByText('Tickets', { exact: true })).toBeVisible();
-    await expect(outline.getByText('Resale tickets')).toBeVisible();
-    await expect(outline.getByText('Get tickets CTA')).toBeVisible();
-    await expect(outline.getByText('Brand footer')).toBeVisible();
-    await page.getByRole('tab', { name: /Audit/i }).click();
-    await expect(page.getByTestId('event-page-heading-audit')).toBeVisible();
+    await expect(outline.getByRole('button', { name: 'Tickets', exact: true })).toBeVisible();
+    await expect(
+      outline.getByRole('button', { name: 'Resale tickets', exact: true }),
+    ).toBeVisible();
+    await expect(
+      outline.getByRole('button', { name: 'Get tickets CTA', exact: true }),
+    ).toBeVisible();
+    await expect(outline.getByRole('button', { name: 'Brand footer', exact: true })).toBeVisible();
+
+    // Reordering from the outline is persisted, not merely reflected locally.
+    await outline.getByRole('button', { name: 'Move Brand footer up' }).click();
+    await saveDraftFromHeader(page);
 
     await publishFromHeader(page);
 
@@ -560,6 +603,12 @@ test.describe('persisted admin event-page Puck editor', () => {
     expect(publishedVersion?.contentJson.editor.provider).toBe(puckProvider);
     expect(publishedVersion?.contentJson.settings.discovery.summary).toBe(eventSummary);
     expectFullPagePuckData(publishedVersion?.contentJson.editor.data);
+    const publishedTypes = publishedVersion!.contentJson.editor.data.content.map(
+      (block) => block.type,
+    );
+    expect(publishedTypes.indexOf('BrandFooter')).toBeLessThan(
+      publishedTypes.indexOf('CheckoutCta'),
+    );
 
     const publicPage = await jsonResponse<PublicContentPage>(
       await page.request.get(`${apiBaseUrl}/v1/public/events/${event.id}/page`),
@@ -604,7 +653,10 @@ test.describe('persisted admin event-page Puck editor', () => {
 
     if (browserName === 'chromium') {
       const client = await page.context().newCDPSession(page);
-      const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
+      const { root } = await client.send('DOM.getDocument', {
+        depth: -1,
+        pierce: true,
+      });
       const hostedSelectors = {
         main: 'main',
         puckScope: '[data-testid="published-event-page"] .tixkit-event-page-puck-scope',
@@ -619,7 +671,9 @@ test.describe('persisted admin event-page Puck editor', () => {
               selector,
             });
             expect(node.nodeId).toBeGreaterThan(0);
-            const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
+            const box = await client.send('DOM.getBoxModel', {
+              nodeId: node.nodeId,
+            });
             expect(widthOf(box.model.content)).toBeGreaterThan(name === 'main' ? 600 : 300);
             expect(heightOf(box.model.content)).toBeGreaterThan(name === 'eventHeader' ? 40 : 20);
             return [name, box] as const;
@@ -671,6 +725,52 @@ test.describe('persisted admin event-page Puck editor', () => {
     await page.setViewportSize(mobileViewport);
     await page.goto(`${adminBaseUrl}/events/${event.id}/content/event-page`);
     await expectPersistedEventPageEditorRegions(page);
+    const mobileEditorFrame = page.locator('[data-testid="editor-canvas"] iframe').first();
+    await expect(mobileEditorFrame).toBeVisible();
+    const mobileEditorFrameBox = await mobileEditorFrame.boundingBox();
+    expect(mobileEditorFrameBox?.width).toBeGreaterThanOrEqual(360);
+    await expect(page.getByTestId('event-page-navigator-panel')).toBeHidden();
+
+    const mobileTools = page.getByRole('navigation', {
+      name: 'Event page tools',
+    });
+    await mobileTools.getByRole('button', { name: 'Add' }).click();
+    const mobileAddPanel = page.getByRole('dialog', {
+      name: 'Add sections panel',
+    });
+    await expect(mobileAddPanel).toBeVisible();
+    await expect(mobileAddPanel).toHaveAttribute('aria-modal', 'false');
+    await expect(
+      mobileAddPanel.getByRole('searchbox', { name: 'Search page sections' }),
+    ).toBeFocused();
+    const mobileAddPanelBox = await mobileAddPanel.boundingBox();
+    expect(mobileAddPanelBox?.y).toBeGreaterThan(200);
+    expect(mobileEditorFrameBox?.y).toBeLessThan(mobileAddPanelBox?.y ?? 0);
+    await expect(page.locator('[data-testid="editor-canvas"] [inert]')).toHaveCount(0);
+    await mobileAddPanel.getByRole('button', { name: 'Add FAQ' }).last().click();
+    await expect(mobileAddPanel).toBeHidden();
+    await expect(
+      page.frameLocator('[data-testid="editor-canvas"] iframe').locator('[data-block-type="FAQ"]'),
+    ).toHaveCount(1);
+    await saveDraftFromHeader(page);
+    const withMobileInsertion = await loadEventPageContentState(event.id, page);
+    const latestDraft = withMobileInsertion.versions.reduce(
+      (latest, candidate) =>
+        candidate.status === 'draft' && (!latest || candidate.versionNumber > latest.versionNumber)
+          ? candidate
+          : latest,
+      undefined as ContentVersionList['items'][number] | undefined,
+    );
+    expect(latestDraft?.contentJson.editor.data.content.some((block) => block.type === 'FAQ')).toBe(
+      true,
+    );
+
+    await mobileTools.getByRole('button', { name: 'Sections' }).click();
+    const mobileSectionsPanel = page.getByRole('dialog', {
+      name: 'Sections panel',
+    });
+    await mobileSectionsPanel.getByRole('button', { name: 'Event header', exact: true }).click();
+    await expect(mobileSectionsPanel).toBeHidden();
     await attachScreenshot(page, testInfo, 'admin-content-event-page-puck-mobile');
     await expectNoAxeViolations(page, testInfo, undefined, [], ['landmark-unique']);
 
@@ -680,6 +780,19 @@ test.describe('persisted admin event-page Puck editor', () => {
     await expect(page.getByText('Event page archived')).toBeVisible();
     const archived = await loadEventPageContentState(event.id, page);
     expect(archived.document.status).toBe('archived');
+
+    if (process.env.USE_WEBSERVER === 'false') {
+      for (let index = consoleErrors.length - 1; index >= 0; index -= 1) {
+        const message = consoleErrors[index] ?? '';
+        if (
+          message.includes('eval() is not supported in this environment') &&
+          message.includes('React will never use eval() in production mode') &&
+          message.includes(new URL(checkoutBaseUrl).origin)
+        ) {
+          consoleErrors.splice(index, 1);
+        }
+      }
+    }
   });
 
   test('captures Chromium CDP layout metrics for the admin-hosted Puck editor', async ({
@@ -701,7 +814,10 @@ test.describe('persisted admin event-page Puck editor', () => {
     await expect(page.getByRole('complementary', { name: 'Page settings' })).toBeHidden();
 
     const client = await page.context().newCDPSession(page);
-    const { root } = await client.send('DOM.getDocument', { depth: -1, pierce: true });
+    const { root } = await client.send('DOM.getDocument', {
+      depth: -1,
+      pierce: true,
+    });
     const selectors = {
       shell: '[data-testid="content-editor-shell"]',
       canvas: '[data-testid="editor-canvas"]',
@@ -715,7 +831,9 @@ test.describe('persisted admin event-page Puck editor', () => {
             selector,
           });
           expect(node.nodeId).toBeGreaterThan(0);
-          const box = await client.send('DOM.getBoxModel', { nodeId: node.nodeId });
+          const box = await client.send('DOM.getBoxModel', {
+            nodeId: node.nodeId,
+          });
           expect(widthOf(box.model.content)).toBeGreaterThan(name === 'shell' ? 900 : 40);
           expect(heightOf(box.model.content)).toBeGreaterThan(name === 'iframe' ? 300 : 20);
           return [name, box] as const;
@@ -751,7 +869,7 @@ test.describe('persisted admin event-page Puck editor', () => {
     });
   });
 
-  test('selects the description block from its H2 outline row via CDP', async ({
+  test('selects canvas child targets from outline rows via CDP', async ({
     browserName,
     page,
   }, testInfo) => {
@@ -773,6 +891,35 @@ test.describe('persisted admin event-page Puck editor', () => {
 
     await page
       .getByTestId('event-page-outline')
+      .getByRole('button', { name: /Brand badge/i })
+      .click();
+    await expect
+      .poll(async () => eventPageSelectionStateViaCdp(client), {
+        message: 'Brand badge outline row should select the badge canvas target.',
+      })
+      .toMatchObject({
+        selectedType: 'EventHeader',
+        selectedOutlineText: expect.stringContaining('Brand badge'),
+        ancestorOutlineText: 'Event header',
+        selectedCanvasTargetTagName: 'SPAN',
+        inspectorHasHeaderFields: true,
+      });
+
+    const frame = page.frameLocator('[data-testid="editor-canvas"] iframe');
+    await frame.locator('[data-block-type="Tickets"]').click({ position: { x: 12, y: 12 } });
+    await expect
+      .poll(async () => eventPageSelectionStateViaCdp(client), {
+        message: 'Direct canvas clicks should clear stale child outline targets.',
+      })
+      .toMatchObject({
+        selectedType: 'Tickets',
+        selectedCanvasTargetTagName: null,
+        selectedCanvasTargetText: null,
+        inspectorHasHeaderFields: false,
+      });
+
+    await page
+      .getByTestId('event-page-outline')
       .getByRole('button', { name: /H2 title About this event/i })
       .click();
 
@@ -784,6 +931,8 @@ test.describe('persisted admin event-page Puck editor', () => {
         selectedType: 'EventDescription',
         selectedOutlineText: 'H2 titleAbout this event',
         ancestorOutlineText: 'Description',
+        selectedCanvasTargetTagName: 'H2',
+        selectedCanvasTargetText: 'About this event',
         descriptionToolbarLabelVisible: true,
         inspectorHasDescriptionFields: true,
         inspectorHasHeaderFields: false,
@@ -791,15 +940,65 @@ test.describe('persisted admin event-page Puck editor', () => {
     await expect(page.getByTestId('event-page-inspector')).toContainText(
       'Inline or background image for the event description',
     );
-    await expect(
-      page
-        .frameLocator('[data-testid="editor-canvas"] iframe')
-        .getByText('Description', { exact: true }),
-    ).toBeVisible();
+    await expect(frame.locator('[data-event-page-outline-selected="true"]')).toHaveText(
+      'About this event',
+    );
+    await expect(frame.getByText('Description', { exact: true })).toBeVisible();
 
-    const afterClick = await eventPageSelectionStateViaCdp(client);
-    await testInfo.attach('cdp-description-outline-selection', {
-      body: JSON.stringify({ beforeClick, afterClick }, null, 2),
+    const afterDescriptionClick = await eventPageSelectionStateViaCdp(client);
+
+    await page
+      .getByTestId('event-page-outline')
+      .getByRole('button', { name: /H2 title Tickets/i })
+      .click();
+    await expect
+      .poll(async () => eventPageSelectionStateViaCdp(client), {
+        message: 'Tickets H2 outline row should select the tickets canvas heading.',
+      })
+      .toMatchObject({
+        selectedType: 'Tickets',
+        selectedOutlineText: 'H2 titleTickets',
+        ancestorOutlineText: 'Tickets',
+        selectedCanvasTargetTagName: 'H2',
+        selectedCanvasTargetText: 'Tickets',
+        inspectorHasDescriptionFields: false,
+        inspectorHasHeaderFields: false,
+      });
+
+    const afterTicketsClick = await eventPageSelectionStateViaCdp(client);
+
+    await page
+      .getByTestId('event-page-outline')
+      .getByRole('button', {
+        name: /Supporting text Secure checkout powered by Tixkit/i,
+      })
+      .click();
+    await expect
+      .poll(async () => eventPageSelectionStateViaCdp(client), {
+        message: 'Checkout CTA supporting text outline row should select the supporting copy.',
+      })
+      .toMatchObject({
+        selectedType: 'CheckoutCta',
+        selectedOutlineText: 'Supporting textSecure checkout powered by Tixkit',
+        ancestorOutlineText: 'Get tickets CTA',
+        selectedCanvasTargetTagName: 'P',
+        selectedCanvasTargetText: 'Secure checkout powered by Tixkit',
+        inspectorHasDescriptionFields: false,
+        inspectorHasHeaderFields: false,
+      });
+
+    const afterCtaClick = await eventPageSelectionStateViaCdp(client);
+    await testInfo.attach('cdp-outline-child-target-selection', {
+      body: JSON.stringify(
+        {
+          beforeClick,
+          afterDescriptionClick,
+          afterTicketsClick,
+          afterCtaClick,
+        },
+        null,
+        2,
+      ),
       contentType: 'application/json',
     });
     await client.detach();
@@ -842,18 +1041,26 @@ test.describe('persisted admin event-page Puck editor', () => {
     );
     expect(String(beforeOpen.pointTargetText)).toContain('Style overlay button');
 
-    await frame.getByRole('link', { name: 'Style overlay button' }).click();
-    await expect
-      .poll(
-        async () =>
-          page
-            .locator('[data-testid="editor-canvas"] iframe')
-            .evaluate((iframe) => (iframe as HTMLIFrameElement).contentWindow?.location.hash),
-        { message: 'Overlay link should receive the click while image mode is closed.' },
-      )
-      .toBe('#style-overlay');
+    const overlayLink = frame.getByRole('link', {
+      name: 'Style overlay button',
+    });
+    expect(
+      await overlayLink.evaluate((link) => {
+        let received = false;
+        link.addEventListener(
+          'click',
+          (event) => {
+            event.preventDefault();
+            received = true;
+          },
+          { once: true },
+        );
+        link.click();
+        return received;
+      }),
+    ).toBe(true);
 
-    await frame.getByRole('button', { name: 'Edit image placement' }).click();
+    await frame.getByRole('button', { name: 'Edit image placement', exact: true }).click();
     await expect(frame.getByRole('slider', { name: 'Image zoom' })).toBeVisible();
     const opened = await descriptionImageEditorStateViaCdp(client);
     expect(opened).toEqual(
@@ -919,7 +1126,22 @@ test.describe('persisted admin event-page Puck editor', () => {
     const initialCount = await puckContentCountViaCdp(client);
     expect(initialCount).toBeGreaterThan(0);
 
-    await page.getByRole('button', { name: 'Add page section' }).click();
+    const rootDocument = await client.send('DOM.getDocument', {
+      depth: -1,
+      pierce: true,
+    });
+    const initialIframeNode = await client.send('DOM.querySelector', {
+      nodeId: rootDocument.root.nodeId,
+      selector: '[data-testid="editor-canvas"] iframe',
+    });
+    const initialIframeDescription = await client.send('DOM.describeNode', {
+      nodeId: initialIframeNode.nodeId,
+    });
+
+    await page
+      .getByTestId('event-page-navigator-panel')
+      .getByRole('button', { name: 'Add', exact: true })
+      .click();
     await expect(page.getByTestId('event-page-puck-components')).toBeVisible();
     const sourceBox = await page.getByTestId('drawer-item:RichText').boundingBox();
     const iframeBox = await page.locator('[data-testid="editor-canvas"] iframe').boundingBox();
@@ -969,7 +1191,7 @@ test.describe('persisted admin event-page Puck editor', () => {
       y: cancelBox!.y + cancelBox!.height / 2,
     });
 
-    await expect(page.getByTestId('event-page-puck-components')).toBeHidden();
+    await expect(page.getByTestId('event-page-puck-components')).toBeVisible();
     await expect
       .poll(async () => puckContentCountViaCdp(client), {
         message: 'Puck content count should not change after canceling add-section drag',
@@ -979,8 +1201,28 @@ test.describe('persisted admin event-page Puck editor', () => {
       page.frameLocator('[data-testid="editor-canvas"] iframe').getByText('Add event story'),
     ).toHaveCount(0);
 
+    const finalRootDocument = await client.send('DOM.getDocument', {
+      depth: -1,
+      pierce: true,
+    });
+    const finalIframeNode = await client.send('DOM.querySelector', {
+      nodeId: finalRootDocument.root.nodeId,
+      selector: '[data-testid="editor-canvas"] iframe',
+    });
+    const finalIframeDescription = await client.send('DOM.describeNode', {
+      nodeId: finalIframeNode.nodeId,
+    });
+    expect(finalIframeDescription.node.backendNodeId).toBe(
+      initialIframeDescription.node.backendNodeId,
+    );
+
     await testInfo.attach('cdp-add-section-drag-cancel', {
-      body: JSON.stringify({ initialCount, finalCount: await puckContentCountViaCdp(client) }),
+      body: JSON.stringify({
+        initialCount,
+        finalCount: await puckContentCountViaCdp(client),
+        iframeRemounted:
+          finalIframeDescription.node.backendNodeId !== initialIframeDescription.node.backendNodeId,
+      }),
       contentType: 'application/json',
     });
     await client.detach();

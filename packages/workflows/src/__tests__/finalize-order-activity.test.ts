@@ -764,6 +764,77 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(attendees[0].custom_answers).not.toContain('legacy stale value');
   });
 
+  it('finalizes distinct attendee identity fields instead of falling back to the buyer', async () => {
+    dbState.tables.checkout_sessions.cs_1.cart = JSON.stringify({
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [
+            {
+              firstName: 'Grace',
+              lastName: 'Hopper',
+              email: 'grace@example.test',
+              phone: '+15555550101',
+              q_attendee_consent: true,
+            },
+          ],
+        },
+      ],
+      buyerFields: { q_buyer_consent: true },
+    });
+    dbState.tables.questions = {
+      q_attendee_consent: {
+        id: 'q_attendee_consent',
+        event_id: 'evt_1',
+        ticket_type_id: 'tt_1',
+        applies_to: 'attendee',
+        label: 'Attendee messages',
+        is_consent_field: true,
+        consent_text: 'Attendee agrees',
+        consent_version: '1',
+      },
+      q_buyer_consent: {
+        id: 'q_buyer_consent',
+        event_id: 'evt_1',
+        ticket_type_id: null,
+        applies_to: 'buyer',
+        label: 'Buyer messages',
+        is_consent_field: true,
+        consent_text: 'Buyer agrees',
+        consent_version: '1',
+      },
+    };
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      paymentIntentId: 'pi_provider_1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(Object.values(dbState.tables.attendees)[0]).toMatchObject({
+      first_name: 'Grace',
+      last_name: 'Hopper',
+      email: 'grace@example.test',
+      phone: '+15555550101',
+    });
+    expect(Object.values(dbState.tables.message_consents)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          email: 'grace@example.test',
+          phone: '+15555550101',
+          consent_text: 'Attendee agrees',
+        }),
+        expect.objectContaining({
+          email: 'buyer@example.test',
+          phone: null,
+          consent_text: 'Buyer agrees',
+        }),
+      ]),
+    );
+  });
+
   it('finalizes distinct attendee answers for repeated ticket types on separate cart lines', async () => {
     dbState.tables.checkout_sessions.cs_1.quote = JSON.stringify({
       subtotalCents: 2000,

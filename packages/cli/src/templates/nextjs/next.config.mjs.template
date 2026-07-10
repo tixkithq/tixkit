@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // Run `bun run typecheck` with TypeScript 7 before builds. Next 16's embedded
+  // checker still imports TypeScript internals removed in TS 7.
+  typescript: { ignoreBuildErrors: true },
 };
 
 export default nextConfig;

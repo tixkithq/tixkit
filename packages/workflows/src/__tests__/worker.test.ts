@@ -31,7 +31,9 @@ vi.mock('@tixkit/shared', () => ({
 }));
 
 vi.mock('../observability.js', () => ({
-  TixkitActivityMetricsInterceptor: class TixkitActivityMetricsInterceptor {},
+  TixkitActivityMetricsInterceptor: class TixkitActivityMetricsInterceptor {
+    readonly mocked = true;
+  },
   startWorkerObservability,
 }));
 
@@ -100,7 +102,7 @@ describe('runWorker', () => {
     delete process.env.TEMPORAL_WORKER_TASK_QUEUES;
   });
 
-  it('emits readiness only after the hold-expiration scheduler is ensured', async () => {
+  it('emits readiness only after all recovery schedulers are ensured', async () => {
     const { runWorker } = await import('../worker.js');
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const operations: string[] = [];
@@ -117,7 +119,12 @@ describe('runWorker', () => {
 
     const started = runWorker({ workflowsPath: 'test-workflows.js' });
     await vi.waitFor(() =>
-      expect(operations).toEqual(['scheduler-started', 'worker-run', 'ready-log']),
+      expect(operations).toEqual([
+        'scheduler-started',
+        'scheduler-started',
+        'worker-run',
+        'ready-log',
+      ]),
     );
 
     expect(log).toHaveBeenCalledWith('TIXKIT_WORKER_READY taskQueues=tixkit');

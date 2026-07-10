@@ -1,4 +1,6 @@
 export type OpenApiReference = { $ref: string };
+export { generateOpenApiTypes } from './generate-types.js';
+export type { OpenApiTypeGenerationOptions } from './generate-types.js';
 export type OpenApiParameter =
   | OpenApiReference
   | {
@@ -378,7 +380,10 @@ const rawOpenApiSpec = {
           id: { type: 'string' },
           documentId: { type: 'string' },
           versionNumber: { type: 'integer' },
-          status: { type: 'string', enum: ['draft', 'published', 'superseded'] },
+          status: {
+            type: 'string',
+            enum: ['draft', 'published', 'superseded'],
+          },
           schemaVersion: { type: 'integer' },
           subject: { type: 'string' },
           previewText: { type: 'string' },
@@ -464,7 +469,7 @@ const rawOpenApiSpec = {
       EventPageDocumentV2: {
         type: 'object',
         description:
-          'Canonical event-page document persisted by the admin Puck editor. Public event-page payloads expose Puck data directly instead of legacy TipTap/headless/renderModel artifacts.',
+          'Canonical event-page document persisted by the admin editor. Public event-page payloads expose data directly instead of legacy TipTap/headless/renderModel artifacts.',
         properties: {
           schemaVersion: { type: 'integer', enum: [2] },
           editor: {
@@ -821,7 +826,9 @@ const rawOpenApiSpec = {
               provider: { type: 'string', enum: ['@puckeditor/core'] },
               puckData: { $ref: '#/components/schemas/PuckData' },
               settings: { type: 'object', additionalProperties: true },
-              discovery: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
+              discovery: {
+                $ref: '#/components/schemas/PublicEventDiscoveryCard',
+              },
             },
             required: ['provider', 'puckData', 'settings', 'discovery'],
           },
@@ -887,14 +894,19 @@ const rawOpenApiSpec = {
             type: 'array',
             items: { $ref: '#/components/schemas/PublicAvailabilityItem' },
           },
-          resaleListings: { $ref: '#/components/schemas/PublicTicketListingPage' },
+          resaleListings: {
+            $ref: '#/components/schemas/PublicTicketListingPage',
+          },
         },
         required: ['event', 'contentPage', 'availability', 'resaleListings'],
       },
       PublicMarketingIntegration: {
         type: 'object',
         properties: {
-          provider: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+          provider: {
+            type: 'string',
+            enum: ['ga4', 'meta_pixel', 'generic_tag'],
+          },
           config: {
             type: 'object',
             additionalProperties: true,
@@ -912,14 +924,15 @@ const rawOpenApiSpec = {
           id: { type: 'string' },
           slug: { type: 'string' },
           title: { type: 'string' },
-          description: { type: 'string' },
+          description: { type: ['string', 'null'] },
           status: { type: 'string' },
           timezone: { type: 'string' },
           startsAt: { type: 'string', format: 'date-time' },
-          endsAt: { type: 'string', format: 'date-time' },
+          endsAt: { type: ['string', 'null'], format: 'date-time' },
           venue: { type: ['object', 'null'], additionalProperties: true },
           brandId: { type: 'string' },
           coverImageUrl: { type: 'string', format: 'uri' },
+          minimumAge: { type: ['integer', 'null'], minimum: 0, maximum: 120 },
           marketingIntegrations: {
             type: 'array',
             items: { $ref: '#/components/schemas/PublicMarketingIntegration' },
@@ -929,10 +942,14 @@ const rawOpenApiSpec = {
           'id',
           'slug',
           'title',
+          'description',
           'status',
           'timezone',
           'startsAt',
+          'endsAt',
+          'venue',
           'brandId',
+          'minimumAge',
           'marketingIntegrations',
         ],
       },
@@ -983,7 +1000,10 @@ const rawOpenApiSpec = {
           subject: { type: 'string' },
           html: { type: 'string' },
           text: { type: 'string' },
-          segments: { type: 'integer', description: 'SMS segment count when channel is sms.' },
+          segments: {
+            type: 'integer',
+            description: 'SMS segment count when channel is sms.',
+          },
         },
       },
       ContentPreview: {
@@ -995,7 +1015,9 @@ const rawOpenApiSpec = {
           },
           output: { $ref: '#/components/schemas/ContentRenderOutput' },
           validation: { $ref: '#/components/schemas/ContentValidationResult' },
-          renderArtifact: { $ref: '#/components/schemas/ContentRenderArtifact' },
+          renderArtifact: {
+            $ref: '#/components/schemas/ContentRenderArtifact',
+          },
         },
         required: ['channel', 'output', 'validation'],
       },
@@ -1010,7 +1032,10 @@ const rawOpenApiSpec = {
             type: 'string',
             enum: ['event_page', 'email', 'sms', 'imessage', 'social_invite'],
           },
-          outputType: { type: 'string', enum: ['preview', 'test_send', 'send'] },
+          outputType: {
+            type: 'string',
+            enum: ['preview', 'test_send', 'send'],
+          },
           artifactRef: { type: 'string' },
           checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           createdAt: { type: 'string', format: 'date-time' },
@@ -1061,31 +1086,55 @@ const rawOpenApiSpec = {
         type: 'object',
         properties: {
           id: { type: 'string' },
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
           title: { type: 'string' },
           slug: { type: 'string' },
-          status: { type: 'string', enum: ['draft', 'published', 'paused', 'ended', 'archived'] },
+          status: {
+            type: 'string',
+            enum: ['draft', 'published', 'paused', 'ended', 'archived'],
+          },
           currency: { type: 'string', minLength: 3, maxLength: 3 },
           startsAt: { type: 'string', format: 'date-time' },
           endsAt: { type: 'string', format: 'date-time' },
           timezone: { type: 'string' },
-          visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
+          visibility: {
+            type: 'string',
+            enum: ['public', 'unlisted', 'private'],
+          },
           description: { type: 'string' },
           capacity: { type: 'integer' },
-          venue: { type: 'object' },
+          minimumAge: { type: ['integer', 'null'], minimum: 0, maximum: 120 },
+          venue: { type: ['object', 'null'], additionalProperties: true },
           seo: { type: 'object' },
           coverImageUrl: { type: 'string', format: 'uri' },
           externalUrl: { type: 'string', format: 'uri' },
           resalePolicy: { $ref: '#/components/schemas/ResalePolicy' },
+          grossSalesCents: { type: 'integer', minimum: 0 },
+          ticketsSold: { type: 'integer', minimum: 0 },
+          checkIns: { type: 'integer', minimum: 0 },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
         },
         required: [
           'id',
+          'tenantId',
+          'organizationId',
+          'brandId',
           'title',
           'slug',
           'status',
           'currency',
           'startsAt',
           'timezone',
+          'minimumAge',
           'resalePolicy',
+          'grossSalesCents',
+          'ticketsSold',
+          'checkIns',
+          'createdAt',
+          'updatedAt',
         ],
       },
       ResalePolicy: {
@@ -1117,7 +1166,10 @@ const rawOpenApiSpec = {
         properties: {
           eventId: { type: 'string' },
           passFeesToBuyer: { type: 'boolean' },
-          rules: { type: 'array', items: { $ref: '#/components/schemas/FeeRule' } },
+          rules: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/FeeRule' },
+          },
         },
         required: ['eventId', 'passFeesToBuyer', 'rules'],
       },
@@ -1135,7 +1187,10 @@ const rawOpenApiSpec = {
                 name: { type: 'string', minLength: 1, maxLength: 80 },
                 type: { type: 'string', enum: ['percentage', 'fixed'] },
                 value: { type: 'integer', minimum: 0 },
-                appliedTo: { type: 'string', enum: ['per_ticket', 'per_order'] },
+                appliedTo: {
+                  type: 'string',
+                  enum: ['per_ticket', 'per_order'],
+                },
               },
               required: ['name', 'type', 'value', 'appliedTo'],
             },
@@ -1168,7 +1223,10 @@ const rawOpenApiSpec = {
           },
           {
             type: 'object',
-            properties: { type: { const: 'boolean' }, value: { type: 'boolean' } },
+            properties: {
+              type: { const: 'boolean' },
+              value: { type: 'boolean' },
+            },
             required: ['type', 'value'],
           },
           {
@@ -1194,7 +1252,9 @@ const rawOpenApiSpec = {
       AdminTableFacetRow: {
         type: 'object',
         properties: {
-          value: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+          value: {
+            oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
+          },
           total: { type: 'integer' },
         },
         required: ['value', 'total'],
@@ -1202,7 +1262,10 @@ const rawOpenApiSpec = {
       AdminTableFacet: {
         type: 'object',
         properties: {
-          rows: { type: 'array', items: { $ref: '#/components/schemas/AdminTableFacetRow' } },
+          rows: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AdminTableFacetRow' },
+          },
           total: { type: 'integer' },
           min: { type: 'number' },
           max: { type: 'number' },
@@ -1212,10 +1275,15 @@ const rawOpenApiSpec = {
         type: 'object',
         properties: {
           search: { type: 'string' },
-          sort: { type: 'array', items: { $ref: '#/components/schemas/AdminTableSortEntry' } },
+          sort: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AdminTableSortEntry' },
+          },
           filters: {
             type: 'object',
-            additionalProperties: { $ref: '#/components/schemas/AdminTableFilterValue' },
+            additionalProperties: {
+              $ref: '#/components/schemas/AdminTableFilterValue',
+            },
           },
           rejectedFilters: { type: 'array', items: { type: 'string' } },
           rejectedSort: { type: 'array', items: { type: 'string' } },
@@ -1230,8 +1298,14 @@ const rawOpenApiSpec = {
           eventId: { type: 'string' },
           eventOccurrenceId: { type: 'string' },
           name: { type: 'string' },
-          kind: { type: 'string', enum: ['free', 'paid', 'donation', 'product'] },
-          status: { type: 'string', enum: ['draft', 'active', 'paused', 'sold_out', 'ended'] },
+          kind: {
+            type: 'string',
+            enum: ['free', 'paid', 'donation', 'product'],
+          },
+          status: {
+            type: 'string',
+            enum: ['draft', 'active', 'paused', 'sold_out', 'ended'],
+          },
           visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
           currency: { type: 'string' },
           priceCents: { type: 'integer' },
@@ -1255,7 +1329,10 @@ const rawOpenApiSpec = {
           venue: { type: 'object' },
           capacity: { type: ['integer', 'null'] },
           sortOrder: { type: 'integer' },
-          status: { type: 'string', enum: ['scheduled', 'cancelled', 'completed'] },
+          status: {
+            type: 'string',
+            enum: ['scheduled', 'cancelled', 'completed'],
+          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -1273,7 +1350,10 @@ const rawOpenApiSpec = {
       EventOccurrencePage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/EventOccurrence' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/EventOccurrence' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1287,7 +1367,10 @@ const rawOpenApiSpec = {
           organizationId: { type: 'string' },
           brandId: { type: 'string' },
           eventId: { type: 'string' },
-          provider: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+          provider: {
+            type: 'string',
+            enum: ['ga4', 'meta_pixel', 'generic_tag'],
+          },
           config: {
             type: 'object',
             additionalProperties: true,
@@ -1304,7 +1387,10 @@ const rawOpenApiSpec = {
       MarketingIntegrationPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/MarketingIntegration' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/MarketingIntegration' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1313,7 +1399,10 @@ const rawOpenApiSpec = {
       TicketTypePage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/TicketType' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/TicketType' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1355,7 +1444,10 @@ const rawOpenApiSpec = {
       WaitlistEntryPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/WaitlistEntry' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/WaitlistEntry' },
+          },
           settings: { $ref: '#/components/schemas/WaitlistSettings' },
         },
         required: ['items', 'settings'],
@@ -1406,7 +1498,10 @@ const rawOpenApiSpec = {
       AccessRulePage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/AccessRule' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AccessRule' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1416,7 +1511,10 @@ const rawOpenApiSpec = {
         type: 'object',
         properties: {
           ticketType: { $ref: '#/components/schemas/TicketType' },
-          accessRules: { type: 'array', items: { $ref: '#/components/schemas/AccessRule' } },
+          accessRules: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AccessRule' },
+          },
         },
         required: ['ticketType', 'accessRules'],
       },
@@ -1429,7 +1527,10 @@ const rawOpenApiSpec = {
               name: { type: 'string' },
               description: { type: 'string' },
               kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
-              visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
+              visibility: {
+                type: 'string',
+                enum: ['public', 'hidden', 'locked'],
+              },
               currency: { type: 'string' },
               priceCents: { type: 'integer' },
               minimumPriceCents: { type: 'integer', nullable: true },
@@ -1452,7 +1553,10 @@ const rawOpenApiSpec = {
             },
             required: ['name', 'totalCapacity'],
           },
-          accessRules: { type: 'array', items: { $ref: '#/components/schemas/AccessRuleCreate' } },
+          accessRules: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AccessRuleCreate' },
+          },
         },
         required: ['ticketType'],
       },
@@ -1465,13 +1569,27 @@ const rawOpenApiSpec = {
               name: { type: 'string' },
               description: { type: 'string' },
               kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
-              status: { type: 'string', enum: ['draft', 'active', 'paused', 'sold_out', 'ended'] },
-              visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
+              status: {
+                type: 'string',
+                enum: ['draft', 'active', 'paused', 'sold_out', 'ended'],
+              },
+              visibility: {
+                type: 'string',
+                enum: ['public', 'hidden', 'locked'],
+              },
               currency: { type: 'string' },
               priceCents: { type: 'integer' },
               minimumPriceCents: { type: 'integer', nullable: true },
-              salesStartAt: { type: 'string', format: 'date-time', nullable: true },
-              salesEndAt: { type: 'string', format: 'date-time', nullable: true },
+              salesStartAt: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+              },
+              salesEndAt: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+              },
               minPerOrder: { type: 'integer' },
               maxPerOrder: { type: 'integer' },
               inventoryPoolId: { type: 'string' },
@@ -1480,7 +1598,10 @@ const rawOpenApiSpec = {
               sortOrder: { type: 'integer' },
             },
           },
-          accessRules: { type: 'array', items: { $ref: '#/components/schemas/AccessRuleCreate' } },
+          accessRules: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AccessRuleCreate' },
+          },
         },
         required: ['ticketType'],
       },
@@ -1509,7 +1630,10 @@ const rawOpenApiSpec = {
       ProductCategoryPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/ProductCategory' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ProductCategory' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1547,7 +1671,10 @@ const rawOpenApiSpec = {
       ProductPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/Product' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Product' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1569,7 +1696,10 @@ const rawOpenApiSpec = {
       AvailabilityPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/AvailabilityResult' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AvailabilityResult' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1649,8 +1779,14 @@ const rawOpenApiSpec = {
       PublicQuestionsResponse: {
         type: 'object',
         properties: {
-          buyerQuestions: { type: 'array', items: { $ref: '#/components/schemas/Question' } },
-          attendeeQuestions: { type: 'array', items: { $ref: '#/components/schemas/Question' } },
+          buyerQuestions: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Question' },
+          },
+          attendeeQuestions: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Question' },
+          },
         },
         required: ['buyerQuestions', 'attendeeQuestions'],
       },
@@ -1683,7 +1819,10 @@ const rawOpenApiSpec = {
       PublicTicketListingPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/PublicTicketListing' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicTicketListing' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -1745,7 +1884,9 @@ const rawOpenApiSpec = {
           successUrl: { type: 'string' },
           cancelUrl: { type: 'string' },
           orderId: { type: 'string' },
-          paymentCompensation: { $ref: '#/components/schemas/PaymentCompensation' },
+          paymentCompensation: {
+            $ref: '#/components/schemas/PaymentCompensation',
+          },
           expiresAt: { type: 'string', format: 'date-time' },
         },
         required: ['id', 'eventId', 'status', 'currency', 'quote', 'expiresAt'],
@@ -1780,7 +1921,9 @@ const rawOpenApiSpec = {
                 currency: { type: 'string', minLength: 3, maxLength: 3 },
                 resaleEnabled: { type: 'boolean' },
                 resaleMaxPriceCents: { type: 'integer', minimum: 0 },
-                activeResaleListing: { $ref: '#/components/schemas/TicketListing' },
+                activeResaleListing: {
+                  $ref: '#/components/schemas/TicketListing',
+                },
                 appleUrl: { type: 'string', format: 'uri' },
                 googleUrl: { type: 'string', format: 'uri' },
               },
@@ -1828,7 +1971,10 @@ const rawOpenApiSpec = {
         properties: {
           artifactId: { type: 'string' },
           uploadUrl: { type: 'string', format: 'uri' },
-          uploadHeaders: { type: 'object', additionalProperties: { type: 'string' } },
+          uploadHeaders: {
+            type: 'object',
+            additionalProperties: { type: 'string' },
+          },
           completeUrl: { type: 'string' },
           completeToken: { type: 'string' },
           expiresAt: { type: 'string', format: 'date-time' },
@@ -1990,7 +2136,10 @@ const rawOpenApiSpec = {
                 type: 'object',
                 properties: {
                   buyerFields: { type: 'object', additionalProperties: true },
-                  attendeeFields: { type: 'object', additionalProperties: true },
+                  attendeeFields: {
+                    type: 'object',
+                    additionalProperties: true,
+                  },
                 },
                 required: ['buyerFields', 'attendeeFields'],
               },
@@ -2006,7 +2155,10 @@ const rawOpenApiSpec = {
               deliveryStatus: {
                 type: 'object',
                 properties: {
-                  email: { type: 'string', enum: ['pending', 'not_applicable'] },
+                  email: {
+                    type: 'string',
+                    enum: ['pending', 'not_applicable'],
+                  },
                   tickets: { type: 'string', enum: ['issued', 'not_issued'] },
                 },
                 required: ['email', 'tickets'],
@@ -2064,7 +2216,10 @@ const rawOpenApiSpec = {
       PaymentCompensationPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/PaymentCompensation' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PaymentCompensation' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -2168,8 +2323,14 @@ const rawOpenApiSpec = {
         properties: {
           invoice: { $ref: '#/components/schemas/Invoice' },
           order: { $ref: '#/components/schemas/Order' },
-          lineItems: { type: 'array', items: { $ref: '#/components/schemas/OrderLineItem' } },
-          taxSnapshots: { type: 'array', items: { $ref: '#/components/schemas/TaxSnapshot' } },
+          lineItems: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/OrderLineItem' },
+          },
+          taxSnapshots: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/TaxSnapshot' },
+          },
         },
         required: ['invoice', 'order', 'lineItems', 'taxSnapshots'],
       },
@@ -2230,7 +2391,10 @@ const rawOpenApiSpec = {
       ApiKeyPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/ApiKey' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiKey' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -2266,7 +2430,10 @@ const rawOpenApiSpec = {
           eventIds: { type: 'array', items: { type: 'string' } },
           scopes: {
             type: 'array',
-            items: { type: 'string', enum: ['checkins.read', 'checkins.write'] },
+            items: {
+              type: 'string',
+              enum: ['checkins.read', 'checkins.write'],
+            },
             description:
               'Scanner device scopes. Use checkins.read for polling-only devices and add checkins.write for scan creation/upload.',
           },
@@ -2290,7 +2457,10 @@ const rawOpenApiSpec = {
       ScannerDevicePage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/ScannerDevice' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ScannerDevice' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -2525,7 +2695,9 @@ const rawOpenApiSpec = {
           },
         },
       },
-      AttendeePage: adminTablePageSchema({ $ref: '#/components/schemas/Attendee' }),
+      AttendeePage: adminTablePageSchema({
+        $ref: '#/components/schemas/Attendee',
+      }),
       Ticket: {
         type: 'object',
         properties: {
@@ -2567,7 +2739,10 @@ const rawOpenApiSpec = {
           eventId: { type: 'string' },
           ticketId: { type: 'string' },
           sellerId: { type: 'string' },
-          status: { type: 'string', enum: ['listed', 'delisted', 'sold', 'expired'] },
+          status: {
+            type: 'string',
+            enum: ['listed', 'delisted', 'sold', 'expired'],
+          },
           priceCents: { type: 'integer', minimum: 0 },
           currency: { type: 'string', minLength: 3, maxLength: 3 },
           faceValueCents: { type: 'integer', minimum: 0 },
@@ -2594,7 +2769,10 @@ const rawOpenApiSpec = {
       TicketListingPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/TicketListing' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/TicketListing' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -2626,7 +2804,10 @@ const rawOpenApiSpec = {
       CheckInListPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/CheckInList' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/CheckInList' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -2742,8 +2923,14 @@ const rawOpenApiSpec = {
           nextAttemptAt: { type: ['string', 'null'], format: 'date-time' },
           leasedUntil: { type: ['string', 'null'], format: 'date-time' },
           lastAttemptedAt: { type: ['string', 'null'], format: 'date-time' },
-          processingStartedAt: { type: ['string', 'null'], format: 'date-time' },
-          processingCompletedAt: { type: ['string', 'null'], format: 'date-time' },
+          processingStartedAt: {
+            type: ['string', 'null'],
+            format: 'date-time',
+          },
+          processingCompletedAt: {
+            type: ['string', 'null'],
+            format: 'date-time',
+          },
           accepted: { type: 'integer' },
           duplicates: { type: 'integer' },
           invalid: { type: 'integer' },
@@ -2806,7 +2993,10 @@ const rawOpenApiSpec = {
           jobId: { type: 'string' },
           sequence: { type: 'integer' },
           scanCount: { type: 'integer' },
-          status: { type: 'string', enum: ['uploaded', 'processing', 'processed', 'failed'] },
+          status: {
+            type: 'string',
+            enum: ['uploaded', 'processing', 'processed', 'failed'],
+          },
           accepted: { type: 'integer' },
           duplicates: { type: 'integer' },
           invalid: { type: 'integer' },
@@ -2839,7 +3029,10 @@ const rawOpenApiSpec = {
       BulkSyncChunkList: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/BulkSyncChunk' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/BulkSyncChunk' },
+          },
           total: { type: 'integer' },
         },
         required: ['items', 'total'],
@@ -2927,7 +3120,10 @@ const rawOpenApiSpec = {
       WebhookEndpointPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/WebhookEndpoint' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/WebhookEndpoint' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -3097,7 +3293,10 @@ const rawOpenApiSpec = {
           eventId: { type: 'string' },
           type: { type: 'string' },
           format: { type: 'string' },
-          status: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed'] },
+          status: {
+            type: 'string',
+            enum: ['pending', 'processing', 'completed', 'failed'],
+          },
           fileUrl: { type: 'string', nullable: true },
           downloadUrl: { type: 'string', nullable: true },
           createdAt: { type: 'string', format: 'date-time' },
@@ -3105,7 +3304,9 @@ const rawOpenApiSpec = {
         },
         required: ['exportId', 'type', 'format', 'status', 'createdAt'],
       },
-      AuditLogPage: adminTablePageSchema({ $ref: '#/components/schemas/AuditLog' }),
+      AuditLogPage: adminTablePageSchema({
+        $ref: '#/components/schemas/AuditLog',
+      }),
       PrivacyRequestInput: {
         type: 'object',
         properties: {
@@ -3129,7 +3330,10 @@ const rawOpenApiSpec = {
           subjectType: { type: 'string', enum: ['buyer', 'attendee'] },
           subjectId: { type: ['string', 'null'] },
           subjectEmail: { type: ['string', 'null'] },
-          status: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed'] },
+          status: {
+            type: 'string',
+            enum: ['pending', 'processing', 'completed', 'failed'],
+          },
           requestedBy: { type: 'string' },
           result: { type: ['object', 'null'] },
           error: { type: ['string', 'null'] },
@@ -3147,7 +3351,9 @@ const rawOpenApiSpec = {
           'createdAt',
         ],
       },
-      PrivacyRequestPage: adminTablePageSchema({ $ref: '#/components/schemas/PrivacyRequest' }),
+      PrivacyRequestPage: adminTablePageSchema({
+        $ref: '#/components/schemas/PrivacyRequest',
+      }),
       MessageQueued: {
         type: 'object',
         properties: {
@@ -3274,7 +3480,10 @@ const rawOpenApiSpec = {
           organizationId: { type: 'string' },
           provider: { type: 'string', enum: ['stripe', 'stripe_connect'] },
           providerAccountId: { type: 'string' },
-          status: { type: 'string', enum: ['pending', 'active', 'restricted', 'disabled'] },
+          status: {
+            type: 'string',
+            enum: ['pending', 'active', 'restricted', 'disabled'],
+          },
           defaultCurrency: { type: 'string' },
           detailsSubmitted: { type: 'boolean' },
           chargesEnabled: { type: 'boolean' },
@@ -3349,7 +3558,10 @@ const rawOpenApiSpec = {
       QuestionPage: {
         type: 'object',
         properties: {
-          items: { type: 'array', items: { $ref: '#/components/schemas/Question' } },
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Question' },
+          },
           nextCursor: { type: ['string', 'null'] },
           hasMore: { type: 'boolean' },
         },
@@ -3432,10 +3644,16 @@ const rawOpenApiSpec = {
   paths: {
     '/health': {
       servers: [
-        { url: 'https://api.tixkit.com', description: 'Production operational root' },
+        {
+          url: 'https://api.tixkit.com',
+          description: 'Production operational root',
+        },
         { url: 'http://localhost:4000', description: 'Local operational root' },
       ],
-      get: { summary: 'Health check', responses: { '200': { description: 'OK' } } },
+      get: {
+        summary: 'Health check',
+        responses: { '200': { description: 'OK' } },
+      },
     },
     '/bootstrap-context': {
       get: {
@@ -3454,11 +3672,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -3481,11 +3707,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -3502,7 +3736,9 @@ const rawOpenApiSpec = {
                   name: { type: 'string' },
                   slug: { type: 'string' },
                   clerkOrganizationId: { type: 'string' },
-                  boxOfficeSettings: { $ref: '#/components/schemas/BoxOfficeSettings' },
+                  boxOfficeSettings: {
+                    $ref: '#/components/schemas/BoxOfficeSettings',
+                  },
                 },
                 required: ['name', 'slug'],
               },
@@ -3513,24 +3749,42 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Organization created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/Organization' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Organization' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'Slug already in use',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -3577,7 +3831,11 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description: 'Brand created',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Brand' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Brand' },
+              },
+            },
           },
         },
       },
@@ -3595,7 +3853,10 @@ const rawOpenApiSpec = {
                 properties: {
                   name: { type: 'string' },
                   slug: { type: 'string' },
-                  status: { type: 'string', enum: ['draft', 'active', 'suspended'] },
+                  status: {
+                    type: 'string',
+                    enum: ['draft', 'active', 'suspended'],
+                  },
                   theme: { type: 'object' },
                   supportUrl: { type: 'string', format: 'uri' },
                   legalUrls: { type: 'object' },
@@ -3614,7 +3875,11 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Brand updated',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Brand' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Brand' },
+              },
+            },
           },
         },
       },
@@ -3642,7 +3907,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Brand domain created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/BrandDomain' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BrandDomain' },
+              },
             },
           },
         },
@@ -3681,16 +3948,45 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }],
         parameters: [
           ...adminTableQueryParameterRefs,
-          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'startsAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'startsAtTo', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'startsAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'startsAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Page of events',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/EventPage' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventPage' },
+              },
+            },
           },
         },
       },
@@ -3714,9 +4010,13 @@ const rawOpenApiSpec = {
                   startsAt: { type: 'string', format: 'date-time' },
                   endsAt: { type: 'string', format: 'date-time' },
                   venue: { type: 'object' },
-                  visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
+                  visibility: {
+                    type: 'string',
+                    enum: ['public', 'unlisted', 'private'],
+                  },
                   seo: { type: 'object' },
                   capacity: { type: 'integer' },
+                  minimumAge: { type: ['integer', 'null'], minimum: 0, maximum: 120 },
                   coverImageUrl: { type: 'string', format: 'uri' },
                   externalUrl: { type: 'string', format: 'uri' },
                 },
@@ -3737,7 +4037,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Event created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Event' },
+              },
             },
           },
         },
@@ -3751,7 +4053,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Event details',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Event' },
+              },
             },
           },
         },
@@ -3771,13 +4075,29 @@ const rawOpenApiSpec = {
                   currency: { type: 'string', minLength: 3, maxLength: 3 },
                   timezone: { type: 'string' },
                   startsAt: { type: 'string', format: 'date-time' },
-                  endsAt: { type: 'string', format: 'date-time', nullable: true },
+                  endsAt: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                  },
                   venue: { type: 'object', nullable: true },
-                  visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
+                  visibility: {
+                    type: 'string',
+                    enum: ['public', 'unlisted', 'private'],
+                  },
                   seo: { type: 'object' },
                   capacity: { type: 'integer', nullable: true },
-                  coverImageUrl: { type: 'string', format: 'uri', nullable: true },
-                  externalUrl: { type: 'string', format: 'uri', nullable: true },
+                  minimumAge: { type: ['integer', 'null'], minimum: 0, maximum: 120 },
+                  coverImageUrl: {
+                    type: 'string',
+                    format: 'uri',
+                    nullable: true,
+                  },
+                  externalUrl: {
+                    type: 'string',
+                    format: 'uri',
+                    nullable: true,
+                  },
                 },
               },
             },
@@ -3786,7 +4106,11 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event updated',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Event' },
+              },
+            },
           },
         },
       },
@@ -3798,11 +4122,19 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event published',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Event' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -3814,11 +4146,19 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event paused',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Event' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -3830,11 +4170,19 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Event archived',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Event' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Event' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -3851,7 +4199,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of ticket types',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketTypePage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketTypePage' },
+              },
             },
           },
         },
@@ -3869,7 +4219,10 @@ const rawOpenApiSpec = {
                   name: { type: 'string' },
                   description: { type: 'string' },
                   kind: { type: 'string', enum: ['free', 'paid', 'donation'] },
-                  visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
+                  visibility: {
+                    type: 'string',
+                    enum: ['public', 'hidden', 'locked'],
+                  },
                   currency: { type: 'string' },
                   priceCents: { type: 'integer' },
                   minimumPriceCents: { type: 'integer' },
@@ -3891,7 +4244,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Ticket type created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketType' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketType' },
+              },
             },
           },
         },
@@ -3904,7 +4259,9 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/CreateTicketTypeBatch' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateTicketTypeBatch' },
+            },
           },
         },
         responses: {
@@ -3923,7 +4280,14 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get the scanning-code format config and scanner contract version (C-079)',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Code-format config and scanner contract version',
@@ -3940,7 +4304,10 @@ const rawOpenApiSpec = {
                           type: 'string',
                           enum: ['qr', 'code128', 'pdf417', 'aztec', 'data_matrix'],
                         },
-                        payloadFormat: { type: 'string', enum: ['signed_v1', 'compact_v2'] },
+                        payloadFormat: {
+                          type: 'string',
+                          enum: ['signed_v1', 'compact_v2'],
+                        },
                         rotating: {
                           type: 'object',
                           properties: {
@@ -3961,22 +4328,41 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
       put: {
         summary: 'Set the scanning-code format config for an event (C-079)',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -3988,7 +4374,10 @@ const rawOpenApiSpec = {
                     type: 'string',
                     enum: ['qr', 'code128', 'pdf417', 'aztec', 'data_matrix'],
                   },
-                  payloadFormat: { type: 'string', enum: ['signed_v1', 'compact_v2'] },
+                  payloadFormat: {
+                    type: 'string',
+                    enum: ['signed_v1', 'compact_v2'],
+                  },
                   rotating: {
                     type: 'object',
                     properties: {
@@ -4021,19 +4410,35 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4046,7 +4451,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Event occurrences',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/EventOccurrencePage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventOccurrencePage' },
+              },
             },
           },
         },
@@ -4068,7 +4475,10 @@ const rawOpenApiSpec = {
                   venue: { type: 'object' },
                   capacity: { type: ['integer', 'null'] },
                   sortOrder: { type: 'integer' },
-                  status: { type: 'string', enum: ['scheduled', 'cancelled', 'completed'] },
+                  status: {
+                    type: 'string',
+                    enum: ['scheduled', 'cancelled', 'completed'],
+                  },
                 },
                 required: ['title', 'startsAt', 'endsAt', 'timezone'],
               },
@@ -4079,7 +4489,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Event occurrence created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/EventOccurrence' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventOccurrence' },
+              },
             },
           },
         },
@@ -4092,14 +4504,18 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/EventOccurrence' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/EventOccurrence' },
+            },
           },
         },
         responses: {
           '200': {
             description: 'Event occurrence updated',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/EventOccurrence' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventOccurrence' },
+              },
             },
           },
         },
@@ -4122,7 +4538,9 @@ const rawOpenApiSpec = {
             description: 'Event marketing integrations',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MarketingIntegrationPage' },
+                schema: {
+                  $ref: '#/components/schemas/MarketingIntegrationPage',
+                },
               },
             },
           },
@@ -4144,7 +4562,10 @@ const rawOpenApiSpec = {
             name: 'provider',
             in: 'path',
             required: true,
-            schema: { type: 'string', enum: ['ga4', 'meta_pixel', 'generic_tag'] },
+            schema: {
+              type: 'string',
+              enum: ['ga4', 'meta_pixel', 'generic_tag'],
+            },
           },
         ],
         requestBody: {
@@ -4156,7 +4577,11 @@ const rawOpenApiSpec = {
                 properties: {
                   config: { type: 'object', additionalProperties: true },
                   consentRequired: { type: 'boolean', default: true },
-                  status: { type: 'string', enum: ['active', 'disabled'], default: 'active' },
+                  status: {
+                    type: 'string',
+                    enum: ['active', 'disabled'],
+                    default: 'active',
+                  },
                 },
                 required: ['config'],
               },
@@ -4167,7 +4592,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Marketing integration saved',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MarketingIntegration' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MarketingIntegration' },
+              },
             },
           },
         },
@@ -4181,20 +4608,34 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Waitlist entries',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WaitlistEntryPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WaitlistEntryPage' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4210,7 +4651,12 @@ const rawOpenApiSpec = {
               schema: {
                 type: 'object',
                 properties: {
-                  expiresInMinutes: { type: 'integer', minimum: 5, maximum: 10080, default: 1440 },
+                  expiresInMinutes: {
+                    type: 'integer',
+                    minimum: 5,
+                    maximum: 10080,
+                    default: 1440,
+                  },
                 },
               },
             },
@@ -4220,28 +4666,50 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Waitlist offer token',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WaitlistOffer' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WaitlistOffer' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event or waitlist entry not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'No capacity is available for an offer',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4253,31 +4721,51 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/WaitlistSettings' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/WaitlistSettings' },
+            },
           },
         },
         responses: {
           '200': {
             description: 'Waitlist settings',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WaitlistSettings' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WaitlistSettings' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4300,12 +4788,23 @@ const rawOpenApiSpec = {
                     type: 'string',
                     enum: ['draft', 'active', 'paused', 'sold_out', 'ended'],
                   },
-                  visibility: { type: 'string', enum: ['public', 'hidden', 'locked'] },
+                  visibility: {
+                    type: 'string',
+                    enum: ['public', 'hidden', 'locked'],
+                  },
                   currency: { type: 'string' },
                   priceCents: { type: 'integer' },
                   minimumPriceCents: { type: 'integer', nullable: true },
-                  salesStartAt: { type: 'string', format: 'date-time', nullable: true },
-                  salesEndAt: { type: 'string', format: 'date-time', nullable: true },
+                  salesStartAt: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                  },
+                  salesEndAt: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                  },
                   minPerOrder: { type: 'integer' },
                   maxPerOrder: { type: 'integer' },
                   inventoryPoolId: { type: 'string' },
@@ -4321,7 +4820,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Ticket type updated',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketType' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketType' },
+              },
             },
           },
         },
@@ -4334,7 +4835,9 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/UpdateTicketTypeBatch' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateTicketTypeBatch' },
+            },
           },
         },
         responses: {
@@ -4357,7 +4860,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Access rules',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AccessRulePage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AccessRulePage' },
+              },
             },
           },
         },
@@ -4375,7 +4880,11 @@ const rawOpenApiSpec = {
                   type: { type: 'string', enum: ['code', 'email_domain'] },
                   value: { type: 'string' },
                   maxUses: { type: 'integer', nullable: true },
-                  expiresAt: { type: 'string', format: 'date-time', nullable: true },
+                  expiresAt: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                  },
                 },
                 required: ['type', 'value'],
               },
@@ -4386,7 +4895,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Access rule created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AccessRule' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AccessRule' },
+              },
             },
           },
         },
@@ -4411,7 +4922,10 @@ const rawOpenApiSpec = {
                 schema: {
                   type: 'object',
                   properties: {
-                    items: { type: 'array', items: { $ref: '#/components/schemas/InventoryPool' } },
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/InventoryPool' },
+                    },
                     nextCursor: { type: 'string', nullable: true },
                     hasMore: { type: 'boolean' },
                   },
@@ -4445,7 +4959,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Inventory pool created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/InventoryPool' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/InventoryPool' },
+              },
             },
           },
         },
@@ -4463,7 +4979,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of product categories',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ProductCategoryPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProductCategoryPage' },
+              },
             },
           },
         },
@@ -4490,7 +5008,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Product category created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ProductCategory' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProductCategory' },
+              },
             },
           },
         },
@@ -4508,7 +5028,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of products',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ProductPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProductPage' },
+              },
             },
           },
         },
@@ -4542,7 +5064,11 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description: 'Product created',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Product' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Product' },
+              },
+            },
           },
         },
       },
@@ -4564,8 +5090,16 @@ const rawOpenApiSpec = {
                   currency: { type: 'string' },
                   categoryId: { type: 'string', nullable: true },
                   maxPerOrder: { type: 'integer' },
-                  availableFrom: { type: 'string', format: 'date-time', nullable: true },
-                  availableUntil: { type: 'string', format: 'date-time', nullable: true },
+                  availableFrom: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                  },
+                  availableUntil: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                  },
                   status: { type: 'string', enum: ['active', 'inactive'] },
                   sortOrder: { type: 'integer' },
                 },
@@ -4576,7 +5110,11 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Product updated',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Product' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Product' },
+              },
+            },
           },
         },
       },
@@ -4589,7 +5127,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Availability per ticket type',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AvailabilityPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AvailabilityPage' },
+              },
             },
           },
         },
@@ -4602,7 +5142,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Event details (hidden ticket types excluded)',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicEvent' },
+              },
             },
           },
         },
@@ -4611,7 +5153,14 @@ const rawOpenApiSpec = {
     '/public/events/{eventId}/revision': {
       get: {
         summary: 'Get the latest public checkout revision for an event',
-        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Latest public event revision timestamp or null',
@@ -4623,7 +5172,11 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Event not found or not publicly readable',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4650,10 +5203,14 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Event details for the verified custom-domain slug',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PublicEvent' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PublicEvent' },
+              },
             },
           },
-          '404': { description: 'No matching published event for the custom domain' },
+          '404': {
+            description: 'No matching published event for the custom domain',
+          },
         },
       },
     },
@@ -4661,7 +5218,12 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get public availability (no auth, public tickets and active products)',
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'products',
             in: 'query',
@@ -4678,7 +5240,9 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: {
                   type: 'array',
-                  items: { $ref: '#/components/schemas/PublicAvailabilityItem' },
+                  items: {
+                    $ref: '#/components/schemas/PublicAvailabilityItem',
+                  },
                 },
               },
             },
@@ -4690,7 +5254,12 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get public checkout bootstrap data',
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'products',
             in: 'query',
@@ -4712,13 +5281,19 @@ const rawOpenApiSpec = {
             description: 'First-load checkout metadata, availability, questions, and resale data',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PublicCheckoutBootstrap' },
+                schema: {
+                  $ref: '#/components/schemas/PublicCheckoutBootstrap',
+                },
               },
             },
           },
           '404': {
             description: 'Event or resale listing not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4727,8 +5302,18 @@ const rawOpenApiSpec = {
       get: {
         summary: 'List public resale listings (no auth, buyer-safe fields only)',
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'cursor', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
           {
             name: 'limit',
             in: 'query',
@@ -4741,7 +5326,9 @@ const rawOpenApiSpec = {
             description: 'Buyer-facing resale listings for a published event',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PublicTicketListingPage' },
+                schema: {
+                  $ref: '#/components/schemas/PublicTicketListingPage',
+                },
               },
             },
           },
@@ -4755,7 +5342,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Published event occurrences',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/EventOccurrencePage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventOccurrencePage' },
+              },
             },
           },
         },
@@ -4769,7 +5358,9 @@ const rawOpenApiSpec = {
             description: 'Public browser-safe marketing integrations',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MarketingIntegrationPage' },
+                schema: {
+                  $ref: '#/components/schemas/MarketingIntegrationPage',
+                },
               },
             },
           },
@@ -4786,7 +5377,11 @@ const rawOpenApiSpec = {
               schema: {
                 type: 'object',
                 properties: {
-                  ticketTypeIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+                  ticketTypeIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    minItems: 1,
+                  },
                   accessCode: { type: 'string' },
                   buyerEmail: { type: 'string', format: 'email' },
                 },
@@ -4813,11 +5408,19 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4828,23 +5431,35 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/JoinWaitlistRequest' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/JoinWaitlistRequest' },
+            },
           },
         },
         responses: {
           '201': {
             description: 'Waitlist entry',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WaitlistEntry' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WaitlistEntry' },
+              },
             },
           },
           '400': {
             description: 'Validation error or ticket not sold out',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event or ticket type not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4856,12 +5471,18 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Offered waitlist entry',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WaitlistEntry' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WaitlistEntry' },
+              },
             },
           },
           '404': {
             description: 'Claim token not found or expired',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4873,7 +5494,9 @@ const rawOpenApiSpec = {
           required: true,
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/PublicCreateUploadArtifact' },
+              schema: {
+                $ref: '#/components/schemas/PublicCreateUploadArtifact',
+              },
             },
           },
         },
@@ -4881,16 +5504,26 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Signed upload ticket',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/UploadArtifactTicket' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UploadArtifactTicket' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4924,7 +5557,10 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: { tracked: { type: 'boolean' }, deduped: { type: 'boolean' } },
+                  properties: {
+                    tracked: { type: 'boolean' },
+                    deduped: { type: 'boolean' },
+                  },
                   required: ['tracked', 'deduped'],
                 },
               },
@@ -4936,7 +5572,10 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: { tracked: { type: 'boolean' }, deduped: { type: 'boolean' } },
+                  properties: {
+                    tracked: { type: 'boolean' },
+                    deduped: { type: 'boolean' },
+                  },
                   required: ['tracked', 'deduped'],
                 },
               },
@@ -4944,11 +5583,19 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4960,7 +5607,9 @@ const rawOpenApiSpec = {
           required: true,
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/PublicCompleteUploadArtifact' },
+              schema: {
+                $ref: '#/components/schemas/PublicCompleteUploadArtifact',
+              },
             },
           },
         },
@@ -4969,17 +5618,27 @@ const rawOpenApiSpec = {
             description: 'Upload completed and scanned clean',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/UploadArtifactCompleteResult' },
+                schema: {
+                  $ref: '#/components/schemas/UploadArtifactCompleteResult',
+                },
               },
             },
           },
           '400': {
             description: 'Validation error or blocked upload',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Upload artifact not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -4990,7 +5649,12 @@ const rawOpenApiSpec = {
         description:
           'Streams a content email image artifact by ID. Responses are cached immutably for one year.',
         parameters: [
-          { name: 'artifactId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'artifactId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
@@ -5017,7 +5681,58 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Image artifact not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/public/content-event-page-images/{artifactId}': {
+      get: {
+        summary: 'Download a content event-page image (public, durable, cacheable)',
+        description:
+          'Streams a content event-page image artifact by ID. Responses are cached immutably for one year.',
+        parameters: [
+          {
+            name: 'artifactId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Image binary stream',
+            headers: {
+              'Content-Type': {
+                schema: { type: 'string' },
+                description: 'MIME type of the stored image',
+              },
+              'Content-Disposition': {
+                schema: { type: 'string' },
+                description: 'inline; filename=...',
+              },
+              'Cache-Control': {
+                schema: { type: 'string' },
+                description: 'public, max-age=31536000, immutable',
+              },
+            },
+            content: {
+              'application/octet-stream': {
+                schema: { type: 'string', format: 'binary' },
+              },
+            },
+          },
+          '404': {
+            description: 'Image artifact not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5028,7 +5743,12 @@ const rawOpenApiSpec = {
         description:
           'Streams a brand logo artifact by ID. Responses are cached immutably for one year.',
         parameters: [
-          { name: 'artifactId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'artifactId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
@@ -5055,7 +5775,11 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Brand logo artifact not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5065,7 +5789,12 @@ const rawOpenApiSpec = {
         summary: 'Create a box-office order (admin, Idempotency-Key required)',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { $ref: '#/components/parameters/RequiredIdempotencyKey' },
         ],
         requestBody: {
@@ -5087,23 +5816,43 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event or scoped resource not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'Inventory or finalization conflict',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5132,7 +5881,21 @@ const rawOpenApiSpec = {
                         resaleListingId: { type: 'string' },
                         quantity: { type: 'integer', minimum: 1 },
                         unitAmountCents: { type: 'integer' },
-                        attendeeFields: { type: 'array', items: { type: 'object' } },
+                        attendeeFields: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              dateOfBirth: {
+                                type: 'string',
+                                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+                                description:
+                                  'Required only when the event has a positive minimum age.',
+                              },
+                            },
+                            additionalProperties: true,
+                          },
+                        },
                       },
                       oneOf: [
                         {
@@ -5178,7 +5941,13 @@ const rawOpenApiSpec = {
                       firstName: { type: 'string' },
                       lastName: { type: 'string' },
                       phone: { type: 'string' },
+                      dateOfBirth: {
+                        type: 'string',
+                        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+                        description: 'Required only when the event has a positive minimum age.',
+                      },
                     },
+                    required: ['email'],
                   },
                   buyerFields: {
                     type: 'object',
@@ -5187,7 +5956,7 @@ const rawOpenApiSpec = {
                   successUrl: { type: 'string', format: 'uri' },
                   cancelUrl: { type: 'string', format: 'uri' },
                 },
-                required: ['eventId', 'items'],
+                required: ['eventId', 'items', 'buyer'],
               },
             },
           },
@@ -5196,24 +5965,42 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Checkout session created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CheckoutSession' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutSession' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'Insufficient inventory or event not published',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '410': {
             description: 'Event sales ended',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5234,24 +6021,42 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Signed upload ticket',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/UploadArtifactTicket' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UploadArtifactTicket' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Brand or event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5273,25 +6078,43 @@ const rawOpenApiSpec = {
             description: 'Upload completed and scanned clean',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/UploadArtifactCompleteResult' },
+                schema: {
+                  $ref: '#/components/schemas/UploadArtifactCompleteResult',
+                },
               },
             },
           },
           '400': {
             description: 'Validation error or blocked upload',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Upload artifact not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5311,15 +6134,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Upload artifact not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5335,7 +6170,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Redacted checkout session details',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CheckoutSession' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutSession' },
+              },
             },
           },
         },
@@ -5347,7 +6184,9 @@ const rawOpenApiSpec = {
           required: true,
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/CheckoutSessionUpdateInput' },
+              schema: {
+                $ref: '#/components/schemas/CheckoutSessionUpdateInput',
+              },
             },
           },
         },
@@ -5355,7 +6194,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Checkout session updated',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CheckoutSession' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutSession' },
+              },
             },
           },
         },
@@ -5369,7 +6210,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Active Apple Wallet and Google Wallet links grouped by ticket',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CheckoutWalletPasses' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutWalletPasses' },
+              },
             },
           },
         },
@@ -5413,7 +6256,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Buyer resale listing created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketListing' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketListing' },
+              },
             },
           },
         },
@@ -5433,11 +6278,19 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Wallet pass not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '503': {
             description: 'Wallet pass signing unavailable',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5478,27 +6331,51 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Session not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'Session expired or cancelled',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '410': {
             description: 'Session expired',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '402': {
             description: 'PAYMENT_FAILED',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '503': {
             description: 'SERVICE_UNAVAILABLE',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5511,19 +6388,63 @@ const rawOpenApiSpec = {
           ...adminTableQueryParameterRefs,
           { name: 'organizationId', in: 'query', schema: { type: 'string' } },
           { name: 'eventId', in: 'query', schema: { type: 'string' } },
-          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'salesChannel', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'paymentProvider', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'refundState', in: 'query', required: false, schema: { type: 'boolean' } },
-          { name: 'totalCentsMin', in: 'query', required: false, schema: { type: 'number' } },
-          { name: 'totalCentsMax', in: 'query', required: false, schema: { type: 'number' } },
-          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'salesChannel',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'paymentProvider',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'refundState',
+            in: 'query',
+            required: false,
+            schema: { type: 'boolean' },
+          },
+          {
+            name: 'totalCentsMin',
+            in: 'query',
+            required: false,
+            schema: { type: 'number' },
+          },
+          {
+            name: 'totalCentsMax',
+            in: 'query',
+            required: false,
+            schema: { type: 'number' },
+          },
+          {
+            name: 'createdAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Page of orders',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/OrderPage' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OrderPage' },
+              },
+            },
           },
         },
       },
@@ -5543,14 +6464,20 @@ const rawOpenApiSpec = {
               enum: ['pending', 'succeeded', 'failed', 'manual_review', 'already_ordered'],
             },
           },
-          { name: 'checkoutSessionId', in: 'query', schema: { type: 'string' } },
+          {
+            name: 'checkoutSessionId',
+            in: 'query',
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Page of orphan payment compensations',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PaymentCompensationPage' },
+                schema: {
+                  $ref: '#/components/schemas/PaymentCompensationPage',
+                },
               },
             },
           },
@@ -5565,7 +6492,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Order details',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/OrderDetail' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OrderDetail' },
+              },
             },
           },
         },
@@ -5579,7 +6508,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Invoice document',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/InvoiceDocument' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/InvoiceDocument' },
+              },
             },
           },
         },
@@ -5593,7 +6524,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Downloadable invoice JSON',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/InvoiceDocument' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/InvoiceDocument' },
+              },
             },
           },
         },
@@ -5607,15 +6540,27 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Order cancelled',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Order' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Order' },
+              },
+            },
           },
           '404': {
             description: 'Order not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'Order cannot be cancelled',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5645,20 +6590,34 @@ const rawOpenApiSpec = {
           '202': {
             description: 'Refund workflow queued',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/RefundQueued' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RefundQueued' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Order not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'Order is not refundable',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5669,20 +6628,62 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }],
         parameters: [
           ...adminTableQueryParameterRefs,
-          { name: 'checkInListId', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'eventOccurrenceId', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'checkInStatus', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'checkedInAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'checkedInAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'checkInListId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'eventOccurrenceId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkInStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkedInAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkedInAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Page of attendees',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AttendeePage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AttendeePage' },
+              },
             },
           },
         },
@@ -5694,19 +6695,56 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }],
         parameters: [
           ...adminTableQueryParameterRefs,
-          { name: 'eventId', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'checkInStatus', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'checkedInAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'checkedInAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkInStatus',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkedInAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkedInAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Page of attendees',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AttendeePage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AttendeePage' },
+              },
             },
           },
         },
@@ -5727,7 +6765,11 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Attendee updated',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Attendee' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Attendee' },
+              },
+            },
           },
         },
       },
@@ -5743,7 +6785,10 @@ const rawOpenApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                properties: { toEmail: { type: 'string' } },
+                properties: {
+                  toEmail: { type: 'string', format: 'email' },
+                  dateOfBirth: { type: 'string', format: 'date' },
+                },
                 required: ['toEmail'],
               },
             },
@@ -5752,7 +6797,11 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Ticket transferred',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Ticket' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Ticket' },
+              },
+            },
           },
         },
       },
@@ -5765,7 +6814,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Event fee pass-through policy',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/EventFeePolicy' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventFeePolicy' },
+              },
             },
           },
         },
@@ -5777,7 +6828,9 @@ const rawOpenApiSpec = {
           required: true,
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/UpdateEventFeePolicyInput' },
+              schema: {
+                $ref: '#/components/schemas/UpdateEventFeePolicyInput',
+              },
             },
           },
         },
@@ -5785,7 +6838,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Event fee pass-through policy updated',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/EventFeePolicy' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventFeePolicy' },
+              },
             },
           },
         },
@@ -5799,7 +6854,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Event resale policy',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ResalePolicy' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResalePolicy' },
+              },
             },
           },
         },
@@ -5810,14 +6867,18 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/ResalePolicy' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ResalePolicy' },
+            },
           },
         },
         responses: {
           '200': {
             description: 'Event resale policy updated',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ResalePolicy' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResalePolicy' },
+              },
             },
           },
         },
@@ -5835,7 +6896,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of resale listings',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketListingPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketListingPage' },
+              },
             },
           },
         },
@@ -5865,7 +6928,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Resale listing created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketListing' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketListing' },
+              },
             },
           },
         },
@@ -5880,7 +6945,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Resale listing delisted',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/TicketListing' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TicketListing' },
+              },
             },
           },
         },
@@ -5903,6 +6970,11 @@ const rawOpenApiSpec = {
                   buyerFirstName: { type: ['string', 'null'], minLength: 1 },
                   buyerLastName: { type: ['string', 'null'], minLength: 1 },
                   buyerPhone: { type: ['string', 'null'], minLength: 1 },
+                  buyerDateOfBirth: {
+                    type: 'string',
+                    pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+                    description: 'Required only when the event has a positive minimum age.',
+                  },
                   externalPaymentReference: {
                     type: ['string', 'null'],
                     minLength: 1,
@@ -5939,7 +7011,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of check-in lists',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CheckInListPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckInListPage' },
+              },
             },
           },
         },
@@ -5947,7 +7021,14 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Create a check-in list',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
-        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -5971,24 +7052,42 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Check-in list created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CheckInList' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckInList' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Authentication required',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Missing checkins.write permission',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6004,10 +7103,141 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Offline manifest',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/OfflineManifest' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OfflineManifest' },
+              },
             },
           },
-          '400': { description: 'Check-in list is inactive or exceeds the offline manifest cap' },
+          '400': {
+            description: 'Check-in list is inactive or exceeds the offline manifest cap',
+          },
+        },
+      },
+    },
+    '/events/{eventId}/check-in-lists/{checkInListId}/activity': {
+      get: {
+        summary: 'List durable check-in activity for a check-in list',
+        description:
+          'Returns scan activity from the durable scan log. Use afterId to page forward from a prior activity item.',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkInListId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'since',
+            in: 'query',
+            schema: { type: 'string', format: 'date-time' },
+          },
+          { name: 'afterId', in: 'query', schema: { type: 'string' } },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+          { $ref: '#/components/parameters/OptionalScannerDeviceSecret' },
+        ],
+        responses: {
+          '200': {
+            description: 'Activity items and current check-in summary',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          checkInListId: { type: 'string' },
+                          ticketId: { type: ['string', 'null'] },
+                          deviceId: { type: 'string' },
+                          outcome: { type: 'string' },
+                          scannedAt: { type: 'string', format: 'date-time' },
+                          offline: { type: 'boolean' },
+                          attendeeName: { type: ['string', 'null'] },
+                          attendeeEmail: {
+                            type: ['string', 'null'],
+                            format: 'email',
+                          },
+                          ticketTypeId: { type: ['string', 'null'] },
+                        },
+                        required: [
+                          'id',
+                          'checkInListId',
+                          'ticketId',
+                          'deviceId',
+                          'outcome',
+                          'scannedAt',
+                          'offline',
+                          'attendeeName',
+                          'attendeeEmail',
+                          'ticketTypeId',
+                        ],
+                      },
+                    },
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        checkedIn: { type: 'integer' },
+                        remaining: { type: 'integer' },
+                        total: { type: 'integer' },
+                        acceptedScans: { type: 'integer' },
+                      },
+                      required: ['checkedIn', 'remaining', 'total', 'acceptedScans'],
+                    },
+                    nextCursor: { type: 'string' },
+                  },
+                  required: ['items', 'summary'],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/check-in-lists/{checkInListId}/activity/stream': {
+      get: {
+        summary: 'Stream live check-in activity',
+        description:
+          'Server-sent events: ready, scan, and summary. Last-Event-ID resumes from a scan-log ID. Delivery is at-least-once; clients should de-duplicate scan events by id.',
+        security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'checkInListId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          { name: 'Last-Event-ID', in: 'header', schema: { type: 'string' } },
+          { $ref: '#/components/parameters/OptionalScannerDeviceSecret' },
+        ],
+        responses: {
+          '200': {
+            description: 'SSE activity stream',
+            content: {
+              'text/event-stream': {
+                schema: { type: 'string' },
+              },
+            },
+          },
         },
       },
     },
@@ -6043,7 +7273,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Scan result',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ScanResult' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ScanResult' },
+              },
             },
           },
         },
@@ -6093,7 +7325,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Sync results',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/SyncScanResult' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SyncScanResult' },
+              },
             },
           },
         },
@@ -6129,7 +7363,9 @@ const rawOpenApiSpec = {
           '202': {
             description: 'Bulk sync job created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncJob' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BulkSyncJob' },
+              },
             },
           },
         },
@@ -6141,8 +7377,18 @@ const rawOpenApiSpec = {
         description: 'Requires `checkins.write` because it persists scan payload data.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
-          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'sequence', in: 'path', required: true, schema: { type: 'integer' } },
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'sequence',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+          },
           { $ref: '#/components/parameters/ScannerDeviceSecret' },
           { $ref: '#/components/parameters/RequiredIdempotencyKey' },
         ],
@@ -6182,7 +7428,9 @@ const rawOpenApiSpec = {
           '202': {
             description: 'Chunk accepted or replayed',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncChunk' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BulkSyncChunk' },
+              },
             },
           },
         },
@@ -6194,14 +7442,21 @@ const rawOpenApiSpec = {
         description: 'Requires `checkins.read`; read-only scanner principals can poll job status.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
-          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { $ref: '#/components/parameters/ScannerDeviceSecret' },
         ],
         responses: {
           '200': {
             description: 'Bulk sync job status',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncJob' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BulkSyncJob' },
+              },
             },
           },
         },
@@ -6214,14 +7469,21 @@ const rawOpenApiSpec = {
           'Requires `checkins.read`; read-only scanner principals can poll bounded chunk summaries.',
         security: [{ ScannerDeviceAuth: [] }, { BearerAuth: [] }],
         parameters: [
-          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { $ref: '#/components/parameters/ScannerDeviceSecret' },
         ],
         responses: {
           '200': {
             description: 'Bounded chunk summaries',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/BulkSyncChunkList' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BulkSyncChunkList' },
+              },
             },
           },
         },
@@ -6239,7 +7501,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of API keys (hashed_key never returned)',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiKeyPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiKeyPage' },
+              },
             },
           },
         },
@@ -6270,7 +7534,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'API key created (full key shown only once)',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiKeyCreated' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiKeyCreated' },
+              },
             },
           },
         },
@@ -6295,7 +7561,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of scanner devices (hashed_secret never returned)',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ScannerDevicePage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ScannerDevicePage' },
+              },
             },
           },
         },
@@ -6315,7 +7583,10 @@ const rawOpenApiSpec = {
                   eventIds: { type: 'array', items: { type: 'string' } },
                   scopes: {
                     type: 'array',
-                    items: { type: 'string', enum: ['checkins.read', 'checkins.write'] },
+                    items: {
+                      type: 'string',
+                      enum: ['checkins.read', 'checkins.write'],
+                    },
                     default: ['checkins.read', 'checkins.write'],
                   },
                 },
@@ -6328,7 +7599,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Scanner device created (secret shown only once)',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ScannerDeviceCreated' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ScannerDeviceCreated' },
+              },
             },
           },
         },
@@ -6342,7 +7615,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Scanner device revoked',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ScannerDeviceRevoked' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ScannerDeviceRevoked' },
+              },
             },
           },
         },
@@ -6370,16 +7645,26 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Sales metrics',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/SalesReport' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SalesReport' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6405,15 +7690,27 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Tax metrics',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/TaxReport' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TaxReport' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6433,11 +7730,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6457,11 +7762,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6497,11 +7810,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6521,11 +7842,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6546,7 +7875,10 @@ const rawOpenApiSpec = {
                     tenantId: { type: 'string' },
                     type: { type: 'string' },
                     scopes: { type: 'array', items: { type: 'string' } },
-                    organizationIds: { type: 'array', items: { type: 'string' } },
+                    organizationIds: {
+                      type: 'array',
+                      items: { type: 'string' },
+                    },
                     permissions: { type: 'array', items: { type: 'string' } },
                   },
                 },
@@ -6555,7 +7887,11 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6574,7 +7910,9 @@ const rawOpenApiSpec = {
                   name: { type: 'string' },
                   slug: { type: 'string' },
                   clerkOrganizationId: { type: 'string', nullable: true },
-                  boxOfficeSettings: { $ref: '#/components/schemas/BoxOfficeSettings' },
+                  boxOfficeSettings: {
+                    $ref: '#/components/schemas/BoxOfficeSettings',
+                  },
                 },
               },
             },
@@ -6584,20 +7922,34 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Organization updated',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/Organization' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Organization' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Organization not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6623,8 +7975,26 @@ const rawOpenApiSpec = {
                       role: { type: 'string' },
                       status: { type: 'string' },
                       invitedAt: { type: 'string', format: 'date-time' },
-                      joinedAt: { type: 'string', format: 'date-time', nullable: true },
+                      joinedAt: {
+                        type: 'string',
+                        format: 'date-time',
+                        nullable: true,
+                      },
+                      brandIds: { type: 'array', items: { type: 'string' } },
+                      eventIds: { type: 'array', items: { type: 'string' } },
                     },
+                    required: [
+                      'id',
+                      'organizationId',
+                      'name',
+                      'email',
+                      'role',
+                      'status',
+                      'invitedAt',
+                      'joinedAt',
+                      'brandIds',
+                      'eventIds',
+                    ],
                   },
                 },
               },
@@ -6632,15 +8002,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Organization not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6649,6 +8031,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Invite a member to the organization',
         security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
@@ -6657,7 +8040,19 @@ const rawOpenApiSpec = {
                 type: 'object',
                 properties: {
                   email: { type: 'string', format: 'email' },
-                  role: { type: 'string', enum: ['admin', 'organizer', 'viewer'] },
+                  role: {
+                    type: 'string',
+                    enum: ['admin', 'organizer', 'viewer', 'door_staff', 'door_staff_sales'],
+                  },
+                  brandIds: { type: 'array', items: { type: 'string' } },
+                  eventIds: { type: 'array', items: { type: 'string' } },
+                  returnTo: {
+                    type: 'string',
+                    maxLength: 500,
+                    pattern: '^/kiosk(?:/[^/?#]+)?(?:[?#].*)?$',
+                    description:
+                      'Optional same-origin kiosk path used after invitation acceptance.',
+                  },
                 },
                 required: ['email'],
                 additionalProperties: false,
@@ -6680,27 +8075,166 @@ const rawOpenApiSpec = {
                     role: { type: 'string' },
                     status: { type: 'string' },
                     invitedAt: { type: 'string', format: 'date-time' },
-                    joinedAt: { type: 'string', format: 'date-time', nullable: true },
+                    joinedAt: {
+                      type: 'string',
+                      format: 'date-time',
+                      nullable: true,
+                    },
+                    brandIds: { type: 'array', items: { type: 'string' } },
+                    eventIds: { type: 'array', items: { type: 'string' } },
+                    invitationDelivery: {
+                      type: 'string',
+                      enum: ['queued'],
+                    },
+                    invitationProvider: { type: 'string' },
                   },
+                  required: [
+                    'id',
+                    'organizationId',
+                    'name',
+                    'email',
+                    'role',
+                    'status',
+                    'invitedAt',
+                    'joinedAt',
+                    'brandIds',
+                    'eventIds',
+                    'invitationDelivery',
+                    'invitationProvider',
+                  ],
                 },
               },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Organization not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/organizations/{organizationId}/members/{memberId}': {
+      patch: {
+        summary: 'Update an organization member role and permission grants',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  role: {
+                    type: 'string',
+                    enum: ['admin', 'organizer', 'viewer', 'door_staff', 'door_staff_sales'],
+                  },
+                  brandIds: { type: 'array', items: { type: 'string' } },
+                  eventIds: { type: 'array', items: { type: 'string' } },
+                },
+                required: ['role'],
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Member role updated',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    organizationId: { type: 'string' },
+                    name: { type: 'string' },
+                    email: { type: 'string' },
+                    role: { type: 'string' },
+                    status: { type: 'string' },
+                    invitedAt: { type: 'string', format: 'date-time' },
+                    joinedAt: {
+                      type: 'string',
+                      format: 'date-time',
+                      nullable: true,
+                    },
+                    brandIds: { type: 'array', items: { type: 'string' } },
+                    eventIds: { type: 'array', items: { type: 'string' } },
+                  },
+                  required: [
+                    'id',
+                    'organizationId',
+                    'name',
+                    'email',
+                    'role',
+                    'status',
+                    'invitedAt',
+                    'joinedAt',
+                    'brandIds',
+                    'eventIds',
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Validation error',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description: 'Organization or member not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6723,15 +8257,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Organization not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6744,30 +8290,50 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Existing active Stripe payment account returned',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PaymentAccount' },
+              },
             },
           },
           '201': {
             description: 'Stripe Connect payment account created with onboarding link',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PaymentAccount' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Organization not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '400': {
             description: 'Stripe Connect onboarding is not configured for this environment',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6780,24 +8346,42 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Payment account status refreshed from Stripe',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PaymentAccount' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PaymentAccount' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Organization or payment account not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '400': {
             description: 'Stripe Connect status refresh is not configured for this environment',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6826,15 +8410,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Organization not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6851,16 +8447,26 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of questions',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/QuestionPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/QuestionPage' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6892,7 +8498,10 @@ const rawOpenApiSpec = {
                   label: { type: 'string' },
                   description: { type: 'string' },
                   required: { type: 'boolean' },
-                  appliesTo: { type: 'string', enum: ['buyer', 'attendee', 'both'] },
+                  appliesTo: {
+                    type: 'string',
+                    enum: ['buyer', 'attendee', 'both'],
+                  },
                   ticketTypeId: { type: 'string' },
                   options: { type: 'array', items: { type: 'string' } },
                   placeholder: { type: 'string' },
@@ -6911,19 +8520,35 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description: 'Question created',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Question' },
+              },
+            },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6944,24 +8569,42 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Questions reordered',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/QuestionPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/QuestionPage' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event or question not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -6995,7 +8638,10 @@ const rawOpenApiSpec = {
                   label: { type: 'string' },
                   description: { type: 'string' },
                   required: { type: 'boolean' },
-                  appliesTo: { type: 'string', enum: ['buyer', 'attendee', 'both'] },
+                  appliesTo: {
+                    type: 'string',
+                    enum: ['buyer', 'attendee', 'both'],
+                  },
                   ticketTypeId: { type: ['string', 'null'] },
                   options: { type: 'array', items: { type: 'string' } },
                   placeholder: { type: 'string' },
@@ -7013,19 +8659,35 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Question updated',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Question' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Question not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7036,15 +8698,27 @@ const rawOpenApiSpec = {
           '204': { description: 'Question deleted' },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Question not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7055,11 +8729,19 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'Brand details',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Brand' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Brand' },
+              },
+            },
           },
           '404': {
             description: 'Brand not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7072,13 +8754,19 @@ const rawOpenApiSpec = {
             description: 'Buyer and attendee question lists',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PublicQuestionsResponse' },
+                schema: {
+                  $ref: '#/components/schemas/PublicQuestionsResponse',
+                },
               },
             },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7125,20 +8813,34 @@ const rawOpenApiSpec = {
           '202': {
             description: 'Export queued',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ExportJobQueued' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ExportJobQueued' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7158,15 +8860,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Export job not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7198,15 +8912,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Export job not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7219,19 +8945,35 @@ const rawOpenApiSpec = {
           '302': { description: 'Redirect to the signed export file URL' },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Export job not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '409': {
             description: 'Export is not ready for download',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7260,7 +9002,10 @@ const rawOpenApiSpec = {
                           templateKey: { type: 'string' },
                           emailTemplateKey: { type: 'string' },
                           smsTemplateKey: { type: 'string' },
-                          channel: { type: 'string', enum: ['email', 'sms', 'both'] },
+                          channel: {
+                            type: 'string',
+                            enum: ['email', 'sms', 'both'],
+                          },
                           status: { type: 'string' },
                           audience: {
                             type: 'string',
@@ -7270,7 +9015,10 @@ const rawOpenApiSpec = {
                             type: 'string',
                             enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
                           },
-                          audienceAttendeeIds: { type: 'array', items: { type: 'string' } },
+                          audienceAttendeeIds: {
+                            type: 'array',
+                            items: { type: 'string' },
+                          },
                           audienceLabel: { type: 'string' },
                           audienceCount: { type: 'integer' },
                           queuedEmailJobs: { type: 'integer' },
@@ -7291,11 +9039,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7324,7 +9080,11 @@ const rawOpenApiSpec = {
                         type: 'string',
                         enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
                       },
-                      attendeeIds: { type: 'array', maxItems: 5_000, items: { type: 'string' } },
+                      attendeeIds: {
+                        type: 'array',
+                        maxItems: 5_000,
+                        items: { type: 'string' },
+                      },
                       variables: {
                         type: 'object',
                         additionalProperties: true,
@@ -7350,7 +9110,11 @@ const rawOpenApiSpec = {
                         type: 'string',
                         enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
                       },
-                      attendeeIds: { type: 'array', maxItems: 5_000, items: { type: 'string' } },
+                      attendeeIds: {
+                        type: 'array',
+                        maxItems: 5_000,
+                        items: { type: 'string' },
+                      },
                       variables: {
                         type: 'object',
                         additionalProperties: true,
@@ -7382,7 +9146,11 @@ const rawOpenApiSpec = {
                         type: 'string',
                         enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
                       },
-                      attendeeIds: { type: 'array', maxItems: 5_000, items: { type: 'string' } },
+                      attendeeIds: {
+                        type: 'array',
+                        maxItems: 5_000,
+                        items: { type: 'string' },
+                      },
                       variables: {
                         type: 'object',
                         additionalProperties: true,
@@ -7402,20 +9170,34 @@ const rawOpenApiSpec = {
           '202': {
             description: 'Message campaign queued',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MessageQueued' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MessageQueued' },
+              },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7432,27 +9214,67 @@ const rawOpenApiSpec = {
             required: false,
             schema: { type: 'string' },
           },
-          { name: 'brandId', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'action', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'resourceType', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'actorId', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'brandId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'action',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'resourceType',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'actorId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Page of audit log entries',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AuditLogPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AuditLogPage' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7469,7 +9291,12 @@ const rawOpenApiSpec = {
             required: false,
             schema: { type: 'string' },
           },
-          { name: 'brandId', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'brandId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
           {
             name: 'requestType',
             in: 'query',
@@ -7480,28 +9307,66 @@ const rawOpenApiSpec = {
             name: 'status',
             in: 'query',
             required: false,
-            schema: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed'] },
+            schema: {
+              type: 'string',
+              enum: ['pending', 'processing', 'completed', 'failed'],
+            },
           },
-          { name: 'subjectType', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'createdAtTo', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'completedAtFrom', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'completedAtTo', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'subjectType',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'createdAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'completedAtFrom',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'completedAtTo',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Page of privacy requests',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PrivacyRequestPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PrivacyRequestPage' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7514,12 +9379,18 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Privacy request status',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PrivacyRequest' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PrivacyRequest' },
+              },
             },
           },
           '404': {
             description: 'Privacy request not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7532,14 +9403,18 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/PrivacyRequestInput' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PrivacyRequestInput' },
+            },
           },
         },
         responses: {
           '202': {
             description: 'Privacy export queued',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PrivacyRequest' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PrivacyRequest' },
+              },
             },
           },
         },
@@ -7553,14 +9428,18 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/PrivacyRequestInput' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PrivacyRequestInput' },
+            },
           },
         },
         responses: {
           '202': {
             description: 'Privacy erasure queued',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PrivacyRequest' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PrivacyRequest' },
+              },
             },
           },
         },
@@ -7636,15 +9515,27 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7657,22 +9548,36 @@ const rawOpenApiSpec = {
           { name: 'channel', in: 'query', schema: { type: 'string' } },
           { name: 'brandId', in: 'query', schema: { type: 'string' } },
           { name: 'eventId', in: 'query', schema: { type: 'string' } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+          {
+            name: 'limit',
+            in: 'query',
+            schema: { type: 'integer', minimum: 1, maximum: 100 },
+          },
         ],
         responses: {
           '200': {
             description: 'Content documents',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ContentDocumentPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContentDocumentPage' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7706,27 +9611,41 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Created content document',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ContentDocument' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContentDocument' },
+              },
             },
           },
           '400': {
             description: 'Validation error, including unavailable future channels',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
     },
-    '/content-documents/migrate-event-page-chrome': {
+    '/content-documents/migrate-event-page-puck': {
       post: {
-        summary: 'One-time migration: append chrome blocks to older event-page versions',
+        summary: 'Migrate legacy event-page versions to the canonical Puck document',
         security: [{ BearerAuth: [] }],
         responses: {
           '200': {
@@ -7758,11 +9677,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7772,18 +9699,72 @@ const rawOpenApiSpec = {
         summary: 'Get a content document',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Content document',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ContentDocument' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContentDocument' },
+              },
             },
           },
           '404': {
             description: 'Not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+      patch: {
+        summary: 'Rename a content document',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { name: { type: 'string', minLength: 1, maxLength: 160 } },
+                required: ['name'],
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Renamed content document',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContentDocument' },
+              },
+            },
+          },
+          '404': {
+            description: 'Not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7793,7 +9774,12 @@ const rawOpenApiSpec = {
         summary: 'Duplicate a content document as an unpublished draft copy',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         requestBody: {
           required: false,
@@ -7803,7 +9789,11 @@ const rawOpenApiSpec = {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  key: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$', maxLength: 128 },
+                  key: {
+                    type: 'string',
+                    pattern: '^[a-z0-9][a-z0-9._-]*$',
+                    maxLength: 128,
+                  },
                   name: { type: 'string', minLength: 1, maxLength: 160 },
                 },
               },
@@ -7821,7 +9811,9 @@ const rawOpenApiSpec = {
                     document: { $ref: '#/components/schemas/ContentDocument' },
                     versions: {
                       type: 'array',
-                      items: { $ref: '#/components/schemas/ContentDocumentVersion' },
+                      items: {
+                        $ref: '#/components/schemas/ContentDocumentVersion',
+                      },
                     },
                   },
                   required: ['document', 'versions'],
@@ -7831,11 +9823,19 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error, including unavailable future channels',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Not found or outside tenant scope',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -7845,14 +9845,21 @@ const rawOpenApiSpec = {
         summary: 'List content document versions',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Content document versions',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/ContentDocumentVersionPage' },
+                schema: {
+                  $ref: '#/components/schemas/ContentDocumentVersionPage',
+                },
               },
             },
           },
@@ -7862,7 +9869,12 @@ const rawOpenApiSpec = {
         summary: 'Save a content document draft version',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         requestBody: {
           required: true,
@@ -7905,7 +9917,12 @@ const rawOpenApiSpec = {
         summary: 'Render a content document preview',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         requestBody: {
           required: true,
@@ -7937,53 +9954,10 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Rendered preview',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ContentPreview' } },
-            },
-          },
-        },
-      },
-    },
-    '/content-documents/{documentId}/preview-token': {
-      post: {
-        summary: 'Mint a signed draft-preview token for in-place editing',
-        security: [{ BearerAuth: [] }],
-        parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
-        ],
-        requestBody: {
-          required: false,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  versionId: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Signed preview token with checkout edit-overlay URL',
-            content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    token: { type: 'string' },
-                    url: { type: 'string' },
-                    expiresAt: { type: 'string', format: 'date-time' },
-                    versionId: { type: 'string' },
-                  },
-                  required: ['token', 'url', 'expiresAt', 'versionId'],
-                },
+                schema: { $ref: '#/components/schemas/ContentPreview' },
               },
             },
-          },
-          '404': {
-            description: 'Document or draft version not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
       },
@@ -7993,8 +9967,18 @@ const rawOpenApiSpec = {
         summary: 'Publish a content document version',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'versionId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'versionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
@@ -8005,7 +9989,9 @@ const rawOpenApiSpec = {
                   type: 'object',
                   properties: {
                     document: { $ref: '#/components/schemas/ContentDocument' },
-                    version: { $ref: '#/components/schemas/ContentDocumentVersion' },
+                    version: {
+                      $ref: '#/components/schemas/ContentDocumentVersion',
+                    },
                   },
                   required: ['document', 'version'],
                 },
@@ -8014,7 +10000,11 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Publish blockers',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8024,13 +10014,20 @@ const rawOpenApiSpec = {
         summary: 'Archive a content document',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Archived document',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ContentDocument' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ContentDocument' },
+              },
             },
           },
         },
@@ -8041,7 +10038,12 @@ const rawOpenApiSpec = {
         summary: 'Capture a content test send through the shared renderer',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'documentId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'documentId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         requestBody: {
           required: true,
@@ -8069,8 +10071,12 @@ const rawOpenApiSpec = {
                   type: 'object',
                   properties: {
                     testSend: { $ref: '#/components/schemas/ContentTestSend' },
-                    output: { $ref: '#/components/schemas/ContentRenderOutput' },
-                    renderArtifact: { $ref: '#/components/schemas/ContentRenderArtifact' },
+                    output: {
+                      $ref: '#/components/schemas/ContentRenderOutput',
+                    },
+                    renderArtifact: {
+                      $ref: '#/components/schemas/ContentRenderArtifact',
+                    },
                   },
                   required: ['testSend', 'output', 'renderArtifact'],
                 },
@@ -8084,7 +10090,12 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get the published content-studio event page for an event',
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { name: 'locale', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
@@ -8098,7 +10109,11 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'No published event page',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8107,7 +10122,12 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get public hosted event-page bootstrap data',
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { name: 'locale', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
@@ -8115,13 +10135,19 @@ const rawOpenApiSpec = {
             description: 'First-load hosted event-page content, availability, and resale data',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PublicEventPageBootstrap' },
+                schema: {
+                  $ref: '#/components/schemas/PublicEventPageBootstrap',
+                },
               },
             },
           },
           '404': {
             description: 'Event not found or not publicly readable',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8130,7 +10156,12 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Compatibility alias for the published content-studio event page',
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { name: 'locale', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
@@ -8144,31 +10175,11 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'No published event page',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
-          },
-        },
-      },
-    },
-    '/public/events/{eventId}/draft-preview': {
-      get: {
-        summary: 'Load a signed draft preview for in-place event-page editing',
-        parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'token', in: 'query', required: true, schema: { type: 'string' } },
-          { name: 'host', in: 'query', schema: { type: 'string' } },
-        ],
-        responses: {
-          '200': {
-            description: 'Draft event-page content with real context for editing',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/DraftPreviewPage' },
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
-          },
-          '404': {
-            description: 'Event, draft, or preview token not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
       },
@@ -8177,8 +10188,18 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get the published content-studio event page for a verified custom-domain slug',
         parameters: [
-          { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'host', in: 'query', required: true, schema: { type: 'string' } },
+          {
+            name: 'slug',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'host',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
           { name: 'locale', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
@@ -8192,7 +10213,11 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'No verified custom-domain event page',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8201,8 +10226,18 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get public hosted event-page bootstrap data by custom-domain slug',
         parameters: [
-          { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'host', in: 'query', required: true, schema: { type: 'string' } },
+          {
+            name: 'slug',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'host',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
           { name: 'locale', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
@@ -8210,13 +10245,19 @@ const rawOpenApiSpec = {
             description: 'First-load hosted event-page content for the verified host and slug',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PublicEventPageBootstrap' },
+                schema: {
+                  $ref: '#/components/schemas/PublicEventPageBootstrap',
+                },
               },
             },
           },
           '404': {
             description: 'No verified custom-domain event page',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8225,7 +10266,12 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get structured discovery metadata for a published event page',
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           { name: 'locale', in: 'query', schema: { type: 'string' } },
         ],
         responses: {
@@ -8233,13 +10279,19 @@ const rawOpenApiSpec = {
             description: 'Structured public discovery metadata',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PublicEventDiscoveryCard' },
+                schema: {
+                  $ref: '#/components/schemas/PublicEventDiscoveryCard',
+                },
               },
             },
           },
           '404': {
             description: 'No published event page',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8297,7 +10349,10 @@ const rawOpenApiSpec = {
                       type: 'object',
                       properties: {
                         valid: { type: 'boolean' },
-                        unknownTags: { type: 'array', items: { type: 'string' } },
+                        unknownTags: {
+                          type: 'array',
+                          items: { type: 'string' },
+                        },
                       },
                       required: ['valid', 'unknownTags'],
                     },
@@ -8309,15 +10364,27 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8333,15 +10400,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Campaign not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8360,7 +10439,9 @@ const rawOpenApiSpec = {
                   properties: {
                     items: {
                       type: 'array',
-                      items: { $ref: '#/components/schemas/MessageJobEnvelope' },
+                      items: {
+                        $ref: '#/components/schemas/MessageJobEnvelope',
+                      },
                     },
                   },
                   required: ['items'],
@@ -8370,15 +10451,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Campaign not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8398,15 +10491,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Job not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8425,7 +10530,9 @@ const rawOpenApiSpec = {
                   properties: {
                     items: {
                       type: 'array',
-                      items: { $ref: '#/components/schemas/MessageDeliveryLogEnvelope' },
+                      items: {
+                        $ref: '#/components/schemas/MessageDeliveryLogEnvelope',
+                      },
                     },
                   },
                   required: ['items'],
@@ -8435,15 +10542,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Campaign not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8457,21 +10576,35 @@ const rawOpenApiSpec = {
             description: 'Delivery log detail',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MessageDeliveryLogEnvelope' },
+                schema: {
+                  $ref: '#/components/schemas/MessageDeliveryLogEnvelope',
+                },
               },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Delivery log not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8490,7 +10623,9 @@ const rawOpenApiSpec = {
                   properties: {
                     items: {
                       type: 'array',
-                      items: { $ref: '#/components/schemas/MessageProviderEventEnvelope' },
+                      items: {
+                        $ref: '#/components/schemas/MessageProviderEventEnvelope',
+                      },
                     },
                   },
                   required: ['items'],
@@ -8500,15 +10635,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Campaign not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8522,21 +10669,35 @@ const rawOpenApiSpec = {
             description: 'Provider event detail',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MessageProviderEventEnvelope' },
+                schema: {
+                  $ref: '#/components/schemas/MessageProviderEventEnvelope',
+                },
               },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Provider event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8571,11 +10732,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8591,7 +10760,10 @@ const rawOpenApiSpec = {
                 properties: {
                   organizationId: { type: 'string' },
                   name: { type: 'string' },
-                  redirectUris: { type: 'array', items: { type: 'string', format: 'uri' } },
+                  redirectUris: {
+                    type: 'array',
+                    items: { type: 'string', format: 'uri' },
+                  },
                   scopes: { type: 'array', items: { type: 'string' } },
                 },
                 required: ['organizationId', 'name', 'redirectUris', 'scopes'],
@@ -8604,21 +10776,35 @@ const rawOpenApiSpec = {
             description: 'OAuth application created (client secret shown only once)',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/OAuthApplicationCreated' },
+                schema: {
+                  $ref: '#/components/schemas/OAuthApplicationCreated',
+                },
               },
             },
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8631,15 +10817,27 @@ const rawOpenApiSpec = {
           '204': { description: 'OAuth application deleted' },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Application not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8655,17 +10853,34 @@ const rawOpenApiSpec = {
             required: true,
             schema: { type: 'string', enum: ['code'] },
           },
-          { name: 'client_id', in: 'query', required: true, schema: { type: 'string' } },
+          {
+            name: 'client_id',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'redirect_uri',
             in: 'query',
             required: true,
             schema: { type: 'string', format: 'uri' },
           },
-          { name: 'scope', in: 'query', required: false, schema: { type: 'string' } },
-          { name: 'state', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'scope',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'state',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
         ],
-        responses: { '302': { description: 'Redirect with code and optional state' } },
+        responses: {
+          '302': { description: 'Redirect with code and optional state' },
+        },
       },
     },
     '/oauth/token': {
@@ -8678,7 +10893,10 @@ const rawOpenApiSpec = {
               schema: {
                 type: 'object',
                 properties: {
-                  grant_type: { type: 'string', enum: ['authorization_code', 'refresh_token'] },
+                  grant_type: {
+                    type: 'string',
+                    enum: ['authorization_code', 'refresh_token'],
+                  },
                   client_id: { type: 'string' },
                   client_secret: { type: 'string' },
                   code: { type: 'string' },
@@ -8694,7 +10912,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'OAuth token response',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/OAuthTokenResponse' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OAuthTokenResponse' },
+              },
             },
           },
         },
@@ -8747,7 +10967,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Page of endpoints',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WebhookEndpointPage' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WebhookEndpointPage' },
+              },
             },
           },
         },
@@ -8820,7 +11042,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Endpoint updated',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WebhookEndpoint' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WebhookEndpoint' },
+              },
             },
           },
         },
@@ -8859,7 +11083,11 @@ const rawOpenApiSpec = {
                           status: { type: 'string' },
                           statusCode: { type: 'integer' },
                           attemptCount: { type: 'integer' },
-                          deliveredAt: { type: 'string', format: 'date-time', nullable: true },
+                          deliveredAt: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                          },
                           createdAt: { type: 'string', format: 'date-time' },
                         },
                       },
@@ -8874,15 +11102,27 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Endpoint not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8912,25 +11152,43 @@ const rawOpenApiSpec = {
             description: 'Endpoint webhook replay queued',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/WebhookEndpointReplayQueued' },
+                schema: {
+                  $ref: '#/components/schemas/WebhookEndpointReplayQueued',
+                },
               },
             },
           },
           '400': {
             description: 'Endpoint inactive or not subscribed to this event type',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Endpoint or event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8943,7 +11201,9 @@ const rawOpenApiSpec = {
           '202': {
             description: 'Webhook replay queued',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WebhookReplayQueued' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WebhookReplayQueued' },
+              },
             },
           },
         },
@@ -8968,11 +11228,19 @@ const rawOpenApiSpec = {
           '200': { description: 'Webhook received' },
           '400': {
             description: 'Invalid webhook or signature',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '503': {
             description: 'Webhook verification not configured',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -8994,11 +11262,19 @@ const rawOpenApiSpec = {
           '200': { description: 'Webhook received' },
           '400': {
             description: 'Invalid webhook or signature',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '503': {
             description: 'Webhook verification or delivery reconciliation not ready',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -9017,7 +11293,10 @@ const rawOpenApiSpec = {
                   destinationUrl: { type: 'string' },
                   slug: { type: 'string' },
                   brandId: { type: 'string' },
-                  utmParams: { type: 'object', additionalProperties: { type: 'string' } },
+                  utmParams: {
+                    type: 'object',
+                    additionalProperties: { type: 'string' },
+                  },
                   expiresAt: { type: 'string', format: 'date-time' },
                 },
                 required: ['destinationUrl'],
@@ -9036,7 +11315,10 @@ const rawOpenApiSpec = {
                     id: { type: 'string' },
                     slug: { type: 'string' },
                     destinationUrl: { type: 'string' },
-                    utmParams: { type: 'object', additionalProperties: { type: 'string' } },
+                    utmParams: {
+                      type: 'object',
+                      additionalProperties: { type: 'string' },
+                    },
                     clicks: { type: 'integer' },
                     createdAt: { type: 'string' },
                   },
@@ -9047,15 +11329,27 @@ const rawOpenApiSpec = {
           },
           '400': {
             description: 'Validation error',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -9092,11 +11386,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -9105,7 +11407,14 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get privacy-safe click aggregates for a short link (C-078)',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Click aggregate',
@@ -9116,7 +11425,10 @@ const rawOpenApiSpec = {
                   properties: {
                     id: { type: 'string' },
                     totalClicks: { type: 'integer' },
-                    byDay: { type: 'object', additionalProperties: { type: 'integer' } },
+                    byDay: {
+                      type: 'object',
+                      additionalProperties: { type: 'integer' },
+                    },
                   },
                   required: ['id', 'totalClicks', 'byDay'],
                 },
@@ -9125,11 +11437,19 @@ const rawOpenApiSpec = {
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -9137,16 +11457,31 @@ const rawOpenApiSpec = {
     '/s/{slug}': {
       get: {
         summary: 'Resolve a short link and redirect (C-078)',
-        parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'slug',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '302': { description: 'Redirect to the destination URL' },
           '404': {
             description: 'Short link not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '410': {
             description: 'Short link has expired',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },

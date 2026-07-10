@@ -24,9 +24,13 @@ import {
   ProviderRouteSelector,
   validateProviderFields,
 } from '@tixkit/email-transport';
-import { normalizeEmailTemplateDocument, renderEmailTemplate } from '@tixkit/content-email';
+import {
+  createDefaultEmailTemplateForKey,
+  normalizeEmailTemplateDocument,
+  renderEmailTemplate,
+} from '@tixkit/content-email';
 import { normalizeSmsTemplateDocument, renderSmsTemplate } from '@tixkit/content-message';
-import type { EmailTransport } from '@tixkit/domain';
+import type { EmailTransport, TemplateKey } from '@tixkit/domain';
 import type { SmsTransport } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
@@ -137,8 +141,10 @@ export async function checkConsentActivity(input: {
 }): Promise<WorkflowActivityResult<{ allowed: boolean }>> {
   const db = getActivityDb();
   try {
-    // Transactional emails always pass consent checks.
-    if (input.notificationType === 'transactional') {
+    // Only bulk marketing mail requires opt-in. Transactional, staff, and
+    // system lifecycle messages are operational and must not depend on a
+    // marketing-consent row existing for a new recipient.
+    if (input.notificationType !== 'bulk') {
       return okResult({ allowed: true });
     }
 
@@ -301,7 +307,13 @@ export async function renderTemplateActivity(input: {
       versionId: input.templateVersionId,
       channel,
     });
-    if (!contentVersion) {
+    const systemEmailDocument =
+      !contentVersion &&
+      channel === 'email' &&
+      input.templateVersionId === `system_${input.templateKey.replaceAll('-', '_')}_v1`
+        ? createDefaultEmailTemplateForKey(input.templateKey as TemplateKey)
+        : undefined;
+    if (!contentVersion && !systemEmailDocument) {
       return errResult(
         'CONTENT_TEMPLATE_NOT_PUBLISHED',
         `Published ${channel} content version not found: ${input.templateVersionId}`,
@@ -309,7 +321,7 @@ export async function renderTemplateActivity(input: {
       );
     }
     if (channel === 'sms') {
-      const document = normalizeSmsTemplateDocument(contentVersion.version.contentJson);
+      const document = normalizeSmsTemplateDocument(contentVersion!.version.contentJson);
       if (!document) {
         return errResult(
           'SMS_TEMPLATE_INVALID',
@@ -334,7 +346,8 @@ export async function renderTemplateActivity(input: {
         segments: rendered.segments,
       });
     }
-    const document = normalizeEmailTemplateDocument(contentVersion.version.contentJson);
+    const document =
+      systemEmailDocument ?? normalizeEmailTemplateDocument(contentVersion?.version.contentJson);
     if (!document) {
       return errResult(
         'EMAIL_TEMPLATE_INVALID',

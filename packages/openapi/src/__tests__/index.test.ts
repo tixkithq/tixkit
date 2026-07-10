@@ -429,6 +429,17 @@ describe('openApiSpec', () => {
     expect(
       openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/manifest'].get.responses,
     ).toHaveProperty('400');
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/activity'].get.parameters,
+    ).toContainEqual({ name: 'afterId', in: 'query', schema: { type: 'string' } });
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/activity/stream'].get
+        .parameters,
+    ).toContainEqual({ name: 'Last-Event-ID', in: 'header', schema: { type: 'string' } });
+    expect(
+      openApiSpec.paths['/events/{eventId}/check-in-lists/{checkInListId}/activity/stream'].get
+        .responses['200'].content,
+    ).toHaveProperty('text/event-stream');
     expect(openApiSpec.components.schemas.OfflineManifest.required).toContain('tickets');
     expect(openApiSpec.components.schemas.OfflineManifest.properties.tickets.maxItems).toBe(50_000);
     expect(openApiSpec.components.schemas.OfflineManifest.properties.tickets.description).toContain(
@@ -957,10 +968,14 @@ describe('openApiSpec', () => {
       'id',
       'slug',
       'title',
+      'description',
       'status',
       'timezone',
       'startsAt',
+      'endsAt',
+      'venue',
       'brandId',
+      'minimumAge',
       'marketingIntegrations',
     ]);
     expect(openApiSpec.components.schemas.PublicEvent.properties).not.toHaveProperty('currency');
@@ -985,17 +1000,10 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/PublicEventDiscoveryCard' });
-    expect(
-      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses['200'].content[
-        'application/json'
-      ].schema,
-    ).toEqual({ $ref: '#/components/schemas/DraftPreviewPage' });
-    expect(
-      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses,
-    ).not.toHaveProperty('401');
-    expect(
-      openApiSpec.paths['/public/events/{eventId}/draft-preview'].get.responses['404'].description,
-    ).toContain('preview token');
+    expect(openApiSpec.paths).not.toHaveProperty('/public/events/{eventId}/draft-preview');
+    expect(openApiSpec.paths).not.toHaveProperty('/content-documents/{documentId}/preview-token');
+    expect(openApiSpec.paths).toHaveProperty('/content-documents/migrate-event-page-puck');
+    expect(openApiSpec.paths).toHaveProperty('/public/content-event-page-images/{artifactId}');
     expect(
       openApiSpec.components.schemas.PublicContentPage.properties.document.properties,
     ).not.toHaveProperty('tenantId');
@@ -1532,20 +1540,70 @@ describe('openApiSpec', () => {
     });
   });
 
+  it('documents the durable organization invitation contract', () => {
+    const operation = openApiSpec.paths['/organizations/{organizationId}/members/invitations'].post;
+    const requestSchema = operation.requestBody.content['application/json'].schema;
+    const responseSchema = operation.responses['201'].content['application/json'].schema;
+
+    expect(operation.parameters).toContainEqual({
+      $ref: '#/components/parameters/RequiredIdempotencyKey',
+    });
+    expect(requestSchema.properties.returnTo).toMatchObject({
+      type: 'string',
+      maxLength: 500,
+    });
+    expect(
+      openApiSpec.paths['/api-keys'].post.requestBody.content['application/json'].schema.properties,
+    ).not.toHaveProperty('returnTo');
+    expect(responseSchema.properties).toMatchObject({
+      brandIds: { type: 'array', items: { type: 'string' } },
+      eventIds: { type: 'array', items: { type: 'string' } },
+      invitationDelivery: { type: 'string', enum: ['queued'] },
+      invitationProvider: { type: 'string' },
+    });
+  });
+
   it('keeps event create/update schemas aligned with backend currency and status contracts', () => {
     const eventSchema = openApiSpec.components.schemas.Event;
     expect(eventSchema.required).toContain('currency');
     expect(eventSchema.properties).toHaveProperty('currency');
     expect(eventSchema.properties).toHaveProperty('status');
+    expect(eventSchema.required).toEqual(
+      expect.arrayContaining([
+        'tenantId',
+        'organizationId',
+        'brandId',
+        'minimumAge',
+        'grossSalesCents',
+        'ticketsSold',
+        'checkIns',
+        'createdAt',
+        'updatedAt',
+      ]),
+    );
+    expect(eventSchema.properties.minimumAge).toEqual({
+      type: ['integer', 'null'],
+      minimum: 0,
+      maximum: 120,
+    });
 
     const createSchema =
       openApiSpec.paths['/events'].post.requestBody.content['application/json'].schema;
     expect(createSchema.required).toContain('currency');
     expect(createSchema.properties).toHaveProperty('currency');
+    expect(createSchema.properties).toHaveProperty('minimumAge');
+    expect(
+      openApiSpec.paths['/events'].post.responses['201'].content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/Event' });
+    expect(
+      openApiSpec.paths['/events/{eventId}'].get.responses['200'].content['application/json']
+        .schema,
+    ).toEqual({ $ref: '#/components/schemas/Event' });
 
     const updateSchema =
       openApiSpec.paths['/events/{eventId}'].patch.requestBody.content['application/json'].schema;
     expect(updateSchema.properties).toHaveProperty('currency');
+    expect(updateSchema.properties).toHaveProperty('minimumAge');
     expect(updateSchema.properties).not.toHaveProperty('status');
     expect(openApiSpec.paths['/events/{eventId}/publish'].post.responses['200']).toBeDefined();
     expect(openApiSpec.paths['/events/{eventId}/pause'].post.responses['200']).toBeDefined();

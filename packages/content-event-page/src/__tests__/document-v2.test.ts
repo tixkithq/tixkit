@@ -10,6 +10,7 @@ import {
   migrateLegacyEventPageBlocksToPuckData,
   migrateLegacyEventPageDocumentToPuck,
   normalizeEventPageDocument,
+  sanitizeEventPageEmbedHtml,
   validateEventPageDocument,
   type EventPageDocument,
 } from '../index.js';
@@ -110,6 +111,7 @@ describe('EventPageDocument v2', () => {
       'SocialLinks',
       'CustomEmbed',
       'Tickets',
+      'ProductAddOns',
       'ResaleTickets',
       'CheckoutCta',
       'BrandFooter',
@@ -164,12 +166,8 @@ describe('legacy block migration helper', () => {
       { id: 'button-1', type: 'button', label: 'More', url: 'https://example.test/more' },
     ]);
 
-    expect(data.content.map((block) => block.type)).toEqual([
-      'EventDescription',
-      'RichText',
-      'Button',
-    ]);
-    expect(data.content.map((block) => block.props.id)).toEqual(['hero-1', 'rich-1', 'button-1']);
+    expect(data.content.map((block) => block.type)).toEqual(['RichText', 'Button']);
+    expect(data.content.map((block) => block.props.id)).toEqual(['rich-1', 'button-1']);
   });
 
   it('wraps migrated data in the v2 document contract', () => {
@@ -192,6 +190,8 @@ describe('legacy block migration helper', () => {
         discovery: { summary: 'Migrated summary', tags: ['music'] },
       },
     });
+    expect(migrated.editor.data.content.some((block) => block.props.id === 'hero-1')).toBe(false);
+    expect(JSON.stringify(migrated.editor.data.content)).not.toContain('Migrated event');
     expect(validateEventPageDocument(migrated).valid).toBe(true);
   });
 });
@@ -277,5 +277,26 @@ describe('validation', () => {
         }),
       ]),
     );
+  });
+
+  it('sandboxes public iframe embeds and rejects unsafe iframe destinations', () => {
+    expect(
+      sanitizeEventPageEmbedHtml(
+        '<iframe src="https://video.example.test/embed/abc" sandbox="allow-same-origin allow-scripts" referrerpolicy="origin"></iframe>',
+      ),
+    ).toBe(
+      '<iframe src="https://video.example.test/embed/abc" title="Embedded content" sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer" loading="lazy"></iframe>',
+    );
+    expect(sanitizeEventPageEmbedHtml('<iframe src="http://127.0.0.1/admin"></iframe>')).toBe('');
+    expect(sanitizeEventPageEmbedHtml('<iframe src="https://[fd12:3456::1]/"></iframe>')).toBe('');
+    expect(sanitizeEventPageEmbedHtml('<iframe src="https://localhost./admin"></iframe>')).toBe('');
+    expect(sanitizeEventPageEmbedHtml('<iframe srcdoc="<script>alert(1)</script>"></iframe>')).toBe(
+      '',
+    );
+    expect(
+      sanitizeEventPageEmbedHtml(
+        '<form action="javascript:alert(1)"><button>Continue</button></form><svg><a xlink:href="javascript:alert(1)">Open</a></svg>',
+      ),
+    ).toBe('');
   });
 });

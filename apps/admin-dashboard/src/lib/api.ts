@@ -153,6 +153,7 @@ export type AdminEventListItem = {
   grossSalesCents: number;
   ticketsSold: number;
   capacity?: number | null;
+  minimumAge?: number | null;
   coverImageUrl?: string | null;
   externalUrl?: string | null;
   resalePolicy: AdminResalePolicy;
@@ -577,11 +578,12 @@ export type AdminBoxOfficeOrderInput = {
     quantity: number;
     attendeeFields?: Array<Record<string, unknown>>;
   }>;
-  buyer?: {
-    email?: string;
+  buyer: {
+    email: string;
     firstName?: string;
     lastName?: string;
     phone?: string;
+    dateOfBirth?: string;
   };
   buyerFields?: Record<string, unknown>;
   notes?: string;
@@ -1176,6 +1178,7 @@ export type AdminBrand = {
   theme: {
     primaryColor?: string;
     logoUrl?: string;
+    iconUrl?: string;
     [key: string]: unknown;
   };
   domains: AdminBrandDomain[];
@@ -1196,7 +1199,13 @@ export type AdminBootstrapContext = {
   brands: AdminBrand[];
 };
 
-export type TeamMemberRole = 'owner' | 'admin' | 'organizer' | 'viewer';
+export type TeamMemberRole =
+  | 'owner'
+  | 'admin'
+  | 'organizer'
+  | 'viewer'
+  | 'door_staff'
+  | 'door_staff_sales';
 export type TeamMemberStatus = 'active' | 'invited' | 'disabled';
 
 export type AdminTeamMember = {
@@ -1208,6 +1217,36 @@ export type AdminTeamMember = {
   status: TeamMemberStatus;
   invitedAt?: string;
   joinedAt?: string;
+  brandIds?: string[];
+  eventIds?: string[];
+  invitationDelivery?: 'queued' | 'sent' | 'captured';
+  invitationProvider?: string;
+};
+
+export type CheckInActivityItem = {
+  id: string;
+  checkInListId: string;
+  ticketId: string | null;
+  deviceId: string;
+  outcome: string;
+  scannedAt: string;
+  offline: boolean;
+  attendeeName: string | null;
+  attendeeEmail: string | null;
+  ticketTypeId: string | null;
+};
+
+export type CheckInActivitySummary = {
+  checkedIn: number;
+  remaining: number;
+  total: number;
+  acceptedScans: number;
+};
+
+export type CheckInActivityPage = {
+  items: CheckInActivityItem[];
+  summary: CheckInActivitySummary;
+  nextCursor?: string;
 };
 
 export type PaymentAccountStatus = 'pending' | 'active' | 'restricted';
@@ -1322,6 +1361,7 @@ export type CreateEventInput = {
   visibility?: EventVisibility;
   seo?: AdminEventSeo;
   capacity?: number | null;
+  minimumAge?: number | null;
   coverImageUrl?: string | null;
   externalUrl?: string | null;
   currency: string;
@@ -1526,6 +1566,10 @@ export type DuplicateContentDocumentInput = {
   name?: string;
 };
 
+export type UpdateContentDocumentInput = {
+  name: string;
+};
+
 export type SaveContentVersionInput = {
   subject?: string;
   previewText?: string;
@@ -1604,6 +1648,15 @@ export type CompletedUploadArtifact = {
 export type InviteTeamMemberInput = {
   email: string;
   role: TeamMemberRole;
+  brandIds?: string[];
+  eventIds?: string[];
+  returnTo?: string;
+};
+
+export type UpdateTeamMemberInput = {
+  role: Exclude<TeamMemberRole, 'owner'>;
+  brandIds?: string[];
+  eventIds?: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -1637,6 +1690,11 @@ export type AdminApi = {
   inviteTeamMember(
     organizationId: string,
     input: InviteTeamMemberInput,
+  ): Promise<ApiResult<AdminTeamMember>>;
+  updateTeamMember(
+    organizationId: string,
+    memberId: string,
+    input: UpdateTeamMemberInput,
   ): Promise<ApiResult<AdminTeamMember>>;
   listPaymentAccounts(organizationId: string): Promise<ApiResult<AdminPaymentAccount[]>>;
   createStripeConnectAccount(organizationId: string): Promise<ApiResult<AdminPaymentAccount>>;
@@ -1692,6 +1750,7 @@ export type AdminApi = {
     input: {
       buyerId: string;
       buyerEmail: string;
+      buyerDateOfBirth?: string;
       buyerFirstName?: string | null;
       buyerLastName?: string | null;
       buyerPhone?: string | null;
@@ -1820,6 +1879,11 @@ export type AdminApi = {
     eventId: string,
     input: { name: string; ticketTypeIds?: string[] },
   ): Promise<ApiResult<AdminCheckInList>>;
+  listCheckInActivity(
+    eventId: string,
+    checkInListId: string,
+    input?: { since?: string; afterId?: string; limit?: number },
+  ): Promise<ApiResult<CheckInActivityPage>>;
   scanTicket(input: ScanTicketInput): Promise<ApiResult<CheckInScanResult>>;
 
   listContentDocuments(input?: {
@@ -1833,6 +1897,10 @@ export type AdminApi = {
     input: CreateContentDocumentInput,
   ): Promise<ApiResult<AdminContentDocument>>;
   getContentDocument(documentId: string): Promise<ApiResult<AdminContentDocument>>;
+  updateContentDocument(
+    documentId: string,
+    input: UpdateContentDocumentInput,
+  ): Promise<ApiResult<AdminContentDocument>>;
   duplicateContentDocument(
     documentId: string,
     input?: DuplicateContentDocumentInput,
@@ -1852,22 +1920,27 @@ export type AdminApi = {
       optOutToken?: string;
     },
   ): Promise<ApiResult<AdminContentPreview>>;
-  mintPreviewToken(
-    documentId: string,
-    input?: { versionId?: string },
-  ): Promise<ApiResult<{ token: string; url: string; expiresAt: string; versionId: string }>>;
-  migrateEventPageChrome(): Promise<
+  migrateEventPagePuck(): Promise<
     ApiResult<{
       documentsScanned: number;
       versionsChecked: number;
       versionsMigrated: number;
-      migrated: { documentId: string; versionId: string; versionNumber: number }[];
+      migrated: {
+        documentId: string;
+        versionId: string;
+        versionNumber: number;
+      }[];
     }>
   >;
   publishContentVersion(
     documentId: string,
     versionId: string,
-  ): Promise<ApiResult<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>>;
+  ): Promise<
+    ApiResult<{
+      document: AdminContentDocument;
+      version: AdminContentDocumentVersion;
+    }>
+  >;
   archiveContentDocument(documentId: string): Promise<ApiResult<AdminContentDocument>>;
   testSendContent(
     documentId: string,
@@ -2234,6 +2307,9 @@ function normalizeBrand(value: Record<string, unknown>): AdminBrand {
   if (typeof theme.logoUrl === 'string' && theme.logoUrl.startsWith('/v1/')) {
     theme.logoUrl = `${getAdminApiBaseUrl()}${theme.logoUrl}`;
   }
+  if (typeof theme.iconUrl === 'string' && theme.iconUrl.startsWith('/v1/')) {
+    theme.iconUrl = `${getAdminApiBaseUrl()}${theme.iconUrl}`;
+  }
   return {
     id: String(value.id),
     tenantId: String(value.tenantId ?? value.tenant_id ?? ''),
@@ -2261,13 +2337,29 @@ function normalizeTeamMember(
   value: Record<string, unknown>,
   organizationId: string,
 ): AdminTeamMember {
-  const role =
-    value.role === 'owner' || value.role === 'admin' || value.role === 'organizer'
-      ? value.role
+  const roleValue = String(value.role ?? 'viewer');
+  const role: TeamMemberRole =
+    roleValue === 'owner' ||
+    roleValue === 'admin' ||
+    roleValue === 'organizer' ||
+    roleValue === 'viewer' ||
+    roleValue === 'door_staff' ||
+    roleValue === 'door_staff_sales'
+      ? roleValue
       : 'viewer';
   const status =
     value.status === 'active' || value.status === 'disabled' ? value.status : 'invited';
   const email = stringValue(value.email, '');
+  const brandIds = Array.isArray(value.brandIds)
+    ? value.brandIds.filter((id): id is string => typeof id === 'string')
+    : Array.isArray(value.brand_ids)
+      ? value.brand_ids.filter((id): id is string => typeof id === 'string')
+      : undefined;
+  const eventIds = Array.isArray(value.eventIds)
+    ? value.eventIds.filter((id): id is string => typeof id === 'string')
+    : Array.isArray(value.event_ids)
+      ? value.event_ids.filter((id): id is string => typeof id === 'string')
+      : undefined;
   return {
     id: String(value.id),
     organizationId: String(value.organizationId ?? value.organization_id ?? organizationId),
@@ -2277,6 +2369,15 @@ function normalizeTeamMember(
     status,
     invitedAt: stringValue(value.invitedAt ?? value.invited_at, undefined),
     joinedAt: stringValue(value.joinedAt ?? value.joined_at, undefined),
+    brandIds,
+    eventIds,
+    invitationDelivery:
+      value.invitationDelivery === 'queued' ||
+      value.invitationDelivery === 'captured' ||
+      value.invitationDelivery === 'sent'
+        ? value.invitationDelivery
+        : undefined,
+    invitationProvider: stringValue(value.invitationProvider, undefined),
   };
 }
 
@@ -2384,6 +2485,10 @@ function normalizeEvent(
     grossSalesCents: finiteNumber(value.grossSalesCents),
     ticketsSold: finiteNumber(value.ticketsSold),
     capacity: value.capacity == null ? undefined : finiteNumber(value.capacity),
+    minimumAge:
+      value.minimumAge == null && value.minimum_age == null
+        ? null
+        : finiteNumber(value.minimumAge ?? value.minimum_age),
     coverImageUrl: stringValue(value.coverImageUrl ?? value.cover_image_url, undefined),
     externalUrl: stringValue(value.externalUrl ?? value.external_url, undefined),
     resalePolicy,
@@ -3469,6 +3574,7 @@ const fixtureWebhookEvents: AdminWebhookEvent[] = [
  */
 const fixturePrincipal: TixkitPrincipal = {
   permissions: [
+    'box_office.write',
     'events.read',
     'events.write',
     'tickets.write',
@@ -3797,7 +3903,9 @@ export const adminApi: AdminApi = {
   async listOrganizations() {
     return withFixture(
       async () => {
-        const result = await request<AdminOrganization[]>('/v1/organizations', { method: 'GET' });
+        const result = await request<AdminOrganization[]>('/v1/organizations', {
+          method: 'GET',
+        });
         return result.ok
           ? ok(result.data.map((org) => normalizeOrganization(asRecord(org))))
           : result;
@@ -3826,7 +3934,9 @@ export const adminApi: AdminApi = {
   async listBrands() {
     return withFixture(
       async () => {
-        const result = await request<AdminBrand[]>('/v1/brands', { method: 'GET' });
+        const result = await request<AdminBrand[]>('/v1/brands', {
+          method: 'GET',
+        });
         return result.ok ? ok(result.data.map((brand) => normalizeBrand(asRecord(brand)))) : result;
       },
       () => ok(fixtureBrands),
@@ -3917,6 +4027,7 @@ export const adminApi: AdminApi = {
           `/v1/organizations/${organizationId}/members/invitations`,
           {
             method: 'POST',
+            headers: { 'Idempotency-Key': newIdempotencyKey('organization-invitation') },
             body: JSON.stringify(input),
           },
         );
@@ -3931,9 +4042,45 @@ export const adminApi: AdminApi = {
           role: input.role,
           status: 'invited',
           invitedAt: iso(0),
+          invitationDelivery: 'captured',
+          invitationProvider: 'fixture',
         };
         fixtureTeamMembers.unshift(member);
         return ok(member);
+      },
+    );
+  },
+
+  async updateTeamMember(organizationId, memberId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminTeamMember>(
+          `/v1/organizations/${organizationId}/members/${memberId}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify(input),
+          },
+        );
+        return result.ok ? ok(normalizeTeamMember(asRecord(result.data), organizationId)) : result;
+      },
+      () => {
+        const index = fixtureTeamMembers.findIndex(
+          (member) => member.id === memberId && member.organizationId === organizationId,
+        );
+        if (index < 0) {
+          return {
+            ok: false as const,
+            error: apiError('not_found', 'Organization member not found', 404),
+          };
+        }
+        const updated: AdminTeamMember = {
+          ...fixtureTeamMembers[index],
+          role: input.role,
+          brandIds: input.brandIds,
+          eventIds: input.eventIds,
+        };
+        fixtureTeamMembers[index] = updated;
+        return ok(updated);
       },
     );
   },
@@ -4117,7 +4264,10 @@ export const adminApi: AdminApi = {
           { method: 'GET' },
         );
         return result.ok
-          ? ok({ ...result.data, items: result.data.items.map((item) => normalizeEvent(item)) })
+          ? ok({
+              ...result.data,
+              items: result.data.items.map((item) => normalizeEvent(item)),
+            })
           : result;
       },
       () => {
@@ -4213,7 +4363,10 @@ export const adminApi: AdminApi = {
         return result.ok ? ok(normalizeEvent(result.data)) : result;
       },
       () => {
-        const venue = input.venue ?? { name: input.venueName, address: input.address };
+        const venue = input.venue ?? {
+          name: input.venueName,
+          address: input.address,
+        };
         const newEvent: AdminEventDetail = {
           id: newFixtureId('evt'),
           title: input.title,
@@ -4259,7 +4412,10 @@ export const adminApi: AdminApi = {
           input.venueName !== undefined ||
           input.address !== undefined
         ) {
-          const venue = input.venue ?? { name: input.venueName, address: input.address };
+          const venue = input.venue ?? {
+            name: input.venueName,
+            address: input.address,
+          };
           body.venue = Object.values(venue).some(Boolean) ? venue : null;
         }
         if (input.visibility !== undefined) body.visibility = input.visibility;
@@ -4278,10 +4434,11 @@ export const adminApi: AdminApi = {
       () => {
         const event = fixtureEvents.find((e) => e.id === eventId);
         if (!event) return err<AdminEventDetail>(apiError('not_found', 'Event not found', 404));
-        const updated = normalizeEvent({ ...event, ...input, updatedAt: iso(0) } as Record<
-          string,
-          unknown
-        >);
+        const updated = normalizeEvent({
+          ...event,
+          ...input,
+          updatedAt: iso(0),
+        } as Record<string, unknown>);
         const idx = fixtureEvents.indexOf(event);
         fixtureEvents[idx] = updated;
         return ok(updated);
@@ -4444,7 +4601,9 @@ export const adminApi: AdminApi = {
         const query = params.toString();
         const result = await request<PageResult<AdminTicketListing> | AdminTicketListing[]>(
           `/v1/events/${eventId}/resale-listings${query ? `?${query}` : ''}`,
-          { method: 'GET' },
+          {
+            method: 'GET',
+          },
         );
         return result.ok ? ok(normalizeTicketListingPage(result.data)) : result;
       },
@@ -4959,7 +5118,11 @@ export const adminApi: AdminApi = {
           settings: normalizeWaitlistSettings(asRecord(data.settings)),
         });
       },
-      () => ok({ items: [], settings: { autoOfferEnabled: true, offerTtlMinutes: 1440 } }),
+      () =>
+        ok({
+          items: [],
+          settings: { autoOfferEnabled: true, offerTtlMinutes: 1440 },
+        }),
     );
   },
 
@@ -5532,7 +5695,9 @@ export const adminApi: AdminApi = {
       () =>
         request<RefundOrderResult>(`/v1/orders/${orderId}/refunds`, {
           method: 'POST',
-          headers: { 'Idempotency-Key': adminIdempotencyKey(`refund_${orderId}`) },
+          headers: {
+            'Idempotency-Key': adminIdempotencyKey(`refund_${orderId}`),
+          },
           body: JSON.stringify({
             ...input,
             reason: input.reason?.trim() || 'Requested from admin dashboard',
@@ -5710,6 +5875,26 @@ export const adminApi: AdminApi = {
     );
   },
 
+  async listCheckInActivity(eventId, checkInListId, input) {
+    const params = new URLSearchParams();
+    if (input?.since) params.set('since', input.since);
+    if (input?.afterId) params.set('afterId', input.afterId);
+    if (input?.limit) params.set('limit', String(input.limit));
+    const query = params.toString();
+    return withFixture(
+      async () =>
+        request<CheckInActivityPage>(
+          `/v1/events/${eventId}/check-in-lists/${checkInListId}/activity${query ? `?${query}` : ''}`,
+          { method: 'GET' },
+        ),
+      () =>
+        ok({
+          items: [],
+          summary: { checkedIn: 0, remaining: 0, total: 0, acceptedScans: 0 },
+        }),
+    );
+  },
+
   async scanTicket(input) {
     const qrPayload = input.qrPayload.trim();
     const scannedAt = input.scannedAt ?? new Date().toISOString();
@@ -5821,10 +6006,27 @@ export const adminApi: AdminApi = {
 
   async getContentDocument(documentId) {
     return withFixture(
-      () => request<AdminContentDocument>(`/v1/content-documents/${documentId}`, { method: 'GET' }),
+      () =>
+        request<AdminContentDocument>(`/v1/content-documents/${documentId}`, {
+          method: 'GET',
+        }),
       () =>
         err<AdminContentDocument>(
           apiError('fixture_unavailable', 'Content documents require the live API', 503),
+        ),
+    );
+  },
+
+  async updateContentDocument(documentId, input) {
+    return withFixture(
+      () =>
+        request<AdminContentDocument>(`/v1/content-documents/${documentId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        }),
+      () =>
+        err<AdminContentDocument>(
+          apiError('fixture_unavailable', 'Content document updates require the live API', 503),
         ),
     );
   },
@@ -5887,35 +6089,31 @@ export const adminApi: AdminApi = {
     );
   },
 
-  async mintPreviewToken(documentId, input) {
-    return withFixture(
-      () =>
-        request<{ token: string; url: string; expiresAt: string; versionId: string }>(
-          `/v1/content-documents/${documentId}/preview-token`,
-          { method: 'POST', body: JSON.stringify(input ?? {}) },
-        ),
-      () =>
-        err<{ token: string; url: string; expiresAt: string; versionId: string }>(
-          apiError('fixture_unavailable', 'Preview tokens require the live API', 503),
-        ),
-    );
-  },
-
-  async migrateEventPageChrome() {
+  async migrateEventPagePuck() {
     return withFixture(
       () =>
         request<{
           documentsScanned: number;
           versionsChecked: number;
           versionsMigrated: number;
-          migrated: { documentId: string; versionId: string; versionNumber: number }[];
-        }>('/v1/content-documents/migrate-event-page-chrome', { method: 'POST' }),
+          migrated: {
+            documentId: string;
+            versionId: string;
+            versionNumber: number;
+          }[];
+        }>('/v1/content-documents/migrate-event-page-puck', {
+          method: 'POST',
+        }),
       () =>
         err<{
           documentsScanned: number;
           versionsChecked: number;
           versionsMigrated: number;
-          migrated: { documentId: string; versionId: string; versionNumber: number }[];
+          migrated: {
+            documentId: string;
+            versionId: string;
+            versionNumber: number;
+          }[];
         }>(apiError('fixture_unavailable', 'Migration requires the live API', 503)),
     );
   },
@@ -5923,14 +6121,18 @@ export const adminApi: AdminApi = {
   async publishContentVersion(documentId, versionId) {
     return withFixture(
       () =>
-        request<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>(
-          `/v1/content-documents/${documentId}/versions/${versionId}/publish`,
-          { method: 'POST', body: JSON.stringify({}) },
-        ),
+        request<{
+          document: AdminContentDocument;
+          version: AdminContentDocumentVersion;
+        }>(`/v1/content-documents/${documentId}/versions/${versionId}/publish`, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        }),
       () =>
-        err<{ document: AdminContentDocument; version: AdminContentDocumentVersion }>(
-          apiError('fixture_unavailable', 'Content publishing requires the live API', 503),
-        ),
+        err<{
+          document: AdminContentDocument;
+          version: AdminContentDocumentVersion;
+        }>(apiError('fixture_unavailable', 'Content publishing requires the live API', 503)),
     );
   },
 
@@ -6030,7 +6232,9 @@ export const adminApi: AdminApi = {
       async () => {
         const result = await request<BackendMessageCampaign>(`/v1/events/${eventId}/messages`, {
           method: 'POST',
-          headers: { 'Idempotency-Key': adminIdempotencyKey(`message_${eventId}`) },
+          headers: {
+            'Idempotency-Key': adminIdempotencyKey(`message_${eventId}`),
+          },
           body: JSON.stringify(input),
         });
         if (!result.ok) return result;
@@ -6233,7 +6437,10 @@ export const adminApi: AdminApi = {
 
   async getPromoReport(eventId) {
     return withFixture(
-      () => request<AdminPromoReport>(`/v1/events/${eventId}/reports/promo`, { method: 'GET' }),
+      () =>
+        request<AdminPromoReport>(`/v1/events/${eventId}/reports/promo`, {
+          method: 'GET',
+        }),
       () => ok(fixturePromoReport(eventId)),
     );
   },
@@ -6321,7 +6528,10 @@ export const adminApi: AdminApi = {
           { method: 'GET' },
         );
         return result.ok
-          ? ok({ ...result.data, items: result.data.items.map(normalizeAuditLog) })
+          ? ok({
+              ...result.data,
+              items: result.data.items.map(normalizeAuditLog),
+            })
           : result;
       },
       () => {
@@ -6371,7 +6581,10 @@ export const adminApi: AdminApi = {
           { method: 'GET' },
         );
         return result.ok
-          ? ok({ ...result.data, items: result.data.items.map(normalizePrivacyRequest) })
+          ? ok({
+              ...result.data,
+              items: result.data.items.map(normalizePrivacyRequest),
+            })
           : result;
       },
       () => {
@@ -6431,7 +6644,9 @@ export const adminApi: AdminApi = {
       async () => {
         const result = await request<AdminPrivacyRequest>('/v1/privacy/data-exports', {
           method: 'POST',
-          headers: { 'Idempotency-Key': adminIdempotencyKey('privacy_export') },
+          headers: {
+            'Idempotency-Key': adminIdempotencyKey('privacy_export'),
+          },
           body: JSON.stringify(input),
         });
         return result.ok ? ok(normalizePrivacyRequest(result.data)) : result;
@@ -6461,7 +6676,9 @@ export const adminApi: AdminApi = {
       async () => {
         const result = await request<AdminPrivacyRequest>('/v1/privacy/erasures', {
           method: 'POST',
-          headers: { 'Idempotency-Key': adminIdempotencyKey('privacy_erasure') },
+          headers: {
+            'Idempotency-Key': adminIdempotencyKey('privacy_erasure'),
+          },
           body: JSON.stringify(input),
         });
         return result.ok ? ok(normalizePrivacyRequest(result.data)) : result;

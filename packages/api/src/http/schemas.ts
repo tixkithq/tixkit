@@ -1,10 +1,18 @@
 import { z } from 'zod';
-import { createExportRequestSchema, ValidationError, WEBHOOK_EVENT_TYPES } from '@tixkit/domain';
+import {
+  createExportRequestSchema,
+  isLocalKioskReturnTo,
+  ValidationError,
+  WEBHOOK_EVENT_TYPES,
+} from '@tixkit/domain';
 
 // Reusable primitives
 const ulidSchema = z.string().min(1);
 const currencySchema = z.string().length(3);
 const iso8601Schema = z.string().datetime();
+const dateOfBirthSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date of birth must use YYYY-MM-DD format');
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 export const MAX_BULK_OFFLINE_SYNC_CHUNKS = 1_000;
@@ -194,7 +202,9 @@ export const oauthRedirectUrlSchema = z
         return false;
       }
     },
-    { message: 'OAuth redirect URI must use https, except localhost http in development/test' },
+    {
+      message: 'OAuth redirect URI must use https, except localhost http in development/test',
+    },
   );
 
 /**
@@ -271,6 +281,7 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
           firstName: z.string().optional(),
           lastName: z.string().optional(),
           phone: z.string().optional(),
+          dateOfBirth: dateOfBirthSchema.optional(),
         })
         .optional(),
       buyerFields: z.record(z.string(), z.unknown()).optional(),
@@ -288,6 +299,7 @@ export const updateCheckoutSessionSchema = (devMode: boolean) =>
           firstName: z.string().optional(),
           lastName: z.string().optional(),
           phone: z.string().optional(),
+          dateOfBirth: dateOfBirthSchema.optional(),
         })
         .optional(),
       successUrl: safeRedirectUrl(devMode).optional(),
@@ -323,6 +335,7 @@ export const createBoxOfficeOrderSchema = z
         firstName: z.string().optional(),
         lastName: z.string().optional(),
         phone: z.string().optional(),
+        dateOfBirth: dateOfBirthSchema.optional(),
       })
       .optional(),
     buyerFields: z.record(z.string(), z.unknown()).optional(),
@@ -356,6 +369,7 @@ export const createEventSchema = z
     visibility: z.enum(['public', 'unlisted', 'private']).optional(),
     seo: z.record(z.string(), z.unknown()).optional(),
     capacity: z.number().int().positive().optional(),
+    minimumAge: z.number().int().min(0).max(120).nullable().optional(),
     coverImageUrl: urlSchema.optional(),
     externalUrl: urlSchema.optional(),
   })
@@ -374,6 +388,7 @@ export const updateEventSchema = z
     visibility: z.enum(['public', 'unlisted', 'private']).optional(),
     seo: z.record(z.string(), z.unknown()).optional(),
     capacity: z.number().int().positive().nullable().optional(),
+    minimumAge: z.number().int().min(0).max(120).nullable().optional(),
     coverImageUrl: urlSchema.nullable().optional(),
     externalUrl: urlSchema.nullable().optional(),
     status: z.enum(['draft', 'published', 'paused', 'archived']).optional(),
@@ -469,9 +484,49 @@ export const updateOrganizationSchema = z
 export const createOrganizationInvitationSchema = z
   .object({
     email: z.string().trim().toLowerCase().email(),
-    role: z.enum(['admin', 'organizer', 'viewer']).optional().default('viewer'),
+    role: z
+      .enum(['admin', 'organizer', 'viewer', 'door_staff', 'door_staff_sales'])
+      .optional()
+      .default('viewer'),
+    brandIds: z.array(ulidSchema).max(50).optional(),
+    eventIds: z.array(ulidSchema).max(100).optional(),
+    returnTo: z
+      .string()
+      .trim()
+      .max(500)
+      .refine((value) => isLocalKioskReturnTo(value), {
+        message: 'returnTo must be a local kiosk URL',
+      })
+      .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.brandIds?.length && value.eventIds?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide brandIds or eventIds, not both',
+        path: ['brandIds'],
+      });
+    }
+  });
+
+/** PATCH body for updating an existing organization member's role / scope. */
+export const updateOrganizationMemberSchema = z
+  .object({
+    role: z.enum(['admin', 'organizer', 'viewer', 'door_staff', 'door_staff_sales']),
+    brandIds: z.array(ulidSchema).max(50).optional(),
+    eventIds: z.array(ulidSchema).max(100).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.brandIds?.length && value.eventIds?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Provide brandIds or eventIds, not both',
+        path: ['brandIds'],
+      });
+    }
+  });
 
 export const createBrandSchema = z
   .object({
@@ -785,6 +840,7 @@ export const updateAttendeeSchema = z
 export const transferTicketSchema = z
   .object({
     toEmail: z.string().email(),
+    dateOfBirth: dateOfBirthSchema.optional(),
   })
   .strict();
 
@@ -810,6 +866,7 @@ export const completeResaleListingSchema = z
     buyerFirstName: z.string().trim().min(1).nullable().optional(),
     buyerLastName: z.string().trim().min(1).nullable().optional(),
     buyerPhone: z.string().trim().min(1).nullable().optional(),
+    buyerDateOfBirth: dateOfBirthSchema.optional(),
     externalPaymentReference: z.string().trim().min(1).max(256).nullable().optional(),
   })
   .strict();

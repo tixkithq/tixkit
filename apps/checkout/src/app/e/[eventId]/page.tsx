@@ -1,5 +1,7 @@
 import EventPageClient from './event-page-client';
 import { publicApi, type PublicEventPageBootstrap } from '@/lib/api';
+import { eventPageMetadataFromBootstrap } from '@/lib/event-page-metadata';
+import type { Metadata } from 'next';
 
 type PageProps = {
   params: Promise<{ eventId: string }>;
@@ -21,6 +23,14 @@ async function loadInitialBootstrap(
   } catch {
     return null;
   }
+}
+
+export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
+  const { eventId } = await params;
+  const query = await searchParams;
+  const bootstrap = await loadInitialBootstrap(eventId, firstParam(query.locale));
+  if (!bootstrap) return {};
+  return eventPageMetadataFromBootstrap(bootstrap);
 }
 
 export default async function EventPage({ params, searchParams }: PageProps) {

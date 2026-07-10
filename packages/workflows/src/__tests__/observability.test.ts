@@ -12,9 +12,15 @@ vi.mock('@temporalio/interceptors-opentelemetry', () => ({
   OpenTelemetryWorkflowInboundInterceptor: vi.fn(),
 }));
 
+const pushMetricsToGatewayMock = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('@tixkit/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tixkit/shared')>();
-  return { ...actual, startOpenTelemetry: () => ({ shutdown: async () => undefined }) };
+  return {
+    ...actual,
+    pushMetricsToGateway: pushMetricsToGatewayMock,
+    startOpenTelemetry: () => ({ shutdown: async () => undefined }),
+  };
 });
 
 function activityContext(activityType: string): ActivityContext {
@@ -112,5 +118,24 @@ describe('worker observability', () => {
     expect(output).toContain('service="test-worker-error"');
     expect(output).toContain('activity="processRefundActivity"');
     expect(output).toContain('outcome="error"} 1');
+  });
+
+  it('does not overlap metrics pushes when the gateway never settles', async () => {
+    const originalGatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY_URL;
+    process.env.PROMETHEUS_PUSHGATEWAY_URL = 'http://pushgateway.test';
+    pushMetricsToGatewayMock.mockImplementationOnce(() => new Promise<undefined>(() => undefined));
+    const interceptor = new TixkitActivityMetricsInterceptor(
+      activityContext('hungGatewayActivity'),
+      createTixkitMetrics('test-worker-hung-gateway'),
+    );
+
+    try {
+      await interceptor.execute({ args: [], headers: {} as never }, async () => ({ ok: true }));
+      await interceptor.execute({ args: [], headers: {} as never }, async () => ({ ok: true }));
+      await vi.waitFor(() => expect(pushMetricsToGatewayMock).toHaveBeenCalledTimes(1));
+    } finally {
+      if (originalGatewayUrl === undefined) delete process.env.PROMETHEUS_PUSHGATEWAY_URL;
+      else process.env.PROMETHEUS_PUSHGATEWAY_URL = originalGatewayUrl;
+    }
   });
 });

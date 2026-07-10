@@ -1,5 +1,6 @@
-import { BaseRepository } from './base.js';
+import { BaseRepository, insertReturning } from './base.js';
 import { ulid } from 'ulid';
+import type { Database } from '../client.js';
 
 type TicketListingTerminalStatus = 'delisted' | 'expired';
 
@@ -400,24 +401,41 @@ export class ScanLogRepository extends BaseRepository {
     metadata?: Record<string, unknown>;
   }) {
     const id = `scan_${ulid()}`;
-    return this.insertReturning(
-      'scan_logs',
-      {
+    return this.db.transaction().execute(async (trx) => {
+      const transactionDb = trx as Database;
+      const list = await transactionDb
+        .selectFrom('check_in_lists')
+        .select('next_activity_sequence')
+        .where('id', '=', input.checkInListId)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      const activitySequence = Number(list.next_activity_sequence ?? 0) + 1;
+      await transactionDb
+        .updateTable('check_in_lists')
+        .set({ next_activity_sequence: activitySequence })
+        .where('id', '=', input.checkInListId)
+        .execute();
+      return insertReturning(
+        transactionDb,
+        'scan_logs',
+        {
+          id,
+          tenant_id: input.tenantId,
+          check_in_list_id: input.checkInListId,
+          device_id: input.deviceId,
+          ticket_id: input.ticketId ?? null,
+          qr_hash: input.qrHash,
+          outcome: input.outcome,
+          scanned_at: input.scannedAt,
+          synced_at: input.offline ? null : new Date(),
+          offline: input.offline,
+          metadata: input.metadata ? JSON.stringify(input.metadata) : null,
+          created_at: new Date(),
+          activity_sequence: activitySequence,
+        },
         id,
-        tenant_id: input.tenantId,
-        check_in_list_id: input.checkInListId,
-        device_id: input.deviceId,
-        ticket_id: input.ticketId ?? null,
-        qr_hash: input.qrHash,
-        outcome: input.outcome,
-        scanned_at: input.scannedAt,
-        synced_at: input.offline ? null : new Date(),
-        offline: input.offline,
-        metadata: input.metadata ? JSON.stringify(input.metadata) : null,
-        created_at: new Date(),
-      },
-      id,
-    );
+      );
+    });
   }
 
   async findByList(listId: string, limit = 100) {
@@ -428,6 +446,44 @@ export class ScanLogRepository extends BaseRepository {
       .orderBy('scanned_at', 'desc')
       .limit(limit)
       .execute();
+  }
+
+  async findByListSince(input: {
+    listId: string;
+    tenantId: string;
+    since?: Date;
+    afterId?: string;
+    limit?: number;
+  }) {
+    const limit = input.limit ?? 50;
+    const cursor = input.afterId
+      ? await this.db
+          .selectFrom('scan_logs')
+          .select('activity_sequence')
+          .where('tenant_id', '=', input.tenantId)
+          .where('check_in_list_id', '=', input.listId)
+          .where('id', '=', input.afterId)
+          .executeTakeFirst()
+      : undefined;
+    if (input.afterId && !cursor) return [];
+    let query = this.db
+      .selectFrom('scan_logs')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('check_in_list_id', '=', input.listId)
+      .orderBy('activity_sequence', 'asc')
+      .limit(limit);
+
+    if (input.since) {
+      query = query.where('scanned_at', '>=', input.since);
+    }
+    if (cursor?.activity_sequence != null) {
+      query = query.where('activity_sequence', '>', cursor.activity_sequence);
+    } else if (input.afterId) {
+      query = query.where('id', '>', input.afterId);
+    }
+
+    return query.execute();
   }
 
   async findByDevice(deviceId: string) {

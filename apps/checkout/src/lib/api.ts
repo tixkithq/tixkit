@@ -36,6 +36,7 @@ export type PublicEvent = {
   } | null;
   brandId?: string;
   coverImageUrl?: string;
+  minimumAge?: number | null;
   marketingIntegrations?: MarketingIntegration[];
 };
 
@@ -181,6 +182,7 @@ export type CheckoutResaleListing = {
   ticketId: string;
   ticketTypeId?: string;
   ticketTypeName?: string;
+  eventOccurrenceId?: string;
   sellerId?: string;
   status: 'listed' | 'delisted' | 'sold' | 'expired' | string;
   priceCents: number;
@@ -198,6 +200,7 @@ export type CheckoutPublicResaleListing = {
   eventId: string;
   ticketTypeId?: string;
   ticketTypeName?: string;
+  eventOccurrenceId?: string;
   status: 'listed' | string;
   priceCents: number;
   currency: string;
@@ -249,6 +252,7 @@ export type Buyer = {
   firstName: string;
   lastName: string;
   phone: string;
+  dateOfBirth?: string;
 };
 
 export type CartItem = {
@@ -315,6 +319,7 @@ export type PublicCheckoutBootstrap = {
   availability: AvailabilityItem[];
   questions: QuestionsResponse;
   resaleListing?: CheckoutPublicResaleListing | null;
+  occurrences?: PublicEventOccurrence[];
 };
 
 export type PublicEventPageBootstrap = {
@@ -589,6 +594,7 @@ export const publicApi = {
       availability?: AvailabilityItem[];
       questions?: unknown;
       resaleListing?: CheckoutPublicResaleListing | null;
+      occurrences?: PublicEventOccurrence[];
     }>(`/public/events/${encodeURIComponent(eventId)}/bootstrap${query ? `?${query}` : ''}`, {
       signal,
     });
@@ -597,6 +603,7 @@ export const publicApi = {
       availability: Array.isArray(response.availability) ? response.availability : [],
       questions: normalizeQuestionsResponse(response.questions),
       resaleListing: response.resaleListing ?? null,
+      occurrences: Array.isArray(response.occurrences) ? response.occurrences : [],
     };
   },
 

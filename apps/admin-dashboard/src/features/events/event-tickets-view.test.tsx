@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EventTicketsView } from './event-tickets-view';
 
 type EventTicketsAdminApiMock = {
+  getEvent: ReturnType<typeof vi.fn>;
   listTicketTypes: ReturnType<typeof vi.fn>;
   listWaitlist: ReturnType<typeof vi.fn>;
   listEventOccurrences: ReturnType<typeof vi.fn>;
@@ -21,6 +22,7 @@ type EventTicketsAdminApiMock = {
 
 const adminApiMock = vi.hoisted(
   (): EventTicketsAdminApiMock => ({
+    getEvent: vi.fn(),
     listTicketTypes: vi.fn(),
     listWaitlist: vi.fn(),
     listEventOccurrences: vi.fn(),
@@ -177,6 +179,16 @@ function createDeferred<T>() {
 }
 
 function mockEventTicketsData() {
+  adminApiMock.getEvent.mockResolvedValue({
+    ok: true,
+    data: {
+      id: 'evt_1',
+      title: 'All Access',
+      startsAt: fridayOccurrence.startsAt,
+      timezone: fridayOccurrence.timezone,
+      minimumAge: null,
+    },
+  });
   adminApiMock.listTicketTypes.mockResolvedValue({
     ok: true,
     data: ticketTypes,
@@ -522,7 +534,7 @@ describe('EventTicketsView resale', () => {
         maxAbsoluteCents: 5500,
       });
     });
-    expect(adminApiMock.getResalePolicy).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(adminApiMock.getResalePolicy).toHaveBeenCalledTimes(2));
   });
 
   it('delists resale listings with a scoped idempotency key and refreshes listings', async () => {
@@ -543,7 +555,7 @@ describe('EventTicketsView resale', () => {
         idempotencyKey: expect.stringMatching(/^resale_evt_1_[a-zA-Z0-9-]+$/),
       });
     });
-    expect(adminApiMock.listResaleListings).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(adminApiMock.listResaleListings).toHaveBeenCalledTimes(2));
   });
 });
 

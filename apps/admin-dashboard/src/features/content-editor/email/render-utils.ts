@@ -13,7 +13,7 @@ import {
 
 export function initialEditorContent(document: EmailTemplateDocument): EmailEditorProps['content'] {
   const contentJson = document.editor.contentJson;
-  const contentHtml = document.editor.contentHtml;
+  const contentHtml = makeLegacyBrandLogoEditable(document.editor.contentHtml);
   if (
     contentJson &&
     !(isSinglePlainTextParagraphJson(contentJson) && hasStructuredEditorHtml(contentHtml))
@@ -21,6 +21,23 @@ export function initialEditorContent(document: EmailTemplateDocument): EmailEdit
     return applyMergeTagPreviewsToEditorContent(contentJson as EmailEditorProps['content']);
   }
   return applyMergeTagPreviewsToEditorContent(contentHtml as EmailEditorProps['content']);
+}
+
+/**
+ * Older Studio defaults forced the logo to width:100% with a fixed max-width and
+ * auto margins. Those rules made the editor's native size and alignment controls
+ * appear ineffective. Migrate only that exact legacy signature on canvas load.
+ */
+export function makeLegacyBrandLogoEditable(html: string): string {
+  return html.replace(/<img\b[^>]*>/gi, (imageTag) => {
+    if (!/\bsrc=["']\{\{\s*brand\.logoUrl\s*\}\}["']/i.test(imageTag)) return imageTag;
+    const styleMatch = imageTag.match(/\sstyle=("([^"]*)"|'([^']*)')/i);
+    const style = styleMatch?.[2] ?? styleMatch?.[3] ?? '';
+    if (!/max-width:\s*160px/i.test(style) || !/width:\s*100%/i.test(style)) return imageTag;
+    const editableStyle = 'display: inline-block; height: auto;';
+    if (!styleMatch) return imageTag.replace(/\s*\/>$/, ` style="${editableStyle}" />`);
+    return imageTag.replace(styleMatch[0], ` style="${editableStyle}"`);
+  });
 }
 
 function isSinglePlainTextParagraphJson(value: unknown): boolean {
@@ -76,13 +93,14 @@ export function withEditorExport(
   const canonicalHtml = canonicalizeMergeTagPreviewHtml(preferredHtml);
   const htmlText = plainTextFromHtml(canonicalHtml);
   const contentText = jsonText || exported.text.trim() || htmlText;
-  if (!contentText.trim() && !hasMeaningfulHtml(canonicalHtml)) {
+  const exportHasStructure = hasMeaningfulEditorStructure(exported.json);
+  if (!contentText.trim() && !hasMeaningfulHtml(canonicalHtml) && !exportHasStructure) {
     return document;
   }
   // If the live editor export is blank/shell-only but the saved document still
   // has the studio shell, keep the richer saved HTML.
   const previousHtml = document.editor.contentHtml ?? '';
-  const exportIsBlank = !hasMeaningfulHtml(canonicalHtml);
+  const exportIsBlank = !hasMeaningfulHtml(canonicalHtml) && !exportHasStructure;
   const keepPreviousLayout =
     exportIsBlank && hasEmailLayoutHtml(previousHtml) && hasMeaningfulHtml(previousHtml);
   const baseContentHtml = keepPreviousLayout
@@ -104,6 +122,27 @@ export function withEditorExport(
     },
     blocks: projectEditorTextToLegacyBlocks(document.blocks, contentText),
   };
+}
+
+function hasMeaningfulEditorStructure(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const node = value as { content?: unknown; type?: unknown };
+  if (
+    typeof node.type === 'string' &&
+    [
+      'button',
+      'columnsColumn',
+      'fourColumns',
+      'horizontalRule',
+      'image',
+      'section',
+      'threeColumns',
+      'twoColumns',
+    ].includes(node.type)
+  ) {
+    return true;
+  }
+  return Array.isArray(node.content) && node.content.some(hasMeaningfulEditorStructure);
 }
 
 function hasMeaningfulHtml(html: string): boolean {

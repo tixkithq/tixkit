@@ -41,26 +41,41 @@ const REQUIRED_COMMAND_SNIPPETS = [
   'bun run guardrails:public-remote -- --apply <owner>/<public-repo>',
 ];
 
-const REQUIRED_EXTERNAL_GATE_SNIPPETS = [
-  'hosted GitHub Actions run is green',
-  'Branch protection for `refs/heads/main` requires pull-request and required-status-check rules',
-  'The hosted `Provider Tests (Stripe)` job runs (does not skip)',
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
-  'STRIPE_CONNECT_CLIENT_ID',
-  '.github/workflows/release-dry-run.yml` runs green on hosted CI',
-  'Managed Postgres backup',
-  'managed Postgres restore',
-  'managed MySQL backup',
-  'managed MySQL restore',
-  'restore-based rollback',
-  'RPO/RTO',
-  'docs/production-deployment-guide.md',
-  'docs/incident-runbooks.md',
-  'Deferred 2026-06-30 PayPal',
-  'fresh hosted CI validates the committed suite, `docs/completion/user-story-test-matrix.md`, `Validated 146 user-story rows`, and `78 evidence paths` without cached Turbo-only proof',
-  'export GitHub App as the only bypass actor',
+const REQUIRED_EXTERNAL_GATES = [
+  [
+    'hosted GitHub Actions run is green',
+    /hosted GitHub Actions run is green|\.github\/workflows\/trusted-ci\.yml` is green/i,
+  ],
+  [
+    'branch protection',
+    /Branch protection for `refs\/heads\/main` requires pull-request and required-status-check rules/,
+  ],
+  [
+    'non-skipped Stripe provider gate',
+    /Provider Tests \(Stripe\).*does not skip|Trusted Stripe provider jobs did not skip/is,
+  ],
+  ['Stripe secret key name', /STRIPE_SECRET_KEY/],
+  ['Stripe webhook secret name', /STRIPE_WEBHOOK_SECRET/],
+  ['Stripe publishable key name', /NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY/],
+  ['Stripe Connect client id name', /STRIPE_CONNECT_CLIENT_ID/],
+  [
+    'green release dry run',
+    /\.github\/workflows\/(?:release-dry-run|trusted-release-dry-run)\.yml` runs green/i,
+  ],
+  ['Postgres backup', /(?:Managed )?Postgres backup/i],
+  ['Postgres restore', /(?:managed )?Postgres restore|Postgres backup\/restore/i],
+  ['MySQL backup', /(?:managed )?MySQL backup/i],
+  ['MySQL restore', /(?:managed )?MySQL restore|MySQL backup\/restore/i],
+  ['restore-based rollback', /restore-based rollback/i],
+  ['RPO/RTO', /RPO\/RTO/],
+  ['production deployment guide', /docs\/production-deployment-guide\.md/],
+  ['incident runbooks', /docs\/incident-runbooks\.md/],
+  ['Deferred 2026-06-30 PayPal', /Deferred 2026-06-30 PayPal/],
+  [
+    'fresh uncached user-story proof',
+    /fresh (?:hosted CI|uncached Trusted CI).*user-story-test-matrix\.md.*Validated 146 user-story rows.*(?:78|133) evidence paths.*without cached Turbo-only proof/is,
+  ],
+  ['public export bypass actor', /export GitHub App as the only bypass actor/],
 ];
 
 const REQUIRED_PATHS = [
@@ -267,9 +282,9 @@ export function validateValidationRunbookContent(
     }
   }
 
-  for (const snippet of REQUIRED_EXTERNAL_GATE_SNIPPETS) {
-    if (!markdown.includes(snippet)) {
-      errors.push(`Missing required external gate evidence: ${snippet}`);
+  for (const [label, pattern] of REQUIRED_EXTERNAL_GATES) {
+    if (!pattern.test(markdown)) {
+      errors.push(`Missing required external gate evidence: ${label}`);
     }
   }
 

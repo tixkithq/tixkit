@@ -327,6 +327,7 @@ async function toXlsx(rows: Record<string, unknown>[]): Promise<Buffer> {
   } catch (err) {
     throw new Error(
       `XLSX export generation failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      { cause: err },
     );
   }
 }

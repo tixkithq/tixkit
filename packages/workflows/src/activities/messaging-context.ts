@@ -77,13 +77,31 @@ export function buildEventContext(
   };
 }
 
-export type BrandContextRow = { id: string; name: string | null };
+export type BrandContextRow = { id: string; name: string | null; theme?: unknown };
+
+function parseTheme(value: unknown): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== 'string') return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function buildBrandContext(
   brand: BrandContextRow | null | undefined,
 ): MergeTagContext['brand'] {
   if (!brand) return undefined;
-  return { name: stringValue(brand.name) };
+  const theme = parseTheme(brand.theme);
+  return {
+    name: stringValue(brand.name),
+    logoUrl: theme ? stringValue(theme.logoUrl) : undefined,
+  };
 }
 
 export type OrderContextRow = {

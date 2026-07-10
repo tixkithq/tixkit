@@ -520,13 +520,21 @@ describe('EventMessagesView', () => {
     expect(view.getByText('Brand order confirmation')).toBeInTheDocument();
     expect(view.getByText('Demo Event order confirmation')).toBeInTheDocument();
     expect(view.getAllByText('Transactional').length).toBeGreaterThan(0);
-    expect(view.getByText('Lifecycle template')).toBeInTheDocument();
-    expect(view.getAllByRole('combobox').length).toBeGreaterThan(0);
-    expect(view.getAllByRole('link', { name: 'Open in editor' })[0]).toHaveAttribute(
+    expect(view.getByText('Lifecycle library')).toBeInTheDocument();
+    expect(view.getByRole('searchbox', { name: 'Search lifecycle emails' })).toBeInTheDocument();
+    expect(view.getByText('Essential')).toBeInTheDocument();
+    expect(view.getByText('Attendee journey')).toBeInTheDocument();
+    expect(view.getByText('Operations')).toBeInTheDocument();
+    expect(view.getByRole('link', { name: 'Edit email' })).toHaveAttribute(
       'href',
       '/events/evt_1/content/email?templateKey=order-confirmed&returnTo=%2Fevents%2Fevt_1%2Fmessages%3Ftab%3Dlifecycle%26templateKey%3Dorder-confirmed',
     );
-    expect(view.getAllByRole('link', { name: 'Open in editor' }).length).toBeGreaterThan(1);
+
+    fireEvent.change(view.getByRole('searchbox', { name: 'Search lifecycle emails' }), {
+      target: { value: 'webhook' },
+    });
+    expect(view.getByRole('button', { name: /Webhook failed/ })).toBeInTheDocument();
+    expect(view.queryByRole('button', { name: /Order confirmed/ })).not.toBeInTheDocument();
   });
 
   it('renders persisted audience labels after campaign reload', async () => {
@@ -622,8 +630,6 @@ describe('MessagesView', () => {
       expect(view.getByText('Demo Event')).toBeInTheDocument();
     });
 
-    fireEvent.change(view.container.querySelector('select')!, { target: { value: 'evt_1' } });
-
     await waitFor(() => {
       expect(adminApiMock.listMessages).toHaveBeenCalledWith('evt_1');
     });
@@ -652,8 +658,6 @@ describe('MessagesView', () => {
     await waitFor(() => {
       expect(adminApiMock.listEvents).toHaveBeenCalled();
     });
-    fireEvent.change(view.container.querySelector('select')!, { target: { value: 'evt_1' } });
-
     await waitFor(() => {
       expect(view.getByText(longName)).toBeInTheDocument();
     });

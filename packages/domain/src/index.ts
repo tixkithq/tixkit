@@ -2,6 +2,7 @@ export * from './shared/index.js';
 export * from './errors/index.js';
 export * from './tenant/index.js';
 export * from './identity/index.js';
+export * from './eligibility/age.js';
 export * from './events/index.js';
 export * from './ticketing/index.js';
 export * from './pricing/index.js';

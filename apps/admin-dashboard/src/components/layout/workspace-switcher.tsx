@@ -47,20 +47,19 @@ export function WorkspaceSwitcher() {
 
   const selectedOrganization = organizations.find((org) => org.id === organizationId);
   const selectedBrand = availableBrands.find((brand) => brand.id === brandId);
-  const logoUrl = selectedBrand?.theme?.logoUrl;
-  const canSwitchOrganizations = organizations.length > 1;
-  const canSwitchBrands = availableBrands.length > 1;
-  const hasSwitcherMenu = canSwitchOrganizations || canSwitchBrands;
+  const iconUrl = selectedBrand?.theme?.iconUrl;
+  const hasSwitcherMenu = organizations.length > 0 || availableBrands.length > 0;
 
   const triggerLabel = `${selectedOrganization?.name ?? 'No workspace'} / ${selectedBrand?.name ?? 'No brand'}`;
 
   const logo = (
-    <span className="flex aspect-square size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-accent text-sidebar-accent-foreground">
-      {logoUrl ? (
+    <span className="flex aspect-square size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#fbfaf7] p-1.5 text-sidebar-accent-foreground ring-1 ring-black/10">
+      {iconUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={logoUrl} alt="" className="size-full object-contain" />
+        <img src={iconUrl} alt="" className="size-full object-contain" />
       ) : (
-        <Building2 aria-hidden="true" className="size-4 text-muted-foreground" />
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src="/brand/tixkit-symbol.svg" alt="" className="size-5 object-contain" />
       )}
     </span>
   );
@@ -91,10 +90,21 @@ export function WorkspaceSwitcher() {
                     <>
                       <span className="grid min-w-0 flex-1">
                         <span className="truncate font-bold">
-                          {selectedOrganization?.name ?? 'No workspace'}
+                          {loading
+                            ? 'Loading workspace...'
+                            : (selectedOrganization?.name ?? 'No workspace')}
                         </span>
                         <span className="truncate text-xs text-muted-foreground">
-                          {selectedBrand?.name ?? 'No brand'}
+                          {loading ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Loader2 aria-hidden="true" className="size-3 animate-spin" />
+                              Loading
+                            </span>
+                          ) : error ? (
+                            'Workspace unavailable'
+                          ) : (
+                            (selectedBrand?.name ?? 'No brand')
+                          )}
                         </span>
                       </span>
                       <ChevronsUpDown

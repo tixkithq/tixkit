@@ -20,7 +20,15 @@
         "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
         "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
       ],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": [
+        "dist/**",
+        "build/**",
+        ".next/**",
+        "!.next/cache/**",
+        ".nuxt/**",
+        ".output/**",
+        ".svelte-kit/**"
+      ]
     },
     "dev": {
       "cache": false,

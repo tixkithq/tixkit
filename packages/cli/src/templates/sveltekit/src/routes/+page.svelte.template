@@ -1,0 +1,33 @@
+<script lang="ts">
+  import TixkitWidget, { type TixkitWidgetProps } from '@tixkit/sveltekit/TixkitWidget.svelte';
+
+  let lifecycleEvents = $state<string[]>([]);
+  const widgetProps: TixkitWidgetProps = {
+    widgetBaseUrl: 'http://localhost:3000',
+    brand: '__BRAND_ID__',
+    event: '__EVENT_ID__',
+    trackingId: '__NAME__',
+    mode: 'inline',
+    height: '560px',
+    onEvent: (event) => {
+      lifecycleEvents = [...lifecycleEvents, event.type];
+    },
+  };
+</script>
+
+<svelte:head><title>__TITLE__</title></svelte:head>
+
+<main>
+  <h1>__TITLE__</h1>
+  <p>Demonstrates the Tixkit widget, checkout form action, and verified webhook receiver.</p>
+  <TixkitWidget {...widgetProps} />
+  <form method="POST" action="?/checkout">
+    <input type="hidden" name="eventId" value="__EVENT_ID__" />
+    <input type="hidden" name="idempotencyKey" value="__NAME__-checkout" />
+    <input type="hidden" name="ticketTypeId" value="__TICKET_TYPE_ID__" />
+    <input type="hidden" name="quantity" value="1" />
+    <label>Buyer email <input type="email" name="buyerEmail" required /></label>
+    <button type="submit">Create checkout session</button>
+  </form>
+  <output aria-label="Tixkit lifecycle events">{lifecycleEvents.join(', ') || 'No events yet'}</output>
+</main>

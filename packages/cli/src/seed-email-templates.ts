@@ -23,12 +23,16 @@ export type SeedEmailTemplatesInput = {
   brandId: string;
   eventId?: string | null;
   createdBy?: string;
+  forceRestyle?: boolean;
+  dryRun?: boolean;
 };
 
 export type SeedEmailTemplatesResult = {
   ok: boolean;
   message: string;
   seeded: string[];
+  restyled: string[];
+  skipped: string[];
 };
 
 const EMAIL_VARIABLE_DEFINITIONS = MERGE_TAG_REGISTRY.map((variable) => ({
@@ -48,6 +52,8 @@ export async function seedEmailTemplateDefaults(
       ok: false,
       message: 'DATABASE_URL is not set. Create .env.local from .env.local.example.',
       seeded: [],
+      restyled: [],
+      skipped: [],
     };
   }
 
@@ -57,6 +63,8 @@ export async function seedEmailTemplateDefaults(
     const createdBy = input.createdBy ?? 'system-seed';
 
     const seeded: TemplateKey[] = [];
+    const restyled: TemplateKey[] = [];
+    const skipped: TemplateKey[] = [];
     for (const key of SEED_EMAIL_TEMPLATE_KEYS) {
       // eslint-disable-next-line no-await-in-loop -- Template seeding is sequential so validation and publishing errors point to one key.
       const existing = await repo.findPublishedEmailTemplate({
@@ -65,13 +73,40 @@ export async function seedEmailTemplateDefaults(
         eventId: input.eventId ?? undefined,
         key,
       });
-      if (existing) continue;
-
       const lifecycle = getTemplateLifecycle(key);
       const document = createDefaultEmailTemplateForKey(key);
       const validation = validateEmailTemplate(document);
       if (!validation.valid) {
         throw new Error(`Generated default email template for ${key} failed validation`);
+      }
+      if (existing) {
+        if (!input.forceRestyle || existing.version.createdBy !== 'system-seed') {
+          skipped.push(key);
+          continue;
+        }
+        if (input.dryRun) {
+          restyled.push(key);
+          continue;
+        }
+        // eslint-disable-next-line no-await-in-loop -- Restyles are published sequentially for deterministic audit history.
+        const version = await repo.createVersion({
+          documentId: existing.document.id,
+          subject: document.settings.subject,
+          previewText: document.settings.previewText,
+          contentJson: document,
+          variables: EMAIL_VARIABLE_DEFINITIONS,
+          validation,
+          createdBy,
+        });
+        // eslint-disable-next-line no-await-in-loop -- Publish each replacement before proceeding to the next key.
+        await repo.publishVersion({ documentId: existing.document.id, versionId: version.id });
+        restyled.push(key);
+        continue;
+      }
+
+      if (input.dryRun) {
+        seeded.push(key);
+        continue;
       }
       // eslint-disable-next-line no-await-in-loop -- Each document must exist before its version and publish step.
       const created = await repo.createDocument({
@@ -101,14 +136,20 @@ export async function seedEmailTemplateDefaults(
 
     return {
       ok: true,
-      message: `Seeded ${seeded.length} email template${seeded.length === 1 ? '' : 's'}.`,
+      message: input.dryRun
+        ? `Dry run: would seed ${seeded.length} and restyle ${restyled.length} email template${seeded.length + restyled.length === 1 ? '' : 's'}; ${skipped.length} skipped.`
+        : `Seeded ${seeded.length} and restyled ${restyled.length} email template${seeded.length + restyled.length === 1 ? '' : 's'}; ${skipped.length} skipped.`,
       seeded,
+      restyled,
+      skipped,
     };
   } catch (err) {
     return {
       ok: false,
       message: err instanceof Error ? err.message : 'Unknown error',
       seeded: [],
+      restyled: [],
+      skipped: [],
     };
   } finally {
     await db.destroy();

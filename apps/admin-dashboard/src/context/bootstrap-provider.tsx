@@ -22,6 +22,7 @@ type BootstrapContextValue = {
   availableBrands: AdminBrand[];
   setOrganizationId: (organizationId: string | undefined) => void;
   setBrandId: (brandId: string | undefined) => void;
+  updateBrand: (brand: AdminBrand) => void;
   loading: boolean;
   error: string | null;
 };
@@ -141,6 +142,12 @@ export function BootstrapProvider({ children }: { children: React.ReactNode }) {
     persistSelection(selectedBrandStorageKey, nextBrandId);
   }, []);
 
+  const updateBrand = useCallback((updatedBrand: AdminBrand) => {
+    setBrands((current) =>
+      current.map((brand) => (brand.id === updatedBrand.id ? updatedBrand : brand)),
+    );
+  }, []);
+
   const value = useMemo<BootstrapContextValue>(
     () => ({
       organizations,
@@ -150,6 +157,7 @@ export function BootstrapProvider({ children }: { children: React.ReactNode }) {
       availableBrands,
       setOrganizationId,
       setBrandId,
+      updateBrand,
       loading,
       error,
     }),
@@ -161,6 +169,7 @@ export function BootstrapProvider({ children }: { children: React.ReactNode }) {
       availableBrands,
       setOrganizationId,
       setBrandId,
+      updateBrand,
       loading,
       error,
     ],

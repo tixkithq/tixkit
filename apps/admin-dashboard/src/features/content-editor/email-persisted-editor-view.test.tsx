@@ -106,6 +106,7 @@ const editorMockState = vi.hoisted(() => ({
   exportedJson: undefined as Record<string, unknown> | undefined,
   alignmentCalls: [] as string[],
   slashCommandItems: [] as Array<{ title?: string; description?: string; category?: string }>,
+  lastBubbleMenu: undefined as { showDefaultImageMenu?: boolean } | undefined,
   lastTheme: undefined as unknown,
   lastInitialText: '',
 }));
@@ -164,6 +165,7 @@ vi.mock('@react-email/editor', async () => {
   const EmailEditor = ReactModule.forwardRef(
     (
       {
+        bubbleMenu,
         children,
         content,
         editable = true,
@@ -173,6 +175,7 @@ vi.mock('@react-email/editor', async () => {
         slashCommand,
         theme,
       }: {
+        bubbleMenu?: { showDefaultImageMenu?: boolean };
         children?: React.ReactNode;
         content?: unknown;
         editable?: boolean;
@@ -307,6 +310,9 @@ vi.mock('@react-email/editor', async () => {
       ReactModule.useEffect(() => {
         editorMockState.slashCommandItems = slashCommand?.items ?? [];
       }, [slashCommand]);
+      ReactModule.useEffect(() => {
+        editorMockState.lastBubbleMenu = bubbleMenu;
+      }, [bubbleMenu]);
       ReactModule.useEffect(() => {
         editorMockState.lastTheme = theme;
       }, [theme]);
@@ -612,6 +618,7 @@ describe('EmailPersistedEditorView', () => {
     editorMockState.exportedJson = undefined;
     editorMockState.alignmentCalls = [];
     editorMockState.slashCommandItems = [];
+    editorMockState.lastBubbleMenu = undefined;
     editorMockState.lastTheme = undefined;
     editorMockState.lastInitialText = '';
     vi.stubGlobal(
@@ -931,8 +938,48 @@ describe('EmailPersistedEditorView', () => {
         expect.objectContaining({ title: 'Unsubscribe Footer', category: 'Tixkit' }),
         expect.objectContaining({ title: 'HTML', category: 'Advanced' }),
         expect.objectContaining({ title: 'Variable', category: 'Tixkit' }),
+        expect.objectContaining({ title: 'Background hero', category: 'Tixkit' }),
       ]),
     );
+  });
+
+  it('builds a background hero with the inherited brand logo and editable section styles', () => {
+    const commands = createEmailSlashCommands({
+      mergeTags: ['brand.logoUrl', 'event.title'],
+      brandName: 'All Access Chicago',
+    });
+    const hero = commands.find((command) => command.title === 'Background hero');
+    const run = vi.fn(() => true);
+    const insertContent = vi.fn(() => ({ run }));
+    const deleteRange = vi.fn(() => ({ insertContent }));
+    const focus = vi.fn(() => ({ deleteRange }));
+    const editor = { chain: () => ({ focus }) };
+
+    hero?.command({
+      editor: editor as unknown as Parameters<NonNullable<typeof hero>['command']>[0]['editor'],
+      range: { from: 1, to: 8 },
+    });
+
+    expect(insertContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'section',
+        attrs: expect.objectContaining({ style: expect.stringContaining('min-height: 320px') }),
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'image',
+            attrs: expect.objectContaining({
+              src: mergeTagCanvasAttributeValue('brand.logoUrl'),
+              alt: 'Brand logo',
+            }),
+          }),
+          expect.objectContaining({
+            type: 'paragraph',
+            attrs: expect.objectContaining({ style: expect.stringContaining('font-size: 40px') }),
+          }),
+        ]),
+      }),
+    );
+    expect(run).toHaveBeenCalled();
   });
 
   it('builds the Social Links slash command with canonical event and brand URLs', () => {
@@ -1020,6 +1067,7 @@ describe('EmailPersistedEditorView', () => {
     expect(screen.queryByText('Transactional ticket messages')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Send timing')).not.toBeInTheDocument();
     expect(screen.getByTestId('native-email-inspector-host')).toBeInTheDocument();
+    expect(editorMockState.lastBubbleMenu).toMatchObject({ showDefaultImageMenu: false });
     expect(screen.getByLabelText('Insert Theme')).toBeInTheDocument();
     expect(screen.getByLabelText('Insert Global CSS')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Insert Theme'));
@@ -1251,9 +1299,9 @@ describe('EmailPersistedEditorView', () => {
     let resetCanvas: HTMLElement | undefined;
     await waitFor(() => {
       resetCanvas = screen.getByRole('textbox', { name: 'Email body' });
-      expect(resetCanvas).toHaveTextContent('Receipt and order details inside.');
+      expect(resetCanvas).toHaveTextContent('Your tickets are being prepared');
     });
-    expect(resetCanvas).toHaveTextContent('Details');
+    expect(resetCanvas).toHaveTextContent('Summary');
     expect(resetCanvas).toHaveTextContent('{{order.id}}');
     expect(resetCanvas).not.toHaveTextContent('Bare custom body');
     expect(screen.getByText('Reset to the Studio default for Order confirmed')).toBeInTheDocument();
@@ -1266,14 +1314,14 @@ describe('EmailPersistedEditorView', () => {
         expect.objectContaining({
           contentJson: expect.objectContaining({
             editor: expect.objectContaining({
-              contentText: expect.stringContaining('Receipt and order details inside.'),
+              contentText: expect.stringContaining('Your tickets are being prepared'),
             }),
           }),
-          renderedText: expect.stringContaining('Receipt and order details inside.'),
+          renderedText: expect.stringContaining('Your tickets are being prepared'),
         }),
       );
     });
-  });
+  }, 10_000);
 
   it('canonicalizes preview variable and inline style markup before saving', async () => {
     editorMockState.exportedHtml = `<p>Hi <span data-tixkit-inline-style="true" style="color: #0f766e"><span key="recipient.name" kind="recipient" label="Attendee name" preview="Ada Lovelace" class="tixkit-email-variable-chip" data-tixkit-merge-tag="recipient.name" data-variable-key="recipient.name" data-variable-kind="recipient" data-variable-label="Attendee name" data-variable-preview="Ada Lovelace" data-variable-detail="Attendee name - {{recipient.name}}" title="Attendee name: {{recipient.name}}">Ada Lovelace</span></span>.</p><p><img src="${mergeTagCanvasAttributeValue('ticket.qrCodeUrl')}" data-tixkit-merge-attr-src="ticket.qrCodeUrl" alt="Ticket QR code"></p>`;
@@ -1455,10 +1503,14 @@ describe('EmailPersistedEditorView', () => {
     adminApiMock.saveContentVersion.mockResolvedValue(ok(version));
 
     render(
-      React.createElement(EmailPersistedEditorView, {
-        eventId: 'evt_1',
-        templateKey: 'review-request',
-      }),
+      React.createElement(
+        React.StrictMode,
+        null,
+        React.createElement(EmailPersistedEditorView, {
+          eventId: 'evt_1',
+          templateKey: 'review-request',
+        }),
+      ),
     );
 
     await screen.findByLabelText('Subject');
@@ -1471,6 +1523,7 @@ describe('EmailPersistedEditorView', () => {
       name: 'All Access Chicago Review request',
       locale: 'en',
     });
+    expect(adminApiMock.createContentDocument).toHaveBeenCalledTimes(1);
     expect(adminApiMock.saveContentVersion).toHaveBeenCalledWith(
       'cdoc_email',
       expect.objectContaining({

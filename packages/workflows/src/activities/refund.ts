@@ -992,7 +992,7 @@ export async function notifyRefundActivity(input: {
         .executeTakeFirst(),
       db
         .selectFrom('brands')
-        .select(['id', 'name'])
+        .select(['id', 'name', 'theme'])
         .where('id', '=', input.brandId)
         .executeTakeFirst(),
       input.providerRefundId

@@ -4,7 +4,7 @@ Step-by-step recovery procedures for common Tixkit production incidents. Each ru
 
 ## General Triage
 
-1. Check `GET /health` on the API.
+1. Check API liveness at `GET /health` and database-backed readiness at `GET /ready`.
 2. Check `GET /metrics` through the internal API service with the configured `METRICS_BEARER_TOKEN` and confirm Prometheus is scraping fresh samples. Do not use the public API ingress for metrics.
 3. Check the worker process is running, connected to Temporal, and exporting spans to the OpenTelemetry collector.
 4. Open Temporal UI and filter by the failing workflow type.

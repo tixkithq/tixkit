@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import EventPageClient from '../e/[eventId]/event-page-client';
 import { isSharedCheckoutHost, publicHostHeader } from '@/lib/hosts';
 import { publicApi, type PublicEventPageBootstrap } from '@/lib/api';
+import { eventPageMetadataFromBootstrap } from '@/lib/event-page-metadata';
+import type { Metadata } from 'next';
 
 type PageProps = {
   params: Promise<{ eventSlug: string }>;
@@ -28,6 +30,16 @@ async function loadInitialBootstrap(
   } catch {
     return null;
   }
+}
+
+export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
+  const { eventSlug } = await params;
+  const query = await searchParams;
+  const host = publicHostHeader(await headers());
+
+  if (isSharedCheckoutHost(host)) return {};
+  const bootstrap = await loadInitialBootstrap(eventSlug, host, firstParam(query.locale));
+  return bootstrap ? eventPageMetadataFromBootstrap(bootstrap) : {};
 }
 
 export default async function CustomDomainEventPage({ params, searchParams }: PageProps) {

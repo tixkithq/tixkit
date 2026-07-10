@@ -60,6 +60,7 @@ export const eventSchema = z
     postalCode: z.string().optional(),
     country: z.string().optional(),
     capacity: z.number().int().positive().optional(),
+    minimumAge: z.number().int().min(0).max(120).optional(),
     coverImageUrl: z.string().url('Cover image must be a valid URL').optional().or(z.literal('')),
     externalUrl: z.string().url('External URL must be a valid URL').optional().or(z.literal('')),
     seoTitle: z.string().optional(),
@@ -203,6 +204,8 @@ export function buildEventUpdatePayload(
 
   if (hasChangedField(values, dirtyFields, initialValues, 'capacity'))
     payload.capacity = values.capacity ?? null;
+  if (hasChangedField(values, dirtyFields, initialValues, 'minimumAge'))
+    payload.minimumAge = values.minimumAge ?? null;
   if (hasChangedField(values, dirtyFields, initialValues, 'coverImageUrl'))
     payload.coverImageUrl = emptyStringToNull(values.coverImageUrl);
   if (hasChangedField(values, dirtyFields, initialValues, 'externalUrl'))
@@ -276,6 +279,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
             postalCode: event.venue?.postalCode ?? '',
             country: event.venue?.country ?? '',
             capacity: event.capacity ?? undefined,
+            minimumAge: event.minimumAge ?? undefined,
             coverImageUrl: event.coverImageUrl ?? '',
             externalUrl: event.externalUrl ?? '',
             seoTitle: event.seo.title ?? '',
@@ -299,6 +303,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
             postalCode: '',
             country: '',
             capacity: undefined,
+            minimumAge: undefined,
             coverImageUrl: '',
             externalUrl: '',
             seoTitle: '',
@@ -346,6 +351,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
         visibility: values.visibility,
         seo,
         capacity: values.capacity,
+        minimumAge: values.minimumAge,
         coverImageUrl: emptyStringToUndefined(values.coverImageUrl),
         externalUrl: emptyStringToUndefined(values.externalUrl),
         currency: values.currency,
@@ -445,7 +451,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
             )}
           />
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <FormField
             control={form.control}
             name="status"
@@ -454,7 +460,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
                 <FormLabel>Status</FormLabel>
                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                   <FormControl>
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                   </FormControl>
@@ -477,7 +483,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
                 <FormLabel>Visibility</FormLabel>
                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                   <FormControl>
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select visibility" />
                     </SelectTrigger>
                   </FormControl>
@@ -504,6 +510,32 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
                     value={field.value ?? ''}
                     onChange={(e) =>
                       field.onChange(e.target.value ? Number(e.target.value) : undefined)
+                    }
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="minimumAge"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Minimum age</FormLabel>
+                <FormControl>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={120}
+                    inputMode="numeric"
+                    placeholder="No restriction"
+                    title="Checked on the attendee’s event date."
+                    value={field.value ?? ''}
+                    onChange={(changeEvent) =>
+                      field.onChange(
+                        changeEvent.target.value ? Number(changeEvent.target.value) : undefined,
+                      )
                     }
                   />
                 </FormControl>

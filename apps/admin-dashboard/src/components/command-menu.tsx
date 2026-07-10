@@ -218,10 +218,10 @@ export function CommandMenu() {
 
   const checkInAction: CommandMenuItem = {
     id: 'check-in',
-    title: 'Open Check-in Scanner',
+    title: 'Open Check-in',
     href: routes.checkIn,
     icon: QrCode,
-    keywords: ['check-in', 'scan', 'qr'],
+    keywords: ['check-in', 'scan', 'qr', 'kiosk'],
     requiredPermission: 'checkins.write',
   };
 

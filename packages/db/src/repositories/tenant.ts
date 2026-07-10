@@ -1,5 +1,6 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
+import { ConflictError } from '@tixkit/domain';
 
 type BoxOfficeSettings = {
   enabled: boolean;
@@ -14,6 +15,23 @@ const defaultBoxOfficeSettings: BoxOfficeSettings = {
   requireBuyerEmail: false,
   receiptMode: 'email',
 };
+
+function isUniqueViolation(error: unknown): boolean {
+  const candidate = error as {
+    code?: unknown;
+    errno?: unknown;
+    number?: unknown;
+    message?: unknown;
+  };
+  return (
+    candidate.code === '23505' ||
+    candidate.code === 'ER_DUP_ENTRY' ||
+    candidate.errno === 1062 ||
+    candidate.number === 2601 ||
+    candidate.number === 2627 ||
+    /duplicate|unique constraint|unique index/i.test(String(candidate.message ?? ''))
+  );
+}
 
 export class TenantRepository extends BaseRepository {
   async create(input: { name: string; plan?: string }) {
@@ -83,7 +101,10 @@ export class OrganizationRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('organizations', id, { ...input, updated_at: new Date() });
+    return this.updateReturning('organizations', id, {
+      ...input,
+      updated_at: new Date(),
+    });
   }
 }
 
@@ -96,6 +117,7 @@ export class OrganizationMemberRepository extends BaseRepository {
         'organization_members.id as id',
         'organization_members.tenant_id as tenant_id',
         'organization_members.organization_id as organization_id',
+        'organization_members.user_id as user_id',
         'organization_members.role as role',
         'organization_members.invited_at as invited_at',
         'organization_members.accepted_at as accepted_at',
@@ -111,7 +133,56 @@ export class OrganizationMemberRepository extends BaseRepository {
       .execute();
   }
 
-  async invite(input: { tenantId: string; organizationId: string; email: string; role: string }) {
+  async findById(tenantId: string, organizationId: string, memberId: string) {
+    return this.db
+      .selectFrom('organization_members')
+      .innerJoin('user_profiles', 'user_profiles.id', 'organization_members.user_id')
+      .select([
+        'organization_members.id as id',
+        'organization_members.tenant_id as tenant_id',
+        'organization_members.organization_id as organization_id',
+        'organization_members.user_id as user_id',
+        'organization_members.role as role',
+        'organization_members.invited_at as invited_at',
+        'organization_members.accepted_at as accepted_at',
+        'organization_members.created_at as created_at',
+        'organization_members.updated_at as updated_at',
+        'user_profiles.email as email',
+        'user_profiles.first_name as first_name',
+        'user_profiles.last_name as last_name',
+        'user_profiles.status as user_status',
+      ])
+      .where('organization_members.tenant_id', '=', tenantId)
+      .where('organization_members.organization_id', '=', organizationId)
+      .where('organization_members.id', '=', memberId)
+      .executeTakeFirst();
+  }
+
+  async findByIdForUpdate(tenantId: string, organizationId: string, memberId: string) {
+    return this.db
+      .selectFrom('organization_members')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('id', '=', memberId)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
+  async updateRole(memberId: string, role: string) {
+    return this.updateReturning('organization_members', memberId, {
+      role,
+      updated_at: new Date(),
+    });
+  }
+
+  async invite(input: {
+    tenantId: string;
+    organizationId: string;
+    email: string;
+    role: string;
+    updateExistingRole?: boolean;
+  }) {
     const userId = `usr_${ulid()}`;
     const memberId = `mem_${ulid()}`;
     const now = new Date();
@@ -123,41 +194,94 @@ export class OrganizationMemberRepository extends BaseRepository {
       .where('email', '=', normalizedEmail)
       .executeTakeFirst();
 
-    const user =
-      existingUser ??
-      (await this.insertReturning(
-        'user_profiles',
+    let user = existingUser;
+    if (!user) {
+      try {
+        user = await this.insertReturning(
+          'user_profiles',
+          {
+            id: userId,
+            tenant_id: input.tenantId,
+            clerk_user_id: `invited:${normalizedEmail}`,
+            email: normalizedEmail,
+            first_name: null,
+            last_name: null,
+            avatar_url: null,
+            status: 'invited',
+            last_seen_at: null,
+            created_at: now,
+            updated_at: now,
+          },
+          userId,
+        );
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        user = await this.db
+          .selectFrom('user_profiles')
+          .selectAll()
+          .where('tenant_id', '=', input.tenantId)
+          .where('clerk_user_id', '=', `invited:${normalizedEmail}`)
+          .executeTakeFirst();
+        if (!user) throw error;
+      }
+    }
+
+    const existingMember = await this.db
+      .selectFrom('organization_members')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('user_id', '=', user.id)
+      .forUpdate()
+      .executeTakeFirst();
+    if (existingMember) {
+      if (existingMember.accepted_at) {
+        throw new ConflictError(
+          'This person is already a member. Use Edit member to change their role or scope.',
+        );
+      }
+      if (input.updateExistingRole !== false && existingMember.role !== input.role) {
+        return this.updateRole(existingMember.id, input.role);
+      }
+      return existingMember;
+    }
+
+    try {
+      return await this.insertReturning(
+        'organization_members',
         {
-          id: userId,
+          id: memberId,
           tenant_id: input.tenantId,
-          clerk_user_id: `invited:${normalizedEmail}`,
-          email: normalizedEmail,
-          first_name: null,
-          last_name: null,
-          avatar_url: null,
-          status: 'invited',
-          last_seen_at: null,
+          organization_id: input.organizationId,
+          user_id: user.id,
+          role: input.role,
+          invited_at: now,
+          accepted_at: null,
           created_at: now,
           updated_at: now,
         },
-        userId,
-      ));
-
-    return this.insertReturning(
-      'organization_members',
-      {
-        id: memberId,
-        tenant_id: input.tenantId,
-        organization_id: input.organizationId,
-        user_id: user.id,
-        role: input.role,
-        invited_at: now,
-        accepted_at: null,
-        created_at: now,
-        updated_at: now,
-      },
-      memberId,
-    );
+        memberId,
+      );
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const concurrentMember = await this.db
+        .selectFrom('organization_members')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('user_id', '=', user.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!concurrentMember) throw error;
+      if (concurrentMember.accepted_at) {
+        throw new ConflictError(
+          'This person is already a member. Use Edit member to change their role or scope.',
+        );
+      }
+      return input.updateExistingRole === false || concurrentMember.role === input.role
+        ? concurrentMember
+        : this.updateRole(concurrentMember.id, input.role);
+    }
   }
 }
 
@@ -238,7 +362,10 @@ export class BrandRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('brands', id, { ...input, updated_at: new Date() });
+    return this.updateReturning('brands', id, {
+      ...input,
+      updated_at: new Date(),
+    });
   }
 
   async addDomain(brandId: string, domain: string, isPrimary = false) {
@@ -334,6 +461,9 @@ export class PaymentAccountRepository extends BaseRepository {
   }
 
   async update(id: string, input: Record<string, unknown>) {
-    return this.updateReturning('payment_accounts', id, { ...input, updated_at: new Date() });
+    return this.updateReturning('payment_accounts', id, {
+      ...input,
+      updated_at: new Date(),
+    });
   }
 }

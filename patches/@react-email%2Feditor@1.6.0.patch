@@ -231,7 +231,8 @@ index 67232336..2b3504f4 100644
  			}),
  			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.LinkDefault, {}),
  			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.ButtonDefault, {}),
- 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.ImageDefault, {}),
+-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.ImageDefault, {}),
++			bubbleMenu?.showDefaultImageMenu === false ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.BubbleMenu.ImageDefault, {}),
 -			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.SlashCommandRoot, {}),
 +			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(require_root.SlashCommandRoot, { ...slashCommand }),
  			children
@@ -248,12 +249,13 @@ index 12f8999e..f8e21c16 100644
  import { Content, Editor, Extensions, JSONContent } from "@tiptap/core";
  import * as _$react from "react";
  import { ReactNode } from "react";
-@@ -24,7 +26,12 @@ interface EmailEditorProps {
+@@ -24,7 +26,13 @@ interface EmailEditorProps {
    bubbleMenu?: {
      hideWhenActiveNodes?: string[];
      hideWhenActiveMarks?: string[];
 +    placement?: 'top' | 'bottom';
 +    offset?: number;
++    showDefaultImageMenu?: boolean;
 +    trigger?: TriggerFn;
 +    children?: ReactNode;
    };
@@ -261,7 +263,7 @@ index 12f8999e..f8e21c16 100644
    extensions?: Extensions;
    onUploadImage?: (file: File) => Promise<{
      url: string;
-@@ -35,4 +42,4 @@ interface EmailEditorProps {
+@@ -35,4 +43,4 @@ interface EmailEditorProps {
  declare const EmailEditor: _$react.ForwardRefExoticComponent<EmailEditorProps & _$react.RefAttributes<EmailEditorRef>>;
  //#endregion
  export { EmailEditor, type EmailEditorProps, type EmailEditorRef };
@@ -279,12 +281,13 @@ index 9120ce68..630c687c 100644
  import * as _$react from "react";
  import { ReactNode } from "react";
  import { Content, Editor, Extensions, JSONContent } from "@tiptap/core";
-@@ -24,7 +26,12 @@ interface EmailEditorProps {
+@@ -24,7 +26,13 @@ interface EmailEditorProps {
    bubbleMenu?: {
      hideWhenActiveNodes?: string[];
      hideWhenActiveMarks?: string[];
 +    placement?: 'top' | 'bottom';
 +    offset?: number;
++    showDefaultImageMenu?: boolean;
 +    trigger?: TriggerFn;
 +    children?: ReactNode;
    };
@@ -292,7 +295,7 @@ index 9120ce68..630c687c 100644
    extensions?: Extensions;
    onUploadImage?: (file: File) => Promise<{
      url: string;
-@@ -35,4 +42,4 @@ interface EmailEditorProps {
+@@ -35,4 +43,4 @@ interface EmailEditorProps {
  declare const EmailEditor: _$react.ForwardRefExoticComponent<EmailEditorProps & _$react.RefAttributes<EmailEditorRef>>;
  //#endregion
  export { EmailEditor, type EmailEditorProps, type EmailEditorRef };
@@ -325,7 +328,8 @@ index 9af90e2b..0f095dc4 100644
  			}),
  			/* @__PURE__ */ jsx(BubbleMenu.LinkDefault, {}),
  			/* @__PURE__ */ jsx(BubbleMenu.ButtonDefault, {}),
- 			/* @__PURE__ */ jsx(BubbleMenu.ImageDefault, {}),
+-			/* @__PURE__ */ jsx(BubbleMenu.ImageDefault, {}),
++			bubbleMenu?.showDefaultImageMenu === false ? null : /* @__PURE__ */ jsx(BubbleMenu.ImageDefault, {}),
 -			/* @__PURE__ */ jsx(SlashCommandRoot, {}),
 +			/* @__PURE__ */ jsx(SlashCommandRoot, { ...slashCommand }),
  			children

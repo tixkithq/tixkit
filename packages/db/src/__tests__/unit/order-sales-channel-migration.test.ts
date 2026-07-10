@@ -21,6 +21,10 @@ import { OrganizationClerkIdUniqueMigration } from '../../migrations/0046_organi
 import { EventPublicRevisionMigration } from '../../migrations/0047_event_public_revision.js';
 import { HotQueryIndexesMigration } from '../../migrations/0048_hot_query_indexes.js';
 import { EventFeePassThroughMigration } from '../../migrations/0049_event_fee_pass_through.js';
+import { EventAgeEligibilityMigration } from '../../migrations/0052_event_age_eligibility.js';
+import { OrganizationMemberUniqueMigration } from '../../migrations/0053_organization_member_unique.js';
+import { CheckInActivityIndexesMigration } from '../../migrations/0054_check_in_activity_indexes.js';
+import { CheckInActivitySequenceMigration } from '../../migrations/0055_check_in_activity_sequence.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -187,7 +191,11 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0050_payment_event_recovery');
+    expect(Object.keys(migrations).at(-1)).toBe('0055_check_in_activity_sequence');
+    expect(migrations['0052_event_age_eligibility']).toBe(EventAgeEligibilityMigration);
+    expect(migrations['0053_organization_member_unique']).toBe(OrganizationMemberUniqueMigration);
+    expect(migrations['0054_check_in_activity_indexes']).toBe(CheckInActivityIndexesMigration);
+    expect(migrations['0055_check_in_activity_sequence']).toBe(CheckInActivitySequenceMigration);
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(

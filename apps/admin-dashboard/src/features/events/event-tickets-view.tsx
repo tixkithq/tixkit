@@ -94,6 +94,9 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
   const { data, loading, error, refetch } = useAdminQuery(['listTicketTypes', eventId], () =>
     adminApi.listTicketTypes(eventId),
   );
+  const { data: event } = useAdminQuery(['getEvent', eventId, 'box-office'], () =>
+    adminApi.getEvent(eventId),
+  );
   const {
     data: waitlistData,
     loading: waitlistLoading,
@@ -186,8 +189,8 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
       toast.error(result.error.message);
       return;
     }
+    await refetchResalePolicy();
     toast.success('Resale policy saved');
-    void refetchResalePolicy();
   };
 
   const handleDelistResaleListing = async (listing: AdminTicketListing) => {
@@ -198,8 +201,8 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
       toast.error(result.error.message);
       return;
     }
+    await refetchResaleListings();
     toast.success('Resale listing delisted');
-    void refetchResaleListings();
   };
 
   if (loading && ticketTypes.length === 0) {
@@ -406,14 +409,19 @@ export function EventTicketsView({ eventId }: { eventId: string }) {
             aria-labelledby="box-office-tab"
             className="space-y-4"
           >
-            <BoxOfficeOrderPanel
-              eventId={eventId}
-              ticketTypes={ticketTypes}
-              occurrences={occurrences}
-              onOrderCreated={() => {
-                void refetch();
-              }}
-            />
+            {event ? (
+              <BoxOfficeOrderPanel
+                eventId={eventId}
+                event={event}
+                ticketTypes={ticketTypes}
+                occurrences={occurrences}
+                onOrderCreated={() => {
+                  void refetch();
+                }}
+              />
+            ) : (
+              <Skeleton className="h-64 w-full" />
+            )}
           </div>
         )}
 

@@ -12,8 +12,8 @@ type DecodeCallback = (
 ) => void;
 
 vi.mock('@zxing/browser', () => ({
-  BrowserMultiFormatReader: class MockBrowserMultiFormatReader {
-    decodeFromVideoDevice = vi.fn((_a: unknown, _b: unknown, _cb: DecodeCallback) =>
+  BrowserQRCodeReader: class MockBrowserQRCodeReader {
+    decodeFromConstraints = vi.fn((_a: unknown, _b: unknown, _cb: DecodeCallback) =>
       Promise.resolve({ stop: vi.fn() }),
     );
   },
@@ -179,21 +179,17 @@ describe('ScannerPanel camera mode', () => {
     installMediaDevices();
   });
 
-  it('defaults to Camera mode when camera is supported', async () => {
+  it('defaults to Camera mode without requesting permission automatically', async () => {
     const props = defaultProps();
     render(<ScannerPanel {...props} />);
-    // After mount, the panel should switch to camera mode
-    await waitFor(() => {
-      expect(screen.getByTestId('camera-viewport')).toBeInTheDocument();
-    });
+    expect(await screen.findByText('Ready to scan')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enable camera' })).toBeInTheDocument();
   });
 
   it('switches to Manual mode when the Manual tab is clicked', async () => {
     const props = defaultProps();
     render(<ScannerPanel {...props} />);
-    await waitFor(() => {
-      expect(screen.getByTestId('camera-viewport')).toBeInTheDocument();
-    });
+    expect(await screen.findByText('Ready to scan')).toBeInTheDocument();
     // Radix Tabs activates on mouseDown, not click.
     fireEvent.mouseDown(screen.getByRole('tab', { name: /manual/i }));
     expect(await screen.findByPlaceholderText('Enter QR code or ticket ID')).toBeInTheDocument();
@@ -203,6 +199,7 @@ describe('ScannerPanel camera mode', () => {
     const props = defaultProps();
     props.scanning = true;
     render(<ScannerPanel {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
     expect(await screen.findByTestId('camera-viewport')).toBeInTheDocument();
   });
 });

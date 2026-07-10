@@ -7,7 +7,7 @@ import { findRepoRoot } from './env.js';
 
 const execFileAsync = promisify(execFile);
 
-export type ScaffoldTemplate = 'nextjs' | 'vue' | 'astro' | 'remix';
+export type ScaffoldTemplate = 'nextjs' | 'vue' | 'astro' | 'remix' | 'sveltekit';
 
 export interface ScaffoldOptions {
   targetDir: string;
@@ -29,7 +29,13 @@ interface TemplateEntry {
 const templateDirFor = (template: ScaffoldTemplate): string =>
   fileURLToPath(new URL(`templates/${template}`, import.meta.url));
 
-export const SCAFFOLD_TEMPLATES: ScaffoldTemplate[] = ['nextjs', 'vue', 'astro', 'remix'];
+export const SCAFFOLD_TEMPLATES: ScaffoldTemplate[] = [
+  'nextjs',
+  'vue',
+  'astro',
+  'remix',
+  'sveltekit',
+];
 
 export function scaffoldTemplateDescription(template: ScaffoldTemplate): string {
   switch (template) {
@@ -41,6 +47,8 @@ export function scaffoldTemplateDescription(template: ScaffoldTemplate): string 
       return 'Astro app with @tixkit/astro';
     case 'remix':
       return 'Remix app with @tixkit/remix';
+    case 'sveltekit':
+      return 'SvelteKit app with @tixkit/sveltekit';
     default:
       return template;
   }
@@ -124,22 +132,7 @@ export async function scaffold(
       };
     }
 
-    let repoRoot: string;
-    try {
-      repoRoot = await findRepoRoot(options.targetDir);
-    } catch {
-      return {
-        ok: false,
-        message: `Target directory must be inside the Tixkit monorepo so workspace:* dependencies resolve. Received: ${options.targetDir}`,
-      };
-    }
-    const relToRepo = path.relative(repoRoot, path.resolve(options.targetDir));
-    if (relToRepo.startsWith('..') || path.isAbsolute(relToRepo)) {
-      return {
-        ok: false,
-        message: `Target directory must be inside the Tixkit monorepo so workspace:* dependencies resolve. Received: ${options.targetDir}`,
-      };
-    }
+    const repoRoot = await findRepoRoot(options.targetDir).catch(() => options.targetDir);
 
     for await (const entry of walkTemplates(templateDirFor(options.template))) {
       const destination = path.join(options.targetDir, entry.destination);

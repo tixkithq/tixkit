@@ -60,6 +60,10 @@ jobs:
           bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
           env -u DATABASE_URL -u DATABASE_URL_MYSQL bun run test:unit
           bun run build
+          node packages/cli/dist/index.js --help
+          mkdir -p /tmp/tixkit-cli-pack
+          (cd packages/cli && bun pm pack --destination /tmp/tixkit-cli-pack)
+          test -f /tmp/tixkit-cli-pack/tixkit-0.1.0.tgz
           git init -q
           git add .
           git diff --cached --check
@@ -210,6 +214,21 @@ jobs:
       - run: bun run db:migrate
       - run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
       - run: bun run test:integration
+      - name: PostgreSQL performance budget gate
+        run: |
+          cd packages/api
+          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
+          cd ../..
+          PERFORMANCE_METRICS_PATH=artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
+          bun run check:performance-budgets -- --config performance-budgets.integration.json
+      - name: Upload PostgreSQL performance metrics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: postgres-performance-metrics
+          path: artifacts/performance/load-harness-metrics.json
+          if-no-files-found: error
+          retention-days: 30
 
   integration-tests-mysql:
     name: Integration Tests (MySQL)
@@ -277,17 +296,30 @@ jobs:
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
           PERFORMANCE_METRICS_PATH=artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
           bun run check:performance-budgets -- --config performance-budgets.integration.json
+      - name: Upload MySQL performance metrics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mysql-performance-metrics
+          path: artifacts/performance/load-harness-metrics.json
+          if-no-files-found: error
+          retention-days: 30
 
   integration-tests-mssql:
     name: Integration Tests (MSSQL)
     runs-on: tixkit-epyc-trusted
     env:
       DB_DRIVER: mssql
-      DATABASE_URL_MSSQL: sqlserver://sa:Test-password-12345@tixkit-ci-mssql.arc-runners.svc.cluster.local:1433/tixkit?encrypt=false&trustServerCertificate=true
+      DATABASE_URL_MSSQL: ${{ secrets.TRUSTED_DATABASE_URL_MSSQL }}
+      MSSQL_SA_PASSWORD: ${{ secrets.TRUSTED_MSSQL_SA_PASSWORD }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
+      - name: Verify MSSQL trusted-runner secrets
+        run: |
+          test -n "$DATABASE_URL_MSSQL" || { echo "TRUSTED_DATABASE_URL_MSSQL is required" >&2; exit 1; }
+          test -n "$MSSQL_SA_PASSWORD" || { echo "TRUSTED_MSSQL_SA_PASSWORD is required" >&2; exit 1; }
       - name: Reset MSSQL database
         run: |
           cat > /tmp/reset-mssql.mjs <<'EOF'
@@ -306,7 +338,7 @@ jobs:
               type: 'default',
               options: {
                 userName: 'sa',
-                password: 'Test-password-12345',
+                password: process.env.MSSQL_SA_PASSWORD,
               },
             },
             options: {
@@ -382,3 +414,217 @@ jobs:
       - name: Cleanup MSSQL database
         if: ${{ always() }}
         run: bun /tmp/reset-mssql.mjs cleanup
+
+  provider-tests-stripe:
+    name: Provider Tests (Stripe)
+    runs-on: tixkit-epyc-trusted
+    needs:
+      - build
+      - unit-tests
+      - integration-tests-postgres
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      ADMIN_DASHBOARD_URL: http://localhost:3202
+      CHECKOUT_URL: http://localhost:3201
+      TIXKIT_API_URL: http://localhost:4200
+      TEMPORAL_TASK_QUEUE: tixkit-provider-trusted
+      DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
+      REDIS_URL: redis://localhost:6379
+      TEMPORAL_ADDRESS: localhost:7233
+      TEMPORAL_NAMESPACE: default
+      QR_SIGNING_SECRET: ci-qr-signing-secret
+      OFFLINE_MANIFEST_SIGNING_KEY: ci-offline-manifest-signing-key
+      OFFLINE_MANIFEST_KEY_ID: manifest:ci
+      CLERK_SECRET_KEY: ''
+      CLERK_PUBLISHABLE_KEY: ''
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ''
+      CLERK_WEBHOOK_SECRET: ''
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+      STRIPE_CONNECT_CLIENT_ID: ${{ secrets.STRIPE_CONNECT_CLIENT_ID }}
+      OTEL_SDK_DISABLED: 'true'
+      RATE_LIMIT_MAX: '100000'
+      RATE_LIMIT_TIME_WINDOW: 1 minute
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+        with:
+          playwright-cache: 'true'
+      - name: Require trusted Stripe test-mode secrets
+        run: |
+          missing=()
+          for name in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY STRIPE_CONNECT_CLIENT_ID; do
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required trusted-runner secrets: ${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          {
+            echo "### Stripe provider secret gate"
+            echo
+            echo "All required test-mode secret names are configured; values are redacted."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - run: bun install --frozen-lockfile
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: Write provider CI env file
+        run: |
+          umask 077
+          cat > .env.local <<EOF
+          NODE_ENV=development
+          PORT=4000
+          LOG_LEVEL=info
+          OTEL_SDK_DISABLED=true
+          API_BASE_URL=http://localhost:4000
+          NEXT_PUBLIC_TIXKIT_API_BASE_URL=http://localhost:4000/v1
+          NEXT_PUBLIC_ADMIN_API_BASE_URL=http://localhost:4000
+          DATABASE_URL=postgres://tixkit:tixkit@localhost:5432/tixkit
+          REDIS_URL=redis://localhost:6379
+          QR_SIGNING_SECRET=ci-qr-signing-secret
+          OFFLINE_MANIFEST_SIGNING_KEY=ci-offline-manifest-signing-key
+          OFFLINE_MANIFEST_KEY_ID=manifest:ci
+          TEMPORAL_ADDRESS=localhost:7233
+          TEMPORAL_NAMESPACE=default
+          TEMPORAL_TASK_QUEUE=tixkit-provider-trusted
+          CLERK_SECRET_KEY=
+          CLERK_PUBLISHABLE_KEY=
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+          CLERK_WEBHOOK_SECRET=
+          STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+          STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+          STRIPE_CONNECT_CLIENT_ID=${STRIPE_CONNECT_CLIENT_ID}
+          EOF
+      - name: Start Docker-backed services
+        run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
+      - name: Wait for Temporal
+        run: |
+          for attempt in {1..90}; do
+            if bash -c "echo > /dev/tcp/localhost/7233" 2>/dev/null; then sleep 3; exit 0; fi
+            sleep 2
+          done
+          docker compose -f infra/docker-compose.yml logs temporal
+          exit 1
+      - run: bun run --env-file=.env.local db:migrate
+      - run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared --filter=@tixkit/workflows --filter=@tixkit/openapi
+      - name: Run direct Stripe provider workflow test
+        run: RUN_STRIPE_PROVIDER_TESTS=1 bun run --env-file=.env.local --filter @tixkit/workflows test:provider:stripe
+      - name: Run hosted Stripe Elements browser test
+        run: bun run --env-file=.env.local test:e2e:stripe-provider
+      - name: Run Stripe Connect provider test
+        run: cd packages/api && RUN_STRIPE_CONNECT_TESTS=1 bun --env-file=../../.env.local vitest run src/__tests__/integration/stripe-connect-provider.integration.test.ts
+      - name: Record provider success
+        run: |
+          {
+            echo "### Stripe provider tests passed"
+            echo
+            echo "Provider Tests (Stripe) did not skip."
+            echo "- Direct Stripe create/confirm/refund validation passed."
+            echo "- Hosted Stripe Elements checkout/refund validation passed."
+            echo "- Stripe Connect account/status validation passed."
+            echo "- Secret values were redacted."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload provider browser artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: trusted-stripe-provider-browser-artifacts
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Show Docker logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs --no-color
+      - name: Remove provider credential file
+        if: always()
+        run: rm -f .env.local
+      - name: Stop Docker-backed services
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down -v
+
+  browser-performance:
+    name: Browser & Lighthouse Performance
+    runs-on: tixkit-epyc-trusted
+    needs:
+      - build
+      - unit-tests
+      - integration-tests-postgres
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      RUN_LIGHTHOUSE_BUDGETS: '1'
+      ADMIN_DASHBOARD_URL: http://localhost:3202
+      CHECKOUT_URL: http://localhost:3201
+      TIXKIT_API_URL: http://localhost:4200
+      TEMPORAL_TASK_QUEUE: tixkit-performance-trusted
+      DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
+      REDIS_URL: redis://localhost:6379
+      TEMPORAL_ADDRESS: localhost:7233
+      TEMPORAL_NAMESPACE: default
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: tixkit
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_REGION: us-east-1
+      QR_SIGNING_SECRET: ci-qr-signing-secret
+      OFFLINE_MANIFEST_SIGNING_KEY: ci-offline-manifest-signing-key
+      OFFLINE_MANIFEST_KEY_ID: manifest:ci
+      CLERK_SECRET_KEY: ''
+      CLERK_PUBLISHABLE_KEY: ''
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ''
+      CLERK_WEBHOOK_SECRET: ''
+      STRIPE_SECRET_KEY: ''
+      STRIPE_WEBHOOK_SECRET: ''
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ''
+      OTEL_SDK_DISABLED: 'true'
+      RATE_LIMIT_MAX: '100000'
+      RATE_LIMIT_TIME_WINDOW: 1 minute
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+        with:
+          playwright-cache: 'true'
+      - run: bun install --frozen-lockfile
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: Start Docker-backed services
+        run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
+      - name: Wait for Temporal
+        run: |
+          for attempt in {1..90}; do
+            if bash -c "echo > /dev/tcp/localhost/7233" 2>/dev/null; then sleep 3; exit 0; fi
+            sleep 2
+          done
+          docker compose -f infra/docker-compose.yml logs temporal
+          exit 1
+      - run: bun run db:migrate
+      - name: Build browser dependencies
+        run: |
+          bun run --filter @tixkit/widget build
+          bunx turbo run build
+      - name: Run widget embed golden-path smoke
+        run: bun run test:e2e:checkout-widget -- --project=chromium
+      - name: Generate and enforce Lighthouse budgets
+        run: bunx playwright test e2e/performance-lighthouse.spec.ts --project=chromium
+      - name: Upload browser performance artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: trusted-browser-performance
+          path: |
+            artifacts/performance/lighthouse/
+            playwright-report/
+            test-results/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Show Docker logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs --no-color
+      - name: Stop Docker-backed services
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down -v

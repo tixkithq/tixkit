@@ -381,6 +381,7 @@ test('validateUserStoryMatrix rejects covered rows with only prose evidence', ()
 
   assert.deepEqual(result.errors, [
     'US-BUY-001: Covered rows must cite a concrete completion item, repo path, or package script',
+    'US-BUY-001: Covered E-layer rows must cite a concrete e2e/ path or test:e2e package script',
   ]);
 });
 
@@ -414,7 +415,7 @@ test('validateUserStoryMatrix rejects covered rows with only non-proof source pa
 
   assert.deepEqual(result.errors, [
     'US-BUY-001: Covered path evidence must cite a test, workflow, runbook, or proof script',
-    'US-BUY-001: Covered E-layer rows must cite E2E/browser evidence or a completed completion item',
+    'US-BUY-001: Covered E-layer rows must cite a concrete e2e/ path or test:e2e package script',
     'US-BUY-001: Covered A-layer rows must cite accessibility/axe evidence or a completed completion item',
     'US-BUY-001: Covered U-layer rows must cite unit/test-helper evidence or a completed completion item',
   ]);
@@ -449,6 +450,7 @@ test('validateUserStoryMatrix rejects file-like code spans without repo-relative
 
   assert.deepEqual(result.errors, [
     'US-BUY-001: file-like evidence token must be a repo-relative path: checkout-paid-capture-workflow.spec.ts',
+    'US-BUY-001: Covered E-layer rows must cite a concrete e2e/ path or test:e2e package script',
   ]);
 });
 
@@ -463,6 +465,7 @@ test('validateUserStoryMatrix rejects prose masquerading as code-span evidence',
 
   assert.deepEqual(result.errors, [
     'US-BUY-001: evidence code span must be a repo-relative path or runnable command: unit tests, route integration, browser journey, and axe checks',
+    'US-BUY-001: Covered E-layer rows must cite a concrete e2e/ path or test:e2e package script',
   ]);
 });
 
@@ -520,7 +523,10 @@ test('validateUserStoryMatrix rejects exception story status drift', () => {
     },
   );
 
-  assert.deepEqual(result.errors, ['US-BUY-002: exception story status must stay Deferred']);
+  assert.deepEqual(result.errors, [
+    'US-BUY-002: exception story status must stay Deferred',
+    'US-BUY-002: Covered E-layer rows must cite a concrete e2e/ path or test:e2e package script',
+  ]);
 });
 
 test('validateUserStoryMatrix rejects unregistered deferred or managed stories', () => {
@@ -699,7 +705,7 @@ test('validateUserStoryMatrix rejects covered E-layer rows without browser evide
   );
 
   assert.deepEqual(result.errors, [
-    'US-BUY-001: Covered E-layer rows must cite E2E/browser evidence or a completed completion item',
+    'US-BUY-001: Covered E-layer rows must cite a concrete e2e/ path or test:e2e package script',
   ]);
 });
 

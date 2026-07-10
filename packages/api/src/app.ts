@@ -32,6 +32,7 @@ import { reportingRoutes } from './routes/modules/reporting.js';
 import { privacyRoutes } from './routes/modules/privacy.js';
 import { clerkWebhookRoutes } from './routes/modules/clerk-webhooks.js';
 import { stripeWebhookRoutes } from './routes/modules/stripe-webhooks.js';
+import { closeCheckInActivityPublisher } from './services/check-in-activity-events.js';
 import { telnyxWebhookRoutes } from './routes/modules/telnyx-webhooks.js';
 import { emailWebhookRoutes } from './routes/modules/email-webhooks.js';
 import { publicRoutes } from './routes/modules/public.js';
@@ -210,6 +211,23 @@ export function registerHealthRoute(app: FastifyInstance): void {
     },
     async () => ({ status: 'ok', timestamp: new Date().toISOString() }),
   );
+  app.get('/ready', { config: { rateLimit: false } }, async (_request, reply) => {
+    try {
+      let timeout: NodeJS.Timeout | undefined;
+      await Promise.race([
+        app.context.db.selectFrom('tenants').select('id').limit(1).execute(),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error('Readiness database timeout')), 2_000);
+          timeout.unref();
+        }),
+      ]).finally(() => {
+        if (timeout) clearTimeout(timeout);
+      });
+      return { status: 'ready', timestamp: new Date().toISOString() };
+    } catch {
+      return reply.status(503).send({ status: 'not_ready' });
+    }
+  });
 }
 
 export function registerJsonBodyParser(
@@ -311,6 +329,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   const rateLimitRedis = await createRateLimitRedisClient();
   app.addHook('onClose', async () => {
     rateLimitRedis?.disconnect();
+    await closeCheckInActivityPublisher();
   });
   const db = createDb(config.databaseUrl);
 

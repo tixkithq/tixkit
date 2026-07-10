@@ -1,0 +1,13 @@
+# __TITLE__
+
+Generated with `create-tixkit-app` using SvelteKit and `@tixkit/sveltekit`.
+
+Copy `.env.local.example` to `.env.local`, configure local credentials, then run:
+
+```bash
+bun install
+bun run typecheck
+bun run dev
+```
+
+The generated app includes a browser-safe widget, a server-side checkout form action, and a verified webhook endpoint. Replace the demo brand, event, and ticket type identifiers before use.

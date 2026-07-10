@@ -16,8 +16,11 @@ import {
 import { createAuthProvider, OIDCAdapter } from '../auth/providers.js';
 import { authRoutes } from '../routes/modules/auth.js';
 
+const clerkGetUser = vi.hoisted(() => vi.fn());
+
 vi.mock('@clerk/backend', () => ({
   verifyToken: vi.fn(),
+  createClerkClient: () => ({ users: { getUser: clerkGetUser } }),
 }));
 
 vi.mock('jose', () => ({
@@ -156,12 +159,17 @@ function createAuthDb(initialTables: Tables) {
     };
   }
 
+  const db = {
+    selectFrom: createQuery,
+    updateTable: createUpdate,
+    insertInto: createInsert,
+    transaction: () => ({
+      execute: async <T>(callback: (transactionDb: unknown) => Promise<T>) => callback(db),
+    }),
+  };
+
   return {
-    db: {
-      selectFrom: createQuery,
-      updateTable: createUpdate,
-      insertInto: createInsert,
-    },
+    db,
     tables,
     updates,
   };
@@ -179,6 +187,8 @@ describe('ClerkAuthService signed-in user auth', () => {
 
   beforeEach(() => {
     vi.mocked(verifyToken).mockReset();
+    clerkGetUser.mockReset();
+    clerkGetUser.mockResolvedValue({ emailAddresses: [], primaryEmailAddressId: null });
     process.env.NODE_ENV = 'test';
   });
 
@@ -236,7 +246,113 @@ describe('ClerkAuthService signed-in user auth', () => {
     });
   });
 
-  it('excludes pending and cross-tenant organization memberships from Clerk principals', async () => {
+  it('activates a pending email invitation on the invited user first sign-in', async () => {
+    vi.mocked(verifyToken).mockResolvedValue({
+      sub: 'clerk_door_user',
+      email: 'door@example.com',
+    } as never);
+    clerkGetUser.mockResolvedValue({
+      primaryEmailAddressId: 'email_1',
+      emailAddresses: [
+        {
+          id: 'email_1',
+          emailAddress: 'door@example.com',
+          verification: { status: 'verified' },
+        },
+      ],
+    });
+    const { db, tables } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_invited',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'invited:door@example.com',
+          email: 'door@example.com',
+          status: 'invited',
+        },
+      ],
+      permission_grants: [
+        {
+          tenant_id: 'tnt_1',
+          principal_type: 'user',
+          principal_id: 'usr_invited',
+          permission: 'checkins.read',
+        },
+        {
+          tenant_id: 'tnt_1',
+          principal_type: 'user',
+          principal_id: 'usr_invited',
+          permission: 'checkins.write',
+        },
+      ],
+      organization_members: [
+        {
+          ...organizationMember('usr_invited', 'org_1'),
+          accepted_at: null,
+        },
+      ],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    const result = await service.authenticateRequest(
+      request({ authorization: 'Bearer clerk_session_token' }),
+    );
+
+    expect(tables.user_profiles[0]).toMatchObject({
+      clerk_user_id: 'clerk_door_user',
+      status: 'active',
+    });
+    expect(tables.organization_members[0]?.accepted_at).toBeInstanceOf(Date);
+    expect(result.principal).toMatchObject({
+      id: 'usr_invited',
+      organizationIds: ['org_1'],
+      scopes: ['checkins.read', 'checkins.write'],
+    });
+  });
+
+  it.each([
+    { name: 'unverified', address: 'door@example.com', status: 'unverified' },
+    { name: 'mismatched', address: 'someone-else@example.com', status: 'verified' },
+  ])('does not claim an invitation from a $name Clerk email', async ({ address, status }) => {
+    vi.mocked(verifyToken).mockResolvedValue({
+      sub: 'clerk_unverified_user',
+      email: 'door@example.com',
+    } as never);
+    clerkGetUser.mockResolvedValue({
+      primaryEmailAddressId: 'email_1',
+      emailAddresses: [
+        {
+          id: 'email_1',
+          emailAddress: address,
+          verification: { status },
+        },
+      ],
+    });
+    const { db, tables } = createAuthDb({
+      user_profiles: [
+        {
+          id: 'usr_invited',
+          tenant_id: 'tnt_1',
+          clerk_user_id: 'invited:door@example.com',
+          email: 'door@example.com',
+          status: 'invited',
+        },
+      ],
+      organization_members: [{ ...organizationMember('usr_invited', 'org_1'), accepted_at: null }],
+    });
+
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    await expect(
+      service.authenticateRequest(request({ authorization: 'Bearer clerk_session_token' })),
+    ).rejects.toThrow('User profile not found');
+    expect(tables.user_profiles[0]).toMatchObject({
+      clerk_user_id: 'invited:door@example.com',
+      status: 'invited',
+    });
+    expect(tables.organization_members[0]?.accepted_at).toBeNull();
+  });
+
+  it('accepts pending invitations while excluding cross-tenant memberships', async () => {
     vi.mocked(verifyToken).mockResolvedValue({ sub: 'clerk_user_1' } as never);
     const { db } = createAuthDb({
       user_profiles: [
@@ -263,8 +379,7 @@ describe('ClerkAuthService signed-in user auth', () => {
       request({ authorization: 'Bearer clerk_session_token' }),
     );
 
-    expect(result.principal.organizationIds).toEqual(['org_accepted']);
-    expect(result.principal.organizationIds).not.toContain('org_pending');
+    expect(result.principal.organizationIds).toEqual(['org_accepted', 'org_pending']);
     expect(result.principal.organizationIds).not.toContain('org_other_tenant');
   });
 
@@ -384,7 +499,7 @@ describe('ClerkAuthService signed-in user auth', () => {
     expect(tables.brands).toHaveLength(1);
     expect(tables.user_profiles).toHaveLength(1);
     expect(tables.organization_members).toHaveLength(1);
-    expect(tables.permission_grants).toHaveLength(15);
+    expect(tables.permission_grants).toHaveLength(16);
     expect(result.principal).toMatchObject({
       type: 'user',
       clerkUserId: 'clerk_dev_user_1',

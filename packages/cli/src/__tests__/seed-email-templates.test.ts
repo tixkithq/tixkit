@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockState = vi.hoisted(() => ({
   publishedKeys: new Set<string>(),
+  systemSeededKeys: new Set<string>(),
   createdDocuments: [] as Record<string, unknown>[],
   createdVersions: [] as Record<string, unknown>[],
   publishedVersions: [] as { documentId: string; versionId: string }[],
@@ -16,7 +17,12 @@ vi.mock('@tixkit/db', () => {
       mockState.findPublishedCalls.push(input);
       if (mockState.publishedKeys.has(input.key as string)) {
         return {
-          version: { id: `cver_existing_${input.key}` },
+          version: {
+            id: `cver_existing_${input.key}`,
+            createdBy: mockState.systemSeededKeys.has(input.key as string)
+              ? 'system-seed'
+              : 'organizer-user',
+          },
           document: { id: `cdoc_existing_${input.key}` },
         };
       }
@@ -78,6 +84,7 @@ describe('seedEmailTemplateDefaults', () => {
   beforeEach(() => {
     process.env.DATABASE_URL = 'postgresql://test';
     mockState.publishedKeys = new Set();
+    mockState.systemSeededKeys = new Set();
     mockState.createdDocuments = [];
     mockState.createdVersions = [];
     mockState.publishedVersions = [];
@@ -194,6 +201,50 @@ describe('seedEmailTemplateDefaults', () => {
     expect(result.seeded).toEqual(missingKeys);
     expect(mockState.createdDocuments).toHaveLength(missingKeys.length);
     expect(mockState.publishedVersions).toHaveLength(missingKeys.length);
+  });
+
+  it('force-restyles only published versions created by the system seeder', async () => {
+    const [systemKey, organizerKey] = SEED_EMAIL_TEMPLATE_KEYS;
+    mockState.publishedKeys = new Set([systemKey, organizerKey]);
+    mockState.systemSeededKeys = new Set([systemKey]);
+
+    const result = await seedEmailTemplateDefaults({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      forceRestyle: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.restyled).toEqual([systemKey]);
+    expect(result.skipped).toContain(organizerKey);
+    expect(mockState.createdVersions).toContainEqual(
+      expect.objectContaining({ documentId: `cdoc_existing_${systemKey}` }),
+    );
+    expect(mockState.createdVersions).not.toContainEqual(
+      expect.objectContaining({ documentId: `cdoc_existing_${organizerKey}` }),
+    );
+  });
+
+  it('reports a force-restyle dry run without writing documents or versions', async () => {
+    const systemKey = SEED_EMAIL_TEMPLATE_KEYS[0];
+    mockState.publishedKeys = new Set([systemKey]);
+    mockState.systemSeededKeys = new Set([systemKey]);
+
+    const result = await seedEmailTemplateDefaults({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      forceRestyle: true,
+      dryRun: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain('Dry run');
+    expect(result.restyled).toEqual([systemKey]);
+    expect(mockState.createdDocuments).toHaveLength(0);
+    expect(mockState.createdVersions).toHaveLength(0);
+    expect(mockState.publishedVersions).toHaveLength(0);
   });
 
   it('refuses to publish a generated default that fails validation', async () => {

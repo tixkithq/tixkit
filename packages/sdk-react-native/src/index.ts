@@ -317,6 +317,7 @@ export type TixkitCreateCheckoutResaleListingInput = TixkitCreateResaleListingIn
 export type TixkitCompleteResaleListingInput = {
   buyerId: string;
   buyerEmail: string;
+  buyerDateOfBirth?: string;
   buyerFirstName?: string;
   buyerLastName?: string;
   externalPaymentReference?: string;

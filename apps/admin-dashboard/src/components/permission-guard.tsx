@@ -11,8 +11,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 
 type PermissionGuardProps = {
-  /** Permission required to view the guarded route content. */
-  required: TixkitPermission;
+  /** Single permission required to view the guarded route content. */
+  required?: TixkitPermission;
+  /** Allow access when the user has any of these permissions. */
+  anyOf?: readonly TixkitPermission[];
   children: React.ReactNode;
 };
 
@@ -25,9 +27,13 @@ type PermissionGuardProps = {
  * (and bounced back to the dashboard) instead of the protected content. This
  * prevents manual navigation to routes the user lacks permissions for.
  */
-export function PermissionGuard({ required, children }: PermissionGuardProps) {
+export function PermissionGuard({ required, anyOf, children }: PermissionGuardProps) {
   const { can, loading } = usePermissions();
-  const allowed = can(required);
+  const allowed = anyOf
+    ? anyOf.some((permission) => can(permission))
+    : required
+      ? can(required)
+      : false;
 
   if (loading) {
     return (

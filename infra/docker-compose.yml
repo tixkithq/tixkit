@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
     environment:
       POSTGRES_USER: tixkit
       POSTGRES_PASSWORD: tixkit
@@ -16,7 +16,7 @@ services:
       retries: 10
 
   mysql:
-    image: mysql:8.4
+    image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
     environment:
       MYSQL_ROOT_PASSWORD: tixkit
       MYSQL_DATABASE: tixkit
@@ -33,7 +33,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     ports:
       - '6379:6379'
     healthcheck:
@@ -43,7 +43,7 @@ services:
       retries: 10
 
   temporal:
-    image: temporalio/auto-setup:1.24
+    image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
     ports:
       - '7233:7233'
     environment:
@@ -60,7 +60,7 @@ services:
       - ./dynamicconfig:/etc/temporal/config/dynamicconfig
 
   temporal-postgresql:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
     environment:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal
@@ -73,7 +73,7 @@ services:
       retries: 10
 
   temporal-ui:
-    image: temporalio/ui:2.32.0
+    image: temporalio/ui:2.32.0@sha256:82bf98dbe005a831b6bc5dc12ccd7bffd606af2032dae4821ae133caaa943d3d
     ports:
       - '8080:8080'
     environment:
@@ -100,7 +100,7 @@ services:
       retries: 5
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.116.1
+    image: otel/opentelemetry-collector-contrib:0.116.1@sha256:d0ebf65280da2e1b1491d1b93648281afd353d4b9ea19160090303cec9a233bd
     command: ['--config=/etc/otel-collector.yml']
     ports:
       - '4317:4317'

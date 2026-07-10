@@ -15,6 +15,9 @@ const adminApiImageSrc = originFromUrl(
   'http://localhost:4000',
 );
 
+const refineScriptSources =
+  process.env.NODE_ENV === 'production' ? [] : ['http://localhost:7331', 'https://esm.sh'];
+
 const adminSecurityHeaders = [
   {
     key: 'Content-Security-Policy',
@@ -27,14 +30,19 @@ const adminSecurityHeaders = [
       `img-src 'self' data: blob: https: ${adminApiImageSrc}`,
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.com",
+      [
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        ...refineScriptSources,
+        'https://*.clerk.accounts.dev',
+        'https://*.clerk.com',
+      ].join(' '),
       "connect-src 'self' http://localhost:* http://127.0.0.1:* https:",
       `frame-src 'self' ${checkoutFrameSrc} https://*.clerk.accounts.dev https://*.clerk.com`,
       "worker-src 'self' blob:",
     ].join('; '),
   },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
 ];
@@ -42,6 +50,9 @@ const adminSecurityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? '.next',
+  // Next 16's embedded checker uses removed TypeScript internals. The repo's
+  // mandatory TS 7 `typecheck` gate runs separately before every CI build.
+  typescript: { ignoreBuildErrors: true },
   transpilePackages: [
     '@tixkit/content-email',
     '@tixkit/content-editor-shell',

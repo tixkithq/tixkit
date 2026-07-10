@@ -1,8 +1,13 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { verifyToken } from '@clerk/backend';
+import { createClerkClient, verifyToken } from '@clerk/backend';
 import type { AuthProvider } from '@tixkit/shared';
 import type { Principal, Permission, Ulid } from '@tixkit/domain';
-import { UnauthorizedError, ForbiddenError, NotFoundError } from '@tixkit/domain';
+import {
+  ALL_PERMISSIONS as DOMAIN_ALL_PERMISSIONS,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+} from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
@@ -50,23 +55,7 @@ function sanitizeEnvEmail(value: string | undefined, fallback: string): string {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned) ? cleaned : fallback;
 }
 
-export const ALL_PERMISSIONS: Permission[] = [
-  'events.read',
-  'events.write',
-  'tickets.write',
-  'orders.read',
-  'orders.write',
-  'refunds.write',
-  'attendees.read',
-  'attendees.write',
-  'checkins.read',
-  'checkins.write',
-  'messages.write',
-  'reports.read',
-  'settings.write',
-  'developers.write',
-  'billing.write',
-];
+export const ALL_PERMISSIONS: Permission[] = [...DOMAIN_ALL_PERMISSIONS];
 const API_KEY_PERMISSIONS = new Set<Permission>(ALL_PERMISSIONS);
 const DEFAULT_SCANNER_DEVICE_SCOPES: Permission[] = ['checkins.read', 'checkins.write'];
 const SCANNER_DEVICE_PERMISSIONS = new Set<Permission>(DEFAULT_SCANNER_DEVICE_SCOPES);
@@ -153,6 +142,94 @@ export class ClerkAuthService {
 
   private isDevelopmentMode(): boolean {
     return process.env.NODE_ENV === 'development';
+  }
+
+  private async resolveVerifiedSessionEmail(
+    claims: ClerkSessionClaims,
+  ): Promise<string | undefined> {
+    if (!this.config.secretKey) return undefined;
+
+    const user = await createClerkClient({
+      secretKey: this.config.secretKey,
+    }).users.getUser(claims.sub);
+    const verifiedAddresses = user.emailAddresses.filter(
+      (emailAddress) => emailAddress.verification?.status === 'verified',
+    );
+    const claimedEmail = (claims.email ?? claims.email_address)?.trim().toLowerCase();
+    if (claimedEmail) {
+      return verifiedAddresses
+        .find((emailAddress) => emailAddress.emailAddress.trim().toLowerCase() === claimedEmail)
+        ?.emailAddress.trim()
+        .toLowerCase();
+    }
+    const primary = verifiedAddresses.find(
+      (emailAddress) => emailAddress.id === user.primaryEmailAddressId,
+    );
+    return (primary ?? verifiedAddresses[0])?.emailAddress.trim().toLowerCase();
+  }
+
+  private async acceptPendingInvitations(claims: ClerkSessionClaims): Promise<void> {
+    const existingProfiles = await this.db
+      .selectFrom('user_profiles')
+      .selectAll()
+      .where('clerk_user_id', '=', claims.sub)
+      .execute();
+    const claimedEmail = (claims.email ?? claims.email_address)?.trim().toLowerCase();
+    let verifiedEmail: string | undefined;
+    const knownEmail = claimedEmail ?? existingProfiles[0]?.email?.trim().toLowerCase();
+    if (!knownEmail) verifiedEmail = await this.resolveVerifiedSessionEmail(claims);
+    const email = knownEmail ?? verifiedEmail;
+
+    const invitedProfiles = email
+      ? await this.db.selectFrom('user_profiles').selectAll().where('email', '=', email).execute()
+      : [];
+    const hasPlaceholderInvitation = invitedProfiles.some(
+      (profile) => profile.clerk_user_id === `invited:${profile.email}`,
+    );
+    if (hasPlaceholderInvitation && !verifiedEmail) {
+      verifiedEmail = await this.resolveVerifiedSessionEmail(claims);
+    }
+    const verifiedInvitedProfiles = verifiedEmail && verifiedEmail === email ? invitedProfiles : [];
+    const candidates = new Map(
+      [...existingProfiles, ...verifiedInvitedProfiles].map((profile) => [profile.id, profile]),
+    );
+    if (candidates.size === 0) return;
+
+    const claimable: Array<(typeof existingProfiles)[number]> = [];
+    for (const profile of candidates.values()) {
+      if (
+        profile.clerk_user_id !== claims.sub &&
+        profile.clerk_user_id !== `invited:${profile.email}`
+      ) {
+        continue;
+      }
+      const pendingMembership = await this.db
+        .selectFrom('organization_members')
+        .select('id')
+        .where('user_id', '=', profile.id)
+        .where('accepted_at', 'is', null)
+        .executeTakeFirst();
+      if (profile.clerk_user_id !== claims.sub || pendingMembership) claimable.push(profile);
+    }
+    if (claimable.length === 0) return;
+
+    const now = new Date();
+    await this.db.transaction().execute(async (trx) => {
+      for (const profile of claimable) {
+        await trx
+          .updateTable('user_profiles')
+          .set({ clerk_user_id: claims.sub, status: 'active', updated_at: now })
+          .where('id', '=', profile.id)
+          .execute();
+        await trx
+          .updateTable('organization_members')
+          .set({ accepted_at: now, updated_at: now })
+          .where('user_id', '=', profile.id)
+          .where('tenant_id', '=', profile.tenant_id)
+          .where('accepted_at', 'is', null)
+          .execute();
+      }
+    });
   }
 
   /**
@@ -272,10 +349,7 @@ export class ClerkAuthService {
   private async ensureDevResendProviderRoute(): Promise<void> {
     if (!process.env.RESEND_API_KEY?.trim()) return;
 
-    const fromEmail = sanitizeEnvEmail(
-      process.env.RESEND_FROM_EMAIL,
-      'onboarding@resend.dev',
-    );
+    const fromEmail = sanitizeEnvEmail(process.env.RESEND_FROM_EMAIL, 'onboarding@resend.dev');
     const fromName = sanitizeEnvText(process.env.RESEND_FROM_NAME, 'Tixkit Dev');
     const senderDomain = fromEmail.includes('@')
       ? fromEmail.split('@')[1]!.toLowerCase()
@@ -485,6 +559,8 @@ export class ClerkAuthService {
       const claims = await this.verifyToken(token);
       const { sub: clerkUserId, org_id } = claims;
 
+      await this.acceptPendingInvitations(claims);
+
       // Resolve tenant safely for users that may belong to multiple tenants.
       // Priority: active Clerk org -> mapped tenant; else explicit X-Tenant-Id
       // header; else the single profile if unambiguous.
@@ -589,7 +665,9 @@ export class ClerkAuthService {
     }
 
     try {
-      const result = await verifyToken(token, { secretKey: this.config.secretKey });
+      const result = await verifyToken(token, {
+        secretKey: this.config.secretKey,
+      });
       const verified = result as Partial<ClerkSessionClaims> & {
         data?: Partial<ClerkSessionClaims>;
         errors?: Array<{ message: string }>;
@@ -779,6 +857,16 @@ export class ClerkAuthService {
   static requirePermission(principal: Principal, permission: Permission): void {
     if (!ClerkAuthService.hasPermission(principal, permission)) {
       throw new ForbiddenError(`Missing required permission: ${permission}`);
+    }
+  }
+
+  /**
+   * Requires any one of the listed permissions (used for dual-accept migrations
+   * such as box_office.write alongside legacy orders.write).
+   */
+  static requireAnyPermission(principal: Principal, permissions: Permission[]): void {
+    if (!permissions.some((permission) => ClerkAuthService.hasPermission(principal, permission))) {
+      throw new ForbiddenError(`Missing required permission: ${permissions.join(' or ')}`);
     }
   }
 

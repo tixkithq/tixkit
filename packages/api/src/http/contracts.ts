@@ -199,6 +199,7 @@ export function serializeEvent(row: Record<string, unknown>) {
     visibility: row.visibility,
     seo: parseJsonValue(row.seo, {}),
     capacity: row.capacity ?? undefined,
+    minimumAge: row.minimum_age ?? null,
     coverImageUrl: row.cover_image_url ?? undefined,
     externalUrl: row.external_url ?? undefined,
     resalePolicy: serializeResalePolicy(row),
@@ -621,13 +622,15 @@ export function serializeOrganization(row: Record<string, unknown>) {
 export function serializeBrandTheme(value: unknown): Record<string, unknown> {
   const theme = parseJsonValue<Record<string, unknown>>(value, {});
   const logoArtifactId = theme.logoArtifactId;
+  const iconArtifactId = theme.iconArtifactId;
+  const publicAssets: Record<string, string> = {};
   if (typeof logoArtifactId === 'string' && logoArtifactId.trim() !== '') {
-    return {
-      ...theme,
-      logoUrl: `/v1/public/brand-logos/${encodeURIComponent(logoArtifactId)}`,
-    };
+    publicAssets.logoUrl = `/v1/public/brand-logos/${encodeURIComponent(logoArtifactId)}`;
   }
-  return theme;
+  if (typeof iconArtifactId === 'string' && iconArtifactId.trim() !== '') {
+    publicAssets.iconUrl = `/v1/public/brand-logos/${encodeURIComponent(iconArtifactId)}`;
+  }
+  return { ...theme, ...publicAssets };
 }
 
 export function serializeBrand(row: Record<string, unknown>) {

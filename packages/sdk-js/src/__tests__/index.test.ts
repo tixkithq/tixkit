@@ -266,8 +266,14 @@ describe('TixkitClient', () => {
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_1',
       eventId: 'evt_1',
-      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
-      buyer: { email: 'buyer@example.com' },
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+        },
+      ],
+      buyer: { email: 'buyer@example.com', dateOfBirth: '1990-01-01' },
     });
 
     const [, init] = fetchMock.mock.calls[0]!;
@@ -304,9 +310,16 @@ describe('TixkitClient', () => {
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_tracking',
       eventId: 'evt_1',
-      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+        },
+      ],
       trackingId: 'utm-campaign-1',
       affiliateCode: 'partner-1',
+      buyer: { email: 'buyer@example.com', dateOfBirth: '1990-01-01' },
     });
 
     const [, init] = fetchMock.mock.calls[0]!;
@@ -343,16 +356,25 @@ describe('TixkitClient', () => {
       idempotencyKey: 'idem_checkout_products',
       eventId: 'evt_1',
       items: [
-        { ticketTypeId: 'tt_1', quantity: 1 },
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+        },
         { productId: 'prd_1', quantity: 2 },
       ],
+      buyer: { email: 'buyer@example.com', dateOfBirth: '1990-01-01' },
     });
 
     const [, init] = fetchMock.mock.calls[0]!;
     const body = JSON.parse(init?.body as string) as Record<string, unknown>;
 
     expect(body.items).toEqual([
-      { ticketTypeId: 'tt_1', quantity: 1 },
+      {
+        ticketTypeId: 'tt_1',
+        quantity: 1,
+        attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+      },
       { productId: 'prd_1', quantity: 2 },
     ]);
   });
@@ -384,6 +406,7 @@ describe('TixkitClient', () => {
       idempotencyKey: 'idem_checkout_resale',
       eventId: 'evt_1',
       items: [{ resaleListingId: 'lst_1', quantity: 1 }],
+      buyer: { email: 'buyer@example.com', dateOfBirth: '1990-01-01' },
     });
 
     const [, init] = fetchMock.mock.calls[0]!;
@@ -418,7 +441,14 @@ describe('TixkitClient', () => {
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_waitlist',
       eventId: 'evt_1',
-      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+        },
+      ],
+      buyer: { email: 'buyer@example.com', dateOfBirth: '1990-01-01' },
       waitlistClaimToken: 'claim_token_123',
     });
 
@@ -708,8 +738,14 @@ describe('TixkitClient', () => {
       idempotencyKey: 'box_cash_1',
       tenderType: 'cash',
       amountCents: 2500,
-      buyer: { email: 'door@example.com' },
-      items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      buyer: { email: 'door@example.com', dateOfBirth: '1990-01-01' },
+      items: [
+        {
+          ticketTypeId: 'tt_ga',
+          quantity: 1,
+          attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+        },
+      ],
     });
 
     const [url, init] = fetchMock.mock.calls[0]!;
@@ -721,8 +757,14 @@ describe('TixkitClient', () => {
     expect(body).toEqual({
       tenderType: 'cash',
       amountCents: 2500,
-      buyer: { email: 'door@example.com' },
-      items: [{ ticketTypeId: 'tt_ga', quantity: 1 }],
+      buyer: { email: 'door@example.com', dateOfBirth: '1990-01-01' },
+      items: [
+        {
+          ticketTypeId: 'tt_ga',
+          quantity: 1,
+          attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+        },
+      ],
     });
   });
 
@@ -839,7 +881,14 @@ describe('TixkitClient', () => {
     await client.checkout.create({
       idempotencyKey: 'idem_checkout_retry',
       eventId: 'evt_1',
-      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      items: [
+        {
+          ticketTypeId: 'tt_1',
+          quantity: 1,
+          attendeeFields: [{ dateOfBirth: '1990-01-01' }],
+        },
+      ],
+      buyer: { email: 'buyer@example.com', dateOfBirth: '1990-01-01' },
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -924,9 +973,9 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.events.update('evt_1', { currency: 'GBP' });
+    await c.events.update('evt_1', { currency: 'GBP', minimumAge: 18 });
     const call = getCall(fm);
-    expect(JSON.parse(call.body)).toEqual({ currency: 'GBP' });
+    expect(JSON.parse(call.body)).toEqual({ currency: 'GBP', minimumAge: 18 });
   });
 
   it('events.pause sends POST', async () => {
@@ -1041,6 +1090,7 @@ describe('TixkitClient new resource methods', () => {
     await c.tickets.completeResaleListing('lst_1', {
       buyerId: 'usr_buyer',
       buyerEmail: 'buyer@example.com',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'stripe_pi_1',
       idempotencyKey: 'complete_1',
     });
@@ -1050,7 +1100,30 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(getCall(fm).body)).toEqual({
       buyerId: 'usr_buyer',
       buyerEmail: 'buyer@example.com',
+      buyerDateOfBirth: '1990-01-01',
       externalPaymentReference: 'stripe_pi_1',
+    });
+  });
+
+  it('tickets forwards recipient DOB for age-restricted transfers', async () => {
+    const fm = mockFetch(200, { id: 'tkt_1', ownerEmail: 'adult@example.com' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.tickets.transfer('tkt_1', {
+      toEmail: 'adult@example.com',
+      dateOfBirth: '1990-01-01',
+      idempotencyKey: 'transfer_1',
+    });
+
+    expect(getCall(fm).url).toBe('https://api.test/v1/tickets/tkt_1/transfer');
+    expect(getCall(fm).headers['Idempotency-Key']).toBe('transfer_1');
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      toEmail: 'adult@example.com',
+      dateOfBirth: '1990-01-01',
     });
   });
 
@@ -1140,6 +1213,59 @@ describe('TixkitClient new resource methods', () => {
         requireBuyerEmail: true,
         receiptMode: 'both',
       },
+    });
+  });
+
+  it('organizations.updateMember sends the scoped member update contract', async () => {
+    const fm = mockFetch(200, {
+      id: 'mem_1',
+      organizationId: 'org_1',
+      name: 'Ada Lovelace',
+      email: 'ada@example.test',
+      role: 'door_staff',
+      status: 'invited',
+      invitedAt: '2026-01-01T00:00:00.000Z',
+      joinedAt: null,
+      brandIds: ['brd_1'],
+      eventIds: ['evt_1'],
+    });
+    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test' });
+
+    await c.organizations.updateMember('org_1', 'mem_1', {
+      role: 'door_staff',
+      eventIds: ['evt_1'],
+    });
+
+    const call = getCall(fm);
+    expect(call.url).toBe('https://api.test/v1/organizations/org_1/members/mem_1');
+    expect(call.method).toBe('PATCH');
+    expect(JSON.parse(call.body)).toEqual({
+      role: 'door_staff',
+      eventIds: ['evt_1'],
+    });
+  });
+
+  it('organizations lists and idempotently invites members', async () => {
+    const fm = mockFetch(200, []);
+    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test' });
+
+    await c.organizations.listMembers('org_1');
+    await c.organizations.inviteMember('org_1', {
+      email: 'door@example.test',
+      eventIds: ['evt_1'],
+      returnTo: '/kiosk/evt_1',
+      idempotencyKey: 'invite_1',
+    });
+
+    expect(getCall(fm, 0).url).toBe('https://api.test/v1/organizations/org_1/members');
+    const invite = getCall(fm, 1);
+    expect(invite.url).toBe('https://api.test/v1/organizations/org_1/members/invitations');
+    expect(invite.method).toBe('POST');
+    expect(invite.headers['Idempotency-Key']).toBe('invite_1');
+    expect(JSON.parse(invite.body)).toEqual({
+      email: 'door@example.test',
+      eventIds: ['evt_1'],
+      returnTo: '/kiosk/evt_1',
     });
   });
 
@@ -1272,6 +1398,42 @@ describe('TixkitClient new resource methods', () => {
     expect(call.headers.Authorization).toBeUndefined();
     expect(call.headers['X-Device-Id']).toBe('sd_public_1');
     expect(call.headers['X-Device-Secret']).toBe('scanner-secret');
+  });
+
+  it('checkInLists exposes durable activity history and resumable SSE', async () => {
+    const fm = mockFetch(200, {
+      items: [],
+      summary: { checkedIn: 0, remaining: 1, total: 1, acceptedScans: 0 },
+    });
+    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const scannerHeaders = {
+      'X-Device-Id': 'sd_public_1',
+      'X-Device-Secret': 'scanner-secret',
+    };
+
+    await c.checkInLists.listActivity('evt_1', 'cil_1', {
+      since: '2026-06-01T00:00:00.000Z',
+      afterId: 'scan_1',
+      limit: 100,
+      headers: scannerHeaders,
+    });
+    await c.checkInLists.getActivityStream('evt_1', 'cil_1', {
+      lastEventId: 'scan_1',
+      headers: scannerHeaders,
+    });
+
+    const historyCall = getCall(fm, 0);
+    expect(historyCall.url).toBe(
+      'https://api.test/v1/events/evt_1/check-in-lists/cil_1/activity?since=2026-06-01T00%3A00%3A00.000Z&afterId=scan_1&limit=100',
+    );
+    expect(historyCall.headers['X-Device-Secret']).toBe('scanner-secret');
+    const streamCall = getCall(fm, 1);
+    expect(streamCall.url).toBe(
+      'https://api.test/v1/events/evt_1/check-in-lists/cil_1/activity/stream',
+    );
+    expect(streamCall.headers.Accept).toBe('text/event-stream');
+    expect(streamCall.headers['Last-Event-ID']).toBe('scan_1');
+    expect(streamCall.headers['X-Device-Secret']).toBe('scanner-secret');
   });
 
   it('checkIns.syncBacklog uses the synchronous route when the whole backlog fits', async () => {
@@ -1730,11 +1892,17 @@ describe('TixkitClient new resource methods', () => {
       key: 'order-confirmed',
     });
 
+    await c.content.update('cdoc_1', { name: 'Order receipt' });
+    const updateCall = getCall(fm, 1);
+    expect(updateCall.url).toBe('https://api.test/v1/content-documents/cdoc_1');
+    expect(updateCall.method).toBe('PATCH');
+    expect(JSON.parse(updateCall.body)).toEqual({ name: 'Order receipt' });
+
     await c.content.duplicate('cdoc_1', {
       key: 'order-confirmed-copy',
       name: 'Order confirmed copy',
     });
-    const duplicateCall = getCall(fm, 1);
+    const duplicateCall = getCall(fm, 2);
     expect(duplicateCall.url).toBe('https://api.test/v1/content-documents/cdoc_1/duplicate');
     expect(duplicateCall.method).toBe('POST');
     expect(JSON.parse(duplicateCall.body)).toEqual({

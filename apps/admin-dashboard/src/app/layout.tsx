@@ -17,6 +17,9 @@ export const metadata = {
   description: 'Event ticketing and management platform',
 };
 
+const refineInjectorSrc =
+  process.env.NODE_ENV === 'production' ? null : 'http://localhost:7331/inject.js';
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
   const dir = cookieStore.get('dir')?.value === 'rtl' ? 'rtl' : 'ltr';
@@ -42,6 +45,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         ) : (
           content
         )}
+        {refineInjectorSrc ? (
+          <script id="transitions-refine-injector" type="module" src={refineInjectorSrc} />
+        ) : null}
       </body>
     </html>
   );

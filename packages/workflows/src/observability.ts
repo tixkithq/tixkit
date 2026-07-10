@@ -17,6 +17,32 @@ export type WorkerObservability = {
 };
 
 let observability: WorkerObservability | undefined;
+let metricsPushInFlight: Promise<void> | undefined;
+let metricsPushQueued = false;
+
+function scheduleMetricsPush(metrics: TixkitMetrics): void {
+  const gatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY_URL;
+  if (!gatewayUrl) return;
+  if (metricsPushInFlight) {
+    metricsPushQueued = true;
+    return;
+  }
+  // Activity execution never awaits this promise. Keep the actual network
+  // request as the guard so a hung gateway cannot accumulate parallel pushes.
+  metricsPushInFlight = pushMetricsToGateway(metrics, {
+    gatewayUrl,
+    jobName: 'tixkit-worker',
+  })
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      metricsPushInFlight = undefined;
+      if (metricsPushQueued) {
+        metricsPushQueued = false;
+        scheduleMetricsPush(metrics);
+      }
+    });
+}
 
 export async function startWorkerObservability(): Promise<WorkerObservability> {
   await startOpenTelemetry({
@@ -57,10 +83,7 @@ export class TixkitActivityMetricsInterceptor implements ActivityInboundCallsInt
         outcome,
         durationSeconds: Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
       });
-      await pushMetricsToGateway(this.metrics, {
-        gatewayUrl: process.env.PROMETHEUS_PUSHGATEWAY_URL,
-        jobName: 'tixkit-worker',
-      }).catch(() => undefined);
+      scheduleMetricsPush(this.metrics);
     }
   }
 }

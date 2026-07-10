@@ -27,6 +27,7 @@ export const TEMPLATE_KEYS = [
   'event-reminder',
   'attendee-message',
   'staff-order-notification',
+  'organization-member-invited',
   'checkin-device-invited',
   // P1 — competitor parity and growth
   'waitlist-joined',
@@ -71,6 +72,7 @@ export const P0_TEMPLATE_KEYS: readonly TemplateKey[] = [
   'event-reminder',
   'attendee-message',
   'staff-order-notification',
+  'organization-member-invited',
   'checkin-device-invited',
 ];
 
@@ -206,8 +208,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'order.receiptUrl',
     ],
     variableGaps: [],
-    defaultSubject: 'Your {{event.title}} order is confirmed',
-    defaultPreviewText: 'Receipt and order details inside.',
+    defaultSubject: "You're in: {{event.title}}",
+    defaultPreviewText: 'Your order is confirmed. Tickets are on the way.',
     compliance: transactional,
   },
   {
@@ -236,8 +238,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'ticket.walletGoogleUrl',
     ],
     variableGaps: [],
-    defaultSubject: 'Your {{event.title}} tickets are ready',
-    defaultPreviewText: 'Everything you need before arrival.',
+    defaultSubject: 'Your tickets for {{event.title}} are ready',
+    defaultPreviewText: 'Your QR code, ticket details, and wallet links are inside.',
     compliance: transactional,
   },
   {
@@ -251,8 +253,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'order.id', 'brand.supportUrl'],
     optionalVariables: ['event.checkoutUrl', 'order.total', 'order.retryUrl'],
     variableGaps: [],
-    defaultSubject: 'Payment could not be completed for {{event.title}}',
-    defaultPreviewText: 'Retry your order before it expires.',
+    defaultSubject: "Let's finish your {{event.title}} order",
+    defaultPreviewText: 'Your payment did not complete. Your spot is held briefly.',
     compliance: transactional,
   },
   {
@@ -273,6 +275,7 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     ],
     variableGaps: [],
     defaultSubject: 'Your {{event.title}} order was cancelled',
+    defaultPreviewText: 'Your order is no longer active. Review the details inside.',
     compliance: transactional,
   },
   {
@@ -292,7 +295,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'refund.processedAt',
     ],
     variableGaps: [],
-    defaultSubject: 'Refund issued for your {{event.title}} order',
+    defaultSubject: 'Your refund is on the way',
+    defaultPreviewText: 'Your refund has been sent for processing.',
     compliance: transactional,
   },
   {
@@ -313,7 +317,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'event.changeSummary',
     ],
     variableGaps: [],
-    defaultSubject: 'Important update for {{event.title}}',
+    defaultSubject: '{{event.title}} has changed',
+    defaultPreviewText: 'Review the latest event details before you arrive.',
     compliance: transactional,
   },
   {
@@ -332,7 +337,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'event.refundPolicyUrl',
     ],
     variableGaps: [],
-    defaultSubject: '{{event.title}} has been cancelled',
+    defaultSubject: '{{event.title}} is cancelled',
+    defaultPreviewText: 'The event will no longer take place. Refund details are inside.',
     compliance: transactional,
   },
   {
@@ -354,8 +360,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'event.mapUrl',
     ],
     variableGaps: [],
-    defaultSubject: 'Reminder: {{event.title}} is almost here',
-    defaultPreviewText: 'Date, venue, and your ticket inside.',
+    defaultSubject: 'See you at {{event.title}}',
+    defaultPreviewText: 'Your arrival details and ticket are ready.',
     compliance: transactional,
   },
   {
@@ -369,7 +375,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title'],
     optionalVariables: ['brand.name', 'brand.supportUrl'],
     variableGaps: [],
-    defaultSubject: 'Message from the {{event.title}} organizer',
+    defaultSubject: 'A note about {{event.title}}',
+    defaultPreviewText: 'An update from the event organizer.',
     compliance: bulk,
   },
   {
@@ -384,6 +391,22 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     optionalVariables: ['order.total', 'ticket.type', 'dashboard.url', 'order.buyerName'],
     variableGaps: [],
     defaultSubject: 'New order for {{event.title}}',
+    defaultPreviewText: 'A new order is ready to review.',
+    compliance: staff,
+  },
+  {
+    key: 'organization-member-invited',
+    name: 'Organization member invited',
+    family: 'organizer_admin',
+    category: 'staff',
+    tier: 'P0',
+    trigger: 'An administrator invites a member to an organization',
+    defaultAudience: 'staff',
+    requiredVariables: ['recipient.name'],
+    optionalVariables: ['brand.name', 'dashboard.url'],
+    variableGaps: [],
+    defaultSubject: "You're invited to join Tixkit",
+    defaultPreviewText: 'Accept your invitation and review your assigned access.',
     compliance: staff,
   },
   {
@@ -402,7 +425,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'device.expiresAt',
     ],
     variableGaps: [],
-    defaultSubject: "You're invited to scan for {{event.title}}",
+    defaultSubject: "You're on the door for {{event.title}}",
+    defaultPreviewText: 'Open your scanner invitation and review your access.',
     compliance: staff,
   },
   // ---- P1: competitor parity and growth ----
@@ -417,7 +441,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title'],
     optionalVariables: ['event.startsAt', 'event.venueName', 'brand.name', 'waitlist.position'],
     variableGaps: [],
-    defaultSubject: "You're on the waitlist for {{event.title}}",
+    defaultSubject: "You're on the list for {{event.title}}",
+    defaultPreviewText: 'We will let you know when tickets open up.',
     compliance: transactional,
   },
   {
@@ -431,8 +456,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'waitlist.inviteUrl'],
     optionalVariables: ['waitlist.expiresAt', 'ticket.type', 'event.checkoutUrl'],
     variableGaps: [],
-    defaultSubject: 'Tickets are available for {{event.title}}',
-    defaultPreviewText: 'Claim your spot before the offer expires.',
+    defaultSubject: 'Tickets just opened up for {{event.title}}',
+    defaultPreviewText: 'A ticket is available for a limited time.',
     compliance: transactional,
   },
   {
@@ -451,7 +476,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     ],
     optionalVariables: ['event.checkoutUrl'],
     variableGaps: [],
-    defaultSubject: 'Your waitlist offer for {{event.title}} is expiring',
+    defaultSubject: 'Last call for {{event.title}}',
+    defaultPreviewText: 'Your ticket offer is about to close.',
     compliance: transactional,
   },
   {
@@ -465,8 +491,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'event.checkoutUrl'],
     optionalVariables: ['order.total', 'order.id'],
     variableGaps: [],
-    defaultSubject: 'Finish your {{event.title}} order',
-    defaultPreviewText: 'Your tickets are still waiting.',
+    defaultSubject: 'Pick up your {{event.title}} checkout',
+    defaultPreviewText: 'Your checkout is saved and ready when you are.',
     compliance: bulk,
   },
   {
@@ -480,7 +506,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'ticket.transferUrl', 'ticket.code'],
     optionalVariables: ['ticket.type', 'event.startsAt', 'event.venueName'],
     variableGaps: [],
-    defaultSubject: 'A ticket for {{event.title}} is waiting for you',
+    defaultSubject: 'A {{event.title}} ticket is waiting for you',
+    defaultPreviewText: 'Accept the transfer to add the ticket to your account.',
     compliance: transactional,
   },
   {
@@ -494,7 +521,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'ticket.code'],
     optionalVariables: ['ticket.type'],
     variableGaps: [],
-    defaultSubject: 'Ticket transfer accepted for {{event.title}}',
+    defaultSubject: 'Transfer complete for {{event.title}}',
+    defaultPreviewText: 'The ticket transfer has been accepted.',
     compliance: transactional,
   },
   {
@@ -508,7 +536,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'ticket.code'],
     optionalVariables: ['brand.supportUrl'],
     variableGaps: [],
-    defaultSubject: 'Ticket transfer cancelled for {{event.title}}',
+    defaultSubject: 'Transfer cancelled for {{event.title}}',
+    defaultPreviewText: 'The ticket has returned to its sender.',
     compliance: transactional,
   },
   {
@@ -522,7 +551,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'ticket.code'],
     optionalVariables: ['ticket.walletAppleUrl', 'ticket.walletGoogleUrl', 'ticket.qrCodeUrl'],
     variableGaps: [],
-    defaultSubject: 'Your wallet pass for {{event.title}} is ready',
+    defaultSubject: 'Add {{event.title}} to your wallet',
+    defaultPreviewText: 'Keep your ticket one tap away.',
     compliance: transactional,
   },
   {
@@ -536,7 +566,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title'],
     optionalVariables: ['event.publicUrl', 'brand.name'],
     variableGaps: [],
-    defaultSubject: 'Thanks for joining {{event.title}}',
+    defaultSubject: 'Thanks for coming to {{event.title}}',
+    defaultPreviewText: 'A quick thank-you from the team.',
     compliance: bulk,
   },
   {
@@ -550,7 +581,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['recipient.name', 'event.title', 'review.platform'],
     optionalVariables: ['event.publicUrl'],
     variableGaps: [],
-    defaultSubject: 'Share your review of {{event.title}}',
+    defaultSubject: 'How was {{event.title}}?',
+    defaultPreviewText: 'Share one quick review of your experience.',
     compliance: bulk,
   },
   {
@@ -569,7 +601,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
       'salesDigest.topTicketType',
     ],
     variableGaps: [],
-    defaultSubject: 'Daily sales digest',
+    defaultSubject: 'Today at a glance',
+    defaultPreviewText: 'Revenue, orders, and your top ticket in one view.',
     compliance: system,
   },
   // ---- P2: managed/cloud/pro polish ----
@@ -584,7 +617,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['payout.amount'],
     optionalVariables: ['payout.eta', 'payout.account', 'dashboard.url'],
     variableGaps: [],
-    defaultSubject: 'Payout scheduled for {{payout.amount}}',
+    defaultSubject: '{{payout.amount}} is on the way',
+    defaultPreviewText: 'Your payout is scheduled.',
     compliance: system,
   },
   {
@@ -598,7 +632,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['payout.amount'],
     optionalVariables: ['payout.account', 'payout.period', 'dashboard.url'],
     variableGaps: [],
-    defaultSubject: 'Payout of {{payout.amount}} completed',
+    defaultSubject: '{{payout.amount}} paid out',
+    defaultPreviewText: 'Your payout completed successfully.',
     compliance: system,
   },
   {
@@ -612,7 +647,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['payout.amount', 'brand.supportUrl'],
     optionalVariables: ['dashboard.url'],
     variableGaps: [],
-    defaultSubject: 'Payout of {{payout.amount}} failed',
+    defaultSubject: 'Action needed: payout failed',
+    defaultPreviewText: 'We could not complete the payout. Support can help.',
     compliance: system,
   },
   {
@@ -627,6 +663,7 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     optionalVariables: ['brand.name'],
     variableGaps: [],
     defaultSubject: 'Verify your sender domain',
+    defaultPreviewText: 'Protect deliverability by verifying your sending domain.',
     compliance: system,
   },
   {
@@ -640,7 +677,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['integration.name', 'integration.reconnectUrl'],
     optionalVariables: ['dashboard.url'],
     variableGaps: [],
-    defaultSubject: '{{integration.name}} integration disconnected',
+    defaultSubject: '{{integration.name}} disconnected',
+    defaultPreviewText: 'Reconnect the integration to resume automatic updates.',
     compliance: system,
   },
   {
@@ -654,7 +692,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['webhook.endpointUrl', 'dashboard.url'],
     optionalVariables: ['webhook.attempts'],
     variableGaps: [],
-    defaultSubject: 'Webhook delivery failures detected',
+    defaultSubject: 'Webhook deliveries are failing',
+    defaultPreviewText: 'Review the endpoint before the next attempt.',
     compliance: system,
   },
   {
@@ -668,7 +707,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['chargeback.id', 'chargeback.amount', 'chargeback.dueAt'],
     optionalVariables: ['order.id', 'chargeback.evidenceUrl', 'dashboard.url'],
     variableGaps: [],
-    defaultSubject: 'Chargeback opened for {{chargeback.id}}',
+    defaultSubject: 'A dispute needs your response',
+    defaultPreviewText: 'Submit evidence before the response deadline.',
     compliance: system,
   },
   {
@@ -682,7 +722,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['chargeback.id', 'chargeback.amount'],
     optionalVariables: ['order.id', 'dashboard.url'],
     variableGaps: [],
-    defaultSubject: 'Chargeback {{chargeback.id}} won',
+    defaultSubject: 'Dispute {{chargeback.id}} resolved in your favor',
+    defaultPreviewText: 'The dispute is closed. No further action is needed.',
     compliance: system,
   },
   {
@@ -696,7 +737,8 @@ export const TEMPLATE_LIFECYCLES: readonly TemplateLifecycle[] = [
     requiredVariables: ['chargeback.id', 'chargeback.amount', 'brand.supportUrl'],
     optionalVariables: ['order.id', 'dashboard.url'],
     variableGaps: [],
-    defaultSubject: 'Chargeback {{chargeback.id}} lost',
+    defaultSubject: 'Dispute {{chargeback.id}} closed',
+    defaultPreviewText: 'Review the outcome and available next steps.',
     compliance: system,
   },
 ];

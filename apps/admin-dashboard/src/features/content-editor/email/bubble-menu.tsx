@@ -176,6 +176,11 @@ export function TixkitEmailBubbleMenu() {
     editor,
     selector: ({ editor: activeEditor }) => activeEditor?.isActive('code') ?? false,
   });
+  const imageHref = useEditorState({
+    editor,
+    selector: ({ editor: activeEditor }) =>
+      (activeEditor?.getAttributes('image').href as string | undefined) ?? '',
+  });
 
   // The BubbleMenu from @tiptap/react portals to document.body, so the
   // library's EditorFocusScope (Radix Slot) never attaches to the actual
@@ -259,6 +264,9 @@ export function TixkitEmailBubbleMenu() {
     };
     dom.addEventListener('tixkit-email-selection-clear', handleSelectionClearWithRef);
     return () => {
+      lastSelectionRef.current = null;
+      variableSelectKeyRef.current = null;
+      rememberEmailBubbleSelection(null);
       dom.removeEventListener('tixkit-email-selection-state', handleSelectionState);
       dom.removeEventListener('tixkit-email-selection-clear', handleSelectionClear);
       dom.removeEventListener('tixkit-email-selection-clear', handleSelectionClearWithRef);
@@ -443,6 +451,7 @@ export function TixkitEmailBubbleMenu() {
     selection?.scope === 'node' ||
     emailBubbleNodeSelectionNodes.some((nodeName) => editor?.isActive(nodeName) ?? false);
   const isImageSelection = selection?.nodeName === 'image' || (editor?.isActive('image') ?? false);
+  const hasImageLink = typeof imageHref === 'string' && imageHref.trim().length > 0;
   const replaceSelectedImage = React.useCallback(() => {
     restoreBubbleSelection();
     type EditorCommands = NonNullable<typeof editor>['commands'] & {
@@ -514,40 +523,71 @@ export function TixkitEmailBubbleMenu() {
               </BubbleMenu.Item>
             </BubbleMenu.ItemGroup>
           )}
-          {isImageSelection && (
+          {isImageSelection ? (
+            <>
+              <BubbleMenu.ImageToolbar>
+                <BubbleMenu.ItemGroup>
+                  <BubbleMenu.Item
+                    isActive={false}
+                    name="Replace image"
+                    onCommand={replaceSelectedImage}
+                  >
+                    <Image className="size-4" />
+                  </BubbleMenu.Item>
+                  <BubbleMenu.ImageEditLink />
+                  {hasImageLink ? <BubbleMenu.ImageUnlink /> : null}
+                </BubbleMenu.ItemGroup>
+                <BubbleMenu.ItemGroup>
+                  <BubbleMenu.Item
+                    isActive={false}
+                    name="Align left"
+                    onCommand={() => formatCurrentSelection({ alignment: 'left' })}
+                  >
+                    <AlignLeftIcon />
+                  </BubbleMenu.Item>
+                  <BubbleMenu.Item
+                    isActive={false}
+                    name="Align center"
+                    onCommand={() => formatCurrentSelection({ alignment: 'center' })}
+                  >
+                    <AlignCenterIcon />
+                  </BubbleMenu.Item>
+                  <BubbleMenu.Item
+                    isActive={false}
+                    name="Align right"
+                    onCommand={() => formatCurrentSelection({ alignment: 'right' })}
+                  >
+                    <AlignRightIcon />
+                  </BubbleMenu.Item>
+                </BubbleMenu.ItemGroup>
+              </BubbleMenu.ImageToolbar>
+              <BubbleMenu.ImageForm />
+            </>
+          ) : (
             <BubbleMenu.ItemGroup>
               <BubbleMenu.Item
                 isActive={false}
-                name="Replace image"
-                onCommand={replaceSelectedImage}
+                name="Align left"
+                onCommand={() => formatCurrentSelection({ alignment: 'left' })}
               >
-                <Image className="size-4" />
+                <AlignLeftIcon />
+              </BubbleMenu.Item>
+              <BubbleMenu.Item
+                isActive={false}
+                name="Align center"
+                onCommand={() => formatCurrentSelection({ alignment: 'center' })}
+              >
+                <AlignCenterIcon />
+              </BubbleMenu.Item>
+              <BubbleMenu.Item
+                isActive={false}
+                name="Align right"
+                onCommand={() => formatCurrentSelection({ alignment: 'right' })}
+              >
+                <AlignRightIcon />
               </BubbleMenu.Item>
             </BubbleMenu.ItemGroup>
           )}
-          <BubbleMenu.ItemGroup>
-            <BubbleMenu.Item
-              isActive={false}
-              name="Align left"
-              onCommand={() => formatCurrentSelection({ alignment: 'left' })}
-            >
-              <AlignLeftIcon />
-            </BubbleMenu.Item>
-            <BubbleMenu.Item
-              isActive={false}
-              name="Align center"
-              onCommand={() => formatCurrentSelection({ alignment: 'center' })}
-            >
-              <AlignCenterIcon />
-            </BubbleMenu.Item>
-            <BubbleMenu.Item
-              isActive={false}
-              name="Align right"
-              onCommand={() => formatCurrentSelection({ alignment: 'right' })}
-            >
-              <AlignRightIcon />
-            </BubbleMenu.Item>
-          </BubbleMenu.ItemGroup>
           {!isNodeSelection && (
             <BubbleMenu.ItemGroup className="tixkit-email-bubble-controls">
               <span
