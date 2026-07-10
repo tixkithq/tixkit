@@ -21,6 +21,7 @@ export const routes = {
   eventReports: (eventId: string) => `/events/${eventId}/reports`,
   eventSchedule: (eventId: string) => `/events/${eventId}/schedule`,
   eventMarketing: (eventId: string) => `/events/${eventId}/marketing`,
+  eventEmbedStudio: (eventId: string) => `/events/${eventId}/distribution/embed`,
   orders: '/orders',
   orderDetail: (orderId: string) => `/orders/${orderId}`,
   attendees: '/attendees',

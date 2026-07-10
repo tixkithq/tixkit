@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import {
   EMBED_CONTRACT_VERSION,
+  EMBED_LIFECYCLE_SCRIPT_SOURCE,
   createCheckoutLifecycleMessage,
   createCheckoutReadyMessage,
   createHostHelloMessage,
@@ -27,11 +29,18 @@ const base = {
 
 describe('Embed Contract v1', () => {
   it('generates one versioned lifecycle surface including loading', () => {
-    const snippet = generateEmbedSnippet({ ...base, includeLifecycle: true });
+    const generated = generateEmbed({ ...base, includeLifecycle: true });
+    expect(generated.ok).toBe(true);
+    if (!generated.ok) return;
+    const snippet = generated.snippet;
     expect(snippet).toContain(`Embed Contract ${EMBED_CONTRACT_VERSION}`);
     expect(snippet).toContain('tixkit:v1:loading');
     expect(snippet).toContain('tixkit:v1:checkout-session-created');
     expect(snippet).toContain('host-origin="https://merchant.example.test"');
+    const hash = createHash('sha256').update(EMBED_LIFECYCLE_SCRIPT_SOURCE).digest('base64');
+    expect(generated.csp.directives['script-src']).toContain(`'sha256-${hash}'`);
+    const inlineSource = snippet.match(/<script type="module">([\s\S]*?)<\/script>$/)?.[1];
+    expect(inlineSource).toBe(EMBED_LIFECYCLE_SCRIPT_SOURCE);
   });
 
   it('generates an SRI-pinned script and a usable no-JavaScript fallback', () => {
@@ -74,6 +83,32 @@ describe('Embed Contract v1', () => {
     expect(snippet).toContain('locale="fr-FR"');
   });
 
+  it.each(['react', 'vue', 'svelte'] as const)(
+    'keeps %s configuration and lifecycle output synchronized with HTML',
+    (platform) => {
+      const snippet = generateEmbedSnippet({
+        ...base,
+        platform,
+        locale: 'ar-SA',
+        theme: 'high-contrast',
+        products: 'tt_general',
+        themeTokens: { fontFamily: 'Inter', buttonSize: 'lg', buttonVariant: 'outline' },
+        includeLifecycle: true,
+      });
+      expect(snippet).toContain(platform === 'react' ? '"locale":"ar-SA"' : 'locale="ar-SA"');
+      expect(snippet).toContain(
+        platform === 'react' ? '"theme":"high-contrast"' : 'theme="high-contrast"',
+      );
+      expect(snippet).toContain(
+        platform === 'react' ? '"products":"tt_general"' : 'products="tt_general"',
+      );
+      expect(snippet).toContain('fontFamily');
+      expect(snippet).toContain('Inter');
+      expect(snippet).toContain('tixkit:v1:loading');
+      expect(snippet).toContain('tixkit:v1:fatal-error');
+    },
+  );
+
   it('rejects unsafe theme values and inexact origins', () => {
     const errors = validateEmbedOptions({
       ...base,
@@ -83,6 +118,18 @@ describe('Embed Contract v1', () => {
     expect(errors.map((issue) => issue.path)).toEqual(
       expect.arrayContaining(['hostOrigin', 'themeTokens.colorPrimary', 'themeTokens.fontFamily']),
     );
+  });
+
+  it('rejects unknown theme-token keys and keeps framework CSP feature-minimal', () => {
+    const errors = validateEmbedOptions({
+      ...base,
+      themeTokens: { colorPrimary: '#112233', arbitraryCss: 'display:none' } as never,
+    });
+    expect(errors.map((issue) => issue.path)).toContain('themeTokens.arbitraryCss');
+    const result = generateEmbed({ ...base, platform: 'react' });
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.csp.directives['script-src']).not.toContain('https://cdn.example.test');
   });
 
   it('emits a strict minimal CSP without wildcard https or unsafe-inline', () => {

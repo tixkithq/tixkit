@@ -53,6 +53,7 @@
     "@tixkit/content-event-page-react": "workspace:*",
     "@tixkit/content-message": "workspace:*",
     "@tixkit/domain": "workspace:*",
+    "@tixkit/embed-core": "1.0.0",
     "@tixkit/js": "workspace:*",
     "@tixkit/next": "workspace:*",
     "@zxing/browser": "^0.2.0",

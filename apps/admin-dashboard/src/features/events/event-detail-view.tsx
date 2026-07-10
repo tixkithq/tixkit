@@ -108,6 +108,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     { title: 'Products', icon: Package, href: routes.eventProducts(eventId) },
     { title: 'Checkout Form', icon: ClipboardList, href: routes.eventCheckoutForm(eventId) },
     { title: 'Event Page', icon: PenTool, href: routes.eventContentEventPage(eventId) },
+    { title: 'Embed studio', icon: Globe, href: routes.eventEmbedStudio(eventId) },
     { title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) },
     { title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) },
     ...(can('messages.write')

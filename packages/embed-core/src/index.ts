@@ -275,6 +275,8 @@ export interface EmbedCspFeatures {
   reportingApiUrl?: string;
   marketing?: boolean;
   nonce?: string;
+  platform?: EmbedPlatform;
+  inlineLifecycle?: boolean;
 }
 
 export interface EmbedCspProfile {
@@ -328,6 +330,27 @@ export function validateEmbedThemeTokens(
 ): EmbedValidationIssue[] {
   if (!tokens) return [];
   const issues: EmbedValidationIssue[] = [];
+  const allowedKeys = [
+    'colorPrimary',
+    'colorSurface',
+    'colorText',
+    'colorMuted',
+    'colorBorder',
+    'radius',
+    'density',
+    'fontFamily',
+    'buttonSize',
+    'buttonVariant',
+  ] as const;
+  for (const key of Object.keys(tokens)) {
+    if (!(allowedKeys as readonly string[]).includes(key)) {
+      issues.push({
+        path: `themeTokens.${key}`,
+        code: 'invalid-config',
+        message: 'Unknown theme token.',
+      });
+    }
+  }
   const colorKeys: Array<keyof EmbedThemeTokens> = [
     'colorPrimary',
     'colorSurface',
@@ -742,6 +765,12 @@ function scriptNonceAttribute(nonce: string | undefined): string {
 }
 
 function elementAttributes(options: EmbedGeneratorOptions): string {
+  return elementAttributeEntries(options)
+    .map(([name, value]) => `${name}="${escapeHtml(value)}"`)
+    .join('\n  ');
+}
+
+function elementAttributeEntries(options: EmbedGeneratorOptions): Array<[string, string]> {
   const attributes: Array<[string, string | undefined]> = [
     ['brand', options.brandId],
     ['event', options.eventId],
@@ -759,19 +788,27 @@ function elementAttributes(options: EmbedGeneratorOptions): string {
     ['reporting-api-url', options.reportingApiUrl],
     ['host-origin', options.hostOrigin],
   ];
-  return attributes
-    .filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== '')
-    .map(([name, value]) => `${name}="${escapeHtml(value)}"`)
-    .join('\n  ');
+  return attributes.filter(
+    (entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== '',
+  );
 }
 
-function lifecycleScript(
-  elementId: string,
-  callbackName: string,
-  nonce: string | undefined,
-): string {
-  const names = EMBED_LIFECYCLE_NAMES.map((name) => versionedLifecycleEventName(name));
-  return `<script type="module"${scriptNonceAttribute(nonce)}>\n  const element = document.getElementById('${escapeHtml(elementId)}');\n  function ${callbackName}(name, detail) {\n    console.log('Tixkit:', name, detail);\n  }\n  for (const name of ${JSON.stringify(names)}) {\n    element.addEventListener(name, (event) => ${callbackName}(name, event.detail));\n  }\n</script>`;
+export const EMBED_LIFECYCLE_SCRIPT_SOURCE = `const names = ${JSON.stringify(
+  EMBED_LIFECYCLE_NAMES.map((name) => versionedLifecycleEventName(name)),
+)};
+for (const element of document.querySelectorAll('[data-tixkit-lifecycle]')) {
+  const callback = globalThis[element.getAttribute('data-tixkit-lifecycle') || 'onTixkitEvent'];
+  for (const name of names) {
+    element.addEventListener(name, (event) => {
+      if (typeof callback === 'function') callback(name, event.detail);
+      else console.log('Tixkit:', name, event.detail);
+    });
+  }
+}`;
+const EMBED_LIFECYCLE_SCRIPT_SHA256 = 'sha256-Lz7wcQQBXVqkusafhyVWX1nn7PeCUDRqFZnCFsd2Unc=';
+
+function lifecycleScript(nonce: string | undefined): string {
+  return `<script type="module"${scriptNonceAttribute(nonce)}>${EMBED_LIFECYCLE_SCRIPT_SOURCE}</script>`;
 }
 
 function htmlSnippet(options: EmbedGeneratorOptions): string {
@@ -793,14 +830,15 @@ function htmlSnippet(options: EmbedGeneratorOptions): string {
     options.buttonLabel ??
     (options.mode === 'button' ? 'Buy tickets' : 'Continue to secure checkout');
   const fallback = `<a href="${escapeHtml(checkoutUrl.toString())}">${escapeHtml(fallbackLabel)}</a>`;
-  const opening = `<${tagName} id="${escapeHtml(elementId)}"\n  ${elementAttributes(options)}`;
+  const lifecycleAttribute = options.includeLifecycle
+    ? ` data-tixkit-lifecycle="${escapeHtml(options.lifecycleCallbackName ?? 'onTixkitEvent')}"`
+    : '';
+  const opening = `<${tagName} id="${escapeHtml(elementId)}"${lifecycleAttribute}\n  ${elementAttributes(options)}`;
   const element =
     options.mode === 'button'
       ? `${opening}>\n  ${fallback}\n</${tagName}>`
       : `${opening}>\n  ${fallback}\n</${tagName}>`;
-  const lifecycle = options.includeLifecycle
-    ? `\n\n${lifecycleScript(elementId, options.lifecycleCallbackName ?? 'onTixkitEvent', options.nonce)}`
-    : '';
+  const lifecycle = options.includeLifecycle ? `\n\n${lifecycleScript(options.nonce)}` : '';
   const integrity = options.widgetIntegrity
     ? ` integrity="${escapeHtml(options.widgetIntegrity)}" crossorigin="anonymous"`
     : '';
@@ -809,12 +847,18 @@ function htmlSnippet(options: EmbedGeneratorOptions): string {
 
 function frameworkSnippet(options: EmbedGeneratorOptions): string {
   const html = htmlSnippet({ ...options, platform: 'html' });
+  const tag = `tixkit-${options.mode === 'button' ? 'button' : 'widget'}`;
+  const attributes = elementAttributes(options).replaceAll('\n  ', ' ');
+  const properties = JSON.stringify(Object.fromEntries(elementAttributeEntries(options)));
+  const lifecycleNames = JSON.stringify(
+    EMBED_LIFECYCLE_NAMES.map((name) => versionedLifecycleEventName(name)),
+  );
   if (options.platform === 'react')
-    return `import '@tixkit/widget';\n\nexport function TixkitEmbed() {\n  return (\n    <tixkit-${options.mode === 'button' ? 'button' : 'widget'} brand="${escapeHtml(options.brandId)}" event="${escapeHtml(options.eventId)}" checkout-mode="${options.mode === 'button' ? 'modal' : options.mode}" api-base-url="${escapeHtml(options.checkoutBaseUrl ?? DEFAULT_CHECKOUT_BASE_URL)}" />\n  );\n}`;
+    return `import { createElement, useEffect, useRef } from 'react';\nimport '@tixkit/widget';\n\nexport function TixkitEmbed() {\n  const ref = useRef<HTMLElement>(null);\n  useEffect(() => {\n    const element = ref.current;\n    if (!element) return;\n    const names = ${lifecycleNames};\n    const onEvent = (event: Event) => console.log('Tixkit:', event.type, (event as CustomEvent).detail);\n    names.forEach((name) => element.addEventListener(name, onEvent));\n    return () => names.forEach((name) => element.removeEventListener(name, onEvent));\n  }, []);\n  return createElement('${tag}', { ref, ...${properties} });\n}`;
   if (options.platform === 'vue')
-    return `<script setup lang="ts">\nimport '@tixkit/widget';\n</script>\n\n<template>\n  <tixkit-${options.mode === 'button' ? 'button' : 'widget'} brand="${escapeHtml(options.brandId)}" event="${escapeHtml(options.eventId)}" checkout-mode="${options.mode === 'button' ? 'modal' : options.mode}" api-base-url="${escapeHtml(options.checkoutBaseUrl ?? DEFAULT_CHECKOUT_BASE_URL)}" />\n</template>`;
+    return `<script setup lang="ts">\nimport { onBeforeUnmount, onMounted, ref } from 'vue';\nimport '@tixkit/widget';\nconst embed = ref<HTMLElement>();\nconst names = ${lifecycleNames};\nconst onEvent = (event: Event) => console.log('Tixkit:', event.type, (event as CustomEvent).detail);\nonMounted(() => names.forEach((name) => embed.value?.addEventListener(name, onEvent)));\nonBeforeUnmount(() => names.forEach((name) => embed.value?.removeEventListener(name, onEvent)));\n</script>\n\n<template>\n  <${tag} ref="embed" ${attributes} />\n</template>`;
   if (options.platform === 'svelte')
-    return `<script lang="ts">\n  import '@tixkit/widget';\n</script>\n\n<tixkit-${options.mode === 'button' ? 'button' : 'widget'} brand="${escapeHtml(options.brandId)}" event="${escapeHtml(options.eventId)}" checkout-mode="${options.mode === 'button' ? 'modal' : options.mode}" api-base-url="${escapeHtml(options.checkoutBaseUrl ?? DEFAULT_CHECKOUT_BASE_URL)}" />`;
+    return `<script lang="ts">\n  import { onMount } from 'svelte';\n  import '@tixkit/widget';\n  let embed: HTMLElement;\n  const names = ${lifecycleNames};\n  onMount(() => {\n    const onEvent = (event: Event) => console.log('Tixkit:', event.type, (event as CustomEvent).detail);\n    names.forEach((name) => embed.addEventListener(name, onEvent));\n    return () => names.forEach((name) => embed.removeEventListener(name, onEvent));\n  });\n</script>\n\n<${tag} bind:this={embed} ${attributes} />`;
   return html;
 }
 
@@ -829,12 +873,18 @@ export function generateCspProfile(features: EmbedCspFeatures = {}): EmbedCspPro
     ? httpUrl(features.reportingApiUrl)?.origin
     : undefined;
   const nonce = features.nonce ? `'nonce-${features.nonce}'` : undefined;
+  const usesScriptTag =
+    features.platform === undefined ||
+    features.platform === 'html' ||
+    features.platform === 'webflow' ||
+    features.platform === 'framer';
   const directives: Record<string, readonly string[]> = {
     'default-src': ["'self'"],
     'script-src': [
       "'self'",
-      widget,
+      ...(usesScriptTag ? [widget] : []),
       ...(nonce ? [nonce] : []),
+      ...(features.inlineLifecycle && !nonce ? [`'${EMBED_LIFECYCLE_SCRIPT_SHA256}'`] : []),
       ...(features.marketing
         ? ['https://www.googletagmanager.com', 'https://connect.facebook.net']
         : []),
@@ -910,6 +960,8 @@ export function generateEmbed(
       reportingApiUrl: options.reportingApiUrl,
       marketing: options.marketing,
       nonce: options.nonce,
+      platform: options.platform,
+      inlineLifecycle: options.includeLifecycle,
     }),
     instructions: generatePlatformInstructions(options.platform),
     config,
