@@ -28,6 +28,12 @@ test.skip(
   'Lighthouse budgets are generated only when RUN_LIGHTHOUSE_BUDGETS=1',
 );
 
+// Three full Lighthouse audits plus warmup navigation cannot fit within the
+// repository-wide 30-second UI-test timeout on an isolated CI runner. The
+// workflow retains its 45-minute outer bound and every Lighthouse budget is
+// still enforced below.
+test.describe.configure({ timeout: 10 * 60_000 });
+
 function uniqueSuffix(testInfo: TestInfo): string {
   return `lh-${Date.now()}-${testInfo.workerIndex}-${testInfo.retry}`;
 }
@@ -67,7 +73,10 @@ test('generates Lighthouse reports and enforces performance budgets', async ({
 
   for (const report of lighthouseReports) {
     const url = report.url(seeded.event.id);
-    const response = await page.goto(url, { waitUntil: 'networkidle' });
+    const response = await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60_000,
+    });
     expect(response?.ok(), `${report.label} warmup should load ${url}`).toBe(true);
     runLighthouse({ label: report.label, url, outputPath: report.outputPath });
   }

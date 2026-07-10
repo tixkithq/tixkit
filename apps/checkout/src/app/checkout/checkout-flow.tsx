@@ -931,7 +931,13 @@ export default function CheckoutFlow({
       const created = await checkoutApi.createSession({
         eventId,
         items: selectedItems,
-        buyer,
+        buyer: {
+          email: buyer.email,
+          ...(buyer.firstName ? { firstName: buyer.firstName } : {}),
+          ...(buyer.lastName ? { lastName: buyer.lastName } : {}),
+          ...(buyer.phone ? { phone: buyer.phone } : {}),
+          ...(buyer.dateOfBirth ? { dateOfBirth: buyer.dateOfBirth } : {}),
+        },
         buyerFields: Object.fromEntries(
           Object.entries(normalizeCheckoutAnswers(buyerAnswers)).filter(([questionId]) =>
             visibleCheckoutQuestions(questions?.buyerQuestions ?? [], buyerAnswers).some(

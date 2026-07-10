@@ -47,6 +47,10 @@ const eventResalePolicyMigrationPath = new URL(
   '../../migrations/0038_event_resale_policy.ts',
   import.meta.url,
 );
+const eventPublicRevisionMigrationPath = new URL(
+  '../../migrations/0047_event_public_revision.ts',
+  import.meta.url,
+);
 
 type AddedColumn = {
   tableName: string;
@@ -255,6 +259,14 @@ describe('OrderSalesChannelMigration', () => {
         ifExists: true,
       },
     ]);
+  });
+
+  it('runs MSSQL event revision DDL and backfill in separate batches', () => {
+    const source = readFileSync(eventPublicRevisionMigrationPath, 'utf8');
+
+    expect(source).toMatch(
+      /alter table events add public_revision datetime2 null;\s*`\.execute\(db\);\s*await sql`\s*update events/,
+    );
   });
 
   it('creates composite hot-query indexes for public and reporting reads', async () => {

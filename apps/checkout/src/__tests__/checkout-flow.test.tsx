@@ -390,6 +390,39 @@ describe('CheckoutFlow buyer validation', () => {
     expect(checkoutApiMock.createSession).not.toHaveBeenCalled();
   });
 
+  it('omits an uncollected date of birth from unrestricted checkout sessions', async () => {
+    checkoutApiMock.createSession.mockResolvedValue({
+      id: 'cs_unrestricted',
+      eventId: event.id,
+      status: 'open',
+      currency: 'USD',
+      clientToken: 'token_unrestricted',
+      quote: {
+        subtotalCents: 2500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+        totalCents: 2500,
+      },
+      expiresAt: '2026-07-17T18:10:00.000Z',
+    });
+    const view = renderCheckoutFlow();
+
+    await view.findByText('General Admission');
+    fireEvent.click(view.getByRole('button', { name: 'Increase General Admission quantity' }));
+    fireEvent.change(view.getByLabelText(/Email/), {
+      target: { value: 'buyer@example.com' },
+    });
+    fireEvent.click(view.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(checkoutApiMock.createSession).toHaveBeenCalledOnce());
+    expect(checkoutApiMock.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buyer: { email: 'buyer@example.com' },
+      }),
+    );
+  });
+
   it('creates a resale checkout session for a selected public listing', async () => {
     publicApiMock.getAvailability.mockResolvedValue([]);
     publicApiMock.getResaleListings.mockResolvedValue({

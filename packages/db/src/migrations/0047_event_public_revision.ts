@@ -45,6 +45,8 @@ export const EventPublicRevisionMigration: Migration = {
       await sql`
         if col_length('events', 'public_revision') is null
           alter table events add public_revision datetime2 null;
+      `.execute(db);
+      await sql`
         update events
         set public_revision = updated_at
         where public_revision is null;
