@@ -21,6 +21,12 @@ vi.mock('@zxing/browser', () => ({
 
 // --- Helpers ---
 
+const CAMERA_LAZY_LOAD_TIMEOUT_MS = 4_000;
+
+function findCameraReady() {
+  return screen.findByText('Ready to scan', {}, { timeout: CAMERA_LAZY_LOAD_TIMEOUT_MS });
+}
+
 function installMediaDevices() {
   Object.defineProperty(navigator, 'mediaDevices', {
     value: {
@@ -182,14 +188,14 @@ describe('ScannerPanel camera mode', () => {
   it('defaults to Camera mode without requesting permission automatically', async () => {
     const props = defaultProps();
     render(<ScannerPanel {...props} />);
-    expect(await screen.findByText('Ready to scan')).toBeInTheDocument();
+    expect(await findCameraReady()).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Enable camera' })).toBeInTheDocument();
   });
 
   it('switches to Manual mode when the Manual tab is clicked', async () => {
     const props = defaultProps();
     render(<ScannerPanel {...props} />);
-    expect(await screen.findByText('Ready to scan')).toBeInTheDocument();
+    expect(await findCameraReady()).toBeInTheDocument();
     // Radix Tabs activates on mouseDown, not click.
     fireEvent.mouseDown(screen.getByRole('tab', { name: /manual/i }));
     expect(await screen.findByPlaceholderText('Enter QR code or ticket ID')).toBeInTheDocument();
@@ -199,7 +205,8 @@ describe('ScannerPanel camera mode', () => {
     const props = defaultProps();
     props.scanning = true;
     render(<ScannerPanel {...props} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Enable camera' }));
+    await findCameraReady();
+    fireEvent.click(screen.getByRole('button', { name: 'Enable camera' }));
     expect(await screen.findByTestId('camera-viewport')).toBeInTheDocument();
   });
 });
