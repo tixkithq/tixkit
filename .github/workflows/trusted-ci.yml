@@ -471,8 +471,6 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       STRIPE_CONNECT_CLIENT_ID: ${{ secrets.STRIPE_CONNECT_CLIENT_ID }}
-      PW_TEST_CONNECT_WS_ENDPOINT: ws://127.0.0.1:3010/
-      PW_TEST_CONNECT_EXPOSE_NETWORK: '<loopback>:3201,<loopback>:3202,<loopback>:4200'
       OTEL_SDK_DISABLED: 'true'
       RATE_LIMIT_MAX: '100000'
       RATE_LIMIT_TIME_WINDOW: 1 minute
@@ -495,8 +493,8 @@ jobs:
             echo "All required test-mode secret names are configured; values are redacted."
           } >> "$GITHUB_STEP_SUMMARY"
       - run: bun install --frozen-lockfile
-      - name: Start pinned Playwright server
-        run: bash infra/ci/scripts/start-playwright-server.sh tixkit-provider-playwright 3010
+      - name: Install pinned Playwright browser and system dependencies
+        run: bash infra/ci/scripts/install-playwright-runtime.sh
       - name: Start MinIO
         run: |
           docker rm -f tixkit-provider-minio >/dev/null 2>&1 || true
@@ -585,18 +583,12 @@ jobs:
       - name: Show MinIO logs on failure
         if: failure()
         run: docker logs tixkit-provider-minio 2>/dev/null || true
-      - name: Show Playwright server logs on failure
-        if: failure()
-        run: docker logs tixkit-provider-playwright 2>/dev/null || true
       - name: Remove provider credential file
         if: always()
         run: rm -f .env.local
       - name: Stop MinIO
         if: always()
         run: docker rm -f tixkit-provider-minio >/dev/null 2>&1 || true
-      - name: Stop Playwright server
-        if: always()
-        run: docker rm -f tixkit-provider-playwright >/dev/null 2>&1 || true
 
   browser-performance:
     name: Browser & Lighthouse Performance
@@ -667,9 +659,6 @@ jobs:
       STRIPE_SECRET_KEY: ''
       STRIPE_WEBHOOK_SECRET: ''
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ''
-      PW_TEST_CONNECT_WS_ENDPOINT: ws://127.0.0.1:3010/
-      PW_TEST_CONNECT_EXPOSE_NETWORK: '<loopback>:3201,<loopback>:3202,<loopback>:4200'
-      LIGHTHOUSE_CONTAINER_NAME: tixkit-performance-playwright
       OTEL_SDK_DISABLED: 'true'
       RATE_LIMIT_MAX: '100000'
       RATE_LIMIT_TIME_WINDOW: 1 minute
@@ -677,8 +666,8 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
-      - name: Start pinned Playwright server
-        run: bash infra/ci/scripts/start-playwright-server.sh tixkit-performance-playwright 3010
+      - name: Install pinned Playwright browser and system dependencies
+        run: bash infra/ci/scripts/install-playwright-runtime.sh
       - name: Start MinIO
         run: |
           docker rm -f tixkit-performance-minio >/dev/null 2>&1 || true
@@ -730,12 +719,6 @@ jobs:
       - name: Show MinIO logs on failure
         if: failure()
         run: docker logs tixkit-performance-minio 2>/dev/null || true
-      - name: Show Playwright server logs on failure
-        if: failure()
-        run: docker logs tixkit-performance-playwright 2>/dev/null || true
       - name: Stop MinIO
         if: always()
         run: docker rm -f tixkit-performance-minio >/dev/null 2>&1 || true
-      - name: Stop Playwright server
-        if: always()
-        run: docker rm -f tixkit-performance-playwright >/dev/null 2>&1 || true
