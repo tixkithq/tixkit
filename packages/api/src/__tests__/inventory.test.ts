@@ -40,6 +40,8 @@ type Ticket = {
 };
 
 class MockTable {
+  selectExecutions = 0;
+
   constructor(private rows: Map<string, any>) {}
 
   private matches(row: any, conds: Array<{ col: string; op: string; val: any }>): boolean {
@@ -88,15 +90,18 @@ class MockTable {
         return chain;
       },
       executeTakeFirst: () => {
+        this.selectExecutions += 1;
         const rows = this.getRows(conds, sumCol, countAlias, groupCol, idOnly);
         return Promise.resolve(rows[0] ?? undefined);
       },
       executeTakeFirstOrThrow: () => {
+        this.selectExecutions += 1;
         const rows = this.getRows(conds, sumCol, countAlias, groupCol, idOnly);
         if (!rows[0]) throw new Error('not found');
         return Promise.resolve(rows[0]);
       },
       execute: () => {
+        this.selectExecutions += 1;
         const rows = this.getRows(conds, sumCol, countAlias, groupCol, idOnly);
         return Promise.resolve(rows);
       },
@@ -309,6 +314,7 @@ function createMockDb() {
     holds,
     occurrences,
     tickets,
+    getPoolSelectExecutions: () => poolTable.selectExecutions,
   };
 }
 
@@ -333,6 +339,26 @@ describe('InventoryService', () => {
       expect(result.holds).toHaveLength(1);
       expect(result.holds[0].quantity).toBe(2);
       expect(result.primaryHoldId).toBeDefined();
+    });
+
+    it('derives the hold expiry from the locked pool without reloading it', async () => {
+      mock.addPool({
+        id: 'pool_1',
+        total_capacity: 10,
+        sold_count: 0,
+        hold_ttl_seconds: 45,
+      });
+      const startedAt = Date.now();
+
+      const result = await service.reserveCart({
+        items: [{ inventoryPoolId: 'pool_1', ticketTypeId: 'tt_1', quantity: 1 }],
+        checkoutSessionId: 'cs_1',
+      });
+
+      expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(startedAt + 45_000);
+      expect(result.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 45_000);
+      expect(mock.getHold(result.primaryHoldId)?.expires_at).toEqual(result.expiresAt);
+      expect(mock.getPoolSelectExecutions()).toBe(1);
     });
 
     it('throws InventoryExhaustedError when insufficient availability', async () => {

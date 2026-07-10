@@ -93,6 +93,7 @@ export class InventoryService {
       const now = new Date();
       const holds: CartReservationResult['holds'] = [];
       let earliestExpiry: Date | null = null;
+      const expiresAtByPool = new Map<string, Date>();
 
       // Lock pools in a deterministic order to avoid deadlocks.
       // eslint-disable-next-line unicorn/no-array-sort -- sorting a fresh array gives deterministic lock order without mutating shared input.
@@ -132,6 +133,11 @@ export class InventoryService {
         if (available < requested) {
           throw new InventoryExhaustedError(poolId, requested, available);
         }
+
+        const ttl = input.holdTtlSeconds ?? pool.hold_ttl_seconds;
+        const expiresAt = new Date(now.getTime() + ttl * 1000);
+        expiresAtByPool.set(poolId, expiresAt);
+        if (!earliestExpiry || expiresAt < earliestExpiry) earliestExpiry = expiresAt;
       }
 
       // Lock occurrence rows after pools in a deterministic order. Occurrence
@@ -206,14 +212,7 @@ export class InventoryService {
       }
 
       for (const poolId of poolIds) {
-        const pool = await trx
-          .selectFrom('inventory_pools')
-          .selectAll()
-          .where('id', '=', poolId)
-          .executeTakeFirstOrThrow();
-        const ttl = input.holdTtlSeconds ?? pool.hold_ttl_seconds;
-        const expiresAt = new Date(now.getTime() + ttl * 1000);
-        if (!earliestExpiry || expiresAt < earliestExpiry) earliestExpiry = expiresAt;
+        const expiresAt = expiresAtByPool.get(poolId)!;
 
         for (const item of itemsByPool.get(poolId) ?? []) {
           const holdId = `hld_${ulid()}`;
