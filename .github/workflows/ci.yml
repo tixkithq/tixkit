@@ -264,7 +264,7 @@ jobs:
           DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
           cd ../..
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
-          PERFORMANCE_METRICS_PATH=artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
+          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
           bun run check:performance-budgets -- --config performance-budgets.integration.json
       - run: DB_INTEGRATION_DRIVER=mysql bun run test:integration:serial
 

@@ -159,6 +159,17 @@ jobs:
   integration-tests-postgres:
     name: Integration Tests (PostgreSQL)
     runs-on: tixkit-epyc-trusted
+    # The trusted label is backed by one physical EPYC host. Keep measured
+    # database work behind the non-performance matrix so host contention does
+    # not turn the committed latency budgets into scheduler-noise checks.
+    needs:
+      - build
+      - oss-export
+      - unit-tests
+      - flutter-sdk
+      - android-sdk
+      - react-native-demo
+    if: ${{ !cancelled() }}
     services:
       postgres:
         image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
@@ -219,7 +230,7 @@ jobs:
           cd packages/api
           PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
           cd ../..
-          PERFORMANCE_METRICS_PATH=artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
+          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
           bun run check:performance-budgets -- --config performance-budgets.integration.json
       - name: Upload PostgreSQL performance metrics
         if: always()
@@ -233,6 +244,8 @@ jobs:
   integration-tests-mysql:
     name: Integration Tests (MySQL)
     runs-on: tixkit-epyc-trusted
+    needs: integration-tests-postgres
+    if: ${{ !cancelled() }}
     services:
       mysql:
         image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
@@ -294,7 +307,7 @@ jobs:
           DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
           cd ../..
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
-          PERFORMANCE_METRICS_PATH=artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
+          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
           bun run check:performance-budgets -- --config performance-budgets.integration.json
       - name: Upload MySQL performance metrics
         if: always()
@@ -308,6 +321,8 @@ jobs:
   integration-tests-mssql:
     name: Integration Tests (MSSQL)
     runs-on: tixkit-epyc-trusted
+    needs: provider-tests-stripe
+    if: ${{ !cancelled() }}
     env:
       DB_DRIVER: mssql
       DATABASE_URL_MSSQL: ${{ secrets.TRUSTED_DATABASE_URL_MSSQL }}
@@ -422,6 +437,8 @@ jobs:
       - build
       - unit-tests
       - integration-tests-postgres
+      - browser-performance
+    if: ${{ !cancelled() }}
     timeout-minutes: 45
     env:
       CI: 'true'
@@ -554,6 +571,8 @@ jobs:
       - build
       - unit-tests
       - integration-tests-postgres
+      - integration-tests-mysql
+    if: ${{ !cancelled() }}
     timeout-minutes: 45
     env:
       CI: 'true'

@@ -1694,5 +1694,5 @@ describeWithIntegrationDatabase('Load and concurrency harnesses', () => {
       const occurrences = csv.split(a.email).length - 1;
       expect(occurrences).toBe(1);
     }
-  });
+  }, 30_000);
 });

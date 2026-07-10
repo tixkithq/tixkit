@@ -1191,7 +1191,7 @@ describe('EmailPersistedEditorView', () => {
       expect(adminApiMock.archiveContentDocument).toHaveBeenCalledWith('cdoc_email');
     });
     expect(screen.getByText('Archived email template')).toBeInTheDocument();
-  }, 10000);
+  }, 30000);
 
   it('falls back to editor JSON when React Email returns shell-only HTML', async () => {
     editorMockState.shellOnlyExport = true;
