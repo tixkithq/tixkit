@@ -2,9 +2,22 @@
 set -euo pipefail
 
 readonly playwright_version='1.61.1'
-readonly runtime_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}/tixkit-runner}/playwright-runtime"
+readonly runner_temp="${RUNNER_TEMP:-${TMPDIR:-/tmp}/tixkit-runner}"
+if [[ "$runner_temp" != /* || "$runner_temp" == *$'\n'* || "$runner_temp" == *'"'* ]]; then
+  echo 'Runner temporary directory must be an absolute path without newlines or quotes' >&2
+  exit 1
+fi
+if [[ -e "$runner_temp" && ( ! -d "$runner_temp" || -L "$runner_temp" || ! -O "$runner_temp" ) ]]; then
+  echo 'Runner temporary directory must be an owned, non-symlink directory' >&2
+  exit 1
+fi
+mkdir -p "$runner_temp"
+
+readonly runtime_root="$runner_temp/playwright-runtime"
 readonly package_dir="$runtime_root/packages"
 readonly library_root="$runtime_root/root"
+readonly apt_root="$runtime_root/apt"
+readonly apt_config="$apt_root/apt.conf"
 
 installed_version="$(bunx playwright --version)"
 if [[ "$installed_version" != "Version $playwright_version" ]]; then
@@ -23,6 +36,31 @@ for command_name in apt-get dpkg-deb; do
   fi
 done
 
+rm -rf "$runtime_root"
+mkdir -p \
+  "$package_dir" \
+  "$library_root" \
+  "$apt_root/state/lists/partial" \
+  "$apt_root/cache/archives/partial" \
+  "$apt_root/empty.conf.d"
+touch "$apt_root/empty.conf"
+cat >"$apt_config" <<EOF
+Dir::State "$apt_root/state";
+Dir::State::status "/var/lib/dpkg/status";
+Dir::State::lists "$apt_root/state/lists";
+Dir::Cache "$apt_root/cache";
+Dir::Cache::archives "$apt_root/cache/archives";
+Dir::Etc::sourcelist "/etc/apt/sources.list";
+Dir::Etc::sourceparts "/etc/apt/sources.list.d";
+Dir::Etc::main "$apt_root/empty.conf";
+Dir::Etc::parts "$apt_root/empty.conf.d";
+APT::Get::List-Cleanup "0";
+APT::Update::Error-Mode "any";
+Acquire::Retries "3";
+EOF
+export APT_CONFIG="$apt_config"
+apt-get update
+
 set +e
 dependency_report="$(bunx playwright install-deps --dry-run chromium 2>&1)"
 dependency_status=$?
@@ -39,8 +77,6 @@ if ((dependency_status != 0)); then
     exit 1
   fi
 
-  rm -rf "$runtime_root"
-  mkdir -p "$package_dir" "$library_root"
   (
     cd "$package_dir"
     apt-get download "${missing_packages[@]}"

@@ -47,8 +47,10 @@ class MockTable {
   private matches(row: any, conds: Array<{ col: string; op: string; val: any }>): boolean {
     return conds.every((c) => {
       if (c.op === 'in') return Array.isArray(c.val) && c.val.includes(row[c.col]);
-      if (c.col === 'expires_at' && c.op === '<') {
-        return new Date(row.expires_at) < new Date(c.val);
+      if (c.col === 'expires_at' && (c.op === '<' || c.op === '>=')) {
+        const expiresAt = new Date(row.expires_at);
+        const boundary = new Date(c.val);
+        return c.op === '<' ? expiresAt < boundary : expiresAt >= boundary;
       }
       return row[c.col] === c.val;
     });
@@ -420,6 +422,32 @@ describe('InventoryService', () => {
           checkoutSessionId: 'cs_2',
         }),
       ).rejects.toThrow(InventoryExhaustedError);
+    });
+
+    it('excludes stale active holds without synchronously rewriting their status', async () => {
+      mock.addPool({ id: 'pool_1', total_capacity: 10, sold_count: 0 });
+      mock.addHold({
+        id: 'hld_stale',
+        inventory_pool_id: 'pool_1',
+        quantity: 9,
+        status: 'active',
+        expires_at: new Date(Date.now() - 10_000),
+      });
+      mock.addHold({
+        id: 'hld_fresh',
+        inventory_pool_id: 'pool_1',
+        quantity: 2,
+        status: 'active',
+        expires_at: new Date(Date.now() + 10_000),
+      });
+
+      const result = await service.reserveCart({
+        items: [{ inventoryPoolId: 'pool_1', ticketTypeId: 'tt_1', quantity: 8 }],
+        checkoutSessionId: 'cs_2',
+      });
+
+      expect(result.holds).toHaveLength(1);
+      expect(mock.getHold('hld_stale')?.status).toBe('active');
     });
 
     it('rolls back all hold inserts when any pool in the cart is exhausted', async () => {

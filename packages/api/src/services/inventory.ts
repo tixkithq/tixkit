@@ -108,22 +108,16 @@ export class InventoryService {
           .forUpdate()
           .executeTakeFirstOrThrow();
 
-        // Lazy cleanup of expired holds for this pool.
-        // eslint-disable-next-line no-await-in-loop -- each locked pool is cleaned before its availability is recalculated.
-        await trx
-          .updateTable('checkout_holds')
-          .set({ status: 'expired', updated_at: now })
-          .where('inventory_pool_id', '=', poolId)
-          .where('status', '=', 'active')
-          .where('expires_at', '<', now)
-          .execute();
-
-        // eslint-disable-next-line no-await-in-loop -- availability must be read after cleanup while this pool remains locked.
+        // Expired holds do not consume capacity. Durable status cleanup runs in
+        // the hold-expiration workflow, so the reservation hot path avoids a
+        // redundant serialized UPDATE for every contender on the locked pool.
+        // eslint-disable-next-line no-await-in-loop -- availability must be read while this pool remains locked.
         const activeHolds = await trx
           .selectFrom('checkout_holds')
           .select(trx.fn.sum('quantity').as('total_held'))
           .where('inventory_pool_id', '=', poolId)
           .where('status', '=', 'active')
+          .where('expires_at', '>=', now)
           .executeTakeFirst();
 
         const held = Number(activeHolds?.total_held ?? 0);

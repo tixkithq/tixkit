@@ -24,7 +24,9 @@ test('installs missing Playwright libraries without sudo and persists the runtim
   const binDirectory = join(root, 'bin');
   const runnerTemp = join(root, 'runner-temp');
   const githubEnv = join(root, 'github-env');
+  const callLog = join(root, 'calls');
   await mkdir(binDirectory);
+  await mkdir(runnerTemp);
 
   await writeExecutable(
     join(binDirectory, 'uname'),
@@ -38,9 +40,13 @@ echo Linux
 if [[ "$*" == 'playwright --version' ]]; then
   echo 'Version 1.61.1'
 elif [[ "$*" == 'playwright install-deps --dry-run chromium' ]]; then
+  [[ -f "${'${APT_CONFIG:-}'}" ]] || exit 3
+  echo dry-run >> "${callLog}"
   printf 'Missing system dependencies (1):\n  libnspr4\n'
   exit 1
-elif [[ "$*" != 'playwright install chromium' ]]; then
+elif [[ "$*" == 'playwright install chromium' ]]; then
+  echo install >> "${callLog}"
+else
   exit 2
 fi
 `,
@@ -48,8 +54,19 @@ fi
   await writeExecutable(
     join(binDirectory, 'apt-get'),
     `#!/usr/bin/env bash
-if [[ "$1" != 'download' || "$2" != 'libnspr4' ]]; then exit 2; fi
-touch libnspr4_1.deb
+if [[ "$1" == 'update' ]]; then
+  [[ "${'${APT_CONFIG:-}'}" == *'/playwright-runtime/apt/apt.conf' ]]
+  grep -q 'Dir::State::status "/var/lib/dpkg/status"' "${'${APT_CONFIG}'}"
+  grep -q "Dir::State::lists \"${runnerTemp}/playwright-runtime/apt/state/lists\"" "${'${APT_CONFIG}'}"
+  grep -q "Dir::Cache::archives \"${runnerTemp}/playwright-runtime/apt/cache/archives\"" "${'${APT_CONFIG}'}"
+  echo update >> "${callLog}"
+elif [[ "$1" == 'download' && "$2" == 'libnspr4' ]]; then
+  [[ -f "${'${APT_CONFIG:-}'}" ]] || exit 3
+  echo download >> "${callLog}"
+  touch libnspr4_1.deb
+else
+  exit 2
+fi
 `,
   );
   await writeExecutable(
@@ -88,6 +105,7 @@ touch "$3/usr/lib/x86_64-linux-gnu/libnspr4.so"
     /^XDG_DATA_DIRS=.*playwright-runtime\/root\/usr\/share:\/usr\/local\/share:\/usr\/share/m,
   );
   assert.doesNotMatch(result.stdout + result.stderr, /sudo/);
+  assert.equal(await readFile(callLog, 'utf8'), 'update\ndry-run\ndownload\ninstall\n');
 });
 
 test('fails closed when the installed Playwright version drifts', async () => {
@@ -110,4 +128,49 @@ echo 'Version 1.61.2'
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /does not match the trusted runtime/);
+});
+
+test('fails closed before browser installation when the isolated apt index update fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tixkit-playwright-apt-failure-'));
+  temporaryDirectories.push(root);
+  const binDirectory = join(root, 'bin');
+  const runnerTemp = join(root, 'runner-temp');
+  const callLog = join(root, 'calls');
+  await mkdir(binDirectory);
+  await mkdir(runnerTemp);
+  await writeExecutable(join(binDirectory, 'uname'), '#!/usr/bin/env bash\necho Linux\n');
+  await writeExecutable(
+    join(binDirectory, 'bunx'),
+    `#!/usr/bin/env bash
+if [[ "$*" == 'playwright --version' ]]; then echo 'Version 1.61.1'; else echo unexpected >> "${callLog}"; exit 2; fi
+`,
+  );
+  await writeExecutable(
+    join(binDirectory, 'apt-get'),
+    `#!/usr/bin/env bash
+echo update >> "${callLog}"
+exit 100
+`,
+  );
+  await writeExecutable(join(binDirectory, 'dpkg-deb'), '#!/usr/bin/env bash\nexit 2\n');
+
+  const result = spawnSync('bash', [installerPath], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${binDirectory}:${process.env.PATH}`, RUNNER_TEMP: runnerTemp },
+  });
+
+  assert.equal(result.status, 100);
+  assert.equal(await readFile(callLog, 'utf8'), 'update\n');
+});
+
+test('rejects an unsafe relative runner temporary path before filesystem mutation', async () => {
+  const result = spawnSync('bash', [installerPath], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    env: { ...process.env, RUNNER_TEMP: 'relative-runner-temp' },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /must be an absolute path/);
 });
