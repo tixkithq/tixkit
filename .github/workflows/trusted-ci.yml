@@ -305,7 +305,9 @@ jobs:
           test -n "$MSSQL_SA_PASSWORD" || { echo "TRUSTED_MSSQL_SA_PASSWORD is required" >&2; exit 1; }
       - name: Reset MSSQL database
         run: |
-          cat > /tmp/reset-mssql.mjs <<'EOF'
+          reset_script="$RUNNER_TEMP/reset-mssql.mjs"
+          rm -f "$reset_script"
+          cat > "$reset_script" <<'EOF'
           import { Connection, Request } from 'tedious';
 
           const operation = process.argv[2];
@@ -391,12 +393,19 @@ jobs:
           console.error(lastError);
           process.exit(1);
           EOF
-          bun /tmp/reset-mssql.mjs setup
+          bun "$reset_script" setup
       - run: bunx turbo run build --filter=@tixkit/domain --filter=@tixkit/db --filter=@tixkit/shared
       - run: bun run --filter @tixkit/db test:mssql
       - name: Cleanup MSSQL database
         if: ${{ always() }}
-        run: bun /tmp/reset-mssql.mjs cleanup
+        run: |
+          reset_script="$RUNNER_TEMP/reset-mssql.mjs"
+          cleanup_status=0
+          if [ -f "$reset_script" ]; then
+            bun "$reset_script" cleanup || cleanup_status=$?
+          fi
+          rm -f "$reset_script"
+          exit "$cleanup_status"
 
   provider-tests-stripe:
     name: Provider Tests (Stripe)
@@ -462,14 +471,14 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       STRIPE_CONNECT_CLIENT_ID: ${{ secrets.STRIPE_CONNECT_CLIENT_ID }}
+      PW_TEST_CONNECT_WS_ENDPOINT: ws://127.0.0.1:3010/
+      PW_TEST_CONNECT_EXPOSE_NETWORK: '<loopback>:3201,<loopback>:3202,<loopback>:4200'
       OTEL_SDK_DISABLED: 'true'
       RATE_LIMIT_MAX: '100000'
       RATE_LIMIT_TIME_WINDOW: 1 minute
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
-        with:
-          playwright-cache: 'true'
       - name: Require trusted Stripe test-mode secrets
         run: |
           missing=()
@@ -486,10 +495,8 @@ jobs:
             echo "All required test-mode secret names are configured; values are redacted."
           } >> "$GITHUB_STEP_SUMMARY"
       - run: bun install --frozen-lockfile
-      - name: Install Chromium
-        # The hardened trusted runner forbids sudo/no-new-privileges. Its image
-        # owns OS packages; CI installs the pinned browser payload only.
-        run: bunx playwright install chromium
+      - name: Start pinned Playwright server
+        run: bash infra/ci/scripts/start-playwright-server.sh tixkit-provider-playwright 3010
       - name: Start MinIO
         run: |
           docker rm -f tixkit-provider-minio >/dev/null 2>&1 || true
@@ -578,12 +585,18 @@ jobs:
       - name: Show MinIO logs on failure
         if: failure()
         run: docker logs tixkit-provider-minio 2>/dev/null || true
+      - name: Show Playwright server logs on failure
+        if: failure()
+        run: docker logs tixkit-provider-playwright 2>/dev/null || true
       - name: Remove provider credential file
         if: always()
         run: rm -f .env.local
       - name: Stop MinIO
         if: always()
         run: docker rm -f tixkit-provider-minio >/dev/null 2>&1 || true
+      - name: Stop Playwright server
+        if: always()
+        run: docker rm -f tixkit-provider-playwright >/dev/null 2>&1 || true
 
   browser-performance:
     name: Browser & Lighthouse Performance
@@ -654,19 +667,18 @@ jobs:
       STRIPE_SECRET_KEY: ''
       STRIPE_WEBHOOK_SECRET: ''
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ''
+      PW_TEST_CONNECT_WS_ENDPOINT: ws://127.0.0.1:3010/
+      PW_TEST_CONNECT_EXPOSE_NETWORK: '<loopback>:3201,<loopback>:3202,<loopback>:4200'
+      LIGHTHOUSE_CONTAINER_NAME: tixkit-performance-playwright
       OTEL_SDK_DISABLED: 'true'
       RATE_LIMIT_MAX: '100000'
       RATE_LIMIT_TIME_WINDOW: 1 minute
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
-        with:
-          playwright-cache: 'true'
       - run: bun install --frozen-lockfile
-      - name: Install Chromium
-        # The hardened trusted runner forbids sudo/no-new-privileges. Its image
-        # owns OS packages; CI installs the pinned browser payload only.
-        run: bunx playwright install chromium
+      - name: Start pinned Playwright server
+        run: bash infra/ci/scripts/start-playwright-server.sh tixkit-performance-playwright 3010
       - name: Start MinIO
         run: |
           docker rm -f tixkit-performance-minio >/dev/null 2>&1 || true
@@ -718,6 +730,12 @@ jobs:
       - name: Show MinIO logs on failure
         if: failure()
         run: docker logs tixkit-performance-minio 2>/dev/null || true
+      - name: Show Playwright server logs on failure
+        if: failure()
+        run: docker logs tixkit-performance-playwright 2>/dev/null || true
       - name: Stop MinIO
         if: always()
         run: docker rm -f tixkit-performance-minio >/dev/null 2>&1 || true
+      - name: Stop Playwright server
+        if: always()
+        run: docker rm -f tixkit-performance-playwright >/dev/null 2>&1 || true

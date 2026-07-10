@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { chromium, expect, test, type TestInfo } from '@playwright/test';
 import { adminBaseUrl, checkoutBaseUrl } from './helpers/env';
@@ -35,6 +35,22 @@ function uniqueSuffix(testInfo: TestInfo): string {
 function runLighthouse(input: { label: string; url: string; outputPath: string }): void {
   const outputPath = resolve(process.cwd(), input.outputPath);
   mkdirSync(dirname(outputPath), { recursive: true });
+
+  const containerName = process.env.LIGHTHOUSE_CONTAINER_NAME?.trim();
+  if (containerName) {
+    const report = execFileSync(
+      'bash',
+      ['infra/ci/scripts/run-lighthouse-in-container.sh', containerName, input.url],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        maxBuffer: 50 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'inherit'],
+      },
+    );
+    writeFileSync(outputPath, report);
+    return;
+  }
 
   execFileSync(
     'bunx',

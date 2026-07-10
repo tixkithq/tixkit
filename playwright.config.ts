@@ -242,7 +242,7 @@ export default defineConfig({
           stderr: 'pipe',
         },
         {
-          command: `bun run --filter @tixkit/checkout build && bun run --filter @tixkit/checkout start -- -p ${checkoutPort}`,
+          command: `bunx turbo run build --filter=@tixkit/checkout && bun run --filter @tixkit/checkout start -- -p ${checkoutPort}`,
           env: checkoutPublicEnv,
           url: checkoutUrl,
           timeout: webServerTimeoutMs,
