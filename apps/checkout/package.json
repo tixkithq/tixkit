@@ -31,6 +31,7 @@
     "react-hook-form": "^7.72.1",
     "sonner": "^2.0.7",
     "@stripe/stripe-js": "^7.0.0",
+    "@tixkit/content-event-page": "workspace:*",
     "@tixkit/content-event-page-react": "workspace:*",
     "@tixkit/domain": "workspace:*",
     "tailwind-merge": "^3.5.0",

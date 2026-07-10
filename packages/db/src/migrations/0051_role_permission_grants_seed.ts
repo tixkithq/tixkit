@@ -1,7 +1,65 @@
 import { sql } from 'kysely';
 import type { Migration } from 'kysely/migration';
 import { createHash } from 'node:crypto';
-import { isOrganizationSystemRole, permissionsForRole } from '@tixkit/domain';
+
+// Immutable snapshot for this historical migration. Keeping the matrix local
+// makes clean installs runnable before workspace packages are built and
+// prevents future role changes from rewriting migration behavior.
+const ALL_PERMISSION_SNAPSHOT = [
+  'events.read',
+  'events.write',
+  'tickets.write',
+  'orders.read',
+  'orders.write',
+  'refunds.write',
+  'attendees.read',
+  'attendees.write',
+  'checkins.read',
+  'checkins.write',
+  'box_office.write',
+  'messages.write',
+  'reports.read',
+  'settings.write',
+  'developers.write',
+  'billing.write',
+] as const;
+
+const ROLE_PERMISSION_SNAPSHOT = {
+  owner: ALL_PERMISSION_SNAPSHOT,
+  admin: ALL_PERMISSION_SNAPSHOT,
+  organizer: [
+    'events.read',
+    'events.write',
+    'tickets.write',
+    'orders.read',
+    'orders.write',
+    'refunds.write',
+    'attendees.read',
+    'attendees.write',
+    'checkins.read',
+    'checkins.write',
+    'box_office.write',
+    'messages.write',
+    'reports.read',
+  ],
+  viewer: ['events.read', 'orders.read', 'attendees.read', 'checkins.read', 'reports.read'],
+  door_staff: ['events.read', 'attendees.read', 'checkins.read', 'checkins.write'],
+  door_staff_sales: [
+    'events.read',
+    'attendees.read',
+    'checkins.read',
+    'checkins.write',
+    'tickets.write',
+    'orders.read',
+    'box_office.write',
+  ],
+} as const satisfies Record<string, readonly string[]>;
+
+export function seededPermissionsForRole(role: string): readonly string[] | undefined {
+  return Object.prototype.hasOwnProperty.call(ROLE_PERMISSION_SNAPSHOT, role)
+    ? ROLE_PERMISSION_SNAPSHOT[role as keyof typeof ROLE_PERMISSION_SNAPSHOT]
+    : undefined;
+}
 
 export function seedPermissionGrantId(input: {
   organizationId: string;
@@ -35,7 +93,8 @@ export const RolePermissionGrantsSeedMigration: Migration = {
     `.execute(db);
 
     for (const member of members.rows) {
-      if (!isOrganizationSystemRole(member.role)) continue;
+      const permissions = seededPermissionsForRole(member.role);
+      if (!permissions) continue;
       // Treat any grant scoped to a resource in this membership's organization
       // as intentional configuration. Never broaden brand/event grants to the
       // entire organization during the legacy-role backfill.
@@ -68,7 +127,6 @@ export const RolePermissionGrantsSeedMigration: Migration = {
 
       if (Number(existing.rows[0]?.count ?? 0) > 0) continue;
 
-      const permissions = permissionsForRole(member.role);
       for (const permission of permissions) {
         const id = seedPermissionGrantId({
           organizationId: member.organization_id,
