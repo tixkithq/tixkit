@@ -125,6 +125,8 @@ describe('ConfirmationClient', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    Object.defineProperty(window, 'opener', { configurable: true, value: null });
+    Object.defineProperty(document, 'referrer', { configurable: true, value: '' });
   });
 
   it('associates invalid resale price errors with the price input and announces them', async () => {
@@ -205,14 +207,22 @@ describe('ConfirmationClient', () => {
     expect(checkoutApiMock.getWalletPasses).not.toHaveBeenCalled();
   });
 
-  it('emits order_completed once when event details resolve after a completed session', async () => {
+  it('does not broadcast an identity-free completion message outside a v1 handshake', async () => {
     let resolveEvent!: (value: Awaited<ReturnType<typeof publicApi.getEvent>>) => void;
     publicApiMock.getEvent.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveEvent = resolve;
       }),
     );
-    const postMessageSpy = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
+    const postMessageSpy = vi.fn();
+    Object.defineProperty(window, 'opener', {
+      configurable: true,
+      value: { postMessage: postMessageSpy },
+    });
+    Object.defineProperty(document, 'referrer', {
+      configurable: true,
+      value: 'https://merchant.example.test/tickets',
+    });
 
     render(<ConfirmationClient />);
 
@@ -230,17 +240,7 @@ describe('ConfirmationClient', () => {
     });
     await flushAsyncWork();
 
-    expect(postMessageSpy).toHaveBeenCalledTimes(1);
-    expect(postMessageSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: 'tixkit-checkout',
-        event: 'order_completed',
-        sessionId: 'cs_1',
-        orderId: 'ord_1',
-        eventId: 'evt_1',
-      }),
-      '*',
-    );
+    expect(postMessageSpy).not.toHaveBeenCalled();
   });
 
   it('continues polling after one retryable confirmation load failure', async () => {

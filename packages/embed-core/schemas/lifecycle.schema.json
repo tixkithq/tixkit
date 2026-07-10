@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tixkit.com/embed/v1/lifecycle.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "widgetId", "eventId", "mode", "timestamp", "name"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "widgetId": { "type": "string" },
+    "event": { "type": "string" },
+    "eventId": { "type": "string" },
+    "mode": { "enum": ["inline", "modal", "redirect"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "name": {
+      "enum": [
+        "loading",
+        "ready",
+        "opened",
+        "closed",
+        "checkout-started",
+        "checkout-session-created",
+        "order-completed",
+        "recoverable-error",
+        "fatal-error"
+      ]
+    },
+    "sessionId": { "type": "string" },
+    "orderId": { "type": "string" },
+    "reason": { "enum": ["host", "buyer", "navigation", "disconnected", "unknown"] },
+    "errorCode": { "enum": ["invalid-config", "invalid-origin", "invalid-message", "unsupported-contract-version", "handshake-timeout", "checkout-unreachable", "checkout-offline", "unsupported-browser", "session-expired", "checkout-rejected", "internal-error"] },
+    "message": { "type": "string", "maxLength": 240 },
+    "retryable": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "name": { "const": "closed" } } },
+      "then": { "required": ["reason"] }
+    },
+    {
+      "if": { "properties": { "name": { "const": "checkout-session-created" } } },
+      "then": { "required": ["sessionId"] }
+    },
+    {
+      "if": { "properties": { "name": { "const": "order-completed" } } },
+      "then": { "required": ["orderId"] }
+    },
+    {
+      "if": { "properties": { "name": { "enum": ["recoverable-error", "fatal-error"] } } },
+      "then": { "required": ["errorCode", "message", "retryable"], "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }, { "required": ["reason"] }] } }
+    },
+    {
+      "if": { "properties": { "name": { "enum": ["loading", "ready", "opened"] } } },
+      "then": { "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }, { "required": ["reason"] }, { "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+    },
+    {
+      "if": { "properties": { "name": { "const": "closed" } } },
+      "then": { "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }, { "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+    },
+    {
+      "if": { "properties": { "name": { "enum": ["checkout-started", "checkout-session-created", "order-completed"] } } },
+      "then": { "not": { "anyOf": [{ "required": ["reason"] }, { "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+    },
+    {
+      "if": { "properties": { "name": { "enum": ["checkout-started", "checkout-session-created"] } } },
+      "then": { "not": { "required": ["orderId"] } }
+    }
+  ]
+}

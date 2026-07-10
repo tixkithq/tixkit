@@ -58,6 +58,7 @@ import {
   requiresDateOfBirthVerification,
 } from '@tixkit/domain/eligibility';
 import type { PublicEventOccurrence } from '@/lib/api';
+import { emitEmbedLifecycle, initializeEmbedHandshake } from '@/lib/embed-contract';
 
 type Props = {
   initialEventId: string;
@@ -104,6 +105,7 @@ async function findPublicResaleListing(
 ): Promise<CheckoutPublicResaleListing | undefined> {
   let cursor: string | null | undefined;
   do {
+    // eslint-disable-next-line no-await-in-loop -- cursor pages must be fetched sequentially.
     const page = await publicApi.getResaleListings(
       eventId,
       signal,
@@ -119,18 +121,17 @@ async function findPublicResaleListing(
 type Phase = 'select' | 'confirm' | 'payment' | 'completed';
 
 function emitCheckoutEvent(
-  event: 'checkout_started' | 'order_completed',
+  event: 'checkout_started' | 'checkout_session_created' | 'order_completed',
   detail: Record<string, unknown>,
 ) {
-  if (typeof window === 'undefined') return;
-  const message = {
-    source: 'tixkit-checkout',
-    event,
-    type: event,
-    ...detail,
-  };
-  window.parent?.postMessage(message, '*');
-  window.opener?.postMessage(message, '*');
+  emitEmbedLifecycle(
+    event === 'checkout_started'
+      ? 'checkout-started'
+      : event === 'checkout_session_created'
+        ? 'checkout-session-created'
+        : 'order-completed',
+    detail,
+  );
 }
 
 export default function CheckoutFlow({
@@ -151,6 +152,7 @@ export default function CheckoutFlow({
   resaleListingId,
 }: Props) {
   const router = useRouter();
+  useEffect(() => initializeEmbedHandshake(), []);
   const [eventId, setEventId] = useState(initialEventId);
   const [sessionId, setSessionId] = useState(initialSessionId);
   const [sessionToken, setSessionToken] = useState(initialSessionToken);
@@ -975,6 +977,10 @@ export default function CheckoutFlow({
         currency: created.currency ?? displayCurrency,
         valueCents: created.quote.totalCents,
         items: selectedMarketingItems,
+      });
+      emitCheckoutEvent('checkout_session_created', {
+        sessionId: created.id,
+        eventId,
       });
       emitCheckoutEvent('checkout_started', {
         sessionId: created.id,

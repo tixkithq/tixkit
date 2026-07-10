@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tixkit.com/embed/v1/host-hello.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "source", "type", "widgetId", "eventId", "nonce", "hostOrigin"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "source": { "const": "tixkit-embed-host" },
+    "type": { "const": "host:hello" },
+    "widgetId": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "eventId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+    "nonce": { "type": "string", "minLength": 22, "maxLength": 128 },
+    "hostOrigin": { "type": "string", "format": "uri" }
+  }
+}

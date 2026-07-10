@@ -3,6 +3,7 @@ import path from 'node:path';
 import { test, expect } from '@playwright/test';
 
 const fixturesDir = path.resolve(import.meta.dirname, 'fixtures');
+const repositoryRoot = path.resolve(import.meta.dirname, '..');
 
 function readFixture(name: string): string {
   return fs.readFileSync(path.join(fixturesDir, name), 'utf8');
@@ -12,12 +13,20 @@ function readFixture(name: string): string {
 const mockWidgetScript = `
   class TixkitWidget extends HTMLElement {
     connectedCallback() {
-      setTimeout(() => this.dispatchEvent(new CustomEvent('loaded', { detail: { eventId: this.getAttribute('event') } })), 0);
+      setTimeout(() => {
+        const detail = { contractVersion: '1.0', eventId: this.getAttribute('event'), name: 'ready' };
+        this.dispatchEvent(new CustomEvent('tixkit:v1:ready', { detail }));
+        this.dispatchEvent(new CustomEvent('loaded', { detail }));
+      }, 0);
     }
   }
   class TixkitButton extends HTMLElement {
     connectedCallback() {
-      setTimeout(() => this.dispatchEvent(new CustomEvent('loaded', { detail: { eventId: this.getAttribute('event') } })), 0);
+      setTimeout(() => {
+        const detail = { contractVersion: '1.0', eventId: this.getAttribute('event'), name: 'ready' };
+        this.dispatchEvent(new CustomEvent('tixkit:v1:ready', { detail }));
+        this.dispatchEvent(new CustomEvent('loaded', { detail }));
+      }, 0);
     }
   }
   customElements.define('tixkit-widget', TixkitWidget);
@@ -56,6 +65,47 @@ async function loadFixturePage(page: import('@playwright/test').Page, html: stri
 }
 
 test.describe('embed generator fixture pages', () => {
+  test('interactive generator uses Embed Contract v1 and clears invalid output', async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.route('http://localhost:3201/embed-generator', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: fs.readFileSync(path.join(repositoryRoot, 'docs/embed-generator.html'), 'utf8'),
+      }),
+    );
+    await page.route('**/packages/embed-core/dist/index.js', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/javascript',
+        body: fs.readFileSync(
+          path.join(repositoryRoot, 'packages/embed-core/dist/index.js'),
+          'utf8',
+        ),
+      }),
+    );
+
+    await page.goto('http://localhost:3201/embed-generator');
+    const snippet = page.locator('#snippet');
+    await expect(snippet).toHaveValue(/Embed Contract 1\.0/);
+    await expect(snippet).toHaveValue(/host-origin="http:\/\/localhost:3000"/);
+    await page.locator('#lifecycle').check();
+    await expect(snippet).toHaveValue(/tixkit:v1:loading/);
+    await expect(page.locator('#csp')).not.toContainText("'unsafe-inline'");
+    const csp = await page.locator('#csp').textContent();
+    expect(csp).not.toMatch(/connect-src[^;]*(?:^|\s)https:(?:\s|;)/u);
+
+    await page.locator('#eventId').fill('invalid event');
+    await expect(snippet).toHaveValue('');
+    await expect(page.locator('#copyButton')).toBeDisabled();
+    await expect(page.locator('#eventId')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.locator('#error')).toContainText('eventId');
+    expect(pageErrors).toEqual([]);
+  });
+
   test('Webflow fixture page renders embed elements without secrets', async ({ page }) => {
     const html = readFixture('embed-webflow.html');
     await loadFixturePage(page, html);
@@ -109,12 +159,11 @@ test.describe('embed generator fixture pages', () => {
     expect(pageContent).not.toContain('sk_');
   });
 
-  test('Webflow fixture dispatches lifecycle loaded event', async ({ page }) => {
+  test('Webflow fixture dispatches versioned lifecycle ready event', async ({ page }) => {
     const html = readFixture('embed-webflow.html');
     await loadFixturePage(page, html);
 
-    // The mock widget dispatches 'loaded' on connectedCallback
-    // Verify the widget element got the loaded event by checking console output
+    // The mock widget dispatches the v1 ready event on connectedCallback.
     const consoleMessages: string[] = [];
     page.on('console', (msg) => consoleMessages.push(msg.text()));
 
@@ -122,8 +171,9 @@ test.describe('embed generator fixture pages', () => {
     await page.reload();
     await page.waitForTimeout(500);
 
-    // The lifecycle listener should log 'Tixkit: loaded ...'
-    const loadedLog = consoleMessages.find((m) => m.includes('Tixkit:') && m.includes('loaded'));
-    expect(loadedLog).toBeTruthy();
+    const readyLog = consoleMessages.find(
+      (message) => message.includes('Tixkit:') && message.includes('tixkit:v1:ready'),
+    );
+    expect(readyLog).toBeTruthy();
   });
 });

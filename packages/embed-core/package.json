@@ -1,32 +1,36 @@
 {
-  "name": "@tixkit/widget",
-  "version": "0.1.0",
-  "description": "Tixkit Embed Contract v1 custom elements for hosted checkout",
+  "name": "@tixkit/embed-core",
+  "version": "1.0.0",
+  "description": "Versioned Tixkit embed contracts, validation, snippet generation, and CSP profiles",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nkgotcode/tixkit.git",
-    "directory": "packages/widget"
+    "directory": "packages/embed-core"
   },
   "homepage": "https://github.com/nkgotcode/tixkit#readme",
   "bugs": "https://github.com/nkgotcode/tixkit/issues",
   "type": "module",
   "sideEffects": false,
-  "main": "./dist/tixkit-widget.js",
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "!dist/__tests__",
     "!dist/**/*.test.*",
     "!dist/.tsbuildinfo",
+    "schemas",
+    "fixtures",
     "README.md",
     "LICENSE"
   ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/tixkit-widget.js"
+      "import": "./dist/index.js"
     },
+    "./schemas/*": "./schemas/*",
+    "./fixtures/*": "./fixtures/*",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -37,21 +41,16 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -b && esbuild src/index.ts --bundle --minify --format=esm --sourcemap=external --outfile=dist/tixkit-widget.js",
-    "dev": "esbuild src/index.ts --bundle --format=esm --outfile=dist/tixkit-widget.js --watch",
+    "build": "tsc -b",
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test:unit": "vitest run",
     "prepack": "bun run build",
     "clean": "rm -rf dist"
   },
-  "dependencies": {
-    "@tixkit/embed-core": "1.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "typescript": "7.0.2",
-    "esbuild": "^0.28.0",
-    "vitest": "^4.1.0",
-    "jsdom": "^26.1.0"
+    "vitest": "^4.1.0"
   }
 }

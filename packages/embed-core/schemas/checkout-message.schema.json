@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tixkit.com/embed/v1/checkout-message.schema.json",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "source", "type", "widgetId", "eventId", "nonce"],
+      "properties": {
+        "contractVersion": { "const": "1.0" },
+        "source": { "const": "tixkit-checkout" },
+        "type": { "const": "checkout:ready" },
+        "widgetId": { "type": "string" },
+        "eventId": { "type": "string" },
+        "nonce": { "type": "string", "minLength": 22, "maxLength": 128 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "source", "type", "widgetId", "eventId", "nonce"],
+      "properties": {
+        "contractVersion": { "const": "1.0" },
+        "source": { "const": "tixkit-checkout" },
+        "type": { "const": "checkout:close-requested" },
+        "widgetId": { "type": "string" },
+        "eventId": { "type": "string" },
+        "nonce": { "type": "string", "minLength": 22, "maxLength": 128 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "source",
+        "type",
+        "widgetId",
+        "eventId",
+        "nonce",
+        "lifecycle"
+      ],
+      "properties": {
+        "contractVersion": { "const": "1.0" },
+        "source": { "const": "tixkit-checkout" },
+        "type": { "const": "checkout:lifecycle" },
+        "widgetId": { "type": "string" },
+        "eventId": { "type": "string" },
+        "nonce": { "type": "string", "minLength": 22, "maxLength": 128 },
+        "lifecycle": {
+          "enum": [
+            "checkout-started",
+            "checkout-session-created",
+            "order-completed",
+            "recoverable-error",
+            "fatal-error"
+          ]
+        },
+        "sessionId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "errorCode": { "enum": ["invalid-config", "invalid-origin", "invalid-message", "unsupported-contract-version", "handshake-timeout", "checkout-unreachable", "checkout-offline", "unsupported-browser", "session-expired", "checkout-rejected", "internal-error"] },
+        "message": { "type": "string", "maxLength": 240 },
+        "retryable": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "lifecycle": { "const": "checkout-session-created" } } },
+          "then": { "required": ["sessionId"] }
+        },
+        {
+          "if": { "properties": { "lifecycle": { "const": "order-completed" } } },
+          "then": { "required": ["orderId"] }
+        },
+        {
+          "if": { "properties": { "lifecycle": { "enum": ["recoverable-error", "fatal-error"] } } },
+          "then": { "required": ["errorCode", "message", "retryable"], "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }] } }
+        },
+        {
+          "if": { "properties": { "lifecycle": { "enum": ["checkout-started", "checkout-session-created", "order-completed"] } } },
+          "then": { "not": { "anyOf": [{ "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+        },
+        {
+          "if": { "properties": { "lifecycle": { "enum": ["checkout-started", "checkout-session-created"] } } },
+          "then": { "not": { "required": ["orderId"] } }
+        }
+      ]
+    }
+  ]
+}

@@ -82,7 +82,8 @@ describe('generateEmbedSnippet', () => {
     });
     expect(snippet).toContain('handleTixkit');
     expect(snippet).toContain('addEventListener');
-    expect(snippet).toContain('order_completed');
+    expect(snippet).toContain('tixkit:v1:loading');
+    expect(snippet).toContain('tixkit:v1:order-completed');
   });
 
   it('does not include secret keys', () => {

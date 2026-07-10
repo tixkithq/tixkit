@@ -1,0 +1,8 @@
+{
+  "contractVersion": "2.0",
+  "source": "tixkit-checkout",
+  "type": "checkout:ready",
+  "widgetId": "tkw_fixture",
+  "eventId": "evt_fixture",
+  "nonce": "0123456789012345678901"
+}

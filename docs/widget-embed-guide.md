@@ -2,7 +2,7 @@
 
 This guide covers the browser-only Tixkit widget package. The widget is safe to load in public pages: it does not accept or embed secret API keys, payment provider secrets, session tokens, or admin credentials.
 
-Phase 4 embed generator (C-060): Use `bun run embed:generate --event-id <id> --brand-id <id> --platform webflow` to produce a validated, copy-paste snippet with CSP guidance and placement instructions. An interactive HTML generator is at `docs/embed-generator.html`. The manual examples below remain useful for custom integrations.
+Embed Contract v1 is owned by `@tixkit/embed-core`. The CLI and interactive `docs/embed-generator.html` import that package instead of maintaining separate generation logic. Use `bun run embed:generate --event-id <id> --brand-id <id> --platform webflow --allowed-origin https://merchant.example` to produce a validated snippet, strict feature-derived CSP, and placement instructions.
 
 ## Script Loading
 
@@ -31,6 +31,7 @@ Use `tixkit-widget` when tickets should render directly inside the page.
   discount-code="EARLYBIRD"
   tracking-id="campaign_spring_launch"
   api-base-url="https://checkout.tixkit.com"
+  host-origin="https://merchant.example"
 ></tixkit-widget>
 ```
 
@@ -48,6 +49,7 @@ Supported attributes:
 | `theme`             | no       | `auto`, `light`, or `dark`.                                                                                                                      |
 | `api-base-url`      | no       | Checkout origin. Defaults to `https://checkout.tixkit.com`.                                                                                      |
 | `reporting-api-url` | no       | API origin for persisted widget impressions. Defaults to `https://api.tixkit.com`, or `localhost:4000` when checkout runs on localhost.          |
+| `host-origin`       | no       | Exact host page origin used by the v1 handshake. When set, it must match `window.location.origin`.                                               |
 
 ## Button Embeds
 
@@ -61,21 +63,24 @@ Use `tixkit-button` when a page should open checkout from a button. The button d
   checkout-mode="modal"
   discount-code="EARLYBIRD"
   tracking-id="campaign_spring_launch"
+  locale="fr-FR"
+  theme="dark"
   api-base-url="https://checkout.tixkit.com"
+  host-origin="https://merchant.example"
 >
   Buy tickets
 </tixkit-button>
 ```
 
-`items` is a comma-separated list of `ticketTypeId=quantity` pairs. Hosted checkout recalculates price, fees, discounts, access rules, and inventory on the server; client values are only prefill hints.
+`tixkit-button` consumes the same locale, theme, checkout origin, reporting origin, and host-origin attributes as `tixkit-widget`. `items` is a comma-separated list of `ticketTypeId=quantity` pairs. Hosted checkout recalculates price, fees, discounts, access rules, and inventory on the server; client values are only prefill hints.
 
 ## Checkout Modes
 
-| Mode       | Element                          | Behavior                                                                                                        |
-| ---------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `inline`   | `tixkit-widget`                  | Renders a sandboxed iframe in the host page and emits `opened` after the iframe loads.                          |
-| `modal`    | `tixkit-widget`, `tixkit-button` | Opens a sandboxed iframe in a shadow-DOM modal. Buyers can close it with the close button, backdrop, or Escape. |
-| `redirect` | `tixkit-widget`, `tixkit-button` | Emits `opened` and `checkout_started`, then navigates the current page to hosted checkout.                      |
+| Mode       | Element                          | Behavior                                                                                                                                        |
+| ---------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inline`   | `tixkit-widget`                  | Renders a sandboxed iframe in the host page and emits `opened` after the iframe loads.                                                          |
+| `modal`    | `tixkit-widget`, `tixkit-button` | Opens a sandboxed iframe in a shadow-DOM modal. Buyers can close it with the close button, backdrop, or Escape.                                 |
+| `redirect` | `tixkit-widget`, `tixkit-button` | Emits `opened`, then navigates the current page to hosted checkout. Checkout lifecycle starts only after hosted checkout confirms buyer intent. |
 
 For `tixkit-button checkout-mode="inline"`, the runtime opens checkout in a new tab as a safe fallback because a button has no inline container.
 
@@ -90,13 +95,15 @@ Lifecycle events are dispatched from the host custom element. Attach listeners t
   const widget = document.getElementById('tickets');
 
   for (const name of [
-    'loaded',
-    'loading',
-    'opened',
-    'closed',
-    'checkout_started',
-    'order_completed',
-    'error',
+    'tixkit:v1:loading',
+    'tixkit:v1:ready',
+    'tixkit:v1:opened',
+    'tixkit:v1:closed',
+    'tixkit:v1:checkout-started',
+    'tixkit:v1:checkout-session-created',
+    'tixkit:v1:order-completed',
+    'tixkit:v1:recoverable-error',
+    'tixkit:v1:fatal-error',
   ]) {
     widget.addEventListener(name, (event) => {
       console.log(name, event.detail);
@@ -107,17 +114,9 @@ Lifecycle events are dispatched from the host custom element. Attach listeners t
 
 Event detail fields:
 
-| Event              | Detail                                                                                              |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| `loaded`           | `{ event, eventId }` after the element is initialized.                                              |
-| `loading`          | `{ event, eventId }` while an inline iframe is loading.                                             |
-| `opened`           | `{ event, eventId }` after an inline/modal iframe loads, or immediately before redirect navigation. |
-| `closed`           | `{ event, eventId }` when a modal closes, the element disconnects, or the host page unloads.        |
-| `checkout_started` | `{ event, eventId, sessionId? }` from hosted checkout or immediately before redirect navigation.    |
-| `order_completed`  | `{ event, eventId, sessionId?, orderId? }` from hosted checkout or the confirmation page.           |
-| `error`            | `{ event, eventId, message }` for widget configuration or load failures.                            |
+Every detail contains `contractVersion`, `widgetId`, `eventId`, `mode`, `timestamp`, and `name`. Session creation adds `sessionId`; order completion adds `orderId` and may add `sessionId`; errors add `errorCode`, `message`, and `retryable`; close adds a bounded `reason`. Buyer names, email, phone, address, answers, access/promo values, payment data, and provider secrets are never included.
 
-`event` and `eventId` are both present for compatibility. New integrations should read `eventId`.
+Legacy aliases remain available during the compatibility window: `loaded`, `loading`, `opened`, `closed`, `checkout_started`, `order_completed`, and `error`. New integrations must use `tixkit:v1:*` names. `event` remains in legacy event details as an alias of `eventId`.
 
 ## Marketing Integrations
 
@@ -139,14 +138,31 @@ Consent-gated integrations fire only when the browser has `localStorage["tixkit_
 
 ## postMessage Origins
 
-Hosted checkout posts messages with this shape:
+The host starts a per-iframe handshake with this shape:
 
 ```js
 {
-  source: 'tixkit-checkout',
-  event: 'order_completed',
-  type: 'order_completed',
+  contractVersion: '1.0',
+  source: 'tixkit-embed-host',
+  type: 'host:hello',
+  widgetId: 'tkw_opaque',
   eventId: 'evt_demo',
+  nonce: 'per-instance-random-nonce',
+  hostOrigin: 'https://merchant.example'
+}
+```
+
+Hosted checkout acknowledges the exact source window and origin, then emits lifecycle messages such as:
+
+```js
+{
+  contractVersion: '1.0',
+  source: 'tixkit-checkout',
+  type: 'checkout:lifecycle',
+  widgetId: 'tkw_opaque',
+  eventId: 'evt_demo',
+  nonce: 'per-instance-random-nonce',
+  lifecycle: 'order-completed',
   sessionId: 'cs_demo',
   orderId: 'ord_demo'
 }
@@ -154,12 +170,13 @@ Hosted checkout posts messages with this shape:
 
 The widget accepts checkout messages only when:
 
-- `event.origin` exactly matches the `api-base-url` checkout origin.
-- `data.source` is `tixkit-checkout`.
-- `data.event` or `data.type` is a supported lifecycle event.
-- `data.eventId`, when present, matches the element's `event` attribute.
+- `contractVersion` is exactly a supported v1 version; unknown versions fail closed.
+- `event.origin` exactly matches the active `api-base-url` checkout origin.
+- `event.source` is exactly the active iframe `contentWindow`.
+- `source`, `type`, lifecycle payload, widget ID, event ID, and nonce pass the public schema.
+- The nonce belongs to the current render; stale or replaced frames cannot emit events.
 
-The checkout frame uses `postMessage(..., '*')` because Tixkit cannot know every merchant domain in advance. Host pages that listen to `window` messages directly must still validate `event.origin` before using the payload.
+Neither peer uses `postMessage(..., '*')`. The widget sends to the checkout origin and checkout replies to the validated handshake origin. `host-origin` makes an explicitly generated allowed origin active instead of validation-only configuration.
 
 ## Multiple Widgets On One Page
 
@@ -175,7 +192,7 @@ Load the script once and mount multiple elements.
 </tixkit-button>
 ```
 
-Current hosted checkout messages include `eventId`, so lifecycle events are routed only to the matching element. Legacy checkout messages without `eventId` are treated as compatible broadcasts.
+Each instance has a unique widget ID and nonce, so even two widgets for the same event cannot cross-associate messages. Messages without an event ID, widget ID, nonce, or supported contract version fail closed.
 
 ## Modal Behavior
 

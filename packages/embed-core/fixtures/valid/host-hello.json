@@ -1,0 +1,9 @@
+{
+  "contractVersion": "1.0",
+  "source": "tixkit-embed-host",
+  "type": "host:hello",
+  "widgetId": "tkw_fixture",
+  "eventId": "evt_fixture",
+  "nonce": "0123456789012345678901",
+  "hostOrigin": "https://merchant.example.test"
+}

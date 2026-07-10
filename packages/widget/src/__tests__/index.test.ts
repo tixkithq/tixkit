@@ -1,5 +1,11 @@
 import { expect, it, describe, vi, beforeEach, afterEach } from 'vitest';
-import { TixkitWidget, TixkitButton } from '../index.js';
+import {
+  TixkitWidget,
+  TixkitButton,
+  createCheckoutCloseRequestedMessage,
+  createCheckoutLifecycleMessage,
+  createCheckoutReadyMessage,
+} from '../index.js';
 
 const CHECKOUT_BASE = 'https://checkout.tixkit.com';
 const mountedElements: Array<TixkitWidget | TixkitButton> = [];
@@ -37,11 +43,75 @@ function postCheckoutMessage(
   event: string,
   detail: Record<string, string> = {},
   origin = CHECKOUT_BASE,
+  target?: TixkitWidget | TixkitButton,
 ): void {
+  const eventId = detail.eventId ?? 'evt_demo';
+  const candidates = [...mountedElements];
+  // oxlint-disable-next-line unicorn/no-array-reverse -- only the local copy is mutated.
+  candidates.reverse();
+  const element =
+    target ??
+    candidates.find((candidate) => {
+      const src = candidate.shadowRoot?.querySelector('iframe')?.getAttribute('src');
+      return src ? new URL(src).searchParams.get('eventId') === eventId : false;
+    });
+  const frame = element?.shadowRoot?.querySelector('iframe');
+  if (!frame) throw new Error(`No active iframe for ${eventId}`);
+  const source = ensureFrameWindow(frame);
+  const url = new URL(frame.src);
+  const lifecycle =
+    event === 'checkout_started'
+      ? 'checkout-started'
+      : event === 'order_completed'
+        ? 'order-completed'
+        : event;
+  const binding = {
+    widgetId: url.searchParams.get('embedWidgetId') ?? '',
+    eventId,
+    nonce: url.searchParams.get('embedNonce') ?? '',
+  };
+  const message =
+    lifecycle === 'order-completed'
+      ? createCheckoutLifecycleMessage({
+          ...binding,
+          lifecycle,
+          ...(detail.sessionId ? { sessionId: detail.sessionId } : {}),
+          orderId: detail.orderId ?? 'ord_test',
+        })
+      : createCheckoutLifecycleMessage({
+          ...binding,
+          lifecycle: 'checkout-started',
+          ...(detail.sessionId ? { sessionId: detail.sessionId } : {}),
+        });
   window.dispatchEvent(
     new MessageEvent('message', {
       origin,
-      data: { source: 'tixkit-checkout', event, ...detail },
+      source,
+      data: message,
+    }),
+  );
+}
+
+function ensureFrameWindow(frame: HTMLIFrameElement): Window {
+  if (frame.contentWindow) return frame.contentWindow;
+  const source = { postMessage: vi.fn() } as unknown as Window;
+  Object.defineProperty(frame, 'contentWindow', { configurable: true, value: source });
+  return source;
+}
+
+function dispatchFrameLoad(frame: HTMLIFrameElement): void {
+  const source = ensureFrameWindow(frame);
+  frame.dispatchEvent(new Event('load'));
+  const url = new URL(frame.src);
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      origin: url.origin,
+      source,
+      data: createCheckoutReadyMessage({
+        widgetId: url.searchParams.get('embedWidgetId') ?? '',
+        eventId: url.searchParams.get('eventId') ?? '',
+        nonce: url.searchParams.get('embedNonce') ?? '',
+      }),
     }),
   );
 }
@@ -92,13 +162,22 @@ describe('widget lifecycle events (runtime)', () => {
     document.body.innerHTML = '';
   });
 
-  it('dispatches loaded on connectedCallback', () => {
+  it('dispatches loaded after the validated ready handshake', () => {
     const el = createWidget();
     const spy = vi.fn();
+    const readySpy = vi.fn();
     el.addEventListener('loaded', spy);
+    el.addEventListener('tixkit:v1:ready', readySpy);
 
     el.connectedCallback();
+    expect(spy).not.toHaveBeenCalled();
+    expect(readySpy).not.toHaveBeenCalled();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe');
+    expect(frame).not.toBeNull();
+    dispatchFrameLoad(frame!);
+    dispatchFrameLoad(frame!);
     expect(spy).toHaveBeenCalledTimes(1);
+    expect(readySpy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0]?.[0]).toBeInstanceOf(CustomEvent);
   });
 
@@ -246,7 +325,7 @@ describe('widget lifecycle events (runtime)', () => {
     el.addEventListener('opened', spy);
     const iframe = el.shadowRoot?.querySelector('iframe');
     expect(iframe).not.toBeNull();
-    iframe!.dispatchEvent(new Event('load'));
+    dispatchFrameLoad(iframe!);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -300,6 +379,9 @@ describe('widget lifecycle events (runtime)', () => {
     el.addEventListener('closed', spy);
     el.disconnectedCallback();
     expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      detail: { name: 'closed', reason: 'disconnected' },
+    });
   });
 
   it('renders HTML-looking error messages as text', () => {
@@ -328,9 +410,9 @@ describe('widget lifecycle events (runtime)', () => {
       el.addEventListener(name, spy as unknown as EventListener);
     }
 
-    el.connectedCallback(); // loaded
+    el.connectedCallback();
     const iframe = el.shadowRoot?.querySelector('iframe');
-    iframe?.dispatchEvent(new Event('load')); // opened
+    if (iframe) dispatchFrameLoad(iframe); // ready/loaded and opened
     postCheckoutMessage('checkout_started'); // checkout_started
     postCheckoutMessage('order_completed'); // order_completed
     el.disconnectedCallback(); // closed
@@ -372,6 +454,56 @@ describe('widget lifecycle events (runtime)', () => {
     });
   });
 
+  it('isolates widgets for the same event by iframe source, widget ID, and nonce', () => {
+    const first = createWidget({ event: 'evt_shared' });
+    const second = createWidget({ event: 'evt_shared' });
+    first.connectedCallback();
+    second.connectedCallback();
+    const firstSpy = vi.fn();
+    const secondSpy = vi.fn();
+    first.addEventListener('order_completed', firstSpy);
+    second.addEventListener('order_completed', secondSpy);
+
+    postCheckoutMessage(
+      'order_completed',
+      { eventId: 'evt_shared', sessionId: 'cs_shared', orderId: 'ord_shared' },
+      CHECKOUT_BASE,
+      second,
+    );
+
+    expect(firstSpy).not.toHaveBeenCalled();
+    expect(secondSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed for unknown contract versions and stale nonces', () => {
+    const el = createWidget();
+    el.connectedCallback();
+    const spy = vi.fn();
+    el.addEventListener('order_completed', spy);
+    const frame = el.shadowRoot?.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    const source = ensureFrameWindow(frame!);
+    const url = new URL(frame!.src);
+    const message = createCheckoutLifecycleMessage({
+      widgetId: url.searchParams.get('embedWidgetId') ?? '',
+      eventId: 'evt_demo',
+      nonce: 'stale_nonce',
+      lifecycle: 'order-completed',
+      orderId: 'ord_stale',
+    });
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: CHECKOUT_BASE,
+        source,
+        data: { ...message, contractVersion: '2.0' },
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent('message', { origin: CHECKOUT_BASE, source, data: message }),
+    );
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('does not duplicate postMessage listeners across repeated connectedCallback calls', () => {
     const el = createWidget();
 
@@ -400,7 +532,8 @@ describe('widget lifecycle events (runtime)', () => {
       widget.addEventListener('opened', openedSpies[index] as EventListener);
       widget.addEventListener('order_completed', completedSpies[index] as EventListener);
       widget.connectedCallback();
-      widget.shadowRoot?.querySelector('iframe')?.dispatchEvent(new Event('load'));
+      const frame = widget.shadowRoot?.querySelector('iframe');
+      if (frame) dispatchFrameLoad(frame);
     });
 
     loadedSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
@@ -470,6 +603,16 @@ describe('widget iframe security (runtime)', () => {
     expect(src).not.toContain('key=');
   });
 
+  it('reacts to api-base-url mutations by rebuilding the checkout frame', () => {
+    const el = createWidget();
+    document.body.appendChild(el);
+    el.setAttribute('api-base-url', 'https://custom-checkout.example.test');
+    expect(el.shadowRoot?.querySelector('iframe')?.src).toMatch(
+      /^https:\/\/custom-checkout\.example\.test\/checkout\?/,
+    );
+    el.remove();
+  });
+
   it('sets sandbox and allow attributes on the inline iframe', () => {
     const el = createWidget();
 
@@ -499,7 +642,7 @@ describe('widget checkout modes (runtime)', () => {
     expect(el.shadowRoot?.querySelector('iframe.tk-frame')).toBeNull();
     // Clicking the button opens the modal (renders a modal iframe).
     button!.click();
-    const modalFrame = el.shadowRoot?.querySelector('iframe.tk-modal-frame');
+    const modalFrame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe.tk-modal-frame');
     expect(modalFrame).not.toBeNull();
   });
 
@@ -513,15 +656,38 @@ describe('widget checkout modes (runtime)', () => {
     el.addEventListener('closed', closedSpy);
 
     el.shadowRoot?.querySelector('button')?.click();
-    const modalFrame = el.shadowRoot?.querySelector('iframe.tk-modal-frame');
+    const modalFrame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe.tk-modal-frame');
     expect(modalFrame).not.toBeNull();
-    modalFrame!.dispatchEvent(new Event('load'));
+    dispatchFrameLoad(modalFrame!);
     expect(openedSpy).toHaveBeenCalledTimes(1);
 
     const close = el.shadowRoot?.querySelector<HTMLButtonElement>('button.tk-modal-close');
     expect(close).not.toBeNull();
     close!.click();
     expect(closedSpy).toHaveBeenCalledTimes(1);
+    expect(el.shadowRoot?.querySelector('iframe.tk-modal-frame')).toBeNull();
+  });
+
+  it('closes a modal after a validated Escape request from the checkout frame', () => {
+    const el = createWidget({ 'checkout-mode': 'modal' });
+    el.connectedCallback();
+    const launcher = el.shadowRoot?.querySelector<HTMLButtonElement>('button');
+    launcher?.click();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe.tk-modal-frame');
+    expect(frame).not.toBeNull();
+    const source = ensureFrameWindow(frame!);
+    const url = new URL(frame!.src);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: CHECKOUT_BASE,
+        source,
+        data: createCheckoutCloseRequestedMessage({
+          widgetId: url.searchParams.get('embedWidgetId') ?? '',
+          eventId: 'evt_demo',
+          nonce: url.searchParams.get('embedNonce') ?? '',
+        }),
+      }),
+    );
     expect(el.shadowRoot?.querySelector('iframe.tk-modal-frame')).toBeNull();
   });
 
@@ -553,12 +719,16 @@ describe('TixkitButton lifecycle (runtime)', () => {
     document.body.innerHTML = '';
   });
 
-  it('dispatches loaded on connectedCallback', () => {
+  it('dispatches loaded after a button checkout ready handshake', () => {
     const el = createButton();
     const spy = vi.fn();
     el.addEventListener('loaded', spy);
 
     el.connectedCallback();
+    el.shadowRoot?.querySelector<HTMLButtonElement>('button')?.click();
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe');
+    expect(frame).not.toBeNull();
+    dispatchFrameLoad(frame!);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -588,7 +758,7 @@ describe('TixkitButton lifecycle (runtime)', () => {
     expect(button).not.toBeNull();
     button!.click();
 
-    const frame = el.shadowRoot?.querySelector('iframe.tk-modal-frame');
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe.tk-modal-frame');
     expect(frame).not.toBeNull();
     const url = new URL(frame!.getAttribute('src') ?? '');
     expect(url.searchParams.get('eventId')).toBe('evt_demo');
@@ -614,11 +784,20 @@ describe('TixkitButton lifecycle (runtime)', () => {
     expect(startedSpy).not.toHaveBeenCalled();
     expect(openedSpy).not.toHaveBeenCalled();
 
-    const frame = el.shadowRoot?.querySelector('iframe.tk-modal-frame');
+    const frame = el.shadowRoot?.querySelector<HTMLIFrameElement>('iframe.tk-modal-frame');
     expect(frame).not.toBeNull();
-    frame!.dispatchEvent(new Event('load'));
+    dispatchFrameLoad(frame!);
     expect(openedSpy).toHaveBeenCalledTimes(1);
     expect(startedSpy).not.toHaveBeenCalled();
+  });
+
+  it('forwards locale and theme from button attributes to hosted checkout', () => {
+    const el = createButton({ locale: 'fr-FR', theme: 'dark' });
+    el.connectedCallback();
+    el.shadowRoot?.querySelector<HTMLButtonElement>('button')?.click();
+    const url = new URL(el.shadowRoot?.querySelector('iframe')?.src ?? 'about:blank');
+    expect(url.searchParams.get('locale')).toBe('fr-FR');
+    expect(url.searchParams.get('theme')).toBe('dark');
   });
 
   it('dispatches order_completed from trusted checkout postMessage in modal button flows', () => {
@@ -651,10 +830,18 @@ describe('TixkitButton lifecycle (runtime)', () => {
     el.connectedCallback();
     const spy = vi.fn();
     el.addEventListener('order_completed', spy);
-    postCheckoutMessage('order_completed', {
-      eventId: 'evt_other',
-      orderId: 'ord_other',
-    });
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: CHECKOUT_BASE,
+        data: createCheckoutLifecycleMessage({
+          widgetId: 'tkw_other',
+          eventId: 'evt_other',
+          nonce: 'nonce_other',
+          lifecycle: 'order-completed',
+          orderId: 'ord_other',
+        }),
+      }),
+    );
 
     expect(spy).not.toHaveBeenCalled();
   });

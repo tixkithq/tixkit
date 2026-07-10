@@ -42,6 +42,7 @@ import { getSessionToken } from '@/lib/session-token';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { trackMarketingEvent } from '@/lib/marketing';
 import { deriveState, type ConfirmationState } from './confirmation-state';
+import { emitEmbedLifecycle, initializeEmbedHandshake } from '@/lib/embed-contract';
 
 // Re-export so consumers can import the single source of truth from the
 // component module without duplicating the derivation logic.
@@ -73,18 +74,11 @@ function centsFromCurrencyInput(value: string): number | null {
 }
 
 function emitOrderCompleted(detail: Record<string, unknown>) {
-  if (typeof window === 'undefined') return;
-  const message = {
-    source: 'tixkit-checkout',
-    event: 'order_completed',
-    type: 'order_completed',
-    ...detail,
-  };
-  window.parent?.postMessage(message, '*');
-  window.opener?.postMessage(message, '*');
+  emitEmbedLifecycle('order-completed', detail);
 }
 
 export default function ConfirmationClient() {
+  useEffect(() => initializeEmbedHandshake(), []);
   const params = useSearchParams();
   const sessionId = params.get('sessionId') ?? '';
   const orderId = params.get('orderId') ?? '';

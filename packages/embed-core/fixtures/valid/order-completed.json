@@ -1,0 +1,11 @@
+{
+  "contractVersion": "1.0",
+  "source": "tixkit-checkout",
+  "type": "checkout:lifecycle",
+  "widgetId": "tkw_fixture",
+  "eventId": "evt_fixture",
+  "nonce": "0123456789012345678901",
+  "lifecycle": "order-completed",
+  "sessionId": "cs_fixture",
+  "orderId": "ord_fixture"
+}
