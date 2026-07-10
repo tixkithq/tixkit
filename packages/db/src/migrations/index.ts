@@ -53,3 +53,4 @@ export { EventAgeEligibilityMigration } from './0052_event_age_eligibility.js';
 export { OrganizationMemberUniqueMigration } from './0053_organization_member_unique.js';
 export { CheckInActivityIndexesMigration } from './0054_check_in_activity_indexes.js';
 export { CheckInActivitySequenceMigration } from './0055_check_in_activity_sequence.js';
+export { CheckoutHoldCapacityIndexMigration } from './0056_checkout_hold_capacity_index.js';

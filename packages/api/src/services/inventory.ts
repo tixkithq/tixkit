@@ -103,7 +103,7 @@ export class InventoryService {
         // eslint-disable-next-line no-await-in-loop -- inventory pools must be locked sequentially in sorted order to avoid deadlocks.
         const pool = await trx
           .selectFrom('inventory_pools')
-          .selectAll()
+          .select(['total_capacity', 'sold_count', 'hold_ttl_seconds'])
           .where('id', '=', poolId)
           .forUpdate()
           .executeTakeFirstOrThrow();

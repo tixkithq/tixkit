@@ -25,6 +25,7 @@ import { EventAgeEligibilityMigration } from '../../migrations/0052_event_age_el
 import { OrganizationMemberUniqueMigration } from '../../migrations/0053_organization_member_unique.js';
 import { CheckInActivityIndexesMigration } from '../../migrations/0054_check_in_activity_indexes.js';
 import { CheckInActivitySequenceMigration } from '../../migrations/0055_check_in_activity_sequence.js';
+import { CheckoutHoldCapacityIndexMigration } from '../../migrations/0056_checkout_hold_capacity_index.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -191,11 +192,14 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0055_check_in_activity_sequence');
+    expect(Object.keys(migrations).at(-1)).toBe('0056_checkout_hold_capacity_index');
     expect(migrations['0052_event_age_eligibility']).toBe(EventAgeEligibilityMigration);
     expect(migrations['0053_organization_member_unique']).toBe(OrganizationMemberUniqueMigration);
     expect(migrations['0054_check_in_activity_indexes']).toBe(CheckInActivityIndexesMigration);
     expect(migrations['0055_check_in_activity_sequence']).toBe(CheckInActivitySequenceMigration);
+    expect(migrations['0056_checkout_hold_capacity_index']).toBe(
+      CheckoutHoldCapacityIndexMigration,
+    );
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(
@@ -227,6 +231,30 @@ describe('OrderSalesChannelMigration', () => {
     expect(migrations['0047_event_public_revision']).toBe(EventPublicRevisionMigration);
     expect(migrations['0048_hot_query_indexes']).toBe(HotQueryIndexesMigration);
     expect(migrations['0049_event_fee_pass_through']).toBe(EventFeePassThroughMigration);
+  });
+
+  it('creates a covering index for active checkout-hold capacity reads', async () => {
+    const db = new FakeOrderSalesChannelDb();
+
+    await CheckoutHoldCapacityIndexMigration.up(db as never);
+
+    expect(db.createdIndexes).toEqual([
+      {
+        indexName: 'idx_checkout_holds_pool_status_expires_quantity',
+        tableName: 'checkout_holds',
+        columnNames: ['inventory_pool_id', 'status', 'expires_at', 'quantity'],
+      },
+    ]);
+
+    await CheckoutHoldCapacityIndexMigration.down?.(db as never);
+
+    expect(db.droppedIndexes).toEqual([
+      {
+        indexName: 'idx_checkout_holds_pool_status_expires_quantity',
+        tableName: 'checkout_holds',
+        ifExists: true,
+      },
+    ]);
   });
 
   it('creates composite hot-query indexes for public and reporting reads', async () => {

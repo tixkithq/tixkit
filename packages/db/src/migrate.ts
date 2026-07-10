@@ -56,6 +56,7 @@ import { EventAgeEligibilityMigration } from './migrations/0052_event_age_eligib
 import { OrganizationMemberUniqueMigration } from './migrations/0053_organization_member_unique.js';
 import { CheckInActivityIndexesMigration } from './migrations/0054_check_in_activity_indexes.js';
 import { CheckInActivitySequenceMigration } from './migrations/0055_check_in_activity_sequence.js';
+import { CheckoutHoldCapacityIndexMigration } from './migrations/0056_checkout_hold_capacity_index.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -235,6 +236,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0053_organization_member_unique': OrganizationMemberUniqueMigration,
       '0054_check_in_activity_indexes': CheckInActivityIndexesMigration,
       '0055_check_in_activity_sequence': CheckInActivitySequenceMigration,
+      '0056_checkout_hold_capacity_index': CheckoutHoldCapacityIndexMigration,
     };
   }
 }

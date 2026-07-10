@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 runner_values="${repo_root}/infra/ci/arc/runner-values.yaml"
 runner_image_dockerfile="${repo_root}/infra/ci/arc/runner-image/Dockerfile"
 install_script="${repo_root}/infra/ci/scripts/install-arc.sh"
-mssql_manifest="${repo_root}/infra/ci/k8s/trusted-ci-mssql.yaml"
+mssql_manifest="${TIXKIT_MSSQL_MANIFEST:-${repo_root}/infra/ci/k8s/trusted-ci-mssql.yaml}"
 
 require_runner_values_block() {
   local block_name="$1"
@@ -102,6 +102,16 @@ verify_arc_supply_chain_pins() {
 
   if ! grep -q 'name: arc-runners-egress-mssql' "${mssql_manifest}" || ! grep -q 'name: tixkit-ci-mssql-ingress' "${mssql_manifest}"; then
     printf 'Trusted CI MSSQL manifest must include narrow runner egress and MSSQL ingress policies.\n' >&2
+    return 1
+  fi
+
+  if grep -qE "[\"']?kind[\"']?[[:space:]]*:[[:space:]]*[\"']?Secret([\"']|[[:space:],}]|$)" "${mssql_manifest}"; then
+    printf 'Trusted CI MSSQL workload manifest must not create the externally provisioned Secret.\n' >&2
+    return 1
+  fi
+
+  if ! grep -q 'secretKeyRef:' "${mssql_manifest}" || ! grep -q 'key: MSSQL_SA_PASSWORD' "${mssql_manifest}"; then
+    printf 'Trusted CI MSSQL deployment must read MSSQL_SA_PASSWORD from its external Secret.\n' >&2
     return 1
   fi
 }
