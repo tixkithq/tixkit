@@ -228,7 +228,7 @@ jobs:
       - name: PostgreSQL performance budget gate
         run: |
           cd packages/api
-          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
+          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1
           cd ../..
           PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
           bun run check:performance-budgets -- --config performance-budgets.integration.json
@@ -304,7 +304,7 @@ jobs:
       - name: MySQL Tier 1 correctness suites
         run: |
           cd packages/api
-          DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
+          DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1
           cd ../..
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
           PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
@@ -440,6 +440,39 @@ jobs:
       - browser-performance
     if: ${{ !cancelled() }}
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+        env:
+          POSTGRES_USER: tixkit
+          POSTGRES_PASSWORD: tixkit
+          POSTGRES_DB: tixkit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tixkit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      temporal:
+        image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
+        ports:
+          - 7233:7233
+        env:
+          DB: postgres12
+          DB_PORT: 5432
+          POSTGRES_SEEDS: postgres
+          POSTGRES_USER: tixkit
+          POSTGRES_PWD: tixkit
     env:
       CI: 'true'
       ADMIN_DASHBOARD_URL: http://localhost:3202
@@ -489,6 +522,27 @@ jobs:
         # The hardened trusted runner forbids sudo/no-new-privileges. Its image
         # owns OS packages; CI installs the pinned browser payload only.
         run: bunx playwright install chromium
+      - name: Start MinIO
+        run: |
+          docker rm -f tixkit-provider-minio >/dev/null 2>&1 || true
+          docker run --detach --name tixkit-provider-minio \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER=minioadmin \
+            --env MINIO_ROOT_PASSWORD=minioadmin \
+            --health-cmd 'curl -f http://localhost:9000/minio/health/live' \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 12 \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+            server /data
+          for attempt in {1..30}; do
+            status="$(docker inspect --format '{{.State.Health.Status}}' tixkit-provider-minio 2>/dev/null || true)"
+            if [ "$status" = healthy ]; then exit 0; fi
+            if [ "$status" = unhealthy ]; then docker logs tixkit-provider-minio; exit 1; fi
+            sleep 2
+          done
+          docker logs tixkit-provider-minio
+          exit 1
       - name: Write provider CI env file
         run: |
           umask 077
@@ -517,15 +571,12 @@ jobs:
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
           STRIPE_CONNECT_CLIENT_ID=${STRIPE_CONNECT_CLIENT_ID}
           EOF
-      - name: Start Docker-backed services
-        run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
       - name: Wait for Temporal
         run: |
           for attempt in {1..90}; do
             if bash -c "echo > /dev/tcp/localhost/7233" 2>/dev/null; then sleep 3; exit 0; fi
             sleep 2
           done
-          docker compose -f infra/docker-compose.yml logs temporal
           exit 1
       - run: bun run --env-file=.env.local db:migrate
       - run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared --filter=@tixkit/workflows --filter=@tixkit/openapi
@@ -556,15 +607,15 @@ jobs:
             test-results/
           if-no-files-found: ignore
           retention-days: 14
-      - name: Show Docker logs on failure
+      - name: Show MinIO logs on failure
         if: failure()
-        run: docker compose -f infra/docker-compose.yml logs --no-color
+        run: docker logs tixkit-provider-minio 2>/dev/null || true
       - name: Remove provider credential file
         if: always()
         run: rm -f .env.local
-      - name: Stop Docker-backed services
+      - name: Stop MinIO
         if: always()
-        run: docker compose -f infra/docker-compose.yml down -v
+        run: docker rm -f tixkit-provider-minio >/dev/null 2>&1 || true
 
   browser-performance:
     name: Browser & Lighthouse Performance
@@ -576,6 +627,39 @@ jobs:
       - integration-tests-mysql
     if: ${{ !cancelled() }}
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+        env:
+          POSTGRES_USER: tixkit
+          POSTGRES_PASSWORD: tixkit
+          POSTGRES_DB: tixkit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tixkit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      temporal:
+        image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
+        ports:
+          - 7233:7233
+        env:
+          DB: postgres12
+          DB_PORT: 5432
+          POSTGRES_SEEDS: postgres
+          POSTGRES_USER: tixkit
+          POSTGRES_PWD: tixkit
     env:
       CI: 'true'
       RUN_LIGHTHOUSE_BUDGETS: '1'
@@ -615,15 +699,33 @@ jobs:
         # The hardened trusted runner forbids sudo/no-new-privileges. Its image
         # owns OS packages; CI installs the pinned browser payload only.
         run: bunx playwright install chromium
-      - name: Start Docker-backed services
-        run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
+      - name: Start MinIO
+        run: |
+          docker rm -f tixkit-performance-minio >/dev/null 2>&1 || true
+          docker run --detach --name tixkit-performance-minio \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER=minioadmin \
+            --env MINIO_ROOT_PASSWORD=minioadmin \
+            --health-cmd 'curl -f http://localhost:9000/minio/health/live' \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 12 \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+            server /data
+          for attempt in {1..30}; do
+            status="$(docker inspect --format '{{.State.Health.Status}}' tixkit-performance-minio 2>/dev/null || true)"
+            if [ "$status" = healthy ]; then exit 0; fi
+            if [ "$status" = unhealthy ]; then docker logs tixkit-performance-minio; exit 1; fi
+            sleep 2
+          done
+          docker logs tixkit-performance-minio
+          exit 1
       - name: Wait for Temporal
         run: |
           for attempt in {1..90}; do
             if bash -c "echo > /dev/tcp/localhost/7233" 2>/dev/null; then sleep 3; exit 0; fi
             sleep 2
           done
-          docker compose -f infra/docker-compose.yml logs temporal
           exit 1
       - run: bun run db:migrate
       - name: Build browser dependencies
@@ -645,9 +747,9 @@ jobs:
             test-results/
           if-no-files-found: error
           retention-days: 30
-      - name: Show Docker logs on failure
+      - name: Show MinIO logs on failure
         if: failure()
-        run: docker compose -f infra/docker-compose.yml logs --no-color
-      - name: Stop Docker-backed services
+        run: docker logs tixkit-performance-minio 2>/dev/null || true
+      - name: Stop MinIO
         if: always()
-        run: docker compose -f infra/docker-compose.yml down -v
+        run: docker rm -f tixkit-performance-minio >/dev/null 2>&1 || true

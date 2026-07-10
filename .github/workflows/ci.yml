@@ -261,7 +261,7 @@ jobs:
       - name: MySQL Tier 1 correctness suites
         run: |
           cd packages/api
-          DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts
+          DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1
           cd ../..
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
           PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
