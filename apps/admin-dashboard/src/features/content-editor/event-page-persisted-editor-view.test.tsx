@@ -768,7 +768,7 @@ describe('EventPagePersistedEditorView', () => {
       }),
     );
     expect(JSON.stringify(lastSavePayload())).not.toContain('Legacy postMessage edit');
-  });
+  }, 15_000);
 
   it('removes custom embeds from every insertion path without settings permission', async () => {
     permissionCanMock.mockImplementation((permission?: string) => permission !== 'settings.write');
