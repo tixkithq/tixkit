@@ -1,0 +1,37 @@
+---
+title: Test webhook delivery
+description: Exercise local forwarding, signature failure, retry, duplicate delivery, and successful processing without production data.
+audience:
+  - developer
+product_area: webhooks
+content_type: tutorial
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A local receiver and Tixkit source checkout
+related:
+  - /developers/webhooks/setup
+  - /developers/webhooks/verify-signatures
+---
+
+Use test events and a development endpoint. Do not forward production payloads into local logs or tunneling services.
+
+## Inspect the forwarding plan
+
+```bash
+bun run dev:webhooks -- --dry-run --no-write-secret
+```
+
+The dry run reports the planned target without starting Stripe CLI or writing a secret. Live provider forwarding requires the supported provider CLI and test credentials in the selected environment file.
+
+## Exercise receiver behavior
+
+1. Deliver a correctly signed event and return `2xx` only after durable acceptance.
+2. Change one body byte and verify the signature is rejected.
+3. Use a stale timestamp and verify replay protection rejects it.
+4. Return a non-2xx response and observe retry state.
+5. Deliver the same event ID twice and verify business work happens once.
+6. Restore success and confirm delivery status in the Developer dashboard.
+
+Do not log the `Authorization` header, endpoint secret, or full personal-data payload while testing.

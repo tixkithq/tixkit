@@ -15,6 +15,7 @@ type UseAllEventsResult = {
 type UseAllEventsScope = {
   organizationId?: string;
   brandId?: string;
+  enabled?: boolean;
 };
 
 const MAX_PAGES = 100;
@@ -29,7 +30,7 @@ const PAGE_SIZE = 50;
  * and the hook re-fetches whenever the scope changes.
  */
 export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
-  const { organizationId, brandId } = scope ?? {};
+  const { organizationId, brandId, enabled = true } = scope ?? {};
   const [events, setEvents] = React.useState<AdminEventListItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<AdminApiError | undefined>(undefined);
@@ -37,6 +38,14 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
 
   React.useEffect(() => {
     let cancelled = false;
+    if (!enabled) {
+      setEvents([]);
+      setLoading(false);
+      setError(undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
     setLoading(true);
     setError(undefined);
 
@@ -56,6 +65,7 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
           };
           if (organizationId) params.organizationId = organizationId;
           if (brandId) params.brandId = brandId;
+          // eslint-disable-next-line no-await-in-loop -- Each cursor is returned by the preceding page.
           const result = await adminApi.listEvents(params);
           if (cancelled) return;
           if (!result.ok) {
@@ -84,7 +94,7 @@ export function useAllEvents(scope?: UseAllEventsScope): UseAllEventsResult {
     return () => {
       cancelled = true;
     };
-  }, [nonce, organizationId, brandId]);
+  }, [nonce, organizationId, brandId, enabled]);
 
   const refetch = React.useCallback(() => setNonce((n) => n + 1), []);
 

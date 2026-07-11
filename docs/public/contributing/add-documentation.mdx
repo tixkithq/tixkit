@@ -1,0 +1,38 @@
+---
+title: Add documentation
+description: Author validated public content, preserve canonical routes, and keep dashboard, search, redirects, and OSS export synchronized.
+audience:
+  - contributor
+product_area: contributing
+content_type: how-to
+status: beta
+owner: documentation-architecture
+last_verified: 2026-07-10
+prerequisites:
+  - A source checkout and identified content owner
+related:
+  - /contributing/testing
+  - /support
+---
+
+Place public long-form content under `docs/public`. Keep plans, audits, execution evidence, and private operational detail in the repository's excluded internal documentation tree; internal content is never hidden inside a public page.
+
+## Author a page
+
+Declare title, description, audience, product area, content type, stability, owner, last-verified date, prerequisites, and related canonical routes. Use task outcomes, exact verification, safe failure recovery, and a next action. Do not duplicate endpoint inventories or package-local installation detail.
+
+## Update dependent surfaces
+
+Add or reuse a `DocRouteId`, update navigation, redirects, dashboard Help metadata, package links, and source inbound links. Code fences require a language and must contain no secrets, destructive unlabeled commands, or placeholder text.
+
+## Validate
+
+```bash
+bun run docs:check
+bun run docs:build
+bun run --filter @tixkit/docs test:unit
+```
+
+Browser-facing changes also require keyboard, axe, no-console, responsive, and supported-browser coverage.
+
+Use the [validation and test guide](/contributing/testing) to run the focused and final gates.

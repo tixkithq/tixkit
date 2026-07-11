@@ -1,0 +1,40 @@
+---
+title: Configure services and secrets
+description: Validate environment contracts for API, worker, applications, databases, providers, signing, and storage.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: how-to
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - A chosen deployment topology and secret manager
+related:
+  - /self-hosting/authentication
+  - /self-hosting/databases
+---
+
+Start from `.env.local.example` for local development and your platform's secret manager for deployed environments. Never commit a populated environment file.
+
+## Validate by mode
+
+```bash
+bun run setup:check -- --mode local
+bun run setup:check -- --mode provider
+bun run setup:check -- --mode production
+```
+
+Use the mode matching the environment. Production checks are intentionally stricter and must not be bypassed with local capture values.
+
+## Separate public and private values
+
+Only variables explicitly designed for public browser use may use a public prefix. Database URLs, provider secrets, webhook secrets, API keys, encryption/signing material, object-storage credentials, and Temporal credentials remain server-only.
+
+Rotate a secret after suspected exposure and restart/redeploy every process that consumes it. Verify old credentials no longer authenticate.
+
+## Configuration drift
+
+Record non-secret environment contracts in deployment configuration, validate them before release, and compare API/worker settings that must agree, including database, Temporal namespace/task queue, storage, and provider mode.
+
+After every required mode passes, continue to the [deployment runbook](/self-hosting/deployment).

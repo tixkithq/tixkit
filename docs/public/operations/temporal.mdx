@@ -1,0 +1,36 @@
+---
+title: Operate Temporal workflows
+description: Deploy workers, monitor task queues, preserve replay safety, and recover stuck durable operations.
+audience:
+  - self-hoster
+product_area: operations
+content_type: runbook
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - Access to the Temporal namespace and worker deployment
+related:
+  - /operations/incidents
+  - /self-hosting/observability
+---
+
+Tixkit uses Temporal for durable checkout, refund, webhook delivery, exports, and other asynchronous operations. The API may accept a request before every activity completes; workflow state is part of operational truth.
+
+## Deploy workers
+
+Deploy workers with the same task queue, namespace, connection, encryption/TLS, and compatible application contract as the API. Verify worker readiness only after required recovery schedulers and registrations are established.
+
+## Preserve replay safety
+
+Workflow code must remain deterministic. Do not add direct network, clock, random, database, or environment-dependent behavior inside workflow execution; place side effects in activities. Use Temporal versioning patterns before changing an existing workflow branch that may replay.
+
+## Diagnose a stuck workflow
+
+1. Identify the workflow ID and type without copying payloads into public channels.
+2. Inspect history, pending activity, attempt, timeout, and task-queue polling.
+3. Restore the missing dependency or worker before retrying.
+4. Use supported reset/retry/repair behavior only after understanding idempotency and side effects.
+5. Verify the associated order, payment, inventory, delivery, or export state—not only workflow closure.
+
+Never delete workflow history or mutate application rows to make a dashboard look complete.

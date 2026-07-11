@@ -11,49 +11,74 @@ import { EmptyState } from '@/components/empty-state';
 import { ApiErrorState } from '@/components/api-error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EventStatusBadge } from '@/features/events/event-status-badge';
+import { WorkspaceReadinessChecklist } from './workspace-readiness';
 import { OrderStatusBadge } from '@/features/events/event-status-badge';
 import { useBootstrap } from '@/context/bootstrap-provider';
+import { usePermissions } from '@/context/permission-provider';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
 import { formatCurrency, formatNumber, formatDate } from '@/lib/format';
 
 export function DashboardView() {
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
   const { organizationId, brandId } = useBootstrap();
+  const { can } = usePermissions();
+  const workspaceSelected = Boolean(organizationId && brandId);
   const {
     events,
     loading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
-  } = useAllEvents({ organizationId, brandId });
+  } = useAllEvents({ organizationId, brandId, enabled: workspaceSelected });
   const {
     data: ordersData,
     loading: ordersLoading,
     error: ordersError,
     refetch: refetchOrders,
-  } = useAdminQuery(['listOrders', organizationId, brandId], () => {
-    const params: {
-      limit: number;
-      organizationId?: string;
-      brandId?: string;
-    } = { limit: 5 };
-    if (organizationId) params.organizationId = organizationId;
-    if (brandId) params.brandId = brandId;
-    return adminApi.listOrders(params);
-  });
+  } = useAdminQuery(
+    ['listOrders', organizationId, brandId],
+    () => {
+      const params: {
+        limit: number;
+        organizationId?: string;
+        brandId?: string;
+      } = { limit: 5 };
+      if (organizationId) params.organizationId = organizationId;
+      if (brandId) params.brandId = brandId;
+      return adminApi.listOrders(params);
+    },
+    { enabled: workspaceSelected },
+  );
 
   const recentOrders = ordersData?.items ?? [];
 
-  const grossSales = events.reduce((sum, e) => sum + e.grossSalesCents, 0);
+  const grossByCurrency = events.reduce<Record<string, number>>((totals, event) => {
+    totals[event.currency] = (totals[event.currency] ?? 0) + event.grossSalesCents;
+    return totals;
+  }, {});
+  const grossCurrencies = Object.entries(grossByCurrency);
   const ticketsSold = events.reduce((sum, e) => sum + e.ticketsSold, 0);
   const checkIns = events.reduce((sum, e) => sum + e.checkIns, 0);
   const activeEvents = events.filter((e) => e.status === 'published').length;
+  const nextDraft = events.reduce<(typeof events)[number] | undefined>((latest, event) => {
+    if (event.status !== 'draft') return latest;
+    return !latest || event.updatedAt > latest.updatedAt ? event : latest;
+  }, undefined);
 
   const metrics = [
     {
       title: 'Gross Sales',
-      value: formatCurrency(grossSales, 'USD'),
-      hint: `${events.length} event${events.length === 1 ? '' : 's'}`,
+      value:
+        grossCurrencies.length === 0
+          ? formatCurrency(0, 'USD')
+          : grossCurrencies.length === 1
+            ? formatCurrency(grossCurrencies[0]![1], grossCurrencies[0]![0])
+            : `${grossCurrencies.length} currencies`,
+      hint:
+        grossCurrencies.length > 1
+          ? grossCurrencies
+              .map(([currency, amount]) => formatCurrency(amount, currency))
+              .join(' · ')
+          : `${events.length} event${events.length === 1 ? '' : 's'}`,
       icon: DollarSign,
     },
     {
@@ -76,13 +101,6 @@ export function DashboardView() {
     },
   ];
 
-  // Lazy-load the create event drawer
-  const CreateEventDrawer = React.lazy(() =>
-    import('@/features/events/create-event-drawer').then((m) => ({
-      default: m.CreateEventDrawer,
-    })),
-  );
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -90,11 +108,44 @@ export function DashboardView() {
           <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
           <p className="text-sm text-muted-foreground">Your box office at a glance</p>
         </div>
-        <Button onClick={() => setDrawerOpen(true)}>
-          <Plus className="size-4" />
-          Create event
-        </Button>
+        {can('events.write') ? (
+          <Button asChild>
+            <Link href={routes.newEvent}>
+              <Plus className="size-4" />
+              Create event
+            </Link>
+          </Button>
+        ) : null}
       </div>
+
+      <WorkspaceReadinessChecklist />
+
+      {!workspaceSelected ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Select a workspace</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Choose an organization and brand to load scoped events, orders, and readiness.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!eventsLoading && !eventsError && nextDraft ? (
+        <Card className="border-primary/30">
+          <CardHeader>
+            <CardTitle>Continue launching {nextDraft.title}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Resume the server-owned launch checklist from the most recently updated draft.
+            </p>
+            <Button asChild>
+              <Link href={routes.eventDetail(nextDraft.id)}>Continue setup</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {eventsLoading
@@ -145,10 +196,14 @@ export function DashboardView() {
                 title="No events yet"
                 description="Create your first event to start selling tickets and tracking sales."
                 action={
-                  <Button onClick={() => setDrawerOpen(true)}>
-                    <Plus className="size-4" />
-                    Create event
-                  </Button>
+                  can('events.write') ? (
+                    <Button asChild>
+                      <Link href={routes.newEvent}>
+                        <Plus className="size-4" />
+                        Create event
+                      </Link>
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : (
@@ -217,18 +272,6 @@ export function DashboardView() {
           </CardContent>
         </Card>
       </div>
-
-      <React.Suspense fallback={null}>
-        <CreateEventDrawer
-          open={drawerOpen}
-          onOpenChange={setDrawerOpen}
-          onSuccess={() => {
-            // Refetch via the data hooks instead of a full page reload.
-            refetchEvents();
-            refetchOrders();
-          }}
-        />
-      </React.Suspense>
     </div>
   );
 }

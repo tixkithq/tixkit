@@ -1,19 +1,45 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:tixkit_flutter/tixkit_flutter.dart';
 
-void main() {
-  runApp(const TixkitFlutterDemo());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  const credentialBridge = MethodChannel('com.tixkit.demo/scanner-credentials');
+  final credentials = await credentialBridge.invokeMapMethod<String, String>('read');
+  if (credentials == null ||
+      credentials['deviceId'] == null ||
+      credentials['deviceSecret'] == null ||
+      credentials['manifestSigningKey'] == null) {
+    runApp(const CredentialSetupRequired());
+    return;
+  }
+  runApp(TixkitFlutterDemo(credentials: credentials));
+}
+
+class CredentialSetupRequired extends StatelessWidget {
+  const CredentialSetupRequired({super.key});
+
+  @override
+  Widget build(BuildContext context) => const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Text('Enroll this scanner through the native secure credential bridge first.'),
+          ),
+        ),
+      );
 }
 
 class TixkitFlutterDemo extends StatelessWidget {
-  const TixkitFlutterDemo({super.key});
+  const TixkitFlutterDemo({super.key, required this.credentials});
+
+  final Map<String, String> credentials;
 
   @override
   Widget build(BuildContext context) {
     final client = TixkitScannerClient(
-      deviceId: 'sd_demo_device',
-      deviceSecret: 'demo-device-secret',
-      manifestSigningKey: 'demo-manifest-signing-key',
+      deviceId: credentials['deviceId']!,
+      deviceSecret: credentials['deviceSecret']!,
+      manifestSigningKey: credentials['manifestSigningKey']!,
       apiBaseUrl: 'http://localhost:4000/v1',
       storage: TixkitMemoryScannerStorage(),
     );

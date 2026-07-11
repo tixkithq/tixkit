@@ -1,0 +1,35 @@
+---
+title: Prepare and run check-in
+description: Configure authorized devices, validate scans, and use safe offline or manual fallbacks.
+audience:
+  - operator
+product_area: check-in
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Check-in read permission; write permission to admit attendees
+  - A published event with issued test tickets
+related:
+  - /operators/attendees
+  - /getting-started/test-checkout
+---
+
+Rehearse check-in with test tickets before doors open. Confirm device authentication, event scope, connectivity expectations, and the manual fallback path.
+
+## Prepare the station
+
+Select the event and verify the scanner contract/configuration shown by the dashboard. Authorize only the devices and staff that need admission access. Do not place device secrets in URLs, shared notes, screenshots, or analytics.
+
+Run a test scan for a valid ticket, a duplicate scan, an invalid code, and a ticket from another event. The UI must clearly distinguish each result without exposing raw internal errors.
+
+## Operate at the door
+
+Keep the camera permission and event scope visible. After a successful admission, wait for confirmation before scanning the next code. Use manual lookup only when the attendee can be verified through the authorized workflow.
+
+## Offline behavior
+
+Use offline manifests only when the configured scanner flow supports them. Verify manifest signature and freshness; reconnect and synchronize as soon as practical. Offline acceptance is not permission to bypass event scope or admit a duplicate without review.
+
+If a ticket fails, identify whether it is unknown, wrong-event, already used, stale/offline, or blocked by device authorization before escalating.

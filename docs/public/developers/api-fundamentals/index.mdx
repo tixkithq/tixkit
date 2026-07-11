@@ -1,0 +1,36 @@
+---
+title: API fundamentals
+description: Use Tixkit's versioned JSON API with explicit authentication, scopes, pagination, errors, and idempotency.
+audience:
+  - developer
+product_area: api
+content_type: overview
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A server runtime for authenticated integrations
+related:
+  - /getting-started/first-api-call
+  - /reference/api
+---
+
+The local API base URL is `http://localhost:4000/v1`. A self-hosted production deployment uses its configured HTTPS API origin with the same version prefix.
+
+## Request model
+
+Send and accept JSON unless an operation documents a file response. Authenticated routes accept a Clerk bearer token, API key, or supported device credential according to the operation. Public buyer routes explicitly omit authentication.
+
+Every authenticated resource read is still tenant-, organization-, brand-, or event-scoped. Knowing an identifier is not sufficient authorization.
+
+## Integration rules
+
+- Keep secret API keys in a server secret store and send them only in the `Authorization` header.
+- Use cursor pagination instead of guessing offsets.
+- Preserve `requestId` from error responses for diagnosis, but never log credentials or payloads containing personal data.
+- Supply a unique idempotency key for a mutation that moves money, inventory, tickets, messages, or durable work.
+- Retry only according to the returned status and documented operation behavior.
+
+## Contract source
+
+The [API reference](/reference/api) is generated from `packages/openapi`. Conceptual guides explain safe usage; they do not duplicate an endpoint inventory.

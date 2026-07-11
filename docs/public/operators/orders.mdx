@@ -1,0 +1,34 @@
+---
+title: Find and understand orders
+description: Inspect order, payment, fulfillment, and compensation state without exposing buyer data.
+audience:
+  - operator
+product_area: orders
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Order read permission
+related:
+  - /operators/orders/refunds
+  - /operators/attendees
+---
+
+Use the Orders area to find a purchase and understand its current state. Treat order status, payment-provider status, workflow state, and attendee fulfillment as related but distinct evidence.
+
+## Find the order
+
+Search with the least sensitive identifier available, such as an order reference supplied through an authorized support channel. Confirm the organization, brand, event, amount, currency, creation time, and line items before taking action.
+
+Do not paste full buyer records, payment details, or ticket codes into chat, issue trackers, or screenshots.
+
+## Interpret state
+
+A successful payment does not automatically prove every downstream activity completed. Review the order timeline and compensation indicators for pending or failed workflows. If the provider and Tixkit disagree, preserve non-secret correlation identifiers and follow the payment reconciliation runbook.
+
+## Retry safely
+
+Use only explicit retry or repair actions offered by the dashboard. Refreshing a page is safe; resubmitting a checkout or manually changing database state is not a repair. If an action is disabled, resolve the shown permission or state prerequisite.
+
+Continue with [refunds](/operators/orders/refunds) or [attendee records](/operators/attendees).

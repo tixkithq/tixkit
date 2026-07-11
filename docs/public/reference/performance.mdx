@@ -1,0 +1,29 @@
+---
+title: Performance budgets
+description: Review documentation and platform performance contracts and the commands that reproduce them.
+audience:
+  - developer
+  - self-hoster
+  - contributor
+product_area: platform
+content_type: reference
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - A production build for browser measurements
+related:
+  - /self-hosting/observability
+  - /contributing/testing
+---
+
+Performance claims require measured evidence. Repository budgets cover the configured application routes and documentation-specific search/reference behavior.
+
+```bash
+bun run check:performance-budgets
+bun run check:lighthouse-budgets
+```
+
+The docs architecture budgets compressed search bootstrap and shards, search-open interaction, initial JavaScript, layout stability, content paint, and API-reference loading. The OpenAPI JSON is downloadable but is not loaded on ordinary guide pages; the local search index loads only after search intent.
+
+Record environment, commit, viewport, browser, sample count, and artifact when reporting a regression. Do not convert an unmeasured target into a success claim.

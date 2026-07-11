@@ -1,0 +1,20 @@
+---
+title: Build a bespoke migration adapter
+description: Author and validate an organization-specific adapter without scraping.
+audience: [developer]
+product_area: platform
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Developer access to migration tooling and sanitized source fixtures
+related:
+  - /operators/migration-operations
+---
+
+Use `defineBespokeAdapter` and `runBespokeAdapterConformance` from `@tixkit/migration-core`. Adapters must use official APIs or customer-provided exports, declare supported versions, feature mappings, known losses, rate-limit behavior, and implement deterministic discover, extract, normalize, and validate operations.
+
+Never place source credentials in configuration, fixtures, normalized rows, or logs. Resolve scoped references only in non-replayable worker activities. External IDs must be stable; dependencies must follow the platform order; financial history must use side-effect-suppressed snapshots.
+
+Before registration, provide sanitized fixtures and prove dry-run determinism, bounded cursors, validation severities, re-import idempotency, historical financial semantics, and rollback eligibility. The executable conformance runner is offline and does not permit scraping or hidden network behavior. See the package authoring README for the complete contract.

@@ -1627,6 +1627,144 @@ export const apiReferenceOperations = [
     }
   },
   {
+    "method": "GET",
+    "path": "/events/{eventId}/operational-health",
+    "operationId": "getEventsByEventIdOperationalHealth",
+    "tags": [
+      "Events"
+    ],
+    "summary": "Get scoped event operational health",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "events.read"
+    ],
+    "parameters": [
+      {
+        "name": "eventId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": null,
+    "responses": {
+      "200": {
+        "description": "Event webhook and export failure health",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "eventId",
+                "organizationFailedWebhookDeliveries",
+                "failedExports",
+                "checkedAt"
+              ],
+              "properties": {
+                "eventId": {
+                  "type": "string"
+                },
+                "organizationFailedWebhookDeliveries": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failedExports": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "checkedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "example": {
+              "eventId": "event_example",
+              "organizationFailedWebhookDeliveries": 1,
+              "failedExports": 1,
+              "checkedAt": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/events/{eventId}/setup-section",
+    "operationId": "putEventsByEventIdSetupSection",
+    "tags": [
+      "Events"
+    ],
+    "summary": "Persist the last visited event setup section",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "events.write"
+    ],
+    "parameters": [
+      {
+        "name": "eventId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "required": [
+              "section"
+            ],
+            "properties": {
+              "section": {
+                "type": "string",
+                "enum": [
+                  "basics",
+                  "schedule",
+                  "sales",
+                  "media",
+                  "marketing-fields"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "example": {
+            "section": "basics"
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Setup section persisted"
+      }
+    }
+  },
+  {
     "method": "POST",
     "path": "/events/{eventId}/readiness-acknowledgements/{stepId}",
     "operationId": "postEventsByEventIdReadinessAcknowledgementsByStepId",
@@ -18459,9 +18597,108 @@ export const apiReferenceOperations = [
     }
   },
   {
+    "method": "GET",
+    "path": "/migration-adapters",
+    "operationId": "listMigrationAdapters",
+    "tags": [
+      "Platform"
+    ],
+    "summary": "List supported migration adapters and compatibility metadata",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.read"
+    ],
+    "parameters": [],
+    "requestBody": null,
+    "responses": {
+      "200": {
+        "description": "Ordered migration adapter catalog",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationAdapterCatalogEntry"
+                  }
+                }
+              }
+            },
+            "example": {
+              "items": [
+                {
+                  "id": "generic-csv",
+                  "displayName": "displayName example",
+                  "supportedVersions": [
+                    "supportedVersion example"
+                  ],
+                  "featureMapping": {},
+                  "knownLosses": [
+                    "knownLosse example"
+                  ],
+                  "rateLimitPolicy": {},
+                  "sourceModes": [
+                    "official-api"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Forbidden",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "method": "POST",
     "path": "/migration-credentials",
-    "operationId": "postMigrationCredentials",
+    "operationId": "createMigrationCredential",
     "tags": [
       "Platform"
     ],
@@ -18502,7 +18739,7 @@ export const apiReferenceOperations = [
               "secretReference": {
                 "type": "string",
                 "writeOnly": true,
-                "pattern": "^(?:aws-secretsmanager|gcp-secretmanager|secret|vault):\\/\\/[A-Za-z0-9_./:@-]+$",
+                "pattern": "^(?:aws-secretsmanager|gcp-secretmanager|secret|vault):\\/\\/[A-Za-z0-9_@:-]+(?:\\/(?!\\.{1,2}(?:\\/|$))[A-Za-z0-9_.@:-]+)*$",
                 "description": "Secret-manager reference only; never credential material."
               },
               "expiresAt": {
@@ -18522,14 +18759,70 @@ export const apiReferenceOperations = [
     },
     "responses": {
       "201": {
-        "description": "Migration credential reference"
+        "description": "Migration credential reference",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "id",
+                "organizationId",
+                "sourceSystem",
+                "status",
+                "expiresAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "organizationId": {
+                  "type": "string"
+                },
+                "sourceSystem": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "example": {
+              "id": "resource_example",
+              "organizationId": "organization_example",
+              "sourceSystem": "sourceSystem example",
+              "status": "status example",
+              "expiresAt": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Invalid credential reference",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "DELETE",
     "path": "/migration-credentials/{credentialId}",
-    "operationId": "deleteMigrationCredentialsByCredentialId",
+    "operationId": "revokeMigrationCredential",
     "tags": [
       "Platform"
     ],
@@ -18577,7 +18870,7 @@ export const apiReferenceOperations = [
   {
     "method": "GET",
     "path": "/migration-jobs",
-    "operationId": "getMigrationJobs",
+    "operationId": "listMigrationJobs",
     "tags": [
       "Migrations"
     ],
@@ -18594,18 +18887,81 @@ export const apiReferenceOperations = [
     "requiredPermissions": [
       "migrations.read"
     ],
-    "parameters": [],
+    "parameters": [
+      {
+        "name": "organizationId",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      {
+        "name": "offset",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    ],
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Migration jobs"
+        "description": "Migration jobs",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationJob"
+                  }
+                }
+              }
+            },
+            "example": {
+              "items": [
+                {
+                  "id": "resource_example",
+                  "tenant_id": "tenant__example",
+                  "organization_id": "organization__example",
+                  "source_system": "source_system example",
+                  "adapter_version": "adapter_version example",
+                  "mode": "dry-run",
+                  "status": "status example",
+                  "configurationHash": "configurationHash example",
+                  "credentialConfigured": true,
+                  "created_at": "2026-07-10T12:00:00.000Z",
+                  "updated_at": "2026-07-10T12:00:00.000Z"
+                }
+              ]
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-jobs",
-    "operationId": "postMigrationJobs",
+    "operationId": "createMigrationJob",
     "tags": [
       "Migrations"
     ],
@@ -18638,10 +18994,229 @@ export const apiReferenceOperations = [
         "application/json": {
           "schema": {
             "type": "object",
+            "additionalProperties": false,
             "required": [
               "organizationId",
               "sourceSystem",
-              "adapterVersion"
+              "adapterVersion",
+              "configuration"
+            ],
+            "oneOf": [
+              {
+                "properties": {
+                  "sourceSystem": {
+                    "const": "generic-csv"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-export"
+                      },
+                      "sourceSystem": {
+                        "const": "generic-csv"
+                      }
+                    }
+                  },
+                  "credentialId": false
+                }
+              },
+              {
+                "properties": {
+                  "sourceSystem": {
+                    "const": "pretix"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-export"
+                      },
+                      "sourceSystem": {
+                        "const": "pretix"
+                      }
+                    }
+                  },
+                  "credentialId": false
+                }
+              },
+              {
+                "properties": {
+                  "sourceSystem": {
+                    "const": "hi-events"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-export"
+                      },
+                      "sourceSystem": {
+                        "const": "hi-events"
+                      }
+                    }
+                  },
+                  "credentialId": false
+                }
+              },
+              {
+                "properties": {
+                  "sourceSystem": {
+                    "const": "eventbrite"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-export"
+                      },
+                      "sourceSystem": {
+                        "const": "eventbrite"
+                      }
+                    }
+                  },
+                  "credentialId": false
+                }
+              },
+              {
+                "properties": {
+                  "sourceSystem": {
+                    "const": "ticket-tailor"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-export"
+                      },
+                      "sourceSystem": {
+                        "const": "ticket-tailor"
+                      }
+                    }
+                  },
+                  "credentialId": false
+                }
+              },
+              {
+                "required": [
+                  "credentialId"
+                ],
+                "properties": {
+                  "sourceSystem": {
+                    "const": "pretix"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-api"
+                      },
+                      "sourceSystem": {
+                        "const": "pretix"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "required": [
+                  "credentialId"
+                ],
+                "properties": {
+                  "sourceSystem": {
+                    "const": "hi-events"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-api"
+                      },
+                      "sourceSystem": {
+                        "const": "hi-events"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "required": [
+                  "credentialId"
+                ],
+                "properties": {
+                  "sourceSystem": {
+                    "const": "eventbrite"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-api"
+                      },
+                      "sourceSystem": {
+                        "const": "eventbrite"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "required": [
+                  "credentialId"
+                ],
+                "properties": {
+                  "sourceSystem": {
+                    "const": "ticket-tailor"
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "required": [
+                      "sourceMode",
+                      "sourceSystem"
+                    ],
+                    "properties": {
+                      "sourceMode": {
+                        "const": "official-api"
+                      },
+                      "sourceSystem": {
+                        "const": "ticket-tailor"
+                      }
+                    }
+                  }
+                }
+              }
             ],
             "properties": {
               "organizationId": {
@@ -18661,8 +19236,7 @@ export const apiReferenceOperations = [
                 ]
               },
               "configuration": {
-                "type": "object",
-                "description": "Secret-free adapter configuration. Credentials must be referenced by credentialId."
+                "$ref": "#/components/schemas/MigrationPreparationConfiguration"
               },
               "credentialId": {
                 "type": "string",
@@ -18671,26 +19245,80 @@ export const apiReferenceOperations = [
             }
           },
           "example": {
-            "organizationId": "organization_example",
-            "sourceSystem": "sourceSystem example",
-            "adapterVersion": "adapterVersion example"
+            "sourceSystem": "generic-csv",
+            "configuration": {
+              "sourceMode": "official-export",
+              "sourceSystem": "generic-csv"
+            },
+            "credentialId": null
           }
         }
       }
     },
     "responses": {
       "201": {
-        "description": "Migration job"
+        "description": "Migration job",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationJob"
+            },
+            "example": {
+              "id": "resource_example",
+              "tenant_id": "tenant__example",
+              "organization_id": "organization__example",
+              "source_system": "source_system example",
+              "adapter_version": "adapter_version example",
+              "mode": "dry-run",
+              "status": "status example",
+              "configurationHash": "configurationHash example",
+              "credentialConfigured": true,
+              "created_at": "2026-07-10T12:00:00.000Z",
+              "updated_at": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Invalid or mismatched source configuration",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       },
       "409": {
-        "description": "Idempotency conflict"
+        "description": "Idempotency conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-mappings",
-    "operationId": "getMigrationMappings",
+    "operationId": "listMigrationMappings",
     "tags": [
       "Migrations"
     ],
@@ -18707,18 +19335,68 @@ export const apiReferenceOperations = [
     "requiredPermissions": [
       "migrations.read"
     ],
-    "parameters": [],
+    "parameters": [
+      {
+        "name": "organizationId",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      {
+        "name": "sourceSystem",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    ],
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Saved mappings"
+        "description": "Saved mappings",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationMapping"
+                  }
+                }
+              }
+            },
+            "example": {
+              "items": [
+                {
+                  "id": "resource_example",
+                  "organization_id": "organization__example",
+                  "source_system": "source_system example",
+                  "name": "name example",
+                  "entity_type": "entity_type example",
+                  "mapping": {}
+                }
+              ]
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-mappings",
-    "operationId": "postMigrationMappings",
+    "operationId": "createMigrationMapping",
     "tags": [
       "Migrations"
     ],
@@ -18736,17 +19414,117 @@ export const apiReferenceOperations = [
       "migrations.write"
     ],
     "parameters": [],
-    "requestBody": null,
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "sourceSystem",
+              "name",
+              "entityType",
+              "mapping"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "sourceSystem": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "entityType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "mapping": {
+                "type": "object",
+                "maxProperties": 200,
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "example": {
+            "organizationId": "organization_example",
+            "sourceSystem": "sourceSystem example",
+            "name": "name example",
+            "entityType": "entityType example",
+            "mapping": {}
+          }
+        }
+      }
+    },
     "responses": {
       "201": {
-        "description": "Saved mapping"
+        "description": "Saved mapping",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationMapping"
+            },
+            "example": {
+              "id": "resource_example",
+              "organization_id": "organization__example",
+              "source_system": "source_system example",
+              "name": "name example",
+              "entity_type": "entity_type example",
+              "mapping": {}
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Unsafe or invalid mapping",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}",
-    "operationId": "getMigrationJobsByJobId",
+    "operationId": "getMigrationJob",
     "tags": [
       "Migrations"
     ],
@@ -18776,17 +19554,51 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Migration job"
+        "description": "Migration job",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationJob"
+            },
+            "example": {
+              "id": "resource_example",
+              "tenant_id": "tenant__example",
+              "organization_id": "organization__example",
+              "source_system": "source_system example",
+              "adapter_version": "adapter_version example",
+              "mode": "dry-run",
+              "status": "status example",
+              "configurationHash": "configurationHash example",
+              "credentialConfigured": true,
+              "created_at": "2026-07-10T12:00:00.000Z",
+              "updated_at": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
       },
       "404": {
-        "description": "Migration job not found"
+        "description": "Migration job not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}/files",
-    "operationId": "getMigrationJobsByJobIdFiles",
+    "operationId": "listMigrationJobFiles",
     "tags": [
       "Migrations"
     ],
@@ -18816,14 +19628,46 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Registered files"
+        "description": "Registered files",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationFile"
+                  }
+                }
+              }
+            },
+            "example": {
+              "items": [
+                {
+                  "id": "resource_example",
+                  "import_job_id": "import_job__example",
+                  "original_name": "original_name example",
+                  "media_type": "media_type example",
+                  "byte_size": 1,
+                  "sha256": "sha256 example",
+                  "status": "status example",
+                  "created_at": "2026-07-10T12:00:00.000Z"
+                }
+              ]
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/files",
-    "operationId": "postMigrationJobsByJobIdFiles",
+    "operationId": "registerMigrationJobFile",
     "tags": [
       "Migrations"
     ],
@@ -18862,7 +19706,8 @@ export const apiReferenceOperations = [
             ],
             "properties": {
               "uploadArtifactId": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^upl_[A-Za-z0-9_-]{8,128}$"
               }
             }
           },
@@ -18874,17 +19719,48 @@ export const apiReferenceOperations = [
     },
     "responses": {
       "201": {
-        "description": "Registered file"
+        "description": "Registered file",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationFile"
+            },
+            "example": {
+              "id": "resource_example",
+              "import_job_id": "import_job__example",
+              "original_name": "original_name example",
+              "media_type": "media_type example",
+              "byte_size": 1,
+              "sha256": "sha256 example",
+              "status": "status example",
+              "created_at": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
       },
       "409": {
-        "description": "Migration status conflict"
+        "description": "Migration status conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}/rows",
-    "operationId": "getMigrationJobsByJobIdRows",
+    "operationId": "listMigrationJobRows",
     "tags": [
       "Migrations"
     ],
@@ -18909,19 +19785,93 @@ export const apiReferenceOperations = [
         "schema": {
           "type": "string"
         }
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      {
+        "name": "entityType",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
       }
     ],
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Migration rows"
+        "description": "Migration rows",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationRow"
+                  }
+                }
+              }
+            },
+            "example": {
+              "items": [
+                {
+                  "id": "resource_example",
+                  "importJobId": "importjob_example",
+                  "entityType": "entityType example",
+                  "correlationId": "correlation_example",
+                  "rowNumber": 1,
+                  "status": "status example",
+                  "sourceHash": "sourceHash example"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Migration job not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}/conflicts",
-    "operationId": "getMigrationJobsByJobIdConflicts",
+    "operationId": "listMigrationJobConflicts",
     "tags": [
       "Migrations"
     ],
@@ -18946,19 +19896,86 @@ export const apiReferenceOperations = [
         "schema": {
           "type": "string"
         }
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      {
+        "name": "offset",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     ],
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Migration conflicts"
+        "description": "Migration conflicts",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationConflict"
+                  }
+                }
+              }
+            },
+            "example": {
+              "items": [
+                {
+                  "id": "resource_example",
+                  "entity_type": "entity_type example",
+                  "correlationId": "correlation_example",
+                  "severity": "severity example",
+                  "code": "code example",
+                  "message": {},
+                  "details": {}
+                }
+              ]
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Migration job not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}/events",
-    "operationId": "getMigrationJobsByJobIdEvents",
+    "operationId": "listMigrationJobEvents",
     "tags": [
       "Migrations"
     ],
@@ -18983,19 +20000,76 @@ export const apiReferenceOperations = [
         "schema": {
           "type": "string"
         }
+      },
+      {
+        "name": "afterSequence",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     ],
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Migration events"
+        "description": "Migration events",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationEvent"
+                  }
+                }
+              }
+            },
+            "example": {
+              "items": [
+                {
+                  "id": "resource_example",
+                  "sequence": 1,
+                  "type": "type example",
+                  "severity": "severity example",
+                  "message": {},
+                  "createdAt": "2026-07-10T12:00:00.000Z",
+                  "data": {}
+                }
+              ]
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Migration job not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/dry-run",
-    "operationId": "postMigrationJobsByJobIdDryRun",
+    "operationId": "runMigrationDryRun",
     "tags": [
       "Migrations"
     ],
@@ -19025,17 +20099,108 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Dry-run report"
+        "description": "Dry-run report",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationDryRunResult"
+            },
+            "example": {
+              "status": "ready",
+              "report": {},
+              "domainWrites": 0
+            }
+          }
+        }
       },
       "409": {
-        "description": "Migration status conflict"
+        "description": "Migration status conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/migration-jobs/{jobId}/prepare",
+    "operationId": "prepareMigrationJob",
+    "tags": [
+      "Migrations"
+    ],
+    "summary": "Start durable migration source acquisition and normalization",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.write"
+    ],
+    "parameters": [
+      {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": null,
+    "responses": {
+      "202": {
+        "description": "Migration preparation started",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationStarted"
+            },
+            "example": {
+              "jobId": "job_example",
+              "status": "status example"
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Migration job cannot prepare from its current state",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}/report",
-    "operationId": "getMigrationJobsByJobIdReport",
+    "operationId": "getMigrationReport",
     "tags": [
       "Migrations"
     ],
@@ -19065,14 +20230,22 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Migration report"
+        "description": "Migration report",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationReport"
+            },
+            "example": {}
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}/report/download",
-    "operationId": "getMigrationJobsByJobIdReportDownload",
+    "operationId": "downloadMigrationReport",
     "tags": [
       "Migrations"
     ],
@@ -19106,7 +20279,7 @@ export const apiReferenceOperations = [
         "content": {
           "application/json": {
             "schema": {
-              "type": "object"
+              "$ref": "#/components/schemas/MigrationReport"
             },
             "example": {}
           }
@@ -19117,7 +20290,7 @@ export const apiReferenceOperations = [
   {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/commit",
-    "operationId": "postMigrationJobsByJobIdCommit",
+    "operationId": "commitMigrationJob",
     "tags": [
       "Migrations"
     ],
@@ -19156,17 +20329,42 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "202": {
-        "description": "Commit accepted"
+        "description": "Commit accepted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationStarted"
+            },
+            "example": {
+              "jobId": "job_example",
+              "status": "status example"
+            }
+          }
+        }
       },
       "409": {
-        "description": "Migration status conflict"
+        "description": "Migration status conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/pause",
-    "operationId": "postMigrationJobsByJobIdPause",
+    "operationId": "pauseMigrationJob",
     "tags": [
       "Migrations"
     ],
@@ -19196,14 +20394,43 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "202": {
-        "description": "Pause accepted"
+        "description": "Pause accepted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationActionAccepted"
+            },
+            "example": {
+              "jobId": "job_example",
+              "action": "pause",
+              "accepted": true
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Migration status conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/resume",
-    "operationId": "postMigrationJobsByJobIdResume",
+    "operationId": "resumeMigrationJob",
     "tags": [
       "Migrations"
     ],
@@ -19233,14 +20460,43 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "202": {
-        "description": "Resume accepted"
+        "description": "Resume accepted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationActionAccepted"
+            },
+            "example": {
+              "jobId": "job_example",
+              "action": "pause",
+              "accepted": true
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Migration status conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/cancel",
-    "operationId": "postMigrationJobsByJobIdCancel",
+    "operationId": "cancelMigrationJob",
     "tags": [
       "Migrations"
     ],
@@ -19270,14 +20526,43 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "202": {
-        "description": "Cancellation accepted"
+        "description": "Cancellation accepted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationActionAccepted"
+            },
+            "example": {
+              "jobId": "job_example",
+              "action": "pause",
+              "accepted": true
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Migration status conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "GET",
     "path": "/migration-jobs/{jobId}/rollback-assessment",
-    "operationId": "getMigrationJobsByJobIdRollbackAssessment",
+    "operationId": "assessMigrationRollback",
     "tags": [
       "Migrations"
     ],
@@ -19307,14 +20592,45 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "200": {
-        "description": "Rollback assessment"
+        "description": "Rollback assessment",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationRollbackAssessment"
+            },
+            "example": {
+              "eligible": true,
+              "mode": "mode example",
+              "blockers": [
+                {}
+              ]
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Migration job not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
   {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/rollback",
-    "operationId": "postMigrationJobsByJobIdRollback",
+    "operationId": "rollbackMigrationJob",
     "tags": [
       "Migrations"
     ],
@@ -19353,10 +20669,36 @@ export const apiReferenceOperations = [
     "requestBody": null,
     "responses": {
       "202": {
-        "description": "Rollback accepted"
+        "description": "Rollback accepted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationActionAccepted"
+            },
+            "example": {
+              "jobId": "job_example",
+              "action": "pause",
+              "accepted": true
+            }
+          }
+        }
       },
       "409": {
-        "description": "Rollback is not eligible"
+        "description": "Rollback is not eligible",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -20732,6 +22074,263 @@ export const apiReferenceSchemas = [
     ],
     "properties": [
       "error"
+    ]
+  },
+  {
+    "name": "MigrationPreparationConfiguration",
+    "type": "oneOf",
+    "description": "Secret-free, source-discriminated migration locator.",
+    "required": [],
+    "properties": []
+  },
+  {
+    "name": "MigrationJob",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "tenant_id",
+      "organization_id",
+      "source_system",
+      "adapter_version",
+      "mode",
+      "status",
+      "configurationHash",
+      "credentialConfigured",
+      "created_at",
+      "updated_at"
+    ],
+    "properties": [
+      "id",
+      "tenant_id",
+      "organization_id",
+      "source_system",
+      "adapter_version",
+      "mode",
+      "status",
+      "configurationHash",
+      "credentialConfigured",
+      "summary",
+      "created_at",
+      "updated_at"
+    ]
+  },
+  {
+    "name": "MigrationFile",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "import_job_id",
+      "original_name",
+      "media_type",
+      "byte_size",
+      "sha256",
+      "status",
+      "created_at"
+    ],
+    "properties": [
+      "id",
+      "import_job_id",
+      "original_name",
+      "media_type",
+      "byte_size",
+      "sha256",
+      "status",
+      "created_at"
+    ]
+  },
+  {
+    "name": "MigrationMapping",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "organization_id",
+      "source_system",
+      "name",
+      "entity_type",
+      "mapping"
+    ],
+    "properties": [
+      "id",
+      "organization_id",
+      "source_system",
+      "name",
+      "entity_type",
+      "mapping"
+    ]
+  },
+  {
+    "name": "MigrationReport",
+    "type": "object",
+    "description": "",
+    "required": [],
+    "properties": []
+  },
+  {
+    "name": "MigrationAdapterCatalogEntry",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "displayName",
+      "supportedVersions",
+      "featureMapping",
+      "knownLosses",
+      "rateLimitPolicy",
+      "sourceModes"
+    ],
+    "properties": [
+      "id",
+      "displayName",
+      "supportedVersions",
+      "featureMapping",
+      "knownLosses",
+      "rateLimitPolicy",
+      "sourceModes"
+    ]
+  },
+  {
+    "name": "MigrationRow",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "importJobId",
+      "entityType",
+      "correlationId",
+      "rowNumber",
+      "status",
+      "sourceHash"
+    ],
+    "properties": [
+      "id",
+      "importJobId",
+      "fileId",
+      "entityType",
+      "correlationId",
+      "rowNumber",
+      "status",
+      "severity",
+      "tixkitId",
+      "sourceHash",
+      "normalizedHash"
+    ]
+  },
+  {
+    "name": "MigrationConflict",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "entity_type",
+      "correlationId",
+      "severity",
+      "code",
+      "message",
+      "details"
+    ],
+    "properties": [
+      "id",
+      "entity_type",
+      "correlationId",
+      "severity",
+      "code",
+      "message",
+      "details"
+    ]
+  },
+  {
+    "name": "MigrationEvent",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "sequence",
+      "type",
+      "severity",
+      "message",
+      "createdAt",
+      "data"
+    ],
+    "properties": [
+      "id",
+      "sequence",
+      "type",
+      "severity",
+      "message",
+      "createdAt",
+      "data"
+    ]
+  },
+  {
+    "name": "MigrationAccepted",
+    "type": "object",
+    "description": "",
+    "required": [
+      "accepted"
+    ],
+    "properties": [
+      "accepted"
+    ]
+  },
+  {
+    "name": "MigrationStarted",
+    "type": "object",
+    "description": "",
+    "required": [
+      "jobId",
+      "status"
+    ],
+    "properties": [
+      "jobId",
+      "status"
+    ]
+  },
+  {
+    "name": "MigrationActionAccepted",
+    "type": "object",
+    "description": "",
+    "required": [
+      "jobId",
+      "action",
+      "accepted"
+    ],
+    "properties": [
+      "jobId",
+      "action",
+      "accepted"
+    ]
+  },
+  {
+    "name": "MigrationDryRunResult",
+    "type": "object",
+    "description": "",
+    "required": [
+      "status",
+      "report",
+      "domainWrites"
+    ],
+    "properties": [
+      "status",
+      "report",
+      "domainWrites"
+    ]
+  },
+  {
+    "name": "MigrationRollbackAssessment",
+    "type": "object",
+    "description": "",
+    "required": [
+      "eligible",
+      "mode",
+      "blockers"
+    ],
+    "properties": [
+      "eligible",
+      "mode",
+      "blockers"
     ]
   },
   {

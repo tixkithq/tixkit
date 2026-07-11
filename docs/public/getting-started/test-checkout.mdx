@@ -1,0 +1,48 @@
+---
+title: Complete a test checkout
+description: Verify buyer checkout and the resulting order without treating capture-mode behavior as provider readiness.
+audience:
+  - operator
+  - developer
+product_area: checkout
+content_type: tutorial
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - A published test event with sellable inventory
+  - A payment path appropriate for the environment
+related:
+  - /operators/orders
+  - /operators/check-in
+keywords:
+  - test checkout
+  - order
+  - payment capture
+---
+
+Use test-only attendee and buyer data. Never place a real payment credential into a local capture-mode form or repository fixture.
+
+## Confirm the payment mode
+
+In local capture mode, checkout records the platform flow without contacting a payment provider. A successful capture-mode order proves inventory, forms, pricing, and order creation—not Stripe or another external provider.
+
+For provider-backed testing, use the provider's test mode and credentials documented for your environment. Confirm the payment-account status in workspace settings before checkout.
+
+## Complete the purchase
+
+1. Open the published event in a private browser window.
+2. Select one available test ticket or product.
+3. Complete all required buyer, attendee, and consent fields with non-customer data.
+4. Review quantity, fees, discounts, and total before confirming.
+5. Complete the environment-appropriate payment step.
+
+Do not refresh or submit repeatedly while confirmation is pending. The flow uses idempotency and durable processing, but duplicate user actions complicate diagnosis.
+
+## Verify the order
+
+Return to **Orders** in the admin dashboard. Find the new order and confirm its payment/order state, line items, attendee records, and total. If checkout showed success but no order appears, preserve the non-secret order/session identifier and inspect API and worker logs.
+
+## Prepare downstream operations
+
+Use the test order to practice [refund handling](/operators/orders/refunds) and [check-in](/operators/check-in). Provider-backed refunds may have external side effects; use capture mode or provider test mode for rehearsal.

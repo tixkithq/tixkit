@@ -1,0 +1,45 @@
+---
+title: Choose a deployment model
+description: Decide between local evaluation and a self-hosted deployment without overstating managed-service availability.
+audience:
+  - operator
+  - self-hoster
+product_area: self-hosting
+content_type: concept
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - A clear evaluation or production objective
+related:
+  - /getting-started/local-quickstart
+  - /self-hosting/deployment
+keywords:
+  - deployment
+  - local
+  - self-hosted
+---
+
+The repository supports local development and self-hosted operation. This documentation does not promise a managed Tixkit service or hosted control plane.
+
+## Local evaluation
+
+Choose the local stack when you need to evaluate workflows, develop an integration, or contribute. Docker Compose starts PostgreSQL, MySQL, Redis, Temporal, and MinIO. The CLI then runs migrations and starts the API, worker, checkout, admin, and documentation applications.
+
+Local capture-mode payments record platform behavior without contacting a payment provider. They are not a substitute for provider validation.
+
+## Self-hosted operation
+
+Choose self-hosting when your team can operate:
+
+- a supported relational database configuration;
+- Redis, Temporal, and object storage;
+- API and worker processes with health monitoring;
+- public admin, checkout, and documentation applications;
+- TLS, secrets, backups, restore rehearsals, upgrades, and incident response.
+
+Provider-backed payments, messaging, and authentication require their documented credentials and provider-side setup. Do not copy local example values into production.
+
+## Decision check
+
+Use local evaluation until you can complete a test event, test checkout, API request, webhook verification, backup, and restore rehearsal. Move to a production topology only after the [deployment guide](/self-hosting/deployment) and [incident runbooks](/operations/incidents) match your environment.

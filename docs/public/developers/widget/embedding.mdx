@@ -1,0 +1,52 @@
+---
+title: Embed Tixkit checkout
+description: Choose inline, modal, button, or redirect integration and generate CSP-aware markup without exposing secrets.
+audience:
+  - developer
+product_area: widget
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A published event and brand identifier
+related:
+  - /getting-started/test-checkout
+  - /sdks/javascript
+---
+
+The widget is a browser integration and must use public event/brand identifiers only. API keys and provider secrets never belong in embed markup.
+
+## Generate a reviewed snippet
+
+```bash
+bun run embed:generate -- \
+  --event-id evt_example \
+  --brand-id brd_example \
+  --mode inline \
+  --platform plain \
+  --allowed-origin https://tickets.example.test
+```
+
+The CLI prints the snippet, CSP guidance, and placement instructions. Review generated origins against your actual deployment; do not copy default hosted domains into a self-hosted policy without changing them.
+
+The current production release is immutable and integrity-pinned:
+
+```html
+<script
+  src="https://cdn.tixkit.com/widget/v0.1.0/tixkit-widget-0.1.0.js"
+  integrity="sha384-dekV7a3DQg8bDdculs4uy24zS9CiyMfb4QpROp1Pb878LK63cHRC212CsRjzESAB"
+  crossorigin="anonymous"
+></script>
+```
+
+Use `bun run embed:generate` instead of editing the release URL or integrity value by hand. The release-pin validation fails when this public example drifts from the widget manifest.
+
+## Choose a mode
+
+- **Inline** reserves content space and keeps checkout visible in the page flow.
+- **Modal** opens an overlay and must preserve focus and escape behavior.
+- **Button** defers loading until user intent.
+- **Redirect** navigates to hosted checkout and is the simplest isolation boundary.
+
+Test keyboard operation, mobile width, CSP enforcement, lifecycle callbacks, and return navigation. Tracking identifiers must be non-personal attribution values.

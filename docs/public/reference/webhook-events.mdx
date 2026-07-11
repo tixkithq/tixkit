@@ -1,0 +1,21 @@
+---
+title: Webhook event catalog
+description: Browse the event names and payload data fields validated against Tixkit runtime definitions.
+audience:
+  - developer
+product_area: webhooks
+content_type: reference
+status: stable
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites: []
+related:
+  - /developers/webhooks/setup
+  - /developers/webhooks/verify-signatures
+---
+
+Events use a versioned envelope. Delivery is at least once: receivers must verify signatures, reject stale timestamps, and deduplicate by stable event ID. Ordering is not a global guarantee across endpoints or event types.
+
+Tixkit retries non-2xx/activity failures with bounded exponential backoff and marks exhausted deliveries dead-lettered. Replay requires an active, idempotent receiver.
+
+<WebhookReference />

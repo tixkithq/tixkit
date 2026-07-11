@@ -1,0 +1,22 @@
+---
+title: Add an SDK operation
+description: Extend the core client and supported framework or native packages without drifting from OpenAPI or API-version support.
+audience:
+  - contributor
+product_area: contributing
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A stable documented API operation
+related:
+  - /contributing/add-an-api-route
+  - /sdks/javascript
+---
+
+Add the operation to the canonical SDK package for its runtime, using generated/contract types where available. Preserve server/browser secret boundaries, pagination, idempotency, cancellation/timeouts, and typed error behavior.
+
+Update every supported wrapper that exposes the affected resource, then update package READMEs, the SDK guide, runnable example, snippet registry, API version statement, and parity matrix.
+
+Run the package unit tests, generated client test, demo typecheck/build, and `node scripts/sdk-parity-matrix.mjs`. A guide that compiles while its demo or export path is missing is incomplete.

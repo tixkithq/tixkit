@@ -1,0 +1,32 @@
+---
+title: API permissions and scopes
+description: Grant API keys and principals only the product capabilities and resource scope they require.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: security
+last_verified: 2026-07-10
+prerequisites:
+  - An authenticated principal allowed to create the credential
+related:
+  - /developers/api-fundamentals/authentication
+  - /operators/team-and-permissions
+---
+
+Authenticated principals carry product scopes such as `events.read`, `events.write`, `tickets.write`, `orders.read`, `orders.write`, `refunds.write`, `attendees.read`, `attendees.write`, `checkins.read`, `checkins.write`, `box_office.write`, `messages.write`, `reports.read`, `settings.write`, `developers.write`, and `billing.write`.
+
+## Least privilege
+
+Create a read-only key for a read-only integration. Add write or refund scopes only when the service performs those actions. A creator cannot grant scopes they do not hold.
+
+Brand- or event-scoped principals must create credentials within that boundary. A scope grants a capability; it does not remove tenant, organization, brand, or event isolation.
+
+## Failure behavior
+
+- `401 UNAUTHORIZED` means the credential could not authenticate.
+- `403 FORBIDDEN` means authentication succeeded but capability or resource scope is insufficient.
+- `404 NOT_FOUND` may intentionally avoid revealing an out-of-scope resource.
+
+Do not broaden a key before confirming which exact operation and resource boundary failed.

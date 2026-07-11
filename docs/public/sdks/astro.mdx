@@ -1,0 +1,28 @@
+---
+title: Astro SDK
+description: Call Tixkit from Astro server code and use public integrations in islands without shipping credentials.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - An Astro application with server output for authenticated calls
+related:
+  - /sdks/javascript
+  - /developers/webhooks/setup
+---
+
+<SdkGuide sdkId="astro" />
+
+```bash
+bun add @tixkit/astro @tixkit/js
+```
+
+Use `createTixkitClient` from `@tixkit/astro/server` in endpoints, middleware, actions, or server-rendered pages. A fully static page cannot safely embed a secret key; fetch privileged data during a controlled build only when that exposure model is appropriate, or use server output.
+
+The package includes server checkout-form and webhook-endpoint helpers. Preserve raw request bytes for signature verification.
+
+Run `apps/sdk-astro-demo` to verify the current Astro integration and webhook route before copying it into an application.

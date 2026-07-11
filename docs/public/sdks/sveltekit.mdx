@@ -1,0 +1,28 @@
+---
+title: SvelteKit SDK
+description: Initialize Tixkit in server modules and expose only buyer-safe values to Svelte components.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A SvelteKit application
+related:
+  - /sdks/javascript
+  - /developers/webhooks/verify-signatures
+---
+
+<SdkGuide sdkId="sveltekit" />
+
+```bash
+bun add @tixkit/sveltekit @tixkit/js
+```
+
+Use `createTixkitClient` from `@tixkit/sveltekit/server` in `+page.server.ts`, `+server.ts`, or other server-only modules. Read credentials from SvelteKit's private environment APIs, not `$env/static/public`.
+
+The package provides server checkout/form helpers, client exports, and `TixkitWidget.svelte`. A server load function can list scoped events and return a deliberately reduced view model; it must not serialize the API key.
+
+Validate the integration with `apps/sdk-sveltekit-demo`. Confirm SSR output, client hydration, webhook raw-body handling, and production adapter behavior before deployment.

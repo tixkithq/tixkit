@@ -1,0 +1,36 @@
+---
+title: Configure workspace and organization context
+description: Select the correct tenant organization and brand before making scoped operational changes.
+audience:
+  - operator
+product_area: workspace
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Workspace settings permission for changes
+related:
+  - /operators/brands
+  - /operators/team-and-permissions
+---
+
+Tixkit scopes operational data by tenant, organization, and brand. Always confirm the active context before creating an event, connecting a provider, or inviting a teammate.
+
+## Confirm the selected context
+
+Use the organization and brand selectors in the authenticated dashboard shell. After changing context, wait for the scoped bootstrap data to reload. The event, payment, developer, and reporting views must reflect the new selection before you continue.
+
+## Update workspace identity
+
+Open **Settings → Workspace**. Review the display identity and any organization settings available to your permission set. Save once, then reload the page to verify the API persisted the value.
+
+Users without settings permission may read permitted workspace context but must not be shown a change action. Ask a workspace owner to make the change rather than sharing credentials.
+
+## Diagnose a context mismatch
+
+- If expected events or orders disappear, recheck the selected organization and brand.
+- If an action returns forbidden, confirm both the active context and your permission.
+- If the selector offers an unexpected tenant, stop and report the isolation issue without copying customer data into the report.
+
+Continue with [brand configuration](/operators/brands) or [team access](/operators/team-and-permissions).

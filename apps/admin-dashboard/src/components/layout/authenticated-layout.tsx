@@ -10,6 +10,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/s
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AdminBreadcrumbs } from '@/components/layout/admin-breadcrumbs';
 import { SkipToMain } from '@/components/skip-to-main';
+import { ContextualHelp } from '@/components/contextual-help';
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode;
@@ -37,8 +38,9 @@ export function AuthenticatedLayout({ children, headerActions }: AuthenticatedLa
                   <div className="flex min-h-16 w-full items-center gap-3 px-4 py-3">
                     <SidebarTrigger className="shrink-0 md:hidden" />
                     <AdminBreadcrumbs />
+                    <ContextualHelp />
                     {headerActions ? (
-                      <div className="ml-auto flex shrink-0 items-center justify-end gap-3 sm:gap-4">
+                      <div className="flex shrink-0 items-center justify-end gap-3 sm:gap-4">
                         {headerActions}
                       </div>
                     ) : null}

@@ -1,0 +1,33 @@
+---
+title: Process and diagnose refunds
+description: Validate eligibility, initiate a refund once, and confirm provider and order compensation state.
+audience:
+  - operator
+product_area: orders
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Order read and refund write permission
+  - A refundable order in the correct organization and brand
+related:
+  - /operators/orders
+  - /operations/incidents
+---
+
+Refunds can have external financial side effects. Confirm environment, order, amount, currency, and provider mode before submitting.
+
+## Validate eligibility
+
+Open the order detail view and review prior refunds, payment status, remaining refundable amount, and any compensation warning. In capture mode, behavior is local. In provider test or production mode, the refund may call the configured provider.
+
+## Submit once
+
+Enter the authorized amount and reason, review the confirmation, and submit once. Wait for the resulting state instead of repeating the action. Tixkit uses idempotent/durable processing, but repeated operator requests make incident diagnosis harder.
+
+## Verify completion
+
+Confirm the refund record and order totals after the workflow settles. Where provider access is available, reconcile the provider reference without copying credentials or customer payment data.
+
+If state remains pending or failed, use the dashboard's compensation details and [incident runbooks](/operations/incidents). Do not mark an order refunded solely because a toast or provider page appeared.

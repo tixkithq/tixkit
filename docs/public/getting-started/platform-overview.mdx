@@ -1,0 +1,47 @@
+---
+title: Platform overview
+description: Understand Tixkit's event-commerce boundaries before choosing an operating or integration path.
+audience:
+  - operator
+  - developer
+  - self-hoster
+  - contributor
+product_area: platform
+content_type: overview
+status: beta
+owner: documentation-architecture
+last_verified: 2026-07-10
+prerequisites: []
+related:
+  - /getting-started/deployment-model
+  - /contributing/architecture
+keywords:
+  - headless ticketing
+  - event commerce
+  - architecture
+---
+
+Tixkit separates event operations from buyer checkout. Operators work in the admin dashboard; buyers use hosted or embedded checkout; integrations call the API or a supported SDK. The API applies tenant, organization, brand, and event scope before repositories read or change data.
+
+## Choose the surface for your task
+
+Use the **admin dashboard** to configure workspaces, events, inventory, checkout forms, orders, attendees, messages, and reports. Use the **hosted checkout or widget** for buyer-facing purchase flows. Use the **API and SDKs** for server-side integrations and scanner workflows.
+
+Self-hosters operate the API, worker, database, Redis, Temporal, object storage, admin, checkout, and documentation surfaces. A local capture payment mode is useful for development, but it is not proof that a production payment provider is ready.
+
+## Contract boundaries
+
+- `packages/domain` owns pure business types and rules.
+- `packages/db` owns Kysely repositories, database types, and migrations.
+- `packages/api` owns authentication, authorization, serialization, and HTTP routes.
+- `packages/openapi` owns the public HTTP contract used for reference generation and SDK parity.
+- `packages/workflows` owns durable Temporal workflows and activities.
+- `apps/admin-dashboard` and `apps/checkout` consume those contracts; they do not define backend truth.
+
+## Support labels
+
+Every guide identifies its stability. **Stable** describes a supported contract covered by validation. **Beta** means the workflow exists but may still change before a stable release. **Experimental** behavior must not be treated as production-ready. Environment-specific capture or mock behavior is labeled where it appears.
+
+## Next step
+
+[Choose a deployment model](/getting-started/deployment-model) if you are evaluating Tixkit, or [run Tixkit locally](/getting-started/local-quickstart) if you are ready to inspect the complete stack.

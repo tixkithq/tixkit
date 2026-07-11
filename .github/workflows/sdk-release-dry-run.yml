@@ -12,7 +12,11 @@ on:
       - 'packages/sdk-android/**'
       - 'packages/sdk-go/**'
       - 'packages/sdk-rust/**'
-      - 'docs/sdk-guides/**'
+      - 'apps/sdk-*-demo/**'
+      - 'docs/public/guides/sdks/**'
+      - 'packages/docs-core/src/sdk-snippets.ts'
+      - 'scripts/lib/sdk-parity.mjs'
+      - 'scripts/sdk-demo-matrix.mjs'
       - 'scripts/sdk-parity-matrix.mjs'
       - '.github/workflows/sdk-release-dry-run.yml'
   workflow_dispatch:
@@ -32,7 +36,9 @@ jobs:
         with:
           node-version: 24
       - name: Verify SDK parity matrix
-        run: node scripts/sdk-parity-matrix.mjs
+        run: |
+          node scripts/sdk-parity-matrix.mjs
+          node scripts/sdk-demo-matrix.mjs --check
 
   npm-sdk-dry-run:
     name: NPM SDK Dry Run

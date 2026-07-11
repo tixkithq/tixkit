@@ -1,0 +1,30 @@
+---
+title: Choose and operate a database
+description: Use only the database modes covered by Tixkit migrations, repositories, and compatibility validation.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: reference
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - A supported managed or self-operated relational database
+related:
+  - /self-hosting/backups-and-restore
+  - /self-hosting/upgrades
+---
+
+PostgreSQL is the default local path. MySQL and MSSQL behavior is limited to the compatibility explicitly exercised by repository migrations and tests. Do not infer support for an untested engine/version from Kysely's general capabilities.
+
+## Provision safely
+
+Use TLS, private networking, a least-privilege application identity, bounded connection pools, monitored storage, and automated backups. Keep migration credentials separate when the application identity should not alter schema.
+
+## Validate compatibility
+
+Run the engine-specific migration and integration gates documented by the repository before adopting a version or managed service. Test timestamps, JSON, indexes, locking, pagination, unique constraints, and rollback/forward behavior with production-like settings.
+
+## Operational rule
+
+Never repair application state by editing production rows without an approved runbook, backup, tenant scope, and verification plan. Prefer supported API, repository, workflow, and compensation paths.

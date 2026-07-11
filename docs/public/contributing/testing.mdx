@@ -1,0 +1,35 @@
+---
+title: Run validation and tests
+description: Choose focused gates during implementation and execute the complete contract-sensitive suite before release.
+audience:
+  - contributor
+product_area: contributing
+content_type: how-to
+status: beta
+owner: documentation-architecture
+last_verified: 2026-07-10
+prerequisites:
+  - Installed workspace dependencies
+related:
+  - /contributing/repository-setup
+  - /contributing/add-documentation
+---
+
+Run the smallest relevant typecheck, lint, and test while iterating. Broaden validation whenever a change crosses a contract boundary.
+
+```bash
+bun run format:check
+bun run typecheck
+bun run lint
+bun run docs:check
+bun run docs:build
+bun run test:scripts
+bun run test:unit
+bun run test:integration
+bun run test:e2e
+bun run export:oss
+```
+
+Database/provider/browser suites may require environment or infrastructure described by their package and runbook. A skipped suite is not a pass. Turbo cache output is useful during iteration, but final evidence must match the required fresh/environment-backed scope.
+
+Do not weaken or delete a test to obtain green output. Fix warnings caused by the change and run `git diff --check` plus `graphify update .` after code edits.

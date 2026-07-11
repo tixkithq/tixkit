@@ -13,7 +13,9 @@ export const metadata = {
 };
 
 const refineInjectorSrc =
-  process.env.NODE_ENV === 'production' ? null : 'http://localhost:7331/inject.js';
+  process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_DISABLE_REACT_DEVTOOLS === '1'
+    ? null
+    : 'http://localhost:7331/inject.js';
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   // Default to 'ltr'. A future brand/locale resolver can override this

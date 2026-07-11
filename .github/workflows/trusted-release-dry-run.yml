@@ -70,6 +70,12 @@ jobs:
       - uses: ./.github/actions/setup-js
       - uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
       - run: bun install --frozen-lockfile
+      - name: Validate documentation contracts and generated reference
+        run: bun run docs:check
+      - name: Build static documentation release
+        run: bun run --filter @tixkit/docs build:static
+      - name: Validate sanitized OSS documentation release
+        run: bun run export:oss -- --out /tmp/tixkit-release-oss-export
       - name: Write release dry-run env file
         run: |
           cat > .env.local <<'EOF'

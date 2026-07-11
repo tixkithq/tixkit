@@ -1,0 +1,28 @@
+---
+title: Remix SDK
+description: Keep authenticated Tixkit calls in loaders and actions and return only the data the browser needs.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A Remix application
+related:
+  - /sdks/javascript
+  - /developers/api-fundamentals/idempotency
+---
+
+<SdkGuide sdkId="remix" />
+
+```bash
+bun add @tixkit/remix @tixkit/js
+```
+
+Import `createTixkitClient` from `@tixkit/remix/server` in loaders, actions, and server utilities. Use private process environment values and never return the key from a loader.
+
+The package provides server checkout-form helpers and a Remix checkout action. Validate write actions with idempotency and explicit error mapping; do not treat a redirect as proof a durable order completed.
+
+Use `apps/sdk-remix-demo` as the runnable integration fixture and keep its environment contract aligned with this guide.

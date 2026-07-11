@@ -1,0 +1,40 @@
+---
+title: Authenticate API requests
+description: Choose a Clerk token, scoped API key, or scanner credential and keep secrets on the correct runtime boundary.
+audience:
+  - developer
+product_area: api
+content_type: concept
+status: beta
+owner: security
+last_verified: 2026-07-10
+prerequisites:
+  - An authenticated Tixkit workspace for credential creation
+related:
+  - /developers/api-fundamentals/permissions
+  - /getting-started/first-api-call
+---
+
+Tixkit supports authenticated dashboard users, API keys, and scanner device credentials. Anonymous access is limited to explicitly public buyer routes.
+
+## API keys
+
+API keys begin with `tk_` and are bearer credentials. Creation returns the raw secret once; persistence stores a hash. Store the secret immediately in a server-side secret manager. Revoked or expired keys return `401 UNAUTHORIZED`.
+
+```http
+GET /v1/events HTTP/1.1
+Host: api.example.test
+Authorization: Bearer $TIXKIT_API_KEY
+```
+
+Never put the key in a query string, client bundle, mobile application package, analytics field, screenshot, or committed environment file.
+
+## Clerk sessions
+
+The admin dashboard sends a Clerk session JWT. The API verifies it and resolves the active organization/tenant context. Integrations should not scrape or persist dashboard session tokens as API keys.
+
+## Scanner devices
+
+Scanner devices use the issued device ID and secret headers and carry explicit check-in scopes. Revoke a lost device. Do not share one device secret across an uncontrolled fleet.
+
+If a credential leaks, revoke it first, then remove it from logs/history and rotate downstream configuration.

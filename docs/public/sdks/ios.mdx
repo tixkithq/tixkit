@@ -1,0 +1,24 @@
+---
+title: iOS SDK
+description: Use the Swift package for scanner, checkout handoff, public event, and resale workflows with Keychain storage.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Swift 5.9 and iOS 15 or newer
+related:
+  - /operators/check-in
+  - /sdks/android
+---
+
+<SdkGuide sdkId="ios" />
+
+Add the repository's `TixkitIOS` Swift package and link the `TixkitIOS` product. Use `TixkitKeychainStorage` for scanner credentials; memory storage is for deterministic tests.
+
+`TixkitScannerClient` owns authorized scan/sync behavior, while public event and resale clients operate on buyer-safe routes. Keep privileged server API keys out of the application bundle.
+
+Test camera authorization, application backgrounding, network transitions, manifest validation, duplicate scans, and credential revocation on a real supported device. The package test suite and README are the executable source path until a standalone iOS demo target is added to the CI matrix.

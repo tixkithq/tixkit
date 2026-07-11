@@ -126,12 +126,14 @@ const localWorkerEnv = {
 };
 const checkoutPublicEnv = {
   NODE_ENV: 'production',
+  NEXT_PUBLIC_DISABLE_REACT_DEVTOOLS: '1',
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: `${apiUrl}/v1`,
   NEXT_PUBLIC_ADMIN_API_BASE_URL: apiUrl,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
 };
 const adminPublicEnv = {
   NODE_ENV: useAdminDevServer ? 'development' : 'production',
+  NEXT_PUBLIC_DISABLE_REACT_DEVTOOLS: '1',
   NEXT_PUBLIC_TIXKIT_API_BASE_URL: `${apiUrl}/v1`,
   NEXT_PUBLIC_ADMIN_API_BASE_URL: apiUrl,
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkPublishableKey,

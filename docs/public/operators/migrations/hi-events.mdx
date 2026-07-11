@@ -1,0 +1,34 @@
+---
+title: Migrate from Hi.Events
+description: Import supported Hi.Events API or export bundles.
+audience: [operator, developer]
+product_area: platform
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A Hi.Events API credential reference or immutable official export
+related:
+  - /operators/migration-operations
+---
+
+Supported sources are REST API v1 for Hi.Events 0.20–0.x and official JSON/CSV export bundles. The adapter covers organizations/brands, venues, events/occurrences, capacity assignments, products/ticket types, questions, promo/access codes, buyers/attendees, historical orders, tickets, historical payments/refunds, and check-ins.
+
+Organizer dashboard widgets are not portable. Provider-specific payment metadata is retained only as sanitized snapshot provenance. Financial snapshots never trigger live payment or fulfillment behavior.
+
+Collection honors official `Retry-After` guidance and bounded retries for 429/502/503/504. Pin the adapter version, preserve the source page cursors, run dry-run, review losses and counts, and commit only the hash-current job. Stable source IDs make retries and re-import idempotent.
+
+In the migration workspace, choose **Official API** and enter the account ID, one or more event IDs, and—only for self-hosting—the HTTPS API origin. The resulting non-secret configuration is exactly:
+
+```json
+{
+  "sourceMode": "official-api",
+  "sourceSystem": "hi-events",
+  "accountId": "account_123",
+  "eventIds": ["event_456"],
+  "baseUrl": "https://tickets.example.com"
+}
+```
+
+Select an expiring credential reference separately. Never paste an API key, cursor, response record, or arbitrary URL into the scope fields.

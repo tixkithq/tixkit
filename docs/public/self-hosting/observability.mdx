@@ -1,0 +1,28 @@
+---
+title: Configure observability
+description: Monitor request, workflow, datastore, provider, export, checkout, and documentation health without logging sensitive data.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: how-to
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - A telemetry backend compatible with the repository configuration
+related:
+  - /operations/incidents
+  - /reference/performance
+---
+
+Collect service-level metrics, traces, structured logs, and health signals for the API, worker, admin, checkout, docs, database, Redis, Temporal, storage, and configured providers.
+
+## Correlate safely
+
+Use request, workflow, delivery, export-job, checkout-session, and order identifiers only where policy permits. Redact authorization headers, cookies, API keys, signing secrets, provider credentials, ticket codes, and personal-data payloads.
+
+## Alert on outcomes
+
+Alert on error/latency saturation, worker/task-queue lag, failed checkout finalization, payment reconciliation, webhook dead letters, export failures, database pool pressure, storage errors, and documentation smoke failures. Avoid alerts based only on process uptime.
+
+Link alerts to the exact [incident runbook](/operations/incidents) and verify alert routing during release rehearsal.

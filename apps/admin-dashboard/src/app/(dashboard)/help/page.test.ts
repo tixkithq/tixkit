@@ -4,17 +4,18 @@ import { describe, expect, it } from 'vitest';
 const helpSource = readFileSync('src/app/(dashboard)/help/page.tsx', 'utf8');
 
 describe('HelpPage source', () => {
-  it('contains real dashboard guides instead of the old placeholder', () => {
-    expect(helpSource).toContain('Create, configure, and publish an event');
-    expect(helpSource).toContain('Track orders and process refunds');
-    expect(helpSource).toContain('Use API keys and webhooks safely');
+  it('uses the shared permission-aware Help registry', () => {
+    expect(helpSource).toContain('dashboardHelpRegistry');
+    expect(helpSource).toContain('filterHelpByPermissions');
+    expect(helpSource).toContain('Search Help Center');
     expect(helpSource).not.toContain('Help center coming soon');
   });
 
-  it('links guide actions to real dashboard routes', () => {
-    expect(helpSource).toContain('href: routes.events');
-    expect(helpSource).toContain('href: routes.orders');
-    expect(helpSource).toContain('href: routes.developerApiKeys');
-    expect(helpSource).toContain('href: routes.developerWebhooks');
+  it('provides task, role, symptom, and support entry points through DocRouteId', () => {
+    expect(helpSource).toContain('Start by role');
+    expect(helpSource).toContain('Tasks by product area');
+    expect(helpSource).toContain('Troubleshoot by symptom');
+    expect(helpSource).toContain('dashboardDocUrl(routeId)');
+    expect(helpSource).toContain('routeId="support"');
   });
 });

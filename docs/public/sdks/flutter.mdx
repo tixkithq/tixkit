@@ -1,0 +1,24 @@
+---
+title: Flutter SDK
+description: Integrate scanner, ticket, checkout-handoff, public event, and resale behavior in Flutter.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Dart 3.4 or newer and Flutter 3.22 or newer
+related:
+  - /operators/check-in
+  - /sdks/react-native
+---
+
+<SdkGuide sdkId="flutter" />
+
+Add `tixkit_flutter` according to the package README and pubspec source used by your distribution model.
+
+The SDK provides `TixkitScannerClient`, scanner storage contracts, checkout handoff, public event pages, resale behavior, and Flutter UI components. Production scanner credentials require platform-backed secure storage; `TixkitMemoryScannerStorage` is suitable for controlled tests, not durable secret storage.
+
+Validate camera permission denial, duplicate/wrong-event scans, offline manifest expiration, background/resume behavior, and synchronization failure. Use `packages/sdk-flutter/example` and `apps/sdk-flutter-demo` as executable fixtures.

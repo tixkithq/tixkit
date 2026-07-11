@@ -4,6 +4,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
+  BookOpen,
   Laptop,
   Moon,
   Sun,
@@ -25,6 +26,7 @@ import { useTheme } from '@/context/theme-provider';
 import { usePermissions } from '@/context/permission-provider';
 import { type TixkitPermission } from '@/lib/permissions';
 import { routes } from '@/lib/routes';
+import { dashboardDocUrl } from '@/lib/docs';
 import {
   CommandDialog,
   CommandEmpty,
@@ -159,6 +161,44 @@ export function CommandMenu() {
     },
   ];
 
+  const documentationActions: CommandMenuItem[] = [
+    {
+      id: 'docs-help-center',
+      title: 'Open Help Center',
+      subtitle: 'Tasks and troubleshooting',
+      href: routes.help,
+      icon: BookOpen,
+      keywords: ['help', 'documentation', 'support', 'troubleshooting'],
+    },
+    {
+      id: 'docs-operator-events',
+      title: 'Event operations guide',
+      subtitle: 'Create, publish, and operate events',
+      href: dashboardDocUrl('events'),
+      icon: BookOpen,
+      keywords: ['documentation', 'event', 'publish', 'operator'],
+      requiredPermission: 'events.read',
+    },
+    {
+      id: 'docs-api-reference',
+      title: 'API reference',
+      subtitle: 'Endpoints, schemas, and authentication',
+      href: dashboardDocUrl('apiReference'),
+      icon: BookOpen,
+      keywords: ['documentation', 'developer', 'api', 'schema'],
+      requiredPermission: 'developers.write',
+    },
+    {
+      id: 'docs-webhook-troubleshooting',
+      title: 'Webhook troubleshooting',
+      subtitle: 'Signatures, delivery, and replay',
+      href: dashboardDocUrl('webhookTroubleshooting'),
+      icon: BookOpen,
+      keywords: ['documentation', 'developer', 'webhook', 'delivery', 'signature'],
+      requiredPermission: 'developers.write',
+    },
+  ];
+
   const settingsItems: CommandMenuItem[] = [
     {
       id: 'settings-profile',
@@ -268,6 +308,10 @@ export function CommandMenu() {
           <CommandGroup heading="Reporting">{reportingActions.map(renderItem)}</CommandGroup>
           <CommandSeparator />
           <CommandGroup heading="Developer">{developerActions.map(renderItem)}</CommandGroup>
+          <CommandSeparator />
+          <CommandGroup heading="Documentation">
+            {documentationActions.map(renderItem)}
+          </CommandGroup>
           <CommandSeparator />
           <CommandGroup heading="Settings">{settingsItems.map(renderItem)}</CommandGroup>
           <CommandSeparator />

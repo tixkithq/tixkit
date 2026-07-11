@@ -10,13 +10,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: 'Invalid signature' });
   }
 
-  let eventBody: unknown;
   try {
-    eventBody = JSON.parse(body);
+    JSON.parse(body);
   } catch {
     throw createError({ statusCode: 400, statusMessage: 'Invalid JSON body' });
   }
 
-  console.log('Tixkit webhook received', eventBody);
   return { received: true, handledBy: 'sdk-nuxt-demo' };
 });

@@ -1,0 +1,34 @@
+---
+title: Troubleshoot webhook delivery
+description: Diagnose endpoint, signature, response, retry, dead-letter, and replay failures from observable state.
+audience:
+  - developer
+product_area: webhooks
+content_type: troubleshooting
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Access to the endpoint and delivery status
+related:
+  - /developers/webhooks/verify-signatures
+  - /reference/webhook-events
+---
+
+Start with the last delivery status, attempt count, safe response summary, and event ID. Do not rotate secrets or replay until the failure category is known.
+
+## Endpoint was not reached
+
+Verify HTTPS URL, DNS, TLS, firewall, and receiver availability. Confirm the endpoint is active and subscribed to the event type.
+
+## Signature verification failed
+
+Confirm the receiver uses the raw body, current endpoint secret, `t` and `v1` fields, hex decoding, constant-time comparison, and a synchronized clock. Parsing then reserializing JSON changes the signed bytes.
+
+## Receiver returned non-2xx
+
+Inspect the receiver's redacted error using the event ID. Fix durable acceptance or downstream queueing before replay. A slow synchronous handler may time out even if it eventually performs work.
+
+## Delivery is dead-lettered
+
+After retry attempts are exhausted, correct the endpoint first. Replay only when the receiver is idempotent and the operator understands the downstream effect. Replaying financial or fulfillment events without deduplication can repeat side effects.

@@ -1,0 +1,29 @@
+---
+title: Paginate list operations
+description: Traverse stable cursor-based pages without constructing or persisting opaque cursor values.
+audience:
+  - developer
+product_area: api
+content_type: concept
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Access to a paginated list operation
+related:
+  - /reference/api
+  - /developers/api-fundamentals/errors
+---
+
+List operations use an opaque cursor with a bounded `limit`. A response contains `items`, `nextCursor`, and `hasMore`.
+
+## Traverse pages
+
+Request the first page without a cursor. When `hasMore` is true, pass the returned `nextCursor` unchanged to the next request. Stop when `hasMore` is false and `nextCursor` is null.
+
+```http
+GET /v1/events?limit=50&cursor=$NEXT_CURSOR HTTP/1.1
+Authorization: Bearer $TIXKIT_API_KEY
+```
+
+Do not decode, increment, combine, or reuse a cursor for a different endpoint/filter set. If the underlying collection changes during traversal, design the integration to tolerate repeated or newly inserted records according to the operation's ordering contract.

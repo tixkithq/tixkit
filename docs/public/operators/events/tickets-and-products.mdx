@@ -1,0 +1,41 @@
+---
+title: Configure tickets, products, and inventory
+description: Create sellable items with explicit capacity, pricing, availability, and sale windows.
+audience:
+  - operator
+product_area: inventory
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - An existing event
+  - Ticket or event write permission
+related:
+  - /operators/events/checkout-forms
+  - /getting-started/test-checkout
+---
+
+An item is sellable only when its status, price, capacity, inventory pool, and sales window permit a purchase. Public availability is authoritative; an item appearing in the admin editor is not sufficient.
+
+## Create a ticket or product
+
+Open the event's tickets/products view. Define a customer-facing name, price and currency, capacity or inventory source, and sales window. Save and reload before creating dependent rules.
+
+Use test values in non-production environments. Do not use an artificial zero price to bypass payment-path validation unless a free item is the intended product behavior.
+
+## Verify availability
+
+Open the event preview and confirm the item is visible with the expected price and remaining availability. If it is absent, check:
+
+- draft or inactive status;
+- zero or exhausted inventory;
+- sales window not yet open or already closed;
+- inventory pool or occurrence mismatch;
+- access rules, promotion requirements, or public revision state.
+
+## Avoid oversell assumptions
+
+Checkout uses holds and durable confirmation behavior. Do not infer capacity from the count displayed in one browser or manually change database rows. Use supported admin/API operations and verify the resulting public availability.
+
+Next, [review checkout fields and consent](/operators/events/checkout-forms).

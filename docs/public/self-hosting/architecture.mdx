@@ -1,0 +1,30 @@
+---
+title: Self-hosting architecture
+description: Map Tixkit applications, durable services, trust boundaries, and public ingress before deployment.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: concept
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - Familiarity with containerized web services and relational databases
+related:
+  - /self-hosting/configuration
+  - /self-hosting/deployment
+---
+
+Tixkit runs separate API, Temporal worker, admin, checkout, and documentation processes. PostgreSQL is the primary documented local path; repository validation also covers declared compatible database modes. Redis supports runtime coordination, Temporal owns durable workflows, and S3-compatible storage owns generated/uploaded artifacts.
+
+## Trust boundaries
+
+Expose only required public ingress: buyer checkout/public API, authenticated admin/API, provider webhooks, and documentation. Keep database, Redis, Temporal service, and object-storage administration private.
+
+The API authenticates and scopes requests. The worker consumes trusted Temporal tasks but still calls scoped repositories/providers. Browser applications never receive database, provider, API-key, or signing secrets.
+
+## Failure boundaries
+
+API health does not prove worker readiness; worker health does not prove provider readiness. Monitor each service plus database, Redis, Temporal, storage, authentication, payments, messaging, and webhook delivery independently.
+
+Continue with [configuration and secrets](/self-hosting/configuration).

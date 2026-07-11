@@ -20,7 +20,7 @@ The API version uses a date. Additive operations and optional fields may ship wi
 Before release, run:
 
 ```bash
-bun run scripts/build-api-release.ts
+bun scripts/build-api-release.ts
 (cd artifacts/api/2026-01-01 && sha256sum --check CHECKSUMS.sha256)
 bunx tsc --noEmit --skipLibCheck artifacts/api/2026-01-01/openapi.d.ts
 node scripts/sdk-parity-matrix.mjs

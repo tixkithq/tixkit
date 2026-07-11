@@ -1,0 +1,34 @@
+---
+title: Monorepo architecture
+description: Locate applications, packages, contract sources, durable workflows, and public export boundaries.
+audience:
+  - contributor
+product_area: contributing
+content_type: concept
+status: beta
+owner: documentation-architecture
+last_verified: 2026-07-10
+prerequisites:
+  - A source checkout
+related:
+  - /getting-started/platform-overview
+  - /contributing/add-an-api-route
+---
+
+The Bun/Turbo workspace contains runtime applications under `apps/` and reusable or service packages under `packages/`.
+
+## Runtime applications
+
+`apps/admin-dashboard` is the authenticated operator UI. `apps/checkout` is buyer-facing checkout/public event behavior. `apps/docs` builds this documentation. SDK demo apps are executable contract fixtures.
+
+## Backend boundaries
+
+`packages/domain` owns pure rules and types. `packages/db` owns Kysely repositories/migrations. `packages/api` owns Fastify routes, auth, permissions, and serialization. `packages/workflows` owns Temporal workflows/activities. `packages/openapi` owns the public HTTP schema.
+
+## Frontend and integration packages
+
+Content packages own shared editors/rendering; `admin-table-core` owns reusable table behavior; SDK and widget packages expose public integration surfaces. `packages/docs-core` owns documentation route/help/readiness/search contracts without importing applications.
+
+## Export boundary
+
+The private development tree is not identical to the sanitized OSS export. `scripts/export-oss.mjs` explicitly includes public apps/packages/content/governance and excludes internal plans, evidence, managed-only material, and secret-like content.

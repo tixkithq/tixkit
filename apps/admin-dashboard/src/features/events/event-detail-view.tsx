@@ -24,6 +24,7 @@ import { routes } from '@/lib/routes';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ApiErrorState } from '@/components/api-error-state';
 import { toast } from 'sonner';
 import { EventStatusBadge, TicketTypeStatusBadge, OrderStatusBadge } from './event-status-badge';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
@@ -31,24 +32,66 @@ import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { publicEventUrl } from '@/lib/event-links';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { usePermissions } from '@/context/permission-provider';
-import { CreateEventDrawer } from './create-event-drawer';
+import { EventLaunchPanel } from './event-launch-panel';
+import { PublishPreflightDialog } from './publish-preflight-dialog';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const {
     data: event,
     loading,
     error,
-    refetch,
   } = useAdminQuery(['getEvent', eventId], () => adminApi.getEvent(eventId));
-  const { data: ticketTypes } = useAdminQuery(['listTicketTypes', eventId], () =>
-    adminApi.listTicketTypes(eventId),
-  );
+  const {
+    data: ticketTypes,
+    loading: ticketsLoading,
+    error: ticketsError,
+    refetch: refetchTickets,
+  } = useAdminQuery(['listTicketTypes', eventId], () => adminApi.listTicketTypes(eventId));
   const { data: ordersData } = useAdminQuery(['listOrders', eventId], () =>
-    adminApi.listOrders({ filters: { eventId: { type: 'select', values: [eventId] } }, limit: 5 }),
+    adminApi.listOrders({
+      filters: { eventId: { type: 'select', values: [eventId] } },
+      limit: 5,
+    }),
+  );
+  const {
+    data: messages,
+    loading: messagesLoading,
+    error: messagesError,
+    refetch: refetchMessages,
+  } = useAdminQuery(['listMessages', eventId, 'operational-health'], () =>
+    adminApi.listMessages(eventId),
+  );
+  const {
+    data: launchReadiness,
+    loading: readinessLoading,
+    error: readinessError,
+    refetch: refetchReadiness,
+  } = useAdminQuery(['eventLaunchReadiness', eventId], () =>
+    adminApi.getEventLaunchReadiness(eventId),
+  );
+  const {
+    data: operationalHealth,
+    loading: operationalHealthLoading,
+    error: operationalHealthError,
+    refetch: refetchOperationalHealth,
+  } = useAdminQuery(['eventOperationalHealth', eventId], () =>
+    adminApi.getEventOperationalHealth(eventId),
   );
   const { brands } = useBootstrap();
   const { can } = usePermissions();
-  const [editOpen, setEditOpen] = React.useState(false);
+  const [preflightOpen, setPreflightOpen] = React.useState(false);
+  const [lifecycleAction, setLifecycleAction] = React.useState<'pause' | 'archive'>();
+  const [lifecycleError, setLifecycleError] = React.useState<string>();
+  const [setupWarning, setSetupWarning] = React.useState<string>();
+  React.useEffect(() => {
+    const warning = new URLSearchParams(window.location.search).get('setupWarning');
+    if (!warning) return;
+    setSetupWarning(warning);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('setupWarning');
+    window.history.replaceState(window.history.state, '', url);
+  }, []);
 
   if (loading) {
     return (
@@ -87,6 +130,16 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     typeof event.description === 'string' && event.description.trim().length > 0
       ? event.description.trim()
       : undefined;
+  const paymentStep = launchReadiness?.steps.find((step) => step.id === 'payment_readiness');
+  const checkInStep = launchReadiness?.steps.find((step) => step.id === 'check_in_configuration');
+  const lowInventory = tickets.filter((ticket) => {
+    if (!ticket.quantityTotal) return false;
+    return ticket.quantityTotal - ticket.quantitySold <= Math.max(ticket.maxPerOrder ?? 1, 5);
+  });
+  const messagingFailures = (messages ?? []).reduce(
+    (total, message) => total + message.failedCount + message.suppressedCount,
+    0,
+  );
 
   const copyShareUrl = async () => {
     const writeText = navigator.clipboard?.writeText;
@@ -106,19 +159,47 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   const quickLinks = [
     { title: 'Tickets', icon: Ticket, href: routes.eventTickets(eventId) },
     { title: 'Products', icon: Package, href: routes.eventProducts(eventId) },
-    { title: 'Checkout Form', icon: ClipboardList, href: routes.eventCheckoutForm(eventId) },
-    { title: 'Event Page', icon: PenTool, href: routes.eventContentEventPage(eventId) },
-    { title: 'Embed studio', icon: Globe, href: routes.eventEmbedStudio(eventId) },
+    {
+      title: 'Checkout Form',
+      icon: ClipboardList,
+      href: routes.eventCheckoutForm(eventId),
+    },
+    {
+      title: 'Event Page',
+      icon: PenTool,
+      href: routes.eventContentEventPage(eventId),
+    },
+    {
+      title: 'Embed studio',
+      icon: Globe,
+      href: routes.eventEmbedStudio(eventId),
+    },
     { title: 'Attendees', icon: Users, href: routes.eventAttendees(eventId) },
     { title: 'Check-in', icon: QrCode, href: routes.eventCheckIn(eventId) },
     ...(can('messages.write')
-      ? [{ title: 'Messages', icon: MessageSquare, href: routes.eventMessages(eventId) }]
+      ? [
+          {
+            title: 'Messages',
+            icon: MessageSquare,
+            href: routes.eventMessages(eventId),
+          },
+        ]
       : []),
     { title: 'Reports', icon: BarChart3, href: routes.eventReports(eventId) },
   ];
 
   return (
     <div className="space-y-6">
+      {setupWarning ? (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"
+        >
+          <p className="font-semibold">Your draft was created, but its preset needs attention.</p>
+          <p>{setupWarning}</p>
+          <p className="mt-1">Use the launch checklist below to finish the missing setup.</p>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1">
           <div className="flex items-center gap-3">
@@ -143,22 +224,237 @@ export function EventDetailView({ eventId }: { eventId: string }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {can('events.write') && event.status !== 'published' && event.status !== 'archived' ? (
+            <Button
+              disabled={readinessLoading || Boolean(readinessError) || !launchReadiness}
+              onClick={() => setPreflightOpen(true)}
+            >
+              {readinessLoading ? 'Checking readiness…' : 'Review and publish'}
+            </Button>
+          ) : null}
+          {can('events.write') && event.status === 'published' ? (
+            <Button variant="outline" onClick={() => setLifecycleAction('pause')}>
+              Pause sales
+            </Button>
+          ) : null}
+          {can('events.write') && event.status !== 'archived' ? (
+            <Button variant="destructive" onClick={() => setLifecycleAction('archive')}>
+              Archive
+            </Button>
+          ) : null}
+          {event.status === 'published' ? (
+            <>
+              <Button variant="outline" asChild>
+                <a href={shareUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-4" />
+                  Open public page
+                </a>
+              </Button>
+              <Button variant="outline" onClick={copyShareUrl}>
+                <Copy className="size-4" />
+                Copy link
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" asChild>
+              <Link href={routes.eventPreview(eventId)}>
+                <ExternalLink className="size-4" />
+                Authenticated preview
+              </Link>
+            </Button>
+          )}
           <Button variant="outline" asChild>
-            <a href={shareUrl} target="_blank" rel="noreferrer">
-              <ExternalLink className="size-4" />
-              Open public page
-            </a>
-          </Button>
-          <Button variant="outline" onClick={copyShareUrl}>
-            <Copy className="size-4" />
-            Copy link
-          </Button>
-          <Button variant="outline" onClick={() => setEditOpen(true)}>
-            <Pencil className="size-4" />
-            Edit
+            <Link href={routes.eventSettings(eventId)}>
+              <Pencil className="size-4" />
+              Settings
+            </Link>
           </Button>
         </div>
       </div>
+
+      {event.status !== 'published' && readinessLoading ? (
+        <Skeleton className="h-72 w-full" aria-label="Loading launch readiness" />
+      ) : null}
+      {event.status !== 'published' && readinessError ? (
+        <ApiErrorState error={readinessError} onRetry={() => void refetchReadiness()} />
+      ) : null}
+      {launchReadiness && event.status !== 'published' ? (
+        <EventLaunchPanel eventId={eventId} readiness={launchReadiness} />
+      ) : null}
+      {launchReadiness && event.status === 'published' ? (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Operational health</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {ticketsLoading || messagesLoading ? (
+                <p role="status" className="mb-3 text-sm text-muted-foreground">
+                  Checking inventory and messaging health…
+                </p>
+              ) : null}
+              {ticketsError || messagesError ? (
+                <div
+                  role="alert"
+                  className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 p-3 text-sm"
+                >
+                  <span>
+                    Operational health is incomplete. Some live signals could not be loaded.
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      void refetchTickets();
+                      void refetchMessages();
+                    }}
+                  >
+                    Retry health checks
+                  </Button>
+                </div>
+              ) : null}
+              <ul
+                className="grid gap-3 text-sm sm:grid-cols-2"
+                aria-label="Event operational health"
+              >
+                <li className="rounded-md border p-3">
+                  <span className="font-medium">Payments</span>
+                  <p className="text-muted-foreground">
+                    {paymentStep?.status === 'complete' || paymentStep?.status === 'not_applicable'
+                      ? 'No payment restriction detected.'
+                      : 'Payment readiness needs attention.'}
+                  </p>
+                </li>
+                <li className="rounded-md border p-3">
+                  <span className="font-medium">Inventory</span>
+                  <p className="text-muted-foreground">
+                    {ticketsLoading || ticketsError
+                      ? 'Inventory health unavailable.'
+                      : lowInventory.length
+                        ? `${lowInventory.length} ticket type${lowInventory.length === 1 ? '' : 's'} at inventory risk.`
+                        : 'No low-inventory risk detected.'}
+                  </p>
+                </li>
+                <li className="rounded-md border p-3">
+                  <span className="font-medium">Messaging</span>
+                  <p className="text-muted-foreground">
+                    {messagesLoading || messagesError
+                      ? 'Messaging health unavailable.'
+                      : messagingFailures
+                        ? `${messagingFailures} failed or suppressed delivery outcome${messagingFailures === 1 ? '' : 's'}.`
+                        : 'No messaging failure or suppression detected.'}
+                  </p>
+                </li>
+                <li className="rounded-md border p-3">
+                  <span className="font-medium">Schedule and check-in</span>
+                  <p className="text-muted-foreground">
+                    {checkInStep?.status === 'complete' || checkInStep?.status === 'not_applicable'
+                      ? 'Check-in configuration is healthy.'
+                      : 'Review check-in configuration before doors open.'}
+                  </p>
+                </li>
+                <li className="rounded-md border p-3">
+                  <span className="font-medium">Organization webhooks</span>
+                  <p className="text-muted-foreground">
+                    {operationalHealthLoading
+                      ? 'Checking webhook delivery health…'
+                      : operationalHealthError
+                        ? 'Webhook delivery health unavailable.'
+                        : operationalHealth?.organizationFailedWebhookDeliveries
+                          ? `${operationalHealth.organizationFailedWebhookDeliveries} failed or dead-lettered ${operationalHealth.organizationFailedWebhookDeliveries === 1 ? 'webhook delivery' : 'webhook deliveries'} across this organization.`
+                          : 'No failed webhook deliveries detected across this organization.'}
+                  </p>
+                  <Link className="text-primary hover:underline" href={routes.developerWebhooks}>
+                    Review webhooks
+                  </Link>
+                </li>
+                <li className="rounded-md border p-3">
+                  <span className="font-medium">Exports</span>
+                  <p className="text-muted-foreground">
+                    {operationalHealthLoading
+                      ? 'Checking export health…'
+                      : operationalHealthError
+                        ? 'Export health unavailable.'
+                        : operationalHealth?.failedExports
+                          ? `${operationalHealth.failedExports} failed export${operationalHealth.failedExports === 1 ? '' : 's'}.`
+                          : 'No failed exports detected.'}
+                  </p>
+                  <Link
+                    className="text-primary hover:underline"
+                    href={routes.eventReports(eventId)}
+                  >
+                    Review exports
+                  </Link>
+                </li>
+              </ul>
+              {operationalHealthError ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void refetchOperationalHealth()}
+                >
+                  Retry webhook and export health
+                </Button>
+              ) : null}
+            </CardContent>
+          </Card>
+          <details className="rounded-lg border p-4">
+            <summary className="cursor-pointer font-medium">Setup and launch readiness</summary>
+            <div className="mt-4">
+              <EventLaunchPanel eventId={eventId} readiness={launchReadiness} />
+            </div>
+          </details>
+        </>
+      ) : null}
+
+      {launchReadiness ? (
+        <PublishPreflightDialog
+          open={preflightOpen}
+          onOpenChange={setPreflightOpen}
+          eventId={eventId}
+          readiness={launchReadiness}
+          onPublished={() => {
+            void refetchReadiness();
+            window.location.reload();
+          }}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        open={lifecycleAction !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setLifecycleAction(undefined);
+        }}
+        title={lifecycleAction === 'archive' ? 'Archive this event?' : 'Pause ticket sales?'}
+        description={
+          lifecycleAction === 'archive'
+            ? 'Archiving is an audited lifecycle transition. The event can no longer be published.'
+            : 'Public sales pause until the event passes preflight and is published again.'
+        }
+        confirmText={lifecycleAction === 'archive' ? 'Archive event' : 'Pause sales'}
+        variant={lifecycleAction === 'archive' ? 'destructive' : 'default'}
+        onConfirm={async () => {
+          if (!lifecycleAction) return;
+          setLifecycleError(undefined);
+          const result =
+            lifecycleAction === 'archive'
+              ? await adminApi.archiveEvent(eventId)
+              : await adminApi.pauseEvent(eventId);
+          if (!result.ok) {
+            setLifecycleError(result.error.message);
+            return;
+          }
+          window.location.reload();
+        }}
+      >
+        {lifecycleError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {lifecycleError}
+          </p>
+        ) : null}
+      </ConfirmDialog>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
@@ -191,8 +487,8 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              No description yet. Add the canonical event copy via Edit, then place or style it in
-              the Event Page editor.
+              No description yet. Add the canonical event copy in Settings, then place or style it
+              in the Event Page editor.
             </p>
           )}
         </CardContent>
@@ -290,13 +586,6 @@ export function EventDetailView({ eventId }: { eventId: string }) {
           )}
         </CardContent>
       </Card>
-
-      <CreateEventDrawer
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        event={event}
-        onSuccess={refetch}
-      />
     </div>
   );
 }

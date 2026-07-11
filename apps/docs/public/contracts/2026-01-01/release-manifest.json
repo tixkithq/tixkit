@@ -1,23 +1,39 @@
 {
   "releaseVersion": "2026-01-01",
   "apiVersion": "2026-01-01",
-  "commit": "c72b294f6437ab20a01a3f4bad7f728eebfda8fd",
-  "timestamp": "2026-07-10T22:30:57-05:00",
+  "commit": null,
+  "timestamp": null,
+  "provenance": {
+    "sourceCommit": "c72b294f6437ab20a01a3f4bad7f728eebfda8fd",
+    "headTreeHash": "8cc751bdf8dc9e6c2b1f3ab553fef06ec919f9bf",
+    "sourceTreeHash": "a74b6b7adb68e32884801deed2f0c42db9ff7c63eee9eb418ebac1280e67215d",
+    "trackedFileCount": 1390,
+    "excludedGeneratedPaths": [
+      "apps/docs/public/contracts/",
+      "apps/docs/public/openapi.json",
+      "apps/docs/src/generated/",
+      "artifacts/api/",
+      "graphify-out/"
+    ],
+    "worktreeState": "modified",
+    "reproducible": true,
+    "publishable": false
+  },
   "artifacts": [
     {
       "name": "openapi.json",
-      "sha256": "1ee045ec2ffefeb0ef0461ac57bbec073497bc4a1189a5816afd86a9db7b150f",
-      "size": 785333
+      "sha256": "d9a191dadd3cc1d7b997d17c933e7346df84be8487f9c165c7c3d8a2d54a1f59",
+      "size": 841841
     },
     {
       "name": "openapi.yaml",
-      "sha256": "d5853ed85edeeb884450535b3d1cf12f4f770b89814fd6aecb2d60cbb4a31fb0",
-      "size": 538781
+      "sha256": "444040073794c63a4128fe8dc394ad50a34288c9d43e3f32f03f2322a07b2c87",
+      "size": 577286
     },
     {
       "name": "openapi.d.ts",
-      "sha256": "62a144569061e503c5859eb37e39ecceb36c020f1d8125daa2a14b62bffeba2a",
-      "size": 398815
+      "sha256": "dc9a7d55bef26cf68f0ef4334233015413842dd54d1acc3be6a0b38cb6908869",
+      "size": 426186
     },
     {
       "name": "webhook-events.json",
@@ -31,12 +47,12 @@
     },
     {
       "name": "api-diff.json",
-      "sha256": "4e368a7d8def188aa74071990168abef529d783e6179ed679cac5c32f7e486ff",
-      "size": 3806
+      "sha256": "91ccad571ca622ca562e91680254b755279ac9055a11616881ebb389f8ded243",
+      "size": 4500
     },
     {
       "name": "CHANGELOG.md",
-      "sha256": "2168514022fa064c1434d5cabba2f2733aafc90f439114cc7ab227a983fd00ad",
+      "sha256": "a3b48bc481fcee6dcab9338d21407dd255946e1579a3b5f95fb698c8c0fd5967",
       "size": 254
     }
   ],

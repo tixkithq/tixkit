@@ -9,6 +9,18 @@ vi.mock('@/lib/api', () => ({
   adminApi: {
     listEvents: (...args: unknown[]) => mockListEvents(...args),
     listOrders: (...args: unknown[]) => mockListOrders(...args),
+    getWorkspaceReadiness: vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        generatedAt: new Date(0).toISOString(),
+        paymentMode: 'capture',
+        complete: true,
+        steps: [],
+      },
+    }),
   },
 }));
 
@@ -16,14 +28,18 @@ vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: () => ({
     organizations: [],
     brands: [],
-    organizationId: undefined,
-    brandId: undefined,
+    organizationId: 'org_1',
+    brandId: 'brd_1',
     availableBrands: [],
     setOrganizationId: vi.fn(),
     setBrandId: vi.fn(),
     loading: false,
     error: null,
   }),
+}));
+
+vi.mock('@/context/permission-provider', () => ({
+  usePermissions: () => ({ can: () => true, loading: false, error: null }),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -35,11 +51,6 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/',
-}));
-
-// Mock the lazy-loaded CreateEventDrawer to avoid dynamic import issues
-vi.mock('@/features/events/create-event-drawer', () => ({
-  CreateEventDrawer: () => null,
 }));
 
 import { DashboardView } from './dashboard-view';

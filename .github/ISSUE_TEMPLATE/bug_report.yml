@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible defect in Tixkit.
+title: '[Bug]: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not report vulnerabilities or include credentials, customer data, private payloads, or complete environment files here. Follow SECURITY.md for private reporting.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the Tixkit version or full commit SHA.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - API or OpenAPI
+        - Admin dashboard
+        - Checkout or widget
+        - Workflow or provider
+        - SDK or demo
+        - Documentation
+        - Self-hosting or release
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List exact sanitized steps, configuration mode, and the smallest code or command needed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include only a short, sanitized error excerpt.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Bun/Node versions, database mode, browser or SDK runtime, and deployment mode as relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Failing validation
+      description: Name the exact test or validation command and its result, if available.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I searched for an existing issue.
+          required: true
+        - label: I removed credentials, customer data, private payloads, and secret-bearing logs.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

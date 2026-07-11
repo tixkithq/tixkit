@@ -1,0 +1,33 @@
+---
+title: Migrate from Ticket Tailor
+description: Import Ticket Tailor API v1 or official order exports.
+audience: [operator, developer]
+product_area: platform
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A Ticket Tailor API credential reference or immutable official export
+related:
+  - /operators/migration-operations
+---
+
+Supported sources are Ticket Tailor API v1 and official Orders exports dated 2024-01 through 2026-07. The adapter maps events, ticket types, historical orders, issued tickets, vouchers, check-ins, and side-effect-suppressed payment/refund snapshots.
+
+Waitlist notification history and broadcast audiences are not imported. Checkout layout is flattened into question records. Historical payments and refunds remain immutable snapshots.
+
+Follow official next-link cursors, cap pages at 100, honor `Retry-After`, and use bounded retries for 429/5xx. Preserve source IDs and exports, approve dry-run losses/counts, and activate only after reconciliation. Unchanged re-imports skip existing references.
+
+In the migration workspace, choose **Official API** and enter the account ID plus one or more event IDs. The resulting non-secret configuration is exactly:
+
+```json
+{
+  "sourceMode": "official-api",
+  "sourceSystem": "ticket-tailor",
+  "accountId": "account_123",
+  "eventIds": ["ev_456"]
+}
+```
+
+Ticket Tailor credentials are selected separately by credential reference. Do not place Basic-auth material, continuation URLs, or response data in job configuration.

@@ -1,0 +1,45 @@
+name: Documentation issue
+description: Report inaccurate, missing, inaccessible, or hard-to-find public guidance.
+title: '[Docs]: '
+labels:
+  - documentation
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Page or product location
+      description: Provide the public docs route, repository path, or dashboard route.
+    validations:
+      required: true
+  - type: dropdown
+    id: problem
+    attributes:
+      label: Problem type
+      options:
+        - Incorrect behavior or command
+        - Missing task guidance
+        - Broken link or anchor
+        - Accessibility problem
+        - Search or navigation problem
+        - Stale API, SDK, or configuration contract
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What blocked you?
+      description: Include the task, expected result, actual result, and sanitized evidence.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, customer data, and private payloads.
+          required: true

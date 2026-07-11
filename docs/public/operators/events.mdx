@@ -1,0 +1,40 @@
+---
+title: Operate events
+description: Understand event state, schedules, inventory, previews, and publication dependencies.
+audience:
+  - operator
+product_area: events
+content_type: overview
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Event read permission
+related:
+  - /operators/events/schedules
+  - /operators/events/tickets-and-products
+---
+
+The Events area is the operating hub for schedules, sellable items, checkout fields, messaging, marketing, and public presentation. Event publication is a state transition, not proof that every downstream dependency is ready.
+
+## Work in dependency order
+
+1. Confirm organization and brand context.
+2. Create the event and save its core details.
+3. Add a valid schedule or occurrence.
+4. Add sellable ticket or product inventory.
+5. Review checkout fields, consent, fees, and payment readiness.
+6. Preview the public experience.
+7. Publish and verify from a private browser window.
+
+## Understand event status
+
+Draft events are editable but not expected to appear as a live public sale. Published events still depend on active schedules, sale windows, inventory, public revisions, brand/domain context, and payment behavior.
+
+If an event cannot be published, resolve the exact prerequisite shown by the dashboard. Do not repeatedly toggle status or duplicate the event to work around a missing dependency.
+
+## Protect scoped data
+
+Event URLs and identifiers are not authorization. The API and dashboard must enforce tenant, organization, brand, and event access for every read and write. Report any cross-context data immediately through the security process.
+
+Use [schedules](/operators/events/schedules), [tickets and products](/operators/events/tickets-and-products), and [checkout forms](/operators/events/checkout-forms) to complete the setup.

@@ -26,14 +26,30 @@ const demoStorage: TixkitScannerStorage = {
   },
 };
 
-const client = new TixkitScannerClient({
-  deviceId: 'sd_demo_device',
-  deviceSecret: 'demo-device-secret',
-  manifestSigningKey: 'demo-manifest-signing-key',
-  apiBaseUrl: 'http://localhost:4000/v1',
-  checkoutBaseUrl: 'http://localhost:3000',
-  storage: demoStorage,
-});
+type NativeScannerCredentials = {
+  deviceId: string;
+  deviceSecret: string;
+  manifestSigningKey: string;
+};
+
+declare global {
+  // The native host injects an in-memory copy after reading Keychain/Keystore during enrollment.
+  // It must never be sourced from an EXPO_PUBLIC variable or persisted in AsyncStorage.
+  var __TIXKIT_SCANNER_CREDENTIALS__: NativeScannerCredentials | undefined;
+}
+
+function scannerClient() {
+  const credentials = globalThis.__TIXKIT_SCANNER_CREDENTIALS__;
+  if (!credentials) {
+    throw new Error('Enroll this device through the native secure credential bridge first.');
+  }
+  return new TixkitScannerClient({
+    ...credentials,
+    apiBaseUrl: 'http://localhost:4000/v1',
+    checkoutBaseUrl: 'http://localhost:3000',
+    storage: demoStorage,
+  });
+}
 
 // --- Create SDK UI components ---
 // The SDK components return `unknown` (runtime-agnostic); cast to React FC for JSX.
@@ -163,7 +179,7 @@ function ScannerTab() {
     setScanning(true);
     try {
       const r = await scanBarcodePayload({
-        client,
+        client: scannerClient(),
         checkInListId: 'cil_demo',
         qrPayload: 'demo-ticket-payload-001',
         mode: 'auto',
@@ -199,7 +215,10 @@ function SyncTab() {
     setBusy(true);
     setStatus('Downloading manifest...');
     try {
-      const manifest: OfflineManifest = await client.downloadManifest('evt_demo', 'cil_demo');
+      const manifest: OfflineManifest = await scannerClient().downloadManifest(
+        'evt_demo',
+        'cil_demo',
+      );
       setStatus(
         `Manifest downloaded: ${manifest.tickets.length} tickets, expires ${manifest.expiresAt}`,
       );
@@ -214,7 +233,7 @@ function SyncTab() {
     setBusy(true);
     setStatus('Syncing offline scans...');
     try {
-      const result = await client.syncScans('cil_demo');
+      const result = await scannerClient().syncScans('cil_demo');
       setStatus(
         `Sync complete: ${result.accepted} accepted, ${result.duplicates} duplicates, ${result.invalid} invalid`,
       );

@@ -15,9 +15,8 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
-  let event: unknown;
   try {
-    event = JSON.parse(body);
+    JSON.parse(body);
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
       status: 400,
@@ -25,7 +24,6 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
-  console.log('Tixkit webhook received', event);
   return new Response(JSON.stringify({ received: true, handledBy: 'sdk-astro-demo' }), {
     status: 200,
     headers: { 'content-type': 'application/json' },

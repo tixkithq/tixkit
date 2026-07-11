@@ -15,6 +15,22 @@ import { getAdminApiBaseUrl, request, withFixture } from './api-http';
 export { getAdminApiAuthHeaders, getAdminApiBaseUrl } from './api-http';
 export { hasClerkKey } from '@/lib/auth';
 import type { AdminTableQuery, AdminTablePage } from '@tixkit/admin-table-core';
+import type {
+  EventLaunchReadinessStepId,
+  Permission,
+  ReadinessActionId,
+  ReadinessReasonCode,
+  WorkspaceReadinessStepId,
+} from '@tixkit/domain';
+import {
+  ALL_PERMISSIONS,
+  eventLaunchReadinessStepIds,
+  readinessActionIds,
+  readinessPriorities,
+  readinessReasonCodes,
+  readinessStatuses,
+  workspaceReadinessStepIds,
+} from '@tixkit/domain';
 import { queryToParams } from '@tixkit/admin-table-core';
 import {
   ordersTableSchema,
@@ -55,7 +71,34 @@ function err<T>(error: AdminApiError): ApiResult<T> {
   return { ok: false, error };
 }
 
-async function putUploadBytes(ticket: UploadArtifactTicket, file: File): Promise<ApiResult<void>> {
+async function putUploadBytes(
+  ticket: UploadArtifactTicket,
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<ApiResult<void>> {
+  if (typeof XMLHttpRequest !== 'undefined' && onProgress) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', ticket.uploadUrl);
+      for (const [name, value] of Object.entries(ticket.uploadHeaders))
+        xhr.setRequestHeader(name, value);
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+      });
+      xhr.addEventListener('load', () =>
+        resolve(
+          xhr.status >= 200 && xhr.status < 300
+            ? ok(undefined)
+            : err(apiError('upload_failed', `Upload failed with status ${xhr.status}`, xhr.status)),
+        ),
+      );
+      xhr.addEventListener('error', () => resolve(err(apiError('upload_failed', 'Upload failed'))));
+      xhr.addEventListener('abort', () =>
+        resolve(err(apiError('upload_aborted', 'Upload was cancelled'))),
+      );
+      xhr.send(file);
+    });
+  }
   try {
     const response = await fetch(ticket.uploadUrl, {
       method: 'PUT',
@@ -131,6 +174,7 @@ export type AdminFeeRule = {
 
 export type AdminFeePolicy = {
   eventId: string;
+  eventVersion: number;
   passFeesToBuyer: boolean;
   rules: AdminFeeRule[];
 };
@@ -166,6 +210,96 @@ export type AdminEventDetail = AdminEventListItem & {
   organizationId?: string;
   brandId?: string;
   createdAt?: string;
+  version?: number;
+  lastSetupSection?: string;
+  coverImageAlt?: string;
+  seoUseCoverImage?: boolean;
+};
+
+export type AdminReadinessStep = {
+  id: WorkspaceReadinessStepId | EventLaunchReadinessStepId;
+  status: 'complete' | 'incomplete' | 'blocked' | 'not_applicable';
+  priority: 'required' | 'recommended';
+  reasonCodes: ReadinessReasonCode[];
+  actionId: ReadinessActionId | null;
+  requiredPermission: Permission | null;
+  updatedAt: string | null;
+  acknowledgedAt: string | null;
+  acknowledgementValid: boolean | null;
+};
+
+export type AdminWorkspaceReadiness = {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  generatedAt: string;
+  paymentMode: 'capture' | 'provider_test' | 'provider';
+  complete: boolean;
+  steps: AdminReadinessStep[];
+};
+
+export type AdminEventLaunchReadiness = {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId: string;
+  eventVersion: number;
+  generatedAt: string;
+  paymentMode: 'capture' | 'provider_test' | 'provider';
+  launchable: boolean;
+  published: boolean;
+  requiredBlockers: AdminReadinessStep[];
+  recommendedWarnings: AdminReadinessStep[];
+  steps: AdminReadinessStep[];
+};
+export type AdminLaunchReadinessFailureDetails = {
+  requiredBlockers: AdminReadinessStep[];
+  recommendedWarnings: AdminReadinessStep[];
+};
+
+function isAdminReadinessStep(value: unknown): value is AdminReadinessStep {
+  const step = asRecord(value);
+  return (
+    [...workspaceReadinessStepIds, ...eventLaunchReadinessStepIds].includes(step.id as never) &&
+    readinessStatuses.includes(step.status as never) &&
+    readinessPriorities.includes(step.priority as never) &&
+    Array.isArray(step.reasonCodes) &&
+    step.reasonCodes.length > 0 &&
+    step.reasonCodes.every(
+      (reason) => typeof reason === 'string' && readinessReasonCodes.includes(reason as never),
+    ) &&
+    (step.actionId === null || readinessActionIds.includes(step.actionId as never)) &&
+    (step.requiredPermission === null ||
+      ALL_PERMISSIONS.includes(step.requiredPermission as never)) &&
+    (step.updatedAt === null || typeof step.updatedAt === 'string') &&
+    (step.acknowledgedAt === null || typeof step.acknowledgedAt === 'string') &&
+    (step.acknowledgementValid === null || typeof step.acknowledgementValid === 'boolean')
+  );
+}
+
+export function isAdminLaunchReadinessFailure(
+  error: AdminApiError,
+): error is AdminApiError & { details: AdminLaunchReadinessFailureDetails } {
+  const details = asRecord(error.details);
+  return (
+    error.code === 'launch_readiness_failed' &&
+    Array.isArray(details.requiredBlockers) &&
+    details.requiredBlockers.every(isAdminReadinessStep) &&
+    Array.isArray(details.recommendedWarnings) &&
+    details.recommendedWarnings.every(isAdminReadinessStep)
+  );
+}
+
+export type AdminReadinessAcknowledgement = {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId: string;
+  stepId: 'checkout_consent' | 'preview_review';
+  stepVersion: number;
+  subjectFingerprint: string;
+  actorId: string;
+  acknowledgedAt: string;
 };
 
 export type AdminEventOccurrence = {
@@ -440,6 +574,7 @@ export type AdminOrderListItem = {
   totalCents: number;
   refundedCents: number;
   currency: string;
+  isTest?: boolean;
   attendeeCount: number;
   paymentProvider?: 'stripe' | 'free' | 'manual';
   salesChannel?: 'online' | 'box_office';
@@ -1363,13 +1498,32 @@ export type CreateEventInput = {
   seo?: AdminEventSeo;
   capacity?: number | null;
   minimumAge?: number | null;
-  coverImageUrl?: string | null;
   externalUrl?: string | null;
   currency: string;
 };
 
 export type UpdateEventInput = Partial<CreateEventInput> & {
   status?: EventStatus;
+  expectedVersion?: number;
+  coverImageAlt?: string | null;
+  coverImageUrl?: string | null;
+  seoUseCoverImage?: boolean;
+  lastSetupSection?: string | null;
+};
+
+export type DuplicateEventInput = {
+  startsAt: string;
+  title?: string;
+  copy: {
+    basicsVenue: boolean;
+    ticketTypes: boolean;
+    products: boolean;
+    checkoutQuestions: boolean;
+    feeResalePolicies: boolean;
+    eventPageContent: boolean;
+    lifecycleContent: boolean;
+    marketingIntegrations: boolean;
+  };
 };
 
 export type CreateTicketTypeInput = {
@@ -1491,6 +1645,7 @@ export type CreateCheckoutQuestionInput = {
 export type UpdateCheckoutQuestionInput = Partial<CreateCheckoutQuestionInput>;
 
 export type UpdateEventFeePolicyInput = {
+  expectedVersion: number;
   passFeesToBuyer: boolean;
   rules: Array<{
     id?: string;
@@ -1618,7 +1773,10 @@ export type AdminUploadPurpose =
   | 'brand_logo'
   | 'user_avatar'
   | 'content_email_image'
-  | 'content_event_page_image';
+  | 'content_event_page_image'
+  | 'migration_import'
+  | 'event_cover'
+  | 'event_seo_image';
 
 export type CreateUploadArtifactInput = {
   purpose: AdminUploadPurpose;
@@ -1683,14 +1841,75 @@ export type AdminMigrationJob = {
   updated_at: string;
 };
 
-export type CreateAdminMigrationJobInput = {
+export type AdminMigrationPreparationConfiguration =
+  | {
+      sourceMode: 'official-export';
+      sourceSystem: 'generic-csv';
+      artifactIds: readonly string[];
+    }
+  | {
+      sourceMode: 'official-export';
+      sourceSystem: 'pretix';
+      artifactIds: readonly string[];
+    }
+  | {
+      sourceMode: 'official-export';
+      sourceSystem: 'hi-events';
+      artifactIds: readonly string[];
+    }
+  | {
+      sourceMode: 'official-export';
+      sourceSystem: 'eventbrite';
+      artifactIds: readonly string[];
+    }
+  | {
+      sourceMode: 'official-export';
+      sourceSystem: 'ticket-tailor';
+      artifactIds: readonly string[];
+    }
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'pretix';
+      organizerSlug: string;
+      eventSlugs: readonly string[];
+      baseUrl?: string;
+    }
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'hi-events';
+      accountId: string;
+      eventIds: readonly string[];
+      baseUrl?: string;
+    }
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'eventbrite';
+      organizationId: string;
+      eventIds: readonly string[];
+    }
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'ticket-tailor';
+      accountId: string;
+      eventIds: readonly string[];
+    };
+
+type CreateAdminMigrationJobBase = {
   organizationId: string;
-  sourceSystem: string;
   adapterVersion: string;
   mode?: 'dry-run' | 'commit';
-  configuration?: Record<string, unknown>;
-  credentialId?: string;
 };
+export type CreateAdminMigrationJobInput =
+  AdminMigrationPreparationConfiguration extends infer Configuration
+    ? Configuration extends AdminMigrationPreparationConfiguration
+      ? CreateAdminMigrationJobBase & {
+          sourceSystem: Configuration['sourceSystem'];
+          configuration: Configuration;
+        } & (Configuration extends { sourceMode: 'official-api' }
+            ? { credentialId: string }
+            : { credentialId?: never })
+      : never
+    : never;
 
 export type CreateAdminMigrationCredentialInput = {
   organizationId: string;
@@ -1701,11 +1920,22 @@ export type CreateAdminMigrationCredentialInput = {
 
 export type AdminMigrationConfirmation = `commit:${string}` | `rollback:${string}`;
 
+export type AdminMigrationAdapter = {
+  id: 'generic-csv' | 'pretix' | 'hi-events' | 'eventbrite' | 'ticket-tailor';
+  displayName: string;
+  supportedVersions: string[];
+  featureMapping: Record<string, unknown>;
+  knownLosses: string[];
+  rateLimitPolicy: Record<string, unknown>;
+  sourceModes: ('official-api' | 'official-export')[];
+};
+
 export type AdminApi = {
   /** Resolves the authenticated Tixkit principal + permissions (`GET /v1/me`). */
   getPrincipal(token?: string): Promise<ApiResult<TixkitPrincipal>>;
 
   listMigrationJobs(organizationId: string): Promise<ApiResult<{ items: AdminMigrationJob[] }>>;
+  listMigrationAdapters(): Promise<ApiResult<{ items: AdminMigrationAdapter[] }>>;
   createMigrationCredential(
     input: CreateAdminMigrationCredentialInput,
   ): Promise<ApiResult<{ id: string; status: string; expiresAt: string }>>;
@@ -1728,6 +1958,7 @@ export type AdminApi = {
   getMigrationReport(jobId: string): Promise<ApiResult<Record<string, unknown>>>;
   getMigrationRollbackAssessment(jobId: string): Promise<ApiResult<Record<string, unknown>>>;
   runMigrationDryRun(jobId: string): Promise<ApiResult<Record<string, unknown>>>;
+  prepareMigration(jobId: string): Promise<ApiResult<{ jobId: string; status: 'preparing' }>>;
   commitMigration(
     jobId: string,
     confirmation: `commit:${string}`,
@@ -1743,6 +1974,10 @@ export type AdminApi = {
 
   getBootstrapContext(): Promise<ApiResult<AdminBootstrapContext>>;
   listOrganizations(): Promise<ApiResult<AdminOrganization[]>>;
+  getWorkspaceReadiness(
+    organizationId: string,
+    brandId: string,
+  ): Promise<ApiResult<AdminWorkspaceReadiness>>;
   updateOrganization(
     organizationId: string,
     input: UpdateOrganizationInput,
@@ -1778,6 +2013,7 @@ export type AdminApi = {
     brandId?: string;
     eventId?: string;
     metadata?: Record<string, unknown>;
+    onProgress?: (percent: number) => void;
   }): Promise<ApiResult<CompletedUploadArtifact>>;
 
   listEvents(
@@ -1787,7 +2023,52 @@ export type AdminApi = {
     },
   ): Promise<ApiResult<AdminTablePage<AdminEventListItem>>>;
   getEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
+  getEventOperationalHealth(eventId: string): Promise<
+    ApiResult<{
+      eventId: string;
+      organizationFailedWebhookDeliveries: number;
+      failedExports: number;
+      checkedAt: string;
+    }>
+  >;
+  setEventSetupSection(
+    eventId: string,
+    section: 'basics' | 'schedule' | 'sales' | 'media' | 'marketing-fields',
+  ): Promise<ApiResult<{ eventId: string; section: string }>>;
+  getEventLaunchReadiness(eventId: string): Promise<ApiResult<AdminEventLaunchReadiness>>;
+  runTestCheckout(
+    eventId: string,
+    input: {
+      ticketTypeId: string;
+      quantity: number;
+      donationAmountCents?: number;
+      productIds?: string[];
+      buyerFields?: Record<string, unknown>;
+    },
+  ): Promise<
+    ApiResult<{
+      orderId: string;
+      status: string;
+      quote: {
+        currency: string;
+        subtotalCents: number;
+        discountCents: number;
+        taxCents: number;
+        feeCents: number;
+        totalCents: number;
+      };
+    }>
+  >;
+  acknowledgeReadinessStep(
+    eventId: string,
+    stepId: AdminReadinessAcknowledgement['stepId'],
+  ): Promise<ApiResult<AdminReadinessAcknowledgement>>;
+  removeReadinessAcknowledgement(
+    eventId: string,
+    stepId: AdminReadinessAcknowledgement['stepId'],
+  ): Promise<ApiResult<void>>;
   createEvent(input: CreateEventInput): Promise<ApiResult<AdminEventDetail>>;
+  duplicateEvent(eventId: string, input: DuplicateEventInput): Promise<ApiResult<AdminEventDetail>>;
   updateEvent(eventId: string, input: UpdateEventInput): Promise<ApiResult<AdminEventDetail>>;
   publishEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
   pauseEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
@@ -2108,18 +2389,11 @@ export type AdminApi = {
     input: UpdateWebhookEndpointInput,
   ): Promise<ApiResult<AdminWebhookEndpoint>>;
   /** Lists recent webhook delivery events for an endpoint. */
-  listWebhookEvents(
-    endpointId: string,
-  ): Promise<ApiResult<AdminWebhookEvent[]>>;
+  listWebhookEvents(endpointId: string): Promise<ApiResult<AdminWebhookEvent[]>>;
   testWebhookEndpoint(
     endpointId: string,
-  ): Promise<
-    ApiResult<{ queued: true; test: true; eventId: string; endpointId: string }>
-  >;
-  replayWebhookEvent(
-    endpointId: string,
-    eventId: string,
-  ): Promise<ApiResult<{ queued: true }>>;
+  ): Promise<ApiResult<{ queued: true; test: true; eventId: string; endpointId: string }>>;
+  replayWebhookEvent(endpointId: string, eventId: string): Promise<ApiResult<{ queued: true }>>;
 };
 
 function unwrapPage<T>(value: PageResult<T> | T[]): PageResult<T> {
@@ -2570,6 +2844,10 @@ function normalizeEvent(
         : finiteNumber(value.minimumAge ?? value.minimum_age),
     coverImageUrl: stringValue(value.coverImageUrl ?? value.cover_image_url, undefined),
     externalUrl: stringValue(value.externalUrl ?? value.external_url, undefined),
+    version: finiteNumber(value.version, 1),
+    lastSetupSection: stringValue(value.lastSetupSection ?? value.last_setup_section, undefined),
+    coverImageAlt: stringValue(value.coverImageAlt ?? value.cover_image_alt, undefined),
+    seoUseCoverImage: value.seoUseCoverImage === true || value.seo_use_cover_image === true,
     resalePolicy,
     checkIns: finiteNumber(value.checkIns),
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
@@ -2595,6 +2873,7 @@ function normalizeFeePolicy(value: unknown, eventId?: string): AdminFeePolicy {
   const rules = Array.isArray(record?.rules) ? record.rules : [];
   return {
     eventId: stringValue(record?.eventId ?? record?.event_id, eventId ?? ''),
+    eventVersion: Math.max(1, finiteNumber(record?.eventVersion ?? record?.event_version, 1)),
     passFeesToBuyer: record?.passFeesToBuyer === true || record?.pass_fees_to_buyer === true,
     rules: rules.map((ruleValue) => {
       const rule = asRecord(ruleValue) ?? {};
@@ -3241,6 +3520,7 @@ const fixtureEvents: AdminEventDetail[] = [
 const fixtureFeePolicies: Record<string, AdminFeePolicy> = {
   evt_demo_001: {
     eventId: 'evt_demo_001',
+    eventVersion: 1,
     passFeesToBuyer: true,
     rules: [
       {
@@ -3722,8 +4002,8 @@ const fixtureBrands: AdminBrand[] = [
     organizationId: 'org_demo',
     name: 'Tixkit',
     slug: 'tixkit',
-    status: 'draft',
-    theme: { primaryColor: '#222222' },
+    status: 'active',
+    theme: {},
     domains: fixtureBrandDomains,
     supportUrl: undefined,
     legalUrls: {},
@@ -3946,9 +4226,19 @@ function adminIdempotencyKey(prefix: string): string {
 }
 
 export const adminApi: AdminApi = {
+  async listMigrationAdapters() {
+    return withFixture(
+      () => request('/v1/migration-adapters'),
+      () => err(apiError('NOT_AVAILABLE', 'Migration adapters are unavailable in fixture mode')),
+    );
+  },
   async createMigrationCredential(input) {
     return withFixture(
-      () => request('/v1/migration-credentials', { method: 'POST', body: JSON.stringify(input) }),
+      () =>
+        request('/v1/migration-credentials', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
       () => err(apiError('NOT_AVAILABLE', 'Migration credentials are unavailable in fixture mode')),
     );
   },
@@ -3973,7 +4263,10 @@ export const adminApi: AdminApi = {
   },
   async getMigrationJob(jobId) {
     return withFixture(
-      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}`, { method: 'GET' }),
+      () =>
+        request(`/v1/migration-jobs/${encodeURIComponent(jobId)}`, {
+          method: 'GET',
+        }),
       () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
     );
   },
@@ -4006,7 +4299,11 @@ export const adminApi: AdminApi = {
   },
   async saveMigrationMapping(input) {
     return withFixture(
-      () => request('/v1/migration-mappings', { method: 'POST', body: JSON.stringify(input) }),
+      () =>
+        request('/v1/migration-mappings', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
       () => err(apiError('NOT_AVAILABLE', 'Migration mappings are unavailable in fixture mode')),
     );
   },
@@ -4049,7 +4346,19 @@ export const adminApi: AdminApi = {
   },
   async runMigrationDryRun(jobId) {
     return withFixture(
-      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/dry-run`, { method: 'POST' }),
+      () =>
+        request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/dry-run`, {
+          method: 'POST',
+        }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async prepareMigration(jobId) {
+    return withFixture(
+      () =>
+        request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/prepare`, {
+          method: 'POST',
+        }),
       () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
     );
   },
@@ -4132,6 +4441,139 @@ export const adminApi: AdminApi = {
           : result;
       },
       () => ok(fixtureOrganizations),
+    );
+  },
+
+  async getWorkspaceReadiness(organizationId, brandId) {
+    return withFixture(
+      () =>
+        request<AdminWorkspaceReadiness>(
+          `/v1/organizations/${organizationId}/readiness?brandId=${encodeURIComponent(brandId)}`,
+          { method: 'GET' },
+        ),
+      () =>
+        ok(
+          (() => {
+            const organization = fixtureOrganizations.find((item) => item.id === organizationId);
+            const brand = fixtureBrands.find(
+              (item) => item.id === brandId && item.organizationId === organizationId,
+            );
+            const workspaceSelected =
+              organization?.status === 'active' && brand?.status === 'active';
+            const brandConfigured =
+              Boolean(brand?.name.trim()) && Boolean(brand && Object.keys(brand.theme).length > 0);
+            const paymentAccount = fixturePaymentAccounts.find(
+              (account) =>
+                account.organizationId === organizationId && account.id === brand?.paymentAccountId,
+            );
+            const paymentReady = true;
+            const acceptedMembers = fixtureTeamMembers.filter(
+              (member) => member.organizationId === organizationId && member.status === 'active',
+            );
+            const legalConfigured = Boolean(
+              brand && Object.values(brand.legalUrls).some((value) => Boolean(value)),
+            );
+            const senderReady = fixtureBrandSenderIdentities.some(
+              (identity) => identity.brandId === brandId && identity.verified,
+            );
+            const steps: AdminReadinessStep[] = [
+              {
+                id: 'workspace_selection',
+                status: workspaceSelected ? 'complete' : 'blocked',
+                priority: 'required',
+                reasonCodes: [
+                  organization?.status !== 'active'
+                    ? 'organization_inactive'
+                    : brand?.status !== 'active'
+                      ? 'brand_inactive'
+                      : 'workspace_selected',
+                ],
+                actionId: 'select_workspace',
+                requiredPermission: null,
+                updatedAt: brand?.updatedAt ?? null,
+                acknowledgedAt: null,
+                acknowledgementValid: null,
+              },
+              {
+                id: 'brand_identity',
+                status: brandConfigured ? 'complete' : 'incomplete',
+                priority: 'required',
+                reasonCodes: [
+                  brandConfigured ? 'brand_identity_configured' : 'brand_identity_incomplete',
+                ],
+                actionId: 'configure_brand',
+                requiredPermission: 'settings.write',
+                updatedAt: brand?.updatedAt ?? null,
+                acknowledgedAt: null,
+                acknowledgementValid: null,
+              },
+              {
+                id: 'payment_path',
+                status: paymentReady ? 'complete' : 'blocked',
+                priority: 'required',
+                reasonCodes: [paymentReady ? 'payment_capture_mode' : 'payment_path_missing'],
+                actionId: 'configure_payments',
+                requiredPermission: 'billing.write',
+                updatedAt: paymentAccount?.updatedAt ?? null,
+                acknowledgedAt: null,
+                acknowledgementValid: null,
+              },
+              {
+                id: 'team_access',
+                status: acceptedMembers.length > 1 ? 'complete' : 'incomplete',
+                priority: 'recommended',
+                reasonCodes: [
+                  acceptedMembers.length > 1
+                    ? 'team_access_configured'
+                    : 'team_access_single_member',
+                ],
+                actionId: 'manage_team',
+                requiredPermission: 'settings.write',
+                updatedAt: acceptedMembers.at(0)?.joinedAt ?? null,
+                acknowledgedAt: null,
+                acknowledgementValid: null,
+              },
+              {
+                id: 'legal_configuration',
+                status: legalConfigured ? 'complete' : 'incomplete',
+                priority: 'recommended',
+                reasonCodes: [
+                  legalConfigured ? 'legal_configuration_complete' : 'legal_configuration_missing',
+                ],
+                actionId: 'configure_legal',
+                requiredPermission: 'settings.write',
+                updatedAt: brand?.updatedAt ?? null,
+                acknowledgedAt: null,
+                acknowledgementValid: null,
+              },
+              {
+                id: 'sender_identity',
+                status: senderReady ? 'complete' : 'incomplete',
+                priority: 'recommended',
+                reasonCodes: [senderReady ? 'sender_identity_verified' : 'sender_identity_missing'],
+                actionId: 'configure_sender',
+                requiredPermission: 'messages.write',
+                updatedAt:
+                  fixtureBrandSenderIdentities.find(
+                    (identity) => identity.brandId === brandId && identity.verified,
+                  )?.updatedAt ?? null,
+                acknowledgedAt: null,
+                acknowledgementValid: null,
+              },
+            ];
+            return {
+              tenantId: 'ten_demo',
+              organizationId,
+              brandId,
+              generatedAt: iso(0),
+              paymentMode: 'capture',
+              complete: steps
+                .filter((step) => step.priority === 'required')
+                .every((step) => step.status === 'complete'),
+              steps,
+            };
+          })(),
+        ),
     );
   },
 
@@ -4248,7 +4690,9 @@ export const adminApi: AdminApi = {
           `/v1/organizations/${organizationId}/members/invitations`,
           {
             method: 'POST',
-            headers: { 'Idempotency-Key': newIdempotencyKey('organization-invitation') },
+            headers: {
+              'Idempotency-Key': newIdempotencyKey('organization-invitation'),
+            },
             body: JSON.stringify(input),
           },
         );
@@ -4430,7 +4874,7 @@ export const adminApi: AdminApi = {
         });
         if (!createResult.ok) return createResult;
 
-        const uploadResult = await putUploadBytes(createResult.data, input.file);
+        const uploadResult = await putUploadBytes(createResult.data, input.file, input.onProgress);
         if (!uploadResult.ok) return uploadResult;
 
         const completeResult = await request<CompletedUploadArtifact>(
@@ -4467,6 +4911,88 @@ export const adminApi: AdminApi = {
           status: 'uploaded',
           scanStatus: 'clean',
           downloadUrl: URL.createObjectURL(input.file),
+        }),
+    );
+  },
+
+  async runTestCheckout(eventId, input) {
+    return withFixture(
+      async () => {
+        const key = `test-${eventId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const created = await request<{
+          id: string;
+          clientToken: string;
+          quote: {
+            currency: string;
+            subtotalCents: number;
+            discountCents: number;
+            taxCents: number;
+            feeCents: number;
+            totalCents: number;
+          };
+        }>('/v1/checkout/sessions', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': key, 'X-Tixkit-Test-Order': '1' },
+          body: JSON.stringify({
+            eventId,
+            items: [
+              {
+                ticketTypeId: input.ticketTypeId,
+                quantity: input.quantity,
+                unitAmountCents: input.donationAmountCents,
+                attendeeFields: Array.from(
+                  { length: input.quantity },
+                  () => input.buyerFields ?? {},
+                ),
+              },
+              ...(input.productIds ?? []).map((productId) => ({
+                productId,
+                quantity: 1,
+              })),
+            ],
+            buyer: {
+              email: 'preview-test@tixkit.invalid',
+              firstName: 'Preview',
+              lastName: 'Test',
+            },
+            buyerFields: input.buyerFields,
+          }),
+        });
+        if (!created.ok) return created;
+        return request<{
+          order?: { id?: string };
+          orderId?: string;
+          status: string;
+        }>(`/v1/checkout/sessions/${created.data.id}/confirm`, {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': `${key}-confirm`,
+            'X-Checkout-Session-Token': created.data.clientToken,
+            'X-Tixkit-Test-Order': '1',
+          },
+          body: JSON.stringify({}),
+        }).then((result) =>
+          result.ok
+            ? ok({
+                orderId: result.data.orderId ?? result.data.order?.id ?? '',
+                status: result.data.status,
+                quote: created.data.quote,
+              })
+            : result,
+        );
+      },
+      () =>
+        ok({
+          orderId: newFixtureId('ord_test'),
+          status: 'completed',
+          quote: {
+            currency: 'USD',
+            subtotalCents: 0,
+            discountCents: 0,
+            taxCents: 0,
+            feeCents: 0,
+            totalCents: 0,
+          },
         }),
     );
   },
@@ -4536,6 +5062,112 @@ export const adminApi: AdminApi = {
     );
   },
 
+  async getEventLaunchReadiness(eventId) {
+    return withFixture(
+      () =>
+        request<AdminEventLaunchReadiness>(`/v1/events/${eventId}/launch-readiness`, {
+          method: 'GET',
+        }),
+      () => {
+        const event = fixtureEvents.find((item) => item.id === eventId);
+        if (!event)
+          return err<AdminEventLaunchReadiness>(apiError('not_found', 'Event not found', 404));
+        const launchable = event.status === 'published';
+        const blocker: AdminReadinessStep = {
+          id: 'sellable_tickets',
+          status: 'incomplete',
+          priority: 'required',
+          reasonCodes: ['sellable_ticket_missing'],
+          actionId: 'manage_tickets',
+          requiredPermission: 'tickets.write',
+          updatedAt: event.updatedAt,
+          acknowledgedAt: null,
+          acknowledgementValid: null,
+        };
+        return ok({
+          tenantId: event.tenantId ?? 'ten_demo',
+          organizationId: event.organizationId ?? 'org_demo',
+          brandId: event.brandId ?? 'brd_demo',
+          eventId,
+          eventVersion: event.version ?? 1,
+          generatedAt: iso(0),
+          paymentMode: 'capture',
+          launchable,
+          published: event.status === 'published',
+          requiredBlockers: launchable ? [] : [blocker],
+          recommendedWarnings: [],
+          steps: launchable ? [] : [blocker],
+        });
+      },
+    );
+  },
+
+  async getEventOperationalHealth(eventId) {
+    return withFixture(
+      () =>
+        request<{
+          eventId: string;
+          organizationFailedWebhookDeliveries: number;
+          failedExports: number;
+          checkedAt: string;
+        }>(`/v1/events/${eventId}/operational-health`, { method: 'GET' }),
+      () =>
+        ok({
+          eventId,
+          organizationFailedWebhookDeliveries: 0,
+          failedExports: 0,
+          checkedAt: new Date().toISOString(),
+        }),
+    );
+  },
+
+  async setEventSetupSection(eventId, section) {
+    return withFixture(
+      () =>
+        request<{ eventId: string; section: string }>(`/v1/events/${eventId}/setup-section`, {
+          method: 'PUT',
+          body: JSON.stringify({ section }),
+        }),
+      () => ok({ eventId, section }),
+    );
+  },
+
+  async acknowledgeReadinessStep(eventId, stepId) {
+    return withFixture(
+      () =>
+        request<AdminReadinessAcknowledgement>(
+          `/v1/events/${eventId}/readiness-acknowledgements/${stepId}`,
+          { method: 'POST' },
+        ),
+      () => {
+        const event = fixtureEvents.find((item) => item.id === eventId);
+        if (!event)
+          return err<AdminReadinessAcknowledgement>(apiError('not_found', 'Event not found', 404));
+        return ok({
+          tenantId: event.tenantId ?? 'ten_demo',
+          organizationId: event.organizationId ?? 'org_demo',
+          brandId: event.brandId ?? 'brd_demo',
+          eventId,
+          stepId,
+          stepVersion: 1,
+          subjectFingerprint: '0'.repeat(64),
+          actorId: 'usr_demo',
+          acknowledgedAt: iso(0),
+        });
+      },
+    );
+  },
+
+  async removeReadinessAcknowledgement(eventId, stepId) {
+    return withFixture(
+      () =>
+        request<void>(`/v1/events/${eventId}/readiness-acknowledgements/${stepId}`, {
+          method: 'DELETE',
+        }),
+      () => ok(undefined),
+    );
+  },
+
   async createEvent(input) {
     return withFixture(
       async () => {
@@ -4572,12 +5204,11 @@ export const adminApi: AdminApi = {
             currency: input.currency,
             timezone: input.timezone,
             startsAt: input.startsAt,
-            endsAt: input.endsAt,
+            endsAt: input.endsAt ?? undefined,
             venue: Object.values(venue).some(Boolean) ? venue : undefined,
             visibility: input.visibility,
             seo: input.seo,
             capacity: input.capacity,
-            coverImageUrl: input.coverImageUrl,
             externalUrl: input.externalUrl,
           }),
         });
@@ -4606,14 +5237,44 @@ export const adminApi: AdminApi = {
           grossSalesCents: 0,
           ticketsSold: 0,
           capacity: input.capacity ?? undefined,
-          coverImageUrl: input.coverImageUrl ?? undefined,
           externalUrl: input.externalUrl ?? undefined,
           resalePolicy: { enabled: false, maxMultiplier: 1 },
           checkIns: 0,
           updatedAt: iso(0),
+          version: 1,
+          seoUseCoverImage: false,
         };
         fixtureEvents.unshift(newEvent);
         return ok(newEvent);
+      },
+    );
+  },
+
+  async duplicateEvent(eventId, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminEventDetail>(`/v1/events/${eventId}/duplicate`, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        });
+        return result.ok ? ok(normalizeEvent(result.data)) : result;
+      },
+      () => {
+        const source = fixtureEvents.find((event) => event.id === eventId);
+        if (!source) return err(apiError('not_found', 'Event not found', 404));
+        const duplicated = {
+          ...source,
+          id: newFixtureId('evt'),
+          title: input.title ?? `${source.title} copy`,
+          status: 'draft' as const,
+          startsAt: input.startsAt,
+          grossSalesCents: 0,
+          ticketsSold: 0,
+          checkIns: 0,
+          version: 1,
+        };
+        fixtureEvents.push(duplicated);
+        return ok(duplicated);
       },
     );
   },
@@ -4642,7 +5303,12 @@ export const adminApi: AdminApi = {
         if (input.visibility !== undefined) body.visibility = input.visibility;
         if (input.seo !== undefined) body.seo = input.seo;
         if (input.capacity !== undefined) body.capacity = input.capacity;
+        if (input.minimumAge !== undefined) body.minimumAge = input.minimumAge;
         if (input.coverImageUrl !== undefined) body.coverImageUrl = input.coverImageUrl;
+        if (input.coverImageAlt !== undefined) body.coverImageAlt = input.coverImageAlt;
+        if (input.seoUseCoverImage !== undefined) body.seoUseCoverImage = input.seoUseCoverImage;
+        if (input.lastSetupSection !== undefined) body.lastSetupSection = input.lastSetupSection;
+        if (input.expectedVersion !== undefined) body.expectedVersion = input.expectedVersion;
         if (input.externalUrl !== undefined) body.externalUrl = input.externalUrl;
         if (input.status !== undefined) body.status = input.status;
 
@@ -4770,6 +5436,7 @@ export const adminApi: AdminApi = {
           normalizeFeePolicy(
             fixtureFeePolicies[eventId] ?? {
               eventId,
+              eventVersion: event.version ?? 1,
               passFeesToBuyer: false,
               rules: [],
             },
@@ -4792,10 +5459,16 @@ export const adminApi: AdminApi = {
       () => {
         const event = fixtureEvents.find((e) => e.id === eventId);
         if (!event) return err<AdminFeePolicy>(apiError('not_found', 'Event not found', 404));
+        if ((event.version ?? 1) !== input.expectedVersion) {
+          return err<AdminFeePolicy>(
+            apiError('stale_event_version', 'The event changed in another session', 409),
+          );
+        }
         const nowIso = iso(0);
         const policy = normalizeFeePolicy(
           {
             eventId,
+            eventVersion: (event.version ?? input.expectedVersion) + 1,
             passFeesToBuyer: input.passFeesToBuyer,
             rules: input.rules.map((rule) => ({
               ...rule,
@@ -4808,6 +5481,7 @@ export const adminApi: AdminApi = {
           eventId,
         );
         fixtureFeePolicies[eventId] = policy;
+        event.version = policy.eventVersion;
         return ok(policy);
       },
     );
@@ -7085,29 +7759,22 @@ export const adminApi: AdminApi = {
   async listWebhookEvents(endpointId) {
     return withFixture(
       async () => {
-        const result = await request<
-          PageResult<AdminWebhookEvent> | AdminWebhookEvent[]
-        >(`/v1/webhook-endpoints/${endpointId}/events`, { method: "GET" });
+        const result = await request<PageResult<AdminWebhookEvent> | AdminWebhookEvent[]>(
+          `/v1/webhook-endpoints/${endpointId}/events`,
+          { method: 'GET' },
+        );
         return result.ok ? ok(unwrapItems(result.data)) : result;
       },
-      () =>
-        ok(
-          fixtureWebhookEvents.filter(
-            (e) => e.requestedEndpointId === endpointId,
-          ),
-        ),
+      () => ok(fixtureWebhookEvents.filter((e) => e.requestedEndpointId === endpointId)),
     );
   },
 
   async replayWebhookEvent(endpointId, eventId) {
     return withFixture(
       () =>
-        request<{ queued: true }>(
-          `/v1/webhook-endpoints/${endpointId}/events/${eventId}/replay`,
-          {
-            method: "POST",
-          },
-        ),
+        request<{ queued: true }>(`/v1/webhook-endpoints/${endpointId}/events/${eventId}/replay`, {
+          method: 'POST',
+        }),
       () => ok({ queued: true as const }),
     );
   },
@@ -7120,12 +7787,12 @@ export const adminApi: AdminApi = {
           test: true;
           eventId: string;
           endpointId: string;
-        }>(`/v1/webhook-endpoints/${endpointId}/test`, { method: "POST" }),
+        }>(`/v1/webhook-endpoints/${endpointId}/test`, { method: 'POST' }),
       () =>
         ok({
           queued: true as const,
           test: true as const,
-          eventId: newFixtureId("whe_test"),
+          eventId: newFixtureId('whe_test'),
           endpointId,
         }),
     );

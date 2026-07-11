@@ -25,11 +25,6 @@ vi.mock('@/context/permission-provider', () => ({
   usePermissions: usePermissionsMock,
 }));
 
-vi.mock('./create-event-drawer', () => ({
-  CreateEventDrawer: ({ open, event }: { open?: boolean; event?: { id: string } }) =>
-    open ? <div data-testid="event-edit-drawer">Edit drawer for {event?.id ?? 'new'}</div> : null,
-}));
-
 vi.mock('sonner', () => ({
   toast: {
     success: vi.fn(),
@@ -178,7 +173,10 @@ describe('EventDetailView', () => {
     expect(view.getByText('Opening event')).toBeInTheDocument();
     expect(view.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
     expect(view.queryByRole('link', { name: 'Design page' })).not.toBeInTheDocument();
-    expect(view.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(view.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/settings',
+    );
     expect(view.getByRole('link', { name: 'Event Page' })).toHaveAttribute(
       'href',
       '/events/evt_1/content/event-page',
@@ -209,19 +207,21 @@ describe('EventDetailView', () => {
     const view = render(<EventDetailView eventId="evt_1" />);
 
     expect(
-      await view.findByText(/No description yet. Add the canonical event copy via Edit/),
+      await view.findByText(/No description yet. Add the canonical event copy in Settings/),
     ).toBeInTheDocument();
     expect(view.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
     expect(view.queryByRole('link', { name: 'Design page' })).not.toBeInTheDocument();
-    fireEvent.click(view.getByRole('button', { name: 'Edit' }));
-    expect(view.getByTestId('event-edit-drawer')).toHaveTextContent('Edit drawer for evt_1');
+    expect(view.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/settings',
+    );
     expect(view.getByRole('link', { name: 'Event Page' })).toHaveAttribute(
       'href',
       '/events/evt_1/content/event-page',
     );
   });
 
-  it('keeps Schedule and Marketing out of quick links and opens them via Edit', async () => {
+  it('keeps Schedule and Marketing out of quick links and opens settings as a route', async () => {
     mockLoadedEventDetail();
 
     const view = render(<EventDetailView eventId="evt_1" />);
@@ -232,7 +232,9 @@ describe('EventDetailView', () => {
     expect(view.queryByTestId('inline-event-schedule')).not.toBeInTheDocument();
     expect(view.queryByTestId('inline-event-marketing')).not.toBeInTheDocument();
 
-    fireEvent.click(view.getByRole('button', { name: 'Edit' }));
-    expect(view.getByTestId('event-edit-drawer')).toHaveTextContent('Edit drawer for evt_1');
+    expect(view.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/settings',
+    );
   });
 });

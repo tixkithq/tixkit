@@ -1,0 +1,80 @@
+---
+title: Run Tixkit locally
+description: Start infrastructure, migrations, applications, documentation, and sample data from a clean source checkout.
+audience:
+  - operator
+  - developer
+  - contributor
+product_area: platform
+content_type: quickstart
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Bun 1.3 or newer
+  - Node.js 20 or newer
+  - Docker with Compose support
+  - Ports 3000, 3001, 3002, 4000, 5432, 3306, 6379, 7233, 8080, 9000, and 9001 available
+related:
+  - /getting-started/first-event
+  - /contributing/testing
+keywords:
+  - quickstart
+  - docker compose
+  - setup check
+---
+
+Run the quickstart from the root of a Tixkit source checkout. It intentionally refuses to run from an unrelated directory because it controls repository infrastructure and application processes.
+
+## Install and configure
+
+```bash
+bun install --frozen-lockfile
+cp .env.local.example .env.local
+bun run setup:check -- --mode local
+```
+
+`setup:check` exits nonzero and prints the missing or invalid fields when configuration is incomplete. Fix the reported values instead of bypassing the check.
+
+## Start the stack
+
+```bash
+bun run quickstart -- --no-open
+```
+
+The command checks Docker and required ports, starts local infrastructure, runs database migrations, starts the API, worker, checkout, admin, and docs applications, waits for their health checks, and seeds idempotent sample data.
+
+Expected final output includes:
+
+```text
+Tixkit is running locally:
+  API:      http://localhost:4000/health
+  Admin:    http://localhost:3001
+  Checkout: http://localhost:3000
+  Docs:     http://localhost:3002
+  Temporal UI: http://localhost:8080
+```
+
+The process remains in the foreground. Press Control-C once and wait for the managed child processes to stop.
+
+## Verify the result
+
+Open the admin dashboard at `http://localhost:3001`, the documentation at `http://localhost:3002`, and the Temporal UI at `http://localhost:8080`. Verify the API directly:
+
+```bash
+curl --fail http://localhost:4000/health
+curl --fail http://localhost:3002/health
+```
+
+Each command must return a successful response. A rendered page alone does not prove the worker or database is healthy.
+
+## Common failures
+
+- **Docker is unavailable:** start Docker Desktop or the Docker daemon, then rerun the command.
+- **A required port is occupied:** stop the conflicting process. Do not change one application port without updating every dependent URL.
+- **Services time out:** inspect the foreground logs for the named unhealthy service, then rerun `bun run setup:check -- --mode local`.
+- **Sample data fails:** stop the stack, correct the API or database error, and rerun. Use `--skip-seed` only when you deliberately want an empty workspace.
+
+## Next step
+
+[Create the first event](/getting-started/first-event) with the seeded local principal and workspace.

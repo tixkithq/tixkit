@@ -1,0 +1,32 @@
+---
+title: Handle API errors and retries
+description: Interpret the common error envelope and retry only operations that are safe to repeat.
+audience:
+  - developer
+product_area: api
+content_type: concept
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - An API client that preserves status, response body, and request ID
+related:
+  - /developers/api-fundamentals/idempotency
+  - /reference/api
+---
+
+Non-success responses use an error object with a machine-readable `code`, safe message, and `requestId`. Validation errors may include field details.
+
+## Decide whether to retry
+
+- Fix the request for `400` validation errors.
+- Refresh or replace credentials for `401` only after identifying the credential issue.
+- Correct permission/resource scope for `403`; repeated retries will not add permission.
+- Treat `404` as absent or inaccessible without probing adjacent identifiers.
+- For `409` or `422` state/idempotency conflicts, reconcile the original operation before changing the request.
+- Back off for `429` and respect any retry information.
+- Retry transient `5xx` responses only with an idempotency key where the operation requires one.
+
+## Preserve safe diagnostics
+
+Log status, error code, operation ID, request ID, and a redacted local correlation ID. Do not log authorization headers, webhook secrets, full request/response payloads, ticket codes, or customer personal data.

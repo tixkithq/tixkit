@@ -1,0 +1,26 @@
+---
+title: Go SDK
+description: Use the Go client for backend integrations with context cancellation, cursor iteration, and webhook verification.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Go 1.26 or the version declared by the module
+related:
+  - /developers/api-fundamentals
+  - /developers/webhooks/verify-signatures
+---
+
+<SdkGuide sdkId="go" />
+
+```bash
+go get github.com/tixkit/tixkit-go
+```
+
+Construct the client with `tixkit.NewClient` and a server-side key. Pass request contexts with deadlines and preserve typed API errors and request IDs. Use `NewCursorIterator` for paginated operations instead of modifying cursor values.
+
+Keep keys in the service secret manager and redact authorization headers from HTTP tracing. The runnable source at `packages/sdk-go/examples/checkout` demonstrates the current API shape; run the module tests before copying an example into production.

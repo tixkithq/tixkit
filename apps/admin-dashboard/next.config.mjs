@@ -16,7 +16,9 @@ const adminApiImageSrc = originFromUrl(
 );
 
 const refineScriptSources =
-  process.env.NODE_ENV === 'production' ? [] : ['http://localhost:7331', 'https://esm.sh'];
+  process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_DISABLE_REACT_DEVTOOLS === '1'
+    ? []
+    : ['http://localhost:7331', 'https://esm.sh'];
 
 const adminSecurityHeaders = [
   {

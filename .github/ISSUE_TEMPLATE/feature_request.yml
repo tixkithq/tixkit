@@ -1,0 +1,52 @@
+name: Feature request
+description: Propose a focused improvement grounded in a user problem.
+title: '[Feature]: '
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: persona
+    attributes:
+      label: Primary persona
+      options:
+        - Operator
+        - Integrator
+        - Self-hoster
+        - Contributor
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the task that cannot be completed and its impact. Avoid prescribing an implementation first.
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround
+      description: Explain what users do today and why it is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: State observable acceptance criteria and affected API, SDK, UI, docs, or deployment contracts.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and compatibility considerations
+      description: Note tenant, permission, secret-handling, backward-compatibility, or export implications.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and the public documentation.
+          required: true
+        - label: I understand that a proposal is not a release commitment.
+          required: true

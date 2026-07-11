@@ -1,0 +1,29 @@
+---
+title: Make writes idempotent
+description: Prevent repeated side effects when retrying workflow, payment, inventory, ticket, message, and export mutations.
+audience:
+  - developer
+product_area: api
+content_type: concept
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A mutation that documents an Idempotency-Key requirement
+related:
+  - /developers/api-fundamentals/errors
+  - /reference/api
+---
+
+Generate a unique `Idempotency-Key` for one logical mutation and retain it until that mutation reaches a known result.
+
+```http
+POST /v1/orders/ord_example/refunds HTTP/1.1
+Authorization: Bearer $TIXKIT_API_KEY
+Idempotency-Key: 018f-example-logical-operation
+Content-Type: application/json
+```
+
+Reusing a key with the same payload can replay the stored result without repeating side effects. Reusing it with a different payload returns `IDEMPOTENCY_CONFLICT`. Never use one constant key for all requests.
+
+After a timeout, query the resource or retry with the same key and identical payload. Do not generate a new key until you know the original operation should be a separate side effect.

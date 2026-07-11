@@ -1,0 +1,28 @@
+---
+title: Rust SDK
+description: Use the async Rust client with explicit TLS, retries, idempotency, and webhook verification boundaries.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Rust 1.93 or newer
+related:
+  - /developers/api-fundamentals
+  - /developers/webhooks/verify-signatures
+---
+
+<SdkGuide sdkId="rust" />
+
+```bash
+cargo add tixkit
+```
+
+Build `TixkitClient` with a server-side key and the correct API base URL. The SDK uses async HTTP and Rustls configuration declared by the package. Apply timeouts and retain the same idempotency key when retrying one logical write.
+
+Do not include credentials in `Debug` output, tracing fields, panic reports, or URLs. Verify webhooks against raw bytes before deserialization.
+
+Run the package tests and `packages/sdk-rust/examples/checkout.rs` with test configuration. The package declares API version/support information in its README and manifest; parity validation keeps those statements aligned with this guide.

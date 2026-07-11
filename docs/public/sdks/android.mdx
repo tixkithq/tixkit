@@ -1,0 +1,24 @@
+---
+title: Android SDK
+description: Use the Kotlin Android library for secure scanner and public buyer workflows.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A supported Android Gradle/Kotlin toolchain
+related:
+  - /operators/check-in
+  - /sdks/ios
+---
+
+<SdkGuide sdkId="android" />
+
+The library artifact is `com.tixkit:tixkit-android`. In this monorepo, the runnable Android fixture depends on the `:sdk` project under `packages/sdk-android/example`.
+
+Store scanner credentials with platform-backed encrypted storage and exclude them from logs, intents, deep links, backups, and analytics. Use public endpoints for buyer-safe event content; do not package a server API key in the app.
+
+Run the example smoke test and exercise camera permission, offline/online transition, duplicate scans, wrong-event codes, revoked devices, and process recreation before release.

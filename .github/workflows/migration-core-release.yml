@@ -1,0 +1,75 @@
+name: Migration Core Release Candidate
+
+on:
+  pull_request:
+    paths:
+      - "packages/migration-core/**"
+      - "packages/workflows/src/activities/migration-**"
+      - "docs/public/operators/migrations/**"
+      - ".github/workflows/migration-core-release.yml"
+  workflow_dispatch:
+    inputs:
+      registry_preflight:
+        description: Run credential-gated npm trusted-publishing preflight (never publishes)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Build, test, lint, and typecheck
+        run: |
+          set -euo pipefail
+          bun run --filter @tixkit/migration-core build
+          bun run --filter @tixkit/migration-core typecheck
+          bun run --filter @tixkit/migration-core lint
+          bun run --filter @tixkit/migration-core test:unit
+      - name: Pack and verify clean external installation
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/migration-core "$RUNNER_TEMP/migration-consumer"
+          npm pack --dry-run --json ./packages/migration-core > artifacts/migration-core/npm-pack-dry-run.json
+          tarball="$(npm pack ./packages/migration-core --pack-destination artifacts/migration-core --json | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(JSON.parse(s)[0].filename))")"
+          (cd artifacts/migration-core && sha256sum "$tarball" > SHA256SUMS)
+          cd "$RUNNER_TEMP/migration-consumer"
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE/artifacts/migration-core/$tarball" --ignore-scripts
+          node --input-type=module -e "import('@tixkit/migration-core').then(m => { if (!m.migrationAdapterCatalog || !m.parseMigrationPreparationConfiguration) process.exit(1) })"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: migration-core-release-candidate
+          path: artifacts/migration-core/
+          if-no-files-found: error
+
+  trusted-publishing-preflight:
+    needs: candidate
+    if: inputs.registry_preflight
+    runs-on: ubuntu-latest
+    environment: migration-package-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - name: Registry and trusted-publishing preflight
+        run: |
+          set -euo pipefail
+          test "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" != ""
+          test "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" != ""
+          npm ping
+          version="$(node -p "require('./packages/migration-core/package.json').version")"
+          if npm view "@tixkit/migration-core@${version}" version >/dev/null 2>&1; then
+            echo "Version ${version} already exists; publication would be refused."
+            exit 1
+          fi
+          npm pack --dry-run --json ./packages/migration-core >/dev/null
+          echo 'Trusted-publishing identity and registry access are available. This workflow intentionally does not run npm publish.'

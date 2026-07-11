@@ -1,0 +1,34 @@
+---
+title: Migrate from pretix
+description: Import supported pretix REST API or official export data.
+audience: [operator, developer]
+product_area: platform
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A pretix API credential reference or immutable official export
+related:
+  - /operators/migration-operations
+---
+
+Supported sources are pretix REST API v1 for pretix 2023.7–2026.x and Organizer Data Shredder-compatible JSON exports. Use official API/export data only. The adapter maps organizers/brands, venues, events/occurrences, quotas, items/products, questions, vouchers, buyers/attendees, historical orders, tickets, historical payment/refund snapshots, and check-ins in dependency order.
+
+Assigned-seat geometry is reported but not imported. Plugin fields without scalar export values require a bespoke mapper. Payment and refund records retain amount, currency, provider reference, timestamp, and provenance but never emit provider-success, fulfillment, notification, or webhook side effects.
+
+API collection honors `Retry-After`, uses official cursors, and retries 429/502/503/504 with deterministic bounded exponential delay. Store only the scoped secret-manager reference. Dry-run the complete immutable page/export set, review known losses, then commit. Re-import uses pretix IDs as stable external references; rollback tests must remain green before activation.
+
+In the migration workspace, choose **Official API** and enter the organizer slug, one or more event slugs, and—only for self-hosted pretix—the HTTPS API origin. The resulting non-secret configuration is exactly:
+
+```json
+{
+  "sourceMode": "official-api",
+  "sourceSystem": "pretix",
+  "organizerSlug": "acme",
+  "eventSlugs": ["conference-2026"],
+  "baseUrl": "https://pretix.example.com"
+}
+```
+
+Credentials are selected separately by credential reference. Do not put tokens, cursor URLs, query strings, or response records in configuration.

@@ -1,0 +1,32 @@
+---
+title: Manage attendees
+description: Find attendee records, understand admission state, and protect ticket-bearing personal data.
+audience:
+  - operator
+product_area: attendees
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Attendee read permission
+related:
+  - /operators/check-in
+  - /operators/orders
+---
+
+Attendee records connect order line items to admission. They may contain personal data and ticket codes, so expose only the minimum information needed for an authorized task.
+
+## Find an attendee
+
+Use the event and attendee views in the correct organization/brand context. Search by an authorized identifier and confirm the related event and order before changing state.
+
+## Understand status
+
+An attendee can exist before check-in and can have ticket or delivery state distinct from the parent order. A paid order does not mean every attendee has been admitted; a checked-in attendee must not be admitted again without an explicit supervised correction.
+
+## Resolve a lookup problem
+
+If the attendee is absent, confirm the event scope, order completion, attendee-form answers, and whether the purchase created multiple attendees. For door operations, use the documented manual lookup rather than sharing raw ticket codes between devices.
+
+Prepare staff and devices with the [check-in guide](/operators/check-in).

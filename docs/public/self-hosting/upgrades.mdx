@@ -1,0 +1,28 @@
+---
+title: Upgrade Tixkit
+description: Rehearse contract, migration, workflow, SDK, documentation, and rollback compatibility before production rollout.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: runbook
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - A tested backup and restore path
+related:
+  - /self-hosting/deployment
+  - /contributing/testing
+---
+
+Read release and documentation changes for API, SDK, CLI, configuration, providers, migrations, and workflows. Build the sanitized OSS tree and run the release dry-run before upgrading.
+
+## Rehearse
+
+Clone production-like data into an isolated environment using the approved sanitization process. Apply migrations, deploy API/worker together where workflow compatibility requires it, then run checkout, order, webhook, export, check-in, and docs smoke paths.
+
+## Roll forward or back
+
+Confirm the old application can run against the new schema before treating binary rollback as safe. Preserve Temporal replay compatibility. When rollback is unsafe, use the documented forward repair and restore decision instead of forcing an older binary.
+
+Monitor errors, workflow failures, provider outcomes, and database performance through the rollout window.

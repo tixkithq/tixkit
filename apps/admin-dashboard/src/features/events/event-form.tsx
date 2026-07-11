@@ -58,7 +58,11 @@ export const eventSchema = z
     city: z.string().optional(),
     region: z.string().optional(),
     postalCode: z.string().optional(),
-    country: z.string().optional(),
+    country: z
+      .string()
+      .regex(/^[A-Z]{2}$/, 'Choose an ISO country code')
+      .optional()
+      .or(z.literal('')),
     capacity: z.number().int().positive().optional(),
     minimumAge: z.number().int().min(0).max(120).optional(),
     coverImageUrl: z.string().url('Cover image must be a valid URL').optional().or(z.literal('')),
@@ -230,17 +234,36 @@ const commonTimezones = [
 ];
 
 const commonCurrencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD'];
+const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+const nonIsoRegionCodes = new Set(['EU', 'UN', 'XA', 'XB', 'ZZ']);
+const countries = Array.from({ length: 26 * 26 }, (_, index) =>
+  String.fromCharCode(65 + Math.floor(index / 26), 65 + (index % 26)),
+)
+  .filter((code) => !nonIsoRegionCodes.has(code) && regionNames.of(code) !== code)
+  .map((code) => [code, regionNames.of(code) ?? code] as const)
+  .sort((left, right) => left[1].localeCompare(right[1]));
 
 type EventFormProps = {
   event?: AdminEventDetail;
   onSuccess?: (event: AdminEventDetail) => void;
   onCancel?: () => void;
+  section?: 'all' | 'basics' | 'schedule' | 'sales' | 'marketing';
+  autosave?: boolean;
 };
 
 type ScheduleMode = 'one-time' | 'multiple';
 
-export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
+export function EventForm({
+  event,
+  onSuccess,
+  onCancel,
+  section = 'all',
+  autosave = false,
+}: EventFormProps) {
   const [submitting, setSubmitting] = React.useState(false);
+  const [saveState, setSaveState] = React.useState<
+    'idle' | 'saving' | 'saved' | 'offline' | 'conflict'
+  >('idle');
   const [scheduleMode, setScheduleMode] = React.useState<ScheduleMode>('one-time');
   const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap();
   const createDisabled = !event && (bootstrapLoading || !organizationId || !brandId);
@@ -319,6 +342,41 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
     defaultValues: initialValues,
   });
   const { dirtyFields } = form.formState;
+  const recoveryKey = event ? `tixkit:event-conflict:${event.id}:${section}` : undefined;
+
+  React.useEffect(() => {
+    if (!recoveryKey) return;
+    const raw = window.sessionStorage.getItem(recoveryKey);
+    if (!raw) return;
+    window.sessionStorage.removeItem(recoveryKey);
+    try {
+      const recovery = JSON.parse(raw) as {
+        values: EventFormValues;
+        dirtyFields: Array<keyof EventFormValues>;
+      };
+      const merged = { ...initialValues };
+      for (const field of recovery.dirtyFields) merged[field] = recovery.values[field] as never;
+      form.reset(merged, { keepDefaultValues: true });
+      setSaveState('idle');
+      toast.info(
+        'Your unsaved edits were restored over the latest event version. Review and save them.',
+      );
+    } catch {
+      window.sessionStorage.removeItem(recoveryKey);
+    }
+  }, [form, initialValues, recoveryKey]);
+
+  const reloadLatestPreservingEdits = () => {
+    if (!recoveryKey) return;
+    const changedFields = Object.entries(form.formState.dirtyFields)
+      .filter(([, dirty]) => Boolean(dirty))
+      .map(([field]) => field as keyof EventFormValues);
+    window.sessionStorage.setItem(
+      recoveryKey,
+      JSON.stringify({ values: form.getValues(), dirtyFields: changedFields }),
+    );
+    window.location.reload();
+  };
 
   const onSubmit = async (values: EventFormValues) => {
     if (!event && (!organizationId || !brandId)) {
@@ -328,6 +386,7 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
       return;
     }
     setSubmitting(true);
+    setSaveState('saving');
     try {
       const datePayload = buildEventDatePayload(values);
       if (!datePayload) {
@@ -352,7 +411,6 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
         seo,
         capacity: values.capacity,
         minimumAge: values.minimumAge,
-        coverImageUrl: emptyStringToUndefined(values.coverImageUrl),
         externalUrl: emptyStringToUndefined(values.externalUrl),
         currency: values.currency,
       };
@@ -364,30 +422,19 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
         toast.error('Start date must be a valid date and time');
         return;
       }
+      if (event?.version && updateInput) updateInput.expectedVersion = event.version;
 
       const result = event
         ? await adminApi.updateEvent(event.id, updateInput as UpdateEventInput)
         : await adminApi.createEvent(createInput);
 
       if (result.ok) {
-        // When editing an event and the status changed, call the dedicated
-        // endpoint (publish/pause/archive) after the PATCH succeeds.
-        if (event && values.status && values.status !== event.status) {
-          const statusResult = await (async () => {
-            if (values.status === 'published') return adminApi.publishEvent(event.id);
-            if (values.status === 'paused') return adminApi.pauseEvent(event.id);
-            if (values.status === 'archived') return adminApi.archiveEvent(event.id);
-            return null;
-          })();
-          if (statusResult && !statusResult.ok) {
-            toast.error(`Event saved but status change failed: ${statusResult.error.message}`);
-            onSuccess?.(result.data);
-            return;
-          }
-        }
+        setSaveState('saved');
+        form.reset(values);
         toast.success(event ? 'Event updated' : 'Event created');
         onSuccess?.(result.data);
       } else {
+        setSaveState(result.error.code === 'stale_event_version' ? 'conflict' : 'idle');
         toast.error(result.error.message);
       }
     } finally {
@@ -395,532 +442,601 @@ export function EventForm({ event, onSuccess, onCancel }: EventFormProps) {
     }
   };
 
+  const submitRef = React.useRef(onSubmit);
+  submitRef.current = onSubmit;
+  React.useEffect(() => {
+    if (!autosave || !event) return;
+    let timeout: number | undefined;
+    const subscription = form.watch(() => {
+      window.clearTimeout(timeout);
+      if (!navigator.onLine) {
+        setSaveState('offline');
+        return;
+      }
+      setSaveState('idle');
+      timeout = window.setTimeout(() => {
+        void form.handleSubmit((values) => submitRef.current(values))();
+      }, 800);
+    });
+    const retry = () => {
+      if (!form.formState.isDirty) return;
+      setSaveState('idle');
+      void form.handleSubmit((values) => submitRef.current(values))();
+    };
+    window.addEventListener('online', retry);
+    return () => {
+      window.clearTimeout(timeout);
+      subscription.unsubscribe();
+      window.removeEventListener('online', retry);
+    };
+  }, [autosave, event, form]);
+
+  React.useEffect(() => {
+    if (!autosave || !form.formState.isDirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [autosave, form.formState.isDirty]);
+
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField
-          control={form.control}
-          name="title"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Title</FormLabel>
-              <FormControl>
-                <Input placeholder="My Awesome Event" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+      <form
+        id={section === 'all' ? 'basics' : `${section}-form`}
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="space-y-4"
+      >
+        {section === 'all' || section === 'basics' ? (
+          <FormField
+            control={form.control}
+            name="title"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Title</FormLabel>
+                <FormControl>
+                  <Input placeholder="My Awesome Event" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField
-            control={form.control}
-            name="slug"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Slug</FormLabel>
-                <FormControl>
-                  <Input placeholder="my-awesome-event" {...field} />
-                </FormControl>
-                <FormDescription>URL-safe, auto-generated if empty</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="currency"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Currency</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select currency" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {commonCurrencies.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <FormField
-            control={form.control}
-            name="status"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Status</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                  <FormControl>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="draft">Draft</SelectItem>
-                    <SelectItem value="published">Published</SelectItem>
-                    <SelectItem value="paused">Paused</SelectItem>
-                    <SelectItem value="archived">Archived</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="visibility"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Visibility</FormLabel>
-                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                  <FormControl>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select visibility" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="public">Public</SelectItem>
-                    <SelectItem value="unlisted">Unlisted</SelectItem>
-                    <SelectItem value="private">Private</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="capacity"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Capacity</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    placeholder="Unlimited"
-                    value={field.value ?? ''}
-                    onChange={(e) =>
-                      field.onChange(e.target.value ? Number(e.target.value) : undefined)
-                    }
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="minimumAge"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Minimum age</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={120}
-                    inputMode="numeric"
-                    placeholder="No restriction"
-                    title="Checked on the attendee’s event date."
-                    value={field.value ?? ''}
-                    onChange={(changeEvent) =>
-                      field.onChange(
-                        changeEvent.target.value ? Number(changeEvent.target.value) : undefined,
-                      )
-                    }
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <FormField
-          control={form.control}
-          name="description"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Description</FormLabel>
-              <FormControl>
-                <Textarea placeholder="Describe your event..." className="resize-none" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <div className="space-y-3 rounded-lg border p-3">
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Schedule</p>
-            <p className="text-xs text-muted-foreground">
-              Choose a one-time event or manage multiple occurrences for tickets and check-in.
-            </p>
-          </div>
-          <Tabs
-            value={scheduleMode}
-            onValueChange={(value) => setScheduleMode(value as ScheduleMode)}
-          >
-            <TabsList className="w-full">
-              <TabsTrigger value="one-time" className="flex-1">
-                One-time event
-              </TabsTrigger>
-              <TabsTrigger value="multiple" className="flex-1">
-                Multiple occurrences
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          {scheduleMode === 'one-time' ? (
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="startsAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Start Date</FormLabel>
-                      <FormControl>
-                        <Input type="datetime-local" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="endsAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>End Date</FormLabel>
-                      <FormControl>
-                        <Input type="datetime-local" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <FormField
-                control={form.control}
-                name="timezone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Timezone</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select timezone" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {commonTimezones.map((tz) => (
-                          <SelectItem key={tz} value={tz}>
-                            {tz}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          ) : event ? (
-            <div className="space-y-3">
-              <p className="text-xs text-muted-foreground">
-                Primary event start/end stay on the event for listings. Add each public occurrence
-                below; ticket types can be scoped to specific ones.
-              </p>
-              {/* Keep required date fields in the form when multi-occurrence is selected. */}
-              <div className="hidden">
-                <FormField
-                  control={form.control}
-                  name="startsAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormControl>
-                        <Input type="datetime-local" {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="endsAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormControl>
-                        <Input type="datetime-local" {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="timezone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <EventScheduleView eventId={event.id} embedded />
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-xs text-muted-foreground">
-                Set the primary event window now. After creating the event, open Edit to add
-                individual occurrences.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="startsAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Primary Start</FormLabel>
-                      <FormControl>
-                        <Input type="datetime-local" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="endsAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Primary End</FormLabel>
-                      <FormControl>
-                        <Input type="datetime-local" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <FormField
-                control={form.control}
-                name="timezone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Timezone</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select timezone" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {commonTimezones.map((tz) => (
-                          <SelectItem key={tz} value={tz}>
-                            {tz}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          )}
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField
-            control={form.control}
-            name="venueName"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Venue Name</FormLabel>
-                <FormControl>
-                  <Input placeholder="Venue Hall" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="address"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Address</FormLabel>
-                <FormControl>
-                  <Input placeholder="123 Main St" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <FormField
-            control={form.control}
-            name="city"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>City</FormLabel>
-                <FormControl>
-                  <Input placeholder="Austin" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="region"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Region</FormLabel>
-                <FormControl>
-                  <Input placeholder="TX" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="postalCode"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Postal Code</FormLabel>
-                <FormControl>
-                  <Input placeholder="78701" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <FormField
-          control={form.control}
-          name="country"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Country</FormLabel>
-              <FormControl>
-                <Input placeholder="US" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField
-            control={form.control}
-            name="coverImageUrl"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Cover Image URL</FormLabel>
-                <FormControl>
-                  <Input placeholder="https://cdn.example.com/cover.jpg" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="externalUrl"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>External URL</FormLabel>
-                <FormControl>
-                  <Input placeholder="https://example.com/event" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className="space-y-3 rounded-lg border p-3">
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Marketing</p>
-            <p className="text-xs text-muted-foreground">
-              SEO metadata and tracking pixels for hosted event pages and checkout.
-            </p>
-          </div>
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">SEO</p>
-              <p className="text-xs text-muted-foreground">
-                Optional page metadata used by hosted event pages and previews.
-              </p>
-            </div>
+          {section === 'all' || section === 'basics' ? (
             <FormField
               control={form.control}
-              name="seoTitle"
+              name="slug"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>SEO Title</FormLabel>
+                  <FormLabel>Slug</FormLabel>
                   <FormControl>
-                    <Input placeholder="Summer Music Festival tickets" {...field} />
+                    <Input placeholder="my-awesome-event" {...field} />
                   </FormControl>
+                  <FormDescription>URL-safe, auto-generated if empty</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
+          ) : null}
+          {section === 'all' || section === 'sales' ? (
             <FormField
               control={form.control}
-              name="seoDescription"
+              name="currency"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>SEO Description</FormLabel>
+                  <FormLabel>Currency</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {commonCurrencies.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          ) : null}
+        </div>
+        <div
+          id={section === 'all' ? 'sales' : `${section}-sales-controls`}
+          className="scroll-mt-6 grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        >
+          {section === 'all' || section === 'basics' ? (
+            <FormField
+              control={form.control}
+              name="visibility"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Visibility</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select visibility" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="public">Public</SelectItem>
+                      <SelectItem value="unlisted">Unlisted</SelectItem>
+                      <SelectItem value="private">Private</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          ) : null}
+          {section === 'all' || section === 'sales' ? (
+            <FormField
+              control={form.control}
+              name="capacity"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Capacity</FormLabel>
                   <FormControl>
-                    <Textarea
-                      className="resize-none"
-                      placeholder="Short search/social summary"
-                      {...field}
+                    <Input
+                      type="number"
+                      placeholder="Unlimited"
+                      value={field.value ?? ''}
+                      onChange={(e) =>
+                        field.onChange(e.target.value ? Number(e.target.value) : undefined)
+                      }
                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
+          ) : null}
+          {section === 'all' || section === 'sales' ? (
             <FormField
               control={form.control}
-              name="seoImageUrl"
+              name="minimumAge"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>SEO Image URL</FormLabel>
+                  <FormLabel>Minimum age</FormLabel>
                   <FormControl>
-                    <Input placeholder="https://cdn.example.com/social.jpg" {...field} />
+                    <Input
+                      type="number"
+                      min={0}
+                      max={120}
+                      inputMode="numeric"
+                      placeholder="No restriction"
+                      title="Checked on the attendee’s event date."
+                      value={field.value ?? ''}
+                      onChange={(changeEvent) =>
+                        field.onChange(
+                          changeEvent.target.value ? Number(changeEvent.target.value) : undefined,
+                        )
+                      }
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
-          </div>
-          {event ? (
-            <EventMarketingView eventId={event.id} embedded />
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Tracking pixels can be connected after the event is created.
-            </p>
-          )}
+          ) : null}
         </div>
+        {section === 'all' || section === 'basics' ? (
+          <FormField
+            control={form.control}
+            name="description"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Description</FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder="Describe your event..."
+                    className="resize-none"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        ) : null}
+        {section === 'all' || section === 'schedule' ? (
+          <>
+            <div
+              id={section === 'all' ? 'schedule' : `${section}-schedule-controls`}
+              className="scroll-mt-6 space-y-3 rounded-lg border p-3"
+            >
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Schedule</p>
+                <p className="text-xs text-muted-foreground">
+                  Choose a one-time event or manage multiple occurrences for tickets and check-in.
+                </p>
+              </div>
+              <Tabs
+                value={scheduleMode}
+                onValueChange={(value) => setScheduleMode(value as ScheduleMode)}
+              >
+                <TabsList className="w-full">
+                  <TabsTrigger value="one-time" className="flex-1">
+                    One-time event
+                  </TabsTrigger>
+                  <TabsTrigger value="multiple" className="flex-1">
+                    Multiple occurrences
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {scheduleMode === 'one-time' ? (
+                <div className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="startsAt"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Start Date</FormLabel>
+                          <FormControl>
+                            <Input type="datetime-local" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="endsAt"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>End Date</FormLabel>
+                          <FormControl>
+                            <Input type="datetime-local" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name="timezone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Timezone</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select timezone" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {commonTimezones.map((tz) => (
+                              <SelectItem key={tz} value={tz}>
+                                {tz}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              ) : event ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Primary event start/end stay on the event for listings. Add each public
+                    occurrence below; ticket types can be scoped to specific ones.
+                  </p>
+                  {/* Keep required date fields in the form when multi-occurrence is selected. */}
+                  <div className="hidden">
+                    <FormField
+                      control={form.control}
+                      name="startsAt"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Input type="datetime-local" {...field} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="endsAt"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Input type="datetime-local" {...field} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="timezone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <EventScheduleView eventId={event.id} embedded />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Set the primary event window now. After creating the event, open Edit to add
+                    individual occurrences.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="startsAt"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Primary Start</FormLabel>
+                          <FormControl>
+                            <Input type="datetime-local" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="endsAt"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Primary End</FormLabel>
+                          <FormControl>
+                            <Input type="datetime-local" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name="timezone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Timezone</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select timezone" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {commonTimezones.map((tz) => (
+                              <SelectItem key={tz} value={tz}>
+                                {tz}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
+            </div>
+            <div id="schedule-venue" className="scroll-mt-6 grid gap-4 sm:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="venueName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Venue Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Venue Hall" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="address"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Address</FormLabel>
+                    <FormControl>
+                      <Input placeholder="123 Main St" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <FormField
+                control={form.control}
+                name="city"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>City</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Austin" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="region"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Region</FormLabel>
+                    <FormControl>
+                      <Input placeholder="TX" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="postalCode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Postal Code</FormLabel>
+                    <FormControl>
+                      <Input placeholder="78701" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            <FormField
+              control={form.control}
+              name="country"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Country</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value || undefined}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select country" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {countries.map(([code, label]) => (
+                        <SelectItem key={code} value={code}>
+                          {label} ({code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </>
+        ) : null}
+        {section === 'all' || section === 'marketing' ? (
+          <>
+            <div id="media-fields" className="scroll-mt-6 grid gap-4 sm:grid-cols-2">
+              <p className="text-sm text-muted-foreground">
+                Cover and social images are managed in the Media section through the owned upload
+                pipeline.
+              </p>
+              <FormField
+                control={form.control}
+                name="externalUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>External URL</FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://example.com/event" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            <div
+              id={section === 'all' ? 'marketing-fields' : `${section}-marketing-controls`}
+              className="scroll-mt-6 space-y-3 rounded-lg border p-3"
+            >
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Marketing</p>
+                <p className="text-xs text-muted-foreground">
+                  SEO metadata and tracking pixels for hosted event pages and checkout.
+                </p>
+              </div>
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">SEO</p>
+                  <p className="text-xs text-muted-foreground">
+                    Optional page metadata used by hosted event pages and previews.
+                  </p>
+                </div>
+                <FormField
+                  control={form.control}
+                  name="seoTitle"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>SEO Title</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Summer Music Festival tickets" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="seoDescription"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>SEO Description</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          className="resize-none"
+                          placeholder="Short search/social summary"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Upload the social image in the Media section, or reuse the event cover.
+                </p>
+              </div>
+              {event ? (
+                <EventMarketingView eventId={event.id} embedded />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Tracking pixels can be connected after the event is created.
+                </p>
+              )}
+            </div>
+          </>
+        ) : null}
         <div className="flex justify-end gap-2 pt-2">
+          {autosave && event ? (
+            <div className="flex items-center gap-2">
+              <span role="status" className="self-center text-sm text-muted-foreground">
+                {saveState === 'saving'
+                  ? 'Saving…'
+                  : saveState === 'saved'
+                    ? 'Saved'
+                    : saveState === 'offline'
+                      ? 'Offline — changes are unsaved'
+                      : saveState === 'conflict'
+                        ? 'Conflict — review the newer version'
+                        : form.formState.isDirty
+                          ? 'Unsaved changes'
+                          : ''}
+              </span>
+              {saveState === 'conflict' ? (
+                <Button type="button" variant="outline" onClick={reloadLatestPreservingEdits}>
+                  Reload latest and keep my edits
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           {onCancel && (
             <Button type="button" variant="outline" onClick={onCancel}>
               Cancel
             </Button>
           )}
-          <Button type="submit" disabled={submitting || createDisabled}>
+          <Button type="submit" disabled={submitting || createDisabled || saveState === 'conflict'}>
             {submitting ? 'Saving...' : event ? 'Save Changes' : 'Create Event'}
           </Button>
         </div>

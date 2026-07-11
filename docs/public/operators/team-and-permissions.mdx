@@ -1,0 +1,32 @@
+---
+title: Manage team access and permissions
+description: Grant the minimum dashboard capabilities required for each operating role.
+audience:
+  - operator
+product_area: team
+content_type: how-to
+status: beta
+owner: security
+last_verified: 2026-07-10
+prerequisites:
+  - Settings permission to change membership or role assignments
+related:
+  - /operators/workspace
+  - /developers/api-fundamentals/permissions
+---
+
+Dashboard permissions govern actions such as event, ticket, order, refund, attendee, check-in, box-office, messaging, report, settings, developer, and billing work. Grant only the capabilities required for the person's role.
+
+## Review before granting
+
+Confirm the intended tenant and organization, the user's identity, and their operational responsibility. Separate door/check-in work from settings, developer credentials, refunds, and billing unless the role genuinely requires both.
+
+## Verify the result
+
+After saving access, ask the teammate to reload their authenticated session. They should see permitted navigation and receive a clear blocked state for unauthorized actions. Hidden navigation alone is not authorization; the API must enforce the same boundary.
+
+## Remove access promptly
+
+Remove or reduce access when a responsibility changes. Rotate any separately issued API key or device credential; changing a dashboard role does not revoke credentials owned by another authentication system.
+
+Report any cross-tenant or permission bypass through the private [security process](/support), without including customer data or secrets.

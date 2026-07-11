@@ -1,0 +1,41 @@
+---
+title: Incident runbooks
+description: Triage and recover payment, refund, webhook, checkout-workflow, export, and worker incidents.
+audience:
+  - self-hoster
+product_area: operations
+content_type: runbook
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - Authorized production access and an incident communication channel
+related:
+  - /self-hosting/observability
+  - /self-hosting/backups-and-restore
+---
+
+Protect buyers and preserve evidence before changing state. Record severity, start time, affected environment, safe correlation identifiers, and the current mitigation owner. Never paste secrets, credentials, customer payloads, or raw database dumps into the incident record.
+
+## General triage
+
+1. Confirm scope by tenant/organization/brand/event without crossing isolation boundaries.
+2. Check recent deploys, migrations, provider status, API/worker health, task-queue lag, database, Redis, and storage.
+3. Stop or rate-limit the unsafe side effect while preserving read access where possible.
+4. Choose rollback, forward repair, provider reconciliation, or restore based on tested compatibility.
+
+## Payment or refund disagreement
+
+Reconcile Tixkit order/refund records, workflow history, and provider references. Do not issue a second refund or capture before confirming the first attempt. Use the supported compensation/repair path and verify customer-facing status afterward.
+
+## Webhook dead letters
+
+Confirm endpoint reachability and signature verification, then fix receiver idempotency before replay. Replay a bounded event set and verify event IDs at the receiver.
+
+## Stuck checkout or export
+
+Inspect the durable workflow/activity and dependency status. Restore workers/storage/providers, retry through supported operations, and verify order/inventory or export artifact state. Avoid creating many duplicate jobs.
+
+## Recovery validation
+
+Run targeted health and golden-path checks, confirm alerts clear for the right reason, communicate residual impact, and capture follow-up changes with owners. Rehearse restore when integrity is uncertain.

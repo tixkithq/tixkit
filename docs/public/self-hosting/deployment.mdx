@@ -1,0 +1,37 @@
+---
+title: Deploy Tixkit
+description: Build, migrate, release, smoke-test, and roll back the API, worker, applications, and documentation coherently.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: how-to
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - Validated production configuration and durable service dependencies
+related:
+  - /self-hosting/observability
+  - /operations/incidents
+---
+
+Deploy immutable artifacts built from one reviewed commit. The API, worker, OpenAPI reference, SDK compatibility statements, dashboard, checkout, and docs must describe the same contract.
+
+## Release order
+
+1. Back up and verify restore readiness.
+2. Run the release dry-run and documentation/OSS export gates.
+3. Apply forward-compatible migrations using the approved migration identity.
+4. Deploy API and worker with compatible Temporal workflow code.
+5. Deploy admin, checkout, and docs.
+6. Verify health, representative public/authenticated reads, checkout, workflow, webhook, and documentation routes.
+
+## Rollback
+
+Roll back application artifacts independently only while contract and migration compatibility permits it. Prefer a forward fix for destructive schema changes. Preserve documentation redirects so dashboard links remain valid across a docs rollback.
+
+## Smoke checks
+
+Verify `/health` for API and docs, worker readiness, a real published test event, authenticated context, and a test-safe checkout. A green homepage is not a complete deployment proof.
+
+Continue with [observability configuration](/self-hosting/observability) before accepting the release.

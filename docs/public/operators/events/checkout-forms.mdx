@@ -1,0 +1,35 @@
+---
+title: Configure checkout forms and consent
+description: Collect only necessary buyer and attendee data and verify the active public revision.
+audience:
+  - operator
+product_area: checkout
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - An event with sellable inventory
+  - Event write permission
+related:
+  - /getting-started/test-checkout
+  - /reference/privacy-and-retention
+---
+
+Checkout forms can collect buyer-level and attendee-level answers. Minimize personal data and make required fields and consent language explicit.
+
+## Review the form
+
+Open the event checkout-form view. For each field, confirm its audience, requirement state, label, and purpose. Use attendee fields only when the answer must differ per admission; use buyer fields for order-level contact or agreement.
+
+Do not request credentials, payment-card data, government identifiers, or unrelated sensitive information in custom fields.
+
+## Save and preview
+
+Save the form revision, then open checkout preview. Add more than one ticket when validating attendee-level behavior. Confirm required validation, accessible labels, error text, consent presentation, and the final order summary.
+
+## Diagnose stale behavior
+
+If checkout shows an older form, verify the correct event and brand, the saved/public revision, and whether an existing checkout session captured an earlier revision. Start a new private session before assuming the save failed.
+
+Complete a [test checkout](/getting-started/test-checkout) after every material form or consent change.

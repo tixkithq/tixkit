@@ -1,0 +1,31 @@
+---
+title: Run box office and point-of-sale orders
+description: Create supervised event orders while preserving inventory, payment-mode, and permission boundaries.
+audience:
+  - operator
+product_area: box-office
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Box-office write permission
+  - Active event inventory
+related:
+  - /operators/events/tickets-and-products
+  - /operators/orders
+---
+
+Box-office orders use the same event and inventory boundaries as buyer checkout, with operator-controlled entry and payment context.
+
+## Confirm the sale context
+
+Verify organization, brand, event, occurrence, currency, and payment mode before adding items. Confirm the operator is authorized for box-office writes; order read permission alone is insufficient.
+
+## Create the order
+
+Select only currently available items, enter the minimum required buyer/attendee information, and review totals and fees. Submit once and wait for the order result. In provider-backed environments, follow the approved terminal or payment workflow rather than entering card data into an unsupported field.
+
+## Verify and hand off
+
+Open the resulting order and attendee records. Confirm the intended fulfillment or ticket-delivery state before telling the buyer the sale is complete. If creation fails, retain the non-secret attempt reference and check inventory/payment state before retrying.

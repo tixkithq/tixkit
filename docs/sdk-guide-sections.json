@@ -1,0 +1,27 @@
+[
+  {
+    "id": "install",
+    "title": "Install",
+    "searchText": "Install the supported SDK package with the platform package manager."
+  },
+  {
+    "id": "configure",
+    "title": "Configure securely",
+    "searchText": "Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles."
+  },
+  {
+    "id": "first-request",
+    "title": "Make the first request",
+    "searchText": "Make a typed first request and verify the expected event page or scanner decision output."
+  },
+  {
+    "id": "troubleshoot",
+    "title": "Troubleshoot",
+    "searchText": "Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage."
+  },
+  {
+    "id": "verify-and-continue",
+    "title": "Verify and continue",
+    "searchText": "Run the executable fixture, then continue to errors, retries, and the generated API reference."
+  }
+]

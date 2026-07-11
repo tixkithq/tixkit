@@ -1,6 +1,8 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Plus, Ticket } from 'lucide-react';
 import { type AdminEventListItem, adminApi } from '@/lib/api';
 import { eventsTableSchema } from '@/lib/table-schemas';
@@ -12,12 +14,11 @@ import { useAdminTableData } from '@/hooks/use-admin-table-data';
 import { usePermissions } from '@/context/permission-provider';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { getEventColumns } from './columns';
-import { CreateEventDrawer } from './create-event-drawer';
 import { formatCurrency } from '@/lib/format';
+import { routes } from '@/lib/routes';
 
 export function EventsTable() {
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
-  const [editingEvent, setEditingEvent] = React.useState<AdminEventListItem | undefined>(undefined);
+  const router = useRouter();
   const { can } = usePermissions();
   const { organizationId, brandId } = useBootstrap();
   const { query, updateQuery } = useUrlTableState(eventsTableSchema);
@@ -39,20 +40,13 @@ export function EventsTable() {
     () =>
       getEventColumns(
         (event) => {
-          setEditingEvent(event);
-          setDrawerOpen(true);
+          router.push(routes.eventSettings(event.id));
         },
         () => refetch(),
         canWriteEvents,
       ),
-    [canWriteEvents, refetch],
+    [canWriteEvents, refetch, router],
   );
-
-  const handleCreate = () => {
-    if (!canWriteEvents) return;
-    setEditingEvent(undefined);
-    setDrawerOpen(true);
-  };
 
   return (
     <>
@@ -68,9 +62,11 @@ export function EventsTable() {
         getRowId={(row) => row.id}
         toolbarActions={
           canWriteEvents ? (
-            <Button size="sm" className="h-9" onClick={handleCreate}>
-              <Plus className="size-4" />
-              Create event
+            <Button asChild size="sm" className="h-9">
+              <Link href={routes.newEvent}>
+                <Plus className="size-4" />
+                Create event
+              </Link>
             </Button>
           ) : undefined
         }
@@ -85,9 +81,11 @@ export function EventsTable() {
             }
             action={
               canWriteEvents ? (
-                <Button onClick={handleCreate}>
-                  <Plus className="size-4" />
-                  Create event
+                <Button asChild>
+                  <Link href={routes.newEvent}>
+                    <Plus className="size-4" />
+                    Create event
+                  </Link>
                 </Button>
               ) : undefined
             }
@@ -95,14 +93,6 @@ export function EventsTable() {
         }
         renderRowSheet={(row) => (row ? <EventRowSheet event={row} /> : null)}
       />
-      {canWriteEvents && (
-        <CreateEventDrawer
-          open={drawerOpen}
-          onOpenChange={setDrawerOpen}
-          event={editingEvent}
-          onSuccess={refetch}
-        />
-      )}
     </>
   );
 }

@@ -1,0 +1,2178 @@
+[
+  {
+    "url": "/contributing/add-an-api-route",
+    "title": "Add or change an API route",
+    "description": "Keep Fastify behavior, domain and repository contracts, OpenAPI, SDKs, dashboard types, docs, and tests synchronized.",
+    "headings": [
+      {
+        "id": "change-the-complete-slice",
+        "text": "Change the complete slice",
+        "level": 2
+      }
+    ],
+    "body": "Start with the owning route module under packages/api/src/routes/modules . Identify the domain types, repository operations, permissions, tenant/organization/brand/event scope, runtime strings, and integration tests before editing. Change the complete slice 1. Update pure domain validation/types when business rules change. 2. Add a migration and repository method when persistence changes. 3. Implement authentication, authorization, schema, serialization, and safe errors in the route. 4. Update packages/openapi with stable operation ID, tags, security/scopes, schemas, and sanitized examples. 5. Update SDK methods/types, dashboard client types, fixtures, examples, and canonical docs. 6. Add unit, integration, tenant isolation, permission, generated client, and browser coverage as applicable. Do not reveal resource existence across scope boundaries. Do not return raw provider/database errors or secret material.",
+    "audience": [
+      "contributor"
+    ],
+    "productArea": "contributing",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/contributing/add-an-sdk-operation",
+    "title": "Add an SDK operation",
+    "description": "Extend the core client and supported framework or native packages without drifting from OpenAPI or API-version support.",
+    "headings": [],
+    "body": "Add the operation to the canonical SDK package for its runtime, using generated/contract types where available. Preserve server/browser secret boundaries, pagination, idempotency, cancellation/timeouts, and typed error behavior. Update every supported wrapper that exposes the affected resource, then update package READMEs, the SDK guide, runnable example, snippet registry, API version statement, and parity matrix. Run the package unit tests, generated client test, demo typecheck/build, and node scripts/sdk parity matrix.mjs . A guide that compiles while its demo or export path is missing is incomplete.",
+    "audience": [
+      "contributor"
+    ],
+    "productArea": "contributing",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/contributing/add-documentation",
+    "title": "Add documentation",
+    "description": "Author validated public content, preserve canonical routes, and keep dashboard, search, redirects, and OSS export synchronized.",
+    "headings": [
+      {
+        "id": "author-a-page",
+        "text": "Author a page",
+        "level": 2
+      },
+      {
+        "id": "update-dependent-surfaces",
+        "text": "Update dependent surfaces",
+        "level": 2
+      },
+      {
+        "id": "validate",
+        "text": "Validate",
+        "level": 2
+      }
+    ],
+    "body": "Place public long form content under docs/public . Keep plans, audits, execution evidence, and private operational detail in the repository's excluded internal documentation tree; internal content is never hidden inside a public page. Author a page Declare title, description, audience, product area, content type, stability, owner, last verified date, prerequisites, and related canonical routes. Use task outcomes, exact verification, safe failure recovery, and a next action. Do not duplicate endpoint inventories or package local installation detail. Update dependent surfaces Add or reuse a DocRouteId , update navigation, redirects, dashboard Help metadata, package links, and source inbound links. Code fences require a language and must contain no secrets, destructive unlabeled commands, or placeholder text. Validate Browser facing changes also require keyboard, axe, no console, responsive, and supported browser coverage. Use the validation and test guide /contributing/testing to run the focused and final gates.",
+    "audience": [
+      "contributor"
+    ],
+    "productArea": "contributing",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/contributing/architecture",
+    "title": "Monorepo architecture",
+    "description": "Locate applications, packages, contract sources, durable workflows, and public export boundaries.",
+    "headings": [
+      {
+        "id": "runtime-applications",
+        "text": "Runtime applications",
+        "level": 2
+      },
+      {
+        "id": "backend-boundaries",
+        "text": "Backend boundaries",
+        "level": 2
+      },
+      {
+        "id": "frontend-and-integration-packages",
+        "text": "Frontend and integration packages",
+        "level": 2
+      },
+      {
+        "id": "export-boundary",
+        "text": "Export boundary",
+        "level": 2
+      }
+    ],
+    "body": "The Bun/Turbo workspace contains runtime applications under apps/ and reusable or service packages under packages/ . Runtime applications apps/admin dashboard is the authenticated operator UI. apps/checkout is buyer facing checkout/public event behavior. apps/docs builds this documentation. SDK demo apps are executable contract fixtures. Backend boundaries packages/domain owns pure rules and types. packages/db owns Kysely repositories/migrations. packages/api owns Fastify routes, auth, permissions, and serialization. packages/workflows owns Temporal workflows/activities. packages/openapi owns the public HTTP schema. Frontend and integration packages Content packages own shared editors/rendering; admin table core owns reusable table behavior; SDK and widget packages expose public integration surfaces. packages/docs core owns documentation route/help/readiness/search contracts without importing applications. Export boundary The private development tree is not identical to the sanitized OSS export. scripts/export oss.mjs explicitly includes public apps/packages/content/governance and excludes internal plans, evidence, managed only material, and secret like content.",
+    "audience": [
+      "contributor"
+    ],
+    "productArea": "contributing",
+    "contentType": "concept",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/contributing/repository-setup",
+    "title": "Set up the repository",
+    "description": "Clone Tixkit, install the pinned workspace, start the stack, and run focused validation without hidden assumptions.",
+    "headings": [
+      {
+        "id": "work-safely",
+        "text": "Work safely",
+        "level": 2
+      }
+    ],
+    "body": "Clone the repository, enter its root, and preserve any existing working tree changes before editing. The quickstart remains in the foreground and starts infrastructure, migrations, API, worker, checkout, admin, docs, and sample data. Use a second terminal for focused tests. Work safely Read AGENTS.md , the relevant package README, and canonical guide before changing a contract. Use Graphify for cross package navigation and Serena or focused source inspection for exact symbols. Preserve unrelated dirty worktree changes; never reset or reformat them to simplify a task. Keep API, OpenAPI, SDKs, dashboard types, examples, docs, and tests synchronized in one change. Stop the foreground quickstart with Control C and verify its managed processes exit. Continue by adding documentation /contributing/add documentation through the canonical public content workflow.",
+    "audience": [
+      "contributor"
+    ],
+    "productArea": "contributing",
+    "contentType": "quickstart",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/contributing/testing",
+    "title": "Run validation and tests",
+    "description": "Choose focused gates during implementation and execute the complete contract-sensitive suite before release.",
+    "headings": [],
+    "body": "Run the smallest relevant typecheck, lint, and test while iterating. Broaden validation whenever a change crosses a contract boundary. Database/provider/browser suites may require environment or infrastructure described by their package and runbook. A skipped suite is not a pass. Turbo cache output is useful during iteration, but final evidence must match the required fresh/environment backed scope. Do not weaken or delete a test to obtain green output. Fix warnings caused by the change and run git diff check plus graphify update . after code edits.",
+    "audience": [
+      "contributor"
+    ],
+    "productArea": "contributing",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/api-fundamentals/authentication",
+    "title": "Authenticate API requests",
+    "description": "Choose a Clerk token, scoped API key, or scanner credential and keep secrets on the correct runtime boundary.",
+    "headings": [
+      {
+        "id": "api-keys",
+        "text": "API keys",
+        "level": 2
+      },
+      {
+        "id": "clerk-sessions",
+        "text": "Clerk sessions",
+        "level": 2
+      },
+      {
+        "id": "scanner-devices",
+        "text": "Scanner devices",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit supports authenticated dashboard users, API keys, and scanner device credentials. Anonymous access is limited to explicitly public buyer routes. API keys API keys begin with tk and are bearer credentials. Creation returns the raw secret once; persistence stores a hash. Store the secret immediately in a server side secret manager. Revoked or expired keys return 401 UNAUTHORIZED . Never put the key in a query string, client bundle, mobile application package, analytics field, screenshot, or committed environment file. Clerk sessions The admin dashboard sends a Clerk session JWT. The API verifies it and resolves the active organization/tenant context. Integrations should not scrape or persist dashboard session tokens as API keys. Scanner devices Scanner devices use the issued device ID and secret headers and carry explicit check in scopes. Revoke a lost device. Do not share one device secret across an uncontrolled fleet. If a credential leaks, revoke it first, then remove it from logs/history and rotate downstream configuration.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "concept",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/api-fundamentals/errors",
+    "title": "Handle API errors and retries",
+    "description": "Interpret the common error envelope and retry only operations that are safe to repeat.",
+    "headings": [
+      {
+        "id": "decide-whether-to-retry",
+        "text": "Decide whether to retry",
+        "level": 2
+      },
+      {
+        "id": "preserve-safe-diagnostics",
+        "text": "Preserve safe diagnostics",
+        "level": 2
+      }
+    ],
+    "body": "Non success responses use an error object with a machine readable code , safe message, and requestId . Validation errors may include field details. Decide whether to retry Fix the request for 400 validation errors. Refresh or replace credentials for 401 only after identifying the credential issue. Correct permission/resource scope for 403 ; repeated retries will not add permission. Treat 404 as absent or inaccessible without probing adjacent identifiers. For 409 or 422 state/idempotency conflicts, reconcile the original operation before changing the request. Back off for 429 and respect any retry information. Retry transient 5xx responses only with an idempotency key where the operation requires one. Preserve safe diagnostics Log status, error code, operation ID, request ID, and a redacted local correlation ID. Do not log authorization headers, webhook secrets, full request/response payloads, ticket codes, or customer personal data.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "concept",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/api-fundamentals/idempotency",
+    "title": "Make writes idempotent",
+    "description": "Prevent repeated side effects when retrying workflow, payment, inventory, ticket, message, and export mutations.",
+    "headings": [],
+    "body": "Generate a unique Idempotency Key for one logical mutation and retain it until that mutation reaches a known result. Reusing a key with the same payload can replay the stored result without repeating side effects. Reusing it with a different payload returns IDEMPOTENCY CONFLICT . Never use one constant key for all requests. After a timeout, query the resource or retry with the same key and identical payload. Do not generate a new key until you know the original operation should be a separate side effect.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "concept",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/api-fundamentals",
+    "title": "API fundamentals",
+    "description": "Use Tixkit's versioned JSON API with explicit authentication, scopes, pagination, errors, and idempotency.",
+    "headings": [
+      {
+        "id": "request-model",
+        "text": "Request model",
+        "level": 2
+      },
+      {
+        "id": "integration-rules",
+        "text": "Integration rules",
+        "level": 2
+      },
+      {
+        "id": "contract-source",
+        "text": "Contract source",
+        "level": 2
+      }
+    ],
+    "body": "The local API base URL is http://localhost:4000/v1 . A self hosted production deployment uses its configured HTTPS API origin with the same version prefix. Request model Send and accept JSON unless an operation documents a file response. Authenticated routes accept a Clerk bearer token, API key, or supported device credential according to the operation. Public buyer routes explicitly omit authentication. Every authenticated resource read is still tenant , organization , brand , or event scoped. Knowing an identifier is not sufficient authorization. Integration rules Keep secret API keys in a server secret store and send them only in the Authorization header. Use cursor pagination instead of guessing offsets. Preserve requestId from error responses for diagnosis, but never log credentials or payloads containing personal data. Supply a unique idempotency key for a mutation that moves money, inventory, tickets, messages, or durable work. Retry only according to the returned status and documented operation behavior. Contract source The API reference /reference/api is generated from packages/openapi . Conceptual guides explain safe usage; they do not duplicate an endpoint inventory.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "overview",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/api-fundamentals/pagination",
+    "title": "Paginate list operations",
+    "description": "Traverse stable cursor-based pages without constructing or persisting opaque cursor values.",
+    "headings": [
+      {
+        "id": "traverse-pages",
+        "text": "Traverse pages",
+        "level": 2
+      }
+    ],
+    "body": "List operations use an opaque cursor with a bounded limit . A response contains items , nextCursor , and hasMore . Traverse pages Request the first page without a cursor. When hasMore is true, pass the returned nextCursor unchanged to the next request. Stop when hasMore is false and nextCursor is null. Do not decode, increment, combine, or reuse a cursor for a different endpoint/filter set. If the underlying collection changes during traversal, design the integration to tolerate repeated or newly inserted records according to the operation's ordering contract.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "concept",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/api-fundamentals/permissions",
+    "title": "API permissions and scopes",
+    "description": "Grant API keys and principals only the product capabilities and resource scope they require.",
+    "headings": [
+      {
+        "id": "least-privilege",
+        "text": "Least privilege",
+        "level": 2
+      },
+      {
+        "id": "failure-behavior",
+        "text": "Failure behavior",
+        "level": 2
+      }
+    ],
+    "body": "Authenticated principals carry product scopes such as events.read , events.write , tickets.write , orders.read , orders.write , refunds.write , attendees.read , attendees.write , checkins.read , checkins.write , box office.write , messages.write , reports.read , settings.write , developers.write , and billing.write . Least privilege Create a read only key for a read only integration. Add write or refund scopes only when the service performs those actions. A creator cannot grant scopes they do not hold. Brand or event scoped principals must create credentials within that boundary. A scope grants a capability; it does not remove tenant, organization, brand, or event isolation. Failure behavior 401 UNAUTHORIZED means the credential could not authenticate. 403 FORBIDDEN means authentication succeeded but capability or resource scope is insufficient. 404 NOT FOUND may intentionally avoid revealing an out of scope resource. Do not broaden a key before confirming which exact operation and resource boundary failed.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/webhooks/setup",
+    "title": "Configure a webhook endpoint",
+    "description": "Register an HTTPS receiver, subscribe to explicit event types, and store the one-time signing secret safely.",
+    "headings": [
+      {
+        "id": "store-the-secret-once",
+        "text": "Store the secret once",
+        "level": 2
+      },
+      {
+        "id": "return-promptly",
+        "text": "Return promptly",
+        "level": 2
+      },
+      {
+        "id": "verify-configuration",
+        "text": "Verify configuration",
+        "level": 2
+      }
+    ],
+    "body": "Open Developer → Webhooks and create an endpoint with its exact HTTPS URL and only the event types the integration handles. Store the secret once Endpoint creation returns a signing secret once. Move it directly to the receiving service's secret manager. Do not copy it into a URL, browser storage, analytics, screenshots, issue reports, or committed configuration. To rotate, create or activate the replacement secret/endpoint according to the supported dashboard flow, deploy verification, validate delivery, and disable the old endpoint. Do not disable the working path before the replacement verifies successfully. Return promptly Read the raw body, verify signature and timestamp, durably record the event ID, and return a 2xx response promptly. Perform slow business work asynchronously. Non 2xx responses and delivery failures are retried; repeated processing must be idempotent. Verify configuration Send a test delivery, confirm a successful status in Tixkit, and reconcile the event ID in receiver logs without recording the secret or full sensitive payload.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "webhooks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/webhooks/testing",
+    "title": "Test webhook delivery",
+    "description": "Exercise local forwarding, signature failure, retry, duplicate delivery, and successful processing without production data.",
+    "headings": [
+      {
+        "id": "inspect-the-forwarding-plan",
+        "text": "Inspect the forwarding plan",
+        "level": 2
+      },
+      {
+        "id": "exercise-receiver-behavior",
+        "text": "Exercise receiver behavior",
+        "level": 2
+      }
+    ],
+    "body": "Use test events and a development endpoint. Do not forward production payloads into local logs or tunneling services. Inspect the forwarding plan The dry run reports the planned target without starting Stripe CLI or writing a secret. Live provider forwarding requires the supported provider CLI and test credentials in the selected environment file. Exercise receiver behavior 1. Deliver a correctly signed event and return 2xx only after durable acceptance. 2. Change one body byte and verify the signature is rejected. 3. Use a stale timestamp and verify replay protection rejects it. 4. Return a non 2xx response and observe retry state. 5. Deliver the same event ID twice and verify business work happens once. 6. Restore success and confirm delivery status in the Developer dashboard. Do not log the Authorization header, endpoint secret, or full personal data payload while testing.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "webhooks",
+    "contentType": "tutorial",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/webhooks/troubleshooting",
+    "title": "Troubleshoot webhook delivery",
+    "description": "Diagnose endpoint, signature, response, retry, dead-letter, and replay failures from observable state.",
+    "headings": [
+      {
+        "id": "endpoint-was-not-reached",
+        "text": "Endpoint was not reached",
+        "level": 2
+      },
+      {
+        "id": "signature-verification-failed",
+        "text": "Signature verification failed",
+        "level": 2
+      },
+      {
+        "id": "receiver-returned-non-2xx",
+        "text": "Receiver returned non-2xx",
+        "level": 2
+      },
+      {
+        "id": "delivery-is-dead-lettered",
+        "text": "Delivery is dead-lettered",
+        "level": 2
+      }
+    ],
+    "body": "Start with the last delivery status, attempt count, safe response summary, and event ID. Do not rotate secrets or replay until the failure category is known. Endpoint was not reached Verify HTTPS URL, DNS, TLS, firewall, and receiver availability. Confirm the endpoint is active and subscribed to the event type. Signature verification failed Confirm the receiver uses the raw body, current endpoint secret, t and v1 fields, hex decoding, constant time comparison, and a synchronized clock. Parsing then reserializing JSON changes the signed bytes. Receiver returned non 2xx Inspect the receiver's redacted error using the event ID. Fix durable acceptance or downstream queueing before replay. A slow synchronous handler may time out even if it eventually performs work. Delivery is dead lettered After retry attempts are exhausted, correct the endpoint first. Replay only when the receiver is idempotent and the operator understands the downstream effect. Replaying financial or fulfillment events without deduplication can repeat side effects.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "webhooks",
+    "contentType": "troubleshooting",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/developers/webhooks/verify-signatures",
+    "title": "Verify webhook signatures",
+    "description": "Authenticate the raw request body with HMAC-SHA256, constant-time comparison, and timestamp tolerance.",
+    "headings": [
+      {
+        "id": "verify-before-parsing",
+        "text": "Verify before parsing",
+        "level": 2
+      },
+      {
+        "id": "prevent-replay",
+        "text": "Prevent replay",
+        "level": 2
+      }
+    ],
+    "body": "The X Tixkit Signature header contains t= ,v1= . Tixkit signs ${timestamp}.${rawBody} with HMAC SHA256. Verify before parsing Compute the digest before JSON parsing or reserialization. Reject missing, malformed, stale, or mismatched signatures. Use constant time comparison and keep the endpoint secret out of error messages. Prevent replay Timestamp tolerance limits stale requests but does not deduplicate valid retries. Store the stable webhook event ID and make processing idempotent. A delivery attempt ID may change across attempts; the event ID identifies the logical event. Continue with the generated API reference /reference/api and a supported SDK guide /sdks/javascript after the verification fixture passes.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "webhooks",
+    "contentType": "how-to",
+    "status": "stable",
+    "keywords": []
+  },
+  {
+    "url": "/developers/widget/embedding",
+    "title": "Embed Tixkit checkout",
+    "description": "Choose inline, modal, button, or redirect integration and generate CSP-aware markup without exposing secrets.",
+    "headings": [
+      {
+        "id": "generate-a-reviewed-snippet",
+        "text": "Generate a reviewed snippet",
+        "level": 2
+      },
+      {
+        "id": "choose-a-mode",
+        "text": "Choose a mode",
+        "level": 2
+      }
+    ],
+    "body": "The widget is a browser integration and must use public event/brand identifiers only. API keys and provider secrets never belong in embed markup. Generate a reviewed snippet The CLI prints the snippet, CSP guidance, and placement instructions. Review generated origins against your actual deployment; do not copy default hosted domains into a self hosted policy without changing them. The current production release is immutable and integrity pinned: Use bun run embed:generate instead of editing the release URL or integrity value by hand. The release pin validation fails when this public example drifts from the widget manifest. Choose a mode Inline reserves content space and keeps checkout visible in the page flow. Modal opens an overlay and must preserve focus and escape behavior. Button defers loading until user intent. Redirect navigates to hosted checkout and is the simplest isolation boundary. Test keyboard operation, mobile width, CSP enforcement, lifecycle callbacks, and return navigation. Tracking identifiers must be non personal attribution values.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "widget",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/getting-started/deployment-model",
+    "title": "Choose a deployment model",
+    "description": "Decide between local evaluation and a self-hosted deployment without overstating managed-service availability.",
+    "headings": [
+      {
+        "id": "local-evaluation",
+        "text": "Local evaluation",
+        "level": 2
+      },
+      {
+        "id": "self-hosted-operation",
+        "text": "Self-hosted operation",
+        "level": 2
+      },
+      {
+        "id": "decision-check",
+        "text": "Decision check",
+        "level": 2
+      }
+    ],
+    "body": "The repository supports local development and self hosted operation. This documentation does not promise a managed Tixkit service or hosted control plane. Local evaluation Choose the local stack when you need to evaluate workflows, develop an integration, or contribute. Docker Compose starts PostgreSQL, MySQL, Redis, Temporal, and MinIO. The CLI then runs migrations and starts the API, worker, checkout, admin, and documentation applications. Local capture mode payments record platform behavior without contacting a payment provider. They are not a substitute for provider validation. Self hosted operation Choose self hosting when your team can operate: a supported relational database configuration; Redis, Temporal, and object storage; API and worker processes with health monitoring; public admin, checkout, and documentation applications; TLS, secrets, backups, restore rehearsals, upgrades, and incident response. Provider backed payments, messaging, and authentication require their documented credentials and provider side setup. Do not copy local example values into production. Decision check Use local evaluation until you can complete a test event, test checkout, API request, webhook verification, backup, and restore rehearsal. Move to a production topology only after the deployment guide /self hosting/deployment and incident runbooks /operations/incidents match your environment.",
+    "audience": [
+      "operator",
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "concept",
+    "status": "beta",
+    "keywords": [
+      "deployment",
+      "local",
+      "self-hosted"
+    ]
+  },
+  {
+    "url": "/getting-started/first-api-call",
+    "title": "Make the first API call",
+    "description": "Create a narrowly scoped server-only key and use it for a non-destructive request.",
+    "headings": [
+      {
+        "id": "create-a-scoped-key",
+        "text": "Create a scoped key",
+        "level": 2
+      },
+      {
+        "id": "list-events-safely",
+        "text": "List events safely",
+        "level": 2
+      },
+      {
+        "id": "diagnose-failures",
+        "text": "Diagnose failures",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit API keys are secrets for server side use. Do not paste a secret into browser code, a URL, documentation feedback, analytics, screenshots, or persistent browser storage. Create a scoped key Open Developer → API keys in the admin dashboard. Create a key with only the read scope needed to list events. Copy the secret from the one time display directly into your server secret manager or current shell, then dismiss it. Tixkit does not display the secret again. Do not add these values to shell history, committed .env files, or client visible NEXT PUBLIC variables. List events safely A successful response is JSON containing the events visible to the key's tenant and scope. An empty list is a valid result. Diagnose failures 401 Unauthorized: the header is missing, malformed, expired, revoked, or contains the wrong key. 403 Forbidden: authentication succeeded but the key lacks the required scope or tenant access. 404 Not Found: verify the /v1 base path and environment. Connection refused: confirm the API health endpoint and base URL before rotating the key. Rotate or revoke the key immediately if it was copied into a browser, URL, log, screenshot, or committed file. Continue with webhook signature verification /developers/webhooks/verify signatures , authentication and key handling /developers/api fundamentals/authentication , or the generated API reference /reference/api .",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "quickstart",
+    "status": "beta",
+    "keywords": [
+      "API key",
+      "curl",
+      "first request"
+    ]
+  },
+  {
+    "url": "/getting-started/first-event",
+    "title": "Create and publish the first event",
+    "description": "Configure an event, schedule, sellable inventory, checkout form, preview, and publication state.",
+    "headings": [
+      {
+        "id": "create-the-event",
+        "text": "Create the event",
+        "level": 2
+      },
+      {
+        "id": "configure-schedule-and-inventory",
+        "text": "Configure schedule and inventory",
+        "level": 2
+      },
+      {
+        "id": "review-checkout-behavior",
+        "text": "Review checkout behavior",
+        "level": 2
+      },
+      {
+        "id": "preview-before-publishing",
+        "text": "Preview before publishing",
+        "level": 2
+      },
+      {
+        "id": "verify-publication",
+        "text": "Verify publication",
+        "level": 2
+      },
+      {
+        "id": "next-step",
+        "text": "Next step",
+        "level": 2
+      }
+    ],
+    "body": "This path creates a test event that can reach checkout. Publishing an event without sellable inventory or a valid schedule does not create a usable buyer flow. Create the event 1. Open Events in the admin dashboard and choose Create event . 2. Enter a test safe name, description, venue or online context, and the organization/brand requested by the form. 3. Save the event before adding child resources. The event detail page must load without a scope or permission error. If it does not, confirm the selected organization and brand rather than recreating the event in another tenant. Configure schedule and inventory Add at least one occurrence with a future start time. Then create a ticket type or product with a positive price, available quantity, and sales window that includes the current time. Verify the inventory view shows a sellable item. A draft item, zero capacity, expired sales window, or inactive product is not available at checkout. Review checkout behavior Open the checkout form editor. Review required buyer and attendee fields, consent text, and fee presentation. Save the current revision. Use only test safe wording and data. Preview before publishing Open the public event or checkout preview from the event action. Confirm the correct brand, schedule, item, price, and required form fields. Return to the dashboard and publish the event only after the preview matches the intended test workflow. Verify publication Reload the event detail page and confirm the status is published. Then open the public event page in a private browser window. If the event is missing, inspect schedule, sales window, domain, and inventory state before changing publication repeatedly. Next step Complete a test checkout /getting started/test checkout and keep the resulting order available for refund and check in practice.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "events",
+    "contentType": "tutorial",
+    "status": "beta",
+    "keywords": [
+      "first event",
+      "publish",
+      "ticket inventory"
+    ]
+  },
+  {
+    "url": "/getting-started/local-quickstart",
+    "title": "Run Tixkit locally",
+    "description": "Start infrastructure, migrations, applications, documentation, and sample data from a clean source checkout.",
+    "headings": [
+      {
+        "id": "install-and-configure",
+        "text": "Install and configure",
+        "level": 2
+      },
+      {
+        "id": "start-the-stack",
+        "text": "Start the stack",
+        "level": 2
+      },
+      {
+        "id": "verify-the-result",
+        "text": "Verify the result",
+        "level": 2
+      },
+      {
+        "id": "common-failures",
+        "text": "Common failures",
+        "level": 2
+      },
+      {
+        "id": "next-step",
+        "text": "Next step",
+        "level": 2
+      }
+    ],
+    "body": "Run the quickstart from the root of a Tixkit source checkout. It intentionally refuses to run from an unrelated directory because it controls repository infrastructure and application processes. Install and configure setup:check exits nonzero and prints the missing or invalid fields when configuration is incomplete. Fix the reported values instead of bypassing the check. Start the stack The command checks Docker and required ports, starts local infrastructure, runs database migrations, starts the API, worker, checkout, admin, and docs applications, waits for their health checks, and seeds idempotent sample data. Expected final output includes: The process remains in the foreground. Press Control C once and wait for the managed child processes to stop. Verify the result Open the admin dashboard at http://localhost:3001 , the documentation at http://localhost:3002 , and the Temporal UI at http://localhost:8080 . Verify the API directly: Each command must return a successful response. A rendered page alone does not prove the worker or database is healthy. Common failures Docker is unavailable: start Docker Desktop or the Docker daemon, then rerun the command. A required port is occupied: stop the conflicting process. Do not change one application port without updating every dependent URL. Services time out: inspect the foreground logs for the named unhealthy service, then rerun bun run setup:check mode local . Sample data fails: stop the stack, correct the API or database error, and rerun. Use skip seed only when you deliberately want an empty workspace. Next step Create the first event /getting started/first event with the seeded local principal and workspace.",
+    "audience": [
+      "operator",
+      "developer",
+      "contributor"
+    ],
+    "productArea": "platform",
+    "contentType": "quickstart",
+    "status": "beta",
+    "keywords": [
+      "quickstart",
+      "docker compose",
+      "setup check"
+    ]
+  },
+  {
+    "url": "/getting-started/platform-overview",
+    "title": "Platform overview",
+    "description": "Understand Tixkit's event-commerce boundaries before choosing an operating or integration path.",
+    "headings": [
+      {
+        "id": "choose-the-surface-for-your-task",
+        "text": "Choose the surface for your task",
+        "level": 2
+      },
+      {
+        "id": "contract-boundaries",
+        "text": "Contract boundaries",
+        "level": 2
+      },
+      {
+        "id": "support-labels",
+        "text": "Support labels",
+        "level": 2
+      },
+      {
+        "id": "next-step",
+        "text": "Next step",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit separates event operations from buyer checkout. Operators work in the admin dashboard; buyers use hosted or embedded checkout; integrations call the API or a supported SDK. The API applies tenant, organization, brand, and event scope before repositories read or change data. Choose the surface for your task Use the admin dashboard to configure workspaces, events, inventory, checkout forms, orders, attendees, messages, and reports. Use the hosted checkout or widget for buyer facing purchase flows. Use the API and SDKs for server side integrations and scanner workflows. Self hosters operate the API, worker, database, Redis, Temporal, object storage, admin, checkout, and documentation surfaces. A local capture payment mode is useful for development, but it is not proof that a production payment provider is ready. Contract boundaries packages/domain owns pure business types and rules. packages/db owns Kysely repositories, database types, and migrations. packages/api owns authentication, authorization, serialization, and HTTP routes. packages/openapi owns the public HTTP contract used for reference generation and SDK parity. packages/workflows owns durable Temporal workflows and activities. apps/admin dashboard and apps/checkout consume those contracts; they do not define backend truth. Support labels Every guide identifies its stability. Stable describes a supported contract covered by validation. Beta means the workflow exists but may still change before a stable release. Experimental behavior must not be treated as production ready. Environment specific capture or mock behavior is labeled where it appears. Next step Choose a deployment model /getting started/deployment model if you are evaluating Tixkit, or run Tixkit locally /getting started/local quickstart if you are ready to inspect the complete stack.",
+    "audience": [
+      "operator",
+      "developer",
+      "self-hoster",
+      "contributor"
+    ],
+    "productArea": "platform",
+    "contentType": "overview",
+    "status": "beta",
+    "keywords": [
+      "headless ticketing",
+      "event commerce",
+      "architecture"
+    ]
+  },
+  {
+    "url": "/getting-started/test-checkout",
+    "title": "Complete a test checkout",
+    "description": "Verify buyer checkout and the resulting order without treating capture-mode behavior as provider readiness.",
+    "headings": [
+      {
+        "id": "confirm-the-payment-mode",
+        "text": "Confirm the payment mode",
+        "level": 2
+      },
+      {
+        "id": "complete-the-purchase",
+        "text": "Complete the purchase",
+        "level": 2
+      },
+      {
+        "id": "verify-the-order",
+        "text": "Verify the order",
+        "level": 2
+      },
+      {
+        "id": "prepare-downstream-operations",
+        "text": "Prepare downstream operations",
+        "level": 2
+      }
+    ],
+    "body": "Use test only attendee and buyer data. Never place a real payment credential into a local capture mode form or repository fixture. Confirm the payment mode In local capture mode, checkout records the platform flow without contacting a payment provider. A successful capture mode order proves inventory, forms, pricing, and order creation—not Stripe or another external provider. For provider backed testing, use the provider's test mode and credentials documented for your environment. Confirm the payment account status in workspace settings before checkout. Complete the purchase 1. Open the published event in a private browser window. 2. Select one available test ticket or product. 3. Complete all required buyer, attendee, and consent fields with non customer data. 4. Review quantity, fees, discounts, and total before confirming. 5. Complete the environment appropriate payment step. Do not refresh or submit repeatedly while confirmation is pending. The flow uses idempotency and durable processing, but duplicate user actions complicate diagnosis. Verify the order Return to Orders in the admin dashboard. Find the new order and confirm its payment/order state, line items, attendee records, and total. If checkout showed success but no order appears, preserve the non secret order/session identifier and inspect API and worker logs. Prepare downstream operations Use the test order to practice refund handling /operators/orders/refunds and check in /operators/check in . Provider backed refunds may have external side effects; use capture mode or provider test mode for rehearsal.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "checkout",
+    "contentType": "tutorial",
+    "status": "beta",
+    "keywords": [
+      "test checkout",
+      "order",
+      "payment capture"
+    ]
+  },
+  {
+    "url": "/operations/incidents",
+    "title": "Incident runbooks",
+    "description": "Triage and recover payment, refund, webhook, checkout-workflow, export, and worker incidents.",
+    "headings": [
+      {
+        "id": "general-triage",
+        "text": "General triage",
+        "level": 2
+      },
+      {
+        "id": "payment-or-refund-disagreement",
+        "text": "Payment or refund disagreement",
+        "level": 2
+      },
+      {
+        "id": "webhook-dead-letters",
+        "text": "Webhook dead letters",
+        "level": 2
+      },
+      {
+        "id": "stuck-checkout-or-export",
+        "text": "Stuck checkout or export",
+        "level": 2
+      },
+      {
+        "id": "recovery-validation",
+        "text": "Recovery validation",
+        "level": 2
+      }
+    ],
+    "body": "Protect buyers and preserve evidence before changing state. Record severity, start time, affected environment, safe correlation identifiers, and the current mitigation owner. Never paste secrets, credentials, customer payloads, or raw database dumps into the incident record. General triage 1. Confirm scope by tenant/organization/brand/event without crossing isolation boundaries. 2. Check recent deploys, migrations, provider status, API/worker health, task queue lag, database, Redis, and storage. 3. Stop or rate limit the unsafe side effect while preserving read access where possible. 4. Choose rollback, forward repair, provider reconciliation, or restore based on tested compatibility. Payment or refund disagreement Reconcile Tixkit order/refund records, workflow history, and provider references. Do not issue a second refund or capture before confirming the first attempt. Use the supported compensation/repair path and verify customer facing status afterward. Webhook dead letters Confirm endpoint reachability and signature verification, then fix receiver idempotency before replay. Replay a bounded event set and verify event IDs at the receiver. Stuck checkout or export Inspect the durable workflow/activity and dependency status. Restore workers/storage/providers, retry through supported operations, and verify order/inventory or export artifact state. Avoid creating many duplicate jobs. Recovery validation Run targeted health and golden path checks, confirm alerts clear for the right reason, communicate residual impact, and capture follow up changes with owners. Rehearse restore when integrity is uncertain.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "operations",
+    "contentType": "runbook",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operations/temporal",
+    "title": "Operate Temporal workflows",
+    "description": "Deploy workers, monitor task queues, preserve replay safety, and recover stuck durable operations.",
+    "headings": [
+      {
+        "id": "deploy-workers",
+        "text": "Deploy workers",
+        "level": 2
+      },
+      {
+        "id": "preserve-replay-safety",
+        "text": "Preserve replay safety",
+        "level": 2
+      },
+      {
+        "id": "diagnose-a-stuck-workflow",
+        "text": "Diagnose a stuck workflow",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit uses Temporal for durable checkout, refund, webhook delivery, exports, and other asynchronous operations. The API may accept a request before every activity completes; workflow state is part of operational truth. Deploy workers Deploy workers with the same task queue, namespace, connection, encryption/TLS, and compatible application contract as the API. Verify worker readiness only after required recovery schedulers and registrations are established. Preserve replay safety Workflow code must remain deterministic. Do not add direct network, clock, random, database, or environment dependent behavior inside workflow execution; place side effects in activities. Use Temporal versioning patterns before changing an existing workflow branch that may replay. Diagnose a stuck workflow 1. Identify the workflow ID and type without copying payloads into public channels. 2. Inspect history, pending activity, attempt, timeout, and task queue polling. 3. Restore the missing dependency or worker before retrying. 4. Use supported reset/retry/repair behavior only after understanding idempotency and side effects. 5. Verify the associated order, payment, inventory, delivery, or export state—not only workflow closure. Never delete workflow history or mutate application rows to make a dashboard look complete.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "operations",
+    "contentType": "runbook",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/attendees",
+    "title": "Manage attendees",
+    "description": "Find attendee records, understand admission state, and protect ticket-bearing personal data.",
+    "headings": [
+      {
+        "id": "find-an-attendee",
+        "text": "Find an attendee",
+        "level": 2
+      },
+      {
+        "id": "understand-status",
+        "text": "Understand status",
+        "level": 2
+      },
+      {
+        "id": "resolve-a-lookup-problem",
+        "text": "Resolve a lookup problem",
+        "level": 2
+      }
+    ],
+    "body": "Attendee records connect order line items to admission. They may contain personal data and ticket codes, so expose only the minimum information needed for an authorized task. Find an attendee Use the event and attendee views in the correct organization/brand context. Search by an authorized identifier and confirm the related event and order before changing state. Understand status An attendee can exist before check in and can have ticket or delivery state distinct from the parent order. A paid order does not mean every attendee has been admitted; a checked in attendee must not be admitted again without an explicit supervised correction. Resolve a lookup problem If the attendee is absent, confirm the event scope, order completion, attendee form answers, and whether the purchase created multiple attendees. For door operations, use the documented manual lookup rather than sharing raw ticket codes between devices. Prepare staff and devices with the check in guide /operators/check in .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "attendees",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/box-office",
+    "title": "Run box office and point-of-sale orders",
+    "description": "Create supervised event orders while preserving inventory, payment-mode, and permission boundaries.",
+    "headings": [
+      {
+        "id": "confirm-the-sale-context",
+        "text": "Confirm the sale context",
+        "level": 2
+      },
+      {
+        "id": "create-the-order",
+        "text": "Create the order",
+        "level": 2
+      },
+      {
+        "id": "verify-and-hand-off",
+        "text": "Verify and hand off",
+        "level": 2
+      }
+    ],
+    "body": "Box office orders use the same event and inventory boundaries as buyer checkout, with operator controlled entry and payment context. Confirm the sale context Verify organization, brand, event, occurrence, currency, and payment mode before adding items. Confirm the operator is authorized for box office writes; order read permission alone is insufficient. Create the order Select only currently available items, enter the minimum required buyer/attendee information, and review totals and fees. Submit once and wait for the order result. In provider backed environments, follow the approved terminal or payment workflow rather than entering card data into an unsupported field. Verify and hand off Open the resulting order and attendee records. Confirm the intended fulfillment or ticket delivery state before telling the buyer the sale is complete. If creation fails, retain the non secret attempt reference and check inventory/payment state before retrying.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "box-office",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/brands",
+    "title": "Configure brands and domains",
+    "description": "Manage customer-facing identity and verify that brand changes reach public surfaces.",
+    "headings": [
+      {
+        "id": "update-visual-identity",
+        "text": "Update visual identity",
+        "level": 2
+      },
+      {
+        "id": "verify-the-public-result",
+        "text": "Verify the public result",
+        "level": 2
+      },
+      {
+        "id": "resolve-common-blockers",
+        "text": "Resolve common blockers",
+        "level": 2
+      }
+    ],
+    "body": "A brand controls customer facing identity within an organization. Treat domain verification, sender identity, and visual branding as separate readiness signals; changing a logo does not verify a domain or messaging provider. Update visual identity Open Settings → Branding for the selected brand. Use organization approved names, colors, and public assets. Preview light and dark contexts where the dashboard provides them, then save and reload. Use assets that contain no customer data, credentials, or internal environment details. Keep critical instructions in text; a logo or screenshot must not be the only way to understand a flow. Verify the public result Open a published test event or checkout preview in a private browser window. Confirm the expected brand, not merely the admin preview. Cached public content may require a new revision or refresh according to the current editor workflow. Resolve common blockers A missing public logo usually means the asset was not saved, the wrong brand is selected, or the public revision has not incorporated the change. A custom domain is not ready until its verification status is authoritative; DNS edits alone are not completion. Email sender readiness is provider specific and separate from brand display settings. Next, create and configure an event /operators/events .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "brands",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/check-in",
+    "title": "Prepare and run check-in",
+    "description": "Configure authorized devices, validate scans, and use safe offline or manual fallbacks.",
+    "headings": [
+      {
+        "id": "prepare-the-station",
+        "text": "Prepare the station",
+        "level": 2
+      },
+      {
+        "id": "operate-at-the-door",
+        "text": "Operate at the door",
+        "level": 2
+      },
+      {
+        "id": "offline-behavior",
+        "text": "Offline behavior",
+        "level": 2
+      }
+    ],
+    "body": "Rehearse check in with test tickets before doors open. Confirm device authentication, event scope, connectivity expectations, and the manual fallback path. Prepare the station Select the event and verify the scanner contract/configuration shown by the dashboard. Authorize only the devices and staff that need admission access. Do not place device secrets in URLs, shared notes, screenshots, or analytics. Run a test scan for a valid ticket, a duplicate scan, an invalid code, and a ticket from another event. The UI must clearly distinguish each result without exposing raw internal errors. Operate at the door Keep the camera permission and event scope visible. After a successful admission, wait for confirmation before scanning the next code. Use manual lookup only when the attendee can be verified through the authorized workflow. Offline behavior Use offline manifests only when the configured scanner flow supports them. Verify manifest signature and freshness; reconnect and synchronize as soon as practical. Offline acceptance is not permission to bypass event scope or admit a duplicate without review. If a ticket fails, identify whether it is unknown, wrong event, already used, stale/offline, or blocked by device authorization before escalating.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "check-in",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/events",
+    "title": "Operate events",
+    "description": "Understand event state, schedules, inventory, previews, and publication dependencies.",
+    "headings": [
+      {
+        "id": "work-in-dependency-order",
+        "text": "Work in dependency order",
+        "level": 2
+      },
+      {
+        "id": "understand-event-status",
+        "text": "Understand event status",
+        "level": 2
+      },
+      {
+        "id": "protect-scoped-data",
+        "text": "Protect scoped data",
+        "level": 2
+      }
+    ],
+    "body": "The Events area is the operating hub for schedules, sellable items, checkout fields, messaging, marketing, and public presentation. Event publication is a state transition, not proof that every downstream dependency is ready. Work in dependency order 1. Confirm organization and brand context. 2. Create the event and save its core details. 3. Add a valid schedule or occurrence. 4. Add sellable ticket or product inventory. 5. Review checkout fields, consent, fees, and payment readiness. 6. Preview the public experience. 7. Publish and verify from a private browser window. Understand event status Draft events are editable but not expected to appear as a live public sale. Published events still depend on active schedules, sale windows, inventory, public revisions, brand/domain context, and payment behavior. If an event cannot be published, resolve the exact prerequisite shown by the dashboard. Do not repeatedly toggle status or duplicate the event to work around a missing dependency. Protect scoped data Event URLs and identifiers are not authorization. The API and dashboard must enforce tenant, organization, brand, and event access for every read and write. Report any cross context data immediately through the security process. Use schedules /operators/events/schedules , tickets and products /operators/events/tickets and products , and checkout forms /operators/events/checkout forms to complete the setup.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "events",
+    "contentType": "overview",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/events/checkout-forms",
+    "title": "Configure checkout forms and consent",
+    "description": "Collect only necessary buyer and attendee data and verify the active public revision.",
+    "headings": [
+      {
+        "id": "review-the-form",
+        "text": "Review the form",
+        "level": 2
+      },
+      {
+        "id": "save-and-preview",
+        "text": "Save and preview",
+        "level": 2
+      },
+      {
+        "id": "diagnose-stale-behavior",
+        "text": "Diagnose stale behavior",
+        "level": 2
+      }
+    ],
+    "body": "Checkout forms can collect buyer level and attendee level answers. Minimize personal data and make required fields and consent language explicit. Review the form Open the event checkout form view. For each field, confirm its audience, requirement state, label, and purpose. Use attendee fields only when the answer must differ per admission; use buyer fields for order level contact or agreement. Do not request credentials, payment card data, government identifiers, or unrelated sensitive information in custom fields. Save and preview Save the form revision, then open checkout preview. Add more than one ticket when validating attendee level behavior. Confirm required validation, accessible labels, error text, consent presentation, and the final order summary. Diagnose stale behavior If checkout shows an older form, verify the correct event and brand, the saved/public revision, and whether an existing checkout session captured an earlier revision. Start a new private session before assuming the save failed. Complete a test checkout /getting started/test checkout after every material form or consent change.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "checkout",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/events/schedules",
+    "title": "Configure event schedules",
+    "description": "Add occurrences that make event timing explicit for buyers and operators.",
+    "headings": [
+      {
+        "id": "add-an-occurrence",
+        "text": "Add an occurrence",
+        "level": 2
+      },
+      {
+        "id": "change-an-active-schedule-safely",
+        "text": "Change an active schedule safely",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      }
+    ],
+    "body": "Schedules determine when an event occurs and provide context for checkout, attendee operations, and reporting. Add an occurrence Open the event schedule view and add a future start time with the intended timezone and any supported end or door time. Save, reload, and verify the displayed local time. Timezone errors are operationally expensive. Confirm the venue timezone and do not infer it from the operator's browser. When daylight saving boundaries are relevant, verify the exact rendered date and offset. Change an active schedule safely Before changing an event that already has orders, determine how the change affects buyer communication, tickets, check in, and integrations. Save the new value once, verify it on the public event page, and use the messaging workflow when attendees must be notified. Troubleshoot If a published event is missing from public discovery, confirm that at least one occurrence is active and that its timing, publication, sales window, and brand context are compatible. A schedule alone does not override inactive inventory. Continue with sellable inventory /operators/events/tickets and products .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "events",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/events/tickets-and-products",
+    "title": "Configure tickets, products, and inventory",
+    "description": "Create sellable items with explicit capacity, pricing, availability, and sale windows.",
+    "headings": [
+      {
+        "id": "create-a-ticket-or-product",
+        "text": "Create a ticket or product",
+        "level": 2
+      },
+      {
+        "id": "verify-availability",
+        "text": "Verify availability",
+        "level": 2
+      },
+      {
+        "id": "avoid-oversell-assumptions",
+        "text": "Avoid oversell assumptions",
+        "level": 2
+      }
+    ],
+    "body": "An item is sellable only when its status, price, capacity, inventory pool, and sales window permit a purchase. Public availability is authoritative; an item appearing in the admin editor is not sufficient. Create a ticket or product Open the event's tickets/products view. Define a customer facing name, price and currency, capacity or inventory source, and sales window. Save and reload before creating dependent rules. Use test values in non production environments. Do not use an artificial zero price to bypass payment path validation unless a free item is the intended product behavior. Verify availability Open the event preview and confirm the item is visible with the expected price and remaining availability. If it is absent, check: draft or inactive status; zero or exhausted inventory; sales window not yet open or already closed; inventory pool or occurrence mismatch; access rules, promotion requirements, or public revision state. Avoid oversell assumptions Checkout uses holds and durable confirmation behavior. Do not infer capacity from the count displayed in one browser or manually change database rows. Use supported admin/API operations and verify the resulting public availability. Next, review checkout fields and consent /operators/events/checkout forms .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "inventory",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/messaging",
+    "title": "Configure and send messages",
+    "description": "Work with lifecycle and campaign content while respecting sender verification, consent, and delivery evidence.",
+    "headings": [
+      {
+        "id": "prepare-content",
+        "text": "Prepare content",
+        "level": 2
+      },
+      {
+        "id": "verify-sender-readiness",
+        "text": "Verify sender readiness",
+        "level": 2
+      },
+      {
+        "id": "send-and-verify",
+        "text": "Send and verify",
+        "level": 2
+      }
+    ],
+    "body": "The content editor, sender identity, audience selection, and transport status are separate controls. A saved template is not proof of provider delivery. Prepare content Select the correct brand and event scope. Use the lifecycle or campaign editor appropriate to the message. Preview content with test data and confirm links, unsubscribe/consent behavior, and accessible structure. Verify sender readiness Provider delivery requires the environment's verified email or SMS sender configuration. Local capture behavior can validate rendering without proving provider acceptance. Resolve sender warnings before a live send. Send and verify Use a limited test audience first. Confirm the dashboard's delivery/capture state and, when authorized, provider evidence. Do not copy recipient lists, message bodies containing personal data, or provider credentials into support reports. If delivery fails, distinguish invalid sender, provider rejection, transport error, recipient status, and template/render failure before retrying.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "messaging",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/migration-operations",
+    "title": "Operate durable migrations",
+    "description": "Dry-run, commit, recover, reconcile, and safely correct tenant migration jobs.",
+    "headings": [
+      {
+        "id": "operator-lifecycle",
+        "text": "Operator lifecycle",
+        "level": 2
+      },
+      {
+        "id": "javascript-sdk-workflow",
+        "text": "JavaScript SDK workflow",
+        "level": 2
+      },
+      {
+        "id": "cli-workflow",
+        "text": "CLI workflow",
+        "level": 2
+      },
+      {
+        "id": "api-key-and-source-credential",
+        "text": "API key and source credential",
+        "level": 2
+      },
+      {
+        "id": "dry-run-guarantee",
+        "text": "Dry-run guarantee",
+        "level": 2
+      },
+      {
+        "id": "source-object-safety",
+        "text": "Source object safety",
+        "level": 2
+      },
+      {
+        "id": "historical-financial-records",
+        "text": "Historical financial records",
+        "level": 2
+      },
+      {
+        "id": "cancellation-rollback-and-correction",
+        "text": "Cancellation, rollback, and correction",
+        "level": 2
+      },
+      {
+        "id": "incident-and-recovery",
+        "text": "Incident and recovery",
+        "level": 2
+      },
+      {
+        "id": "release-and-compatibility",
+        "text": "Release and compatibility",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit migrations are durable, tenant scoped jobs. Treat the job report—not an adapter log—as the source of truth for dry run readiness, progress, and conflicts. Treat the live rollback assessment as the source of truth for rollback eligibility. Migration workers may retry a chunk; adapters and the core therefore use stable external references and idempotent writes. Operator lifecycle 1. Upload source objects with upload purpose migration import and wait for a clean malware scan result. Retain the returned opaque uploadArtifactId . 2. Register an expiring source credential reference, then create the job with its source system, adapter version, mapping profile, timezone, currency assumptions, and credential ID. 3. Register each clean uploadArtifactId on the job. Tixkit derives storage metadata and checksums; clients never submit object keys or asserted hashes. 4. Save or select mappings, then run the dry run. Resolve every fatal/error issue and review warnings, unsupported features, duplicates, mapping failures, counts, and runtime/storage estimates. 5. Save the final report and approval evidence. Confirm that its input/configuration hashes still match the job. 6. Commit using the exact job bound acknowledgement. Monitor durable progress events and reconciliation metrics. 7. Activate imported entities only after reconciliation. Keep source files and reports under the configured retention policy. Never skip directly from creation to commit. The API rejects a stale or unsuccessful dry run even if a client attempts it. JavaScript SDK workflow @tixkit/js exposes every public migration route through client.migrations . Its create input is a discriminated union: sourceSystem must match configuration.sourceSystem , official API sources require their documented selectors and credentialId , and export jobs accept only upload artifact IDs. The typed mapping methods are createMapping and mappings ; report retrieval is available as both report and downloadReport . SDK methods apply the same tenant permissions, confirmation headers, and server side validation as direct HTTP calls. CLI workflow Keep credentials out of command arguments and shell history: A minimal create request is: Upload source files with upload purpose migration import , complete malware scanning, then register the returned uploadArtifactId on the job. The server derives the immutable object key, size, media type, and SHA 256 from the tenant and organization scoped upload artifact; clients cannot supply an arbitrary storage key. migration:prepare starts the durable Temporal acquisition/normalization workflow. Wait for the job to reach ready before running dry run. Preparation persists bounded row chunks and opaque cursors, and can be paused, resumed, cancelled, or retried without embedding source records in job configuration. Use migration:pause , migration:resume , and migration:cancel for lifecycle control. These are requests: wait until job status confirms the durable checkpoint. Run migration:rollback assessment immediately before rollback and review eligible , mode , blockers, and any correctivePlanId . migration:rollback requires confirm 'ROLLBACK ' and still fails closed when the server detects live activity or downstream references. API key and source credential TIXKIT API KEY authenticates the operator to Tixkit. It is not the credential used to read a source system. Source credentials stay in the deployment's secret manager; Tixkit stores only an expiring reference: Never submit the raw source token, password, cookie, or authorization header in job configuration or mappings. The credential reference is organization and source scoped. Tixkit revalidates its registry expiry and secret manager availability when API preparation and commit begin. If it expires, is revoked, or no longer resolves, register a new reference, create a new job configuration, and repeat preparation and dry run; do not extend or replace committed evidence in place. Revoke a superseded reference with DELETE /v1/migration credentials/{credentialId}?organizationId={organizationId} . Self hosted workers bind accepted aws secretsmanager:// , gcp secretmanager:// , secret:// , or vault:// references to injected environment variables through TIXKIT MIGRATION CREDENTIAL BINDINGS . The JSON registry contains no secret material and must match both the complete reference and source system: Set TIXKIT MIGRATION GENERIC CSV SECRET through the deployment secret manager. Bindings must match the exact reference, tenant, organization, and source system. Public env:// references are rejected, malformed registries fail closed, and missing bindings or environment material prevent commit. Dry run guarantee A dry run may persist job control rows, uploaded file metadata, normalized staging rows, validation findings, mappings, conflicts, and progress events. It performs zero writes to live event, inventory, buyer, order, payment, ticket, or check in domains. It does not reserve inventory, send messages, deliver webhooks, fulfill tickets, or contact payment providers. Before approving commit, verify the report contains create/update/skip/conflict counts, issue severities, unsupported feature losses, duplicate and mapping findings, date/timezone/currency findings, and runtime/storage estimates. Changing any source object, adapter, mapping, or behavior affecting option invalidates the report and requires another dry run. Source object safety Use tenant and organization scoped migration import upload artifacts and short lived upload credentials. Verify content length and SHA 256 before parsing and again before commit. Reject path traversal, archives with unsafe entries or expansion ratios, unsupported encodings, and unexpected media types. Malware scan uploads where the deployment supports scanning. Quarantine rather than parse failed objects. Encrypt source objects and reports at rest. Redact secrets and unnecessary buyer PII from logs and progress events. Do not replace an object in place. A changed hash is a new input and invalidates the dry run. Apply explicit retention and deletion policies to source exports, row payloads, and reports. Historical financial records Imported payments and refunds are historical snapshots with source amount, currency, provider reference, source timestamp, and provenance. They are not proof that a Tixkit provider transaction succeeded. Migration code must never generate provider success events, settle funds, initiate refunds, create synthetic completed payments, or trigger fulfillment, notification, or webhook side effects. Reconcile snapshots explicitly against provider records when required. A reconciliation result is separate provenance; it must not rewrite the original source values silently. Amount or currency mismatches block activation until an operator records the approved correction. Cancellation, rollback, and correction Before commit, cancellation is safe and leaves live domains unchanged. During commit, cancellation takes effect at a durable chunk boundary; already committed chunks remain idempotently recorded and are reconciled before any resume or rollback decision. After commit but before activation, rollback may delete only untouched entities created by that job. It must refuse destructive rollback when an imported entity has a new sale, scan, transfer, edit, provider event, or downstream reference. Entities updated rather than created are not blindly restored. After live activity, the rollback assessment refuses deletion and persists an immutable rollback.corrective plan event. Download the report again and inspect its correctivePlans collection. Each plan identifies its event ID, blockers, impacted entities, saved mappings, and safe actions. The migration owner must attach the plan to the incident, obtain the same operational/financial approval required for the affected records, execute only additive or scoped corrections, and retain the completion evidence. Typical corrections are additive mappings, scoped edits, compensating historical snapshots, or explicit deactivation. Never delete evidence or manufacture provider history to make totals agree. Incident and recovery 1. Pause the affected job and prevent activation. Do not terminate Temporal histories or edit job state directly. 2. Capture the job ID, run/workflow ID, adapter/version, input/configuration hashes, last durable cursor, failing chunk, and redacted error code. 3. Determine whether the failure is deterministic data validation, transient infrastructure, adapter incompatibility, or a domain invariant failure. 4. For transient failures, restore the dependency and resume from the recorded checkpoint. Idempotency and external reference uniqueness must make replay safe. 5. For bad inputs or mappings, cancel the job, create immutable corrected inputs/configuration, and run a new dry run. Do not mutate committed evidence. 6. Reconcile row counts, external references, entity totals, currencies, historical payment/refund snapshots, ticket state, and check in history before activation. 7. If partial writes cannot be proven safe, keep the job paused, disable activation, and escalate with the corrective plan. Do not force completion. Alert on stalled progress, repeated chunk failures, conflict spikes, tenant scope violations, input hash mismatches, reconciliation drift, rollback refusal, and accidental side effect attempts. Operational dashboards and audit logs must use job/entity identifiers and error codes rather than buyer PII. Release and compatibility Pin the migration adapter and source version matrix used by every job. Adapter upgrades do not alter an existing job’s semantics. Breaking mapping or normalization changes require a new adapter major version, migration guide, fixtures, dry run/commit/idempotency tests, and an explicit operator choice for new jobs.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "runbook",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/migrations/bespoke-adapters",
+    "title": "Build a bespoke migration adapter",
+    "description": "Author and validate an organization-specific adapter without scraping.",
+    "headings": [],
+    "body": "Use defineBespokeAdapter and runBespokeAdapterConformance from @tixkit/migration core . Adapters must use official APIs or customer provided exports, declare supported versions, feature mappings, known losses, rate limit behavior, and implement deterministic discover, extract, normalize, and validate operations. Never place source credentials in configuration, fixtures, normalized rows, or logs. Resolve scoped references only in non replayable worker activities. External IDs must be stable; dependencies must follow the platform order; financial history must use side effect suppressed snapshots. Before registration, provide sanitized fixtures and prove dry run determinism, bounded cursors, validation severities, re import idempotency, historical financial semantics, and rollback eligibility. The executable conformance runner is offline and does not permit scraping or hidden network behavior. See the package authoring README for the complete contract.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/migrations/eventbrite",
+    "title": "Migrate from Eventbrite",
+    "description": "Import Eventbrite API v3 or official attendee exports.",
+    "headings": [],
+    "body": "Supported sources are Eventbrite API v3 and official attendee CSV exports dated 2024 01 through 2026 07. Events, ticket classes, attendees, historical orders, tickets, discounts, check ins, and historical payment/refund snapshots are mapped with stable Eventbrite IDs. Organizer payout schedules remain source provenance only. Reserved seating geometry and marketing audiences are known losses. Imported financial history cannot create provider success events. Use continuation tokens, pages of at most 100 records, Retry After , and bounded exponential backoff. Keep the official export immutable, run dry run and known loss review, then commit. Re import and pre activation rollback eligibility are covered by the adapter conformance profile. In the migration workspace, choose Official API , enter the Eventbrite organization ID, and select at least one explicit event ID. Event IDs are required so the bounded resource plan is durable and resumable; organization wide event discovery is not performed implicitly. The resulting non secret configuration is exactly: Select the expiring credential reference separately; tokens and cursor URLs are not configuration fields.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/migrations/generic-csv",
+    "title": "Import Generic CSV exports",
+    "description": "Prepare, map, preview, and migrate deterministic CSV exports.",
+    "headings": [],
+    "body": "The Generic CSV adapter accepts immutable RFC 4180 documents for events, ticket types, attendees, historical orders, tickets, promo codes, and check in history. Use rfc4180 v1 ; template files and sample data are exported by @tixkit/migration core . The adapter detects comma, semicolon, tab, or pipe delimiters and recognizes entity headers. Always confirm detection in the preview, save an organization scoped mapping profile, and rerun dry run after any mapping change. Required source IDs become stable external references, so re importing an unchanged export skips existing records. Supported mappings include fixed ticket prices and capacity, attendee/buyer provenance, historical orders, issued tickets, fixed or percentage promo codes, and check in/check out timestamps. Reserved seat geometry, provider payment success, source messaging, and webhook automation are reported as known losses. Historical order status never creates a successful provider payment. Import spreadsheet formulas only as data. Error CSV output prefixes formula leading values and can be safely opened for remediation. Resolve every fatal/error row, verify timezone and ISO currency findings, then commit with the job bound confirmation. Rollback remains limited to untouched entities created by that job.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/migrations/hi-events",
+    "title": "Migrate from Hi.Events",
+    "description": "Import supported Hi.Events API or export bundles.",
+    "headings": [],
+    "body": "Supported sources are REST API v1 for Hi.Events 0.20–0.x and official JSON/CSV export bundles. The adapter covers organizations/brands, venues, events/occurrences, capacity assignments, products/ticket types, questions, promo/access codes, buyers/attendees, historical orders, tickets, historical payments/refunds, and check ins. Organizer dashboard widgets are not portable. Provider specific payment metadata is retained only as sanitized snapshot provenance. Financial snapshots never trigger live payment or fulfillment behavior. Collection honors official Retry After guidance and bounded retries for 429/502/503/504. Pin the adapter version, preserve the source page cursors, run dry run, review losses and counts, and commit only the hash current job. Stable source IDs make retries and re import idempotent. In the migration workspace, choose Official API and enter the account ID, one or more event IDs, and—only for self hosting—the HTTPS API origin. The resulting non secret configuration is exactly: Select an expiring credential reference separately. Never paste an API key, cursor, response record, or arbitrary URL into the scope fields.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/migrations/pretix",
+    "title": "Migrate from pretix",
+    "description": "Import supported pretix REST API or official export data.",
+    "headings": [],
+    "body": "Supported sources are pretix REST API v1 for pretix 2023.7–2026.x and Organizer Data Shredder compatible JSON exports. Use official API/export data only. The adapter maps organizers/brands, venues, events/occurrences, quotas, items/products, questions, vouchers, buyers/attendees, historical orders, tickets, historical payment/refund snapshots, and check ins in dependency order. Assigned seat geometry is reported but not imported. Plugin fields without scalar export values require a bespoke mapper. Payment and refund records retain amount, currency, provider reference, timestamp, and provenance but never emit provider success, fulfillment, notification, or webhook side effects. API collection honors Retry After , uses official cursors, and retries 429/502/503/504 with deterministic bounded exponential delay. Store only the scoped secret manager reference. Dry run the complete immutable page/export set, review known losses, then commit. Re import uses pretix IDs as stable external references; rollback tests must remain green before activation. In the migration workspace, choose Official API and enter the organizer slug, one or more event slugs, and—only for self hosted pretix—the HTTPS API origin. The resulting non secret configuration is exactly: Credentials are selected separately by credential reference. Do not put tokens, cursor URLs, query strings, or response records in configuration.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/migrations/ticket-tailor",
+    "title": "Migrate from Ticket Tailor",
+    "description": "Import Ticket Tailor API v1 or official order exports.",
+    "headings": [],
+    "body": "Supported sources are Ticket Tailor API v1 and official Orders exports dated 2024 01 through 2026 07. The adapter maps events, ticket types, historical orders, issued tickets, vouchers, check ins, and side effect suppressed payment/refund snapshots. Waitlist notification history and broadcast audiences are not imported. Checkout layout is flattened into question records. Historical payments and refunds remain immutable snapshots. Follow official next link cursors, cap pages at 100, honor Retry After , and use bounded retries for 429/5xx. Preserve source IDs and exports, approve dry run losses/counts, and activate only after reconciliation. Unchanged re imports skip existing references. In the migration workspace, choose Official API and enter the account ID plus one or more event IDs. The resulting non secret configuration is exactly: Ticket Tailor credentials are selected separately by credential reference. Do not place Basic auth material, continuation URLs, or response data in job configuration.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/orders",
+    "title": "Find and understand orders",
+    "description": "Inspect order, payment, fulfillment, and compensation state without exposing buyer data.",
+    "headings": [
+      {
+        "id": "find-the-order",
+        "text": "Find the order",
+        "level": 2
+      },
+      {
+        "id": "interpret-state",
+        "text": "Interpret state",
+        "level": 2
+      },
+      {
+        "id": "retry-safely",
+        "text": "Retry safely",
+        "level": 2
+      }
+    ],
+    "body": "Use the Orders area to find a purchase and understand its current state. Treat order status, payment provider status, workflow state, and attendee fulfillment as related but distinct evidence. Find the order Search with the least sensitive identifier available, such as an order reference supplied through an authorized support channel. Confirm the organization, brand, event, amount, currency, creation time, and line items before taking action. Do not paste full buyer records, payment details, or ticket codes into chat, issue trackers, or screenshots. Interpret state A successful payment does not automatically prove every downstream activity completed. Review the order timeline and compensation indicators for pending or failed workflows. If the provider and Tixkit disagree, preserve non secret correlation identifiers and follow the payment reconciliation runbook. Retry safely Use only explicit retry or repair actions offered by the dashboard. Refreshing a page is safe; resubmitting a checkout or manually changing database state is not a repair. If an action is disabled, resolve the shown permission or state prerequisite. Continue with refunds /operators/orders/refunds or attendee records /operators/attendees .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "orders",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/orders/refunds",
+    "title": "Process and diagnose refunds",
+    "description": "Validate eligibility, initiate a refund once, and confirm provider and order compensation state.",
+    "headings": [
+      {
+        "id": "validate-eligibility",
+        "text": "Validate eligibility",
+        "level": 2
+      },
+      {
+        "id": "submit-once",
+        "text": "Submit once",
+        "level": 2
+      },
+      {
+        "id": "verify-completion",
+        "text": "Verify completion",
+        "level": 2
+      }
+    ],
+    "body": "Refunds can have external financial side effects. Confirm environment, order, amount, currency, and provider mode before submitting. Validate eligibility Open the order detail view and review prior refunds, payment status, remaining refundable amount, and any compensation warning. In capture mode, behavior is local. In provider test or production mode, the refund may call the configured provider. Submit once Enter the authorized amount and reason, review the confirmation, and submit once. Wait for the resulting state instead of repeating the action. Tixkit uses idempotent/durable processing, but repeated operator requests make incident diagnosis harder. Verify completion Confirm the refund record and order totals after the workflow settles. Where provider access is available, reconcile the provider reference without copying credentials or customer payment data. If state remains pending or failed, use the dashboard's compensation details and incident runbooks /operations/incidents . Do not mark an order refunded solely because a toast or provider page appeared.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "orders",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/reports-and-exports",
+    "title": "Run reports and exports",
+    "description": "Request scoped reporting data, monitor asynchronous exports, and handle generated files safely.",
+    "headings": [
+      {
+        "id": "run-a-report",
+        "text": "Run a report",
+        "level": 2
+      },
+      {
+        "id": "create-an-export",
+        "text": "Create an export",
+        "level": 2
+      },
+      {
+        "id": "diagnose-failure",
+        "text": "Diagnose failure",
+        "level": 2
+      }
+    ],
+    "body": "Reports and exports inherit the active tenant, organization, brand, event, and permission context. Treat generated files as potentially sensitive operational data. Run a report Confirm the selected context and time range before applying filters. Validate totals against a small known sample when the report informs financial or attendance decisions. Create an export Submit the export once and monitor its job state. Exports may be produced asynchronously by workflow activities and object storage. A request acknowledgement is not proof the file exists. Download only through the authorized link, store the file according to your retention policy, and do not attach customer data to public issues. Diagnose failure Check the job event/status shown by the dashboard. Distinguish query validation, workflow/worker, object storage, and signed download failures. Use incident runbooks /operations/incidents for a stuck job rather than recreating many identical exports.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "reports",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/sandbox-operations",
+    "title": "Operate the integration sandbox",
+    "description": "Initialize, reset, isolate, and recover Tixkit's deterministic integration sandbox.",
+    "headings": [],
+    "body": "The sandbox must use a dedicated database, object storage namespace, and Temporal task queue. Set TIXKIT RUNTIME MODE=sandbox ; this forces payment, refund, email, and SMS activities onto capture/no provider behavior even if provider credentials are accidentally present. Initialize a new migrated sandbox database once with TIXKIT SANDBOX INITIALIZE CONFIRM=\"INITIALIZE \" and tixkit sandbox:initialize . The marker is persisted inside the target database. Reset refuses an unmarked database, a primary database alias, a database outside the anchored tixkit sandbox / tixkit test naming convention, or remote reset without the explicit remote reset flag. Stop and drain every sandbox API and worker process, then set TIXKIT SANDBOX RESET COORDINATION=STOPPED only for tixkit sandbox:reset . The result shows a scoped 24 hour API key once and returns epoch plus taskQueue . Configure both API and worker with TIXKIT SANDBOX EPOCH= and TEMPORAL TASK QUEUE= . Startup compares these values with the persisted database marker and fails closed for stale epochs or another queue. Scheduler workflow IDs are epoch scoped, so the new worker cannot reuse a scheduler bound to the prior queue. Each reset seeds the canonical sample brand/event, a future event window, free and capture paid admission, a hidden access code ticket SANDBOX VIP , promotion, add on, checkout question, check in list, and sample history. Old credentials disappear with the reset; old task queues have no worker in the new epoch. If sandbox traffic reaches a provider, stop API/workers, revoke the exposed provider credential, preserve non payload correlation IDs, initialize/reset the sandbox, rotate the task queue, and verify sandbox runtime mode before restoring access.",
+    "audience": [
+      "operator",
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "runbook",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/team-and-permissions",
+    "title": "Manage team access and permissions",
+    "description": "Grant the minimum dashboard capabilities required for each operating role.",
+    "headings": [
+      {
+        "id": "review-before-granting",
+        "text": "Review before granting",
+        "level": 2
+      },
+      {
+        "id": "verify-the-result",
+        "text": "Verify the result",
+        "level": 2
+      },
+      {
+        "id": "remove-access-promptly",
+        "text": "Remove access promptly",
+        "level": 2
+      }
+    ],
+    "body": "Dashboard permissions govern actions such as event, ticket, order, refund, attendee, check in, box office, messaging, report, settings, developer, and billing work. Grant only the capabilities required for the person's role. Review before granting Confirm the intended tenant and organization, the user's identity, and their operational responsibility. Separate door/check in work from settings, developer credentials, refunds, and billing unless the role genuinely requires both. Verify the result After saving access, ask the teammate to reload their authenticated session. They should see permitted navigation and receive a clear blocked state for unauthorized actions. Hidden navigation alone is not authorization; the API must enforce the same boundary. Remove access promptly Remove or reduce access when a responsibility changes. Rotate any separately issued API key or device credential; changing a dashboard role does not revoke credentials owned by another authentication system. Report any cross tenant or permission bypass through the private security process /support , without including customer data or secrets.",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "team",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/operators/workspace",
+    "title": "Configure workspace and organization context",
+    "description": "Select the correct tenant organization and brand before making scoped operational changes.",
+    "headings": [
+      {
+        "id": "confirm-the-selected-context",
+        "text": "Confirm the selected context",
+        "level": 2
+      },
+      {
+        "id": "update-workspace-identity",
+        "text": "Update workspace identity",
+        "level": 2
+      },
+      {
+        "id": "diagnose-a-context-mismatch",
+        "text": "Diagnose a context mismatch",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit scopes operational data by tenant, organization, and brand. Always confirm the active context before creating an event, connecting a provider, or inviting a teammate. Confirm the selected context Use the organization and brand selectors in the authenticated dashboard shell. After changing context, wait for the scoped bootstrap data to reload. The event, payment, developer, and reporting views must reflect the new selection before you continue. Update workspace identity Open Settings → Workspace . Review the display identity and any organization settings available to your permission set. Save once, then reload the page to verify the API persisted the value. Users without settings permission may read permitted workspace context but must not be shown a change action. Ask a workspace owner to make the change rather than sharing credentials. Diagnose a context mismatch If expected events or orders disappear, recheck the selected organization and brand. If an action returns forbidden, confirm both the active context and your permission. If the selector offers an unexpected tenant, stop and report the isolation issue without copying customer data into the report. Continue with brand configuration /operators/brands or team access /operators/team and permissions .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "workspace",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/reference/accessibility",
+    "title": "Accessibility conformance",
+    "description": "Understand the accessibility target, tested documentation and product surfaces, and known reporting path.",
+    "headings": [],
+    "body": "Tixkit targets keyboard operable, screen reader compatible, responsive interfaces with visible focus, semantic landmarks/headings, appropriate contrast, reduced motion behavior, and accessible error/status communication. Documentation acceptance covers homepage, representative guide, search, API reference, mobile navigation, code copy, and framework tabs across Chromium, Firefox, and WebKit with axe, console, and page error gates. Product conformance remains limited to the surfaces and evidence named by the repository validation record; this page does not claim certification. Report an accessibility problem through support /support with route, browser/assistive technology, steps, expected behavior, and a data safe description.",
+    "audience": [
+      "operator",
+      "developer",
+      "contributor"
+    ],
+    "productArea": "platform",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/reference/api-release-train",
+    "title": "API contract release train",
+    "description": "Versioning, compatibility, verification, and publication gates for Tixkit API and SDK contracts.",
+    "headings": [
+      {
+        "id": "incident-and-rollback-procedure",
+        "text": "Incident and rollback procedure",
+        "level": 2
+      }
+    ],
+    "body": "API contract release train Every contract release is stored under artifacts/api/ and exposed by the documentation site at /contracts/ / . A release contains OpenAPI JSON and YAML, generated TypeScript declarations, the webhook catalog, sanitized examples, an API diff, a changelog, a manifest, and SHA 256 checksums. The API version uses a date. Additive operations and optional fields may ship within the current version. Removing an operation or named schema is detected as breaking and fails the release build. A breaking contract requires a new API version, migration guidance, SDK compatibility updates, and explicit release approval. The current and immediately previous versions remain supported during the documented deprecation window. Before release, run: The API Contract Release workflow repeats these gates and uploads a private workflow artifact. It does not publish a package, create a public release, upload production CDN content, or create a tag. Those actions require the protected api contract production environment and final release approval. After approved publication, verify each registry or CDN object by downloading it into a clean directory, comparing its SHA 256 value with CHECKSUMS.sha256 , installing the packed SDK, running the SDK consumer contract, and confirming that the public release manifest source commit is an ancestor of the approved tag commit. Incident and rollback procedure If any checksum, attestation, manifest commit, registry package, documentation copy, or staged CDN object disagrees, stop before advancing an alias or tag and retain every candidate plus workflow log as incident evidence. Never overwrite an immutable version. For a partial publication, restore the prior documentation/CDN alias atomically, purge only mutable caches, and verify the previous manifest again. Deprecate a bad registry package with a corrective message instead of deleting or republishing its version. Retract any pending deprecation window, publish a corrective compatibility plan, and notify affected consumers only through the approved incident channel. Production aliases, package publication, tags, and consumer communication remain external approval actions.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/reference/api-versions",
+    "title": "API versions and compatibility",
+    "description": "Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.",
+    "headings": [],
+    "body": "The current documented API lifecycle version is 2026 01 01 ; webhook envelopes include that value. HTTP routes use the /v1 URL prefix. The current docs describe the current supported contract rather than a hosted archive of historical reference builds. Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period. SDK parity validation checks the declared API version across supported packages and guides.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/reference/api",
+    "title": "API endpoint reference",
+    "description": "Browse every public operation generated from the current OpenAPI 3.1 contract.",
+    "headings": [],
+    "body": "This inventory is generated from packages/openapi ; no hand maintained endpoint list is used. Each operation has a stable deep link, explicit security, product area tag, parameters, request/response contract, and operation ID in the downloadable document.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": [
+      "endpoint reference",
+      "OpenAPI"
+    ]
+  },
+  {
+    "url": "/reference/api/schemas",
+    "title": "API schema reference",
+    "description": "Browse canonical request and response schema names generated from OpenAPI.",
+    "headings": [],
+    "body": "Schema names, required properties, and operation usage come from the same downloadable OpenAPI contract as the endpoint reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/reference/performance",
+    "title": "Performance budgets",
+    "description": "Review documentation and platform performance contracts and the commands that reproduce them.",
+    "headings": [],
+    "body": "Performance claims require measured evidence. Repository budgets cover the configured application routes and documentation specific search/reference behavior. The docs architecture budgets compressed search bootstrap and shards, search open interaction, initial JavaScript, layout stability, content paint, and API reference loading. The OpenAPI JSON is downloadable but is not loaded on ordinary guide pages; the local search index loads only after search intent. Record environment, commit, viewport, browser, sample count, and artifact when reporting a regression. Do not convert an unmeasured target into a success claim.",
+    "audience": [
+      "developer",
+      "self-hoster",
+      "contributor"
+    ],
+    "productArea": "platform",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/reference/privacy-and-retention",
+    "title": "Privacy and retention",
+    "description": "Minimize personal data across checkout, attendees, messaging, logs, exports, documentation, and integrations.",
+    "headings": [],
+    "body": "Collect only data required for the event and documented operational purpose. Checkout questions, attendee records, messages, reports, exports, webhook payloads, logs, screenshots, and support reports can carry personal data. Restrict access by tenant, organization, brand, event, and permission. Apply your configured retention/deletion process to databases, object storage, exports, provider systems, backups, logs, and analytics. Deleting one application row does not automatically erase every external or backup copy. Documentation search is local/static by default and does not retain query text. Optional analytics are disabled by default and must not collect search text, resource IDs, payloads, credentials, or organization data without a separate privacy review. Use the private security/support process for data exposure. Do not attach affected payloads or customer records to a public issue.",
+    "audience": [
+      "operator",
+      "developer",
+      "self-hoster"
+    ],
+    "productArea": "platform",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/reference/webhook-events",
+    "title": "Webhook event catalog",
+    "description": "Browse the event names and payload data fields validated against Tixkit runtime definitions.",
+    "headings": [],
+    "body": "Events use a versioned envelope. Delivery is at least once: receivers must verify signatures, reject stale timestamps, and deduplicate by stable event ID. Ordering is not a global guarantee across endpoints or event types. Tixkit retries non 2xx/activity failures with bounded exponential backoff and marks exhausted deliveries dead lettered. Replay requires an active, idempotent receiver.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "webhooks",
+    "contentType": "reference",
+    "status": "stable",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/android",
+    "title": "Android SDK",
+    "description": "Use the Kotlin Android library for secure scanner and public buyer workflows.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "The library artifact is com.tixkit:tixkit android . In this monorepo, the runnable Android fixture depends on the :sdk project under packages/sdk android/example . Store scanner credentials with platform backed encrypted storage and exclude them from logs, intents, deep links, backups, and analytics. Use public endpoints for buyer safe event content; do not package a server API key in the app. Run the example smoke test and exercise camera permission, offline/online transition, duplicate scans, wrong event codes, revoked devices, and process recreation before release. android Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/astro",
+    "title": "Astro SDK",
+    "description": "Call Tixkit from Astro server code and use public integrations in islands without shipping credentials.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Use createTixkitClient from @tixkit/astro/server in endpoints, middleware, actions, or server rendered pages. A fully static page cannot safely embed a secret key; fetch privileged data during a controlled build only when that exposure model is appropriate, or use server output. The package includes server checkout form and webhook endpoint helpers. Preserve raw request bytes for signature verification. Run apps/sdk astro demo to verify the current Astro integration and webhook route before copying it into an application. astro Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/flutter",
+    "title": "Flutter SDK",
+    "description": "Integrate scanner, ticket, checkout-handoff, public event, and resale behavior in Flutter.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Add tixkit flutter according to the package README and pubspec source used by your distribution model. The SDK provides TixkitScannerClient , scanner storage contracts, checkout handoff, public event pages, resale behavior, and Flutter UI components. Production scanner credentials require platform backed secure storage; TixkitMemoryScannerStorage is suitable for controlled tests, not durable secret storage. Validate camera permission denial, duplicate/wrong event scans, offline manifest expiration, background/resume behavior, and synchronization failure. Use packages/sdk flutter/example and apps/sdk flutter demo as executable fixtures. flutter Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/go",
+    "title": "Go SDK",
+    "description": "Use the Go client for backend integrations with context cancellation, cursor iteration, and webhook verification.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Construct the client with tixkit.NewClient and a server side key. Pass request contexts with deadlines and preserve typed API errors and request IDs. Use NewCursorIterator for paginated operations instead of modifying cursor values. Keep keys in the service secret manager and redact authorization headers from HTTP tracing. The runnable source at packages/sdk go/examples/checkout demonstrates the current API shape; run the module tests before copying an example into production. go Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/ios",
+    "title": "iOS SDK",
+    "description": "Use the Swift package for scanner, checkout handoff, public event, and resale workflows with Keychain storage.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Add the repository's TixkitIOS Swift package and link the TixkitIOS product. Use TixkitKeychainStorage for scanner credentials; memory storage is for deterministic tests. TixkitScannerClient owns authorized scan/sync behavior, while public event and resale clients operate on buyer safe routes. Keep privileged server API keys out of the application bundle. Test camera authorization, application backgrounding, network transitions, manifest validation, duplicate scans, and credential revocation on a real supported device. The package test suite and README are the executable source path until a standalone iOS demo target is added to the CI matrix. ios Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/javascript",
+    "title": "JavaScript SDK",
+    "description": "Use @tixkit/js from server-side JavaScript or TypeScript with typed resources and safe retry behavior.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Install the core SDK: The client rejects secret looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer safe public data to client components. The package declares API version 2026 01 01 ; keep SDK and server compatibility aligned. Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry. javascript Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/nextjs",
+    "title": "Next.js SDK",
+    "description": "Keep Tixkit secrets in server components and route handlers while using client checkout components safely.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Import createTixkitClient from @tixkit/next/server only in server components, server utilities, or route handlers. Never place a secret key in a NEXT PUBLIC variable. Use @tixkit/next/client for provider, hook, and checkout UI exports that consume public identifiers. The route handler exports include supported webhook and checkout helpers; verify signatures with the raw body and keep the endpoint secret server only. The runnable fixture is apps/sdk next demo ; its build is part of SDK parity validation. nextjs Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/react-native",
+    "title": "React Native SDK",
+    "description": "Build scanner, ticket, checkout-handoff, public event, and resale experiences with secure device storage.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "The package exposes TixkitScannerClient , public event/resale clients, checkout handoff helpers, and secure storage contracts. Scanner credentials are device secrets: store them through the supported secure adapter, never AsyncStorage, source code, deep link URLs, analytics, or crash breadcrumbs. Use public clients without a privileged API key for buyer safe content. Checkout handoff URLs must contain only supported public identifiers and quantities. For offline scanning, verify manifest signature and freshness, enforce the event/device scope, retain idempotency identifiers, and synchronize when connectivity returns. Exercise the runnable apps/sdk react native demo on both supported mobile platforms. react native Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/remix",
+    "title": "Remix SDK",
+    "description": "Keep authenticated Tixkit calls in loaders and actions and return only the data the browser needs.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Import createTixkitClient from @tixkit/remix/server in loaders, actions, and server utilities. Use private process environment values and never return the key from a loader. The package provides server checkout form helpers and a Remix checkout action. Validate write actions with idempotency and explicit error mapping; do not treat a redirect as proof a durable order completed. Use apps/sdk remix demo as the runnable integration fixture and keep its environment contract aligned with this guide. remix Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/rust",
+    "title": "Rust SDK",
+    "description": "Use the async Rust client with explicit TLS, retries, idempotency, and webhook verification boundaries.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Build TixkitClient with a server side key and the correct API base URL. The SDK uses async HTTP and Rustls configuration declared by the package. Apply timeouts and retain the same idempotency key when retrying one logical write. Do not include credentials in Debug output, tracing fields, panic reports, or URLs. Verify webhooks against raw bytes before deserialization. Run the package tests and packages/sdk rust/examples/checkout.rs with test configuration. The package declares API version/support information in its README and manifest; parity validation keeps those statements aligned with this guide. rust Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/sveltekit",
+    "title": "SvelteKit SDK",
+    "description": "Initialize Tixkit in server modules and expose only buyer-safe values to Svelte components.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "Use createTixkitClient from @tixkit/sveltekit/server in +page.server.ts , +server.ts , or other server only modules. Read credentials from SvelteKit's private environment APIs, not $env/static/public . The package provides server checkout/form helpers, client exports, and TixkitWidget.svelte . A server load function can list scoped events and return a deliberately reduced view model; it must not serialize the API key. Validate the integration with apps/sdk sveltekit demo . Confirm SSR output, client hydration, webhook raw body handling, and production adapter behavior before deployment. sveltekit Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/sdks/vue-and-nuxt",
+    "title": "Vue and Nuxt SDK",
+    "description": "Use @tixkit/vue in Nuxt server routes and Vue client integrations without crossing the secret boundary.",
+    "headings": [
+      {
+        "id": "install",
+        "text": "Install",
+        "level": 2
+      },
+      {
+        "id": "configure",
+        "text": "Configure securely",
+        "level": 2
+      },
+      {
+        "id": "first-request",
+        "text": "Make the first request",
+        "level": 2
+      },
+      {
+        "id": "troubleshoot",
+        "text": "Troubleshoot",
+        "level": 2
+      },
+      {
+        "id": "verify-and-continue",
+        "text": "Verify and continue",
+        "level": 2
+      }
+    ],
+    "body": "In Nuxt, import createTixkitClient from @tixkit/vue/server inside server/ code and read the key from private runtime config. Do not expose it through runtimeConfig.public . Client exports are for public checkout/widget behavior. Pass public event and brand identifiers from a server response rather than a privileged client instance. The runnable Nuxt fixture is apps/sdk nuxt demo . Its README and build must remain synchronized with this guide and the SDK package exports. vue Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "sdks",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/architecture",
+    "title": "Self-hosting architecture",
+    "description": "Map Tixkit applications, durable services, trust boundaries, and public ingress before deployment.",
+    "headings": [
+      {
+        "id": "trust-boundaries",
+        "text": "Trust boundaries",
+        "level": 2
+      },
+      {
+        "id": "failure-boundaries",
+        "text": "Failure boundaries",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit runs separate API, Temporal worker, admin, checkout, and documentation processes. PostgreSQL is the primary documented local path; repository validation also covers declared compatible database modes. Redis supports runtime coordination, Temporal owns durable workflows, and S3 compatible storage owns generated/uploaded artifacts. Trust boundaries Expose only required public ingress: buyer checkout/public API, authenticated admin/API, provider webhooks, and documentation. Keep database, Redis, Temporal service, and object storage administration private. The API authenticates and scopes requests. The worker consumes trusted Temporal tasks but still calls scoped repositories/providers. Browser applications never receive database, provider, API key, or signing secrets. Failure boundaries API health does not prove worker readiness; worker health does not prove provider readiness. Monitor each service plus database, Redis, Temporal, storage, authentication, payments, messaging, and webhook delivery independently. Continue with configuration and secrets /self hosting/configuration .",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "concept",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/authentication",
+    "title": "Configure authentication",
+    "description": "Choose and validate the supported authentication provider without weakening tenant or session boundaries.",
+    "headings": [
+      {
+        "id": "provider-setup",
+        "text": "Provider setup",
+        "level": 2
+      },
+      {
+        "id": "safe-migration",
+        "text": "Safe migration",
+        "level": 2
+      }
+    ],
+    "body": "The repository supports its documented local development principal and provider backed authentication paths. Local authentication is for controlled development; do not expose it as a production login mechanism. Provider setup Configure the provider's public browser key and server secret in their correct runtime boundaries. Set the matching AUTH PROVIDER and browser provider selection values, then restart API and admin applications. Provider organization identity must resolve to Tixkit tenant/organization context. Test suspended users, missing organization membership, multi tenant selection, expired sessions, and forbidden actions. Safe migration Follow the provider migration procedure for identity mapping and rollback. Never silently create cross tenant memberships from an unverified email match. Keep the prior path available until login, logout, session refresh, organization selection, and API authorization pass in the target environment.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/backups-and-restore",
+    "title": "Back up and restore Tixkit",
+    "description": "Protect relational data and object artifacts with measured, rehearsed recovery procedures.",
+    "headings": [
+      {
+        "id": "backup",
+        "text": "Backup",
+        "level": 2
+      },
+      {
+        "id": "restore-rehearsal",
+        "text": "Restore rehearsal",
+        "level": 2
+      }
+    ],
+    "body": "Backups are not complete until a restore rehearsal proves usable application state. Protect database data and required object storage artifacts; document which ephemeral Redis/Temporal state is reconstructed and which durable Temporal persistence is protected by its own service plan. Backup Run the repository's engine/object storage backup procedures with encrypted destinations, least privilege access, retention, and monitoring. Record timestamps and non secret artifact identifiers. Restore rehearsal Restore into an isolated environment, run migrations only as required by the target commit, start API/worker/application processes, and verify tenant scope, a representative event/order, artifact download, workflow visibility, and health checks. Measure recovery point and recovery time from actual rehearsal evidence. Do not publish invented RPO/RTO claims.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "runbook",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/configuration",
+    "title": "Configure services and secrets",
+    "description": "Validate environment contracts for API, worker, applications, databases, providers, signing, and storage.",
+    "headings": [
+      {
+        "id": "validate-by-mode",
+        "text": "Validate by mode",
+        "level": 2
+      },
+      {
+        "id": "separate-public-and-private-values",
+        "text": "Separate public and private values",
+        "level": 2
+      },
+      {
+        "id": "configuration-drift",
+        "text": "Configuration drift",
+        "level": 2
+      }
+    ],
+    "body": "Start from .env.local.example for local development and your platform's secret manager for deployed environments. Never commit a populated environment file. Validate by mode Use the mode matching the environment. Production checks are intentionally stricter and must not be bypassed with local capture values. Separate public and private values Only variables explicitly designed for public browser use may use a public prefix. Database URLs, provider secrets, webhook secrets, API keys, encryption/signing material, object storage credentials, and Temporal credentials remain server only. Rotate a secret after suspected exposure and restart/redeploy every process that consumes it. Verify old credentials no longer authenticate. Configuration drift Record non secret environment contracts in deployment configuration, validate them before release, and compare API/worker settings that must agree, including database, Temporal namespace/task queue, storage, and provider mode. After every required mode passes, continue to the deployment runbook /self hosting/deployment .",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/databases",
+    "title": "Choose and operate a database",
+    "description": "Use only the database modes covered by Tixkit migrations, repositories, and compatibility validation.",
+    "headings": [
+      {
+        "id": "provision-safely",
+        "text": "Provision safely",
+        "level": 2
+      },
+      {
+        "id": "validate-compatibility",
+        "text": "Validate compatibility",
+        "level": 2
+      },
+      {
+        "id": "operational-rule",
+        "text": "Operational rule",
+        "level": 2
+      }
+    ],
+    "body": "PostgreSQL is the default local path. MySQL and MSSQL behavior is limited to the compatibility explicitly exercised by repository migrations and tests. Do not infer support for an untested engine/version from Kysely's general capabilities. Provision safely Use TLS, private networking, a least privilege application identity, bounded connection pools, monitored storage, and automated backups. Keep migration credentials separate when the application identity should not alter schema. Validate compatibility Run the engine specific migration and integration gates documented by the repository before adopting a version or managed service. Test timestamps, JSON, indexes, locking, pagination, unique constraints, and rollback/forward behavior with production like settings. Operational rule Never repair application state by editing production rows without an approved runbook, backup, tenant scope, and verification plan. Prefer supported API, repository, workflow, and compensation paths.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/deployment",
+    "title": "Deploy Tixkit",
+    "description": "Build, migrate, release, smoke-test, and roll back the API, worker, applications, and documentation coherently.",
+    "headings": [
+      {
+        "id": "release-order",
+        "text": "Release order",
+        "level": 2
+      },
+      {
+        "id": "rollback",
+        "text": "Rollback",
+        "level": 2
+      },
+      {
+        "id": "smoke-checks",
+        "text": "Smoke checks",
+        "level": 2
+      }
+    ],
+    "body": "Deploy immutable artifacts built from one reviewed commit. The API, worker, OpenAPI reference, SDK compatibility statements, dashboard, checkout, and docs must describe the same contract. Release order 1. Back up and verify restore readiness. 2. Run the release dry run and documentation/OSS export gates. 3. Apply forward compatible migrations using the approved migration identity. 4. Deploy API and worker with compatible Temporal workflow code. 5. Deploy admin, checkout, and docs. 6. Verify health, representative public/authenticated reads, checkout, workflow, webhook, and documentation routes. Rollback Roll back application artifacts independently only while contract and migration compatibility permits it. Prefer a forward fix for destructive schema changes. Preserve documentation redirects so dashboard links remain valid across a docs rollback. Smoke checks Verify /health for API and docs, worker readiness, a real published test event, authenticated context, and a test safe checkout. A green homepage is not a complete deployment proof. Continue with observability configuration /self hosting/observability before accepting the release.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/object-storage",
+    "title": "Configure object storage",
+    "description": "Store uploads and generated artifacts in a private S3-compatible bucket with controlled download paths.",
+    "headings": [],
+    "body": "Configure endpoint, bucket, region, access key, and secret only on server processes that require storage. Use a least privilege identity restricted to the intended bucket/prefix. Keep the bucket private. Public or authenticated download behavior must flow through the API's documented allowlisted or signed routes; object keys are not authorization. Validate upload, durable read, signed download expiry, public allowlist behavior, deletion/retention, and failure recovery. Monitor capacity, error rate, and credential expiry. Include required artifacts in backup/restore rehearsals rather than assuming database backups are sufficient.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/observability",
+    "title": "Configure observability",
+    "description": "Monitor request, workflow, datastore, provider, export, checkout, and documentation health without logging sensitive data.",
+    "headings": [
+      {
+        "id": "correlate-safely",
+        "text": "Correlate safely",
+        "level": 2
+      },
+      {
+        "id": "alert-on-outcomes",
+        "text": "Alert on outcomes",
+        "level": 2
+      }
+    ],
+    "body": "Collect service level metrics, traces, structured logs, and health signals for the API, worker, admin, checkout, docs, database, Redis, Temporal, storage, and configured providers. Correlate safely Use request, workflow, delivery, export job, checkout session, and order identifiers only where policy permits. Redact authorization headers, cookies, API keys, signing secrets, provider credentials, ticket codes, and personal data payloads. Alert on outcomes Alert on error/latency saturation, worker/task queue lag, failed checkout finalization, payment reconciliation, webhook dead letters, export failures, database pool pressure, storage errors, and documentation smoke failures. Avoid alerts based only on process uptime. Link alerts to the exact incident runbook /operations/incidents and verify alert routing during release rehearsal.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "how-to",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/upgrades",
+    "title": "Upgrade Tixkit",
+    "description": "Rehearse contract, migration, workflow, SDK, documentation, and rollback compatibility before production rollout.",
+    "headings": [
+      {
+        "id": "rehearse",
+        "text": "Rehearse",
+        "level": 2
+      },
+      {
+        "id": "roll-forward-or-back",
+        "text": "Roll forward or back",
+        "level": 2
+      }
+    ],
+    "body": "Read release and documentation changes for API, SDK, CLI, configuration, providers, migrations, and workflows. Build the sanitized OSS tree and run the release dry run before upgrading. Rehearse Clone production like data into an isolated environment using the approved sanitization process. Apply migrations, deploy API/worker together where workflow compatibility requires it, then run checkout, order, webhook, export, check in, and docs smoke paths. Roll forward or back Confirm the old application can run against the new schema before treating binary rollback as safe. Preserve Temporal replay compatibility. When rollback is unsafe, use the documented forward repair and restore decision instead of forcing an older binary. Monitor errors, workflow failures, provider outcomes, and database performance through the rollout window.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "runbook",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/support",
+    "title": "Support and responsible reporting",
+    "description": "Choose the correct private or public channel for usage questions, defects, security issues, and documentation changes.",
+    "headings": [],
+    "body": "Use repository discussions or the documented support destination for usage questions that contain no private data. Use issue templates for reproducible public defects and documentation problems. Report security vulnerabilities privately through the process in SECURITY.md ; never open a public issue containing exploit detail, credentials, tenant data, or customer information. For an operational incident, follow incident runbooks /operations/incidents and your organization's escalation policy. Public community support is not a production paging service. When reporting a docs problem, include the canonical page URL, source path, version/commit when known, and the incorrect or missing outcome. Remove secrets, personal data, private topology, and internal payloads.",
+    "audience": [
+      "operator",
+      "developer",
+      "self-hoster",
+      "contributor"
+    ],
+    "productArea": "platform",
+    "contentType": "overview",
+    "status": "beta",
+    "keywords": []
+  }
+]

@@ -1,0 +1,33 @@
+---
+title: Migrate from Eventbrite
+description: Import Eventbrite API v3 or official attendee exports.
+audience: [operator, developer]
+product_area: platform
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - An Eventbrite API credential reference or immutable official export
+related:
+  - /operators/migration-operations
+---
+
+Supported sources are Eventbrite API v3 and official attendee CSV exports dated 2024-01 through 2026-07. Events, ticket classes, attendees, historical orders, tickets, discounts, check-ins, and historical payment/refund snapshots are mapped with stable Eventbrite IDs.
+
+Organizer payout schedules remain source provenance only. Reserved seating geometry and marketing audiences are known losses. Imported financial history cannot create provider-success events.
+
+Use continuation tokens, pages of at most 100 records, `Retry-After`, and bounded exponential backoff. Keep the official export immutable, run dry-run and known-loss review, then commit. Re-import and pre-activation rollback eligibility are covered by the adapter conformance profile.
+
+In the migration workspace, choose **Official API**, enter the Eventbrite organization ID, and select at least one explicit event ID. Event IDs are required so the bounded resource plan is durable and resumable; organization-wide event discovery is not performed implicitly. The resulting non-secret configuration is exactly:
+
+```json
+{
+  "sourceMode": "official-api",
+  "sourceSystem": "eventbrite",
+  "organizationId": "123456789",
+  "eventIds": ["987654321"]
+}
+```
+
+Select the expiring credential reference separately; tokens and cursor URLs are not configuration fields.

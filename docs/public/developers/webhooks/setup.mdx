@@ -1,0 +1,33 @@
+---
+title: Configure a webhook endpoint
+description: Register an HTTPS receiver, subscribe to explicit event types, and store the one-time signing secret safely.
+audience:
+  - developer
+product_area: webhooks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Developer permission
+  - An HTTPS endpoint that can retain the raw request body
+related:
+  - /developers/webhooks/verify-signatures
+  - /reference/webhook-events
+---
+
+Open **Developer → Webhooks** and create an endpoint with its exact HTTPS URL and only the event types the integration handles.
+
+## Store the secret once
+
+Endpoint creation returns a signing secret once. Move it directly to the receiving service's secret manager. Do not copy it into a URL, browser storage, analytics, screenshots, issue reports, or committed configuration.
+
+To rotate, create or activate the replacement secret/endpoint according to the supported dashboard flow, deploy verification, validate delivery, and disable the old endpoint. Do not disable the working path before the replacement verifies successfully.
+
+## Return promptly
+
+Read the raw body, verify signature and timestamp, durably record the event ID, and return a `2xx` response promptly. Perform slow business work asynchronously. Non-2xx responses and delivery failures are retried; repeated processing must be idempotent.
+
+## Verify configuration
+
+Send a test delivery, confirm a successful status in Tixkit, and reconcile the event ID in receiver logs without recording the secret or full sensitive payload.

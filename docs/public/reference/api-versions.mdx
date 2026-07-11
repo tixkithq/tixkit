@@ -1,0 +1,21 @@
+---
+title: API versions and compatibility
+description: Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites: []
+related:
+  - /reference/api
+  - /contributing/add-an-sdk-operation
+---
+
+The current documented API lifecycle version is `2026-01-01`; webhook envelopes include that value. HTTP routes use the `/v1` URL prefix.
+
+The current docs describe the current supported contract rather than a hosted archive of historical reference builds. Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period.
+
+SDK parity validation checks the declared API version across supported packages and guides.

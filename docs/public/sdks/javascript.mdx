@@ -1,0 +1,48 @@
+---
+title: JavaScript SDK
+description: Use @tixkit/js from server-side JavaScript or TypeScript with typed resources and safe retry behavior.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A server-side JavaScript runtime
+related:
+  - /getting-started/first-api-call
+  - /developers/api-fundamentals/authentication
+---
+
+<SdkGuide sdkId="javascript" />
+
+<FrameworkTabs
+  tabs={[
+    { label: 'Bun', code: 'bun add @tixkit/js', language: 'bash' },
+    { label: 'npm', code: 'npm install @tixkit/js', language: 'bash' },
+    { label: 'pnpm', code: 'pnpm add @tixkit/js', language: 'bash' },
+  ]}
+/>
+
+Install the core SDK:
+
+```bash
+bun add @tixkit/js
+```
+
+```ts
+import { TixkitClient } from '@tixkit/js';
+
+const tixkit = new TixkitClient({
+  apiKey: process.env.TIXKIT_API_KEY,
+  apiBaseUrl: process.env.TIXKIT_API_BASE_URL ?? 'http://localhost:4000',
+});
+
+const page = await tixkit.events.list({ limit: 10 });
+console.log(page.items.map((event) => event.id));
+```
+
+The client rejects secret-looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-01-01`; keep SDK and server compatibility aligned.
+
+Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry.

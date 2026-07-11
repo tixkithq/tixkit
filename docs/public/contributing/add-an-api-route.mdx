@@ -1,0 +1,29 @@
+---
+title: Add or change an API route
+description: Keep Fastify behavior, domain and repository contracts, OpenAPI, SDKs, dashboard types, docs, and tests synchronized.
+audience:
+  - contributor
+product_area: contributing
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Familiarity with the API/domain/database boundary
+related:
+  - /contributing/add-an-sdk-operation
+  - /reference/api
+---
+
+Start with the owning route module under `packages/api/src/routes/modules`. Identify the domain types, repository operations, permissions, tenant/organization/brand/event scope, runtime strings, and integration tests before editing.
+
+## Change the complete slice
+
+1. Update pure domain validation/types when business rules change.
+2. Add a migration and repository method when persistence changes.
+3. Implement authentication, authorization, schema, serialization, and safe errors in the route.
+4. Update `packages/openapi` with stable operation ID, tags, security/scopes, schemas, and sanitized examples.
+5. Update SDK methods/types, dashboard client types, fixtures, examples, and canonical docs.
+6. Add unit, integration, tenant-isolation, permission, generated-client, and browser coverage as applicable.
+
+Do not reveal resource existence across scope boundaries. Do not return raw provider/database errors or secret material.

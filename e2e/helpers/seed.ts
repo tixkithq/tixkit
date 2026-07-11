@@ -122,6 +122,57 @@ export async function seedPublishedEventPageContent(input: {
   });
 }
 
+export async function seedPublishedOrderConfirmationContent(input: {
+  eventId: string;
+  suffix: string;
+}): Promise<void> {
+  const now = new Date();
+  const safeSuffix = compactIdPart(input.suffix, 20);
+  const documentId = `doc_confirm_${safeSuffix}`.slice(0, 32);
+  const versionId = `ver_confirm_${safeSuffix}`.slice(0, 32);
+  await withE2eDb(async (db) => {
+    await db
+      .insertInto('content_documents')
+      .values({
+        id: documentId,
+        tenant_id: devTenantId,
+        organization_id: devOrganizationId,
+        brand_id: devBrandId,
+        event_id: input.eventId,
+        channel: 'email',
+        key: 'order-confirmed',
+        name: 'Order confirmation',
+        status: 'published',
+        locale: 'en',
+        current_draft_version_id: null,
+        published_version_id: versionId,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('content_document_versions')
+      .values({
+        id: versionId,
+        document_id: documentId,
+        version_number: 1,
+        status: 'published',
+        schema_version: 1,
+        subject: 'Your tickets are confirmed',
+        preview_text: 'Order confirmation',
+        content_json: JSON.stringify({}),
+        rendered_html: '<p>Your order is confirmed.</p>',
+        rendered_text: 'Your order is confirmed.',
+        variables: JSON.stringify([]),
+        validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        created_by: 'e2e',
+        created_at: now,
+        published_at: now,
+      })
+      .execute();
+  });
+}
+
 export type SeededTicketVariantCheckoutEvent = {
   event: { id: string; title: string };
   accessCode: string;

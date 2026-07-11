@@ -1,0 +1,53 @@
+---
+title: Make the first API call
+description: Create a narrowly scoped server-only key and use it for a non-destructive request.
+audience:
+  - developer
+product_area: api
+content_type: quickstart
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Developer permission in a Tixkit workspace
+  - A server runtime or terminal that will not expose environment variables to a browser bundle
+related:
+  - /developers/api-fundamentals/authentication
+  - /reference/api
+keywords:
+  - API key
+  - curl
+  - first request
+---
+
+Tixkit API keys are secrets for server-side use. Do not paste a secret into browser code, a URL, documentation feedback, analytics, screenshots, or persistent browser storage.
+
+## Create a scoped key
+
+Open **Developer → API keys** in the admin dashboard. Create a key with only the read scope needed to list events. Copy the secret from the one-time display directly into your server secret manager or current shell, then dismiss it. Tixkit does not display the secret again.
+
+```bash
+export TIXKIT_API_KEY='paste-the-one-time-secret-in-your-shell'
+export TIXKIT_API_BASE_URL='http://localhost:4000/v1'
+```
+
+Do not add these values to shell history, committed `.env` files, or client-visible `NEXT_PUBLIC_` variables.
+
+## List events safely
+
+```bash
+curl --fail-with-body \
+  --header "Authorization: Bearer $TIXKIT_API_KEY" \
+  "$TIXKIT_API_BASE_URL/events"
+```
+
+A successful response is JSON containing the events visible to the key's tenant and scope. An empty list is a valid result.
+
+## Diagnose failures
+
+- **401 Unauthorized:** the header is missing, malformed, expired, revoked, or contains the wrong key.
+- **403 Forbidden:** authentication succeeded but the key lacks the required scope or tenant access.
+- **404 Not Found:** verify the `/v1` base path and environment.
+- **Connection refused:** confirm the API health endpoint and base URL before rotating the key.
+
+Rotate or revoke the key immediately if it was copied into a browser, URL, log, screenshot, or committed file. Continue with [webhook signature verification](/developers/webhooks/verify-signatures), [authentication and key handling](/developers/api-fundamentals/authentication), or the [generated API reference](/reference/api).

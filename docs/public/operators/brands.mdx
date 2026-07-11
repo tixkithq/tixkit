@@ -1,0 +1,37 @@
+---
+title: Configure brands and domains
+description: Manage customer-facing identity and verify that brand changes reach public surfaces.
+audience:
+  - operator
+product_area: brands
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - An active organization context
+  - Settings permission
+related:
+  - /operators/workspace
+  - /getting-started/first-event
+---
+
+A brand controls customer-facing identity within an organization. Treat domain verification, sender identity, and visual branding as separate readiness signals; changing a logo does not verify a domain or messaging provider.
+
+## Update visual identity
+
+Open **Settings → Branding** for the selected brand. Use organization-approved names, colors, and public assets. Preview light and dark contexts where the dashboard provides them, then save and reload.
+
+Use assets that contain no customer data, credentials, or internal environment details. Keep critical instructions in text; a logo or screenshot must not be the only way to understand a flow.
+
+## Verify the public result
+
+Open a published test event or checkout preview in a private browser window. Confirm the expected brand, not merely the admin preview. Cached public content may require a new revision or refresh according to the current editor workflow.
+
+## Resolve common blockers
+
+- A missing public logo usually means the asset was not saved, the wrong brand is selected, or the public revision has not incorporated the change.
+- A custom domain is not ready until its verification status is authoritative; DNS edits alone are not completion.
+- Email sender readiness is provider-specific and separate from brand display settings.
+
+Next, [create and configure an event](/operators/events).

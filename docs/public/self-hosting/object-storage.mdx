@@ -1,0 +1,22 @@
+---
+title: Configure object storage
+description: Store uploads and generated artifacts in a private S3-compatible bucket with controlled download paths.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: how-to
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - An S3-compatible service and private bucket
+related:
+  - /self-hosting/configuration
+  - /self-hosting/backups-and-restore
+---
+
+Configure endpoint, bucket, region, access key, and secret only on server processes that require storage. Use a least-privilege identity restricted to the intended bucket/prefix.
+
+Keep the bucket private. Public or authenticated download behavior must flow through the API's documented allowlisted or signed routes; object keys are not authorization.
+
+Validate upload, durable read, signed-download expiry, public allowlist behavior, deletion/retention, and failure recovery. Monitor capacity, error rate, and credential expiry. Include required artifacts in backup/restore rehearsals rather than assuming database backups are sufficient.

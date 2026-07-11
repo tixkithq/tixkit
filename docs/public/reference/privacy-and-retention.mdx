@@ -1,0 +1,25 @@
+---
+title: Privacy and retention
+description: Minimize personal data across checkout, attendees, messaging, logs, exports, documentation, and integrations.
+audience:
+  - operator
+  - developer
+  - self-hoster
+product_area: platform
+content_type: reference
+status: beta
+owner: security
+last_verified: 2026-07-10
+prerequisites: []
+related:
+  - /operators/events/checkout-forms
+  - /support
+---
+
+Collect only data required for the event and documented operational purpose. Checkout questions, attendee records, messages, reports, exports, webhook payloads, logs, screenshots, and support reports can carry personal data.
+
+Restrict access by tenant, organization, brand, event, and permission. Apply your configured retention/deletion process to databases, object storage, exports, provider systems, backups, logs, and analytics. Deleting one application row does not automatically erase every external or backup copy.
+
+Documentation search is local/static by default and does not retain query text. Optional analytics are disabled by default and must not collect search text, resource IDs, payloads, credentials, or organization data without a separate privacy review.
+
+Use the private security/support process for data exposure. Do not attach affected payloads or customer records to a public issue.

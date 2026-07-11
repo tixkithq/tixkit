@@ -1,0 +1,53 @@
+---
+title: Verify webhook signatures
+description: Authenticate the raw request body with HMAC-SHA256, constant-time comparison, and timestamp tolerance.
+audience:
+  - developer
+product_area: webhooks
+content_type: how-to
+status: stable
+owner: security
+last_verified: 2026-07-10
+prerequisites:
+  - A webhook endpoint signing secret in server-only storage
+  - Access to the unparsed request body
+related:
+  - /developers/webhooks/testing
+  - /developers/webhooks/troubleshooting
+---
+
+The `X-Tixkit-Signature` header contains `t=<unix-seconds>,v1=<hex-signature>`. Tixkit signs `${timestamp}.${rawBody}` with HMAC-SHA256.
+
+## Verify before parsing
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+export function verifyTixkitWebhook(
+  rawBody: string,
+  signatureHeader: string,
+  secret: string,
+  toleranceSeconds = 300,
+): boolean {
+  const parts = new Map(signatureHeader.split(',').map((part) => part.split('=', 2)));
+  const timestamp = Number(parts.get('t'));
+  const signature = parts.get('v1');
+  if (!Number.isFinite(timestamp) || !signature) return false;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - timestamp) > toleranceSeconds) return false;
+
+  const expected = createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
+  const actualBytes = Buffer.from(signature, 'hex');
+  const expectedBytes = Buffer.from(expected, 'hex');
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
+```
+
+Compute the digest before JSON parsing or reserialization. Reject missing, malformed, stale, or mismatched signatures. Use constant-time comparison and keep the endpoint secret out of error messages.
+
+## Prevent replay
+
+Timestamp tolerance limits stale requests but does not deduplicate valid retries. Store the stable webhook event ID and make processing idempotent. A delivery attempt ID may change across attempts; the event ID identifies the logical event.
+
+Continue with the [generated API reference](/reference/api) and a [supported SDK guide](/sdks/javascript) after the verification fixture passes.

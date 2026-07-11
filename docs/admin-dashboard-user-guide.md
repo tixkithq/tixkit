@@ -2,6 +2,16 @@
 
 This guide is for organizers, box-office operators, support staff, and developers using the Tixkit admin dashboard.
 
+## Create and launch an event
+
+Use **Events → Create event** to open `/events/new`. Choose a starting point, then enter only the title, schedule, timezone, currency, and optional venue. The browser timezone is suggested when the workspace has no saved default. The event is immediately stored as a draft and opens in its launch center.
+
+The launch center is the source of truth for setup progress. Required blockers must pass before publication; recommended items can be addressed later. Each available action opens the existing specialist editor for tickets, products, checkout questions, event-page content, messages, payments, preview, or check-in. Actions the current role cannot perform are not offered.
+
+Preview is authenticated for unpublished events. Marking preview reviewed is explicit and is invalidated when relevant event, ticket, checkout, product, or content state changes. In capture/mock or provider-test mode, **Run safe test checkout** exercises real availability, pricing, questions, and product rules without charging, issuing tickets, consuming inventory, or affecting production reports.
+
+Use `/events/{eventId}/settings` for advanced settings. Sections cover basics, schedule and structured venue, sales, owned media uploads with alt text, and SEO/marketing. Changes save with event-version checks; if another editor changes the event first, reload the latest version before retrying. Published events collapse setup guidance and prioritize operational health, while readiness remains available as a secondary action.
+
 ## First Run
 
 Before selling tickets:

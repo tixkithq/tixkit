@@ -1,0 +1,163 @@
+name: Trusted Documentation CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/docs/**"
+      - "apps/admin-dashboard/**"
+      - "apps/checkout/**"
+      - "apps/sdk-*-demo/**"
+      - "docs/**"
+      - "packages/api/**"
+      - "packages/cli/**"
+      - "packages/docs-core/**"
+      - "packages/domain/**"
+      - "packages/db/**"
+      - "packages/openapi/**"
+      - "packages/sdk-*/**"
+      - "packages/shared/**"
+      - "packages/widget/**"
+      - "packages/workflows/**"
+      - "packages/**/README.md"
+      - "scripts/docs/**"
+      - "scripts/__tests__/docs-validation.test.mjs"
+      - "scripts/__tests__/export-oss.test.mjs"
+      - "scripts/__tests__/legacy-documentation-references.test.mjs"
+      - "scripts/__tests__/sdk-parity.test.mjs"
+      - "scripts/export-oss.mjs"
+      - "scripts/lib/sdk-parity.mjs"
+      - "scripts/sdk-demo-matrix.mjs"
+      - "scripts/sdk-parity-matrix.mjs"
+      - "e2e/docs-platform.spec.ts"
+      - "e2e/admin-documentation-platform.spec.ts"
+      - "playwright.docs.config.ts"
+      - "playwright.config.ts"
+      - "package.json"
+      - "bun.lock"
+      - "turbo.json"
+      - ".env.example"
+      - ".env.local.example"
+      - "*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+      - ".github/workflows/trusted-docs-ci.yml"
+      - ".github/workflows/trusted-ci.yml"
+      - ".github/workflows/trusted-release-dry-run.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: trusted-docs-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Contracts, Content, and Static Build
+    runs-on: tixkit-epyc-trusted
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Verify GitHub Action refs are pinned
+        run: infra/ci/scripts/verify-github-action-pins.sh
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Validate generated reference drift before builds
+        run: bun run docs:reference
+      - name: Validate documentation contracts and content
+        run: bun run docs:check
+      - name: Validate documentation application
+        run: |
+          bun run --filter @tixkit/docs typecheck
+          bun run --filter @tixkit/docs lint
+          bun run --filter @tixkit/docs test:unit
+          bun run --filter @tixkit/docs build:static
+      - name: Validate SDK guides, packages, and demos
+        run: |
+          bun run sdk:parity
+          bun run sdk:demos:check
+      - name: Validate documentation, export, and SDK script failure cases
+        run: node --test scripts/__tests__/docs-validation.test.mjs scripts/__tests__/export-oss.test.mjs scripts/__tests__/legacy-documentation-references.test.mjs scripts/__tests__/sdk-parity.test.mjs
+      - name: Reject generated drift and whitespace errors
+        run: git diff --exit-code -- apps/docs/public apps/docs/src/generated && git diff --check
+
+  browser:
+    name: Docs Browser (${{ matrix.browser }})
+    runs-on: tixkit-epyc-trusted
+    needs: validate
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      CI: "true"
+      DOCS_URL: http://127.0.0.1:3002
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+        with:
+          playwright-cache: "true"
+      - run: bun install --frozen-lockfile
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run documentation accessibility and responsive tests
+        run: |
+          bun run docs:test:e2e -- --project=${{ matrix.browser }}
+          if [ "${{ matrix.browser }}" = chromium ]; then
+            bun run docs:test:e2e -- --project=mobile-chromium
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: trusted-docs-playwright-${{ matrix.browser }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  dashboard-browser:
+    name: Dashboard Documentation Browser (${{ matrix.browser }})
+    runs-on: tixkit-epyc-trusted
+    needs: validate
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      CI: "true"
+      TEMPORAL_TASK_QUEUE: tixkit-docs-e2e-${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+        with:
+          playwright-cache: "true"
+      - run: bun install --frozen-lockfile
+      - name: Start dashboard test infrastructure
+        run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run Help, readiness, and developer-console browser tests
+        run: bunx playwright test e2e/admin-documentation-platform.spec.ts --project=${{ matrix.browser }}
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs --no-color
+      - name: Stop dashboard test infrastructure
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down -v
+
+  oss-export:
+    name: Sanitized OSS Documentation Build
+    runs-on: tixkit-epyc-trusted
+    needs: validate
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Export and build the sanitized public tree
+        run: bun run export:oss -- --out /tmp/tixkit-docs-oss-export
+      - name: Verify internal documentation is absent
+        run: test ! -e /tmp/tixkit-docs-oss-export/docs/internal

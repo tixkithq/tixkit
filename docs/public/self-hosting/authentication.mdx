@@ -1,0 +1,28 @@
+---
+title: Configure authentication
+description: Choose and validate the supported authentication provider without weakening tenant or session boundaries.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: how-to
+status: beta
+owner: security
+last_verified: 2026-07-10
+prerequisites:
+  - A supported authentication provider configuration
+related:
+  - /self-hosting/configuration
+  - /operators/team-and-permissions
+---
+
+The repository supports its documented local development principal and provider-backed authentication paths. Local authentication is for controlled development; do not expose it as a production login mechanism.
+
+## Provider setup
+
+Configure the provider's public browser key and server secret in their correct runtime boundaries. Set the matching `AUTH_PROVIDER` and browser provider selection values, then restart API and admin applications.
+
+Provider organization identity must resolve to Tixkit tenant/organization context. Test suspended users, missing organization membership, multi-tenant selection, expired sessions, and forbidden actions.
+
+## Safe migration
+
+Follow the provider migration procedure for identity mapping and rollback. Never silently create cross-tenant memberships from an unverified email match. Keep the prior path available until login, logout, session refresh, organization selection, and API authorization pass in the target environment.

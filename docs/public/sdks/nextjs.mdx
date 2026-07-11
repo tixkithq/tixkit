@@ -1,0 +1,41 @@
+---
+title: Next.js SDK
+description: Keep Tixkit secrets in server components and route handlers while using client checkout components safely.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A Next.js App Router application
+related:
+  - /sdks/javascript
+  - /developers/widget/embedding
+---
+
+<SdkGuide sdkId="nextjs" />
+
+```bash
+bun add @tixkit/next @tixkit/js
+```
+
+Import `createTixkitClient` from `@tixkit/next/server` only in server components, server utilities, or route handlers. Never place a secret key in a `NEXT_PUBLIC_` variable.
+
+```ts
+import { createTixkitClient } from '@tixkit/next/server';
+
+const tixkit = createTixkitClient({
+  apiKey: process.env.TIXKIT_API_KEY,
+  apiBaseUrl: process.env.TIXKIT_API_BASE_URL,
+});
+
+export async function GET() {
+  return Response.json(await tixkit.events.list({ limit: 10 }));
+}
+```
+
+Use `@tixkit/next/client` for provider, hook, and checkout UI exports that consume public identifiers. The route-handler exports include supported webhook and checkout helpers; verify signatures with the raw body and keep the endpoint secret server-only.
+
+The runnable fixture is `apps/sdk-next-demo`; its build is part of SDK parity validation.

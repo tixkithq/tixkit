@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import * as React from 'react';
+import * as React from "react";
 import {
   Archive,
   ArrowDown,
@@ -38,7 +38,7 @@ import {
   Users,
   X,
   XCircle,
-} from 'lucide-react';
+} from "lucide-react";
 import {
   Drawer,
   Puck,
@@ -47,8 +47,8 @@ import {
   type Overrides,
   type Permissions,
   type Viewports,
-} from '@puckeditor/core';
-import { toast } from 'sonner';
+} from "@puckeditor/core";
+import { toast } from "sonner";
 import {
   EVENT_PAGE_PUCK_COMPONENT_TYPES,
   PUCK_EVENT_PAGE_PROVIDER,
@@ -64,7 +64,7 @@ import {
   type EventPagePuckData,
   type EventPageSettings,
   type EventPageValidationResultV2,
-} from '@tixkit/content-event-page';
+} from "@tixkit/content-event-page";
 import {
   EventPageRender,
   EventPageRuntimeProvider,
@@ -74,7 +74,7 @@ import {
   type EventPagePuckCoreData,
   type EventPagePuckUploadImage,
   type EventPageRuntime,
-} from '@tixkit/content-event-page-react/puck';
+} from "@tixkit/content-event-page-react/puck";
 import {
   EditorChrome,
   EditorTopBar,
@@ -86,7 +86,7 @@ import {
   TooltipTrigger,
   type DropdownMenuItemConfig,
   type EditorMode,
-} from '@tixkit/content-editor-shell';
+} from "@tixkit/content-editor-shell";
 import {
   adminApi,
   type AdminBrand,
@@ -95,15 +95,15 @@ import {
   type AdminEventDetail,
   type AdminProduct,
   type AdminTicketType,
-} from '@/lib/api';
-import { publicEventUrl } from '@/lib/event-links';
-import { usePermissions } from '@/context/permission-provider';
+} from "@/lib/api";
+import { publicEventUrl } from "@/lib/event-links";
+import { usePermissions } from "@/context/permission-provider";
 
-type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
-type EventPageNavigatorTab = 'sections' | 'add';
-type EventPageMobilePanel = EventPageNavigatorTab | 'settings' | null;
-type EventPagePreviewViewport = 'desktop' | 'tablet' | 'mobile';
-type EventPageFocusTarget = number | 'root' | null;
+type AutosaveState = "idle" | "saving" | "saved" | "error";
+type EventPageNavigatorTab = "sections" | "add";
+type EventPageMobilePanel = EventPageNavigatorTab | "settings" | null;
+type EventPagePreviewViewport = "desktop" | "tablet" | "mobile";
+type EventPageFocusTarget = number | "root" | null;
 
 type EventPagePreview = {
   label: string;
@@ -123,76 +123,81 @@ type EventPageEditorChrome = {
 };
 
 const eventPageViewports: Viewports = [
-  { width: 390, height: 'auto', label: 'Mobile' },
-  { width: 768, height: 'auto', label: 'Tablet' },
-  { width: '100%', height: 'auto', label: 'Desktop' },
+  { width: 390, height: "auto", label: "Mobile" },
+  { width: 768, height: "auto", label: "Tablet" },
+  { width: "100%", height: "auto", label: "Desktop" },
 ];
 
-const cancelDropIframeStyleId = 'event-page-cancel-drop-style';
-const eventPagePuckComponentTypeSet = new Set<string>(EVENT_PAGE_PUCK_COMPONENT_TYPES);
+const cancelDropIframeStyleId = "event-page-cancel-drop-style";
+const eventPagePuckComponentTypeSet = new Set<string>(
+  EVENT_PAGE_PUCK_COMPONENT_TYPES,
+);
 
 const eventPageComponentLabels: Record<string, string> = {
-  EventHeader: 'Event header',
-  EventDescription: 'Description',
-  RichText: 'Rich text',
-  Media: 'Image / media',
-  Button: 'Button',
-  Divider: 'Divider',
-  CustomEmbed: 'Custom embed',
-  EventDetails: 'Event details',
-  Schedule: 'Schedule',
-  Venue: 'Venue',
-  FAQ: 'FAQ',
-  Speakers: 'Speakers',
-  Sponsors: 'Sponsors',
-  SocialLinks: 'Social links',
-  Tickets: 'Tickets',
-  ProductAddOns: 'Product add-ons',
-  ResaleTickets: 'Resale tickets',
-  CheckoutCta: 'Get tickets CTA',
-  BrandFooter: 'Brand footer',
+  EventHeader: "Event header",
+  EventDescription: "Description",
+  RichText: "Rich text",
+  Media: "Image / media",
+  Button: "Button",
+  Divider: "Divider",
+  CustomEmbed: "Custom embed",
+  EventDetails: "Event details",
+  Schedule: "Schedule",
+  Venue: "Venue",
+  FAQ: "FAQ",
+  Speakers: "Speakers",
+  Sponsors: "Sponsors",
+  SocialLinks: "Social links",
+  Tickets: "Tickets",
+  ProductAddOns: "Product add-ons",
+  ResaleTickets: "Resale tickets",
+  CheckoutCta: "Get tickets CTA",
+  BrandFooter: "Brand footer",
 };
 
 function eventPageComponentLabel(name: string): string {
-  return eventPageComponentLabels[name] ?? name.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  return (
+    eventPageComponentLabels[name] ??
+    name.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+  );
 }
 
 function eventPageComponentIcon(name: string): React.ReactNode {
-  const className = 'size-4';
+  const className = "size-4";
   switch (name) {
-    case 'EventHeader':
+    case "EventHeader":
       return <Heading1 className={className} />;
-    case 'EventDescription':
+    case "EventDescription":
       return <Type className={className} />;
-    case 'RichText':
+    case "RichText":
       return <Type className={className} />;
-    case 'Media':
+    case "Media":
       return <Image className={className} />;
-    case 'Button':
-    case 'CheckoutCta':
+    case "Button":
+    case "CheckoutCta":
       return <MousePointerClick className={className} />;
-    case 'Divider':
+    case "Divider":
       return <Minus className={className} />;
-    case 'CustomEmbed':
+    case "CustomEmbed":
       return <Code2 className={className} />;
-    case 'EventDetails':
-    case 'Tickets':
-    case 'ProductAddOns':
-    case 'ResaleTickets':
+    case "EventDetails":
+    case "Tickets":
+    case "ProductAddOns":
+    case "ResaleTickets":
       return <ListChecks className={className} />;
-    case 'Schedule':
+    case "Schedule":
       return <CalendarDays className={className} />;
-    case 'Venue':
+    case "Venue":
       return <MapPin className={className} />;
-    case 'FAQ':
+    case "FAQ":
       return <CircleHelp className={className} />;
-    case 'Speakers':
+    case "Speakers":
       return <Users className={className} />;
-    case 'Sponsors':
+    case "Sponsors":
       return <Handshake className={className} />;
-    case 'SocialLinks':
+    case "SocialLinks":
       return <Share2 className={className} />;
-    case 'BrandFooter':
+    case "BrandFooter":
       return <LayoutTemplate className={className} />;
     default:
       return <LayoutTemplate className={className} />;
@@ -200,11 +205,11 @@ function eventPageComponentIcon(name: string): React.ReactNode {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function cleanString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
+  if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
@@ -268,7 +273,9 @@ function outlineSlotNode(
     ...outlineZoneItems(data, block, slotName),
   ];
   if (slotChildren.length === 0) return undefined;
-  const preserveRootOwnerIndex = (node: EventPageOutlineNode): EventPageOutlineNode => ({
+  const preserveRootOwnerIndex = (
+    node: EventPageOutlineNode,
+  ): EventPageOutlineNode => ({
     ...node,
     ownerIndex,
     children: node.children?.map(preserveRootOwnerIndex),
@@ -298,7 +305,7 @@ function outlineItemNodes(
   return {
     id: `${parentId}:${label}`,
     label,
-    detail: `${items.length} ${items.length === 1 ? 'item' : 'items'}`,
+    detail: `${items.length} ${items.length === 1 ? "item" : "items"}`,
     ownerIndex,
     ownerId,
     canvasTargetId: `${parentId}:${label}`,
@@ -307,17 +314,19 @@ function outlineItemNodes(
       id: `${parentId}:${label}:${index}`,
       label:
         summaryKeys.map((key) => cleanString(item[key])).find(Boolean) ??
-        `${label.replace(/s$/, '')} ${index + 1}`,
+        `${label.replace(/s$/, "")} ${index + 1}`,
       ownerIndex,
       ownerId,
       canvasTargetId: `${parentId}:${label}:${index}`,
       icon: <LayoutTemplate className="size-3.5" />,
     })),
-    emptyLabel: 'No items',
+    emptyLabel: "No items",
   };
 }
 
-function flattenOutlineNodes(nodes: EventPageOutlineNode[]): EventPageOutlineNode[] {
+function flattenOutlineNodes(
+  nodes: EventPageOutlineNode[],
+): EventPageOutlineNode[] {
   return nodes.flatMap((node) => [
     node,
     ...(node.children ? flattenOutlineNodes(node.children) : []),
@@ -325,7 +334,10 @@ function flattenOutlineNodes(nodes: EventPageOutlineNode[]): EventPageOutlineNod
 }
 
 /** Root → leaf path for the selected outline node. Used for parent+selected highlighting. */
-function findOutlinePath(nodes: EventPageOutlineNode[], targetId: string): string[] | null {
+function findOutlinePath(
+  nodes: EventPageOutlineNode[],
+  targetId: string,
+): string[] | null {
   for (const node of nodes) {
     if (node.id === targetId || node.selectableBlockId === targetId) {
       return [node.id];
@@ -338,16 +350,18 @@ function findOutlinePath(nodes: EventPageOutlineNode[], targetId: string): strin
 }
 
 function escapeAttributeValue(value: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
     return CSS.escape(value);
   }
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function clearCanvasOutlineTargets(frameDocument: Document) {
   frameDocument
     .querySelectorAll('[data-event-page-outline-selected="true"]')
-    .forEach((element) => element.removeAttribute('data-event-page-outline-selected'));
+    .forEach((element) =>
+      element.removeAttribute("data-event-page-outline-selected"),
+    );
 }
 
 function clearEditorCanvasOutlineTargets() {
@@ -389,68 +403,70 @@ function outlineNodeForBlock(
   };
 
   switch (block.type) {
-    case 'EventHeader': {
+    case "EventHeader": {
       if (props.showBrandBadge !== false) {
-        addChild('badge', 'Brand badge', {
+        addChild("badge", "Brand badge", {
           detail: outlineText(props.brandLabel),
           icon: <LayoutTemplate className="size-3.5" />,
         });
       }
-      addChild('title', 'H1 title', {
+      addChild("title", "H1 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       if (outlineText(props.description)) {
-        addChild('description', 'Description copy', {
+        addChild("description", "Description copy", {
           detail: outlineText(props.description),
         });
       }
       const visibleDetails = [
-        props.showDate === false ? undefined : 'Date',
-        props.showTimezone === false ? undefined : 'Timezone',
-        props.showVenue === false ? undefined : 'Venue',
+        props.showDate === false ? undefined : "Date",
+        props.showTimezone === false ? undefined : "Timezone",
+        props.showVenue === false ? undefined : "Venue",
       ].filter(Boolean);
       if (visibleDetails.length > 0) {
-        addChild('details', 'Event details row', {
-          detail: visibleDetails.join(', '),
+        addChild("details", "Event details row", {
+          detail: visibleDetails.join(", "),
           icon: <ListChecks className="size-3.5" />,
         });
       }
       if (outlineText(props.imageUrl)) {
-        addChild('image', 'Background image', {
-          detail: outlineText(props.imageAlt, 'No alt text'),
+        addChild("image", "Background image", {
+          detail: outlineText(props.imageAlt, "No alt text"),
           icon: <Image className="size-3.5" />,
         });
       }
       const logos = outlineArray(props.logos);
       if (logos.length > 0) {
         children.push(
-          outlineItemNodes(id, ownerIndex, ownerId, 'Logos', logos, [
-            'name',
-            'imageAlt',
-            'imageUrl',
+          outlineItemNodes(id, ownerIndex, ownerId, "Logos", logos, [
+            "name",
+            "imageAlt",
+            "imageUrl",
           ]),
         );
       }
       break;
     }
-    case 'EventDescription': {
+    case "EventDescription": {
       if (outlineText(props.eyebrow)) {
-        addChild('eyebrow', 'Eyebrow', { detail: outlineText(props.eyebrow) });
+        addChild("eyebrow", "Eyebrow", { detail: outlineText(props.eyebrow) });
       }
-      addChild('title', 'H2 title', {
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       if (outlineText(props.body)) {
-        addChild('body', 'Body copy', { detail: outlineText(props.body) });
+        addChild("body", "Body copy", { detail: outlineText(props.body) });
       }
       if (outlineText(props.imageUrl)) {
         addChild(
-          'image',
-          props.imageLayout === 'background' ? 'Background image' : 'Inline image',
+          "image",
+          props.imageLayout === "background"
+            ? "Background image"
+            : "Inline image",
           {
-            detail: outlineText(props.imageAlt, 'No alt text'),
+            detail: outlineText(props.imageAlt, "No alt text"),
             icon: <Image className="size-3.5" />,
           },
         );
@@ -458,10 +474,10 @@ function outlineNodeForBlock(
       const logos = outlineArray(props.logos);
       if (logos.length > 0) {
         children.push(
-          outlineItemNodes(id, ownerIndex, ownerId, 'Logos', logos, [
-            'name',
-            'imageAlt',
-            'imageUrl',
+          outlineItemNodes(id, ownerIndex, ownerId, "Logos", logos, [
+            "name",
+            "imageAlt",
+            "imageUrl",
           ]),
         );
       }
@@ -470,27 +486,27 @@ function outlineNodeForBlock(
         block,
         ownerIndex,
         ownerId,
-        'imageOverlay',
-        'Extra overlay content',
-        'No items',
+        "imageOverlay",
+        "Extra overlay content",
+        "No items",
       );
       if (overlayNode) children.push(overlayNode);
       break;
     }
-    case 'RichText':
-      addChild('body', 'Rich text body', {
-        detail: outlineText(props.body, 'Empty'),
+    case "RichText":
+      addChild("body", "Rich text body", {
+        detail: outlineText(props.body, "Empty"),
       });
       break;
-    case 'Media':
+    case "Media":
       if (outlineText(props.imageUrl)) {
-        addChild('image', 'Image', {
-          detail: outlineText(props.imageAlt, 'No alt text'),
+        addChild("image", "Image", {
+          detail: outlineText(props.imageAlt, "No alt text"),
           icon: <Image className="size-3.5" />,
         });
       }
       if (outlineText(props.caption)) {
-        addChild('caption', 'Caption', { detail: outlineText(props.caption) });
+        addChild("caption", "Caption", { detail: outlineText(props.caption) });
       }
       if (props.overlayEnabled === true) {
         const overlayNode = outlineSlotNode(
@@ -498,141 +514,171 @@ function outlineNodeForBlock(
           block,
           ownerIndex,
           ownerId,
-          'imageOverlay',
-          'Overlay blocks',
-          'No items',
+          "imageOverlay",
+          "Overlay blocks",
+          "No items",
         );
         if (overlayNode) children.push(overlayNode);
       }
       break;
-    case 'EventDetails':
-      addChild('title', 'H2 title', {
+    case "EventDetails":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       children.push(
-        outlineItemNodes(id, ownerIndex, ownerId, 'Details', outlineArray(props.items), [
-          'label',
-          'value',
-        ]),
+        outlineItemNodes(
+          id,
+          ownerIndex,
+          ownerId,
+          "Details",
+          outlineArray(props.items),
+          ["label", "value"],
+        ),
       );
       break;
-    case 'Schedule':
-      addChild('title', 'H2 title', {
+    case "Schedule":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       children.push(
-        outlineItemNodes(id, ownerIndex, ownerId, 'Schedule items', outlineArray(props.items), [
-          'title',
-        ]),
+        outlineItemNodes(
+          id,
+          ownerIndex,
+          ownerId,
+          "Schedule items",
+          outlineArray(props.items),
+          ["title"],
+        ),
       );
       break;
-    case 'Venue':
-      addChild('title', 'H2 title', {
+    case "Venue":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       if (outlineText(props.venueName))
-        addChild('venue', 'Venue name', {
+        addChild("venue", "Venue name", {
           detail: outlineText(props.venueName),
         });
       if (outlineText(props.address))
-        addChild('address', 'Address', { detail: outlineText(props.address) });
+        addChild("address", "Address", { detail: outlineText(props.address) });
       if (outlineText(props.mapUrl))
-        addChild('map', 'Map link', { detail: outlineText(props.mapUrl) });
+        addChild("map", "Map link", { detail: outlineText(props.mapUrl) });
       break;
-    case 'FAQ':
-      addChild('title', 'H2 title', {
+    case "FAQ":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       children.push(
-        outlineItemNodes(id, ownerIndex, ownerId, 'Questions', outlineArray(props.items), [
-          'question',
-        ]),
+        outlineItemNodes(
+          id,
+          ownerIndex,
+          ownerId,
+          "Questions",
+          outlineArray(props.items),
+          ["question"],
+        ),
       );
       break;
-    case 'Sponsors':
-      addChild('title', 'H2 title', {
+    case "Sponsors":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       children.push(
-        outlineItemNodes(id, ownerIndex, ownerId, 'Sponsors', outlineArray(props.items), [
-          'name',
-          'imageAlt',
-        ]),
+        outlineItemNodes(
+          id,
+          ownerIndex,
+          ownerId,
+          "Sponsors",
+          outlineArray(props.items),
+          ["name", "imageAlt"],
+        ),
       );
       break;
-    case 'Speakers':
-      addChild('title', 'H2 title', {
+    case "Speakers":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
       children.push(
-        outlineItemNodes(id, ownerIndex, ownerId, 'Speakers', outlineArray(props.items), [
-          'name',
-          'role',
-        ]),
+        outlineItemNodes(
+          id,
+          ownerIndex,
+          ownerId,
+          "Speakers",
+          outlineArray(props.items),
+          ["name", "role"],
+        ),
       );
       break;
-    case 'Button':
-      addChild('label', 'Button label', { detail: outlineText(props.label) });
+    case "Button":
+      addChild("label", "Button label", { detail: outlineText(props.label) });
       if (outlineText(props.url))
-        addChild('url', 'Button link', {
+        addChild("url", "Button link", {
           detail: outlineText(props.url),
           canvasTargetId: `${id}:label`,
         });
       break;
-    case 'SocialLinks':
+    case "SocialLinks":
       if (outlineText(props.title)) {
-        addChild('title', 'H2 title', {
+        addChild("title", "H2 title", {
           detail: outlineText(props.title),
           icon: <Heading1 className="size-3.5" />,
         });
       }
       children.push(
-        outlineItemNodes(id, ownerIndex, ownerId, 'Links', outlineArray(props.links), [
-          'label',
-          'url',
-        ]),
+        outlineItemNodes(
+          id,
+          ownerIndex,
+          ownerId,
+          "Links",
+          outlineArray(props.links),
+          ["label", "url"],
+        ),
       );
       break;
-    case 'CustomEmbed':
-      addChild('embed', props.allowUnsafeEmbed ? 'Approved embed' : 'Unapproved embed', {
-        detail: outlineText(props.html, 'Empty'),
-        icon: <Code2 className="size-3.5" />,
-      });
+    case "CustomEmbed":
+      addChild(
+        "embed",
+        props.allowUnsafeEmbed ? "Approved embed" : "Unapproved embed",
+        {
+          detail: outlineText(props.html, "Empty"),
+          icon: <Code2 className="size-3.5" />,
+        },
+      );
       break;
-    case 'Tickets':
-      addChild('title', 'H2 title', {
+    case "Tickets":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
-      addChild('ticketList', 'Ticket list', {
-        detail: outlineText(props.previewState, 'live'),
+      addChild("ticketList", "Ticket list", {
+        detail: outlineText(props.previewState, "live"),
       });
       break;
-    case 'ResaleTickets':
-      addChild('title', 'H2 title', {
+    case "ResaleTickets":
+      addChild("title", "H2 title", {
         detail: outlineText(props.title),
         icon: <Heading1 className="size-3.5" />,
       });
-      addChild('resaleList', 'Resale list', {
-        detail: outlineText(props.previewState, 'live'),
+      addChild("resaleList", "Resale list", {
+        detail: outlineText(props.previewState, "live"),
       });
       break;
-    case 'CheckoutCta':
-      addChild('label', 'CTA button', { detail: outlineText(props.label) });
+    case "CheckoutCta":
+      addChild("label", "CTA button", { detail: outlineText(props.label) });
       if (outlineText(props.supportingText)) {
-        addChild('supportingText', 'Supporting text', {
+        addChild("supportingText", "Supporting text", {
           detail: outlineText(props.supportingText),
         });
       }
       break;
-    case 'BrandFooter':
-      addChild('label', 'Footer label', { detail: outlineText(props.label) });
+    case "BrandFooter":
+      addChild("label", "Footer label", { detail: outlineText(props.label) });
       break;
     default:
       break;
@@ -658,30 +704,37 @@ function EventPageDocumentOutline({
 }) {
   const selectedItem = useEventPagePuck((state) => state.selectedItem);
   const dispatch = useEventPagePuck((state) => state.dispatch);
-  const selectedId = isRecord(selectedItem?.props) ? cleanString(selectedItem.props.id) : undefined;
+  const selectedId = isRecord(selectedItem?.props)
+    ? cleanString(selectedItem.props.id)
+    : undefined;
   const nodes = React.useMemo(
-    () => data.content.map((block, index) => outlineNodeForBlock(data, block, index)),
+    () =>
+      data.content.map((block, index) =>
+        outlineNodeForBlock(data, block, index),
+      ),
     [data],
   );
   const nodeLookup = React.useMemo(
     () => new Map(flattenOutlineNodes(nodes).map((node) => [node.id, node])),
     [nodes],
   );
-  const [selectedOutlineNodeId, setSelectedOutlineNodeId] = React.useState<string | undefined>(
-    selectedId,
+  const [selectedOutlineNodeId, setSelectedOutlineNodeId] = React.useState<
+    string | undefined
+  >(selectedId);
+  const outlineSelectionSourceRef = React.useRef<"canvas" | "outline">(
+    "canvas",
   );
-  const outlineSelectionSourceRef = React.useRef<'canvas' | 'outline'>('canvas');
 
   React.useEffect(() => {
     if (!selectedId) return;
     setSelectedOutlineNodeId((current) => {
       if (!current) {
-        outlineSelectionSourceRef.current = 'canvas';
+        outlineSelectionSourceRef.current = "canvas";
         return selectedId;
       }
       const currentNode = nodeLookup.get(current);
       if (
-        outlineSelectionSourceRef.current === 'outline' &&
+        outlineSelectionSourceRef.current === "outline" &&
         currentNode &&
         !currentNode.selectableBlockId &&
         currentNode.ownerId === selectedId
@@ -689,7 +742,7 @@ function EventPageDocumentOutline({
         return current;
       }
       clearEditorCanvasOutlineTargets();
-      outlineSelectionSourceRef.current = 'canvas';
+      outlineSelectionSourceRef.current = "canvas";
       // Prefer the exact outline node for any canvas block id (root or nested).
       const matchedPath = findOutlinePath(nodes, selectedId);
       return matchedPath?.[matchedPath.length - 1] ?? selectedId;
@@ -699,12 +752,17 @@ function EventPageDocumentOutline({
   const selectionPath = React.useMemo(
     () =>
       selectedOutlineNodeId
-        ? (findOutlinePath(nodes, selectedOutlineNodeId) ?? [selectedOutlineNodeId])
+        ? (findOutlinePath(nodes, selectedOutlineNodeId) ?? [
+            selectedOutlineNodeId,
+          ])
         : [],
     [nodes, selectedOutlineNodeId],
   );
   const selectedNodeId = selectionPath[selectionPath.length - 1];
-  const ancestorNodeIds = React.useMemo(() => new Set(selectionPath.slice(0, -1)), [selectionPath]);
+  const ancestorNodeIds = React.useMemo(
+    () => new Set(selectionPath.slice(0, -1)),
+    [selectionPath],
+  );
 
   const selectCanvasBlock = React.useCallback((blockId: string) => {
     const frame = window.document.querySelector<HTMLIFrameElement>(
@@ -718,13 +776,14 @@ function EventPageDocumentOutline({
     if (!block) return false;
     clearCanvasOutlineTargets(frameDocument);
     block.scrollIntoView({
-      behavior: 'auto',
-      block: 'nearest',
-      inline: 'nearest',
+      behavior: "auto",
+      block: "nearest",
+      inline: "nearest",
     });
-    const MouseEventConstructor = frameDocument.defaultView?.MouseEvent ?? MouseEvent;
+    const MouseEventConstructor =
+      frameDocument.defaultView?.MouseEvent ?? MouseEvent;
     block.dispatchEvent(
-      new MouseEventConstructor('click', {
+      new MouseEventConstructor("click", {
         bubbles: true,
         cancelable: true,
       }),
@@ -743,21 +802,21 @@ function EventPageDocumentOutline({
     );
     if (!target) return false;
     clearCanvasOutlineTargets(frameDocument);
-    target.setAttribute('data-event-page-outline-selected', 'true');
+    target.setAttribute("data-event-page-outline-selected", "true");
     target.scrollIntoView({
-      behavior: 'auto',
-      block: 'nearest',
-      inline: 'nearest',
+      behavior: "auto",
+      block: "nearest",
+      inline: "nearest",
     });
     return true;
   }, []);
 
   const selectNode = React.useCallback(
     (node: EventPageOutlineNode) => {
-      outlineSelectionSourceRef.current = 'outline';
+      outlineSelectionSourceRef.current = "outline";
       setSelectedOutlineNodeId(node.id);
       dispatch({
-        type: 'setUi',
+        type: "setUi",
         ui: { itemSelector: { index: node.ownerIndex } },
       });
       if (node.canvasTargetId && selectCanvasTarget(node.canvasTargetId)) {
@@ -781,15 +840,15 @@ function EventPageDocumentOutline({
   const moveNode = React.useCallback(
     (node: EventPageOutlineNode, destinationIndex: number) => {
       dispatch({
-        type: 'reorder',
+        type: "reorder",
         sourceIndex: node.ownerIndex,
         destinationIndex,
-        destinationZone: 'root:default-zone',
+        destinationZone: "root:default-zone",
       });
       dispatch({
-        type: 'setUi',
+        type: "setUi",
         ui: {
-          itemSelector: { index: destinationIndex, zone: 'root:default-zone' },
+          itemSelector: { index: destinationIndex, zone: "root:default-zone" },
         },
       });
     },
@@ -837,17 +896,19 @@ function EventPageOutlineNodeView({
   const selected = selectedNodeId === node.id;
   const isAncestor = !selected && ancestorNodeIds.has(node.id);
   const rowClassName = selected
-    ? 'flex min-w-0 flex-1 items-center gap-2 rounded-md bg-accent px-2 py-1.5 text-left text-sm text-accent-foreground'
+    ? "flex min-w-0 flex-1 items-center gap-2 rounded-md bg-accent px-2 py-1.5 text-left text-sm text-accent-foreground"
     : isAncestor
-      ? 'flex min-w-0 flex-1 items-center gap-2 rounded-md bg-accent/45 px-2 py-1.5 text-left text-sm text-foreground'
-      : 'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground';
+      ? "flex min-w-0 flex-1 items-center gap-2 rounded-md bg-accent/45 px-2 py-1.5 text-left text-sm text-foreground"
+      : "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground";
   return (
     <li>
       <div className="flex min-w-0 items-center gap-1">
         <button
-          aria-current={selected ? 'true' : undefined}
+          aria-current={selected ? "true" : undefined}
           className={rowClassName}
-          data-outline-role={selected ? 'selected' : isAncestor ? 'ancestor' : 'idle'}
+          data-outline-role={
+            selected ? "selected" : isAncestor ? "ancestor" : "idle"
+          }
           onClick={() => onSelectNode(node)}
           style={{ paddingLeft: `${0.5 + depth * 1.1}rem` }}
           type="button"
@@ -915,11 +976,14 @@ function listItemsFromResponse<T>(value: unknown): T[] {
   if (!isRecord(value)) return [];
   if (Array.isArray(value.items)) return value.items as T[];
   return Object.values(value).filter(
-    (item): item is T => Boolean(item) && typeof item === 'object',
+    (item): item is T => Boolean(item) && typeof item === "object",
   );
 }
 
-function resultMessage(error: { message?: string } | undefined, defaultMessage: string) {
+function resultMessage(
+  error: { message?: string } | undefined,
+  defaultMessage: string,
+) {
   return error?.message ?? defaultMessage;
 }
 
@@ -930,30 +994,41 @@ function isRetryableLoadError(error: { status?: number } | undefined) {
 function latestVersion(items: AdminContentDocumentVersion[]) {
   return items.reduce<AdminContentDocumentVersion | undefined>(
     (current, version) =>
-      !current || version.versionNumber > current.versionNumber ? version : current,
+      !current || version.versionNumber > current.versionNumber
+        ? version
+        : current,
     undefined,
   );
 }
 
-function latestDraft(versions: AdminContentDocumentVersion[], document: AdminContentDocument) {
+function latestDraft(
+  versions: AdminContentDocumentVersion[],
+  document: AdminContentDocument,
+) {
   return (
     versions.find((version) => version.id === document.currentDraftVersionId) ??
-    latestVersion(versions.filter((version) => version.status === 'draft')) ??
+    latestVersion(versions.filter((version) => version.status === "draft")) ??
     latestVersion(versions)
   );
 }
 
 function duplicateDocumentName(name: string): string {
-  const suffix = ' Copy';
-  return name.endsWith(suffix) ? name : `${name.slice(0, 160 - suffix.length)}${suffix}`;
+  const suffix = " Copy";
+  return name.endsWith(suffix)
+    ? name
+    : `${name.slice(0, 160 - suffix.length)}${suffix}`;
 }
 
-function defaultDocumentInput(event: AdminEventDetail): CreateDefaultEventPageDocumentInput {
+function defaultDocumentInput(
+  event: AdminEventDetail,
+): CreateDefaultEventPageDocumentInput {
   const publicPath = `/e/${event.id}`;
   return {
     eventId: event.id,
     eventTitle: event.title,
-    eventDescription: event.description ?? 'Hosted event page draft generated from event metadata.',
+    eventDescription:
+      event.description ??
+      "Hosted event page draft generated from event metadata.",
     startsAt: event.startsAt,
     endsAt: event.endsAt,
     timezone: event.timezone,
@@ -964,7 +1039,7 @@ function defaultDocumentInput(event: AdminEventDetail): CreateDefaultEventPageDo
     coverImageUrl: event.coverImageUrl ?? undefined,
     coverImageAlt: event.title,
     publicUrl: publicPath,
-    locale: 'en',
+    locale: "en",
   };
 }
 
@@ -980,30 +1055,53 @@ function coerceStoredEventPageDocument(
   const normalized = normalizeEventPageDocument(value);
   if (normalized) return materializeEventPageDocument(normalized, input);
   if (!isRecord(value)) return undefined;
-  if (!Array.isArray(value.blocks) && !isRecord(value.settings)) return undefined;
-  return migrateLegacyEventPageDocumentToPuck(value as EventPageLegacyDocument, input);
+  if (!Array.isArray(value.blocks) && !isRecord(value.settings))
+    return undefined;
+  return migrateLegacyEventPageDocumentToPuck(
+    value as EventPageLegacyDocument,
+    input,
+  );
 }
 
-function isPuckComponentData(value: unknown): value is EventPagePuckComponentData {
-  return isRecord(value) && typeof value.type === 'string' && isRecord(value.props);
+function isPuckComponentData(
+  value: unknown,
+): value is EventPagePuckComponentData {
+  return (
+    isRecord(value) && typeof value.type === "string" && isRecord(value.props)
+  );
 }
 
 function isSupportedEventPagePuckComponentData(
   value: unknown,
 ): value is EventPagePuckComponentData {
-  return isPuckComponentData(value) && eventPagePuckComponentTypeSet.has(value.type);
+  return (
+    isPuckComponentData(value) && eventPagePuckComponentTypeSet.has(value.type)
+  );
 }
 
-function coercePuckData(value: unknown, fallback: EventPagePuckData): EventPagePuckData {
-  if (!isRecord(value) || !isRecord(value.root) || !Array.isArray(value.content)) return fallback;
+function coercePuckData(
+  value: unknown,
+  fallback: EventPagePuckData,
+): EventPagePuckData {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.root) ||
+    !Array.isArray(value.content)
+  )
+    return fallback;
   const rootProps = isRecord(value.root.props)
-    ? (value.root.props as EventPagePuckData['root']['props'])
+    ? (value.root.props as EventPagePuckData["root"]["props"])
     : fallback.root.props;
   const zones = isRecord(value.zones)
     ? Object.fromEntries(
         Object.entries(value.zones).flatMap(([zoneName, zoneContent]) =>
           Array.isArray(zoneContent)
-            ? [[zoneName, zoneContent.filter(isSupportedEventPagePuckComponentData)]]
+            ? [
+                [
+                  zoneName,
+                  zoneContent.filter(isSupportedEventPagePuckComponentData),
+                ],
+              ]
             : [],
         ),
       )
@@ -1016,14 +1114,21 @@ function coercePuckData(value: unknown, fallback: EventPagePuckData): EventPageP
 }
 
 function firstEventHeader(document: EventPageDocument) {
-  return document.editor.data.content.find((block) => block.type === 'EventHeader');
+  return document.editor.data.content.find(
+    (block) => block.type === "EventHeader",
+  );
 }
 
 function firstEventDescription(document: EventPageDocument) {
-  return document.editor.data.content.find((block) => block.type === 'EventDescription');
+  return document.editor.data.content.find(
+    (block) => block.type === "EventDescription",
+  );
 }
 
-function eventPageSubject(document: EventPageDocument, event: AdminEventDetail): string {
+function eventPageSubject(
+  document: EventPageDocument,
+  event: AdminEventDetail,
+): string {
   const header = firstEventHeader(document);
   const description = firstEventDescription(document);
   return (
@@ -1035,7 +1140,10 @@ function eventPageSubject(document: EventPageDocument, event: AdminEventDetail):
   );
 }
 
-function eventPagePreviewText(document: EventPageDocument, event: AdminEventDetail): string {
+function eventPagePreviewText(
+  document: EventPageDocument,
+  event: AdminEventDetail,
+): string {
   const header = firstEventHeader(document);
   const description = firstEventDescription(document);
   return (
@@ -1054,10 +1162,13 @@ function syncSettingsFromData(
   data: EventPagePuckData,
   event: AdminEventDetail,
 ): EventPageSettings {
-  const header = data.content.find((block) => block.type === 'EventHeader');
-  const description = data.content.find((block) => block.type === 'EventDescription');
+  const header = data.content.find((block) => block.type === "EventHeader");
+  const description = data.content.find(
+    (block) => block.type === "EventDescription",
+  );
   const rootProps = data.root.props;
-  const hasRootProp = (key: string) => Object.prototype.hasOwnProperty.call(rootProps, key);
+  const hasRootProp = (key: string) =>
+    Object.prototype.hasOwnProperty.call(rootProps, key);
   const summary =
     cleanString(rootProps.marketingSummary) ??
     cleanString(description?.props.body) ??
@@ -1070,9 +1181,9 @@ function syncSettingsFromData(
     cleanString(description?.props.title) ??
     event.title;
   const seoDescription = cleanString(rootProps.description) ?? summary;
-  const tags = hasRootProp('tags')
-    ? (typeof rootProps.tags === 'string' ? rootProps.tags : '')
-        .split(',')
+  const tags = hasRootProp("tags")
+    ? (typeof rootProps.tags === "string" ? rootProps.tags : "")
+        .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean)
     : settings.discovery.tags;
@@ -1081,7 +1192,7 @@ function syncSettingsFromData(
     discovery: {
       ...settings.discovery,
       summary,
-      category: hasRootProp('category')
+      category: hasRootProp("category")
         ? cleanString(rootProps.category)
         : settings.discovery.category,
       tags,
@@ -1091,12 +1202,16 @@ function syncSettingsFromData(
         cleanString(rootProps.coverImageUrl) ??
         cleanString(header?.props.imageUrl) ??
         cleanString(description?.props.imageUrl) ??
-        (hasRootProp('coverImageUrl') ? undefined : settings.discovery.coverImageUrl),
+        (hasRootProp("coverImageUrl")
+          ? undefined
+          : settings.discovery.coverImageUrl),
       socialImageUrl:
         cleanString(rootProps.socialImageUrl) ??
         cleanString(header?.props.imageUrl) ??
         cleanString(description?.props.imageUrl) ??
-        (hasRootProp('socialImageUrl') ? undefined : settings.discovery.socialImageUrl),
+        (hasRootProp("socialImageUrl")
+          ? undefined
+          : settings.discovery.socialImageUrl),
     },
   };
 }
@@ -1117,7 +1232,10 @@ function withPuckData(
   };
 }
 
-function saveBodyForDocument(document: EventPageDocument, event: AdminEventDetail) {
+function saveBodyForDocument(
+  document: EventPageDocument,
+  event: AdminEventDetail,
+) {
   return {
     contentJson: document,
     subject: eventPageSubject(document, event),
@@ -1125,7 +1243,10 @@ function saveBodyForDocument(document: EventPageDocument, event: AdminEventDetai
   };
 }
 
-function publicPageUrl(_document: EventPageDocument, event: AdminEventDetail): string {
+function publicPageUrl(
+  _document: EventPageDocument,
+  event: AdminEventDetail,
+): string {
   // Always open the checkout-hosted public event page, not the admin origin.
   return publicEventUrl(event);
 }
@@ -1146,12 +1267,12 @@ function PuckIframeOverride({
   React.useEffect(() => {
     if (!previewDocument) return;
 
-    previewDocument.title = 'Event page editor canvas';
-    previewDocument.documentElement.setAttribute('lang', 'en');
+    previewDocument.title = "Event page editor canvas";
+    previewDocument.documentElement.setAttribute("lang", "en");
 
     const frame = previewDocument.defaultView?.frameElement;
-    frame?.setAttribute('title', 'Event page editor canvas');
-    frame?.setAttribute('aria-label', 'Event page editor canvas');
+    frame?.setAttribute("title", "Event page editor canvas");
+    frame?.setAttribute("aria-label", "Event page editor canvas");
   }, [previewDocument]);
 
   React.useEffect(() => {
@@ -1161,11 +1282,15 @@ function PuckIframeOverride({
       clearCanvasOutlineTargets(previewDocument as Document);
     }
 
-    previewDocument.addEventListener('pointerdown', handleCanvasPointer, true);
-    previewDocument.addEventListener('click', handleCanvasPointer, true);
+    previewDocument.addEventListener("pointerdown", handleCanvasPointer, true);
+    previewDocument.addEventListener("click", handleCanvasPointer, true);
     return () => {
-      previewDocument.removeEventListener('pointerdown', handleCanvasPointer, true);
-      previewDocument.removeEventListener('click', handleCanvasPointer, true);
+      previewDocument.removeEventListener(
+        "pointerdown",
+        handleCanvasPointer,
+        true,
+      );
+      previewDocument.removeEventListener("click", handleCanvasPointer, true);
     };
   }, [previewDocument]);
 
@@ -1181,29 +1306,30 @@ function PuckIframeOverride({
             imageFit?: unknown;
           }
         | undefined;
-      const id = typeof detail?.id === 'string' ? detail.id : undefined;
+      const id = typeof detail?.id === "string" ? detail.id : undefined;
       if (!id) return;
       const blockType =
-        detail?.blockType === 'EventHeader' || detail?.blockType === 'EventDescription'
+        detail?.blockType === "EventHeader" ||
+        detail?.blockType === "EventDescription"
           ? detail.blockType
-          : 'EventDescription';
+          : "EventDescription";
 
       const placement = detail?.placement;
       const nextPlacement = placement
         ? {
-            x: typeof placement.x === 'string' ? placement.x : '50%',
-            y: typeof placement.y === 'string' ? placement.y : '50%',
-            scale: typeof placement.scale === 'string' ? placement.scale : '1',
+            x: typeof placement.x === "string" ? placement.x : "50%",
+            y: typeof placement.y === "string" ? placement.y : "50%",
+            scale: typeof placement.scale === "string" ? placement.scale : "1",
           }
         : undefined;
       const nextImageFit =
-        detail?.imageFit === 'cover' || detail?.imageFit === 'contain'
+        detail?.imageFit === "cover" || detail?.imageFit === "contain"
           ? detail.imageFit
           : undefined;
       if (!nextPlacement && !nextImageFit) return;
 
       dispatch({
-        type: 'setData',
+        type: "setData",
         data: (data) => ({
           ...data,
           content: data.content.map((block) =>
@@ -1228,9 +1354,15 @@ function PuckIframeOverride({
       });
     }
 
-    previewDocument.addEventListener('tixkit:event-page-hero-image-edit', handleHeroImageEdit);
+    previewDocument.addEventListener(
+      "tixkit:event-page-hero-image-edit",
+      handleHeroImageEdit,
+    );
     return () => {
-      previewDocument.removeEventListener('tixkit:event-page-hero-image-edit', handleHeroImageEdit);
+      previewDocument.removeEventListener(
+        "tixkit:event-page-hero-image-edit",
+        handleHeroImageEdit,
+      );
     };
   }, [dispatch, previewDocument]);
 
@@ -1254,7 +1386,7 @@ const structurePanelMinWidth = 260;
 const structurePanelMaxWidth = 460;
 const structurePanelDefaultWidth = 288;
 
-const EventPageComponentSearchContext = React.createContext('');
+const EventPageComponentSearchContext = React.createContext("");
 const EventPageComponentInsertContext = React.createContext<{
   canInsert: boolean;
   onInserted?: () => void;
@@ -1263,17 +1395,21 @@ const EventPageComponentInsertContext = React.createContext<{
 function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
   const selectedItem = useEventPagePuck((state) => state.selectedItem);
   const dispatch = useEventPagePuck((state) => state.dispatch);
-  const itemSelector = useEventPagePuck((state) => state.appState.ui.itemSelector);
+  const itemSelector = useEventPagePuck(
+    (state) => state.appState.ui.itemSelector,
+  );
   const selectedType = cleanString(selectedItem?.type);
-  const [query, setQuery] = React.useState('');
+  const [query, setQuery] = React.useState("");
   const [sectionTitles, setSectionTitles] = React.useState<string[]>([]);
   const [hasMatches, setHasMatches] = React.useState(true);
   const fieldsRootRef = React.useRef<HTMLDivElement>(null);
   const lastSectionSelectorRef = React.useRef(itemSelector);
-  const selectedLabel = selectedType ? eventPageComponentLabel(selectedType) : 'Page design';
+  const selectedLabel = selectedType
+    ? eventPageComponentLabel(selectedType)
+    : "Page design";
 
   React.useEffect(() => {
-    setQuery('');
+    setQuery("");
   }, [selectedType]);
 
   React.useEffect(() => {
@@ -1291,40 +1427,48 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
     function refreshSettingsIndex() {
       const topLevelFields = Array.from(
         fieldsRoot.querySelectorAll<HTMLElement>(fieldSelector),
-      ).filter((field) => !field.parentElement?.closest<HTMLElement>(fieldSelector));
+      ).filter(
+        (field) => !field.parentElement?.closest<HTMLElement>(fieldSelector),
+      );
       const normalizedQuery = query.trim().toLocaleLowerCase();
       let matchingControls = 0;
       let groupCollapsed = false;
       let groupMatchesQuery = false;
 
       for (const field of topLevelFields) {
-        const section = field.querySelector<HTMLElement>('[data-field-section]');
+        const section = field.querySelector<HTMLElement>(
+          "[data-field-section]",
+        );
         if (section) {
-          groupCollapsed = section.dataset.sectionExpanded !== 'true';
+          groupCollapsed = section.dataset.sectionExpanded !== "true";
           groupMatchesQuery = Boolean(
             normalizedQuery &&
-            (section.dataset.fieldSection ?? '').toLocaleLowerCase().includes(normalizedQuery),
+            (section.dataset.fieldSection ?? "")
+              .toLocaleLowerCase()
+              .includes(normalizedQuery),
           );
         }
         const fieldMatches =
           !normalizedQuery ||
-          (field.textContent ?? '').toLocaleLowerCase().includes(normalizedQuery);
+          (field.textContent ?? "")
+            .toLocaleLowerCase()
+            .includes(normalizedQuery);
         const matches = fieldMatches || (!section && groupMatchesQuery);
         const hidden = normalizedQuery ? !matches : !section && groupCollapsed;
-        field.toggleAttribute('data-settings-filter-hidden', hidden);
+        field.toggleAttribute("data-settings-filter-hidden", hidden);
         if (matches && (!section || groupMatchesQuery)) {
           matchingControls += 1;
         }
       }
 
       const titles = Array.from(
-        fieldsRoot.querySelectorAll<HTMLElement>('[data-field-section]'),
+        fieldsRoot.querySelectorAll<HTMLElement>("[data-field-section]"),
       ).reduce<string[]>((items, section, index) => {
         const title = section.dataset.fieldSection?.trim();
         if (!title) return items;
         section.id = `event-page-settings-${title
           .toLocaleLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')}-${index}`;
+          .replace(/[^a-z0-9]+/g, "-")}-${index}`;
         return items.includes(title) ? items : items.concat(title);
       }, []);
 
@@ -1341,17 +1485,22 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
       function connectActiveGroup() {
         if (!activeGroup) return;
         if (activeGroup.controls.length > 0) {
-          activeGroup.trigger.setAttribute('aria-controls', activeGroup.controls.join(' '));
+          activeGroup.trigger.setAttribute(
+            "aria-controls",
+            activeGroup.controls.join(" "),
+          );
         } else {
-          activeGroup.trigger.removeAttribute('aria-controls');
+          activeGroup.trigger.removeAttribute("aria-controls");
         }
       }
 
       for (const field of topLevelFields) {
-        const section = field.querySelector<HTMLElement>('[data-field-section]');
+        const section = field.querySelector<HTMLElement>(
+          "[data-field-section]",
+        );
         if (section) {
           connectActiveGroup();
-          const trigger = section.querySelector<HTMLButtonElement>('button');
+          const trigger = section.querySelector<HTMLButtonElement>("button");
           const title = section.dataset.fieldSection?.trim();
           if (!trigger || !title || !section.id) {
             activeGroup = undefined;
@@ -1366,13 +1515,13 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
           };
           continue;
         }
-        field.removeAttribute('aria-labelledby');
+        field.removeAttribute("aria-labelledby");
         delete field.dataset.settingsGroup;
         if (!activeGroup) continue;
         const controlId = `${activeGroup.id}-control-${controlledFieldIndex++}`;
         field.id = controlId;
         field.dataset.settingsGroup = activeGroup.title;
-        field.setAttribute('aria-labelledby', activeGroup.trigger.id);
+        field.setAttribute("aria-labelledby", activeGroup.trigger.id);
         activeGroup.controls.push(controlId);
       }
       connectActiveGroup();
@@ -1383,7 +1532,7 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
     refreshSettingsIndex();
     const observer = new MutationObserver(refreshSettingsIndex);
     observer.observe(fieldsRoot, {
-      attributeFilter: ['data-section-expanded'],
+      attributeFilter: ["data-section-expanded"],
       attributes: true,
       childList: true,
       subtree: true,
@@ -1393,12 +1542,16 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
 
   function scrollToSection(title: string) {
     const sections = Array.from(
-      fieldsRootRef.current?.querySelectorAll<HTMLElement>('[data-field-section]') ?? [],
+      fieldsRootRef.current?.querySelectorAll<HTMLElement>(
+        "[data-field-section]",
+      ) ?? [],
     );
-    const section = sections.find((candidate) => candidate.dataset.fieldSection === title);
-    const trigger = section?.querySelector<HTMLButtonElement>('button');
-    if (trigger?.getAttribute('aria-expanded') === 'false') trigger.click();
-    section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const section = sections.find(
+      (candidate) => candidate.dataset.fieldSection === title,
+    );
+    const trigger = section?.querySelector<HTMLButtonElement>("button");
+    if (trigger?.getAttribute("aria-expanded") === "false") trigger.click();
+    section?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   return (
@@ -1410,15 +1563,15 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              {selectedType ? 'Selected section' : 'Whole page'}
+              {selectedType ? "Selected section" : "Whole page"}
             </p>
             <p className="mt-0.5 truncate text-base font-semibold tracking-tight">
               {selectedLabel}
             </p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
               {selectedType
-                ? 'Edit content on the canvas. Adjust layout and appearance here.'
-                : 'Adjust the page theme, discovery, and social preview.'}
+                ? "Edit content on the canvas. Adjust layout and appearance here."
+                : "Adjust the page theme, discovery, and social preview."}
             </p>
           </div>
           {onClose ? (
@@ -1439,14 +1592,14 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
               aria-pressed={Boolean(selectedType)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 selectedType
-                  ? 'bg-background text-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
               onClick={() => {
                 const selector = lastSectionSelectorRef.current;
                 if (selector) {
                   dispatch({
-                    type: 'setUi',
+                    type: "setUi",
                     ui: { itemSelector: selector },
                     recordHistory: false,
                   });
@@ -1460,12 +1613,12 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
               aria-pressed={!selectedType}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 !selectedType
-                  ? 'bg-background text-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
               onClick={() =>
                 dispatch({
-                  type: 'setUi',
+                  type: "setUi",
                   ui: { itemSelector: null },
                   recordHistory: false,
                 })
@@ -1494,7 +1647,7 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
             <button
               aria-label="Clear settings search"
               className="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              onClick={() => setQuery('')}
+              onClick={() => setQuery("")}
               type="button"
             >
               <X className="size-3" />
@@ -1503,7 +1656,9 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
         </label>
         {!query && sectionTitles.length > 0 ? (
           <label className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-t pt-2">
-            <span className="text-[11px] font-medium text-muted-foreground">Jump to</span>
+            <span className="text-[11px] font-medium text-muted-foreground">
+              Jump to
+            </span>
             <span className="relative min-w-0">
               <select
                 aria-label="Jump to setting group"
@@ -1512,7 +1667,7 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
                 onChange={(event) => {
                   const title = event.currentTarget.value;
                   if (title) scrollToSection(title);
-                  event.currentTarget.value = '';
+                  event.currentTarget.value = "";
                 }}
               >
                 <option value="">Choose a settings group…</option>
@@ -1530,7 +1685,10 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
           </label>
         ) : null}
       </div>
-      <div className="tk-ep-inspector__fields min-h-0 flex-1 overflow-y-auto" ref={fieldsRootRef}>
+      <div
+        className="tk-ep-inspector__fields min-h-0 flex-1 overflow-y-auto"
+        ref={fieldsRootRef}
+      >
         <Puck.Fields />
         {!hasMatches ? (
           <output className="m-4 block rounded-lg border border-dashed p-5 text-center">
@@ -1540,7 +1698,7 @@ function EventPageInspectorPanel({ onClose }: { onClose?: () => void }) {
             </p>
             <button
               className="mt-3 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent"
-              onClick={() => setQuery('')}
+              onClick={() => setQuery("")}
               type="button"
             >
               Clear search
@@ -1585,19 +1743,19 @@ function EventPageNavigatorPanel({
       <div className="sticky top-0 z-10 border-b bg-background/95 px-3 py-3 backdrop-blur">
         <div className="flex items-center justify-between gap-2">
           <div className="grid min-w-0 flex-1 grid-cols-2 rounded-lg bg-muted p-1">
-            {(['sections', 'add'] as const).map((item) => (
+            {(["sections", "add"] as const).map((item) => (
               <button
                 aria-pressed={tab === item}
                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                   tab === item
-                    ? 'bg-background text-foreground shadow-xs'
-                    : 'text-foreground/75 hover:text-foreground'
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-foreground/75 hover:text-foreground"
                 }`}
                 key={item}
                 onClick={() => onTabChange(item)}
                 type="button"
               >
-                {item === 'sections' ? 'Sections' : 'Add'}
+                {item === "sections" ? "Sections" : "Add"}
               </button>
             ))}
           </div>
@@ -1613,13 +1771,13 @@ function EventPageNavigatorPanel({
           ) : null}
         </div>
         <p className="mt-2 px-1 text-[11px] text-muted-foreground">
-          {tab === 'sections'
-            ? 'Select, inspect, and reorder the page.'
-            : 'Search or drag a section onto the canvas.'}
+          {tab === "sections"
+            ? "Select, inspect, and reorder the page."
+            : "Search or drag a section onto the canvas."}
         </p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'sections' ? (
+        {tab === "sections" ? (
           <div className="space-y-2 p-3" data-testid="event-page-outline">
             <EventPageDocumentOutline data={data} onNavigate={onNavigate} />
           </div>
@@ -1654,8 +1812,8 @@ function EventPagePanelToggle({
       aria-pressed={open}
       className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-medium transition-colors ${
         open
-          ? 'border-foreground/20 bg-accent text-accent-foreground'
-          : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+          ? "border-foreground/20 bg-accent text-accent-foreground"
+          : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground"
       }`}
       onClick={onClick}
       type="button"
@@ -1681,7 +1839,7 @@ function EventPageMobileTool({
     <button
       aria-pressed={active}
       className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-[10px] font-medium transition-colors ${
-        active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'
+        active ? "bg-accent text-accent-foreground" : "text-muted-foreground"
       }`}
       onClick={onClick}
       type="button"
@@ -1707,26 +1865,26 @@ function EventPageMobilePanelOverlay({
   useModalFocusTrap(panelRef, onClose);
 
   React.useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const desktopQuery = window.matchMedia('(min-width: 1024px)');
+    if (typeof window.matchMedia !== "function") return;
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
     const closeOnDesktop = (query: MediaQueryList | MediaQueryListEvent) => {
       if (query.matches) onClose();
     };
     closeOnDesktop(desktopQuery);
-    desktopQuery.addEventListener('change', closeOnDesktop);
-    return () => desktopQuery.removeEventListener('change', closeOnDesktop);
+    desktopQuery.addEventListener("change", closeOnDesktop);
+    return () => desktopQuery.removeEventListener("change", closeOnDesktop);
   }, [onClose]);
   const positionClassName =
-    mode === 'add'
-      ? 'top-[34%] rounded-t-2xl'
-      : mode === 'settings'
-        ? 'top-[10%] rounded-t-2xl'
-        : 'top-[38%] rounded-t-2xl';
+    mode === "add"
+      ? "top-[34%] rounded-t-2xl"
+      : mode === "settings"
+        ? "top-[10%] rounded-t-2xl"
+        : "top-[38%] rounded-t-2xl";
 
   return (
     <dialog
       aria-label={label}
-      aria-modal={mode === 'add' ? 'false' : 'true'}
+      aria-modal={mode === "add" ? "false" : "true"}
       className={`absolute inset-x-0 bottom-[72px] z-40 m-0 h-auto w-full max-w-none border-0 border-t bg-background p-0 shadow-2xl lg:hidden ${positionClassName}`}
       open
       ref={panelRef}
@@ -1749,9 +1907,14 @@ function SelectFirstPuckBlockOnMount({
   const selectedDocumentRef = React.useRef<string | undefined>(undefined);
 
   React.useEffect(() => {
-    if (!hasContent || selectedItem || selectedDocumentRef.current === documentId) return;
+    if (
+      !hasContent ||
+      selectedItem ||
+      selectedDocumentRef.current === documentId
+    )
+      return;
     selectedDocumentRef.current = documentId;
-    dispatch({ type: 'setUi', ui: { itemSelector: { index: 0 } } });
+    dispatch({ type: "setUi", ui: { itemSelector: { index: 0 } } });
   }, [dispatch, documentId, hasContent, selectedItem]);
 
   return null;
@@ -1769,8 +1932,8 @@ function FocusEventPageTarget({
   React.useEffect(() => {
     if (target === null) return;
     dispatch({
-      type: 'setUi',
-      ui: { itemSelector: target === 'root' ? null : { index: target } },
+      type: "setUi",
+      ui: { itemSelector: target === "root" ? null : { index: target } },
     });
     onFocused();
   }, [dispatch, onFocused, target]);
@@ -1792,15 +1955,17 @@ function EventPagePuckComponentsButton({
   onInserted?: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const [query, setQuery] = React.useState('');
+  const [query, setQuery] = React.useState("");
   const [cancelTargetActive, setCancelTargetActive] = React.useState(false);
   const appState = useEventPagePuck((state) => state.appState);
   const isDragging = appState.ui.isDragging;
   const dispatch = useEventPagePuck((state) => state.dispatch);
   const { can } = usePermissions();
-  const canInsertUnsafeEmbed = can('settings.write');
+  const canInsertUnsafeEmbed = can("settings.write");
   const wasDraggingRef = React.useRef(false);
-  const dragStartStateRef = React.useRef<typeof appState | undefined>(undefined);
+  const dragStartStateRef = React.useRef<typeof appState | undefined>(
+    undefined,
+  );
   const shouldCancelDragRef = React.useRef(false);
   const cancelTargetActiveRef = React.useRef(false);
 
@@ -1809,7 +1974,9 @@ function EventPagePuckComponentsButton({
 
     function updateCancelTarget(event: MouseEvent | PointerEvent) {
       const target = document.elementFromPoint(event.clientX, event.clientY);
-      const canvasFrame = document.querySelector('[data-testid="editor-canvas"] iframe');
+      const canvasFrame = document.querySelector(
+        '[data-testid="editor-canvas"] iframe',
+      );
       const canvasFrameRect = canvasFrame?.getBoundingClientRect();
       const pointerInsideCanvas = Boolean(
         canvasFrameRect &&
@@ -1818,7 +1985,9 @@ function EventPagePuckComponentsButton({
         event.clientY >= canvasFrameRect.top &&
         event.clientY <= canvasFrameRect.bottom,
       );
-      const releasedOnCancelZone = Boolean(target?.closest('[data-event-page-drag-cancel-zone]'));
+      const releasedOnCancelZone = Boolean(
+        target?.closest("[data-event-page-drag-cancel-zone]"),
+      );
       const nextActive = releasedOnCancelZone || !pointerInsideCanvas;
       shouldCancelDragRef.current = nextActive;
       if (cancelTargetActiveRef.current !== nextActive) {
@@ -1832,23 +2001,23 @@ function EventPagePuckComponentsButton({
       updateCancelTarget(event);
     }
 
-    document.addEventListener('pointermove', updateCancelTarget, true);
-    document.addEventListener('mousemove', updateCancelTarget, true);
-    document.addEventListener('pointerup', handlePointerRelease, true);
-    document.addEventListener('mouseup', handlePointerRelease, true);
+    document.addEventListener("pointermove", updateCancelTarget, true);
+    document.addEventListener("mousemove", updateCancelTarget, true);
+    document.addEventListener("pointerup", handlePointerRelease, true);
+    document.addEventListener("mouseup", handlePointerRelease, true);
 
     return () => {
-      document.removeEventListener('pointermove', updateCancelTarget, true);
-      document.removeEventListener('mousemove', updateCancelTarget, true);
-      document.removeEventListener('pointerup', handlePointerRelease, true);
-      document.removeEventListener('mouseup', handlePointerRelease, true);
+      document.removeEventListener("pointermove", updateCancelTarget, true);
+      document.removeEventListener("mousemove", updateCancelTarget, true);
+      document.removeEventListener("pointerup", handlePointerRelease, true);
+      document.removeEventListener("mouseup", handlePointerRelease, true);
     };
   }, [isDragging, onCancelTargetChange]);
 
   React.useEffect(() => {
     if (!wasDraggingRef.current && isDragging) {
       dragStartStateRef.current =
-        typeof structuredClone === 'function'
+        typeof structuredClone === "function"
           ? structuredClone(appState)
           : JSON.parse(JSON.stringify(appState));
       shouldCancelDragRef.current = false;
@@ -1861,7 +2030,7 @@ function EventPagePuckComponentsButton({
       if (shouldCancelDragRef.current && dragStartStateRef.current) {
         const dragStartState = dragStartStateRef.current;
         dispatch({
-          type: 'set',
+          type: "set",
           state: () => ({
             ...dragStartState,
             ui: { ...dragStartState.ui, itemSelector: null, isDragging: false },
@@ -1880,13 +2049,18 @@ function EventPagePuckComponentsButton({
     wasDraggingRef.current = isDragging;
   }, [appState, dispatch, isDragging, onCancelDrag, onCancelTargetChange]);
 
-  const normalizedQuery = React.useMemo(() => query.trim().toLowerCase(), [query]);
+  const normalizedQuery = React.useMemo(
+    () => query.trim().toLowerCase(),
+    [query],
+  );
   const hasMatchingComponents = React.useMemo(
     () =>
       EVENT_PAGE_PUCK_COMPONENT_TYPES.some(
         (componentType) =>
-          (componentType !== 'CustomEmbed' || canInsertUnsafeEmbed) &&
-          eventPageComponentLabel(componentType).toLowerCase().includes(normalizedQuery),
+          (componentType !== "CustomEmbed" || canInsertUnsafeEmbed) &&
+          eventPageComponentLabel(componentType)
+            .toLowerCase()
+            .includes(normalizedQuery),
       ),
     [canInsertUnsafeEmbed, normalizedQuery],
   );
@@ -1901,19 +2075,19 @@ function EventPagePuckComponentsButton({
         <Drawer>
           <div
             className={[
-              'space-y-3 p-3 text-popover-foreground',
+              "space-y-3 p-3 text-popover-foreground",
               '[&_[class*="ComponentList-content"]]:pt-2',
               '[&_[class*="ComponentList-title"]]:rounded-md [&_[class*="ComponentList-title"]]:px-2 [&_[class*="ComponentList-title"]]:py-1.5 [&_[class*="ComponentList-title"]]:text-xs [&_[class*="ComponentList-title"]]:font-semibold [&_[class*="ComponentList-title"]]:uppercase [&_[class*="ComponentList-title"]]:tracking-normal [&_[class*="ComponentList-title"]]:text-muted-foreground [&_[class*="ComponentList-title"]]:hover:bg-muted/70',
               '[&_[class*="Drawer"]]:grid [&_[class*="Drawer"]]:grid-cols-1 [&_[class*="Drawer"]]:gap-2',
-              '[&_[data-puck-drawer-item]]:w-full',
-              '[&_[data-puck-drawer-item]:has([data-event-page-drawer-hidden])]:hidden',
+              "[&_[data-puck-drawer-item]]:w-full",
+              "[&_[data-puck-drawer-item]:has([data-event-page-drawer-hidden])]:hidden",
               isDragging && !cancelTargetActive
-                ? 'rounded-md ring-2 ring-primary/40 ring-offset-2 ring-offset-background'
-                : '',
+                ? "rounded-md ring-2 ring-primary/40 ring-offset-2 ring-offset-background"
+                : "",
               cancelTargetActive
-                ? 'rounded-md ring-2 ring-destructive/70 ring-offset-2 ring-offset-background'
-                : '',
-            ].join(' ')}
+                ? "rounded-md ring-2 ring-destructive/70 ring-offset-2 ring-offset-background"
+                : "",
+            ].join(" ")}
             data-testid="event-page-puck-components"
           >
             <label className="relative block">
@@ -1931,17 +2105,19 @@ function EventPagePuckComponentsButton({
             {isDragging ? (
               <span
                 className={[
-                  'inline-flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-xs font-medium transition-colors',
+                  "inline-flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-xs font-medium transition-colors",
                   cancelTargetActive
-                    ? 'border-destructive bg-destructive text-destructive-foreground'
-                    : 'border-destructive/30 bg-destructive/10 text-destructive',
-                ].join(' ')}
+                    ? "border-destructive bg-destructive text-destructive-foreground"
+                    : "border-destructive/30 bg-destructive/10 text-destructive",
+                ].join(" ")}
                 data-event-page-drag-cancel-zone
-                data-state={cancelTargetActive ? 'active' : 'idle'}
+                data-state={cancelTargetActive ? "active" : "idle"}
                 data-testid="event-page-drag-cancel-zone"
               >
                 <XCircle className="size-3.5" />
-                {cancelTargetActive ? 'Release to cancel' : 'Move here to cancel'}
+                {cancelTargetActive
+                  ? "Release to cancel"
+                  : "Move here to cancel"}
               </span>
             ) : null}
             <Puck.Components />
@@ -1990,32 +2166,52 @@ function EventPagePuckComponentsButton({
   );
 }
 
-function EventPagePuckDrawerItem({ name }: { children: React.ReactNode; name: string }) {
+function EventPagePuckDrawerItem({
+  name,
+}: {
+  children: React.ReactNode;
+  name: string;
+}) {
   const query = React.useContext(EventPageComponentSearchContext);
   const { can } = usePermissions();
-  const { canInsert, onInserted } = React.useContext(EventPageComponentInsertContext);
+  const { canInsert, onInserted } = React.useContext(
+    EventPageComponentInsertContext,
+  );
   const appState = useEventPagePuck((state) => state.appState);
   const dispatch = useEventPagePuck((state) => state.dispatch);
   const label = eventPageComponentLabel(name);
-  if (name === 'CustomEmbed' && !can('settings.write')) {
-    return <div aria-hidden="true" className="hidden" data-event-page-drawer-hidden />;
+  if (name === "CustomEmbed" && !can("settings.write")) {
+    return (
+      <div
+        aria-hidden="true"
+        className="hidden"
+        data-event-page-drawer-hidden
+      />
+    );
   }
   if (query && !label.toLowerCase().includes(query)) {
-    return <div aria-hidden="true" className="hidden" data-event-page-drawer-hidden />;
+    return (
+      <div
+        aria-hidden="true"
+        className="hidden"
+        data-event-page-drawer-hidden
+      />
+    );
   }
 
   function insertComponent() {
-    if (!canInsert || (name === 'CustomEmbed' && !can('settings.write'))) return;
+    if (!canInsert || (name === "CustomEmbed" && !can("settings.write")))
+      return;
     const destinationIndex = appState.data.content.length;
-    const destinationZone = 'root:default-zone';
+    const destinationZone = "root:default-zone";
     dispatch({
-      type: 'insert',
+      type: "insert",
       componentType: name,
       destinationIndex,
       destinationZone,
     });
     dispatch({
-      type: 'setUi',
+      type: "setUi",
       ui: { itemSelector: { index: destinationIndex, zone: destinationZone } },
     });
     onInserted?.();
@@ -2049,16 +2245,16 @@ function EventPagePuckDrawerItem({ name }: { children: React.ReactNode; name: st
 function buildPageRuntime(input: EventPageEditorChrome): EventPageRuntime {
   const brand = input.brand;
   const ticketItems = input.tickets
-    .filter((ticket) => ticket.visibility !== 'hidden')
+    .filter((ticket) => ticket.visibility !== "hidden")
     .map((ticket) => {
       const remaining =
-        typeof ticket.quantityTotal === 'number'
+        typeof ticket.quantityTotal === "number"
           ? Math.max(ticket.quantityTotal - ticket.quantitySold, 0)
           : undefined;
       const soldOut =
-        ticket.status === 'sold_out' ||
-        ticket.status === 'ended' ||
-        (typeof remaining === 'number' && remaining <= 0);
+        ticket.status === "sold_out" ||
+        ticket.status === "ended" ||
+        (typeof remaining === "number" && remaining <= 0);
       return {
         id: ticket.id,
         name: ticket.name,
@@ -2069,56 +2265,65 @@ function buildPageRuntime(input: EventPageEditorChrome): EventPageRuntime {
           currency: ticket.currency,
           minimumPriceCents: ticket.minimumPriceCents,
         }),
-        status: soldOut ? 'sold_out' : 'active',
+        status: soldOut ? "sold_out" : "active",
         availabilityLabel:
-          !soldOut && typeof remaining === 'number' && remaining <= 10
+          !soldOut && typeof remaining === "number" && remaining <= 10
             ? `${remaining} left`
             : undefined,
       };
     });
   const productItems = input.products
-    .filter((product) => product.status === 'active')
+    .filter((product) => product.status === "active")
     .reduce<AdminProduct[]>((sorted, product) => {
       const insertionIndex = sorted.findIndex(
         (item) =>
           item.sortOrder > product.sortOrder ||
-          (item.sortOrder === product.sortOrder && item.name.localeCompare(product.name) > 0),
+          (item.sortOrder === product.sortOrder &&
+            item.name.localeCompare(product.name) > 0),
       );
       if (insertionIndex === -1) return sorted.concat(product);
-      return sorted.slice(0, insertionIndex).concat(product, sorted.slice(insertionIndex));
+      return sorted
+        .slice(0, insertionIndex)
+        .concat(product, sorted.slice(insertionIndex));
     }, [])
     .map((product) => ({
       id: product.id,
       name: product.name,
       description: product.description,
       priceLabel: ticketPriceLabel({
-        kind: 'product',
+        kind: "product",
         priceCents: product.priceCents,
         currency: product.currency,
       }),
-      status: 'active',
+      status: "active",
     }));
   const footerLinks = [
-    brand?.legalUrls.terms ? { label: 'Terms', href: brand.legalUrls.terms } : null,
-    brand?.legalUrls.privacy ? { label: 'Privacy', href: brand.legalUrls.privacy } : null,
-    brand?.legalUrls.refundPolicy
-      ? { label: 'Refund policy', href: brand.legalUrls.refundPolicy }
+    brand?.legalUrls.terms
+      ? { label: "Terms", href: brand.legalUrls.terms }
       : null,
-    brand?.supportUrl ? { label: 'Support', href: brand.supportUrl } : null,
+    brand?.legalUrls.privacy
+      ? { label: "Privacy", href: brand.legalUrls.privacy }
+      : null,
+    brand?.legalUrls.refundPolicy
+      ? { label: "Refund policy", href: brand.legalUrls.refundPolicy }
+      : null,
+    brand?.supportUrl ? { label: "Support", href: brand.supportUrl } : null,
   ].filter((link): link is { label: string; href: string } => Boolean(link));
 
   return {
-    brandName: brand?.name ?? 'Event',
+    brandName: brand?.name ?? "Event",
     brandFooterLabel: brand?.whiteLabel
-      ? (brand.name ?? 'Event')
+      ? (brand.name ?? "Event")
       : brand?.name
         ? `${brand.name} · Powered by Tixkit`
-        : 'Powered by Tixkit',
+        : "Powered by Tixkit",
     footerLinks,
     tickets: ticketItems,
     products: productItems,
     resaleListings: [],
-    showGetTicketsCta: [...ticketItems, ...productItems].some((item) => item.status === 'active'),
+    showGetTicketsCta: [...ticketItems, ...productItems].some(
+      (item) => item.status === "active",
+    ),
     interactive: false,
   };
 }
@@ -2126,34 +2331,43 @@ function buildPageRuntime(input: EventPageEditorChrome): EventPageRuntime {
 function brandVariablesFromAdminBrand(brand?: AdminBrand) {
   const theme = brand?.theme ?? {};
   return {
-    background: typeof theme.background === 'string' ? theme.background : undefined,
-    foreground: typeof theme.foreground === 'string' ? theme.foreground : undefined,
+    background:
+      typeof theme.background === "string" ? theme.background : undefined,
+    foreground:
+      typeof theme.foreground === "string" ? theme.foreground : undefined,
     accent:
-      typeof theme.primaryColor === 'string'
+      typeof theme.primaryColor === "string"
         ? theme.primaryColor
-        : typeof theme.primary === 'string'
+        : typeof theme.primary === "string"
           ? theme.primary
-          : typeof theme.accent === 'string'
+          : typeof theme.accent === "string"
             ? theme.accent
             : undefined,
-    radius: typeof theme.radius === 'string' ? theme.radius : undefined,
+    radius: typeof theme.radius === "string" ? theme.radius : undefined,
   };
 }
 
 /** Map admin brand theme tokens onto checkout/shadcn CSS variables for exact chrome styling. */
-function brandThemeStyleFromAdminBrand(brand?: AdminBrand): React.CSSProperties | undefined {
+function brandThemeStyleFromAdminBrand(
+  brand?: AdminBrand,
+): React.CSSProperties | undefined {
   const theme = brand?.theme ?? {};
   const style: Record<string, string> = {};
   for (const [key, value] of Object.entries(theme)) {
-    if (typeof value !== 'string' || !value) continue;
-    const tokenKey = key === 'primaryColor' ? 'primary' : key;
-    const cssKey = tokenKey.startsWith('--') ? tokenKey : `--${tokenKey}`;
+    if (typeof value !== "string" || !value) continue;
+    const tokenKey = key === "primaryColor" ? "primary" : key;
+    const cssKey = tokenKey.startsWith("--") ? tokenKey : `--${tokenKey}`;
     style[cssKey] = value;
   }
-  return Object.keys(style).length > 0 ? (style as React.CSSProperties) : undefined;
+  return Object.keys(style).length > 0
+    ? (style as React.CSSProperties)
+    : undefined;
 }
 
-function puckOverrides(runtime: EventPageRuntime, brand?: AdminBrand): Partial<Overrides<Config>> {
+function puckOverrides(
+  runtime: EventPageRuntime,
+  brand?: AdminBrand,
+): Partial<Overrides<Config>> {
   return {
     drawerItem: EventPagePuckDrawerItem,
     header: ({ actions }: { actions: React.ReactNode }) => (
@@ -2161,8 +2375,16 @@ function puckOverrides(runtime: EventPageRuntime, brand?: AdminBrand): Partial<O
         <div className="flex items-center justify-end gap-2">{actions}</div>
       </div>
     ),
-    headerActions: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    fields: ({ children, isLoading }: { children: React.ReactNode; isLoading: boolean }) => (
+    headerActions: ({ children }: { children: React.ReactNode }) => (
+      <>{children}</>
+    ),
+    fields: ({
+      children,
+      isLoading,
+    }: {
+      children: React.ReactNode;
+      isLoading: boolean;
+    }) => (
       <div className="tk-ep-fields h-full overflow-y-auto px-3 py-3">
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading fields...</p>
@@ -2172,7 +2394,9 @@ function puckOverrides(runtime: EventPageRuntime, brand?: AdminBrand): Partial<O
       </div>
     ),
     drawer: ({ children }: { children: React.ReactNode }) => (
-      <div className="h-full overflow-y-auto border-r bg-background p-3">{children}</div>
+      <div className="h-full overflow-y-auto border-r bg-background p-3">
+        {children}
+      </div>
     ),
     iframe: ({
       children,
@@ -2181,7 +2405,11 @@ function puckOverrides(runtime: EventPageRuntime, brand?: AdminBrand): Partial<O
       children: React.ReactNode;
       document?: Document | null;
     }) => (
-      <PuckIframeOverride brand={brand} document={previewDocument} runtime={runtime}>
+      <PuckIframeOverride
+        brand={brand}
+        document={previewDocument}
+        runtime={runtime}
+      >
         {children}
       </PuckIframeOverride>
     ),
@@ -2198,13 +2426,13 @@ function puckOverrides(runtime: EventPageRuntime, brand?: AdminBrand): Partial<O
 }
 
 const modalFocusableSelector = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
-].join(',');
+].join(",");
 
 function useModalFocusTrap<T extends HTMLElement>(
   containerRef: React.RefObject<T | null>,
@@ -2220,24 +2448,27 @@ function useModalFocusTrap<T extends HTMLElement>(
     if (!container) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const focusableElements = () =>
-      Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter(
-        (element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true',
+      Array.from(
+        container.querySelectorAll<HTMLElement>(modalFocusableSelector),
+      ).filter(
+        (element) =>
+          !element.hidden && element.getAttribute("aria-hidden") !== "true",
       );
     const animationFrame = window.requestAnimationFrame(() => {
       const initialTarget =
-        container.querySelector<HTMLElement>('[data-modal-autofocus]') ??
+        container.querySelector<HTMLElement>("[data-modal-autofocus]") ??
         focusableElements()[0] ??
         container;
       initialTarget.focus();
     });
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         event.preventDefault();
         onCloseRef.current();
         return;
       }
-      if (event.key !== 'Tab') return;
+      if (event.key !== "Tab") return;
       const focusable = focusableElements();
       if (focusable.length === 0) {
         event.preventDefault();
@@ -2255,10 +2486,10 @@ function useModalFocusTrap<T extends HTMLElement>(
       }
     }
 
-    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       window.cancelAnimationFrame(animationFrame);
-      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
       previouslyFocused?.focus();
     };
   }, [containerRef]);
@@ -2302,8 +2533,8 @@ function RenameEventPageDialog({
               Rename event page
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              This name identifies the document in the content studio. It does not change the public
-              event title.
+              This name identifies the document in the content studio. It does
+              not change the public event title.
             </p>
           </div>
           <div className="space-y-2 p-4">
@@ -2336,10 +2567,12 @@ function RenameEventPageDialog({
             </button>
             <button
               className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-              disabled={!normalizedName || normalizedName === currentName || saving}
+              disabled={
+                !normalizedName || normalizedName === currentName || saving
+              }
               type="submit"
             >
-              {saving ? 'Renaming…' : 'Rename'}
+              {saving ? "Renaming…" : "Rename"}
             </button>
           </div>
         </form>
@@ -2372,7 +2605,9 @@ function EventPageVersionHistoryDialog({
   const orderedVersions = React.useMemo(
     () =>
       versions.reduce<AdminContentDocumentVersion[]>((ordered, version) => {
-        const index = ordered.findIndex((item) => item.versionNumber < version.versionNumber);
+        const index = ordered.findIndex(
+          (item) => item.versionNumber < version.versionNumber,
+        );
         if (index === -1) return ordered.concat(version);
         return ordered.slice(0, index).concat(version, ordered.slice(index));
       }, []),
@@ -2419,7 +2654,10 @@ function EventPageVersionHistoryDialog({
           {orderedVersions.length ? (
             <ol className="space-y-2">
               {orderedVersions.map((version) => (
-                <li className="rounded-lg border bg-card p-3 text-card-foreground" key={version.id}>
+                <li
+                  className="rounded-lg border bg-card p-3 text-card-foreground"
+                  key={version.id}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
@@ -2428,19 +2666,21 @@ function EventPageVersionHistoryDialog({
                           {version.status}
                         </span>
                         {version.id === currentDraftId ? (
-                          <span className="text-xs text-emerald-700">Current draft</span>
+                          <span className="text-xs text-emerald-700">
+                            Current draft
+                          </span>
                         ) : null}
                       </p>
                       <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {version.subject || 'Untitled event page'}
+                        {version.subject || "Untitled event page"}
                       </p>
                       <time
                         className="mt-1 block text-xs text-muted-foreground"
                         dateTime={version.createdAt}
                       >
                         {new Intl.DateTimeFormat(undefined, {
-                          dateStyle: 'medium',
-                          timeStyle: 'short',
+                          dateStyle: "medium",
+                          timeStyle: "short",
                         }).format(new Date(version.createdAt))}
                       </time>
                     </div>
@@ -2513,13 +2753,19 @@ function EventPageDataDialog({
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   useModalFocusTrap(dialogRef, onClose);
   const rows = [
-    ['Event title', event.title],
-    ['Description', event.description || 'No description'],
-    ['Starts', event.startsAt || 'Not scheduled'],
-    ['Timezone', event.timezone || 'Not configured'],
-    ['Venue', event.venue?.name || event.venueName || 'Not configured'],
-    ['Tickets', `${ticketCount} active ticket type${ticketCount === 1 ? '' : 's'}`],
-    ['Products', `${productCount} active product${productCount === 1 ? '' : 's'}`],
+    ["Event title", event.title],
+    ["Description", event.description || "No description"],
+    ["Starts", event.startsAt || "Not scheduled"],
+    ["Timezone", event.timezone || "Not configured"],
+    ["Venue", event.venue?.name || event.venueName || "Not configured"],
+    [
+      "Tickets",
+      `${ticketCount} active ticket type${ticketCount === 1 ? "" : "s"}`,
+    ],
+    [
+      "Products",
+      `${productCount} active product${productCount === 1 ? "" : "s"}`,
+    ],
   ] as const;
 
   return (
@@ -2537,8 +2783,9 @@ function EventPageDataDialog({
               Variables &amp; event data
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Event, ticket, and product sections use this managed data automatically. Text you edit
-              directly on the canvas remains page content.
+              Event, ticket, and product sections use this managed data
+              automatically. Text you edit directly on the canvas remains page
+              content.
             </p>
           </div>
           <button
@@ -2553,8 +2800,13 @@ function EventPageDataDialog({
         </div>
         <dl className="min-h-0 flex-1 divide-y overflow-y-auto px-4">
           {rows.map(([label, value]) => (
-            <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]" key={label}>
-              <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+            <div
+              className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]"
+              key={label}
+            >
+              <dt className="text-xs font-medium text-muted-foreground">
+                {label}
+              </dt>
               <dd className="text-sm break-words">{value}</dd>
             </div>
           ))}
@@ -2600,13 +2852,15 @@ function PublishReviewDrawer({
   runtime: EventPageRuntime;
   status: string;
 }) {
-  const [tab, setTab] = React.useState<'rendered' | 'issues' | 'json'>(
-    preview.validation.valid ? 'rendered' : 'issues',
+  const [tab, setTab] = React.useState<"rendered" | "issues" | "json">(
+    preview.validation.valid ? "rendered" : "issues",
   );
-  const [viewport, setViewport] = React.useState<EventPagePreviewViewport>('desktop');
+  const [viewport, setViewport] =
+    React.useState<EventPagePreviewViewport>("desktop");
   const drawerRef = React.useRef<HTMLDialogElement>(null);
   useModalFocusTrap(drawerRef, onClose);
-  const viewportWidth = viewport === 'mobile' ? 390 : viewport === 'tablet' ? 768 : undefined;
+  const viewportWidth =
+    viewport === "mobile" ? 390 : viewport === "tablet" ? 768 : undefined;
   const prospectiveVersion = draft.versionNumber + 1;
 
   return (
@@ -2629,14 +2883,20 @@ function PublishReviewDrawer({
       >
         <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold" id="publish-review-title">
+            <p
+              className="truncate text-sm font-semibold"
+              id="publish-review-title"
+            >
               Review and publish
             </p>
-            <p className="text-xs text-muted-foreground" id="publish-review-description">
+            <p
+              className="text-xs text-muted-foreground"
+              id="publish-review-description"
+            >
               {preview.validation.valid
                 ? `Your reviewed snapshot will become draft v${prospectiveVersion}.`
                 : `${preview.validation.issues.length} publish blocker${
-                    preview.validation.issues.length === 1 ? '' : 's'
+                    preview.validation.issues.length === 1 ? "" : "s"
                   } must be resolved.`}
             </p>
           </div>
@@ -2658,7 +2918,9 @@ function PublishReviewDrawer({
           </div>
           <div>
             <p className="text-muted-foreground">Publishing</p>
-            <p className="mt-0.5 font-medium">New draft v{prospectiveVersion}</p>
+            <p className="mt-0.5 font-medium">
+              New draft v{prospectiveVersion}
+            </p>
           </div>
           <div className="min-w-0">
             <p className="text-muted-foreground">Destination</p>
@@ -2667,34 +2929,39 @@ function PublishReviewDrawer({
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
           <div className="flex gap-1">
-            {(['rendered', 'issues', 'json'] as const).map((item) => (
+            {(["rendered", "issues", "json"] as const).map((item) => (
               <button
                 aria-pressed={tab === item}
                 className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
                   tab === item
-                    ? 'bg-foreground text-background'
-                    : 'text-muted-foreground hover:bg-accent'
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-accent"
                 }`}
                 key={item}
                 onClick={() => setTab(item)}
                 type="button"
               >
-                {item === 'rendered'
-                  ? 'Preview'
-                  : item === 'issues'
+                {item === "rendered"
+                  ? "Preview"
+                  : item === "issues"
                     ? `Issues (${preview.validation.issues.length})`
-                    : 'JSON'}
+                    : "JSON"}
               </button>
             ))}
           </div>
-          {tab === 'rendered' ? (
-            <div aria-label="Preview size" className="flex rounded-md border p-0.5">
-              {(['desktop', 'tablet', 'mobile'] as const).map((item) => (
+          {tab === "rendered" ? (
+            <div
+              aria-label="Preview size"
+              className="flex rounded-md border p-0.5"
+            >
+              {(["desktop", "tablet", "mobile"] as const).map((item) => (
                 <button
                   aria-label={`${item} preview`}
                   aria-pressed={viewport === item}
                   className={`rounded px-2 py-1 text-xs capitalize ${
-                    viewport === item ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'
+                    viewport === item
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground"
                   }`}
                   key={item}
                   onClick={() => setViewport(item)}
@@ -2707,13 +2974,15 @@ function PublishReviewDrawer({
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-auto bg-muted/30">
-          {tab === 'rendered' && (
+          {tab === "rendered" && (
             <div
               className="mx-auto min-h-full bg-background text-foreground shadow-sm transition-[width] duration-250"
               data-testid="preview-public-page-surface"
               style={{
                 ...brandThemeStyleFromAdminBrand(brand),
-                ...(viewportWidth ? { width: viewportWidth, maxWidth: '100%' } : {}),
+                ...(viewportWidth
+                  ? { width: viewportWidth, maxWidth: "100%" }
+                  : {}),
               }}
             >
               <EventPageRender
@@ -2724,25 +2993,29 @@ function PublishReviewDrawer({
               />
             </div>
           )}
-          {tab === 'issues' && (
+          {tab === "issues" && (
             <div className="space-y-3 p-4 text-sm">
               {preview.validation.issues.length === 0 ? (
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-700">
                   <p className="flex items-center gap-2 font-medium">
                     <CheckCircle2 className="size-4" /> Ready to publish
                   </p>
-                  <p className="mt-1 text-xs">No event-page validation blockers were found.</p>
+                  <p className="mt-1 text-xs">
+                    No event-page validation blockers were found.
+                  </p>
                 </div>
               ) : (
                 preview.validation.issues.map((issue, index) => (
                   <div
                     className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-destructive"
-                    key={`${issue.code}:${issue.field ?? ''}`}
+                    key={`${issue.code}:${issue.field ?? ""}`}
                   >
                     <p className="font-medium">
                       {index + 1}. {issue.message}
                     </p>
-                    {issue.field ? <p className="mt-1 text-xs opacity-75">{issue.field}</p> : null}
+                    {issue.field ? (
+                      <p className="mt-1 text-xs opacity-75">{issue.field}</p>
+                    ) : null}
                     <button
                       className="mt-2 rounded-md border border-current/25 px-2 py-1 text-xs font-medium transition-colors hover:bg-destructive/10"
                       onClick={() => onEditIssue(issue.field)}
@@ -2755,7 +3028,7 @@ function PublishReviewDrawer({
               )}
             </div>
           )}
-          {tab === 'json' && (
+          {tab === "json" && (
             <pre className="m-4 whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-xs leading-5">
               {JSON.stringify(preview.document, null, 2)}
             </pre>
@@ -2771,7 +3044,8 @@ function PublishReviewDrawer({
               <p className="font-medium">Publishing did not complete</p>
               <p className="mt-0.5 text-xs">{error}</p>
               <p className="mt-1 text-xs opacity-80">
-                Your reviewed draft is still here. Resolve the issue and try again.
+                Your reviewed draft is still here. Resolve the issue and try
+                again.
               </p>
             </div>
           </div>
@@ -2795,7 +3069,7 @@ function PublishReviewDrawer({
               onClick={() => onPublish(preview.document)}
               type="button"
             >
-              {publishing ? 'Publishing…' : 'Publish now'}
+              {publishing ? "Publishing…" : "Publish now"}
             </button>
           </div>
         </div>
@@ -2804,24 +3078,45 @@ function PublishReviewDrawer({
   );
 }
 
-export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
+export function EventPagePersistedEditorView({
+  eventId,
+  previewOnly = false,
+  onPreviewReady,
+  onPreviewError,
+}: {
+  eventId: string;
+  previewOnly?: boolean;
+  onPreviewReady?: () => void;
+  onPreviewError?: (message: string) => void;
+}) {
   const [event, setEvent] = React.useState<AdminEventDetail>();
   const [document, setDocument] = React.useState<AdminContentDocument>();
   const [draft, setDraft] = React.useState<AdminContentDocumentVersion>();
-  const [versions, setVersions] = React.useState<AdminContentDocumentVersion[]>([]);
-  const [eventPageDocument, setEventPageDocument] = React.useState<EventPageDocument>();
-  const [editorChrome, setEditorChrome] = React.useState<EventPageEditorChrome>({
-    tickets: [],
-    products: [],
-  });
+  const [versions, setVersions] = React.useState<AdminContentDocumentVersion[]>(
+    [],
+  );
+  const [eventPageDocument, setEventPageDocument] =
+    React.useState<EventPageDocument>();
+  const [editorChrome, setEditorChrome] = React.useState<EventPageEditorChrome>(
+    {
+      tickets: [],
+      products: [],
+    },
+  );
   const [structurePanelOpen, setStructurePanelOpen] = React.useState(true);
-  const [structurePanelWidth, setStructurePanelWidth] = React.useState(structurePanelDefaultWidth);
-  const [navigatorTab, setNavigatorTab] = React.useState<EventPageNavigatorTab>('sections');
+  const [structurePanelWidth, setStructurePanelWidth] = React.useState(
+    structurePanelDefaultWidth,
+  );
+  const [navigatorTab, setNavigatorTab] =
+    React.useState<EventPageNavigatorTab>("sections");
   const [inspectorOpen, setInspectorOpen] = React.useState(true);
-  const [mobilePanel, setMobilePanel] = React.useState<EventPageMobilePanel>(null);
-  const [editorMode, setEditorMode] = React.useState<EditorMode>('editor');
-  const [previewViewport, setPreviewViewport] = React.useState<EventPagePreviewViewport>('desktop');
-  const [cancelDropTargetActive, setCancelDropTargetActive] = React.useState(false);
+  const [mobilePanel, setMobilePanel] =
+    React.useState<EventPageMobilePanel>(null);
+  const [editorMode, setEditorMode] = React.useState<EditorMode>("editor");
+  const [previewViewport, setPreviewViewport] =
+    React.useState<EventPagePreviewViewport>("desktop");
+  const [cancelDropTargetActive, setCancelDropTargetActive] =
+    React.useState(false);
   const [preview, setPreview] = React.useState<EventPagePreview>();
   const [publishReviewOpen, setPublishReviewOpen] = React.useState(false);
   const [renameOpen, setRenameOpen] = React.useState(false);
@@ -2830,8 +3125,9 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const [isRenaming, setIsRenaming] = React.useState(false);
   const [isPublishing, setIsPublishing] = React.useState(false);
   const [puckSessionRevision, setPuckSessionRevision] = React.useState(0);
-  const [focusTarget, setFocusTarget] = React.useState<EventPageFocusTarget>(null);
-  const [autosave, setAutosave] = React.useState<AutosaveState>('idle');
+  const [focusTarget, setFocusTarget] =
+    React.useState<EventPageFocusTarget>(null);
+  const [autosave, setAutosave] = React.useState<AutosaveState>("idle");
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string>();
   const [loadRetryable, setLoadRetryable] = React.useState(true);
@@ -2846,11 +3142,14 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     | undefined
   >(undefined);
   const { can } = usePermissions();
-  const isArchived = document?.status === 'archived';
-  const canWrite = can('events.write');
-  const canManageUnsafeEmbeds = can('settings.write');
+  const isArchived = document?.status === "archived";
+  const canWrite = can("events.write");
+  const canManageUnsafeEmbeds = can("settings.write");
   const canEdit = !isArchived && canWrite;
-  const pageRuntime = React.useMemo(() => buildPageRuntime(editorChrome), [editorChrome]);
+  const pageRuntime = React.useMemo(
+    () => buildPageRuntime(editorChrome),
+    [editorChrome],
+  );
   const hasCommerceItems = pageRuntime.tickets.length > 0;
   const overrides = React.useMemo(
     () => puckOverrides(pageRuntime, editorChrome.brand),
@@ -2859,26 +3158,34 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   const uploadEventPageImage = React.useCallback<EventPagePuckUploadImage>(
     async (file) => {
       if (!canEdit) {
-        throw new Error('You do not have permission to upload event page images.');
+        throw new Error(
+          "You do not have permission to upload event page images.",
+        );
       }
       if (!event?.brandId || !event.id) {
-        throw new Error('Event page image uploads require an event and brand context.');
+        throw new Error(
+          "Event page image uploads require an event and brand context.",
+        );
       }
       const result = await adminApi.uploadArtifact({
-        purpose: 'content_event_page_image',
+        purpose: "content_event_page_image",
         file,
         brandId: event.brandId,
         eventId: event.id,
         metadata: {
-          source: 'admin_event_page_editor',
+          source: "admin_event_page_editor",
           contentDocumentId: document?.id,
         },
       });
       if (!result.ok) {
-        throw new Error(resultMessage(result.error, 'Unable to upload event page image'));
+        throw new Error(
+          resultMessage(result.error, "Unable to upload event page image"),
+        );
       }
       if (!result.data.downloadUrl) {
-        throw new Error('Uploaded event page image did not return a download URL.');
+        throw new Error(
+          "Uploaded event page image did not return a download URL.",
+        );
       }
       return { url: result.data.downloadUrl };
     },
@@ -2892,7 +3199,12 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         hasProductItems: (pageRuntime.products?.length ?? 0) > 0,
         onUploadImage: uploadEventPageImage,
       }),
-    [canManageUnsafeEmbeds, hasCommerceItems, pageRuntime.products?.length, uploadEventPageImage],
+    [
+      canManageUnsafeEmbeds,
+      hasCommerceItems,
+      pageRuntime.products?.length,
+      uploadEventPageImage,
+    ],
   );
 
   React.useEffect(() => {
@@ -2900,8 +3212,10 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       '[data-testid="editor-canvas"] iframe',
     );
     const frameDocument = frame?.contentDocument;
-    const previousPointerEvents = frame?.style.pointerEvents ?? '';
-    const existingStyle = frameDocument?.getElementById(cancelDropIframeStyleId);
+    const previousPointerEvents = frame?.style.pointerEvents ?? "";
+    const existingStyle = frameDocument?.getElementById(
+      cancelDropIframeStyleId,
+    );
 
     if (!cancelDropTargetActive || !frame || !frameDocument?.head) {
       existingStyle?.remove();
@@ -2909,8 +3223,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       return undefined;
     }
 
-    frame.style.pointerEvents = 'none';
-    const style = existingStyle ?? frameDocument.createElement('style');
+    frame.style.pointerEvents = "none";
+    const style = existingStyle ?? frameDocument.createElement("style");
     style.id = cancelDropIframeStyleId;
     style.textContent = `
       [data-dnd-placeholder] {
@@ -2950,7 +3264,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   function markDraftDirty() {
     if (isArchived) return;
     nextOperationId();
-    setAutosave('idle');
+    setAutosave("idle");
     setActionError(undefined);
     setNotice(undefined);
   }
@@ -2965,39 +3279,51 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     const eventResult = await adminApi.getEvent(eventId);
     if (!eventResult.ok) {
       setLoadRetryable(isRetryableLoadError(eventResult.error));
-      setError(resultMessage(eventResult.error, 'Unable to load event'));
+      setError(resultMessage(eventResult.error, "Unable to load event"));
       setLoading(false);
       return;
     }
     const loadedEvent = eventResult.data;
     if (!loadedEvent.organizationId || !loadedEvent.brandId) {
       setLoadRetryable(false);
-      setError('Event is missing organization or brand scope for persisted event-page content.');
+      setError(
+        "Event is missing organization or brand scope for persisted event-page content.",
+      );
       setLoading(false);
       return;
     }
 
     const documentsResult = await adminApi.listContentDocuments({
-      channel: 'event_page',
+      channel: "event_page",
       brandId: loadedEvent.brandId,
       eventId: loadedEvent.id,
       limit: 20,
     });
     if (!documentsResult.ok) {
       setLoadRetryable(isRetryableLoadError(documentsResult.error));
-      setError(resultMessage(documentsResult.error, 'Unable to load event page content documents'));
+      setError(
+        resultMessage(
+          documentsResult.error,
+          "Unable to load event page content documents",
+        ),
+      );
       setLoading(false);
       return;
     }
 
-    const documents = listItemsFromResponse<AdminContentDocument>(documentsResult.data);
+    const documents = listItemsFromResponse<AdminContentDocument>(
+      documentsResult.data,
+    );
     let loadedDocument = documents.find(
-      (item) => item.channel === 'event_page' && item.eventId === loadedEvent.id,
+      (item) =>
+        item.channel === "event_page" && item.eventId === loadedEvent.id,
     );
     if (!loadedDocument) {
       if (!canWrite) {
         setLoadRetryable(false);
-        setError('No event page exists yet, and you do not have permission to create one.');
+        setError(
+          "No event page exists yet, and you do not have permission to create one.",
+        );
         setLoading(false);
         return;
       }
@@ -3005,34 +3331,50 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         organizationId: loadedEvent.organizationId,
         brandId: loadedEvent.brandId,
         eventId: loadedEvent.id,
-        channel: 'event_page',
-        key: 'main',
+        channel: "event_page",
+        key: "main",
         name: `${loadedEvent.title} event page`,
-        locale: 'en',
+        locale: "en",
       });
       if (!createResult.ok) {
         setLoadRetryable(isRetryableLoadError(createResult.error));
-        setError(resultMessage(createResult.error, 'Unable to create event page content document'));
+        setError(
+          resultMessage(
+            createResult.error,
+            "Unable to create event page content document",
+          ),
+        );
         setLoading(false);
         return;
       }
       loadedDocument = createResult.data;
     }
 
-    const versionsResult = await adminApi.listContentVersions(loadedDocument.id);
+    const versionsResult = await adminApi.listContentVersions(
+      loadedDocument.id,
+    );
     if (!versionsResult.ok) {
       setLoadRetryable(isRetryableLoadError(versionsResult.error));
-      setError(resultMessage(versionsResult.error, 'Unable to load event page versions'));
+      setError(
+        resultMessage(
+          versionsResult.error,
+          "Unable to load event page versions",
+        ),
+      );
       setLoading(false);
       return;
     }
 
-    let loadedVersions = listItemsFromResponse<AdminContentDocumentVersion>(versionsResult.data);
+    let loadedVersions = listItemsFromResponse<AdminContentDocumentVersion>(
+      versionsResult.data,
+    );
     let loadedDraft = latestDraft(loadedVersions, loadedDocument);
     if (!loadedDraft) {
       if (!canWrite) {
         setLoadRetryable(false);
-        setError('This event page has no draft, and you do not have permission to create one.');
+        setError(
+          "This event page has no draft, and you do not have permission to create one.",
+        );
         setLoading(false);
         return;
       }
@@ -3043,7 +3385,12 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       );
       if (!saveResult.ok) {
         setLoadRetryable(isRetryableLoadError(saveResult.error));
-        setError(resultMessage(saveResult.error, 'Unable to create the initial event page draft'));
+        setError(
+          resultMessage(
+            saveResult.error,
+            "Unable to create the initial event page draft",
+          ),
+        );
         setLoading(false);
         return;
       }
@@ -3051,10 +3398,15 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       loadedVersions = [saveResult.data];
     }
 
-    const normalized = coerceStoredEventPageDocument(loadedDraft.contentJson, loadedEvent);
+    const normalized = coerceStoredEventPageDocument(
+      loadedDraft.contentJson,
+      loadedEvent,
+    );
     if (!normalized) {
       setLoadRetryable(false);
-      setError('Saved event page draft is not a schemaVersion 2 Puck document.');
+      setError(
+        "Saved event page draft is not a schemaVersion 2 Puck document.",
+      );
       setLoading(false);
       return;
     }
@@ -3067,22 +3419,27 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     const supportingDataFailure = !brandsResult.ok
       ? {
           error: brandsResult.error,
-          message: 'Unable to load event page branding',
+          message: "Unable to load event page branding",
         }
       : !ticketsResult.ok
         ? {
             error: ticketsResult.error,
-            message: 'Unable to load event page ticket types',
+            message: "Unable to load event page ticket types",
           }
         : !productsResult.ok
           ? {
               error: productsResult.error,
-              message: 'Unable to load event page products',
+              message: "Unable to load event page products",
             }
           : undefined;
     if (supportingDataFailure) {
       setLoadRetryable(isRetryableLoadError(supportingDataFailure.error));
-      setError(resultMessage(supportingDataFailure.error, supportingDataFailure.message));
+      setError(
+        resultMessage(
+          supportingDataFailure.error,
+          supportingDataFailure.message,
+        ),
+      );
       setLoading(false);
       return;
     }
@@ -3118,11 +3475,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       venueName: loadedEvent.venue?.name ?? loadedEvent.venueName ?? undefined,
     });
     setPreview({
-      label: 'Current Puck draft',
+      label: "Current Puck draft",
       document: normalized,
       validation: validateEventPageDocument(normalized),
     });
-    setAutosave('saved');
+    setAutosave("saved");
     setLoading(false);
   }, [canWrite, eventId]);
 
@@ -3130,17 +3487,36 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     void load();
   }, [load]);
 
-  async function saveDraft(operationId = nextOperationId(), snapshot = eventPageDocument) {
+  React.useEffect(() => {
+    if (!previewOnly) return;
+    if (error) onPreviewError?.(error);
+    else if (!loading && eventPageDocument && preview) onPreviewReady?.();
+  }, [
+    error,
+    eventPageDocument,
+    loading,
+    onPreviewError,
+    onPreviewReady,
+    preview,
+    previewOnly,
+  ]);
+
+  async function saveDraft(
+    operationId = nextOperationId(),
+    snapshot = eventPageDocument,
+  ) {
     if (!document || !event || !snapshot || !canEdit) return undefined;
-    setAutosave('saving');
+    setAutosave("saving");
     const result = await adminApi.saveContentVersion(
       document.id,
       saveBodyForDocument(snapshot, event),
     );
     if (!isCurrentOperation(operationId)) return undefined;
     if (!result.ok) {
-      setAutosave('error');
-      setActionError(resultMessage(result.error, 'Unable to save event page draft'));
+      setAutosave("error");
+      setActionError(
+        resultMessage(result.error, "Unable to save event page draft"),
+      );
       return undefined;
     }
     setDraft(result.data);
@@ -3153,7 +3529,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       document: snapshot,
       validation: validateEventPageDocument(snapshot),
     });
-    setAutosave('saved');
+    setAutosave("saved");
     setActionError(undefined);
     setNotice(`Saved draft v${result.data.versionNumber}`);
     return { version: result.data, document: snapshot };
@@ -3163,7 +3539,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   autosaveDraftRef.current = saveDraft;
 
   React.useEffect(() => {
-    if (autosave !== 'idle' || !canEdit || !eventPageDocument || isPublishing) {
+    if (autosave !== "idle" || !canEdit || !eventPageDocument || isPublishing) {
       return;
     }
     const timer = window.setTimeout(() => {
@@ -3173,22 +3549,24 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   }, [autosave, canEdit, eventPageDocument, isPublishing]);
 
   React.useEffect(() => {
-    if (autosave === 'saved') return;
+    if (autosave === "saved") return;
     const warnBeforeUnload = (unloadEvent: BeforeUnloadEvent) => {
       unloadEvent.preventDefault();
-      unloadEvent.returnValue = '';
+      unloadEvent.returnValue = "";
     };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [autosave]);
 
-  async function saveBeforeBackNavigation(clickEvent: React.MouseEvent<HTMLAnchorElement>) {
-    if (autosave === 'saving') {
+  async function saveBeforeBackNavigation(
+    clickEvent: React.MouseEvent<HTMLAnchorElement>,
+  ) {
+    if (autosave === "saving") {
       clickEvent.preventDefault();
-      setNotice('Finishing your save—try Back again in a moment.');
+      setNotice("Finishing your save—try Back again in a moment.");
       return;
     }
-    if (autosave !== 'idle' && autosave !== 'error') return;
+    if (autosave !== "idle" && autosave !== "error") return;
     clickEvent.preventDefault();
     const destination = clickEvent.currentTarget.href;
     const saved = await saveDraft();
@@ -3199,11 +3577,13 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     if (!eventPageDocument || isArchived) return;
     setPreview({
       label:
-        autosave === 'saved' ? `Saved draft v${draft?.versionNumber ?? ''}` : 'Unsaved preview',
+        autosave === "saved"
+          ? `Saved draft v${draft?.versionNumber ?? ""}`
+          : "Unsaved preview",
       document: eventPageDocument,
       validation: validateEventPageDocument(eventPageDocument),
     });
-    setEditorMode('preview');
+    setEditorMode("preview");
     setMobilePanel(null);
     setActionError(undefined);
   }
@@ -3211,7 +3591,10 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   function requestPublishReview(snapshot = eventPageDocument) {
     if (!snapshot || !canEdit) return;
     setPreview({
-      label: autosave === 'saved' ? `Saved draft v${draft?.versionNumber ?? ''}` : 'Unsaved draft',
+      label:
+        autosave === "saved"
+          ? `Saved draft v${draft?.versionNumber ?? ""}`
+          : "Unsaved draft",
       document: snapshot,
       validation: validateEventPageDocument(snapshot),
     });
@@ -3221,17 +3604,17 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   function editValidationIssue(field?: string) {
     const contentIndexMatch = field?.match(/^editor\.data\.content\.(\d+)/);
-    setFocusTarget(contentIndexMatch ? Number(contentIndexMatch[1]) : 'root');
+    setFocusTarget(contentIndexMatch ? Number(contentIndexMatch[1]) : "root");
     setPublishReviewOpen(false);
-    setEditorMode('editor');
-    setNavigatorTab('sections');
+    setEditorMode("editor");
+    setNavigatorTab("sections");
     setStructurePanelOpen(true);
     setInspectorOpen(true);
     setMobilePanel(
-      typeof window !== 'undefined' &&
-        typeof window.matchMedia === 'function' &&
-        window.matchMedia('(max-width: 1023px)').matches
-        ? 'settings'
+      typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 1023px)").matches
+        ? "settings"
         : null,
     );
   }
@@ -3252,10 +3635,15 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         snapshotKey,
         version: saved.version,
       };
-      const result = await adminApi.publishContentVersion(document.id, saved.version.id);
+      const result = await adminApi.publishContentVersion(
+        document.id,
+        saved.version.id,
+      );
       if (!isCurrentOperation(operationId)) return;
       if (!result.ok) {
-        setActionError(resultMessage(result.error, 'Unable to publish event page'));
+        setActionError(
+          resultMessage(result.error, "Unable to publish event page"),
+        );
         return;
       }
       setDocument(result.data.document);
@@ -3268,7 +3656,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       setPublishReviewOpen(false);
       setActionError(undefined);
       setNotice(`Published v${result.data.version.versionNumber}`);
-      toast.success('Event page published');
+      toast.success("Event page published");
     } finally {
       setIsPublishing(false);
     }
@@ -3278,7 +3666,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     if (!document || !canEdit) return;
     if (
       !window.confirm(
-        'Archive this event page? Editing, publishing, and previews will be disabled.',
+        "Archive this event page? Editing, publishing, and previews will be disabled.",
       )
     ) {
       return;
@@ -3287,13 +3675,15 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     const result = await adminApi.archiveContentDocument(document.id);
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
-      setActionError(resultMessage(result.error, 'Unable to archive event page'));
+      setActionError(
+        resultMessage(result.error, "Unable to archive event page"),
+      );
       return;
     }
     setDocument(result.data);
     setActionError(undefined);
-    setNotice('Archived event page');
-    toast.success('Event page archived');
+    setNotice("Archived event page");
+    toast.success("Event page archived");
   }
 
   async function renameDocument(name: string) {
@@ -3305,13 +3695,15 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         name,
       });
       if (!result.ok) {
-        setActionError(resultMessage(result.error, 'Unable to rename event page'));
+        setActionError(
+          resultMessage(result.error, "Unable to rename event page"),
+        );
         return;
       }
       setDocument(result.data);
       setRenameOpen(false);
       setNotice(`Renamed event page to ${result.data.name}`);
-      toast.success('Event page renamed');
+      toast.success("Event page renamed");
     } finally {
       setIsRenaming(false);
     }
@@ -3319,9 +3711,14 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
   function previewVersion(version: AdminContentDocumentVersion) {
     if (!event) return;
-    const versionDocument = coerceStoredEventPageDocument(version.contentJson, event);
+    const versionDocument = coerceStoredEventPageDocument(
+      version.contentJson,
+      event,
+    );
     if (!versionDocument) {
-      setActionError(`Version ${version.versionNumber} is not a valid event page.`);
+      setActionError(
+        `Version ${version.versionNumber} is not a valid event page.`,
+      );
       return;
     }
     setPreview({
@@ -3330,16 +3727,21 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       validation: validateEventPageDocument(versionDocument),
     });
     setHistoryOpen(false);
-    setEditorMode('preview');
-    setPreviewViewport('desktop');
+    setEditorMode("preview");
+    setPreviewViewport("desktop");
     setNotice(`Previewing saved version ${version.versionNumber}`);
   }
 
   function restoreVersion(version: AdminContentDocumentVersion) {
     if (!event || !canEdit) return;
-    const versionDocument = coerceStoredEventPageDocument(version.contentJson, event);
+    const versionDocument = coerceStoredEventPageDocument(
+      version.contentJson,
+      event,
+    );
     if (!versionDocument) {
-      setActionError(`Version ${version.versionNumber} is not a valid event page.`);
+      setActionError(
+        `Version ${version.versionNumber} is not a valid event page.`,
+      );
       return;
     }
     publishRetryRef.current = undefined;
@@ -3351,7 +3753,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       validation: validateEventPageDocument(versionDocument),
     });
     setHistoryOpen(false);
-    setEditorMode('editor');
+    setEditorMode("editor");
     markDraftDirty();
     setNotice(`Restored version ${version.versionNumber} as a new draft`);
   }
@@ -3366,29 +3768,34 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     });
     if (!isCurrentOperation(operationId)) return;
     if (!result.ok) {
-      setActionError(resultMessage(result.error, 'Unable to duplicate event page'));
+      setActionError(
+        resultMessage(result.error, "Unable to duplicate event page"),
+      );
       return;
     }
     setActionError(undefined);
     setNotice(`Duplicated event page as ${result.data.name}`);
-    toast.success('Event page duplicated');
+    toast.success("Event page duplicated");
   }
 
   function viewPublicPage() {
     if (!event || !eventPageDocument || isArchived) return;
     const url = publicPageUrl(eventPageDocument, event);
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(url, "_blank", "noopener,noreferrer");
     setActionError(undefined);
-    setNotice('Opened public page');
+    setNotice("Opened public page");
   }
 
-  function setCurrentPuckData(data: unknown, options: { markDirty?: boolean } = {}) {
+  function setCurrentPuckData(
+    data: unknown,
+    options: { markDirty?: boolean } = {},
+  ) {
     if (!event || !eventPageDocument || isArchived) return;
     const { markDirty = true } = options;
     const nextDocument = withPuckData(eventPageDocument, data, event);
     setEventPageDocument(nextDocument);
     setPreview({
-      label: 'Current Puck draft',
+      label: "Current Puck draft",
       document: nextDocument,
       validation: validateEventPageDocument(nextDocument),
     });
@@ -3402,7 +3809,9 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     setCurrentPuckData(data, { markDirty: false });
   }
 
-  function startStructurePanelResize(pointerEvent: React.PointerEvent<HTMLElement>) {
+  function startStructurePanelResize(
+    pointerEvent: React.PointerEvent<HTMLElement>,
+  ) {
     pointerEvent.preventDefault();
     const startX = pointerEvent.clientX;
     const startWidth = structurePanelWidth;
@@ -3413,7 +3822,10 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const nextWidth = Math.min(
         structurePanelMaxWidth,
-        Math.max(structurePanelMinWidth, startWidth + moveEvent.clientX - startX),
+        Math.max(
+          structurePanelMinWidth,
+          startWidth + moveEvent.clientX - startX,
+        ),
       );
       setStructurePanelWidth(nextWidth);
     };
@@ -3422,26 +3834,29 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       if (resizeHandle.hasPointerCapture(pointerId)) {
         resizeHandle.releasePointerCapture(pointerId);
       }
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', stopResize);
-      window.removeEventListener('pointercancel', stopResize);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', stopResize);
-    window.addEventListener('pointercancel', stopResize);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
   }
 
-  function resizeStructurePanelWithKeyboard(keyboardEvent: React.KeyboardEvent<HTMLElement>) {
+  function resizeStructurePanelWithKeyboard(
+    keyboardEvent: React.KeyboardEvent<HTMLElement>,
+  ) {
     const delta = keyboardEvent.shiftKey ? 40 : 12;
-    if (keyboardEvent.key !== 'ArrowLeft' && keyboardEvent.key !== 'ArrowRight') return;
+    if (keyboardEvent.key !== "ArrowLeft" && keyboardEvent.key !== "ArrowRight")
+      return;
     keyboardEvent.preventDefault();
     setStructurePanelWidth((width) =>
       Math.min(
         structurePanelMaxWidth,
         Math.max(
           structurePanelMinWidth,
-          width + (keyboardEvent.key === 'ArrowRight' ? delta : -delta),
+          width + (keyboardEvent.key === "ArrowRight" ? delta : -delta),
         ),
       ),
     );
@@ -3455,7 +3870,14 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     );
   }
 
-  if (error || !event || !document || !draft || !eventPageDocument || !preview) {
+  if (
+    error ||
+    !event ||
+    !document ||
+    !draft ||
+    !eventPageDocument ||
+    !preview
+  ) {
     return (
       <section className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
         <div className="w-full max-w-lg space-y-4 rounded-lg border bg-card p-6 text-card-foreground">
@@ -3464,7 +3886,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
             <h1 className="text-2xl font-semibold">Unable to load editor</h1>
           </div>
           <p className="text-sm text-destructive">
-            {error ?? 'Hosted page editor could not load.'}
+            {error ?? "Hosted page editor could not load."}
           </p>
           <div className="flex flex-wrap gap-2">
             <a
@@ -3488,17 +3910,35 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
     );
   }
 
-  const archivedReason = isArchived ? 'Archived pages are read-only.' : undefined;
+  const archivedReason = isArchived
+    ? "Archived pages are read-only."
+    : undefined;
   const localValidation = validateEventPageDocument(eventPageDocument);
-  const publishDisabled = !canEdit || autosave === 'saving' || isPublishing;
+  if (previewOnly) {
+    return (
+      <div
+        className="min-h-[32rem] overflow-hidden rounded-lg bg-background text-foreground"
+        data-testid="authenticated-event-page-preview"
+        style={brandThemeStyleFromAdminBrand(editorChrome.brand)}
+      >
+        <EventPageRender
+          brandVariables={brandVariablesFromAdminBrand(editorChrome.brand)}
+          document={eventPageDocument}
+          runtime={pageRuntime}
+          validate={false}
+        />
+      </div>
+    );
+  }
+  const publishDisabled = !canEdit || autosave === "saving" || isPublishing;
   const autosaveLabel =
-    autosave === 'idle'
-      ? 'Unsaved changes'
-      : autosave === 'saving'
-        ? 'Saving…'
-        : autosave === 'saved'
-          ? 'Saved'
-          : 'Save failed';
+    autosave === "idle"
+      ? "Unsaved changes"
+      : autosave === "saving"
+        ? "Saving…"
+        : autosave === "saved"
+          ? "Saved"
+          : "Save failed";
   const permissions: Partial<Permissions> = {
     delete: canEdit,
     drag: canEdit,
@@ -3508,8 +3948,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   };
   const moreActionsItems: DropdownMenuItemConfig[] = [
     {
-      id: 'rename',
-      label: 'Rename page',
+      id: "rename",
+      label: "Rename page",
       icon: <Pencil className="size-4" />,
       onClick: () => {
         setActionError(undefined);
@@ -3518,8 +3958,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       disabled: !canEdit,
     },
     {
-      id: 'history',
-      label: 'Version history',
+      id: "history",
+      label: "Version history",
       icon: <ListChecks className="size-4" />,
       onClick: () => {
         setActionError(undefined);
@@ -3527,65 +3967,65 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       },
     },
     {
-      id: 'variables',
-      label: 'Variables & event data',
+      id: "variables",
+      label: "Variables & event data",
       icon: <Type className="size-4" />,
       onClick: () => setDataDialogOpen(true),
       separatorAfter: true,
     },
     {
-      id: 'edit',
-      label: 'Edit page',
+      id: "edit",
+      label: "Edit page",
       icon: <Pencil className="size-4" />,
       onClick: () => {
-        setEditorMode('editor');
+        setEditorMode("editor");
         setMobilePanel(null);
       },
-      disabled: editorMode === 'editor',
+      disabled: editorMode === "editor",
     },
     {
-      id: 'preview',
-      label: 'Preview current draft',
+      id: "preview",
+      label: "Preview current draft",
       icon: <Eye className="size-4" />,
       onClick: openPreview,
       disabled: Boolean(archivedReason),
     },
     {
-      id: 'code',
-      label: 'View page JSON',
+      id: "code",
+      label: "View page JSON",
       icon: <Code2 className="size-4" />,
       onClick: () => {
-        setEditorMode('code');
+        setEditorMode("code");
         setMobilePanel(null);
       },
       separatorAfter: true,
     },
     {
-      id: 'save',
-      label: 'Save draft',
+      id: "save",
+      label: "Save draft",
       icon: <Save className="size-4" />,
       onClick: () => void saveDraft(),
-      disabled: !canEdit || autosave === 'saving',
+      disabled: !canEdit || autosave === "saving",
       separatorAfter: true,
     },
     {
-      id: 'public',
-      label: 'View public page',
+      id: "public",
+      label: "View public page",
       icon: <ExternalLink className="size-4" />,
       onClick: () => viewPublicPage(),
       disabled: Boolean(archivedReason),
     },
     {
-      id: 'duplicate',
-      label: 'Duplicate page',
+      id: "duplicate",
+      label: "Duplicate page",
       icon: <Copy className="size-4" />,
       onClick: () => void duplicateDocument(),
       disabled: !canEdit,
       separatorAfter: true,
     },
     {
-      id: 'archive',
-      label: 'Archive page',
+      id: "archive",
+      label: "Archive page",
       icon: <Archive className="size-4" />,
       onClick: () => void archiveDocument(),
       disabled: !canEdit,
@@ -3632,7 +4072,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         )}
         <div
           className="min-h-0 min-w-0 flex-1 overflow-hidden pb-[72px] lg:pb-0"
-          inert={Boolean(mobilePanel && mobilePanel !== 'add')}
+          inert={Boolean(mobilePanel && mobilePanel !== "add")}
         >
           <Puck.Preview />
         </div>
@@ -3645,11 +4085,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
 
       {mobilePanel ? (
         <EventPageMobilePanelOverlay
-          label={`${mobilePanel === 'settings' ? 'Settings' : mobilePanel === 'add' ? 'Add sections' : 'Sections'} panel`}
+          label={`${mobilePanel === "settings" ? "Settings" : mobilePanel === "add" ? "Add sections" : "Sections"} panel`}
           mode={mobilePanel}
           onClose={() => setMobilePanel(null)}
         >
-          {mobilePanel === 'settings' ? (
+          {mobilePanel === "settings" ? (
             <EventPageInspectorPanel onClose={() => setMobilePanel(null)} />
           ) : (
             <EventPageNavigatorPanel
@@ -3672,28 +4112,38 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         className="absolute inset-x-3 bottom-2 z-50 flex h-14 items-stretch gap-1 rounded-xl border bg-background/95 p-1 shadow-lg backdrop-blur lg:hidden"
       >
         <EventPageMobileTool
-          active={!mobilePanel && editorMode === 'editor'}
+          active={!mobilePanel && editorMode === "editor"}
           icon={<Pencil className="size-4" />}
           label="Edit"
           onClick={() => setMobilePanel(null)}
         />
         <EventPageMobileTool
-          active={mobilePanel === 'sections'}
+          active={mobilePanel === "sections"}
           icon={<PanelLeftOpen className="size-4" />}
           label="Sections"
-          onClick={() => setMobilePanel((panel) => (panel === 'sections' ? null : 'sections'))}
+          onClick={() =>
+            setMobilePanel((panel) =>
+              panel === "sections" ? null : "sections",
+            )
+          }
         />
         <EventPageMobileTool
-          active={mobilePanel === 'add'}
+          active={mobilePanel === "add"}
           icon={<Plus className="size-4" />}
           label="Add"
-          onClick={() => setMobilePanel((panel) => (panel === 'add' ? null : 'add'))}
+          onClick={() =>
+            setMobilePanel((panel) => (panel === "add" ? null : "add"))
+          }
         />
         <EventPageMobileTool
-          active={mobilePanel === 'settings'}
+          active={mobilePanel === "settings"}
           icon={<Settings2 className="size-4" />}
           label="Settings"
-          onClick={() => setMobilePanel((panel) => (panel === 'settings' ? null : 'settings'))}
+          onClick={() =>
+            setMobilePanel((panel) =>
+              panel === "settings" ? null : "settings",
+            )
+          }
         />
         <EventPageMobileTool
           active={false}
@@ -3706,7 +4156,11 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   );
 
   const previewWidth =
-    previewViewport === 'mobile' ? 390 : previewViewport === 'tablet' ? 768 : undefined;
+    previewViewport === "mobile"
+      ? 390
+      : previewViewport === "tablet"
+        ? 768
+        : undefined;
   const previewCanvas = (
     <main
       aria-label="Event page preview"
@@ -3719,7 +4173,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
           data-testid="preview-mode-public-page-surface"
           style={{
             ...brandThemeStyleFromAdminBrand(editorChrome.brand),
-            ...(previewWidth ? { width: previewWidth, maxWidth: '100%' } : {}),
+            ...(previewWidth ? { width: previewWidth, maxWidth: "100%" } : {}),
           }}
         >
           <EventPageRender
@@ -3732,7 +4186,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       </div>
       <button
         className="fixed bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border bg-background px-4 py-2 text-sm font-medium shadow-lg lg:hidden"
-        onClick={() => setEditorMode('editor')}
+        onClick={() => setEditorMode("editor")}
         type="button"
       >
         Back to editor
@@ -3753,7 +4207,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       </div>
       <button
         className="fixed bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border bg-background px-4 py-2 text-sm font-medium shadow-lg lg:hidden"
-        onClick={() => setEditorMode('editor')}
+        onClick={() => setEditorMode("editor")}
         type="button"
       >
         Back to editor
@@ -3762,29 +4216,33 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   );
 
   const canvas =
-    editorMode === 'editor' ? editorCanvas : editorMode === 'preview' ? previewCanvas : codeCanvas;
+    editorMode === "editor"
+      ? editorCanvas
+      : editorMode === "preview"
+        ? previewCanvas
+        : codeCanvas;
 
   const secondaryActions = (
     <>
       <div className="flex rounded-md border bg-muted/40 p-0.5">
         <button
-          aria-pressed={editorMode === 'editor'}
+          aria-pressed={editorMode === "editor"}
           className={`rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
-            editorMode === 'editor'
-              ? 'bg-background text-foreground shadow-xs'
-              : 'text-muted-foreground'
+            editorMode === "editor"
+              ? "bg-background text-foreground shadow-xs"
+              : "text-muted-foreground"
           }`}
-          onClick={() => setEditorMode('editor')}
+          onClick={() => setEditorMode("editor")}
           type="button"
         >
           Edit
         </button>
         <button
-          aria-pressed={editorMode === 'preview'}
+          aria-pressed={editorMode === "preview"}
           className={`rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
-            editorMode === 'preview'
-              ? 'bg-background text-foreground shadow-xs'
-              : 'text-muted-foreground'
+            editorMode === "preview"
+              ? "bg-background text-foreground shadow-xs"
+              : "text-muted-foreground"
           }`}
           onClick={openPreview}
           type="button"
@@ -3792,13 +4250,16 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
           Preview
         </button>
       </div>
-      {editorMode === 'preview' ? (
-        <div aria-label="Preview device" className="flex rounded-md border p-0.5">
+      {editorMode === "preview" ? (
+        <div
+          aria-label="Preview device"
+          className="flex rounded-md border p-0.5"
+        >
           {(
             [
-              ['desktop', LayoutTemplate],
-              ['tablet', Tablet],
-              ['mobile', Smartphone],
+              ["desktop", LayoutTemplate],
+              ["tablet", Tablet],
+              ["mobile", Smartphone],
             ] as const
           ).map(([viewport, Icon]) => (
             <button
@@ -3806,8 +4267,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               aria-pressed={previewViewport === viewport}
               className={`rounded p-1.5 transition-colors ${
                 previewViewport === viewport
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground'
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground"
               }`}
               key={viewport}
               onClick={() => setPreviewViewport(viewport)}
@@ -3818,7 +4279,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
           ))}
         </div>
       ) : null}
-      {editorMode === 'editor' ? (
+      {editorMode === "editor" ? (
         <>
           <EventPagePanelToggle
             icon={
@@ -3849,8 +4310,8 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
       <button
         className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors ${
           localValidation.valid
-            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
-            : 'border-destructive/30 bg-destructive/10 text-destructive'
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+            : "border-destructive/30 bg-destructive/10 text-destructive"
         }`}
         onClick={() => requestPublishReview()}
         type="button"
@@ -3860,7 +4321,9 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
         ) : (
           <CircleHelp className="size-3.5" />
         )}
-        {localValidation.valid ? 'Ready' : `${localValidation.issues.length} issues`}
+        {localValidation.valid
+          ? "Ready"
+          : `${localValidation.issues.length} issues`}
       </button>
     </>
   );
@@ -3900,7 +4363,7 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
   return (
     <>
       <div className="contents" inert={publishReviewOpen}>
-        {editorMode === 'editor' ? (
+        {editorMode === "editor" ? (
           <Puck
             config={puckConfig}
             data={eventPageDocument.editor.data as EventPagePuckCoreData}
@@ -3922,7 +4385,10 @@ export function EventPagePersistedEditorView({ eventId }: { eventId: string }) {
               documentId={document.id}
               hasContent={eventPageDocument.editor.data.content.length > 0}
             />
-            <FocusEventPageTarget onFocused={() => setFocusTarget(null)} target={focusTarget} />
+            <FocusEventPageTarget
+              onFocused={() => setFocusTarget(null)}
+              target={focusTarget}
+            />
             {renderChrome()}
           </Puck>
         ) : (

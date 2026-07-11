@@ -77,10 +77,6 @@ vi.mock('@/components/data-table', async (importOriginal) => {
   };
 });
 
-vi.mock('./create-event-drawer', () => ({
-  CreateEventDrawer: () => <div data-testid="create-event-drawer" />,
-}));
-
 beforeEach(() => {
   permissionsMock.can.mockImplementation((permission?: string) => permission === 'events.write');
   eventRows.current = [];
@@ -134,7 +130,7 @@ describe('Events table columns', () => {
 
     render(<EventsTable />);
 
-    expect(screen.queryByRole('button', { name: 'Create event' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Create event' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('create-event-drawer')).not.toBeInTheDocument();
     expect(screen.getByText('No events yet')).toBeInTheDocument();
     expect(
@@ -147,8 +143,12 @@ describe('Events table columns', () => {
 
     render(<EventsTable />);
 
-    expect(screen.getAllByRole('button', { name: 'Create event' })).toHaveLength(2);
-    expect(screen.getByTestId('create-event-drawer')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Create event' })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: 'Create event' })[0]).toHaveAttribute(
+      'href',
+      '/events/new',
+    );
+    expect(screen.queryByTestId('create-event-drawer')).not.toBeInTheDocument();
   });
 
   it('renders row sheet gross sales as currency', () => {

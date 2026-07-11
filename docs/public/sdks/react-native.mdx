@@ -1,0 +1,28 @@
+---
+title: React Native SDK
+description: Build scanner, ticket, checkout-handoff, public event, and resale experiences with secure device storage.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A React Native application and supported secure-storage adapter
+related:
+  - /operators/check-in
+  - /developers/api-fundamentals/authentication
+---
+
+<SdkGuide sdkId="react-native" />
+
+```bash
+bun add @tixkit/react-native
+```
+
+The package exposes `TixkitScannerClient`, public event/resale clients, checkout handoff helpers, and secure-storage contracts. Scanner credentials are device secrets: store them through the supported secure adapter, never AsyncStorage, source code, deep-link URLs, analytics, or crash breadcrumbs.
+
+Use public clients without a privileged API key for buyer-safe content. Checkout handoff URLs must contain only supported public identifiers and quantities.
+
+For offline scanning, verify manifest signature and freshness, enforce the event/device scope, retain idempotency identifiers, and synchronize when connectivity returns. Exercise the runnable `apps/sdk-react-native-demo` on both supported mobile platforms.

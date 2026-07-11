@@ -1,0 +1,35 @@
+---
+title: Configure event schedules
+description: Add occurrences that make event timing explicit for buyers and operators.
+audience:
+  - operator
+product_area: events
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - An existing event
+  - Event write permission
+related:
+  - /operators/events
+  - /operators/events/tickets-and-products
+---
+
+Schedules determine when an event occurs and provide context for checkout, attendee operations, and reporting.
+
+## Add an occurrence
+
+Open the event schedule view and add a future start time with the intended timezone and any supported end or door time. Save, reload, and verify the displayed local time.
+
+Timezone errors are operationally expensive. Confirm the venue timezone and do not infer it from the operator's browser. When daylight-saving boundaries are relevant, verify the exact rendered date and offset.
+
+## Change an active schedule safely
+
+Before changing an event that already has orders, determine how the change affects buyer communication, tickets, check-in, and integrations. Save the new value once, verify it on the public event page, and use the messaging workflow when attendees must be notified.
+
+## Troubleshoot
+
+If a published event is missing from public discovery, confirm that at least one occurrence is active and that its timing, publication, sales window, and brand context are compatible. A schedule alone does not override inactive inventory.
+
+Continue with [sellable inventory](/operators/events/tickets-and-products).

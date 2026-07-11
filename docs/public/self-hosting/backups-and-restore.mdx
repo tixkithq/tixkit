@@ -1,0 +1,28 @@
+---
+title: Back up and restore Tixkit
+description: Protect relational data and object artifacts with measured, rehearsed recovery procedures.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: runbook
+status: beta
+owner: platform-operations
+last_verified: 2026-07-10
+prerequisites:
+  - Backup destinations isolated from the primary failure domain
+related:
+  - /self-hosting/databases
+  - /operations/incidents
+---
+
+Backups are not complete until a restore rehearsal proves usable application state. Protect database data and required object-storage artifacts; document which ephemeral Redis/Temporal state is reconstructed and which durable Temporal persistence is protected by its own service plan.
+
+## Backup
+
+Run the repository's engine/object-storage backup procedures with encrypted destinations, least-privilege access, retention, and monitoring. Record timestamps and non-secret artifact identifiers.
+
+## Restore rehearsal
+
+Restore into an isolated environment, run migrations only as required by the target commit, start API/worker/application processes, and verify tenant scope, a representative event/order, artifact download, workflow visibility, and health checks.
+
+Measure recovery point and recovery time from actual rehearsal evidence. Do not publish invented RPO/RTO claims.

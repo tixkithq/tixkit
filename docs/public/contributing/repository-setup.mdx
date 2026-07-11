@@ -1,0 +1,38 @@
+---
+title: Set up the repository
+description: Clone Tixkit, install the pinned workspace, start the stack, and run focused validation without hidden assumptions.
+audience:
+  - contributor
+product_area: contributing
+content_type: quickstart
+status: beta
+owner: documentation-architecture
+last_verified: 2026-07-10
+prerequisites:
+  - Git, Bun 1.3+, Node.js 20+, and Docker
+related:
+  - /getting-started/local-quickstart
+  - /contributing/testing
+---
+
+Clone the repository, enter its root, and preserve any existing working-tree changes before editing.
+
+```bash
+bun install --frozen-lockfile
+cp .env.local.example .env.local
+bun run setup:check -- --mode local
+bun run quickstart -- --no-open
+```
+
+The quickstart remains in the foreground and starts infrastructure, migrations, API, worker, checkout, admin, docs, and sample data. Use a second terminal for focused tests.
+
+## Work safely
+
+- Read `AGENTS.md`, the relevant package README, and canonical guide before changing a contract.
+- Use Graphify for cross-package navigation and Serena or focused source inspection for exact symbols.
+- Preserve unrelated dirty-worktree changes; never reset or reformat them to simplify a task.
+- Keep API, OpenAPI, SDKs, dashboard types, examples, docs, and tests synchronized in one change.
+
+Stop the foreground quickstart with Control-C and verify its managed processes exit.
+
+Continue by [adding documentation](/contributing/add-documentation) through the canonical public-content workflow.

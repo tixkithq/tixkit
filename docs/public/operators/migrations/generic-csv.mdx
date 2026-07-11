@@ -1,0 +1,22 @@
+---
+title: Import Generic CSV exports
+description: Prepare, map, preview, and migrate deterministic CSV exports.
+audience: [operator, developer]
+product_area: platform
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - Immutable source CSV files and migration operator permission
+related:
+  - /operators/migration-operations
+---
+
+The Generic CSV adapter accepts immutable RFC 4180 documents for events, ticket types, attendees, historical orders, tickets, promo codes, and check-in history. Use `rfc4180-v1`; template files and sample data are exported by `@tixkit/migration-core`.
+
+The adapter detects comma, semicolon, tab, or pipe delimiters and recognizes entity headers. Always confirm detection in the preview, save an organization-scoped mapping profile, and rerun dry-run after any mapping change. Required source IDs become stable external references, so re-importing an unchanged export skips existing records.
+
+Supported mappings include fixed ticket prices and capacity, attendee/buyer provenance, historical orders, issued tickets, fixed or percentage promo codes, and check-in/check-out timestamps. Reserved-seat geometry, provider payment success, source messaging, and webhook automation are reported as known losses. Historical order status never creates a successful provider payment.
+
+Import spreadsheet formulas only as data. Error CSV output prefixes formula-leading values and can be safely opened for remediation. Resolve every fatal/error row, verify timezone and ISO currency findings, then commit with the job-bound confirmation. Rollback remains limited to untouched entities created by that job.

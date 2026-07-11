@@ -1,0 +1,32 @@
+---
+title: Run reports and exports
+description: Request scoped reporting data, monitor asynchronous exports, and handle generated files safely.
+audience:
+  - operator
+product_area: reports
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Reports read permission
+related:
+  - /operators/orders
+  - /operations/incidents
+---
+
+Reports and exports inherit the active tenant, organization, brand, event, and permission context. Treat generated files as potentially sensitive operational data.
+
+## Run a report
+
+Confirm the selected context and time range before applying filters. Validate totals against a small known sample when the report informs financial or attendance decisions.
+
+## Create an export
+
+Submit the export once and monitor its job state. Exports may be produced asynchronously by workflow activities and object storage. A request acknowledgement is not proof the file exists.
+
+Download only through the authorized link, store the file according to your retention policy, and do not attach customer data to public issues.
+
+## Diagnose failure
+
+Check the job event/status shown by the dashboard. Distinguish query validation, workflow/worker, object-storage, and signed-download failures. Use [incident runbooks](/operations/incidents) for a stuck job rather than recreating many identical exports.

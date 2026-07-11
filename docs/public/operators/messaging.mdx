@@ -1,0 +1,33 @@
+---
+title: Configure and send messages
+description: Work with lifecycle and campaign content while respecting sender verification, consent, and delivery evidence.
+audience:
+  - operator
+product_area: messaging
+content_type: how-to
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - Messaging write permission
+  - A verified sender path for provider delivery
+related:
+  - /operators/brands
+  - /operators/reports-and-exports
+---
+
+The content editor, sender identity, audience selection, and transport status are separate controls. A saved template is not proof of provider delivery.
+
+## Prepare content
+
+Select the correct brand and event scope. Use the lifecycle or campaign editor appropriate to the message. Preview content with test data and confirm links, unsubscribe/consent behavior, and accessible structure.
+
+## Verify sender readiness
+
+Provider delivery requires the environment's verified email or SMS sender configuration. Local capture behavior can validate rendering without proving provider acceptance. Resolve sender warnings before a live send.
+
+## Send and verify
+
+Use a limited test audience first. Confirm the dashboard's delivery/capture state and, when authorized, provider evidence. Do not copy recipient lists, message bodies containing personal data, or provider credentials into support reports.
+
+If delivery fails, distinguish invalid sender, provider rejection, transport error, recipient status, and template/render failure before retrying.

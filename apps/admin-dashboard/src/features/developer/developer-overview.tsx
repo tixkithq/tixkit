@@ -5,12 +5,14 @@ import Link from 'next/link';
 import { KeyRound, Webhook, BookOpen, Code2 } from 'lucide-react';
 import { adminApi } from '@/lib/api';
 import { routes } from '@/lib/routes';
+import { dashboardDocUrl } from '@/lib/docs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { ApiErrorState } from '@/components/api-error-state';
+import { DeveloperConsoleGuide } from './developer-console-guide';
 
 export function DeveloperOverview() {
   const { organizationId } = useBootstrap();
@@ -31,8 +33,8 @@ export function DeveloperOverview() {
     adminApi.listWebhookEndpoints(organizationId ? { organizationId } : undefined),
   );
 
-  const activeKeys = (apiKeys ?? []).length;
-  const activeWebhooks = (webhooks ?? []).filter((w) => w.status === 'active').length;
+  const activeKeys = apiKeys?.length ?? null;
+  const activeWebhooks = webhooks?.filter((w) => w.status === 'active').length ?? null;
 
   return (
     <div className="space-y-6">
@@ -109,6 +111,12 @@ export function DeveloperOverview() {
         </Card>
       </div>
 
+      <DeveloperConsoleGuide
+        activeKeys={keysLoading || keysError ? null : activeKeys}
+        activeWebhooks={webhooksLoading || webhooksError ? null : activeWebhooks}
+        totalWebhooks={webhooksLoading || webhooksError ? null : (webhooks?.length ?? 0)}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -128,7 +136,7 @@ export function DeveloperOverview() {
               </div>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link href={`${routes.help}#developer-api`}>Open guide</Link>
+              <Link href={dashboardDocUrl('apiReference')}>Open reference</Link>
             </Button>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
@@ -142,7 +150,7 @@ export function DeveloperOverview() {
               </div>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link href={`${routes.help}#developer-api`}>Open guide</Link>
+              <Link href={dashboardDocUrl('webhookEvents')}>Open event catalog</Link>
             </Button>
           </div>
         </CardContent>

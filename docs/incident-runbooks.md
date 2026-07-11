@@ -48,6 +48,8 @@ Production dashboards must include these panels:
 | Payment success rate       | `sum(rate(tixkit_payment_events_total{outcome="ok"}[15m])) / clamp_min(sum(rate(tixkit_payment_events_total[15m])), 1)`                       |
 | Temporal activity failures | `sum(rate(tixkit_temporal_activity_events_total{outcome!="ok"}[5m])) by (activity)`                                                           |
 | Active inventory holds     | `tixkit_inventory_active_holds{scope="global"}`                                                                                               |
+| Migration progress age     | `max by (phase) (tixkit_migration_progress_age_seconds)`                                                                                      |
+| Migration failures         | `sum by (phase,error_code) (increase(tixkit_migration_events_total{outcome="error"}[10m]))`                                                   |
 
 Alert rules:
 
@@ -59,6 +61,13 @@ Alert rules:
 | PaymentSuccessRateLow        | payment success rate < 98% for 15m with at least 20 attempts             | yes  |
 | TemporalActivityFailureSpike | any critical activity non-ok rate > 0.02/s for 10m                       | yes  |
 | MetricsMissing               | no `up` sample for API or worker Pushgateway job for 5m                  | yes  |
+| MigrationProgressStalled     | durable progress age > 900s for 10m                                      | yes  |
+| MigrationPreparationFailing  | prepare failures > 0 in 10m                                              | yes  |
+| MigrationConflictsDetected   | `error_code="conflict"` > 0 in 15m                                       | no   |
+| MigrationScopeViolation      | `error_code="scope_violation"` > 0 in 5m                                 | yes  |
+| MigrationReconciliationDue   | `error_code="reconciliation_required"` > 0 in 10m                        | yes  |
+| MigrationRollbackRefused     | `error_code="rollback_refused"` > 0 in 5m                                | no   |
+| MigrationSideEffectAttempted | `error_code="side_effect_attempt"` > 0 in 5m                             | yes  |
 
 SLO targets:
 
@@ -66,6 +75,16 @@ SLO targets:
 - Webhook catch-up: 99% of delivery retries either delivered or dead-lettered within 5 minutes.
 - Scan/check-in p95 API latency: under 500 ms over rolling 30 days.
 - Payment provider success rate: at least 98% for non-declined provider attempts.
+
+Migration alerts use only the bounded `phase`, `outcome`, and `error_code` labels. Tenant IDs,
+organization IDs, job IDs, source record IDs, and buyer/attendee data must never be metric labels.
+The worker refreshes progress age every 30 seconds from the latest persisted preparation/commit/rollback
+progress event (falling back to the active job transition timestamp before its first event). Activity
+completion does not reset this gauge; only a durable progress write can do so. The 900-second threshold
+therefore allows at least 30 refresh opportunities before a job is considered stalled.
+For any migration page, open **R11: Migration preparation and commit recovery** below; conflicts and
+rollback refusals are operator-review signals, while scope violations and side-effect attempts require
+an immediate halt and security review.
 
 ---
 
@@ -106,6 +125,60 @@ WHERE id = '<orderId>';
 ```
 
 Confirm `payment_events.processed_at` is set and Temporal shows the reconciliation workflow as completed.
+
+---
+
+## R11: Migration preparation and commit recovery
+
+### Symptoms
+
+- `MigrationProgressStalled`, `MigrationPreparationFailing`, or a reconciliation alert fires.
+- Worker startup fails with `MIGRATION_CURSOR_KEYRING_UNAVAILABLE` or `MIGRATION_CURSOR_KEY_INVALID`.
+- A resumed job fails with `MIGRATION_CURSOR_INVALID` after a deployment.
+- A rollback is refused or a scope/side-effect guard records an error.
+
+### Triage and recovery
+
+1. Stop new migration commits. Inspect the job and workflow in Temporal, then distinguish an upstream
+   rate limit from a storage/database failure. Never edit the encrypted cursor or import rows manually.
+2. For a stalled preparation, restore the failed dependency and retry the failed activity. Durable
+   preparation progress is authoritative; do not start a second workflow for the same job.
+3. Treat `scope_violation` and `side_effect_attempt` as security events. Pause the job, retain its audit
+   events, and verify tenant/organization scoping and historical-payment side-effect guards before retry.
+4. Treat `conflict` as a mapping decision and `reconciliation_required` as corrective work. Resolve the
+   conflict or reconciliation plan through the migration workflow; do not bypass dry-run acceptance.
+5. A `rollback_refused` result is fail-closed. Preserve the imported entities and execute the generated
+   corrective plan. Never delete entities that acquired sales, scans, transfers, edits, provider events,
+   or downstream references.
+
+### Cursor keyring rotation
+
+Workers require both variables at startup:
+
+```bash
+TIXKIT_MIGRATION_CURSOR_ACTIVE_KEY_ID=2026-07
+TIXKIT_MIGRATION_CURSOR_KEYS='{"2026-07":"<base64-32-byte-key>","2026-06":"<previous-base64-32-byte-key>"}'
+```
+
+Key IDs are 1-64 ASCII letters, digits, `_`, or `-`. Values decode to exactly 32 bytes. The active key
+encrypts all new cursors; every listed previous key remains read-only for cursors written before restart.
+
+1. Generate a new 32-byte key in the approved secret manager and add it to the JSON map without removing
+   the prior key.
+2. Set the new key ID as active, deploy workers, and confirm startup plus a pause/resume can decrypt an
+   existing job while newly persisted cursors carry the new key ID.
+3. Wait until every job cursor encrypted with the old ID has completed or been rewritten with the active
+   key. Confirm no old-key cursor remains in durable job progress and retain the old key for the rollback
+   window.
+4. Remove the retired key in a later deployment. If `MIGRATION_CURSOR_INVALID` appears, restore the exact
+   retired key from secret-manager version history, restart workers, resume/rewrite affected cursors, and
+   repeat the retirement audit. Never replace a key's material while retaining its ID.
+
+### Verification
+
+- Migration progress age returns to zero for the active phase and no new failure counter increments.
+- The workflow resumes from its durable cursor without duplicate rows.
+- The job's audit history records the operator action and all dry-run/commit invariants remain green.
 
 ---
 

@@ -30,6 +30,36 @@ Tixkit migrations are durable, tenant-scoped jobs. Treat the job report—not an
 
 Never skip directly from creation to commit. The API rejects a stale or unsuccessful dry run even if a client attempts it.
 
+## JavaScript SDK workflow
+
+`@tixkit/js` exposes every public migration route through `client.migrations`. Its create input is a discriminated union: `sourceSystem` must match `configuration.sourceSystem`, official API sources require their documented selectors and `credentialId`, and export jobs accept only upload artifact IDs.
+
+```ts
+const job = await client.migrations.create({
+  organizationId: 'org_01JEXAMPLE',
+  sourceSystem: 'pretix',
+  adapterVersion: 'api-v1',
+  credentialId: 'mcred_01JEXAMPLE',
+  idempotencyKey: 'pretix-import-2026-07-11',
+  configuration: {
+    sourceMode: 'official-api',
+    sourceSystem: 'pretix',
+    organizerSlug: 'example-organizer',
+    eventSlugs: ['summer-festival'],
+  },
+});
+
+await client.migrations.prepare(job.id);
+const files = await client.migrations.files(job.id);
+const mappings = await client.migrations.mappings({
+  organizationId: 'org_01JEXAMPLE',
+  sourceSystem: 'pretix',
+});
+const report = await client.migrations.downloadReport(job.id);
+```
+
+The typed mapping methods are `createMapping` and `mappings`; report retrieval is available as both `report` and `downloadReport`. SDK methods apply the same tenant permissions, confirmation headers, and server-side validation as direct HTTP calls.
+
 ## CLI workflow
 
 Keep credentials out of command arguments and shell history:
@@ -38,7 +68,10 @@ Keep credentials out of command arguments and shell history:
 export TIXKIT_API_URL=https://api.example.com
 export TIXKIT_API_KEY='from-your-secret-manager'
 
+tixkit migration:adapters --json
 tixkit migration:create --request-file ./migration-request.json --json
+tixkit migration:file imp_01JEXAMPLE --upload-artifact-id upl_01JEXAMPLE --json
+tixkit migration:prepare imp_01JEXAMPLE --json
 tixkit migration:dry-run imp_01JEXAMPLE --json
 tixkit migration:status imp_01JEXAMPLE --json
 tixkit migration:report imp_01JEXAMPLE --json > migration-report.json
@@ -54,10 +87,13 @@ A minimal create request is:
 {
   "organizationId": "org_01JEXAMPLE",
   "sourceSystem": "generic-csv",
-  "adapterVersion": "1.0.0",
+  "adapterVersion": "rfc4180-v1",
   "mode": "commit",
-  "configuration": { "timezone": "America/Chicago", "currency": "USD" },
-  "credentialId": "mcred_01JEXAMPLE"
+  "configuration": {
+    "sourceMode": "official-export",
+    "sourceSystem": "generic-csv",
+    "artifactIds": ["upl_01JEXAMPLE"]
+  }
 }
 ```
 
@@ -65,6 +101,11 @@ Upload source files with upload purpose `migration_import`, complete malware sca
 register the returned `uploadArtifactId` on the job. The server derives the immutable object key,
 size, media type, and SHA-256 from the tenant- and organization-scoped upload artifact; clients
 cannot supply an arbitrary storage key.
+
+`migration:prepare` starts the durable Temporal acquisition/normalization workflow. Wait for the
+job to reach `ready` before running dry-run. Preparation persists bounded row chunks and opaque
+cursors, and can be paused, resumed, cancelled, or retried without embedding source records in job
+configuration.
 
 Use `migration:pause`, `migration:resume`, and `migration:cancel` for lifecycle control. These are requests: wait until job status confirms the durable checkpoint. Run `migration:rollback-assessment` immediately before rollback and review `eligible`, `mode`, blockers, and any `correctivePlanId`. `migration:rollback` requires `--confirm 'ROLLBACK <jobId>'` and still fails closed when the server detects live activity or downstream references.
 
@@ -78,23 +119,23 @@ curl -sS https://api.example.com/v1/migration-credentials \
   -H 'Content-Type: application/json' \
   --data '{
     "organizationId":"org_01JEXAMPLE",
-    "sourceSystem":"generic-csv",
-    "secretReference":"secret://migrations/generic-csv/2026-07",
+    "sourceSystem":"pretix",
+    "secretReference":"secret://migrations/pretix/2026-07",
     "expiresAt":"2026-07-11T18:00:00Z"
   }'
 ```
 
-Never submit the raw source token, password, cookie, or authorization header in job configuration or mappings. The credential reference is organization- and source-scoped. Tixkit revalidates its registry expiry and secret-manager availability when commit begins. If it expires, is revoked, or no longer resolves, register a new reference, update a new job configuration, and repeat the dry run; do not extend or replace committed evidence in place. Revoke a superseded reference with `DELETE /v1/migration-credentials/{credentialId}?organizationId={organizationId}`.
+Never submit the raw source token, password, cookie, or authorization header in job configuration or mappings. The credential reference is organization- and source-scoped. Tixkit revalidates its registry expiry and secret-manager availability when API preparation and commit begin. If it expires, is revoked, or no longer resolves, register a new reference, create a new job configuration, and repeat preparation and dry-run; do not extend or replace committed evidence in place. Revoke a superseded reference with `DELETE /v1/migration-credentials/{credentialId}?organizationId={organizationId}`.
 
 Self-hosted workers bind accepted `aws-secretsmanager://`, `gcp-secretmanager://`, `secret://`, or `vault://` references to injected environment variables through `TIXKIT_MIGRATION_CREDENTIAL_BINDINGS`. The JSON registry contains no secret material and must match both the complete reference and source system:
 
 ```json
 {
-  "secret://migrations/generic-csv/2026-07": {
+  "secret://migrations/pretix/2026-07": {
     "tenantId": "tenant_01JEXAMPLE",
     "organizationId": "org_01JEXAMPLE",
-    "sourceSystem": "generic-csv",
-    "envName": "TIXKIT_MIGRATION_GENERIC_CSV_SECRET"
+    "sourceSystem": "pretix",
+    "envName": "TIXKIT_MIGRATION_PRETIX_SECRET"
   }
 }
 ```

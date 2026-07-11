@@ -1,0 +1,53 @@
+---
+title: Create and publish the first event
+description: Configure an event, schedule, sellable inventory, checkout form, preview, and publication state.
+audience:
+  - operator
+product_area: events
+content_type: tutorial
+status: beta
+owner: product-ui
+last_verified: 2026-07-10
+prerequisites:
+  - A running local stack or authorized self-hosted environment
+  - Permission to create events and ticket inventory
+related:
+  - /operators/events/tickets-and-products
+  - /getting-started/test-checkout
+keywords:
+  - first event
+  - publish
+  - ticket inventory
+---
+
+This path creates a test event that can reach checkout. Publishing an event without sellable inventory or a valid schedule does not create a usable buyer flow.
+
+## Create the event
+
+1. Open **Events** in the admin dashboard and choose **Create event**.
+2. Enter a test-safe name, description, venue or online context, and the organization/brand requested by the form.
+3. Save the event before adding child resources.
+
+The event detail page must load without a scope or permission error. If it does not, confirm the selected organization and brand rather than recreating the event in another tenant.
+
+## Configure schedule and inventory
+
+Add at least one occurrence with a future start time. Then create a ticket type or product with a positive price, available quantity, and sales window that includes the current time.
+
+Verify the inventory view shows a sellable item. A draft item, zero capacity, expired sales window, or inactive product is not available at checkout.
+
+## Review checkout behavior
+
+Open the checkout-form editor. Review required buyer and attendee fields, consent text, and fee presentation. Save the current revision. Use only test-safe wording and data.
+
+## Preview before publishing
+
+Open the public event or checkout preview from the event action. Confirm the correct brand, schedule, item, price, and required form fields. Return to the dashboard and publish the event only after the preview matches the intended test workflow.
+
+## Verify publication
+
+Reload the event detail page and confirm the status is published. Then open the public event page in a private browser window. If the event is missing, inspect schedule, sales-window, domain, and inventory state before changing publication repeatedly.
+
+## Next step
+
+[Complete a test checkout](/getting-started/test-checkout) and keep the resulting order available for refund and check-in practice.

@@ -1,0 +1,28 @@
+---
+title: Vue and Nuxt SDK
+description: Use @tixkit/vue in Nuxt server routes and Vue client integrations without crossing the secret boundary.
+audience:
+  - developer
+product_area: sdks
+content_type: how-to
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A Vue or Nuxt application
+related:
+  - /sdks/javascript
+  - /developers/widget/embedding
+---
+
+<SdkGuide sdkId="vue" />
+
+```bash
+bun add @tixkit/vue @tixkit/js
+```
+
+In Nuxt, import `createTixkitClient` from `@tixkit/vue/server` inside `server/` code and read the key from private runtime config. Do not expose it through `runtimeConfig.public`.
+
+Client exports are for public checkout/widget behavior. Pass public event and brand identifiers from a server response rather than a privileged client instance.
+
+The runnable Nuxt fixture is `apps/sdk-nuxt-demo`. Its README and build must remain synchronized with this guide and the SDK package exports.

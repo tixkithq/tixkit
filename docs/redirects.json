@@ -1,0 +1,17 @@
+{
+  "/docs/admin-dashboard-user-guide": "/operators/events",
+  "/docs/api-reference": "/developers/api-fundamentals",
+  "/docs/clerk-setup-guide": "/self-hosting/authentication",
+  "/docs/incident-runbooks": "/operations/incidents",
+  "/docs/managed-database-compatibility": "/self-hosting/databases",
+  "/docs/pluggable-auth-guide": "/self-hosting/authentication",
+  "/docs/production-deployment-guide": "/self-hosting/deployment",
+  "/docs/sdk-guides/javascript": "/sdks/javascript",
+  "/docs/sdk-guides/nextjs": "/sdks/nextjs",
+  "/docs/sdk-guides/react-native": "/sdks/react-native",
+  "/docs/sdk-guides/sveltekit": "/sdks/sveltekit",
+  "/docs/temporal-operations-guide": "/operations/temporal",
+  "/docs/webhook-guide": "/developers/webhooks/setup",
+  "/docs/widget-embed-guide": "/developers/widget/embedding",
+  "/help#developer-api": "/developers/api-fundamentals"
+}
