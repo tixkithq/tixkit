@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "nuxt build"
+  },
+  "dependencies": {
+    "@tixkit/checkout-headless": "0.1.0",
+    "nuxt": "4.2.2",
+    "vue": "3.5.26"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

@@ -24,6 +24,10 @@ const nextConfig = {
         source: '/:path*',
         headers: checkoutSecurityHeaders,
       },
+      {
+        source: '/checkout',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
     ];
   },
 };

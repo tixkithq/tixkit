@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro build"
+  },
+  "dependencies": {
+    "@tixkit/checkout-headless": "0.1.0",
+    "astro": "5.16.11"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

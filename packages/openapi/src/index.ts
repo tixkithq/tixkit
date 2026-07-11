@@ -2034,6 +2034,15 @@ const rawOpenApiSpec = {
         },
         required: ['sessionId', 'status', 'paymentIntentId', 'totalCents', 'currency'],
       },
+      CheckoutHostedHandoff: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          url: { type: 'string', format: 'uri' },
+          expiresAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['url', 'expiresAt'],
+      },
       BoxOfficeOrderInput: {
         type: 'object',
         properties: {
@@ -6197,6 +6206,72 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: { $ref: '#/components/schemas/CheckoutSession' },
               },
+            },
+          },
+        },
+      },
+    },
+    '/checkout/sessions/{sessionId}/handoff': {
+      post: {
+        summary: 'Create a short-lived hosted checkout handoff',
+        parameters: [{ $ref: '#/components/parameters/CheckoutSessionToken' }],
+        responses: {
+          '200': {
+            description: 'Hosted checkout handoff',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutHostedHandoff' },
+              },
+            },
+          },
+          '400': {
+            description: 'Session is expired, completed, or hosted checkout is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Session not found or the session credential is invalid',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
+    '/checkout/sessions/{sessionId}/handoff/exchange': {
+      post: {
+        summary: 'Exchange a hosted checkout handoff capability',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { handoff: { type: 'string', minLength: 1 } },
+                required: ['handoff'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Checkout session with a client credential for hosted checkout',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/CheckoutSession' } },
+            },
+          },
+          '400': {
+            description: 'Handoff body is invalid',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Handoff is invalid, expired, cancelled, or no longer redeemable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
             },
           },
         },

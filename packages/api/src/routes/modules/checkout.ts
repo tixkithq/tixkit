@@ -67,6 +67,11 @@ import {
   parseBody,
 } from '../../http/schemas.js';
 import { hashWaitlistClaimToken } from './waitlist.js';
+import {
+  checkoutPublicOrigin,
+  createCheckoutHandoffToken,
+  validCheckoutHandoffSession,
+} from '../../services/checkout-handoff.js';
 
 function requireIdempotencyKey(request: FastifyRequest): string {
   const key = request.headers['idempotency-key'];
@@ -2018,6 +2023,40 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     );
 
     return reply.status(result.status).send(result.body);
+  });
+
+  app.post('/checkout/sessions/:sessionId/handoff', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const repo = new CheckoutSessionRepository(db);
+    const session = await repo.findById(sessionId);
+    if (!session) throw new NotFoundError('CheckoutSession', sessionId);
+    assertCheckoutSessionToken(session, requireCheckoutSessionToken(request));
+    if (!['open', 'pending_payment'].includes(session.status)) {
+      throw new ValidationError('Checkout session cannot be handed off in its current state');
+    }
+    const handoff = createCheckoutHandoffToken(session);
+    const url = new URL('/checkout', checkoutPublicOrigin());
+    url.searchParams.set('sessionId', session.id);
+    url.hash = new URLSearchParams({ handoff: handoff.token }).toString();
+    return { url: url.toString(), expiresAt: handoff.expiresAt };
+  });
+
+  app.post('/checkout/sessions/:sessionId/handoff/exchange', async (request) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const body = request.body as { handoff?: unknown } | null;
+    if (!body || typeof body.handoff !== 'string' || !body.handoff) {
+      throw new ValidationError('Checkout handoff is required');
+    }
+    const repo = new CheckoutSessionRepository(db);
+    const session = await repo.findById(sessionId);
+    if (!session) throw new NotFoundError('CheckoutSession', sessionId);
+    if (!validCheckoutHandoffSession(session, body.handoff)) {
+      throw new NotFoundError('CheckoutSession', sessionId);
+    }
+    const compensation = await new PaymentCompensationRepository(db).findLatestByCheckoutSession(
+      sessionId,
+    );
+    return publicCheckoutSession(session, compensation, { includeClientToken: true });
   });
 
   app.get('/checkout/sessions/:sessionId', async (request) => {

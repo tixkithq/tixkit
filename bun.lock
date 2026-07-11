@@ -280,6 +280,28 @@
         "vitest": "^4.1.0",
       },
     },
+    "packages/checkout-headless": {
+      "name": "@tixkit/checkout-headless",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/react": "^19.2.0",
+        "react": "^19.2.0",
+        "svelte": "^5.0.0",
+        "typescript": "7.0.2",
+        "vitest": "^4.1.0",
+        "vue": "^3.5.0",
+      },
+      "peerDependencies": {
+        "react": ">=18",
+        "svelte": ">=4",
+        "vue": ">=3",
+      },
+      "optionalPeers": [
+        "react",
+        "svelte",
+        "vue",
+      ],
+    },
     "packages/cli": {
       "name": "tixkit",
       "version": "0.1.0",
@@ -2295,6 +2317,8 @@
     "@tixkit/astro": ["@tixkit/astro@workspace:packages/sdk-astro"],
 
     "@tixkit/checkout": ["@tixkit/checkout@workspace:apps/checkout"],
+
+    "@tixkit/checkout-headless": ["@tixkit/checkout-headless@workspace:packages/checkout-headless"],
 
     "@tixkit/content-core": ["@tixkit/content-core@workspace:packages/content-core"],
 

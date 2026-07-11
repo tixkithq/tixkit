@@ -36,6 +36,7 @@ vi.mock('@/lib/api', () => {
     checkoutApi: {
       createSession: vi.fn(),
       getSession: vi.fn(),
+      exchangeHandoff: vi.fn(),
       confirmSession: vi.fn(),
     },
     CheckoutApiError,
@@ -85,6 +86,7 @@ const publicApiMock = publicApi as unknown as {
 };
 const checkoutApiMock = checkoutApi as unknown as {
   createSession: ReturnType<typeof vi.fn>;
+  exchangeHandoff: ReturnType<typeof vi.fn>;
 };
 
 afterEach(() => {
@@ -180,6 +182,67 @@ describe('CheckoutFlow buyer validation', () => {
       },
     );
     publicApiMock.getBrand.mockRejectedValue(new Error('brand unavailable'));
+  });
+
+  it('strips a fragment handoff before exchanging it from the client', async () => {
+    window.history.replaceState(null, '', '/checkout?sessionId=cs_1#handoff=opaque_capability');
+    checkoutApiMock.exchangeHandoff.mockResolvedValue({
+      id: 'cs_1',
+      eventId: 'evt_checkout',
+      brandId: 'brd_1',
+      status: 'open',
+      currency: 'USD',
+      quote: {
+        totalCents: 2500,
+        subtotalCents: 2500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+      },
+      expiresAt: '2026-07-17T20:00:00.000Z',
+      clientToken: 'scoped_session_credential',
+    });
+
+    renderCheckoutFlow({ initialEventId: '', initialSessionId: 'cs_1' });
+
+    await waitFor(() => {
+      expect(checkoutApiMock.exchangeHandoff).toHaveBeenCalledWith('cs_1', 'opaque_capability');
+    });
+    expect(window.location.hash).toBe('');
+    expect(window.location.search).toBe('?sessionId=cs_1');
+  });
+
+  it('strips an unused fragment handoff when a stored session credential wins', async () => {
+    window.sessionStorage.setItem('tk:session:cs_stored', 'stored_credential');
+    window.history.replaceState(
+      null,
+      '',
+      '/checkout?sessionId=cs_stored#handoff=unused_capability',
+    );
+    vi.mocked(checkoutApi.getSession).mockResolvedValue({
+      id: 'cs_stored',
+      eventId: 'evt_checkout',
+      brandId: 'brd_1',
+      status: 'open',
+      currency: 'USD',
+      quote: {
+        totalCents: 2500,
+        subtotalCents: 2500,
+        discountCents: 0,
+        taxCents: 0,
+        feeCents: 0,
+      },
+      expiresAt: '2026-07-17T20:00:00.000Z',
+    });
+
+    renderCheckoutFlow({ initialEventId: '', initialSessionId: 'cs_stored' });
+
+    await waitFor(() => {
+      expect(checkoutApi.getSession).toHaveBeenCalledWith('cs_stored', 'stored_credential');
+    });
+    expect(checkoutApiMock.exchangeHandoff).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('');
+    window.sessionStorage.removeItem('tk:session:cs_stored');
   });
 
   it('keeps Continue disabled until a ticket is selected', async () => {

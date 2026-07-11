@@ -1,0 +1,7 @@
+---
+import { createCheckoutController, createFetchCheckoutTransport } from '@tixkit/checkout-headless';
+const controller = createCheckoutController({ eventId: 'evt_example', transport: createFetchCheckoutTransport({ apiBaseUrl: 'https://api.example.test/v1' }) });
+const phase = controller.getState().phase;
+controller.destroy();
+---
+<main>Checkout state: {phase}</main>

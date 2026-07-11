@@ -768,12 +768,21 @@ export const checkoutApi = {
     sessionToken?: string,
     paymentIntentClientSecret?: string,
   ): Promise<CheckoutSession> {
-    const query = paymentIntentClientSecret
-      ? `?payment_intent_client_secret=${encodeURIComponent(paymentIntentClientSecret)}`
-      : '';
+    const params = new URLSearchParams();
+    if (paymentIntentClientSecret) {
+      params.set('payment_intent_client_secret', paymentIntentClientSecret);
+    }
+    const query = params.size ? `?${params.toString()}` : '';
     return apiRequest<CheckoutSession>(
       `/checkout/sessions/${encodeURIComponent(sessionId)}${query}`,
       sessionToken ? { sessionToken } : undefined,
+    );
+  },
+
+  async exchangeHandoff(sessionId: string, handoff: string): Promise<CheckoutSession> {
+    return apiRequest<CheckoutSession>(
+      `/checkout/sessions/${encodeURIComponent(sessionId)}/handoff/exchange`,
+      { method: 'POST', body: JSON.stringify({ handoff }) },
     );
   },
 

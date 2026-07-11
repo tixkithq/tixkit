@@ -556,15 +556,28 @@ export default function CheckoutFlow({
       }
       // Prefer the token from sessionStorage (resume mechanism), then from
       // initial props. Never read the token from URL params here.
-      const token = getSessionToken(initialSessionId) || initialSessionToken;
-      if (!token) {
+      let token = getSessionToken(initialSessionId) || initialSessionToken;
+      const fragment = typeof window === 'undefined' ? '' : window.location.hash.slice(1);
+      const fragmentHandoff = new URLSearchParams(fragment).get('handoff') || '';
+      if (fragmentHandoff && typeof window !== 'undefined') {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.hash = '';
+        window.history.replaceState(null, '', cleanUrl.toString());
+      }
+      const handoff = token ? '' : fragmentHandoff;
+      if (!token && !handoff) {
         setInitialLoading(false);
         return;
       }
       setLoading(true);
       try {
-        const loaded = await checkoutApi.getSession(initialSessionId, token);
+        const loaded = handoff
+          ? await checkoutApi.exchangeHandoff(initialSessionId, handoff)
+          : await checkoutApi.getSession(initialSessionId, token || undefined);
         if (cancelled) return;
+        token = token || loaded.clientToken || '';
+        if (!token) throw new Error('Checkout handoff did not return a session credential.');
+        storeSessionToken(initialSessionId, token);
         setSession(loaded);
         setSessionId(loaded.id);
         setSessionToken(token);
