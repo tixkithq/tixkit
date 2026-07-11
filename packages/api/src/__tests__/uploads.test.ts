@@ -60,10 +60,7 @@ function createMockDb(
   }
 
   // eslint-disable-next-line unicorn/consistent-function-scoping -- this helper is local to the lightweight Kysely mock.
-  function matches(
-    row: Row,
-    conditions: Array<[string, string, unknown] | RowPredicate>,
-  ): boolean {
+  function matches(row: Row, conditions: Array<[string, string, unknown] | RowPredicate>): boolean {
     return conditions.every((condition) => {
       if (typeof condition === 'function') return condition(row);
       const [column, operator, value] = condition;
@@ -175,10 +172,15 @@ type RowPredicateBuilder = ((column: string, operator: string, value: unknown) =
 };
 
 function createPredicateBuilder(): RowPredicateBuilder {
-  const builder = ((column: string, operator: string, value: unknown) => (row: Row) =>
-    operator === 'in' && Array.isArray(value)
-      ? value.includes(row[column])
-      : row[column] === value) as RowPredicateBuilder;
+  const builder = ((column: string, operator: string, value: unknown) => (row: Row) => {
+    if (operator === 'in' && Array.isArray(value)) return value.includes(row[column]);
+    if (operator === '<')
+      return (
+        new Date(row[column] as string | Date).getTime() <
+        new Date(value as string | Date).getTime()
+      );
+    return row[column] === value;
+  }) as RowPredicateBuilder;
   builder.or = (predicates) => (row) => predicates.some((predicate) => predicate(row));
   builder.and = (predicates) => (row) => predicates.every((predicate) => predicate(row));
   return builder;
@@ -397,7 +399,7 @@ describe('upload artifact service', () => {
     expect(artifact.artifactId).toMatch(/^upl_/);
     expect(tables.upload_artifacts[0]).toMatchObject({
       id: 'upl_expired',
-      status: 'rejected',
+      status: 'cleanup_complete',
       scan_status: 'blocked',
       scan_result: 'Upload artifact expired before completion',
     });
@@ -436,7 +438,9 @@ describe('upload artifact service', () => {
 
     await expect(cleanupExpiredUploadArtifacts(db, now, 1)).resolves.toBe(1);
 
-    expect(tables.upload_artifacts.filter((row) => row.status === 'rejected')).toHaveLength(1);
+    expect(tables.upload_artifacts.filter((row) => row.status === 'cleanup_complete')).toHaveLength(
+      1,
+    );
     expect(s3Send).toHaveBeenCalledTimes(1);
   });
 
@@ -463,7 +467,34 @@ describe('upload artifact service', () => {
 
     expect(results.reduce((sum, result) => sum + result, 0)).toBe(1);
     expect(s3Send).toHaveBeenCalledTimes(1);
-    expect(tables.upload_artifacts[0]).toMatchObject({ status: 'rejected' });
+    expect(tables.upload_artifacts[0]).toMatchObject({ status: 'cleanup_complete' });
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).toHaveBeenCalledTimes(1);
+  });
+
+  it('reclaims an aged cleanup claim and moves it to a terminal state', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_stale_claim',
+          status: 'cleanup_pending',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/staging/upl_stale_claim.txt',
+          expires_at: new Date(now.getTime() - 60_000),
+          updated_at: new Date(now.getTime() - 16 * 60_000),
+        },
+      ],
+    });
+    s3Send.mockResolvedValue({});
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(1);
+    expect(s3Send).toHaveBeenCalledTimes(1);
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'cleanup_complete',
+      scan_status: 'blocked',
+    });
   });
 
   it('renews referenced event media and never deletes it', async () => {
@@ -522,6 +553,12 @@ describe('upload artifact service', () => {
 
     await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
     expect(tables.upload_artifacts[0]).toMatchObject({ status: 'pending' });
+    expect(new Date(tables.upload_artifacts[0]?.expires_at as Date).getTime()).toBeGreaterThan(
+      now.getTime(),
+    );
+    s3Send.mockResolvedValue({});
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).toHaveBeenCalledTimes(1);
   });
 
   it('restores a claimed artifact when an event attaches it before deletion', async () => {
@@ -562,8 +599,7 @@ describe('upload artifact service', () => {
             row.id === 'upl_attach_race' &&
             values.status === 'cleanup_pending'
           ) {
-            events[0]!.cover_image_url =
-              '/v1/public/event-media/event_cover/upl_attach_race';
+            events[0]!.cover_image_url = '/v1/public/event-media/event_cover/upl_attach_race';
           }
         },
       },
@@ -602,7 +638,7 @@ describe('upload artifact service', () => {
 
     await expect(cleanupExpiredUploadArtifacts(db, now, 1)).resolves.toBe(1);
     expect(tables.upload_artifacts[0]?.status).toBe('uploaded');
-    expect(tables.upload_artifacts[1]?.status).toBe('rejected');
+    expect(tables.upload_artifacts[1]?.status).toBe('cleanup_complete');
   });
 
   it('marks clean uploaded objects complete after size/type verification, scanning, and final-key promotion', async () => {
@@ -1244,15 +1280,63 @@ describe('upload artifact service', () => {
 
 describe('upload artifact routes', () => {
   it('scopes event-cover uploads and returns a durable public artifact URL', async () => {
-    const { db, tables } = createMockDb({ events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'draft' }] });
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          status: 'draft',
+        },
+      ],
+    });
     const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.write'] }));
-    const response = await app.inject({ method: 'POST', url: '/upload-artifacts', payload: { purpose: 'event_cover', brandId: 'brd_1', eventId: 'evt_1', fileName: 'cover.webp', contentType: 'image/webp', sizeBytes: 1024 } });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'event_cover',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        fileName: 'cover.webp',
+        contentType: 'image/webp',
+        sizeBytes: 1024,
+      },
+    });
     expect(response.statusCode).toBe(201);
-    expect(tables.upload_artifacts[0]).toMatchObject({ tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', event_id: 'evt_1', purpose: 'event_cover' });
-    tables.upload_artifacts[0] = { ...tables.upload_artifacts[0], status: 'uploaded', scan_status: 'clean' };
-    const download = await app.inject({ method: 'GET', url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/download` });
-    expect(download.json()).toMatchObject({ downloadUrl: `/v1/public/event-media/event_cover/${tables.upload_artifacts[0]?.id}`, durable: true });
-    const wrongBrand = await app.inject({ method: 'POST', url: '/upload-artifacts', payload: { purpose: 'event_cover', brandId: 'brd_other', eventId: 'evt_1', fileName: 'cover.webp', contentType: 'image/webp', sizeBytes: 1024 } });
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: 'brd_1',
+      event_id: 'evt_1',
+      purpose: 'event_cover',
+    });
+    tables.upload_artifacts[0] = {
+      ...tables.upload_artifacts[0],
+      status: 'uploaded',
+      scan_status: 'clean',
+    };
+    const download = await app.inject({
+      method: 'GET',
+      url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/download`,
+    });
+    expect(download.json()).toMatchObject({
+      downloadUrl: `/v1/public/event-media/event_cover/${tables.upload_artifacts[0]?.id}`,
+      durable: true,
+    });
+    const wrongBrand = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'event_cover',
+        brandId: 'brd_other',
+        eventId: 'evt_1',
+        fileName: 'cover.webp',
+        contentType: 'image/webp',
+        sizeBytes: 1024,
+      },
+    });
     expect(wrongBrand.statusCode).toBe(400);
     await app.close();
   });

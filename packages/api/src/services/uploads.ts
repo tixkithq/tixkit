@@ -329,6 +329,7 @@ export async function cleanupExpiredUploadArtifacts(
   now = new Date(),
   limit = 100,
 ): Promise<number> {
+  const staleCleanupClaimBefore = new Date(now.getTime() - 15 * 60 * 1000);
   const rows = await db
     .selectFrom('upload_artifacts')
     .select([
@@ -342,6 +343,7 @@ export async function cleanupExpiredUploadArtifacts(
       'object_key',
       'purpose',
       'event_id',
+      'updated_at',
     ])
     .where((eb) =>
       eb.or([
@@ -349,6 +351,10 @@ export async function cleanupExpiredUploadArtifacts(
         eb.and([
           eb('status', '=', 'uploaded'),
           eb('purpose', 'in', ['event_cover', 'event_seo_image']),
+        ]),
+        eb.and([
+          eb('status', '=', 'cleanup_pending'),
+          eb('updated_at', '<', staleCleanupClaimBefore),
         ]),
       ]),
     )
@@ -387,13 +393,15 @@ export async function cleanupExpiredUploadArtifacts(
           return false;
         }
       }
-      const claim = await db
+      let claimQuery = db
         .updateTable('upload_artifacts')
         .set({ status: 'cleanup_pending', updated_at: now })
         .where('id', '=', row.id)
         .where('status', '=', row.status)
-        .where('expires_at', '<', now)
-        .executeTakeFirst();
+        .where('expires_at', '<', now);
+      if (row.status === 'cleanup_pending')
+        claimQuery = claimQuery.where('updated_at', '<', staleCleanupClaimBefore);
+      const claim = await claimQuery.executeTakeFirst();
       if (Number(claim.numUpdatedRows) !== 1) return false;
 
       if (row.status === 'uploaded' && row.event_id) {
@@ -425,16 +433,20 @@ export async function cleanupExpiredUploadArtifacts(
       if (!(await tryDeleteUploadObject(s3, row.bucket, row.object_key))) {
         await db
           .updateTable('upload_artifacts')
-          .set({ status: row.status, updated_at: now })
+          .set({
+            status: row.status,
+            expires_at: new Date(now.getTime() + 5 * 60 * 1000),
+            updated_at: now,
+          })
           .where('id', '=', row.id)
           .where('status', '=', 'cleanup_pending')
           .execute();
         return false;
       }
-      await db
+      const completed = await db
         .updateTable('upload_artifacts')
         .set({
-          status: 'rejected',
+          status: 'cleanup_complete',
           scan_status: 'blocked',
           scan_result:
             row.scan_result ??
@@ -445,8 +457,8 @@ export async function cleanupExpiredUploadArtifacts(
         })
         .where('id', '=', row.id)
         .where('status', '=', 'cleanup_pending')
-        .execute();
-      return true;
+        .executeTakeFirst();
+      return Number(completed.numUpdatedRows) === 1;
     }),
   );
 
