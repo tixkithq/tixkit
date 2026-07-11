@@ -15,8 +15,21 @@ import {
   PROVIDER_EVENT_RECOVERY_WORKFLOW_VERSION,
 } from './shared/types.js';
 import { buildWorkerStartupFailureMessage } from './startup-diagnostics.js';
-import { TixkitActivityMetricsInterceptor, startWorkerObservability } from './observability.js';
+import {
+  TixkitActivityMetricsInterceptor,
+  startMigrationProgressAgeRefresh,
+  startWorkerObservability,
+} from './observability.js';
 import { createWorkflowExporterSink } from './otel-workflow-exporter.js';
+import { registerMigrationActivityService } from './activities/migration.js';
+import { createRepositoryMigrationActivityService } from './activities/migration-repository-service.js';
+import { createProductionMigrationCommitters } from './activities/migration-domain-committers.js';
+import { BindingRegistryMigrationCredentialResolver } from './activities/migration-credential-resolver.js';
+import {
+  createMigrationPreparationService,
+  migrationCursorKeyringFromEnvironment,
+  registerMigrationPreparationService,
+} from './activities/migration-preparation.js';
 
 const require = createRequire(import.meta.url);
 
@@ -135,6 +148,7 @@ async function ensureScheduledWorkflow(
 }
 
 export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
+  const migrationCursorKeyring = migrationCursorKeyringFromEnvironment();
   const startupDb = createDb(config.databaseUrl);
   try {
     await assertSandboxRuntimeBinding(startupDb, {
@@ -146,6 +160,32 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
     await startupDb.destroy();
   }
   const observability = await startWorkerObservability();
+  const activityDb = createDb(config.databaseUrl);
+  const stopMigrationProgressAgeRefresh = startMigrationProgressAgeRefresh(
+    observability.metrics,
+    activityDb,
+  );
+  const migrationCredentialResolver = new BindingRegistryMigrationCredentialResolver();
+  const unregisterMigrationService = registerMigrationActivityService(
+    createRepositoryMigrationActivityService(
+      activityDb,
+      createProductionMigrationCommitters(activityDb),
+      migrationCredentialResolver,
+    ),
+  );
+  const unregisterMigrationPreparationService = registerMigrationPreparationService(
+    createMigrationPreparationService(activityDb, migrationCredentialResolver, {
+      cursorEncryptionKeyring: {
+        currentKeyId: migrationCursorKeyring.currentKeyId,
+        keys: Object.fromEntries(
+          Object.entries(migrationCursorKeyring.keys).map(([keyId, key]) => [
+            keyId,
+            key.toString('base64'),
+          ]),
+        ),
+      },
+    }),
+  );
   const connection = await NativeConnection.connect({
     address: config.temporalAddress,
   });
@@ -163,7 +203,9 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
       ? undefined
       : await createTraceExporter({ serviceName: 'tixkit-worker' });
     const activityInterceptors: ActivityInterceptorsFactory[] = [
-      (ctx) => ({ inbound: new TixkitActivityMetricsInterceptor(ctx, observability.metrics) }),
+      (ctx) => ({
+        inbound: new TixkitActivityMetricsInterceptor(ctx, observability.metrics),
+      }),
     ];
     if (!tracingDisabled) {
       try {
@@ -196,7 +238,9 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
       interceptors: {
         ...(tracingDisabled
           ? {}
-          : { workflowModules: [require.resolve('./workflows/otel-interceptors.js')] }),
+          : {
+              workflowModules: [require.resolve('./workflows/otel-interceptors.js')],
+            }),
         activity: activityInterceptors,
       },
     };
@@ -211,7 +255,9 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
 
     const schedulerEpoch =
       process.env.TIXKIT_RUNTIME_MODE === 'sandbox' ? process.env.TIXKIT_SANDBOX_EPOCH : undefined;
-    await ensureHoldExpirationScheduler({ workflowId: holdExpirationWorkflowId(schedulerEpoch) });
+    await ensureHoldExpirationScheduler({
+      workflowId: holdExpirationWorkflowId(schedulerEpoch),
+    });
     await ensureProviderEventRecoveryScheduler({
       workflowId: providerEventRecoveryWorkflowId(schedulerEpoch),
     });
@@ -220,6 +266,10 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
     console.log(`TIXKIT_WORKER_READY taskQueues=${config.temporalWorkerTaskQueues.join(',')}`);
     await Promise.all(workerRuns);
   } finally {
+    stopMigrationProgressAgeRefresh();
+    unregisterMigrationPreparationService();
+    unregisterMigrationService();
+    await activityDb.destroy();
     await closeActivityClients();
     await connection.close();
   }

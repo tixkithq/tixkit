@@ -499,7 +499,7 @@ describe('ClerkAuthService signed-in user auth', () => {
     expect(tables.brands).toHaveLength(1);
     expect(tables.user_profiles).toHaveLength(1);
     expect(tables.organization_members).toHaveLength(1);
-    expect(tables.permission_grants).toHaveLength(16);
+    expect(tables.permission_grants).toHaveLength(20);
     expect(result.principal).toMatchObject({
       type: 'user',
       clerkUserId: 'clerk_dev_user_1',

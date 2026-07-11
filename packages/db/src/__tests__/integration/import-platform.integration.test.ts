@@ -477,7 +477,9 @@ describe.sequential.each(driverCases)('import platform: $driver', ({ driver, url
       organizationId: organization.id,
       sourceSystem: 'generic-csv',
       secretReference: 'vault://migrations/expired',
-      expiresAt: new Date(Date.now() - 1),
+      // MySQL DATETIME stores whole seconds, so keep the fixture outside its
+      // rounding window while still exercising repository expiry enforcement.
+      expiresAt: new Date(Date.now() - 2_000),
       createdBy: 'usr_credential',
     });
     expect(
@@ -488,5 +490,96 @@ describe.sequential.each(driverCases)('import platform: $driver', ({ driver, url
         sourceSystem: 'generic-csv',
       }),
     ).toBeUndefined();
+  });
+
+  it('persists preparation rows, conflicts, and cursors atomically and idempotently', async () => {
+    const tenant = await new TenantRepository(db).create({ name: `Preparation ${driver}` });
+    const organization = await new OrganizationRepository(db).create({
+      tenantId: tenant.id,
+      name: `Preparation ${driver}`,
+      slug: `preparation-${driver}`,
+    });
+    const imports = new ImportRepository(db);
+    const job = await imports.createJob({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      sourceSystem: 'generic-csv',
+      adapterVersion: 'rfc4180-v1',
+      mode: 'commit',
+      idempotencyKey: `preparation-${driver}`,
+      requestedBy: 'test',
+    });
+    await imports.transitionJob({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      jobId: job.id,
+      from: ['pending'],
+      to: 'preparing' as never,
+    });
+    const chunk = {
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      jobId: job.id,
+      cursorKey: 'artifact-sha:first',
+      nextCursor: 'cursor-2',
+      startRowNumber: 0,
+      completed: false,
+      rows: [
+        {
+          entityType: 'event',
+          externalId: 'event-1',
+          sourceData: { id: 'event-1', secret: undefined },
+          normalizedData: {
+            entityType: 'event',
+            externalId: 'event-1',
+            sourcePosition: 'events.csv:2',
+            attributes: { title: 'Event', currency: 'USD', timezone: 'UTC' },
+          },
+          issues: [
+            {
+              code: 'TIMEZONE_REVIEW',
+              severity: 'warning',
+              message: 'Review timezone',
+            },
+          ],
+        },
+      ],
+    };
+    await expect(imports.persistPreparationChunk(chunk)).resolves.toEqual({
+      inserted: 1,
+      rowNumber: 1,
+    });
+    await expect(imports.persistPreparationChunk(chunk)).resolves.toEqual({
+      inserted: 0,
+      rowNumber: 1,
+    });
+    await expect(imports.preparationProgress(tenant.id, organization.id, job.id)).resolves.toEqual({
+      cursor: 'cursor-2',
+      rowNumber: 1,
+      completed: false,
+    });
+    expect(
+      await imports.listRows({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        jobId: job.id,
+      }),
+    ).toHaveLength(1);
+    expect(
+      await imports.listConflicts({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        jobId: job.id,
+      }),
+    ).toHaveLength(1);
+    await imports.persistPreparationChunk({
+      ...chunk,
+      cursorKey: 'artifact-sha:cursor-2',
+      nextCursor: undefined,
+      startRowNumber: 1,
+      completed: true,
+      rows: [],
+    });
+    expect((await imports.findJob(tenant.id, organization.id, job.id))?.status).toBe('prepared');
   });
 });

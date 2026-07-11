@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { validateSdkParity } from './lib/sdk-parity.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const apiVersion = '2026-01-01';
@@ -312,18 +314,6 @@ const checks = [
   },
 ];
 
-const guides = [
-  'docs/sdk-guides/javascript.md',
-  'docs/sdk-guides/nextjs.md',
-  'docs/sdk-guides/sveltekit.md',
-  'docs/sdk-guides/react-native.md',
-  'docs/sdk-guides/flutter.md',
-  'docs/sdk-guides/ios.md',
-  'docs/sdk-guides/android.md',
-  'docs/sdk-guides/go.md',
-  'docs/sdk-guides/rust.md',
-];
-
 const npmIgnores = [
   'packages/sdk-js/.npmignore',
   'packages/sdk-next/.npmignore',
@@ -347,17 +337,6 @@ for (const check of checks) {
     for (const pattern of check.patterns) {
       assert(source.includes(pattern), `${check.platform} is missing ${pattern} in ${check.file}`);
     }
-  } catch (error) {
-    failures.push(error instanceof Error ? error.message : String(error));
-  }
-}
-
-for (const guide of guides) {
-  try {
-    const body = read(guide);
-    assert(statSync(join(root, guide)).size > 0, `${guide} is empty`);
-    assert(body.includes(apiVersion), `${guide} does not pin API version ${apiVersion}`);
-    assert(body.includes('Validation'), `${guide} is missing a Validation section`);
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error));
   }
@@ -391,6 +370,31 @@ try {
   failures.push(error instanceof Error ? error.message : String(error));
 }
 
+try {
+  const program = [
+    "import { sdkSnippetRegistry } from './packages/docs-core/src/sdk-snippets.ts';",
+    "import { docRoutes } from './packages/docs-core/src/routes.ts';",
+    'process.stdout.write(JSON.stringify({ sdkSnippetRegistry, docRoutes }));',
+  ].join(' ');
+  const shared = JSON.parse(
+    execFileSync('bun', ['--eval', program], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }),
+  );
+  const parity = validateSdkParity({
+    root,
+    registry: shared.sdkSnippetRegistry,
+    docRoutes: shared.docRoutes,
+  });
+  failures.push(...parity.failures);
+} catch (error) {
+  failures.push(
+    `Shared SDK registry validation failed: ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
+
 if (failures.length > 0) {
   console.error('SDK parity matrix failed:');
   for (const failure of failures) console.error(`- ${failure}`);
@@ -398,5 +402,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `SDK parity matrix passed for ${checks.length} platforms at API version ${apiVersion}.`,
+  `SDK parity matrix passed for ${checks.length} source checks and 12 supported SDK contracts at API version ${apiVersion}.`,
 );

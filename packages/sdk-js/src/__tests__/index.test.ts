@@ -7,6 +7,9 @@ import path from 'node:path';
 import {
   TixkitClient,
   TixkitApiError,
+  isLaunchReadinessFailure,
+  isArchivedEventFailure,
+  isStaleEventVersionFailure,
   MAX_OFFLINE_MANIFEST_TICKETS,
   type AdminTablePage,
   type BrandSenderIdentity,
@@ -29,10 +32,14 @@ import {
   type UploadArtifactDownload,
   type UploadPurpose,
   type WebhookEvent,
+  type CreateMigrationJobInput,
 } from '../index.js';
 
 function mockFetch(status: number, body: unknown) {
-  const init: ResponseInit = { status, headers: { 'Content-Type': 'application/json' } };
+  const init: ResponseInit = {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  };
   if (status !== 204) {
     return vi
       .spyOn(globalThis, 'fetch')
@@ -51,7 +58,64 @@ function getCall(fetchMock: ReturnType<typeof vi.spyOn>, index = 0) {
   };
 }
 
+function acceptMigrationJobInput(_input: CreateMigrationJobInput): void {}
+
+acceptMigrationJobInput({
+  organizationId: 'org_1',
+  sourceSystem: 'pretix',
+  adapterVersion: 'api-v1',
+  credentialId: 'mcred_12345678',
+  idempotencyKey: 'bad-source',
+  configuration: {
+    sourceMode: 'official-api',
+    sourceSystem: 'hi-events',
+    // @ts-expect-error The outer and nested migration source systems must match.
+    accountId: 'acct',
+    eventIds: ['evt'],
+  },
+});
+acceptMigrationJobInput({
+  organizationId: 'org_1',
+  sourceSystem: 'pretix',
+  adapterVersion: 'api-v1',
+  credentialId: 'mcred_12345678',
+  idempotencyKey: 'missing-selector',
+  // @ts-expect-error pretix official API jobs require a non-optional eventSlugs selector.
+  configuration: { sourceMode: 'official-api', sourceSystem: 'pretix', organizerSlug: 'org' },
+});
+// @ts-expect-error Export jobs must not carry source API credential references.
+acceptMigrationJobInput({
+  organizationId: 'org_1',
+  sourceSystem: 'generic-csv',
+  adapterVersion: 'rfc4180-v1',
+  credentialId: 'mcred_12345678',
+  idempotencyKey: 'export-secret',
+  configuration: {
+    sourceMode: 'official-export',
+    sourceSystem: 'generic-csv',
+    artifactIds: ['upl_12345678'],
+  },
+});
+
 describe('TixkitClient', () => {
+  it('sends explicit test checkout mode only as a header', async () => {
+    const fetchMock = mockFetch(201, { id: 'cs_1' });
+    const client = new TixkitClient({
+      apiKey: 'tk_test',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.checkout.create({
+      eventId: 'evt_1',
+      items: [{ ticketTypeId: 'tt_1', quantity: 1 }],
+      buyer: { email: 'test@example.test' },
+      idempotencyKey: 'test-order-1',
+      testOrder: true,
+    });
+    const call = getCall(fetchMock);
+    expect(call.headers['X-Tixkit-Test-Order']).toBe('1');
+    expect(JSON.parse(call.body)).not.toHaveProperty('testOrder');
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -65,13 +129,171 @@ describe('TixkitClient', () => {
     expect(client.tickets).toBeDefined();
   });
 
+  it('covers every migration file, mapping, and report route with typed methods', async () => {
+    const fetchMock = mockFetch(200, { items: [] });
+    const client = new TixkitClient({
+      apiKey: 'tk_test',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await client.migrations.files('job_1');
+    await client.migrations.mappings({
+      organizationId: 'org_1',
+      sourceSystem: 'pretix',
+    });
+    await client.migrations.createMapping({
+      organizationId: 'org_1',
+      sourceSystem: 'generic-csv',
+      name: 'Attendee columns',
+      entityType: 'attendee',
+      mapping: { email: 'email_address', tags: ['tag_1', 'tag_2'] },
+    });
+    await client.migrations.downloadReport('job_1');
+
+    expect(fetchMock.mock.calls.map((_, index) => getCall(fetchMock, index))).toMatchObject([
+      { method: 'GET', url: 'https://api.test/v1/migration-jobs/job_1/files' },
+      {
+        method: 'GET',
+        url: 'https://api.test/v1/migration-mappings?organizationId=org_1&sourceSystem=pretix',
+      },
+      { method: 'POST', url: 'https://api.test/v1/migration-mappings' },
+      {
+        method: 'GET',
+        url: 'https://api.test/v1/migration-jobs/job_1/report/download',
+      },
+    ]);
+  });
+
+  it('correlates migration job source systems with their preparation selectors', () => {
+    const input: CreateMigrationJobInput = {
+      organizationId: 'org_1',
+      sourceSystem: 'pretix',
+      adapterVersion: '1',
+      credentialId: 'mcred_12345678',
+      configuration: {
+        sourceMode: 'official-api',
+        sourceSystem: 'pretix',
+        organizerSlug: 'org',
+        eventSlugs: ['event'],
+      },
+      idempotencyKey: 'migration-1',
+    };
+    expect(input.configuration.sourceSystem).toBe(input.sourceSystem);
+  });
+
+  it('keeps readiness endpoints in SDK parity', async () => {
+    const fetchMock = mockFetch(200, {
+      eventId: 'evt_1',
+      launchable: false,
+      requiredBlockers: [],
+      recommendedWarnings: [],
+      steps: [],
+    });
+    const client = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await client.events.launchReadiness('evt_1');
+    expect(getCall(fetchMock)).toMatchObject({
+      method: 'GET',
+      url: 'https://api.test/v1/events/evt_1/launch-readiness',
+    });
+  });
+
+  it('rejects malformed readiness blocker envelopes', () => {
+    const malformed = new TixkitApiError('launch_readiness_failed', 'blocked', 409, 'req_1', {
+      requiredBlockers: [null] as never[],
+      recommendedWarnings: [],
+    });
+    expect(isLaunchReadinessFailure(malformed)).toBe(false);
+    const unknownReason = new TixkitApiError('launch_readiness_failed', 'blocked', 409, 'req_1', {
+      requiredBlockers: [
+        {
+          id: 'sellable_tickets',
+          status: 'incomplete',
+          priority: 'required',
+          reasonCodes: ['unknown_reason'],
+          actionId: 'manage_tickets',
+          requiredPermission: 'tickets.write',
+          updatedAt: null,
+          acknowledgedAt: null,
+          acknowledgementValid: null,
+        },
+      ],
+      recommendedWarnings: [],
+    });
+    expect(isLaunchReadinessFailure(unknownReason)).toBe(false);
+  });
+
+  it('narrows every publish conflict contract', () => {
+    expect(
+      isStaleEventVersionFailure(
+        new TixkitApiError('stale_event_version', 'stale', 409, 'req_1', {
+          expectedVersion: 2,
+          currentVersion: 3,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isStaleEventVersionFailure(
+        new TixkitApiError('stale_event_version', 'stale', 409, 'req_1', {}),
+      ),
+    ).toBe(false);
+    expect(
+      isArchivedEventFailure(new TixkitApiError('event_archived', 'archived', 409, 'req_1')),
+    ).toBe(true);
+  });
+
+  it('supports readiness acknowledgement create and delete', async () => {
+    const fetchMock = mockFetch(201, {
+      eventId: 'evt_1',
+      stepId: 'preview_review',
+    });
+    const client = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.events.acknowledgeReadinessStep('evt_1', 'preview_review');
+    expect(getCall(fetchMock)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/events/evt_1/readiness-acknowledgements/preview_review',
+    });
+
+    fetchMock.mockImplementationOnce(async () => new Response(null, { status: 204 }));
+    await client.events.removeReadinessAcknowledgement('evt_1', 'preview_review');
+    expect(getCall(fetchMock, 1)).toMatchObject({
+      method: 'DELETE',
+      url: 'https://api.test/v1/events/evt_1/readiness-acknowledgements/preview_review',
+    });
+  });
+
+  it('gets workspace readiness for the selected brand', async () => {
+    const fetchMock = mockFetch(200, { complete: true, steps: [] });
+    const client = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.organizations.readiness('org_1', 'brd_1');
+    expect(getCall(fetchMock).url).toBe(
+      'https://api.test/v1/organizations/org_1/readiness?brandId=brd_1',
+    );
+  });
+
   it('constructs a public client without an API key', () => {
     const client = new TixkitClient({ apiBaseUrl: 'https://api.test' });
     expect(client.checkout).toBeDefined();
   });
 
   it('rejects secret API keys in browser runtimes', () => {
-    const runtime = globalThis as typeof globalThis & { window?: unknown; document?: unknown };
+    const runtime = globalThis as typeof globalThis & {
+      window?: unknown;
+      document?: unknown;
+    };
     runtime.window = {};
     runtime.document = {};
 
@@ -474,10 +696,16 @@ describe('TixkitClient', () => {
         ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ entry: { id: 'wl_1' }, claimToken: 'claim_token_123' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            entry: { id: 'wl_1' },
+            claimToken: 'claim_token_123',
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ autoOfferEnabled: false, offerTtlMinutes: 60 }), {
@@ -492,7 +720,9 @@ describe('TixkitClient', () => {
       maxRetries: 0,
     });
     await client.events.listWaitlist('evt_1');
-    await client.events.offerWaitlistEntry('evt_1', 'wl_1', { expiresInMinutes: 30 });
+    await client.events.offerWaitlistEntry('evt_1', 'wl_1', {
+      expiresInMinutes: 30,
+    });
     await client.events.updateWaitlistSettings('evt_1', {
       autoOfferEnabled: false,
       offerTtlMinutes: 60,
@@ -550,7 +780,10 @@ describe('TixkitClient', () => {
         ),
       );
 
-    const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await client.public.joinWaitlist('evt_1', {
       ticketTypeId: 'tt_1',
       email: 'buyer@example.com',
@@ -561,7 +794,11 @@ describe('TixkitClient', () => {
     expect(getCall(fetchMock, 0)).toMatchObject({
       url: 'https://api.test/v1/public/events/evt_1/waitlist',
       method: 'POST',
-      body: JSON.stringify({ ticketTypeId: 'tt_1', email: 'buyer@example.com', quantity: 2 }),
+      body: JSON.stringify({
+        ticketTypeId: 'tt_1',
+        email: 'buyer@example.com',
+        quantity: 2,
+      }),
     });
     expect(getCall(fetchMock, 1)).toMatchObject({
       url: 'https://api.test/v1/public/waitlist/claims/claim%20token',
@@ -614,12 +851,20 @@ describe('TixkitClient', () => {
 
   it('exposes public marketing integration helper', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ items: [{ provider: 'meta_pixel', status: 'active' }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          items: [{ provider: 'meta_pixel', status: 'active' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
-    const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
 
     await client.public.listMarketingIntegrations('evt_1');
 
@@ -647,7 +892,10 @@ describe('TixkitClient', () => {
       ),
     );
 
-    const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const client = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     const page = await client.events.list({
       limit: 10,
       cursor: 'evt_1',
@@ -677,7 +925,10 @@ describe('TixkitClient', () => {
       maxRetries: 0,
     });
 
-    await client.events.update('evt_1', { title: 'Updated' });
+    await client.events.update('evt_1', {
+      title: 'Updated',
+      expectedVersion: 1,
+    });
 
     expect(getCall(fetchMock).headers['Content-Type']).toBe('application/json');
   });
@@ -685,7 +936,11 @@ describe('TixkitClient', () => {
   it('sends caller supplied confirm idempotency key only as a header', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
-        JSON.stringify({ sessionId: 'cs_1', status: 'pending_payment', totalCents: 5000 }),
+        JSON.stringify({
+          sessionId: 'cs_1',
+          status: 'pending_payment',
+          totalCents: 5000,
+        }),
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -718,7 +973,11 @@ describe('TixkitClient', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
-          order: { id: 'ord_box', salesChannel: 'box_office', tenderType: 'cash' },
+          order: {
+            id: 'ord_box',
+            salesChannel: 'box_office',
+            tenderType: 'cash',
+          },
           sessionId: 'cs_box',
           status: 'completed',
         }),
@@ -780,7 +1039,9 @@ describe('TixkitClient', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await client.checkout.get('cs_1', { paymentIntentClientSecret: 'pi_secret_123' });
+    await client.checkout.get('cs_1', {
+      paymentIntentClientSecret: 'pi_secret_123',
+    });
 
     const [url, init] = fetchMock.mock.calls[0]!;
     const headers = init?.headers as Record<string, string>;
@@ -816,7 +1077,11 @@ describe('TixkitClient', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
-          error: { code: 'SERVICE_UNAVAILABLE', message: 'try later', requestId: 'req_1' },
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'try later',
+            requestId: 'req_1',
+          },
         }),
         { status: 503, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -848,7 +1113,11 @@ describe('TixkitClient', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            error: { code: 'SERVICE_UNAVAILABLE', message: 'try later', requestId: 'req_1' },
+            error: {
+              code: 'SERVICE_UNAVAILABLE',
+              message: 'try later',
+              requestId: 'req_1',
+            },
           }),
           { status: 503, headers: { 'Content-Type': 'application/json' } },
         ),
@@ -937,15 +1206,22 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.events.update('evt_1', { title: 'Updated' });
+    await c.events.update('evt_1', { title: 'Updated', expectedVersion: 1 });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/events/evt_1');
     expect(call.method).toBe('PATCH');
-    expect(JSON.parse(call.body)).toEqual({ title: 'Updated' });
+    expect(JSON.parse(call.body)).toEqual({
+      title: 'Updated',
+      expectedVersion: 1,
+    });
   });
 
   it('events.create includes required currency in the request body', async () => {
-    const fm = mockFetch(201, { id: 'evt_1', title: 'Launch', currency: 'EUR' });
+    const fm = mockFetch(201, {
+      id: 'evt_1',
+      title: 'Launch',
+      currency: 'EUR',
+    });
     const c = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
@@ -967,15 +1243,27 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('events.update sends mutable event fields without status changes', async () => {
-    const fm = mockFetch(200, { id: 'evt_1', status: 'published', currency: 'GBP' });
+    const fm = mockFetch(200, {
+      id: 'evt_1',
+      status: 'published',
+      currency: 'GBP',
+    });
     const c = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.events.update('evt_1', { currency: 'GBP', minimumAge: 18 });
+    await c.events.update('evt_1', {
+      currency: 'GBP',
+      minimumAge: 18,
+      expectedVersion: 1,
+    });
     const call = getCall(fm);
-    expect(JSON.parse(call.body)).toEqual({ currency: 'GBP', minimumAge: 18 });
+    expect(JSON.parse(call.body)).toEqual({
+      currency: 'GBP',
+      minimumAge: 18,
+      expectedVersion: 1,
+    });
   });
 
   it('events.pause sends POST', async () => {
@@ -1011,10 +1299,16 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.events.updateResalePolicy('evt_1', { enabled: true, maxMultiplier: 1.1 });
+    await c.events.updateResalePolicy('evt_1', {
+      enabled: true,
+      maxMultiplier: 1.1,
+    });
     expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/resale-policy');
     expect(getCall(fm).method).toBe('PUT');
-    expect(JSON.parse(getCall(fm).body)).toEqual({ enabled: true, maxMultiplier: 1.1 });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      enabled: true,
+      maxMultiplier: 1.1,
+    });
 
     fm.mockClear();
     await c.events.listResaleListings('evt_1', { limit: 25, cursor: 'lst_1' });
@@ -1053,14 +1347,30 @@ describe('TixkitClient new resource methods', () => {
 
     fm.mockClear();
     await c.events.updateFeePolicy('evt_1', {
+      expectedVersion: 1,
       passFeesToBuyer: false,
-      rules: [{ name: 'Order fee', type: 'fixed', value: 250, appliedTo: 'per_order' }],
+      rules: [
+        {
+          name: 'Order fee',
+          type: 'fixed',
+          value: 250,
+          appliedTo: 'per_order',
+        },
+      ],
     });
     expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/fee-policy');
     expect(getCall(fm).method).toBe('PUT');
     expect(JSON.parse(getCall(fm).body)).toEqual({
+      expectedVersion: 1,
       passFeesToBuyer: false,
-      rules: [{ name: 'Order fee', type: 'fixed', value: 250, appliedTo: 'per_order' }],
+      rules: [
+        {
+          name: 'Order fee',
+          type: 'fixed',
+          value: 250,
+          appliedTo: 'per_order',
+        },
+      ],
     });
   });
 
@@ -1081,7 +1391,9 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(getCall(fm).body)).toEqual({ priceCents: 5500 });
 
     fm.mockClear();
-    await c.tickets.delistResaleListing('lst_1', { idempotencyKey: 'delist_1' });
+    await c.tickets.delistResaleListing('lst_1', {
+      idempotencyKey: 'delist_1',
+    });
     expect(getCall(fm).url).toBe('https://api.test/v1/ticket-listings/lst_1/delist');
     expect(getCall(fm).method).toBe('POST');
     expect(getCall(fm).headers['Idempotency-Key']).toBe('delist_1');
@@ -1160,7 +1472,7 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
 
-    expectTypeOf(c.checkout.walletPasses).parameter(1).toEqualTypeOf<string>();
+    expectTypeOf<Parameters<typeof c.checkout.walletPasses>[1]>().toEqualTypeOf<string>();
 
     await c.checkout.walletPasses('cs_1', 'client_1');
 
@@ -1229,7 +1541,10 @@ describe('TixkitClient new resource methods', () => {
       brandIds: ['brd_1'],
       eventIds: ['evt_1'],
     });
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+    });
 
     await c.organizations.updateMember('org_1', 'mem_1', {
       role: 'door_staff',
@@ -1247,7 +1562,10 @@ describe('TixkitClient new resource methods', () => {
 
   it('organizations lists and idempotently invites members', async () => {
     const fm = mockFetch(200, []);
-    const c = new TixkitClient({ apiKey: '***********', apiBaseUrl: 'https://api.test' });
+    const c = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+    });
 
     await c.organizations.listMembers('org_1');
     await c.organizations.inviteMember('org_1', {
@@ -1405,7 +1723,10 @@ describe('TixkitClient new resource methods', () => {
       items: [],
       summary: { checkedIn: 0, remaining: 1, total: 1, acceptedScans: 0 },
     });
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     const scannerHeaders = {
       'X-Device-Id': 'sd_public_1',
       'X-Device-Secret': 'scanner-secret',
@@ -1453,7 +1774,13 @@ describe('TixkitClient new resource methods', () => {
       idempotencyKey: 'idem_sync_backlog',
       headers: { 'X-Scanner-Device-Secret': 'secret' },
       checkInListId: 'cil_1',
-      scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      scans: [
+        {
+          qrHash: 'hash_1',
+          scannedAt: '2026-06-01T12:00:00.000Z',
+          offline: true,
+        },
+      ],
     });
 
     const call = getCall(fm);
@@ -1464,7 +1791,13 @@ describe('TixkitClient new resource methods', () => {
     expect(call.headers['Idempotency-Key']).toBe('idem_sync_backlog');
     expect(JSON.parse(call.body)).toEqual({
       checkInListId: 'cil_1',
-      scans: [{ qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true }],
+      scans: [
+        {
+          qrHash: 'hash_1',
+          scannedAt: '2026-06-01T12:00:00.000Z',
+          offline: true,
+        },
+      ],
     });
   });
 
@@ -1551,9 +1884,21 @@ describe('TixkitClient new resource methods', () => {
       headers: { 'X-Scanner-Device-Secret': 'secret' },
       checkInListId: 'cil_1',
       scans: [
-        { qrHash: 'hash_1', scannedAt: '2026-06-01T12:00:00.000Z', offline: true },
-        { qrHash: 'hash_2', scannedAt: '2026-06-01T12:00:01.000Z', offline: true },
-        { qrHash: 'hash_3', scannedAt: '2026-06-01T12:00:02.000Z', offline: true },
+        {
+          qrHash: 'hash_1',
+          scannedAt: '2026-06-01T12:00:00.000Z',
+          offline: true,
+        },
+        {
+          qrHash: 'hash_2',
+          scannedAt: '2026-06-01T12:00:01.000Z',
+          offline: true,
+        },
+        {
+          qrHash: 'hash_3',
+          scannedAt: '2026-06-01T12:00:02.000Z',
+          offline: true,
+        },
       ],
       forceAsync: true,
       chunkSize: 2,
@@ -1561,7 +1906,10 @@ describe('TixkitClient new resource methods', () => {
       pollMaxDelayMs: 0,
     });
 
-    expect(result).toMatchObject({ mode: 'async', job: { status: 'completed', accepted: 3 } });
+    expect(result).toMatchObject({
+      mode: 'async',
+      job: { status: 'completed', accepted: 3 },
+    });
     expect(fm).toHaveBeenCalledTimes(5);
     expect(getCall(fm, 0).url).toBe('https://api.test/v1/check-ins/bulk-sync-jobs');
     expect(getCall(fm, 0).method).toBe('POST');
@@ -1599,7 +1947,9 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
 
-    const response = await c.exports.getEvents('exp_1', { lastEventId: 'evt_99' });
+    const response = await c.exports.getEvents('exp_1', {
+      lastEventId: 'evt_99',
+    });
 
     const call = getCall(fm);
     expect(response.headers.get('Content-Type')).toBe('text/event-stream');
@@ -1673,13 +2023,19 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
 
-    const report = await c.reports.sales('evt_1', { from: '2026-06-01', to: '2026-06-30' });
+    const report = await c.reports.sales('evt_1', {
+      from: '2026-06-01',
+      to: '2026-06-30',
+    });
     const call = getCall(fm);
 
     expect(call.url).toBe(
       'https://api.test/v1/events/evt_1/reports/sales?from=2026-06-01&to=2026-06-30',
     );
-    expect(report.grossSalesByChannelCents).toEqual({ online: 9000, boxOffice: 3500 });
+    expect(report.grossSalesByChannelCents).toEqual({
+      online: 9000,
+      boxOffice: 3500,
+    });
   });
 
   it('products resource sends category and product management requests', async () => {
@@ -1701,7 +2057,10 @@ describe('TixkitClient new resource methods', () => {
 
     await c.products.createCategory('evt_1', { name: 'Merch', sortOrder: 1 });
     expect(getCall(fm).url).toBe('https://api.test/v1/events/evt_1/product-categories');
-    expect(JSON.parse(getCall(fm).body)).toEqual({ name: 'Merch', sortOrder: 1 });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      name: 'Merch',
+      sortOrder: 1,
+    });
 
     await c.products.create('evt_1', {
       name: 'T-shirt',
@@ -1721,7 +2080,10 @@ describe('TixkitClient new resource methods', () => {
     await c.products.update('prd_1', { description: null, status: 'inactive' });
     expect(getCall(fm, 2).url).toBe('https://api.test/v1/products/prd_1');
     expect(getCall(fm, 2).method).toBe('PATCH');
-    expect(JSON.parse(getCall(fm, 2).body)).toEqual({ description: null, status: 'inactive' });
+    expect(JSON.parse(getCall(fm, 2).body)).toEqual({
+      description: null,
+      status: 'inactive',
+    });
   });
 
   it('messages.list sends GET without pagination params', async () => {
@@ -2269,18 +2631,38 @@ describe('TixkitClient new resource methods', () => {
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await c.ticketTypes.createAccessRule('tt_1', { type: 'code', value: 'VIP123', maxUses: 5 });
+    await c.ticketTypes.createAccessRule('tt_1', {
+      type: 'code',
+      value: 'VIP123',
+      maxUses: 5,
+    });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/ticket-types/tt_1/access-rules');
     expect(call.method).toBe('POST');
-    expect(JSON.parse(call.body)).toEqual({ type: 'code', value: 'VIP123', maxUses: 5 });
+    expect(JSON.parse(call.body)).toEqual({
+      type: 'code',
+      value: 'VIP123',
+      maxUses: 5,
+    });
   });
 
   it('ticketTypes batch methods send atomic ticket and access-rule requests', async () => {
     const fm = mockFetch(201, {
-      ticketType: { id: 'tt_1', name: 'VIP', kind: 'paid', currency: 'USD', priceCents: 5000 },
+      ticketType: {
+        id: 'tt_1',
+        name: 'VIP',
+        kind: 'paid',
+        currency: 'USD',
+        priceCents: 5000,
+      },
       accessRules: [
-        { id: 'acr_1', ticketTypeId: 'tt_1', type: 'code', value: 'VIP123', usesCount: 0 },
+        {
+          id: 'acr_1',
+          ticketTypeId: 'tt_1',
+          type: 'code',
+          value: 'VIP123',
+          usesCount: 0,
+        },
       ],
     });
     const c = new TixkitClient({
@@ -2289,7 +2671,12 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
     await c.ticketTypes.createBatch('evt_1', {
-      ticketType: { name: 'VIP', kind: 'paid', currency: 'USD', priceCents: 5000 },
+      ticketType: {
+        name: 'VIP',
+        kind: 'paid',
+        currency: 'USD',
+        priceCents: 5000,
+      },
       inventoryPool: { name: 'VIP Pool', totalCapacity: 25 },
       accessRules: [{ type: 'code', value: 'VIP123' }],
     });
@@ -2389,7 +2776,11 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('webhookEndpoints.replayEvent sends POST to the endpoint-scoped replay route', async () => {
-    const fm = mockFetch(202, { queued: true, eventId: 'whe_1', endpointId: 'ep_1' });
+    const fm = mockFetch(202, {
+      queued: true,
+      eventId: 'whe_1',
+      endpointId: 'ep_1',
+    });
     const c = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
@@ -2399,9 +2790,38 @@ describe('TixkitClient new resource methods', () => {
     const result = await c.webhookEndpoints.replayEvent('ep_1', 'whe_1');
     const call = getCall(fm);
 
-    expect(result).toEqual({ queued: true, eventId: 'whe_1', endpointId: 'ep_1' });
+    expect(result).toEqual({
+      queued: true,
+      eventId: 'whe_1',
+      endpointId: 'ep_1',
+    });
     expect(call.method).toBe('POST');
     expect(call.url).toBe('https://api.test/v1/webhook-endpoints/ep_1/events/whe_1/replay');
+  });
+
+  it('webhookEndpoints.sendTest queues a synthetic signed delivery', async () => {
+    const fetcher = mockFetch(202, {
+      queued: true,
+      test: true,
+      eventId: 'whe_test',
+      endpointId: 'ep_1',
+    });
+    const c = new TixkitClient({
+      apiKey: 'tk_test',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const result = await c.webhookEndpoints.sendTest('ep_1');
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringContaining('/webhook-endpoints/ep_1/test'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(result).toEqual({
+      queued: true,
+      test: true,
+      eventId: 'whe_test',
+      endpointId: 'ep_1',
+    });
   });
 
   it('webhookEndpoints.replay sends POST to the whole-event replay route', async () => {
@@ -2489,7 +2909,11 @@ describe('TixkitClient new resource methods', () => {
       appliesTo: 'buyer',
       ticketTypeId: 'tt_1',
       placeholder: 'Ada Lovelace',
-      conditionalVisibility: { field: 'q_opt_in', operator: 'equals', value: 'yes' },
+      conditionalVisibility: {
+        field: 'q_opt_in',
+        operator: 'equals',
+        value: 'yes',
+      },
       isConsentField: false,
     });
     const call = getCall(fm);
@@ -2502,7 +2926,11 @@ describe('TixkitClient new resource methods', () => {
       appliesTo: 'buyer',
       ticketTypeId: 'tt_1',
       placeholder: 'Ada Lovelace',
-      conditionalVisibility: { field: 'q_opt_in', operator: 'equals', value: 'yes' },
+      conditionalVisibility: {
+        field: 'q_opt_in',
+        operator: 'equals',
+        value: 'yes',
+      },
       isConsentField: false,
     });
   });
@@ -2723,7 +3151,10 @@ describe('TixkitClient new resource methods', () => {
       nextCursor: null,
       prevCursor: null,
       facets: { status: { rows: [{ value: 'paid', total: 0 }] } },
-      applied: { sort: [{ field: 'createdAt', direction: 'desc' }], filters: {} },
+      applied: {
+        sort: [{ field: 'createdAt', direction: 'desc' }],
+        filters: {},
+      },
     });
     const c = new TixkitClient({
       apiKey: 'tk_test_123',
@@ -2784,8 +3215,14 @@ describe('TixkitClient new resource methods', () => {
     const call = getCall(fm);
 
     expect(call.url).toBe('https://api.test/v1/orders/ord_1');
-    expect(result.checkoutAnswers).toEqual({ buyerFields: {}, attendeeFields: {} });
-    expect(result.deliveryStatus).toEqual({ email: 'pending', tickets: 'not_issued' });
+    expect(result.checkoutAnswers).toEqual({
+      buyerFields: {},
+      attendeeFields: {},
+    });
+    expect(result.deliveryStatus).toEqual({
+      email: 'pending',
+      tickets: 'not_issued',
+    });
     expect(result.refunds).toEqual([]);
   });
 
@@ -2863,7 +3300,10 @@ describe('TixkitClient new resource methods', () => {
         },
       ],
     });
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     const event = await c.public.getEvent('evt_1');
     expectTypeOf(event).toEqualTypeOf<PublicEvent>();
     expect(event).toMatchObject({
@@ -2889,8 +3329,13 @@ describe('TixkitClient new resource methods', () => {
       brandId: 'brd_1',
       marketingIntegrations: [],
     });
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    const event = await c.public.getEventBySlug('all-access', { host: 'events.example.com' });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const event = await c.public.getEventBySlug('all-access', {
+      host: 'events.example.com',
+    });
 
     expectTypeOf(event).toEqualTypeOf<PublicEvent>();
     expect(getCall(fm).url).toBe(
@@ -2901,7 +3346,10 @@ describe('TixkitClient new resource methods', () => {
 
   it('public.getEventRevision sends GET without auth', async () => {
     const fm = mockFetch(200, { revision: '2026-07-07T04:31:00.000Z' });
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     const revision = await c.public.getEventRevision('evt_1');
 
     expect(revision).toEqual({ revision: '2026-07-07T04:31:00.000Z' });
@@ -2912,7 +3360,10 @@ describe('TixkitClient new resource methods', () => {
 
   it('public.listResaleListings sends public GET with pagination', async () => {
     const fm = mockFetch(200, { items: [{ id: 'lst_1', status: 'listed' }] });
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.public.listResaleListings('evt_1', { cursor: 'lst_0', limit: 25 });
     const call = getCall(fm);
     expect(call.url).toBe(
@@ -2923,7 +3374,10 @@ describe('TixkitClient new resource methods', () => {
 
   it('public bootstrap helpers send documented public GET routes without auth', async () => {
     const fm = mockFetch(200, {});
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
 
     const checkoutBootstrap = await c.public.getCheckoutBootstrap('evt_1', {
       products: ['tt_1', 'prd_1'],
@@ -2940,7 +3394,9 @@ describe('TixkitClient new resource methods', () => {
       'https://api.test/v1/public/events/evt_1/bootstrap?products=tt_1',
     );
 
-    const pageBootstrap = await c.public.getEventPageBootstrap('evt_1', { locale: 'en' });
+    const pageBootstrap = await c.public.getEventPageBootstrap('evt_1', {
+      locale: 'en',
+    });
     expectTypeOf(pageBootstrap).toEqualTypeOf<PublicEventPageBootstrap>();
     expectTypeOf<PublicContentPage['page']['puckData']>().toEqualTypeOf<PuckData>();
     expectTypeOf<EventPageDocumentV2['editor']['data']>().toEqualTypeOf<PuckData>();
@@ -2974,7 +3430,10 @@ describe('TixkitClient new resource methods', () => {
         requiresAccessCode: false,
       },
     ]);
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
 
     const availability = await c.public.getAvailability('evt_1', ['tt_hidden', 'prd_1']);
     expectTypeOf(availability).toEqualTypeOf<PublicAvailabilityItem[]>();
@@ -2993,12 +3452,21 @@ describe('TixkitClient new resource methods', () => {
 
   it('public.validateAccessCode sends POST with ticketTypeIds and accessCode', async () => {
     const fm = mockFetch(200, { valid: true, ticketTypeIds: ['tt_1'] });
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
-    await c.public.validateAccessCode('evt_1', { ticketTypeIds: ['tt_1'], accessCode: 'CODE123' });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await c.public.validateAccessCode('evt_1', {
+      ticketTypeIds: ['tt_1'],
+      accessCode: 'CODE123',
+    });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/public/events/evt_1/access-code');
     expect(call.method).toBe('POST');
-    expect(JSON.parse(call.body)).toEqual({ ticketTypeIds: ['tt_1'], accessCode: 'CODE123' });
+    expect(JSON.parse(call.body)).toEqual({
+      ticketTypeIds: ['tt_1'],
+      accessCode: 'CODE123',
+    });
   });
 
   it('uploads.create sends a signed upload ticket request', async () => {
@@ -3088,7 +3556,10 @@ describe('TixkitClient new resource methods', () => {
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         ),
       );
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
 
     await c.public.createUploadArtifact('evt_1', {
       fileName: 'waiver.pdf',
@@ -3106,12 +3577,17 @@ describe('TixkitClient new resource methods', () => {
       questionId: 'q_file',
     });
     expect(getCall(fm, 1).url).toBe('https://api.test/v1/public/upload-artifacts/upl_1/complete');
-    expect(JSON.parse(getCall(fm, 1).body)).toEqual({ token: 'complete-token' });
+    expect(JSON.parse(getCall(fm, 1).body)).toEqual({
+      token: 'complete-token',
+    });
   });
 
   it('public.recordWidgetImpression sends PII-safe impression metadata', async () => {
     const fm = mockFetch(201, { tracked: true, deduped: false });
-    const c = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+    const c = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
     await c.public.recordWidgetImpression('evt_1', {
       visitorId: 'visitor_123456',
       trackingId: 'utm-widget',

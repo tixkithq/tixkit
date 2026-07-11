@@ -91,6 +91,8 @@ describe('openApiSpec', () => {
   it('documents workspace/event readiness, acknowledgements, and publish conflicts', () => {
     expect(openApiSpec.paths).toHaveProperty('/organizations/{organizationId}/readiness');
     expect(openApiSpec.paths).toHaveProperty('/events/{eventId}/launch-readiness');
+    expect(openApiSpec.paths).toHaveProperty('/events/{eventId}/operational-health');
+    expect(openApiSpec.paths).toHaveProperty('/events/{eventId}/setup-section');
     expect(openApiSpec.paths).toHaveProperty(
       '/events/{eventId}/readiness-acknowledgements/{stepId}',
     );
@@ -100,12 +102,16 @@ describe('openApiSpec', () => {
     const readinessOperations = [
       openApiSpec.paths['/organizations/{organizationId}/readiness'].get,
       openApiSpec.paths['/events/{eventId}/launch-readiness'].get,
+      openApiSpec.paths['/events/{eventId}/operational-health'].get,
+      openApiSpec.paths['/events/{eventId}/setup-section'].put,
       openApiSpec.paths['/events/{eventId}/readiness-acknowledgements/{stepId}'].post,
       openApiSpec.paths['/events/{eventId}/readiness-acknowledgements/{stepId}'].delete,
     ];
     expect(readinessOperations.map((operation) => operation['x-required-permissions'])).toEqual([
       ['events.read'],
       ['events.read'],
+      ['events.read'],
+      ['events.write'],
       ['events.write'],
       ['events.write'],
     ]);
@@ -1881,13 +1887,82 @@ describe('openApiSpec', () => {
       writeOnly: true,
       pattern: expect.stringContaining('secretmanager'),
     });
+    const secretReferencePattern = new RegExp(schema.properties.secretReference.pattern, 'u');
+    expect(secretReferencePattern.test('vault://team/migrations/source_api')).toBe(true);
+    expect(secretReferencePattern.test('vault://team//source_api')).toBe(false);
+    expect(secretReferencePattern.test('vault://team/../source_api')).toBe(false);
+    expect(secretReferencePattern.test('vault://team/source_api?version=1')).toBe(false);
 
     const revoke = openApiSpec.paths['/migration-credentials/{credentialId}'].delete;
     expect(revoke.parameters).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'credentialId', in: 'path', required: true }),
-        expect.objectContaining({ name: 'organizationId', in: 'query', required: true }),
+        expect.objectContaining({
+          name: 'credentialId',
+          in: 'path',
+          required: true,
+        }),
+        expect.objectContaining({
+          name: 'organizationId',
+          in: 'query',
+          required: true,
+        }),
       ]),
     );
+  });
+
+  it('publishes the ordered migration adapter catalog operation', () => {
+    expect(openApiSpec.paths['/migration-adapters'].get).toMatchObject({
+      operationId: 'listMigrationAdapters',
+      'x-required-permissions': ['migrations.read'],
+    });
+  });
+
+  it('publishes reusable typed migration schemas and complete mapping contracts', () => {
+    expect(openApiSpec.components.schemas.MigrationPreparationConfiguration.oneOf).toHaveLength(5);
+    expect(openApiSpec.components.schemas.MigrationJob).toMatchObject({
+      type: 'object',
+    });
+    const createSchema =
+      openApiSpec.paths['/migration-jobs'].post.requestBody.content['application/json'].schema;
+    expect(createSchema.oneOf).toHaveLength(9);
+    expect(createSchema.oneOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ required: ['credentialId'] }),
+        expect.objectContaining({
+          properties: expect.objectContaining({ credentialId: false }),
+        }),
+      ]),
+    );
+    const mappingPost = openApiSpec.paths['/migration-mappings'].post;
+    expect(mappingPost.requestBody.content['application/json'].schema).toMatchObject({
+      required: ['organizationId', 'sourceSystem', 'name', 'entityType', 'mapping'],
+    });
+    expect(mappingPost.responses['201'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/MigrationMapping',
+    });
+    expect(
+      openApiSpec.paths['/migration-jobs/{jobId}/report/download'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/MigrationReport' });
+  });
+
+  it('gives every body-bearing successful migration response a JSON schema', () => {
+    for (const [path, pathItem] of Object.entries(openApiSpec.paths)) {
+      if (!path.startsWith('/migration-')) continue;
+      for (const operation of Object.values(pathItem)) {
+        if (!operation || typeof operation !== 'object' || !('responses' in operation)) continue;
+        for (const [status, response] of Object.entries(operation.responses)) {
+          if (!status.startsWith('2') || status === '204') continue;
+          const typedResponse = response as {
+            content?: { 'application/json'?: { schema?: unknown } };
+          };
+          expect(
+            typedResponse.content?.['application/json']?.schema,
+            `${path} ${operation.operationId} ${status}`,
+          ).toBeDefined();
+        }
+      }
+    }
   });
 });

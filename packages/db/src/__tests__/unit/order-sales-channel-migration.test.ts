@@ -26,6 +26,10 @@ import { OrganizationMemberUniqueMigration } from '../../migrations/0053_organiz
 import { CheckInActivityIndexesMigration } from '../../migrations/0054_check_in_activity_indexes.js';
 import { CheckInActivitySequenceMigration } from '../../migrations/0055_check_in_activity_sequence.js';
 import { CheckoutHoldCapacityIndexMigration } from '../../migrations/0056_checkout_hold_capacity_index.js';
+import { ImportPlatformMigration } from '../../migrations/0058_import_platform.js';
+import { MigrationDomainSupportMigration } from '../../migrations/0059_migration_domain_support.js';
+import { MigrationPermissionsMigration } from '../../migrations/0060_migration_permissions.js';
+import { EventOnboardingReadinessMigration } from '../../migrations/0057_event_onboarding_readiness.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -196,7 +200,10 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0056_checkout_hold_capacity_index');
+    expect(Object.keys(migrations).at(-1)).toBe('0062_migration_preparation_cursor');
+    expect(migrations['0059_import_platform']).toBe(ImportPlatformMigration);
+    expect(migrations['0060_migration_domain_support']).toBe(MigrationDomainSupportMigration);
+    expect(migrations['0061_migration_permissions']).toBe(MigrationPermissionsMigration);
     expect(migrations['0052_event_age_eligibility']).toBe(EventAgeEligibilityMigration);
     expect(migrations['0053_organization_member_unique']).toBe(OrganizationMemberUniqueMigration);
     expect(migrations['0054_check_in_activity_indexes']).toBe(CheckInActivityIndexesMigration);
@@ -204,6 +211,7 @@ describe('OrderSalesChannelMigration', () => {
     expect(migrations['0056_checkout_hold_capacity_index']).toBe(
       CheckoutHoldCapacityIndexMigration,
     );
+    expect(migrations['0057_event_onboarding_readiness']).toBe(EventOnboardingReadinessMigration);
     expect(migrations['0031_order_sales_channel']).toBe(OrderSalesChannelMigration);
     expect(migrations['0032_scan_logs_ticket_index']).toBe(ScanLogsTicketIndexMigration);
     expect(migrations['0033_email_jobs_template_version_fk']).toBe(

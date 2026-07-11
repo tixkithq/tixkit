@@ -93,9 +93,7 @@ export type MigrationWorkflowResult = {
 
 export type MigrationRollbackWorkflowInput = ScopedInput & { version: number };
 
-export async function migrationRollbackWorkflow(
-  input: MigrationRollbackWorkflowInput,
-): Promise<{
+export async function migrationRollbackWorkflow(input: MigrationRollbackWorkflowInput): Promise<{
   status: 'rollback_refused' | 'rolled_back';
   assessment: MigrationRollbackAssessment;
   deleted?: number;
@@ -251,9 +249,7 @@ export async function migrationCommitWorkflow(
     state.status = 'reconciling';
     const reconciliation = await activities.reconcileMigrationActivity(scope);
     if (reconciliation.unresolved > 0) {
-      throw new Error(
-        `Migration reconciliation has ${reconciliation.unresolved} unresolved items`,
-      );
+      throw new Error(`Migration reconciliation has ${reconciliation.unresolved} unresolved items`);
     }
 
     if (state.rollbackRequested) {

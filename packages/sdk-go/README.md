@@ -1,78 +1,49 @@
-# Tixkit Go SDK
+# `github.com/tixkit/tixkit-go`
 
-Go client for the Tixkit API, pinned to API version `2026-01-01`.
+## Purpose
 
-The module provides typed resources for checkout sessions, events, ticket types,
-orders, refunds, attendees, check-in, questions, waitlist, reports, exports,
-webhooks, developer API keys, cursor pagination, idempotency keys, typed API
-errors, configurable retries/timeouts, and `X-Tixkit-Signature` webhook
-verification.
+Typed Go client for Tixkit endpoints, cursor pagination, retries, idempotency, and webhook verification.
 
-## Install
+## Consumers
 
-```bash
-go get github.com/tixkit/tixkit-go
-```
+Go services integrating Tixkit from trusted server environments.
 
-## Create a checkout session
+## Status
 
-```go
-package main
+Supported module pinned to API version `2026-01-01`.
 
-import (
-	"context"
-	"log"
-	"time"
+## Installation
 
-	tixkit "github.com/tixkit/tixkit-go"
-)
+`go get github.com/tixkit/tixkit-go`.
 
-func main() {
-	client, err := tixkit.NewClient(
-		"tk_live_...",
-		tixkit.WithBaseURL("https://api.tixkit.com"),
-		tixkit.WithTimeout(30*time.Second),
-		tixkit.WithMaxRetries(3),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
+## Example
 
-	session, err := client.CheckoutSessions.Create(context.Background(), tixkit.CreateCheckoutSessionRequest{
-		EventID: "evt_123",
-		Items: []tixkit.CheckoutItem{{
-			TicketTypeID: "tt_123",
-			Quantity:     1,
-		}},
-		Buyer:          &tixkit.Buyer{Email: "buyer@example.com"},
-		SuccessURL:     "https://example.com/success",
-		CancelURL:      "https://example.com/cancel",
-		IdempotencyKey: "checkout-idempotency-key",
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+`client := tixkit.NewClient(os.Getenv("TIXKIT_API_KEY"))`
 
-	log.Println(session.ID)
-}
-```
+## Public exports
 
-## Verify webhooks
+Client/configuration, typed services and resources, API errors, pagination, idempotency support, and webhook verification.
 
-```go
-ok := tixkit.VerifyWebhookSignature(rawBody, signatureHeader, webhookSecret)
-```
+## Runtime
 
-Webhook verification expects Tixkit's `X-Tixkit-Signature` header in the
-`t=<timestamp>,v1=<hex>` format and performs constant-time HMAC comparison.
+Go 1.26 as declared by `go.mod`.
 
-## Local validation
+## Configuration
 
-```bash
-go list -m -json
-go list ./...
-gofmt -w client.go doc.go errors.go pagination.go services.go types.go webhook.go client_test.go webhook_test.go examples/checkout/main.go
-go test ./...
-go vet ./...
-go build ./examples/...
-```
+Supply API key, base URL, HTTP client, timeout, and retry policy through client configuration.
+
+## Security
+
+Keep keys server-side, verify webhook signatures against raw bodies, and avoid logging request authorization headers.
+
+## Validation
+
+`cd packages/sdk-go && go test ./... && go vet ./...`
+
+## Compatibility
+
+Semantic module releases track API version `2026-01-01`; exported Go identifiers are the compatibility boundary.
+
+## Related guides
+
+[Go SDK guide](../../docs/public/sdks/go.mdx)

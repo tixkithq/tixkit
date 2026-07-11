@@ -3,8 +3,12 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { AuditLogRepository, ImportRepository } from '@tixkit/db';
 import {
+  assertMigrationSecretReference,
   buildDryRunReport,
   canCommitDryRun,
+  canonicalMigrationContentFingerprint,
+  migrationAdapterCatalog,
+  parseMigrationPreparationConfiguration,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
   type DryRunRow,
   type MigrationIssue,
@@ -20,9 +24,9 @@ const createJobSchema = z
   .object({
     organizationId: organizationIdSchema,
     sourceSystem: z.string().trim().min(1).max(80),
-    adapterVersion: z.string().trim().min(1).max(40),
+    adapterVersion: z.string().trim().min(1).max(100),
     mode: z.enum(['dry-run', 'commit']).default('dry-run'),
-    configuration: z.record(z.string(), z.unknown()).optional(),
+    configuration: z.record(z.string(), z.unknown()),
     credentialId: z
       .string()
       .trim()
@@ -41,10 +45,18 @@ const credentialSchema = z
     sourceSystem: z.string().trim().min(1).max(80),
     secretReference: z
       .string()
-      .trim()
       .min(1)
       .max(1000)
-      .regex(/^(?:aws-secretsmanager|gcp-secretmanager|secret|vault):\/\/[A-Za-z0-9_./:@-]+$/u),
+      .superRefine((value, context) => {
+        try {
+          assertMigrationSecretReference(value);
+        } catch (error) {
+          context.addIssue({
+            code: 'custom',
+            message: error instanceof Error ? error.message : 'Invalid secretReference',
+          });
+        }
+      }),
     expiresAt: z.string().datetime(),
   })
   .strict();
@@ -224,8 +236,27 @@ export function sanitizeDryRunReport(
   };
 }
 
+export async function unresolvedMigrationDependencies(
+  entity: NormalizedMigrationEntity,
+  currentJobEntities: ReadonlySet<string>,
+  resolvesExternalReference: (entityType: string, externalId: string) => Promise<boolean>,
+): Promise<NonNullable<NormalizedMigrationEntity['dependencies']>> {
+  const unresolved: Array<NonNullable<NormalizedMigrationEntity['dependencies']>[number]> = [];
+  for (const dependency of entity.dependencies ?? []) {
+    const key = `${dependency.entityType}:${dependency.externalId}`;
+    if (currentJobEntities.has(key)) continue;
+    if (!(await resolvesExternalReference(dependency.entityType, dependency.externalId)))
+      unresolved.push(dependency);
+  }
+  return unresolved;
+}
+
 function serializeJob(job: Record<string, unknown>) {
-  const { configuration: rawConfiguration, ...safeJob } = job;
+  const {
+    configuration: rawConfiguration,
+    preparation_cursor: _preparationCursor,
+    ...safeJob
+  } = job;
   const configuration = parseJson(rawConfiguration as string | null);
   return {
     ...safeJob,
@@ -321,6 +352,11 @@ function normalizedEntity(value: string | null): NormalizedMigrationEntity | und
 export const migrationRoutes: FastifyPluginAsync = async (app) => {
   const repo = () => new ImportRepository(app.context.db);
 
+  app.get('/migration-adapters', async (request) => {
+    requireMigrationPermission(request.principal!, 'migrations.read');
+    return { items: migrationAdapterCatalog() };
+  });
+
   app.post('/migration-credentials', async (request, reply) => {
     const principal = request.principal!;
     requireMigrationPermission(principal, 'migrations.write');
@@ -378,6 +414,31 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     requireMigrationPermission(principal, 'migrations.write');
     const body = parse(createJobSchema, request.body);
     assertMigrationConfigurationSecretFree(body.configuration);
+    let configuration;
+    try {
+      configuration = parseMigrationPreparationConfiguration(body.configuration, body.sourceSystem);
+    } catch (error) {
+      throw new ValidationError(
+        error instanceof Error ? error.message : 'Invalid migration preparation configuration',
+      );
+    }
+    const adapter = migrationAdapterCatalog().find(
+      (candidate) => candidate.id === body.sourceSystem,
+    );
+    if (!adapter) throw new ValidationError(`Unsupported migration source: ${body.sourceSystem}`);
+    if (!adapter.supportedVersions.includes(body.adapterVersion)) {
+      throw new ValidationError(
+        `Unsupported ${body.sourceSystem} adapter version: ${body.adapterVersion}`,
+      );
+    }
+    if (configuration.sourceMode === 'official-api' && !body.credentialId) {
+      throw new ValidationError('credentialId is required for official-api migration jobs');
+    }
+    if (!adapter.sourceModes.includes(configuration.sourceMode)) {
+      throw new ValidationError(
+        `${body.sourceSystem} does not support source mode ${configuration.sourceMode}`,
+      );
+    }
     ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
     if (
       body.credentialId &&
@@ -402,7 +463,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       idempotencyKey: key,
       requestedBy: principal.id,
       configuration: {
-        ...body.configuration,
+        ...configuration,
         ...(body.credentialId ? { credentialId: body.credentialId } : {}),
       },
     });
@@ -411,6 +472,25 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       mode: body.mode,
     });
     return reply.status(201).send(serializeJob(job as unknown as Record<string, unknown>));
+  });
+
+  app.post('/migration-jobs/:jobId/prepare', async (request, reply) => {
+    const principal = request.principal!;
+    requireMigrationPermission(principal, 'migrations.write');
+    const { jobId } = request.params as { jobId: string };
+    if (request.body && Object.keys(request.body as object).length > 0)
+      throw new ValidationError('Migration preparation request body must be empty');
+    const repository = repo();
+    const { job, organizationId } = await scopedJob(repository, request, jobId);
+    if (!['pending', 'failed', 'paused'].includes(job.status))
+      throw new ConflictError('Migration preparation cannot start in the current status');
+    await app.context.temporalClient.startMigrationPreparation({
+      tenantId: principal.tenantId,
+      organizationId,
+      jobId,
+    });
+    await auditMutation(app, request, organizationId, jobId, 'migration_job.prepare_requested');
+    return reply.status(202).send({ jobId, status: 'preparing' });
   });
 
   app.get('/migration-jobs', async (request) => {
@@ -637,7 +717,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const { jobId } = request.params as { jobId: string };
     const repository = repo();
     const { job, organizationId } = await scopedJob(repository, request, jobId);
-    if (!['pending', 'failed', 'ready'].includes(job.status))
+    if (!['prepared', 'failed', 'ready'].includes(job.status))
       throw new ConflictError('Dry-run cannot start in the current migration status');
     const scope = { tenantId: principal.tenantId, organizationId, jobId };
     const rows = await loadAllRows(repository, scope);
@@ -656,6 +736,13 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       conflictsByExternalId.set(key, issues);
     }
     const reportRows: DryRunRow[] = [];
+    const currentJobEntities = new Set(
+      rows.flatMap((candidate) => {
+        const normalized = normalizedEntity(candidate.normalized_data);
+        return normalized ? [`${normalized.entityType}:${normalized.externalId}`] : [];
+      }),
+    );
+    const externalDependencyCache = new Map<string, boolean>();
     for (const row of rows) {
       const entity = normalizedEntity(row.normalized_data) ?? {
         entityType: row.entity_type as NormalizedMigrationEntity['entityType'],
@@ -676,6 +763,38 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
           sourcePosition: entity.sourcePosition,
         });
       }
+      const unresolvedDependencies = await unresolvedMigrationDependencies(
+        entity,
+        currentJobEntities,
+        async (entityType, externalId) => {
+          const key = `${entityType}:${externalId}`;
+          let resolved = externalDependencyCache.get(key);
+          if (resolved === undefined) {
+            resolved = Boolean(
+              await repository.findExternalReference({
+                tenantId: principal.tenantId,
+                organizationId,
+                sourceSystem: job.source_system,
+                entityType,
+                externalId,
+              }),
+            );
+            externalDependencyCache.set(key, resolved);
+          }
+          return resolved;
+        },
+      );
+      for (const dependency of unresolvedDependencies) {
+        issues.push({
+          code: 'DEPENDENCY_UNRESOLVED',
+          severity: 'error',
+          message: `No current-job row or scoped external reference resolves ${dependency.entityType}.`,
+          entityType: entity.entityType,
+          externalId: entity.externalId,
+          sourcePosition: entity.sourcePosition,
+          field: `dependencies.${dependency.entityType}`,
+        });
+      }
       const existing = row.external_id
         ? await repository.findExternalReference({
             tenantId: principal.tenantId,
@@ -685,9 +804,47 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
             externalId: row.external_id,
           })
         : undefined;
+      const imported = existing
+        ? await repository.findImportedEntity(
+            principal.tenantId,
+            organizationId,
+            existing.tixkit_id,
+          )
+        : undefined;
+      const sameCanonicalContent =
+        Boolean(imported) &&
+        canonicalMigrationContentFingerprint({
+          attributes: JSON.parse(imported!.attributes) as Record<string, unknown>,
+          financialSnapshot: imported!.financial_snapshot
+            ? (JSON.parse(
+                imported!.financial_snapshot,
+              ) as NormalizedMigrationEntity['financialSnapshot'])
+            : undefined,
+        }) === canonicalMigrationContentFingerprint(entity);
+      const financialChanged =
+        Boolean(imported) &&
+        !sameCanonicalContent &&
+        (entity.entityType === 'historical-payment' || entity.entityType === 'historical-refund');
+      if (financialChanged) {
+        issues.push({
+          code: 'HISTORICAL_FINANCIAL_RECORD_CHANGED',
+          severity: 'error',
+          message: 'An imported historical financial snapshot cannot be changed by re-import.',
+          entityType: entity.entityType,
+          externalId: entity.externalId,
+          sourcePosition: entity.sourcePosition,
+        });
+      }
       reportRows.push({
         entity,
-        disposition: issues.length > 0 ? 'conflict' : existing ? 'update' : 'create',
+        disposition:
+          issues.length > 0
+            ? 'conflict'
+            : imported && sameCanonicalContent
+              ? 'skip'
+              : existing
+                ? 'update'
+                : 'create',
         issues,
       });
     }
@@ -919,14 +1076,21 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         throw new ValidationError(`x-tixkit-confirmation must equal rollback:${jobId}`);
       }
       const allowed: Record<typeof action, string[]> = {
-        pause: ['committing'],
+        pause: ['preparing', 'committing'],
         resume: ['paused'],
-        cancel: ['pending', 'ready', 'committing', 'paused'],
+        cancel: ['pending', 'prepared', 'ready', 'preparing', 'committing', 'paused'],
         rollback: ['committed', 'failed'],
       };
       if (!allowed[action].includes(job.status))
         throw new ConflictError(`Migration cannot ${action} in its current status`);
-      if (action === 'cancel' && ['pending', 'ready'].includes(job.status)) {
+      const preparation = await repository.preparationProgress(
+        principal.tenantId,
+        organizationId,
+        jobId,
+      );
+      const preparationAction =
+        job.status === 'preparing' || (job.status === 'paused' && !preparation.completed);
+      if (action === 'cancel' && ['pending', 'prepared', 'ready'].includes(job.status)) {
         const changed = await repository.transitionJob({
           tenantId: principal.tenantId,
           organizationId,
@@ -941,6 +1105,13 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
           organizationId,
           jobId,
         });
+      } else if (preparationAction) {
+        await app.context.temporalClient.signalMigrationPreparation(
+          principal.tenantId,
+          organizationId,
+          jobId,
+          action,
+        );
       } else {
         await app.context.temporalClient.signalMigration(
           principal.tenantId,

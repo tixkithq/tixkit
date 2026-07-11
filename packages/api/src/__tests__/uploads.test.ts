@@ -46,8 +46,12 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({
 }));
 
 type Row = Record<string, unknown>;
+type RowPredicate = (row: Row) => boolean;
 
-function createMockDb(seed: Record<string, Row[]> = {}) {
+function createMockDb(
+  seed: Record<string, Row[]> = {},
+  options: { onUpdate?: (table: string, row: Row, values: Row) => void } = {},
+) {
   const tables: Record<string, Row[]> = { upload_artifacts: [], ...seed };
 
   function rowsFor(table: string): Row[] {
@@ -56,8 +60,13 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
   }
 
   // eslint-disable-next-line unicorn/consistent-function-scoping -- this helper is local to the lightweight Kysely mock.
-  function matches(row: Row, conditions: Array<[string, string, unknown]>): boolean {
-    return conditions.every(([column, operator, value]) => {
+  function matches(
+    row: Row,
+    conditions: Array<[string, string, unknown] | RowPredicate>,
+  ): boolean {
+    return conditions.every((condition) => {
+      if (typeof condition === 'function') return condition(row);
+      const [column, operator, value] = condition;
       if (operator === 'in' && Array.isArray(value)) return value.includes(row[column]);
       if (operator === 'is') return value === null ? row[column] == null : row[column] === value;
       if (operator === '<')
@@ -70,7 +79,7 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
   }
 
   function selectFrom(table: string) {
-    const conditions: Array<[string, string, unknown]> = [];
+    const conditions: Array<[string, string, unknown] | RowPredicate> = [];
     let limitCount: number | undefined;
     const query = {
       select: () => query,
@@ -80,13 +89,26 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
         limitCount = value;
         return query;
       },
-      where(column: string, operator: string, value: unknown) {
-        conditions.push([column, operator, value]);
+      where(
+        column: string | ((eb: RowPredicateBuilder) => RowPredicate),
+        operator?: string,
+        value?: unknown,
+      ) {
+        conditions.push(
+          typeof column === 'function'
+            ? column(createPredicateBuilder())
+            : [column, operator!, value],
+        );
         return query;
       },
-      executeTakeFirst: async () => rowsFor(table).find((row) => matches(row, conditions)),
+      executeTakeFirst: async () => {
+        const row = rowsFor(table).find((candidate) => matches(candidate, conditions));
+        return row ? { ...row } : undefined;
+      },
       execute: async () => {
-        const result = rowsFor(table).filter((row) => matches(row, conditions));
+        const result = rowsFor(table)
+          .filter((row) => matches(row, conditions))
+          .map((row) => ({ ...row }));
         return typeof limitCount === 'number' ? result.slice(0, limitCount) : result;
       },
     };
@@ -119,6 +141,7 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
             for (const row of rowsFor(table)) {
               if (matches(row, conditions)) {
                 Object.assign(row, values);
+                options.onUpdate?.(table, row, values);
                 updatedCount += 1;
               }
             }
@@ -129,6 +152,7 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
             for (const row of rowsFor(table)) {
               if (matches(row, conditions)) {
                 Object.assign(row, values);
+                options.onUpdate?.(table, row, values);
                 updatedCount += 1;
               }
             }
@@ -143,6 +167,21 @@ function createMockDb(seed: Record<string, Row[]> = {}) {
     tables,
     db: { selectFrom, insertInto, updateTable } as unknown as Database,
   };
+}
+
+type RowPredicateBuilder = ((column: string, operator: string, value: unknown) => RowPredicate) & {
+  or: (predicates: RowPredicate[]) => RowPredicate;
+  and: (predicates: RowPredicate[]) => RowPredicate;
+};
+
+function createPredicateBuilder(): RowPredicateBuilder {
+  const builder = ((column: string, operator: string, value: unknown) => (row: Row) =>
+    operator === 'in' && Array.isArray(value)
+      ? value.includes(row[column])
+      : row[column] === value) as RowPredicateBuilder;
+  builder.or = (predicates) => (row) => predicates.some((predicate) => predicate(row));
+  builder.and = (predicates) => (row) => predicates.every((predicate) => predicate(row));
+  return builder;
 }
 
 function makePrincipal(overrides: Partial<Principal> = {}): Principal {
@@ -399,6 +438,171 @@ describe('upload artifact service', () => {
 
     expect(tables.upload_artifacts.filter((row) => row.status === 'rejected')).toHaveLength(1);
     expect(s3Send).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims an expired artifact once across concurrent cleanup workers', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_concurrent',
+          status: 'pending',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/staging/upl_concurrent.txt',
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+    });
+    s3Send.mockResolvedValue({});
+
+    const results = await Promise.all([
+      cleanupExpiredUploadArtifacts(db, now),
+      cleanupExpiredUploadArtifacts(db, now),
+    ]);
+
+    expect(results.reduce((sum, result) => sum + result, 0)).toBe(1);
+    expect(s3Send).toHaveBeenCalledTimes(1);
+    expect(tables.upload_artifacts[0]).toMatchObject({ status: 'rejected' });
+  });
+
+  it('renews referenced event media and never deletes it', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_cover',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/event-cover/upl_cover.png',
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          cover_image_url: '/v1/public/event-media/event_cover/upl_cover',
+          seo: '{}',
+        },
+      ],
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]?.status).toBe('uploaded');
+    expect(new Date(tables.upload_artifacts[0]?.expires_at as Date).getTime()).toBeGreaterThan(
+      now.getTime(),
+    );
+  });
+
+  it('restores the prior status when object deletion fails', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_delete_failure',
+          status: 'pending',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/staging/upl_delete_failure.txt',
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+    });
+    s3Send.mockRejectedValue(new Error('S3 unavailable'));
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(tables.upload_artifacts[0]).toMatchObject({ status: 'pending' });
+  });
+
+  it('restores a claimed artifact when an event attaches it before deletion', async () => {
+    const now = new Date();
+    const events: Row[] = [
+      {
+        id: 'evt_1',
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        brand_id: 'brd_1',
+        cover_image_url: null,
+        seo: '{}',
+      },
+    ];
+    const { db, tables } = createMockDb(
+      {
+        upload_artifacts: [
+          {
+            id: 'upl_attach_race',
+            tenant_id: 'tnt_1',
+            organization_id: 'org_1',
+            brand_id: 'brd_1',
+            event_id: 'evt_1',
+            purpose: 'event_cover',
+            status: 'uploaded',
+            scan_status: 'clean',
+            bucket: 'tixkit',
+            object_key: 'uploads/tnt_1/event-cover/upl_attach_race.png',
+            expires_at: new Date(now.getTime() - 60_000),
+          },
+        ],
+        events,
+      },
+      {
+        onUpdate(table, row, values) {
+          if (
+            table === 'upload_artifacts' &&
+            row.id === 'upl_attach_race' &&
+            values.status === 'cleanup_pending'
+          ) {
+            events[0]!.cover_image_url =
+              '/v1/public/event-media/event_cover/upl_attach_race';
+          }
+        },
+      },
+    );
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]?.status).toBe('uploaded');
+  });
+
+  it('does not let unrelated uploaded artifacts starve cleanable rows', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_unrelated',
+          status: 'uploaded',
+          purpose: 'checkout_answer',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/final/upl_unrelated.txt',
+          expires_at: new Date(now.getTime() - 120_000),
+        },
+        {
+          id: 'upl_cleanable',
+          status: 'pending',
+          purpose: 'checkout_answer',
+          scan_status: 'pending',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/staging/upl_cleanable.txt',
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+    });
+    s3Send.mockResolvedValue({});
+
+    await expect(cleanupExpiredUploadArtifacts(db, now, 1)).resolves.toBe(1);
+    expect(tables.upload_artifacts[0]?.status).toBe('uploaded');
+    expect(tables.upload_artifacts[1]?.status).toBe('rejected');
   });
 
   it('marks clean uploaded objects complete after size/type verification, scanning, and final-key promotion', async () => {

@@ -8,3 +8,8 @@ export * from './hold-expiration.js';
 export * from './clerk-identity-sync.js';
 export * from './export.js';
 export * from './privacy.js';
+export * from './migration.js';
+export * from './migration-repository-service.js';
+export * from './migration-domain-committers.js';
+export * from './migration-credential-resolver.js';
+export * from './migration-preparation.js';

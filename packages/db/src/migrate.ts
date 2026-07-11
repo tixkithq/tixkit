@@ -57,7 +57,12 @@ import { OrganizationMemberUniqueMigration } from './migrations/0053_organizatio
 import { CheckInActivityIndexesMigration } from './migrations/0054_check_in_activity_indexes.js';
 import { CheckInActivitySequenceMigration } from './migrations/0055_check_in_activity_sequence.js';
 import { CheckoutHoldCapacityIndexMigration } from './migrations/0056_checkout_hold_capacity_index.js';
+import { EventOnboardingReadinessMigration } from './migrations/0057_event_onboarding_readiness.js';
 import { SandboxEnvironmentsMigration } from './migrations/0056_1_sandbox_environments.js';
+import { ImportPlatformMigration } from './migrations/0058_import_platform.js';
+import { MigrationDomainSupportMigration } from './migrations/0059_migration_domain_support.js';
+import { MigrationPermissionsMigration } from './migrations/0060_migration_permissions.js';
+import { MigrationPreparationCursorMigration } from './migrations/0062_migration_preparation_cursor.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -158,7 +163,22 @@ const ALL_SCHEMA_TABLES = [
   'offline_check_in_sync_jobs',
   'ticket_listings',
   'access_rule_redemptions',
+  'event_readiness_acknowledgements',
   'sandbox_environments',
+  'historical_check_ins',
+  'historical_financial_snapshots',
+  'buyers',
+  'venues',
+  'imported_entity_dependencies',
+  'imported_domain_entities',
+  'import_conflicts',
+  'external_references',
+  'import_mappings',
+  'import_job_events',
+  'import_job_rows',
+  'import_job_files',
+  'import_jobs',
+  'migration_credentials',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -240,7 +260,12 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0054_check_in_activity_indexes': CheckInActivityIndexesMigration,
       '0055_check_in_activity_sequence': CheckInActivitySequenceMigration,
       '0056_checkout_hold_capacity_index': CheckoutHoldCapacityIndexMigration,
-      '0056_1_sandbox_environments': SandboxEnvironmentsMigration,
+      '0057_event_onboarding_readiness': EventOnboardingReadinessMigration,
+      '0058_sandbox_environments': SandboxEnvironmentsMigration,
+      '0059_import_platform': ImportPlatformMigration,
+      '0060_migration_domain_support': MigrationDomainSupportMigration,
+      '0061_migration_permissions': MigrationPermissionsMigration,
+      '0062_migration_preparation_cursor': MigrationPreparationCursorMigration,
     };
   }
 }
@@ -394,7 +419,8 @@ export async function dropAllTables(db: Database): Promise<void> {
     const tableNameList = tableNames.map(quoteMssqlStringLiteral).join(', ');
 
     await sql
-      .raw(`
+      .raw(
+        `
       declare @sql nvarchar(max) = N'';
 
       select @sql = @sql
@@ -417,7 +443,8 @@ export async function dropAllTables(db: Database): Promise<void> {
 
       if len(@sql) > 0
         exec sp_executesql @sql;
-    `)
+    `,
+      )
       .execute(db)
       .catch(() => undefined);
 

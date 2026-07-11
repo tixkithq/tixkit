@@ -491,7 +491,11 @@ async function pointCheckoutSessionAtPaymentIntent(
 ): Promise<boolean> {
   const result = await db
     .updateTable('checkout_sessions')
-    .set({ payment_intent_id: paymentIntentId, status: 'pending_payment', updated_at: new Date() })
+    .set({
+      payment_intent_id: paymentIntentId,
+      status: 'pending_payment',
+      updated_at: new Date(),
+    })
     .where('id', '=', checkoutSessionId)
     .where('status', 'in', ['open', 'pending_payment'])
     .where((eb) =>
@@ -541,7 +545,11 @@ function validateHeldCartItems(input: {
   }
 
   if (expiredHoldIds.length > 0) {
-    return { ok: false, expiredHoldIds, message: `Checkout hold ${expiredHoldIds[0]} has expired` };
+    return {
+      ok: false,
+      expiredHoldIds,
+      message: `Checkout hold ${expiredHoldIds[0]} has expired`,
+    };
   }
 
   for (const [ticketTypeId, expected] of expectedByTicketType) {
@@ -578,6 +586,7 @@ async function validateFinalizePaymentIntent(input: {
   paymentMode?: 'online' | 'offline' | 'free';
   salesChannel?: SalesChannel;
   tenderType?: BoxOfficeTenderType;
+  isTest?: boolean;
   amountCents: number;
   currency: string;
 }): Promise<FinalizePaymentIntentValidationResult> {
@@ -667,7 +676,10 @@ async function compensateCreatedPaymentIntentAfterAttachFailure(input: {
     currency: input.currency,
     reason,
     source: 'checkout_payment_intent_attach_failed',
-    metadata: { brandId: input.brandId, paymentIntentRowId: input.paymentIntentRowId },
+    metadata: {
+      brandId: input.brandId,
+      paymentIntentRowId: input.paymentIntentRowId,
+    },
   });
 
   if (compensationResult.ok) {
@@ -1173,7 +1185,9 @@ export async function compensateOrphanPaymentActivity(input: {
     );
 
     if (paymentIntent) {
-      await piRepo.update(paymentIntent.id, { status: stripePaymentIntent.status });
+      await piRepo.update(paymentIntent.id, {
+        status: stripePaymentIntent.status,
+      });
     }
 
     if (stripePaymentIntent.status === 'succeeded') {
@@ -1199,7 +1213,11 @@ export async function compensateOrphanPaymentActivity(input: {
         },
         async (span) => {
           const created = await stripe.refunds.create(
-            stripeOrphanRefundParams({ provider, providerIntentId, amount: refundAmount }),
+            stripeOrphanRefundParams({
+              provider,
+              providerIntentId,
+              amount: refundAmount,
+            }),
             { idempotencyKey },
           );
           span.setAttribute('tixkit.provider.refund_id', created.id);
@@ -1238,7 +1256,10 @@ export async function compensateOrphanPaymentActivity(input: {
         action: 'cancel',
         status: 'succeeded',
         providerCompensationId: providerIntentId,
-        metadata: { ...metadata, stripePaymentIntentStatus: stripePaymentIntent.status },
+        metadata: {
+          ...metadata,
+          stripePaymentIntentStatus: stripePaymentIntent.status,
+        },
       });
       compensation = updated;
       providerCompensationCompleted = true;
@@ -1308,7 +1329,10 @@ export async function compensateOrphanPaymentActivity(input: {
       action: 'refund',
       status: 'manual_review',
       lastError: `Stripe payment intent status ${stripePaymentIntent.status} is not automatically compensable`,
-      metadata: { ...metadata, stripePaymentIntentStatus: stripePaymentIntent.status },
+      metadata: {
+        ...metadata,
+        stripePaymentIntentStatus: stripePaymentIntent.status,
+      },
     });
     return okResult({
       status: 'manual_review',
@@ -1345,22 +1369,10 @@ export async function finalizeOrderActivity(input: {
   salesChannel?: SalesChannel;
   operatorId?: string;
   tenderType?: BoxOfficeTenderType;
+  isTest?: boolean;
 }): Promise<WorkflowActivityResult<{ orderId: string }>> {
   const db = getActivityDb();
   try {
-    // Idempotency: if an order already exists for this checkout session (e.g. the
-    // activity is retried after committing but before reporting success), return
-    // it instead of creating a duplicate. A unique constraint on
-    // orders.checkout_session_id is the backstop against races.
-    const existingOrder = await db
-      .selectFrom('orders')
-      .select(['id'])
-      .where('checkout_session_id', '=', input.checkoutSessionId)
-      .executeTakeFirst();
-    if (existingOrder) {
-      return okResult({ orderId: existingOrder.id });
-    }
-
     const session = await db
       .selectFrom('checkout_sessions')
       .selectAll()
@@ -1433,6 +1445,147 @@ export async function finalizeOrderActivity(input: {
       .selectAll()
       .where('id', '=', session.event_id)
       .executeTakeFirstOrThrow();
+    if (input.tenantId !== session.tenant_id || event.tenant_id !== session.tenant_id) {
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
+      return errResult('TENANT_SCOPE_MISMATCH', 'Checkout tenant scope does not match', false);
+    }
+    const sessionIsTest = Boolean(session.is_test);
+    if (Boolean(input.isTest) !== sessionIsTest) {
+      await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
+      return errResult('TEST_ORDER_MISMATCH', 'Checkout test-mode state does not match', false);
+    }
+    // Idempotency is evaluated only after validating the authoritative session
+    // scope. This prevents a retry with mismatched tenant/test-mode input from
+    // learning or accepting an order created in another scope.
+    const existingOrder = await db
+      .selectFrom('orders')
+      .select(['id', 'tenant_id', 'is_test'])
+      .where('checkout_session_id', '=', input.checkoutSessionId)
+      .executeTakeFirst();
+    if (existingOrder) {
+      if (
+        existingOrder.tenant_id !== session.tenant_id ||
+        Boolean(existingOrder.is_test) !== sessionIsTest
+      ) {
+        return errResult(
+          'ORDER_SCOPE_MISMATCH',
+          'Existing order scope does not match checkout',
+          false,
+        );
+      }
+      return okResult({ orderId: existingOrder.id });
+    }
+    if (sessionIsTest) {
+      const orderId = `ord_${ulid()}`;
+      const now = new Date();
+      await db.transaction().execute(async (trx) => {
+        const holds = await trx
+          .selectFrom('checkout_holds')
+          .select(['id', 'inventory_pool_id', 'quantity'])
+          .where('checkout_session_id', '=', input.checkoutSessionId)
+          .where('status', '=', 'active')
+          .forUpdate()
+          .execute();
+        for (const hold of holds) {
+          // eslint-disable-next-line no-await-in-loop -- test holds are released atomically in stable transaction order.
+          await trx
+            .updateTable('checkout_holds')
+            .set({ status: 'released', updated_at: now })
+            .where('id', '=', hold.id)
+            .where('status', '=', 'active')
+            .execute();
+        }
+        const resaleListingIds = [
+          ...new Set(
+            cart.items
+              .map((item) => item.resaleListingId)
+              .filter((listingId): listingId is string => Boolean(listingId)),
+          ),
+        ];
+        if (resaleListingIds.length > 0) {
+          await trx
+            .updateTable('ticket_listings')
+            .set({
+              reserved_checkout_session_id: null,
+              reserved_until: null,
+              updated_at: now,
+            })
+            .where('tenant_id', '=', session.tenant_id)
+            .where('id', 'in', resaleListingIds)
+            .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+            .where('status', '=', 'listed')
+            .execute();
+        }
+        if (cart.waitlistEntryId) {
+          await trx
+            .updateTable('waitlist_entries')
+            .set({
+              status: 'offered',
+              reserved_checkout_session_id: null,
+              reserved_until: null,
+              updated_at: now,
+            })
+            .where('id', '=', cart.waitlistEntryId)
+            .where('tenant_id', '=', session.tenant_id)
+            .where('reserved_checkout_session_id', '=', input.checkoutSessionId)
+            .where('status', '=', 'reserved')
+            .execute();
+        }
+        await releasePendingDiscountReservation(trx, input.checkoutSessionId, now);
+        await trx
+          .insertInto('orders')
+          .values({
+            id: orderId,
+            tenant_id: session.tenant_id,
+            organization_id: event.organization_id,
+            brand_id: session.brand_id,
+            event_id: session.event_id,
+            checkout_session_id: input.checkoutSessionId,
+            order_number: `TEST-${orderId.replace(/^ord_/, '').toUpperCase()}`,
+            status: 'paid',
+            currency: session.currency,
+            subtotal_cents: quote.subtotalCents,
+            discount_cents: quote.discountCents,
+            tax_cents: quote.taxCents,
+            fee_cents: quote.feeCents,
+            total_cents: quote.totalCents,
+            refunded_cents: 0,
+            buyer_email: buyer.email ?? '',
+            buyer_first_name: buyer.firstName ?? null,
+            buyer_last_name: buyer.lastName ?? null,
+            buyer_phone: buyer.phone ?? null,
+            buyer_date_of_birth: buyer.dateOfBirth ?? null,
+            payment_intent_id: null,
+            payment_provider: null,
+            sales_channel: input.salesChannel ?? 'online',
+            operator_id: input.operatorId ?? null,
+            tender_type: input.tenderType ?? null,
+            is_test: true,
+            paid_at: now,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+        await trx
+          .updateTable('checkout_sessions')
+          .set({ status: 'completed', order_id: orderId, updated_at: now })
+          .where('id', '=', input.checkoutSessionId)
+          .execute();
+        await trx
+          .insertInto('order_timeline_events')
+          .values({
+            id: `ote_${ulid()}`,
+            order_id: orderId,
+            type: 'order.test_completed',
+            description: 'Test checkout completed without payment or fulfillment',
+            metadata: null,
+            actor_id: input.operatorId ?? null,
+            created_at: now,
+          })
+          .execute();
+      });
+      return okResult({ orderId });
+    }
     if (event.status !== 'published') {
       await releaseOrphanCheckoutResources(db, input.checkoutSessionId);
       return errResult('EVENT_NOT_AVAILABLE', 'Event is not available for checkout', false);
@@ -1504,7 +1657,11 @@ export async function finalizeOrderActivity(input: {
           .forUpdate()
           .execute()) as CheckoutHoldRow[];
 
-        const heldCart = validateHeldCartItems({ cartItems: cart.items, holds, now });
+        const heldCart = validateHeldCartItems({
+          cartItems: cart.items,
+          holds,
+          now,
+        });
         if (!heldCart.ok) {
           if (heldCart.expiredHoldIds.length > 0) {
             await trx
@@ -1663,8 +1820,12 @@ export async function finalizeOrderActivity(input: {
           ...new Map(
             (cart.accessRuleRedemptions ?? [])
               .filter(
-                (redemption): redemption is { accessRuleId: string; ticketTypeId: string } =>
-                  Boolean(redemption.accessRuleId) && Boolean(redemption.ticketTypeId),
+                (
+                  redemption,
+                ): redemption is {
+                  accessRuleId: string;
+                  ticketTypeId: string;
+                } => Boolean(redemption.accessRuleId) && Boolean(redemption.ticketTypeId),
               )
               .map((redemption) => [redemption.accessRuleId, redemption]),
           ).values(),
@@ -1882,6 +2043,7 @@ export async function finalizeOrderActivity(input: {
             sales_channel: input.salesChannel ?? 'online',
             operator_id: input.operatorId ?? null,
             tender_type: input.tenderType ?? null,
+            is_test: input.isTest ?? false,
             paid_at: now,
             created_at: now,
             updated_at: now,
@@ -1906,7 +2068,10 @@ export async function finalizeOrderActivity(input: {
           // eslint-disable-next-line no-await-in-loop -- inventory counts are updated immediately after the matching hold conversion.
           await trx
             .updateTable('inventory_pools')
-            .set((eb) => ({ sold_count: eb('sold_count', '+', hold.quantity), updated_at: now }))
+            .set((eb) => ({
+              sold_count: eb('sold_count', '+', hold.quantity),
+              updated_at: now,
+            }))
             .where('id', '=', hold.inventory_pool_id)
             .execute();
         }
@@ -2801,9 +2966,19 @@ async function ensureWalletPassesForTickets(
     ticketTypesById: Map<string, { id: string; name: string }>;
     attendeesById: Map<
       string,
-      { id: string; email: string | null; first_name: string | null; last_name: string | null }
+      {
+        id: string;
+        email: string | null;
+        first_name: string | null;
+        last_name: string | null;
+      }
     >;
-    order?: { id: string; order_number: string; currency: string; event_id: string } | null;
+    order?: {
+      id: string;
+      order_number: string;
+      currency: string;
+      event_id: string;
+    } | null;
     event?: {
       id: string;
       title: string;
@@ -2834,7 +3009,11 @@ async function ensureWalletPassesForTickets(
   const brandTheme = parseBrandTheme(input.brand?.theme);
   const brandColor = brandTheme.primaryColor ?? brandTheme.primary ?? brandTheme.accent;
   const artifactJobs: Array<
-    () => Promise<{ ticketId: string; id: string; artifact: WalletPassArtifact }>
+    () => Promise<{
+      ticketId: string;
+      id: string;
+      artifact: WalletPassArtifact;
+    }>
   > = [];
 
   for (const ticket of input.tickets) {
@@ -3067,7 +3246,13 @@ function drawField(
   x: number,
   y: number,
 ): void {
-  page.drawText(label.toUpperCase(), { x, y, size: 9, font: bold, color: rgb(0.42, 0.45, 0.5) });
+  page.drawText(label.toUpperCase(), {
+    x,
+    y,
+    size: 9,
+    font: bold,
+    color: rgb(0.42, 0.45, 0.5),
+  });
   page.drawText(pdfText(value), {
     x,
     y: y - 26,

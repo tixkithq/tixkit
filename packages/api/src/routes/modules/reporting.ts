@@ -277,6 +277,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       ])
       .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false)
       .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)
       totalsQuery = totalsQuery.where('organization_id', '=', eventScope.organizationId);
@@ -290,6 +291,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .select(({ fn }) => ['sales_channel', fn.sum<number>('total_cents').as('gross_sales_cents')])
       .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false)
       .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
       .groupBy('sales_channel');
     if (eventScope.organizationId)
@@ -304,6 +306,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .select(['currency', 'created_at'])
       .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false)
       .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
       .orderBy('created_at', 'asc')
       .limit(1);
@@ -319,6 +322,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .select(['created_at'])
       .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false)
       .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
       .orderBy('created_at', 'desc')
       .limit(1);
@@ -376,6 +380,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .where('tickets.status', 'in', ['valid', 'checked_in'])
       .where('orders.tenant_id', '=', principal.tenantId)
       .where('orders.event_id', '=', eventId)
+      .where('orders.is_test', '=', false)
       .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)
       activeTicketsQuery = activeTicketsQuery.where(
@@ -398,6 +403,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
         .where('order_line_items.ticket_type_id', 'is not', null)
         .where('orders.tenant_id', '=', principal.tenantId)
         .where('orders.event_id', '=', eventId)
+        .where('orders.is_test', '=', false)
         .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
       if (eventScope.organizationId)
         lineItemsQuery = lineItemsQuery.where(
@@ -418,7 +424,8 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .selectFrom('orders')
       .select((eb) => eb.fn.countAll<number>().as('count'))
       .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId);
+      .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false);
     if (eventScope.organizationId)
       allOrdersQuery = allOrdersQuery.where('organization_id', '=', eventScope.organizationId);
     if (eventScope.brandId)
@@ -487,6 +494,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       ])
       .where('orders.event_id', '=', eventId)
       .where('orders.tenant_id', '=', principal.tenantId)
+      .where('orders.is_test', '=', false)
       .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)
       taxSnapshotQuery = taxSnapshotQuery.where(
@@ -513,6 +521,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       ])
       .where('orders.event_id', '=', eventId)
       .where('orders.tenant_id', '=', principal.tenantId)
+      .where('orders.is_test', '=', false)
       .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)
       lineItemQuery = lineItemQuery.where('orders.organization_id', '=', eventScope.organizationId);
@@ -538,6 +547,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .select('currency')
       .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false)
       .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)
       currencyQuery = currencyQuery.where('organization_id', '=', eventScope.organizationId);
@@ -686,6 +696,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .where('orders.event_id', '=', eventId)
       .where('orders.tenant_id', '=', principal.tenantId)
       .where('checkout_sessions.tenant_id', '=', principal.tenantId)
+      .where('orders.is_test', '=', false)
       .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
     if (eventScope.organizationId)
       eventOrdersQuery = eventOrdersQuery.where(
@@ -766,7 +777,8 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .selectFrom('checkout_sessions')
       .select((eb) => eb.fn.countAll<number>().as('count'))
       .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId);
+      .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false);
     if (eventScope.brandId)
       sessionsQuery = sessionsQuery.where('brand_id', '=', eventScope.brandId);
     const sessionsRow = await sessionsQuery.executeTakeFirst();
@@ -776,6 +788,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       .select((eb) => eb.fn.countAll<number>().as('count'))
       .where('event_id', '=', eventId)
       .where('tenant_id', '=', principal.tenantId)
+      .where('is_test', '=', false)
       .where('status', '=', 'completed');
     if (eventScope.brandId)
       completedQuery = completedQuery.where('brand_id', '=', eventScope.brandId);

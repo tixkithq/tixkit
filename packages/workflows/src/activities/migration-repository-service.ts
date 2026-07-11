@@ -1,11 +1,11 @@
-import { ImportRepository, type Database } from "@tixkit/db";
+import { ImportRepository, type Database } from '@tixkit/db';
 import {
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
   assertHistoricalFinancialEntity,
   type MigrationCredentialResolver,
   type MigrationEntityType,
   type NormalizedMigrationEntity,
-} from "@tixkit/migration-core";
+} from '@tixkit/migration-core';
 import type {
   MigrationActivityContext,
   MigrationActivityService,
@@ -14,10 +14,10 @@ import type {
   MigrationRollbackAssessment,
   MigrationStageResult,
   MigrationWorkflowProgress,
-} from "./migration.js";
+} from './migration.js';
 
 export type MigrationCommitOutcome = {
-  disposition: "created" | "updated" | "skipped" | "conflict";
+  disposition: 'created' | 'updated' | 'skipped' | 'conflict';
   tixkitId?: string;
 };
 
@@ -33,7 +33,7 @@ export interface MigrationDomainCommitter {
     organizationId: string;
     jobId: string;
     entity: NormalizedMigrationEntity;
-    sideEffects: MigrationActivityContext["sideEffects"];
+    sideEffects: MigrationActivityContext['sideEffects'];
   }): Promise<MigrationCommitOutcome>;
   deleteUntouched(input: {
     tenantId: string;
@@ -43,72 +43,52 @@ export interface MigrationDomainCommitter {
   }): Promise<boolean>;
 }
 
-export type MigrationCommitterRegistry = ReadonlyMap<
-  MigrationEntityType,
-  MigrationDomainCommitter
->;
+export type MigrationCommitterRegistry = ReadonlyMap<MigrationEntityType, MigrationDomainCommitter>;
 
-const STAGE_ENTITIES: Record<
-  MigrationCommitStage,
-  readonly MigrationEntityType[]
-> = {
-  organizations_brands: ["organization", "brand"],
-  venues: ["venue"],
-  events_occurrences: ["event", "occurrence"],
-  inventory_pools: ["inventory-pool"],
-  ticket_types_products: ["ticket-type", "product"],
-  questions: ["question"],
-  discounts_access_codes: ["discount", "access-code"],
-  buyers_attendees: ["buyer", "attendee"],
-  historical_orders: ["historical-order"],
-  tickets: ["ticket"],
-  historical_payments_refunds: ["historical-payment", "historical-refund"],
-  check_in_history: ["check-in"],
+const STAGE_ENTITIES: Record<MigrationCommitStage, readonly MigrationEntityType[]> = {
+  organizations_brands: ['organization', 'brand'],
+  venues: ['venue'],
+  events_occurrences: ['event', 'occurrence'],
+  inventory_pools: ['inventory-pool'],
+  ticket_types_products: ['ticket-type', 'product'],
+  questions: ['question'],
+  discounts_access_codes: ['discount', 'access-code'],
+  buyers_attendees: ['buyer', 'attendee'],
+  historical_orders: ['historical-order'],
+  tickets: ['ticket'],
+  historical_payments_refunds: ['historical-payment', 'historical-refund'],
+  check_in_history: ['check-in'],
 };
 
-export function assertMigrationCommittersRegistered(
-  registry: MigrationCommitterRegistry,
-): void {
-  const missing = MIGRATION_ENTITY_DEPENDENCY_ORDER.filter(
-    (type) => !registry.has(type),
-  );
+export function assertMigrationCommittersRegistered(registry: MigrationCommitterRegistry): void {
+  const missing = MIGRATION_ENTITY_DEPENDENCY_ORDER.filter((type) => !registry.has(type));
   if (missing.length > 0) {
-    throw new Error(`MIGRATION_COMMITTERS_MISSING:${missing.join(",")}`);
+    throw new Error(`MIGRATION_COMMITTERS_MISSING:${missing.join(',')}`);
   }
 }
 
 function parseEntity(serialized: string | null): NormalizedMigrationEntity {
-  if (!serialized) throw new Error("MIGRATION_NORMALIZED_DATA_REQUIRED");
+  if (!serialized) throw new Error('MIGRATION_NORMALIZED_DATA_REQUIRED');
   const parsed = JSON.parse(serialized) as NormalizedMigrationEntity;
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    !parsed.entityType ||
-    !parsed.externalId
-  ) {
-    throw new Error("MIGRATION_NORMALIZED_DATA_INVALID");
+  if (!parsed || typeof parsed !== 'object' || !parsed.entityType || !parsed.externalId) {
+    throw new Error('MIGRATION_NORMALIZED_DATA_INVALID');
   }
   assertHistoricalFinancialEntity(parsed);
   return parsed;
 }
 
-function summary(
-  progress: MigrationWorkflowProgress,
-): MigrationWorkflowProgress {
+function summary(progress: MigrationWorkflowProgress): MigrationWorkflowProgress {
   return { ...progress };
 }
 
-async function listAllCreatedRows(
-  repository: ImportRepository,
-  context: MigrationActivityContext,
-) {
-  const rows: Awaited<ReturnType<ImportRepository["listRows"]>> = [];
+async function listAllCreatedRows(repository: ImportRepository, context: MigrationActivityContext) {
+  const rows: Awaited<ReturnType<ImportRepository['listRows']>> = [];
   for (let offset = 0; ; offset += 5_000) {
     const page = await repository.listRows({
       tenantId: context.tenantId,
       organizationId: context.organizationId,
       jobId: context.jobId,
-      statuses: ["created"],
+      statuses: ['created'],
       limit: 5_000,
       offset,
     });
@@ -124,7 +104,7 @@ export function createRepositoryMigrationActivityService(
 ): MigrationActivityService {
   assertMigrationCommittersRegistered(committers);
   const repository = new ImportRepository(db);
-  const claimedStatus = "committing";
+  const claimedStatus = 'committing';
 
   return {
     async beginCommit(context) {
@@ -133,20 +113,20 @@ export function createRepositoryMigrationActivityService(
         context.organizationId,
         context.jobId,
       );
-      if (!pendingJob) throw new Error("MIGRATION_JOB_NOT_FOUND");
+      if (!pendingJob) throw new Error('MIGRATION_JOB_NOT_FOUND');
       const configuration = pendingJob.configuration
         ? (JSON.parse(pendingJob.configuration) as Record<string, unknown>)
         : {};
-      if (typeof configuration.credentialId === "string") {
+      if (typeof configuration.credentialId === 'string') {
         try {
-          if (!credentialResolver) throw new Error("resolver unavailable");
+          if (!credentialResolver) throw new Error('resolver unavailable');
           const credential = await repository.findActiveCredential({
             tenantId: context.tenantId,
             organizationId: context.organizationId,
             credentialId: configuration.credentialId,
             sourceSystem: pendingJob.source_system,
           });
-          if (!credential) throw new Error("credential inactive");
+          if (!credential) throw new Error('credential inactive');
           const resolved = await credentialResolver.resolve(
             {
               id: credential.id,
@@ -163,10 +143,10 @@ export function createRepositoryMigrationActivityService(
             !Number.isFinite(Date.parse(resolved.expiresAt)) ||
             Date.parse(resolved.expiresAt) <= Date.now()
           )
-            throw new Error("credential expired");
+            throw new Error('credential expired');
           void resolved.material;
         } catch {
-          throw new Error("MIGRATION_CREDENTIAL_UNAVAILABLE");
+          throw new Error('MIGRATION_CREDENTIAL_UNAVAILABLE');
         }
       }
       await repository.beginCommit({
@@ -178,31 +158,26 @@ export function createRepositoryMigrationActivityService(
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: "commit:begin",
-        type: "commit.begin",
-        severity: "info",
-        message: "Migration commit started.",
+        eventKey: 'commit:begin',
+        type: 'commit.begin',
+        severity: 'info',
+        message: 'Migration commit started.',
       });
     },
 
     async processStage(context, input): Promise<MigrationStageResult> {
       const entityTypes = STAGE_ENTITIES[input.stage];
-      const job = await repository.findJob(
-        context.tenantId,
-        context.organizationId,
-        context.jobId,
-      );
-      if (!job) throw new Error("MIGRATION_JOB_NOT_FOUND");
-      if (job.mode !== "commit")
-        throw new Error("MIGRATION_DRY_RUN_CANNOT_COMMIT");
-      if (job.status !== "committing")
+      const job = await repository.findJob(context.tenantId, context.organizationId, context.jobId);
+      if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
+      if (job.mode !== 'commit') throw new Error('MIGRATION_DRY_RUN_CANNOT_COMMIT');
+      if (job.status !== 'committing')
         throw new Error(`MIGRATION_JOB_NOT_COMMITTING:${job.status}`);
       const rows = await repository.claimRows({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
         entityTypes: [...entityTypes],
-        fromStatus: "validated",
+        fromStatus: 'validated',
         claimStatus: claimedStatus,
         ownerToken: input.claimOwner,
         leaseExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
@@ -216,22 +191,17 @@ export function createRepositoryMigrationActivityService(
         conflicts: 0,
         failed: 0,
         complete: rows.length < input.chunkSize,
-        ...(rows.length === input.chunkSize
-          ? { nextCursor: rows.at(-1)!.id }
-          : {}),
+        ...(rows.length === input.chunkSize ? { nextCursor: rows.at(-1)!.id } : {}),
       };
 
       /* eslint-disable no-await-in-loop -- row commits and claim outcomes are intentionally ordered for idempotent recovery. */
       for (const row of rows) {
         const entity = parseEntity(row.normalized_data);
         if (!entityTypes.includes(entity.entityType)) {
-          throw new Error(
-            `MIGRATION_STAGE_ENTITY_MISMATCH:${entity.entityType}`,
-          );
+          throw new Error(`MIGRATION_STAGE_ENTITY_MISMATCH:${entity.entityType}`);
         }
         const committer = committers.get(entity.entityType);
-        if (!committer)
-          throw new Error(`MIGRATION_COMMITTER_MISSING:${entity.entityType}`);
+        if (!committer) throw new Error(`MIGRATION_COMMITTER_MISSING:${entity.entityType}`);
         try {
           const outcome = await committer.commit({
             tenantId: context.tenantId,
@@ -241,18 +211,13 @@ export function createRepositoryMigrationActivityService(
             sideEffects: context.sideEffects,
           });
           if (
-            (outcome.disposition === "created" ||
-              outcome.disposition === "updated") &&
+            (outcome.disposition === 'created' || outcome.disposition === 'updated') &&
             !outcome.tixkitId
           ) {
             throw new Error(`MIGRATION_COMMIT_RESULT_ID_REQUIRED:${row.id}`);
           }
           let completed: boolean;
-          if (
-            outcome.disposition !== "conflict" &&
-            outcome.tixkitId &&
-            row.external_id
-          ) {
+          if (outcome.disposition !== 'conflict' && outcome.tixkitId && row.external_id) {
             await repository.completeRowWithExternalReference({
               tenantId: context.tenantId,
               organizationId: context.organizationId,
@@ -265,7 +230,7 @@ export function createRepositoryMigrationActivityService(
               entityType: entity.entityType,
               externalId: row.external_id,
               tixkitId: outcome.tixkitId,
-              createdEntity: outcome.disposition === "created",
+              createdEntity: outcome.disposition === 'created',
               provenance: entity,
             });
             completed = true;
@@ -279,11 +244,11 @@ export function createRepositoryMigrationActivityService(
               ownerToken: input.claimOwner,
               outcome: outcome.disposition,
               tixkitId: outcome.tixkitId,
-              createdEntity: outcome.disposition === "created",
+              createdEntity: outcome.disposition === 'created',
             });
           }
           if (!completed) throw new Error(`MIGRATION_ROW_CLAIM_LOST:${row.id}`);
-          if (outcome.disposition === "conflict") result.conflicts += 1;
+          if (outcome.disposition === 'conflict') result.conflicts += 1;
           else result[outcome.disposition] += 1;
         } catch (error) {
           await repository.completeRow({
@@ -293,12 +258,10 @@ export function createRepositoryMigrationActivityService(
             rowId: row.id,
             claimedStatus,
             ownerToken: input.claimOwner,
-            outcome: "failed",
-            severity: "error",
+            outcome: 'failed',
+            severity: 'error',
             rollbackBlockedReason:
-              error instanceof Error
-                ? error.message.slice(0, 500)
-                : "Commit failed",
+              error instanceof Error ? error.message.slice(0, 500) : 'Commit failed',
           });
           result.failed += 1;
           throw error;
@@ -315,18 +278,17 @@ export function createRepositoryMigrationActivityService(
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        from: ["committing"],
-        to: "committing",
+        from: ['committing'],
+        to: 'committing',
         summary: summary(progress),
       });
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: `commit:progress:${progress.stage ?? "none"}:${progress.processed}`,
-        type: "commit.progress",
-        severity:
-          progress.failed > 0 || progress.conflicts > 0 ? "warning" : "info",
+        eventKey: `commit:progress:${progress.stage ?? 'none'}:${progress.processed}`,
+        type: 'commit.progress',
+        severity: progress.failed > 0 || progress.conflicts > 0 ? 'warning' : 'info',
         message: `Migration processed ${progress.processed} rows.`,
         data: summary(progress),
       });
@@ -337,59 +299,51 @@ export function createRepositoryMigrationActivityService(
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        from: paused ? ["committing"] : ["paused"],
-        to: paused ? "paused" : "committing",
+        from: paused ? ['committing'] : ['paused'],
+        to: paused ? 'paused' : 'committing',
       });
-      if (!changed) throw new Error("MIGRATION_PAUSE_TRANSITION_REJECTED");
+      if (!changed) throw new Error('MIGRATION_PAUSE_TRANSITION_REJECTED');
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: `commit:${paused ? "pause" : "resume"}:${lifecycleSequence}`,
-        type: paused ? "commit.paused" : "commit.resumed",
-        severity: "info",
-        message: paused
-          ? "Migration commit paused."
-          : "Migration commit resumed.",
+        eventKey: `commit:${paused ? 'pause' : 'resume'}:${lifecycleSequence}`,
+        type: paused ? 'commit.paused' : 'commit.resumed',
+        severity: 'info',
+        message: paused ? 'Migration commit paused.' : 'Migration commit resumed.',
       });
     },
 
     async cancelCommit(context) {
-      await repository.requestCancellation(
-        context.tenantId,
-        context.organizationId,
-        context.jobId,
-      );
+      await repository.requestCancellation(context.tenantId, context.organizationId, context.jobId);
       await repository.releaseClaims({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
         claimedStatus,
-        returnToStatus: "validated",
+        returnToStatus: 'validated',
       });
       const changed = await repository.transitionJob({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        from: ["cancelling"],
-        to: "cancelled",
+        from: ['cancelling'],
+        to: 'cancelled',
       });
-      if (!changed) throw new Error("MIGRATION_CANCEL_TRANSITION_REJECTED");
+      if (!changed) throw new Error('MIGRATION_CANCEL_TRANSITION_REJECTED');
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: "commit:cancelled",
-        type: "commit.cancelled",
-        severity: "warning",
-        message: "Migration commit cancelled.",
+        eventKey: 'commit:cancelled',
+        type: 'commit.cancelled',
+        severity: 'warning',
+        message: 'Migration commit cancelled.',
       });
     },
 
     async reconcile(context) {
-      const rows: Awaited<
-        ReturnType<ImportRepository["listRowsForReconciliation"]>
-      > = [];
+      const rows: Awaited<ReturnType<ImportRepository['listRowsForReconciliation']>> = [];
       for (let offset = 0; ; offset += 5_000) {
         const page = await repository.listRowsForReconciliation(
           context.tenantId,
@@ -406,19 +360,19 @@ export function createRepositoryMigrationActivityService(
         organizationId: context.organizationId,
         jobId: context.jobId,
         claimedStatus,
-        returnToStatus: "validated",
+        returnToStatus: 'validated',
       });
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
         eventKey: `commit:reconcile:${repaired}:${rows.length}`,
-        type: "commit.reconciled",
-        severity: rows.length > 0 ? "error" : "info",
+        type: 'commit.reconciled',
+        severity: rows.length > 0 ? 'error' : 'info',
         message:
           rows.length > 0
             ? `Migration reconciliation found ${rows.length} unresolved rows.`
-            : "Migration reconciliation completed with no unresolved rows.",
+            : 'Migration reconciliation completed with no unresolved rows.',
         data: { repaired, unresolved: rows.length },
       });
       return {
@@ -441,9 +395,7 @@ export function createRepositoryMigrationActivityService(
             reasons.push(`Missing canonical ID for ${row.id}`);
             continue;
           }
-          const committer = committers.get(
-            row.entity_type as MigrationEntityType,
-          );
+          const committer = committers.get(row.entity_type as MigrationEntityType);
           if (!committer) {
             reasons.push(`Missing committer for ${row.entity_type}`);
             continue;
@@ -456,29 +408,24 @@ export function createRepositoryMigrationActivityService(
           });
           if (!probe.eligible)
             reasons.push(
-              probe.reason ??
-                `Authoritative activity on ${row.entity_type}:${row.tixkit_id}`,
+              probe.reason ?? `Authoritative activity on ${row.entity_type}:${row.tixkit_id}`,
             );
         }
         if (reasons.length > 0)
           return {
             eligible: false,
-            mode: "corrective_plan",
+            mode: 'corrective_plan',
             reasons,
             correctivePlanId: `corrective-plan:${context.jobId}`,
           };
         return {
           eligible: true,
-          mode: "pre_activation",
+          mode: 'pre_activation',
           entityCount: rows.length,
         };
       }
-      const job = await repository.findJob(
-        context.tenantId,
-        context.organizationId,
-        context.jobId,
-      );
-      if (!job) throw new Error("MIGRATION_JOB_NOT_FOUND");
+      const job = await repository.findJob(context.tenantId, context.organizationId, context.jobId);
+      if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
       const mappings = await repository.listMappings(
         context.tenantId,
         context.organizationId,
@@ -486,18 +433,17 @@ export function createRepositoryMigrationActivityService(
       );
       return {
         eligible: false,
-        mode: "corrective_plan",
+        mode: 'corrective_plan',
         reasons: eligibility.blockers.map((blocker) => blocker.reason),
         correctivePlanId: (
           await repository.appendIdempotentEvent({
             tenantId: context.tenantId,
             organizationId: context.organizationId,
             jobId: context.jobId,
-            eventKey: "rollback:corrective-plan",
-            type: "rollback.corrective-plan",
-            severity: "warning",
-            message:
-              "Destructive rollback was refused; follow the persisted corrective plan.",
+            eventKey: 'rollback:corrective-plan',
+            type: 'rollback.corrective-plan',
+            severity: 'warning',
+            message: 'Destructive rollback was refused; follow the persisted corrective plan.',
             data: {
               immutable: true,
               blockers: eligibility.blockers,
@@ -512,10 +458,10 @@ export function createRepositoryMigrationActivityService(
                 version: mapping.version,
               })),
               safeActions: [
-                "Keep imported entities inactive while reconciling source mappings.",
-                "Apply tenant-scoped corrective edits or additive mappings.",
-                "Record compensating historical snapshots instead of provider events.",
-                "Re-run rollback assessment only after every blocker is independently resolved.",
+                'Keep imported entities inactive while reconciling source mappings.',
+                'Apply tenant-scoped corrective edits or additive mappings.',
+                'Record compensating historical snapshots instead of provider events.',
+                'Re-run rollback assessment only after every blocker is independently resolved.',
               ],
             },
           })
@@ -529,31 +475,22 @@ export function createRepositoryMigrationActivityService(
         context.organizationId,
         context.jobId,
       );
-      if (!eligibility.eligible || eligibility.mode !== "delete-created") {
-        throw new Error("MIGRATION_ROLLBACK_NO_LONGER_ELIGIBLE");
+      if (!eligibility.eligible || eligibility.mode !== 'delete-created') {
+        throw new Error('MIGRATION_ROLLBACK_NO_LONGER_ELIGIBLE');
       }
       const rows = await listAllCreatedRows(repository, context);
       rows.sort(
         (left, right) =>
-          MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf(
-            right.entity_type as MigrationEntityType,
-          ) -
-          MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf(
-            left.entity_type as MigrationEntityType,
-          ),
+          MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf(right.entity_type as MigrationEntityType) -
+          MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf(left.entity_type as MigrationEntityType),
       );
-      if (rows.length > assessment.entityCount)
-        throw new Error("MIGRATION_ROLLBACK_SET_CHANGED");
+      if (rows.length > assessment.entityCount) throw new Error('MIGRATION_ROLLBACK_SET_CHANGED');
       let deleted = 0;
       /* eslint-disable no-await-in-loop -- rollback rechecks and deletes one entity at a time to fail closed on new activity. */
       for (const row of rows) {
-        if (!row.tixkit_id)
-          throw new Error(`MIGRATION_ROLLBACK_ID_MISSING:${row.id}`);
-        const committer = committers.get(
-          row.entity_type as MigrationEntityType,
-        );
-        if (!committer)
-          throw new Error(`MIGRATION_COMMITTER_MISSING:${row.entity_type}`);
+        if (!row.tixkit_id) throw new Error(`MIGRATION_ROLLBACK_ID_MISSING:${row.id}`);
+        const committer = committers.get(row.entity_type as MigrationEntityType);
+        if (!committer) throw new Error(`MIGRATION_COMMITTER_MISSING:${row.entity_type}`);
         if (
           !(await committer.deleteUntouched({
             tenantId: context.tenantId,
@@ -575,16 +512,16 @@ export function createRepositoryMigrationActivityService(
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        from: ["rolling-back", "committed", "failed"],
-        to: "rolled-back",
+        from: ['rolling-back', 'committed', 'failed'],
+        to: 'rolled-back',
       });
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: "rollback:completed",
-        type: "rollback.completed",
-        severity: "info",
+        eventKey: 'rollback:completed',
+        type: 'rollback.completed',
+        severity: 'info',
         message: `Migration rollback deleted ${deleted} untouched entities.`,
         data: { deleted },
       });
@@ -596,18 +533,18 @@ export function createRepositoryMigrationActivityService(
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        from: ["committing"],
-        to: "committed",
+        from: ['committing'],
+        to: 'committed',
       });
-      if (!changed) throw new Error("MIGRATION_COMPLETE_TRANSITION_REJECTED");
+      if (!changed) throw new Error('MIGRATION_COMPLETE_TRANSITION_REJECTED');
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: "commit:completed",
-        type: "commit.completed",
-        severity: "info",
-        message: "Migration commit completed.",
+        eventKey: 'commit:completed',
+        type: 'commit.completed',
+        severity: 'info',
+        message: 'Migration commit completed.',
       });
     },
 
@@ -617,14 +554,14 @@ export function createRepositoryMigrationActivityService(
         organizationId: context.organizationId,
         jobId: context.jobId,
         claimedStatus,
-        returnToStatus: "validated",
+        returnToStatus: 'validated',
       });
       await repository.transitionJob({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        from: ["committing", "paused", "rolling-back"],
-        to: "failed",
+        from: ['committing', 'paused', 'rolling-back'],
+        to: 'failed',
         errorCode: failure.code,
         errorMessage: failure.message,
       });
@@ -632,9 +569,9 @@ export function createRepositoryMigrationActivityService(
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: `commit:failed:${failure.stage ?? "none"}:${failure.code}`,
-        type: "commit.failed",
-        severity: "fatal",
+        eventKey: `commit:failed:${failure.stage ?? 'none'}:${failure.code}`,
+        type: 'commit.failed',
+        severity: 'fatal',
         message: failure.message,
         data: { stage: failure.stage, code: failure.code },
       });

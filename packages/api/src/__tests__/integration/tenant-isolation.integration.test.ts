@@ -1567,7 +1567,7 @@ describe('cross-tenant denial', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/events/evt_1',
-      payload: { title: 'Hijacked' },
+      payload: { title: 'Hijacked', expectedVersion: 1 },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -2052,7 +2052,7 @@ describe('cross-organization denial (same tenant)', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/events/evt_1',
-      payload: { title: 'Hijacked' },
+      payload: { title: 'Hijacked', expectedVersion: 1 },
     });
     expect(res.statusCode).toBe(404);
     await app.close();

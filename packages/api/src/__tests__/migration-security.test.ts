@@ -1,12 +1,38 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   assertMigrationMappingSafe,
   assertMigrationConfigurationSecretFree,
   redactMigrationReportValue,
   sanitizeDryRunReport,
+  unresolvedMigrationDependencies,
 } from '../routes/modules/migrations.js';
 
 describe('migration security boundaries', () => {
+  it('resolves dependencies by exact current-job or scoped external identity', async () => {
+    const entity = {
+      entityType: 'ticket-type' as const,
+      externalId: 'type-1',
+      sourcePosition: 'row:1',
+      attributes: {},
+      dependencies: [
+        { entityType: 'event' as const, externalId: 'event-current' },
+        { entityType: 'inventory-pool' as const, externalId: 'pool-mapped' },
+        { entityType: 'occurrence' as const, externalId: 'occurrence-missing' },
+      ],
+    };
+    const lookup = vi.fn(
+      async (type: string, id: string) => type === 'inventory-pool' && id === 'pool-mapped',
+    );
+    await expect(
+      unresolvedMigrationDependencies(
+        entity,
+        new Set(['event:event-current', 'event:different-event']),
+        lookup,
+      ),
+    ).resolves.toEqual([{ entityType: 'occurrence', externalId: 'occurrence-missing' }]);
+    expect(lookup).toHaveBeenCalledWith('inventory-pool', 'pool-mapped');
+    expect(lookup).toHaveBeenCalledWith('occurrence', 'occurrence-missing');
+  });
   it.each([
     { apiKey: 'secret' },
     { nested: { access_token: 'secret' } },

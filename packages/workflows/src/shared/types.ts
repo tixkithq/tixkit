@@ -28,6 +28,7 @@ export const PAYMENT_RECONCILIATION_WORKFLOW_VERSION = 2;
 export const PRIVACY_REQUEST_WORKFLOW_VERSION = 1;
 export const MIGRATION_COMMIT_WORKFLOW_VERSION = 1;
 export const MIGRATION_ROLLBACK_WORKFLOW_VERSION = 1;
+export const MIGRATION_PREPARATION_WORKFLOW_VERSION = 1;
 
 // Workflow ID conventions
 export function checkoutWorkflowId(sessionId: string): string {
@@ -102,6 +103,14 @@ export function migrationCommitWorkflowId(
   jobId: string,
 ): string {
   return `migration-commit:${tenantId}:${organizationId}:${jobId}`;
+}
+
+export function migrationPreparationWorkflowId(
+  tenantId: string,
+  organizationId: string,
+  jobId: string,
+): string {
+  return `migration-prepare:${tenantId}:${organizationId}:${jobId}`;
 }
 
 export function migrationRollbackWorkflowId(

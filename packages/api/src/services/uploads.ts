@@ -315,11 +315,12 @@ async function markUploadArtifactRejected(
     .execute();
 }
 
-async function tryDeleteUploadObject(s3: S3Client, bucket: string, key: string): Promise<void> {
+async function tryDeleteUploadObject(s3: S3Client, bucket: string, key: string): Promise<boolean> {
   try {
     await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
   } catch {
-    // The artifact is still rejected; deletion failures should not hide the validation error.
+    return false;
   }
 }
 
@@ -330,8 +331,27 @@ export async function cleanupExpiredUploadArtifacts(
 ): Promise<number> {
   const rows = await db
     .selectFrom('upload_artifacts')
-    .select(['id', 'status', 'scan_result', 'bucket', 'object_key', 'purpose', 'event_id'])
-    .where('status', 'in', ['pending', 'rejected', 'uploaded'])
+    .select([
+      'id',
+      'tenant_id',
+      'organization_id',
+      'brand_id',
+      'status',
+      'scan_result',
+      'bucket',
+      'object_key',
+      'purpose',
+      'event_id',
+    ])
+    .where((eb) =>
+      eb.or([
+        eb('status', 'in', ['pending', 'rejected']),
+        eb.and([
+          eb('status', '=', 'uploaded'),
+          eb('purpose', 'in', ['event_cover', 'event_seo_image']),
+        ]),
+      ]),
+    )
     .where('expires_at', '<', now)
     .orderBy('expires_at')
     .limit(limit)
@@ -350,13 +370,67 @@ export async function cleanupExpiredUploadArtifacts(
           .selectFrom('events')
           .select(['cover_image_url', 'seo'])
           .where('id', '=', row.event_id)
+          .where('tenant_id', '=', row.tenant_id)
+          .where('organization_id', '=', row.organization_id!)
+          .where('brand_id', '=', row.brand_id!)
           .executeTakeFirst();
         const referenced =
           event?.cover_image_url?.includes(row.id) === true ||
           (typeof event?.seo === 'string' && event.seo.includes(row.id));
-        if (referenced) return false;
+        if (referenced) {
+          await db
+            .updateTable('upload_artifacts')
+            .set({ expires_at: new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000) })
+            .where('id', '=', row.id)
+            .where('status', '=', 'uploaded')
+            .execute();
+          return false;
+        }
       }
-      await tryDeleteUploadObject(s3, row.bucket, row.object_key);
+      const claim = await db
+        .updateTable('upload_artifacts')
+        .set({ status: 'cleanup_pending', updated_at: now })
+        .where('id', '=', row.id)
+        .where('status', '=', row.status)
+        .where('expires_at', '<', now)
+        .executeTakeFirst();
+      if (Number(claim.numUpdatedRows) !== 1) return false;
+
+      if (row.status === 'uploaded' && row.event_id) {
+        const attached = await db
+          .selectFrom('events')
+          .select(['cover_image_url', 'seo'])
+          .where('id', '=', row.event_id)
+          .where('tenant_id', '=', row.tenant_id)
+          .where('organization_id', '=', row.organization_id!)
+          .where('brand_id', '=', row.brand_id!)
+          .executeTakeFirst();
+        if (
+          attached?.cover_image_url?.includes(row.id) === true ||
+          (typeof attached?.seo === 'string' && attached.seo.includes(row.id))
+        ) {
+          await db
+            .updateTable('upload_artifacts')
+            .set({
+              status: 'uploaded',
+              expires_at: new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000),
+              updated_at: now,
+            })
+            .where('id', '=', row.id)
+            .where('status', '=', 'cleanup_pending')
+            .execute();
+          return false;
+        }
+      }
+      if (!(await tryDeleteUploadObject(s3, row.bucket, row.object_key))) {
+        await db
+          .updateTable('upload_artifacts')
+          .set({ status: row.status, updated_at: now })
+          .where('id', '=', row.id)
+          .where('status', '=', 'cleanup_pending')
+          .execute();
+        return false;
+      }
       await db
         .updateTable('upload_artifacts')
         .set({
@@ -370,6 +444,7 @@ export async function cleanupExpiredUploadArtifacts(
           updated_at: now,
         })
         .where('id', '=', row.id)
+        .where('status', '=', 'cleanup_pending')
         .execute();
       return true;
     }),

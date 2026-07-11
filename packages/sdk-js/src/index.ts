@@ -2319,20 +2319,136 @@ export type MigrationJob = {
   created_at: string;
   updated_at: string;
 };
-export type CreateMigrationJobInput = {
+export type MigrationSourceSystem =
+  | 'generic-csv'
+  | 'pretix'
+  | 'hi-events'
+  | 'eventbrite'
+  | 'ticket-tailor';
+type MigrationExportPreparationConfiguration = {
+  [Source in MigrationSourceSystem]: {
+    sourceMode: 'official-export';
+    sourceSystem: Source;
+    artifactIds: readonly string[];
+  };
+}[MigrationSourceSystem];
+export type MigrationPreparationConfiguration =
+  | MigrationExportPreparationConfiguration
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'pretix';
+      organizerSlug: string;
+      eventSlugs: readonly string[];
+      baseUrl?: string;
+    }
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'hi-events';
+      accountId: string;
+      eventIds: readonly string[];
+      baseUrl?: string;
+    }
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'eventbrite';
+      organizationId: string;
+      eventIds: readonly string[];
+    }
+  | {
+      sourceMode: 'official-api';
+      sourceSystem: 'ticket-tailor';
+      accountId: string;
+      eventIds: readonly string[];
+    };
+type CreateMigrationJobBase = {
   organizationId: string;
-  sourceSystem: string;
   adapterVersion: string;
   mode?: 'dry-run' | 'commit';
-  configuration?: Record<string, unknown>;
-  credentialId?: string;
 } & IdempotencyOptions;
+export type CreateMigrationJobInput = MigrationPreparationConfiguration extends infer Configuration
+  ? Configuration extends MigrationPreparationConfiguration
+    ? CreateMigrationJobBase & {
+        sourceSystem: Configuration['sourceSystem'];
+        configuration: Configuration;
+      } & (Configuration extends { sourceMode: 'official-api' }
+          ? { credentialId: string }
+          : { credentialId?: never })
+    : never
+  : never;
 export type CreateMigrationCredentialInput = {
   organizationId: string;
   sourceSystem: string;
   secretReference: string;
   expiresAt: string;
 };
+export type MigrationAdapterCatalogEntry = {
+  id: 'generic-csv' | 'pretix' | 'hi-events' | 'eventbrite' | 'ticket-tailor';
+  displayName: string;
+  supportedVersions: string[];
+  featureMapping: Record<string, unknown>;
+  knownLosses: string[];
+  rateLimitPolicy: Record<string, unknown>;
+  sourceModes: ('official-api' | 'official-export')[];
+};
+export type MigrationJobFile = {
+  id: string;
+  import_job_id: string;
+  original_name: string;
+  media_type: string;
+  byte_size: number;
+  sha256: string;
+  status: string;
+  created_at: string;
+};
+export type MigrationMapping = {
+  id: string;
+  organization_id: string;
+  source_system: string;
+  name: string;
+  entity_type: string;
+  mapping: Record<string, string | string[]>;
+  created_at: string;
+  updated_at: string;
+};
+export type CreateMigrationMappingInput = {
+  organizationId: string;
+  sourceSystem: string;
+  name: string;
+  entityType: string;
+  mapping: Record<string, string | string[]>;
+};
+export type MigrationJobRow = {
+  id: string;
+  importJobId: string;
+  fileId: string | null;
+  entityType: string;
+  correlationId: string;
+  rowNumber: number;
+  status: string;
+  severity: string | null;
+  tixkitId: string | null;
+  sourceHash: string;
+  normalizedHash: string | null;
+};
+export type MigrationConflict = {
+  id: string;
+  entity_type: string;
+  correlationId: string;
+  severity: string;
+  code: string;
+  message: unknown;
+  details: unknown;
+};
+export type MigrationJobEvent = {
+  id: string;
+  sequence: number;
+  type: string;
+  severity: string;
+  message: unknown;
+  createdAt: string;
+  data: unknown;
+};
+export type MigrationReport = Record<string, unknown>;
 
 export class TixkitClient {
   private readonly apiKey?: string;
@@ -3927,11 +4043,24 @@ class MessageResource {
 
 class MigrationResource {
   constructor(private client: TixkitClient) {}
-  createCredential(input: CreateMigrationCredentialInput): Promise<{ id: string; organizationId: string; sourceSystem: string; status: string; expiresAt: string }> {
-    return this.client.request('POST', '/migration-credentials', { body: input });
+  adapters(): Promise<{ items: MigrationAdapterCatalogEntry[] }> {
+    return this.client.request('GET', '/migration-adapters');
+  }
+  createCredential(input: CreateMigrationCredentialInput): Promise<{
+    id: string;
+    organizationId: string;
+    sourceSystem: string;
+    status: string;
+    expiresAt: string;
+  }> {
+    return this.client.request('POST', '/migration-credentials', {
+      body: input,
+    });
   }
   revokeCredential(credentialId: string, organizationId: string): Promise<void> {
-    return this.client.request('DELETE', `/migration-credentials/${credentialId}`, { params: { organizationId } });
+    return this.client.request('DELETE', `/migration-credentials/${credentialId}`, {
+      params: { organizationId },
+    });
   }
   list(params?: {
     organizationId?: string;
@@ -3953,18 +4082,43 @@ class MigrationResource {
   }
   create(input: CreateMigrationJobInput): Promise<MigrationJob> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', '/migration-jobs', { body, idempotencyKey });
+    return this.client.request('POST', '/migration-jobs', {
+      body,
+      idempotencyKey,
+    });
   }
-  registerFile(
-    jobId: string,
-    input: { uploadArtifactId: string },
-  ): Promise<Record<string, unknown>> {
-    return this.client.request('POST', `/migration-jobs/${jobId}/files`, { body: input });
+  prepare(jobId: string): Promise<{ jobId: string; status: 'preparing' }> {
+    return this.client.request('POST', `/migration-jobs/${jobId}/prepare`, {
+      body: {},
+    });
+  }
+  registerFile(jobId: string, input: { uploadArtifactId: string }): Promise<MigrationJobFile> {
+    return this.client.request('POST', `/migration-jobs/${jobId}/files`, {
+      body: input,
+    });
+  }
+  files(jobId: string): Promise<{ items: MigrationJobFile[] }> {
+    return this.client.request('GET', `/migration-jobs/${jobId}/files`);
+  }
+  createMapping(input: CreateMigrationMappingInput): Promise<MigrationMapping> {
+    return this.client.request('POST', '/migration-mappings', { body: input });
+  }
+  mappings(params: {
+    organizationId: string;
+    sourceSystem?: string;
+  }): Promise<{ items: MigrationMapping[] }> {
+    return this.client.request('GET', '/migration-mappings', {
+      params: Object.fromEntries(
+        Object.entries(params)
+          .filter((entry) => entry[1] !== undefined)
+          .map(([key, value]) => [key, String(value)]),
+      ),
+    });
   }
   rows(
     jobId: string,
     params?: { limit?: number; entityType?: string; status?: string },
-  ): Promise<{ items: Record<string, unknown>[] }> {
+  ): Promise<{ items: MigrationJobRow[] }> {
     return this.client.request('GET', `/migration-jobs/${jobId}/rows`, {
       params: params
         ? Object.fromEntries(
@@ -3975,26 +4129,28 @@ class MigrationResource {
         : undefined,
     });
   }
-  conflicts(
-    jobId: string,
-    params?: PaginationParams,
-  ): Promise<{ items: Record<string, unknown>[] }> {
+  conflicts(jobId: string, params?: PaginationParams): Promise<{ items: MigrationConflict[] }> {
     return this.client.request('GET', `/migration-jobs/${jobId}/conflicts`, {
       params: paginationParams(params),
     });
   }
-  events(jobId: string, afterSequence?: number): Promise<{ items: Record<string, unknown>[] }> {
+  events(jobId: string, afterSequence?: number): Promise<{ items: MigrationJobEvent[] }> {
     return this.client.request('GET', `/migration-jobs/${jobId}/events`, {
       params: afterSequence === undefined ? undefined : { afterSequence: String(afterSequence) },
     });
   }
-  dryRun(
-    jobId: string,
-  ): Promise<{ status: 'ready' | 'failed'; report: Record<string, unknown>; domainWrites: 0 }> {
+  dryRun(jobId: string): Promise<{
+    status: 'ready' | 'failed';
+    report: Record<string, unknown>;
+    domainWrites: 0;
+  }> {
     return this.client.request('POST', `/migration-jobs/${jobId}/dry-run`);
   }
-  report(jobId: string): Promise<Record<string, unknown>> {
+  report(jobId: string): Promise<MigrationReport> {
     return this.client.request('GET', `/migration-jobs/${jobId}/report`);
+  }
+  downloadReport(jobId: string): Promise<MigrationReport> {
+    return this.client.request('GET', `/migration-jobs/${jobId}/report/download`);
   }
   commit(jobId: string): Promise<{ jobId: string; status: 'committing' }> {
     return this.client.request('POST', `/migration-jobs/${jobId}/commit`, {
@@ -4013,9 +4169,11 @@ class MigrationResource {
   rollback(jobId: string) {
     return this.action(jobId, 'rollback');
   }
-  rollbackAssessment(
-    jobId: string,
-  ): Promise<{ eligible: boolean; mode: string; blockers: Array<Record<string, unknown>> }> {
+  rollbackAssessment(jobId: string): Promise<{
+    eligible: boolean;
+    mode: string;
+    blockers: Array<Record<string, unknown>>;
+  }> {
     return this.client.request('GET', `/migration-jobs/${jobId}/rollback-assessment`);
   }
   private action(jobId: string, action: string): Promise<{ accepted: true }> {

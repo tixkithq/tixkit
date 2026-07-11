@@ -14,7 +14,7 @@ export type QuickstartResult = {
   message: string;
 };
 
-const REQUIRED_PORTS = [5432, 3306, 6379, 7233, 9000, 9001, 4000, 3000, 3001];
+const REQUIRED_PORTS = [5432, 3306, 6379, 7233, 9000, 9001, 4000, 3000, 3001, 3002];
 const INFRA_COMMAND = ['docker', 'compose', '-f', 'infra/docker-compose.yml', 'up', '-d'];
 const MIGRATE_COMMAND = ['bun', 'run', '--env-file=.env.local', 'db:migrate'];
 const DEV_ALL_COMMAND = ['bun', 'run', '--env-file=.env.local', 'dev:all'];
@@ -22,6 +22,7 @@ const HEALTH_URLS = {
   api: 'http://localhost:4000/health',
   admin: 'http://localhost:3001',
   checkout: 'http://localhost:3000',
+  docs: 'http://localhost:3002/health',
 };
 
 function waitForHealth(url: string, attempts = 30, delayMs = 1000): Promise<boolean> {
@@ -158,7 +159,7 @@ export async function runQuickstart(options: QuickstartOptions): Promise<Quickst
     return migrateResult;
   }
 
-  console.log('Starting API, worker, checkout, and admin...');
+  console.log('Starting API, worker, checkout, admin, and documentation...');
   const devProc = startDevAll(cwd);
 
   // Forward Ctrl+C to the dev process group so all services stop together.
@@ -170,13 +171,14 @@ export async function runQuickstart(options: QuickstartOptions): Promise<Quickst
   createInterface({ input: process.stdin, output: process.stdout }).on('close', cleanup);
 
   console.log('Waiting for services to become healthy...');
-  const [apiHealthy, adminHealthy, checkoutHealthy] = await Promise.all([
+  const [apiHealthy, adminHealthy, checkoutHealthy, docsHealthy] = await Promise.all([
     waitForHealth(HEALTH_URLS.api),
     waitForHealth(HEALTH_URLS.admin),
     waitForHealth(HEALTH_URLS.checkout),
+    waitForHealth(HEALTH_URLS.docs),
   ]);
 
-  if (!apiHealthy || !adminHealthy || !checkoutHealthy) {
+  if (!apiHealthy || !adminHealthy || !checkoutHealthy || !docsHealthy) {
     cleanup();
     return {
       ok: false,
@@ -185,6 +187,7 @@ export async function runQuickstart(options: QuickstartOptions): Promise<Quickst
         `API healthy: ${apiHealthy}`,
         `Admin healthy: ${adminHealthy}`,
         `Checkout healthy: ${checkoutHealthy}`,
+        `Docs healthy: ${docsHealthy}`,
         'Check logs above for startup errors.',
       ].join('\n'),
     };
@@ -205,6 +208,7 @@ export async function runQuickstart(options: QuickstartOptions): Promise<Quickst
     `  API:      ${HEALTH_URLS.api}`,
     `  Admin:    ${HEALTH_URLS.admin}`,
     `  Checkout: ${HEALTH_URLS.checkout}`,
+    `  Docs:     http://localhost:3002`,
     `  Temporal UI: http://localhost:8080`,
   ];
 

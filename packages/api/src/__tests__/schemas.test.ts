@@ -236,6 +236,7 @@ describe('API mutation schema drift guards', () => {
 
   it('accepts full editable event detail fields on event updates', () => {
     const parsed = parseBody(updateEventSchema, {
+      expectedVersion: 1,
       venue: { name: 'Riverside', address: '100 River Walk' },
       visibility: 'unlisted',
       seo: { title: 'Search title', description: 'Search description' },
@@ -244,9 +245,15 @@ describe('API mutation schema drift guards', () => {
       externalUrl: 'https://events.example.test/detail',
     });
 
-    expect(parsed.venue).toEqual({ name: 'Riverside', address: '100 River Walk' });
+    expect(parsed.venue).toEqual({
+      name: 'Riverside',
+      address: '100 River Walk',
+    });
     expect(parsed.visibility).toBe('unlisted');
-    expect(parsed.seo).toEqual({ title: 'Search title', description: 'Search description' });
+    expect(parsed.seo).toEqual({
+      title: 'Search title',
+      description: 'Search description',
+    });
     expect(parsed.coverImageUrl).toBe('https://cdn.example.test/cover.jpg');
   });
 
@@ -315,7 +322,10 @@ describe('API mutation schema drift guards', () => {
   });
 
   it('validates product and product category payloads', () => {
-    const category = parseBody(createProductCategorySchema, { name: 'Merch', sortOrder: 2 });
+    const category = parseBody(createProductCategorySchema, {
+      name: 'Merch',
+      sortOrder: 2,
+    });
     expect(category).toEqual({ name: 'Merch', sortOrder: 2 });
 
     const product = parseBody(createProductSchema, {
@@ -343,7 +353,11 @@ describe('API mutation schema drift guards', () => {
     expect(update.availableUntil).toBeNull();
 
     expect(() =>
-      parseBody(createProductSchema, { name: 'Bad', priceCents: -1, currency: 'USD' }),
+      parseBody(createProductSchema, {
+        name: 'Bad',
+        priceCents: -1,
+        currency: 'USD',
+      }),
     ).toThrow(ValidationError);
     expect(() => parseBody(updateProductSchema, { status: 'archived' })).toThrow(ValidationError);
   });
@@ -392,8 +406,14 @@ describe('webhook and OAuth URL policy', () => {
   it.each([
     { events: [], label: 'empty event list' },
     { events: [''], label: 'blank event name' },
-    { events: ['ticket.checked_in', 'ticket.checked_in'], label: 'duplicate event names' },
-    { events: ['ticket.checked_in', 'ticket.checkedin'], label: 'unknown event name' },
+    {
+      events: ['ticket.checked_in', 'ticket.checked_in'],
+      label: 'duplicate event names',
+    },
+    {
+      events: ['ticket.checked_in', 'ticket.checkedin'],
+      label: 'unknown event name',
+    },
   ])('rejects webhook endpoint update with $label', ({ events }) => {
     expect(() => parseBody(updateWebhookEndpointSchema, { events })).toThrow(ValidationError);
   });
@@ -418,7 +438,9 @@ describe('webhook and OAuth URL policy', () => {
 
   it('applies webhook URL policy to updates', () => {
     expect(() =>
-      parseBody(updateWebhookEndpointSchema, { url: 'https://127.0.0.1/tixkit' }),
+      parseBody(updateWebhookEndpointSchema, {
+        url: 'https://127.0.0.1/tixkit',
+      }),
     ).toThrow(ValidationError);
   });
 
@@ -496,7 +518,10 @@ describe('parseBody strict mode', () => {
   });
 
   it('accepts valid refund body', () => {
-    const body = parseBody(refundSchema, { reason: 'Customer requested', amountCents: 5000 });
+    const body = parseBody(refundSchema, {
+      reason: 'Customer requested',
+      amountCents: 5000,
+    });
     expect(body.reason).toBe('Customer requested');
     expect(body.amountCents).toBe(5000);
   });

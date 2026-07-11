@@ -27,11 +27,11 @@ export type EnvRule = {
 };
 
 const GUIDES = {
-  clerk: 'docs/clerk-setup-guide.md',
-  webhook: 'docs/webhook-guide.md',
-  dev: 'docs/completion/dev-resources.md',
-  deploy: 'docs/production-deployment-guide.md',
-  stripe: 'docs/api-reference.md',
+  clerk: 'docs/public/self-hosting/authentication.mdx',
+  webhook: 'docs/public/developers/webhooks/setup.mdx',
+  dev: 'docs/public/getting-started/local-quickstart.mdx',
+  deploy: 'docs/public/self-hosting/deployment.mdx',
+  stripe: 'docs/public/reference/api/index.mdx',
 } as const;
 
 export const ENV_RULES: EnvRule[] = [

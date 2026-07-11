@@ -46,6 +46,7 @@ import {
   normalizeQuestionAnswers,
   validateBoxOfficeOrder,
   BoxOfficeError,
+  ForbiddenError,
   evaluateDateOfBirthEligibility,
   requiresDateOfBirthVerification,
 } from '@tixkit/domain';
@@ -67,6 +68,7 @@ import {
   parseBody,
 } from '../../http/schemas.js';
 import { hashWaitlistClaimToken } from './waitlist.js';
+import { resolvePaymentMode } from '../../services/readiness.js';
 import {
   checkoutPublicOrigin,
   createCheckoutHandoffToken,
@@ -1425,10 +1427,25 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
     const eventRepo = new EventRepository(db);
     const event = await eventRepo.findById(body.eventId);
     if (!event) throw new NotFoundError('Event', body.eventId);
-    if (event.status !== 'published') {
+    const isTestOrder = request.headers['x-tixkit-test-order'] === '1';
+    if (isTestOrder) {
+      const principal = request.principal;
+      if (!principal)
+        throw new ForbiddenError('Authenticated event access is required for test checkout');
+      ClerkAuthService.requirePermission(principal, 'events.write');
+      ClerkAuthService.requireResourceTenant(principal, event, 'Event', body.eventId);
+      ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+      ClerkAuthService.requireBrandScope(principal, event.brand_id);
+      ClerkAuthService.requireEventScope(principal, body.eventId);
+      if (resolvePaymentMode() === 'provider')
+        throw new ValidationError(
+          'Test checkout is available only in capture/mock or explicit provider-test mode',
+        );
+    }
+    if (event.status !== 'published' && !isTestOrder) {
       throw new ValidationError('Event is not published');
     }
-    if (event.visibility === 'private') {
+    if (event.visibility === 'private' && !isTestOrder) {
       throw new NotFoundError('Event', body.eventId);
     }
     const requiresDateOfBirth = requiresDateOfBirthVerification(event.minimum_age);
@@ -1449,7 +1466,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       {
         key: idempotencyKey,
         tenantId: event.tenant_id,
-        requestHash: hashRequest({ ...body, buyer: checkoutBuyer }),
+        requestHash: hashRequest({ ...body, buyer: checkoutBuyer, isTestOrder }),
       },
       async () => {
         const resaleItems = body.items.filter((item) => item.resaleListingId);
@@ -1632,6 +1649,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
                 idempotencyKey,
                 successUrl: body.successUrl,
                 cancelUrl: body.cancelUrl,
+                isTest: isTestOrder,
               });
               sessionCreated = true;
               return created;
@@ -1995,6 +2013,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
               idempotencyKey,
               successUrl: body.successUrl,
               cancelUrl: body.cancelUrl,
+              isTest: isTestOrder,
             });
             sessionCreated = true;
             return created;
@@ -2402,7 +2421,7 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
       cart: parseJsonValue(session.cart, {}),
     });
 
-    if (event.status !== 'published') {
+    if (event.status !== 'published' && !session.is_test) {
       await cancelCheckoutSessionForUnavailableEvent({
         db,
         releaseHoldsForSession: (id) => inventoryService.releaseHoldsForSession(id),
@@ -2545,6 +2564,8 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
           feeCents: quote.feeCents,
           buyerEmail: buyer.email ?? '',
           isFreeOrder: quote.totalCents === 0,
+          paymentMode: session.is_test ? 'free' : undefined,
+          isTest: Boolean(session.is_test),
           affiliateCode: cart.affiliateCode,
         });
 
@@ -2555,12 +2576,21 @@ export const checkoutRoutes: FastifyPluginAsync = async (app) => {
             if (!order) throw new NotFoundError('Order', workflowResult.orderId);
             return { status: 200, body: { order, sessionId, status: 'completed' } };
           }
+          let failureMessage = 'Checkout could not be finalized';
+          try {
+            const failedState = await temporalClient.getCheckoutState(handle.workflowId);
+            if (failedState.status === 'failed' && failedState.error) {
+              failureMessage = failedState.error;
+            }
+          } catch {
+            // The stable public error remains available when workflow state cannot be read.
+          }
           return {
             status: 409,
             body: {
               error: {
                 code: 'CHECKOUT_FINALIZATION_FAILED',
-                message: 'Checkout could not be finalized',
+                message: failureMessage,
                 requestId: request.id,
               },
             },

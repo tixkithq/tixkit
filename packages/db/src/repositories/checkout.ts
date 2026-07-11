@@ -93,6 +93,7 @@ export class CheckoutSessionRepository extends BaseRepository {
     clientToken?: string;
     successUrl?: string;
     cancelUrl?: string;
+    isTest?: boolean;
   }) {
     const id = input.id ?? `cs_${ulid()}`;
     const now = new Date();
@@ -116,6 +117,7 @@ export class CheckoutSessionRepository extends BaseRepository {
         expires_at: input.expiresAt,
         idempotency_key: input.idempotencyKey,
         client_token: input.clientToken ?? randomBytes(24).toString('base64url'),
+        is_test: input.isTest ?? false,
         created_at: now,
         updated_at: now,
       },
@@ -168,6 +170,7 @@ export class OrderRepository extends BaseRepository {
     salesChannel?: SalesChannel;
     operatorId?: string;
     tenderType?: BoxOfficeTenderType;
+    isTest?: boolean;
   }) {
     const id = `ord_${ulid()}`;
     const now = new Date();
@@ -198,6 +201,7 @@ export class OrderRepository extends BaseRepository {
         sales_channel: input.salesChannel ?? 'online',
         operator_id: input.operatorId ?? null,
         tender_type: input.tenderType ?? null,
+        is_test: input.isTest ?? false,
         paid_at: input.status === 'paid' ? now : null,
         created_at: now,
         updated_at: now,

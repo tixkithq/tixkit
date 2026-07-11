@@ -24,6 +24,7 @@ const dbState = vi.hoisted(() => ({
     fee_cents: 200,
     total_cents: 10700,
     refunded_cents: 0,
+    is_test: false,
     buyer_email: 'buyer@test.com',
     buyer_first_name: 'Ada',
     buyer_last_name: 'Lovelace',
@@ -79,9 +80,10 @@ function rowMatchesWheres(
 ): boolean {
   return wheres.every((where) => {
     const column = where.column.includes('.') ? where.column.split('.').at(-1)! : where.column;
-    const value = Object.prototype.hasOwnProperty.call(row, where.column)
+    const storedValue = Object.prototype.hasOwnProperty.call(row, where.column)
       ? row[where.column]
       : row[column];
+    const value = column === 'is_test' && storedValue === undefined ? false : storedValue;
     if (where.op === '=') return value === where.value;
     if (where.op === 'in') return Array.isArray(where.value) && where.value.includes(value);
     if (where.op === 'is') return value === where.value;
@@ -666,6 +668,7 @@ describe('order routes', () => {
       fee_cents: 200,
       total_cents: 10700,
       refunded_cents: 0,
+      is_test: false,
       buyer_email: 'buyer@test.com',
       buyer_first_name: 'Ada',
       buyer_last_name: 'Lovelace',
@@ -1061,6 +1064,12 @@ describe('order routes', () => {
         order_number: 'TK-1003',
         organization_id: 'org_2',
         event_id: 'evt_1',
+      },
+      {
+        ...dbState.order,
+        id: 'ord_test',
+        order_number: 'TEST-1004',
+        is_test: true,
       },
     ];
     const app = await setupApp(orderRoutes, makePrincipal({ organizationIds: ['org_1', 'org_2'] }));

@@ -267,6 +267,29 @@ describe('checkoutSessionWorkflow', () => {
     expect(result.orderId).toBe('ord_test_1');
   });
 
+  it('completes a test checkout without fulfillment side effects', async () => {
+    let fulfillmentCalls = 0;
+    setActivity('sendConfirmationEmailActivity', async () => {
+      fulfillmentCalls += 1;
+      return okResult({ jobId: 'emj_test', status: 'queued' });
+    });
+    setActivity('issueTicketsActivity', async () => {
+      fulfillmentCalls += 1;
+      return okResult({ issued: 1, jobId: 'emj_ticket' });
+    });
+    setActivity('emitWebhookEventActivity', async () => {
+      fulfillmentCalls += 1;
+      return okResult({ eventId: 'evt_test', deliveries: [] });
+    });
+
+    const result = await checkoutSessionWorkflow(
+      makeCheckoutInput({ isFreeOrder: false, paymentMode: 'free', isTest: true }),
+    );
+
+    expect(result).toEqual({ orderId: 'ord_test_1', status: 'completed' });
+    expect(fulfillmentCalls).toBe(0);
+  });
+
   it('completes an offline box-office order without creating a payment intent', async () => {
     let finalizeInput: Record<string, unknown> | undefined;
     setActivity('createPaymentIntentActivity', async () => {

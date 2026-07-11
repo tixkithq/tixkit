@@ -5,9 +5,27 @@
   "breaking": false,
   "summary": {
     "breaking": 0,
-    "compatible": 21
+    "compatible": 25
   },
   "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /events/{eventId}/operational-health",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "PUT /events/{eventId}/setup-section",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /migration-adapters",
+      "message": "Operation was added."
+    },
     {
       "severity": "compatible",
       "category": "operation-added",
@@ -84,6 +102,12 @@
       "severity": "compatible",
       "category": "operation-added",
       "path": "POST /migration-jobs/{jobId}/dry-run",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /migration-jobs/{jobId}/prepare",
       "message": "Operation was added."
     },
     {

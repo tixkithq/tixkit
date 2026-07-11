@@ -1,5 +1,6 @@
 import { BaseRepository } from './base.js';
 import { ulid } from 'ulid';
+import { sql } from 'kysely';
 
 export async function bumpEventPublicRevision(
   db: { updateTable: (table: 'events') => any },
@@ -8,7 +9,7 @@ export async function bumpEventPublicRevision(
 ): Promise<void> {
   await db
     .updateTable('events')
-    .set({ public_revision: revision })
+    .set({ public_revision: revision, version: sql`version + 1` })
     .where('id', '=', eventId)
     .execute();
 }
@@ -127,6 +128,7 @@ export class EventRepository extends BaseRepository {
     const now = new Date();
     return this.updateReturning('events', id, {
       ...input,
+      version: sql`version + 1`,
       public_revision: now,
       updated_at: now,
     });
@@ -136,9 +138,39 @@ export class EventRepository extends BaseRepository {
     const now = new Date();
     return this.updateReturning('events', id, {
       status,
+      version: sql`version + 1`,
       public_revision: now,
       updated_at: now,
     });
+  }
+
+  async updateIfVersion(id: string, expectedVersion: number, input: Record<string, unknown>) {
+    const now = new Date();
+    const result = await this.db.updateTable('events').set({
+      ...input,
+      version: sql`version + 1`,
+      public_revision: now,
+      updated_at: now,
+    }).where('id', '=', id).where('version', '=', expectedVersion).executeTakeFirst();
+    if (Number(result.numUpdatedRows) === 0) return undefined;
+    return this.findById(id);
+  }
+
+  async publishIfVersion(id: string, expectedVersion: number) {
+    const now = new Date();
+    const result = await this.db
+      .updateTable('events')
+      .set({
+        status: 'published',
+        version: sql`version + 1`,
+        public_revision: now,
+        updated_at: now,
+      })
+      .where('id', '=', id)
+      .where('version', '=', expectedVersion)
+      .executeTakeFirst();
+    if (Number(result.numUpdatedRows) === 0) return undefined;
+    return this.findById(id);
   }
 }
 

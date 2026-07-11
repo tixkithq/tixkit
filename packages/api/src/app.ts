@@ -18,6 +18,7 @@ import { QrService } from './services/qr.js';
 import { TemporalClient } from './services/temporal.js';
 import { tenantRoutes } from './routes/modules/tenant.js';
 import { eventRoutes } from './routes/modules/events.js';
+import { readinessRoutes } from './routes/modules/readiness.js';
 import { ticketingRoutes } from './routes/modules/ticketing.js';
 import { checkoutRoutes } from './routes/modules/checkout.js';
 import { orderRoutes } from './routes/modules/orders.js';
@@ -48,6 +49,7 @@ import {
 } from './observability.js';
 import type Stripe from 'stripe';
 import type { EmailTransport, SendSmsInput, SendSmsResult, SmsTransport } from '@tixkit/domain';
+import type { ReadinessService } from './services/readiness.js';
 import { createDefaultEmailTransport } from '@tixkit/email-transport';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
@@ -66,6 +68,7 @@ export type AppContext = {
   emailTransport: EmailTransport;
   smsTransport: SmsTransport;
   stripe?: Stripe;
+  readinessServiceFactory?: (db: Database) => ReadinessService;
 };
 
 class ApiCaptureSmsTransport implements SmsTransport {
@@ -402,6 +405,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   // buyers are anonymous and tenancy is resolved from the published event.
   await app.register(async (publicGroup) => {
     await registerIpRateLimit(publicGroup, { redis: rateLimitRedis });
+    const authenticateTestCheckout = createAuthMiddleware(authService);
+    publicGroup.addHook('onRequest', async (request, reply) => {
+      if (request.headers['x-tixkit-test-order'] === '1') {
+        await authenticateTestCheckout(request, reply);
+      }
+    });
     await publicGroup.register(publicRoutes, { prefix: '/v1' });
     await publicGroup.register(checkoutRoutes, { prefix: '/v1' });
     await publicGroup.register(publicUploadRoutes, { prefix: '/v1' });
@@ -418,6 +427,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
     await authenticated.register(tenantRoutes, { prefix: '/v1' });
     await authenticated.register(eventRoutes, { prefix: '/v1' });
+    await authenticated.register(readinessRoutes, { prefix: '/v1' });
     await authenticated.register(ticketingRoutes, { prefix: '/v1' });
     await authenticated.register(orderRoutes, { prefix: '/v1' });
     await authenticated.register(checkInRoutes, { prefix: '/v1' });

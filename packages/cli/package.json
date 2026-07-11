@@ -41,7 +41,8 @@
     "@tixkit/content-email": "workspace:*",
     "@tixkit/db": "workspace:*",
     "@tixkit/domain": "workspace:*",
-    "@tixkit/embed-core": "1.0.0"
+    "@tixkit/embed-core": "1.0.0",
+    "@tixkit/migration-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

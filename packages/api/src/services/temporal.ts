@@ -44,6 +44,27 @@ import {
   type NotificationDeliveryWorkflowInput,
   type SmsDeliveryWorkflowInput,
   type CheckoutState,
+  migrationCommitWorkflow,
+  migrationRollbackWorkflow,
+  migrationPreparationWorkflow,
+  migrationCommitWorkflowId,
+  migrationRollbackWorkflowId,
+  migrationPreparationWorkflowId,
+  MIGRATION_COMMIT_WORKFLOW_VERSION,
+  MIGRATION_ROLLBACK_WORKFLOW_VERSION,
+  MIGRATION_PREPARATION_WORKFLOW_VERSION,
+  pauseMigrationPreparationSignal,
+  resumeMigrationPreparationSignal,
+  cancelMigrationPreparationSignal,
+  pauseMigrationSignal,
+  resumeMigrationSignal,
+  cancelMigrationSignal,
+  requestMigrationRollbackSignal,
+  getMigrationStateQuery,
+  type MigrationWorkflowInput,
+  type MigrationWorkflowState,
+  type MigrationRollbackWorkflowInput,
+  type MigrationPreparationWorkflowInput,
 } from '@tixkit/workflows';
 import { config } from '../config/index.js';
 
@@ -175,7 +196,9 @@ export class TemporalClient {
   }
 
   async startWebhookDelivery(
-    input: Omit<WebhookDeliveryWorkflowInput, 'version'> & { replayNonce?: string },
+    input: Omit<WebhookDeliveryWorkflowInput, 'version'> & {
+      replayNonce?: string;
+    },
   ) {
     const baseWorkflowId = webhookDeliveryWorkflowId(input.eventId, input.endpointId);
     const workflowId = input.replayNonce
@@ -296,6 +319,102 @@ export class TemporalClient {
       }
       throw err;
     }
+  }
+
+  async startMigrationCommit(input: Omit<MigrationWorkflowInput, 'version'>) {
+    const workflowId = migrationCommitWorkflowId(input.tenantId, input.organizationId, input.jobId);
+    try {
+      return await this.client.workflow.start(migrationCommitWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [{ version: MIGRATION_COMMIT_WORKFLOW_VERSION, ...input }],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) return this.client.workflow.getHandle(workflowId);
+      throw err;
+    }
+  }
+
+  async startMigrationPreparation(input: Omit<MigrationPreparationWorkflowInput, 'version'>) {
+    const workflowId = migrationPreparationWorkflowId(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    );
+    try {
+      return await this.client.workflow.start(migrationPreparationWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [{ version: MIGRATION_PREPARATION_WORKFLOW_VERSION, ...input }],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) return this.client.workflow.getHandle(workflowId);
+      throw err;
+    }
+  }
+
+  async signalMigrationPreparation(
+    tenantId: string,
+    organizationId: string,
+    jobId: string,
+    action: 'pause' | 'resume' | 'cancel',
+  ): Promise<void> {
+    const handle = this.client.workflow.getHandle(
+      migrationPreparationWorkflowId(tenantId, organizationId, jobId),
+    );
+    await handle.signal(
+      action === 'pause'
+        ? pauseMigrationPreparationSignal
+        : action === 'resume'
+          ? resumeMigrationPreparationSignal
+          : cancelMigrationPreparationSignal,
+    );
+  }
+
+  async startMigrationRollback(input: Omit<MigrationRollbackWorkflowInput, 'version'>) {
+    const workflowId = migrationRollbackWorkflowId(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    );
+    try {
+      return await this.client.workflow.start(migrationRollbackWorkflow, {
+        taskQueue: config.temporalTaskQueue,
+        workflowId,
+        args: [{ version: MIGRATION_ROLLBACK_WORKFLOW_VERSION, ...input }],
+      });
+    } catch (err) {
+      if (isWorkflowAlreadyStartedError(err)) return this.client.workflow.getHandle(workflowId);
+      throw err;
+    }
+  }
+
+  async signalMigration(
+    tenantId: string,
+    organizationId: string,
+    jobId: string,
+    action: 'pause' | 'resume' | 'cancel' | 'rollback',
+  ): Promise<void> {
+    const handle = this.client.workflow.getHandle(
+      migrationCommitWorkflowId(tenantId, organizationId, jobId),
+    );
+    const signal = {
+      pause: pauseMigrationSignal,
+      resume: resumeMigrationSignal,
+      cancel: cancelMigrationSignal,
+      rollback: requestMigrationRollbackSignal,
+    }[action];
+    await handle.signal(signal);
+  }
+
+  getMigrationState(
+    tenantId: string,
+    organizationId: string,
+    jobId: string,
+  ): Promise<MigrationWorkflowState> {
+    return this.client.workflow
+      .getHandle(migrationCommitWorkflowId(tenantId, organizationId, jobId))
+      .query(getMigrationStateQuery);
   }
 }
 

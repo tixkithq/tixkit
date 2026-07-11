@@ -103,152 +103,22 @@ function scheduleHandshakeTimeout(element: HTMLElement, onTimeout: () => void): 
   );
 }
 
-const STYLES = `
-  :host {
-    display: block;
-    width: 100%;
-    --tk-radius: var(--tk-radius, 0.625rem);
-    --tk-primary: var(--tk-primary, oklch(0.208 0.042 265.755));
-    --tk-bg: var(--tk-bg, #ffffff);
-    --tk-fg: var(--tk-fg, #171717);
-    color: var(--tk-fg);
-  }
-  .tk-root {
-    position: relative;
-    width: 100%;
-    min-height: 420px;
-    border-radius: var(--tk-radius);
-    overflow: hidden;
-    background: var(--tk-bg);
-    border: 1px solid rgba(23, 23, 23, 0.12);
-  }
-  .tk-frame {
-    width: 100%;
-    height: 100%;
-    min-height: 420px;
-    border: 0;
-    display: block;
-    background: var(--tk-bg);
-  }
-  .tk-state {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 24px;
-    text-align: center;
-    background: var(--tk-bg);
-    color: var(--tk-fg);
-    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-  .tk-spinner {
-    width: 24px;
-    height: 24px;
-    border: 2px solid rgba(23, 23, 23, 0.18);
-    border-top-color: var(--tk-primary);
-    border-radius: 50%;
-    animation: tk-spin 0.8s linear infinite;
-  }
-  @keyframes tk-spin { to { transform: rotate(360deg); } }
-  .tk-error-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 999px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(220, 38, 38, 0.12);
-    color: #b91c1c;
-    font-size: 18px;
-    font-weight: 700;
-  }
-  .tk-retry {
-    border: 1px solid rgba(23, 23, 23, 0.18);
-    background: var(--tk-bg);
-    color: var(--tk-fg);
-    border-radius: 6px;
-    padding: 8px 14px;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .tk-retry:hover { background: rgba(23, 23, 23, 0.05); }
-  .tk-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-  }
-  .tk-modal {
-    width: min(560px, 100%);
-    max-height: 90vh;
-    border-radius: var(--tk-radius);
-    overflow: hidden;
-    background: var(--tk-bg);
-    display: flex;
-    flex-direction: column;
-  }
-  .tk-modal-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    border-bottom: 1px solid rgba(23, 23, 23, 0.1);
-    background: var(--tk-bg);
-    color: var(--tk-fg);
-  }
-  .tk-modal-title {
-    background: #ffffff;
-    color: #171717;
-    font-weight: 600;
-  }
-  .tk-modal-close {
-    border: 0;
-    background: transparent;
-    color: var(--tk-fg);
-    font-size: 20px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 6px;
-  }
-  .tk-modal-close:hover { background: rgba(23, 23, 23, 0.06); }
-  .tk-modal-frame {
-    width: 100%;
-    height: 70vh;
-    border: 0;
-    background: var(--tk-bg);
-  }
-  .tk-launcher {
-    background: var(--tk-primary, oklch(0.208 0.042 265.755));
-    color: white;
-    border: 0;
-    padding: 12px 24px;
-    border-radius: var(--tk-radius, 0.5rem);
-    font: 600 16px var(--tk-font-family, ui-sans-serif, system-ui, sans-serif);
-    cursor: pointer;
-    transition: opacity 0.2s;
-  }
-  .tk-launcher:hover { opacity: 0.9; }
-  .tk-launcher:disabled { opacity: 0.5; cursor: not-allowed; }
-`;
+// Keep the embedded stylesheet compact: template-literal whitespace is shipped
+// byte-for-byte and is part of the public widget performance budget.
+const STYLES = `:host{display:block;width:100%;--tk-radius:var(--tk-radius,0.625rem);--tk-primary:var(--tk-primary,oklch(0.208 0.042 265.755));--tk-bg:var(--tk-bg,#fff);--tk-fg:var(--tk-fg,#171717);color:var(--tk-fg)}.tk-root{position:relative;width:100%;min-height:420px;border-radius:var(--tk-radius);overflow:hidden;background:var(--tk-bg);border:1px solid rgba(23,23,23,.12)}.tk-frame{width:100%;height:100%;min-height:420px;border:0;display:block;background:var(--tk-bg)}.tk-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;background:var(--tk-bg);color:var(--tk-fg);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.tk-spinner{width:24px;height:24px;border:2px solid rgba(23,23,23,.18);border-top-color:var(--tk-primary);border-radius:50%;animation:tk-spin .8s linear infinite}@keyframes tk-spin{to{transform:rotate(360deg)}}.tk-error-icon{width:32px;height:32px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(220,38,38,.12);color:#b91c1c;font-size:18px;font-weight:700}.tk-retry{border:1px solid rgba(23,23,23,.18);background:var(--tk-bg);color:var(--tk-fg);border-radius:6px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer}.tk-retry:hover{background:rgba(23,23,23,.05)}.tk-modal-backdrop{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px}.tk-modal{width:min(560px,100%);max-height:90vh;border-radius:var(--tk-radius);overflow:hidden;background:var(--tk-bg);display:flex;flex-direction:column}.tk-modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(23,23,23,.1);background:var(--tk-bg);color:var(--tk-fg)}.tk-modal-title{background:#fff;color:#171717;font-weight:600}.tk-modal-close{border:0;background:transparent;color:var(--tk-fg);font-size:20px;line-height:1;cursor:pointer;padding:4px 8px;border-radius:6px}.tk-modal-close:hover{background:rgba(23,23,23,.06)}.tk-modal-frame{width:100%;height:70vh;border:0;background:var(--tk-bg)}.tk-launcher{background:var(--tk-primary,oklch(0.208 0.042 265.755));color:#fff;border:0;padding:12px 24px;border-radius:var(--tk-radius,.5rem);font:600 16px var(--tk-font-family,ui-sans-serif,system-ui,sans-serif);cursor:pointer;transition:opacity .2s}.tk-launcher:hover{opacity:.9}.tk-launcher:disabled{opacity:.5;cursor:not-allowed}`;
+
+const COMPACT_STYLES = `:host{display:block;width:100%;--tk-radius:.625rem;--tk-primary:oklch(.208 .042 265.755);--tk-bg:#fff;--tk-fg:#171717;color:var(--tk-fg)}.tk-root{position:relative;width:100%;min-height:420px;border-radius:var(--tk-radius);overflow:hidden;border:1px solid #1717171f}.tk-frame,.tk-modal-frame{width:100%;border:0}.tk-frame{height:100%;min-height:420px;display:block}.tk-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;font:14px/1.5 system-ui,sans-serif}.tk-spinner{width:24px;height:24px;border:2px solid #1717172e;border-top-color:var(--tk-primary);border-radius:50%;animation:tk-spin .8s linear infinite}@keyframes tk-spin{to{transform:rotate(360deg)}}.tk-error-icon{color:#b91c1c;font-size:18px;font-weight:700}.tk-retry{border:1px solid #1717172e;background:var(--tk-bg);color:inherit;border-radius:6px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer}.tk-modal-backdrop{position:fixed;inset:0;z-index:9999;background:#0009;display:flex;align-items:center;justify-content:center;padding:16px}.tk-modal{width:min(560px,100%);max-height:90vh;border-radius:var(--tk-radius);overflow:hidden;background:var(--tk-bg);display:flex;flex-direction:column}.tk-modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1717171a}.tk-modal-title{font-weight:600}.tk-modal-close{border:0;background:transparent;color:inherit;font-size:20px;cursor:pointer;padding:4px 8px}.tk-modal-frame{height:70vh}.tk-launcher{background:var(--tk-primary);color:#fff;border:0;padding:12px 24px;border-radius:var(--tk-radius);font:600 16px system-ui,sans-serif;cursor:pointer}.tk-launcher:disabled{opacity:.5;cursor:not-allowed}`;
+void STYLES;
 
 function injectStyles(shadow: ShadowRoot, themeCss = ''): void {
   if ('adoptedStyleSheets' in shadow && typeof CSSStyleSheet !== 'undefined') {
     const sheet = new CSSStyleSheet();
-    sheet.replaceSync(`${STYLES}\n${themeCss}`);
+    sheet.replaceSync(`${COMPACT_STYLES}\n${themeCss}`);
     shadow.adoptedStyleSheets = [sheet];
     return;
   }
   const style = document.createElement('style');
-  style.textContent = `${STYLES}\n${themeCss}`;
+  style.textContent = `${COMPACT_STYLES}\n${themeCss}`;
   shadow.appendChild(style);
 }
 

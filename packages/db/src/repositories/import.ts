@@ -1,4 +1,5 @@
 import type { Selectable } from 'kysely';
+import { createHash } from 'node:crypto';
 import type {
   ExternalReferenceTable,
   ImportJobEventTable,
@@ -22,6 +23,8 @@ function isUniqueViolation(error: unknown): boolean {
 
 export type ImportJobStatus =
   | 'pending'
+  | 'preparing'
+  | 'prepared'
   | 'discovering'
   | 'extracting'
   | 'normalizing'
@@ -48,6 +51,200 @@ export interface RollbackEligibility {
 }
 
 export class ImportRepository extends BaseRepository {
+  async preparationProgress(
+    tenantId: string,
+    organizationId: string,
+    jobId: string,
+  ): Promise<{ cursor?: string; rowNumber: number; completed: boolean }> {
+    const job = await this.db
+      .selectFrom('import_jobs')
+      .select(['preparation_cursor', 'preparation_row_number', 'status'])
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('id', '=', jobId)
+      .executeTakeFirst();
+    if (!job) return { rowNumber: 0, completed: false };
+    return {
+      cursor: job.preparation_cursor ?? undefined,
+      rowNumber: job.preparation_row_number,
+      completed: job.status === 'prepared',
+    };
+  }
+
+  findImportedEntity(tenantId: string, organizationId: string, tixkitId: string) {
+    return this.db
+      .selectFrom('imported_domain_entities')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('id', '=', tixkitId)
+      .executeTakeFirst();
+  }
+
+  async persistPreparationChunk(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    cursorKey: string;
+    nextCursor?: string;
+    startRowNumber: number;
+    completed: boolean;
+    rows: Array<{
+      entityType: string;
+      externalId: string;
+      sourceData: unknown;
+      normalizedData: unknown;
+      severity?: string;
+      issues: Array<{ code: string; severity: string; message: string; details?: unknown }>;
+    }>;
+  }): Promise<{ inserted: number; rowNumber: number }> {
+    return this.db.transaction().execute(async (transaction) => {
+      let inserted = 0;
+      for (const [offset, row] of input.rows.entries()) {
+        const rowNumber = input.startRowNumber + offset + 1;
+        let stored = await transaction
+          .selectFrom('import_job_rows')
+          .select('id')
+          .where('tenant_id', '=', input.tenantId)
+          .where('organization_id', '=', input.organizationId)
+          .where('import_job_id', '=', input.jobId)
+          .where('entity_type', '=', row.entityType)
+          .where('row_number', '=', rowNumber)
+          .executeTakeFirst();
+        if (!stored) {
+          const id = this.generateId('imr');
+          await transaction
+            .insertInto('import_job_rows')
+            .values({
+              id,
+              tenant_id: input.tenantId,
+              organization_id: input.organizationId,
+              import_job_id: input.jobId,
+              import_job_file_id: null,
+              entity_type: row.entityType,
+              external_id: row.externalId,
+              row_number: rowNumber,
+              status: row.issues.some(
+                ({ severity }) => severity === 'fatal' || severity === 'error',
+              )
+                ? 'conflict'
+                : 'validated',
+              claim_owner: null,
+              claim_attempt: 0,
+              claim_expires_at: null,
+              severity: row.severity ?? null,
+              source_data: JSON.stringify(row.sourceData),
+              normalized_data: JSON.stringify(row.normalizedData),
+              tixkit_id: null,
+              created_entity: false,
+              domain_activity_at: null,
+              rollback_blocked_reason: null,
+              created_at: new Date(),
+              updated_at: new Date(),
+            })
+            .execute();
+          stored = { id };
+          inserted += 1;
+        }
+        for (const issue of row.issues) {
+          const exists = await transaction
+            .selectFrom('import_conflicts')
+            .select('id')
+            .where('tenant_id', '=', input.tenantId)
+            .where('organization_id', '=', input.organizationId)
+            .where('import_job_id', '=', input.jobId)
+            .where('import_job_row_id', '=', stored.id)
+            .where('code', '=', issue.code)
+            .executeTakeFirst();
+          if (exists) continue;
+          await transaction
+            .insertInto('import_conflicts')
+            .values({
+              id: this.generateId('imc'),
+              tenant_id: input.tenantId,
+              organization_id: input.organizationId,
+              import_job_id: input.jobId,
+              import_job_row_id: stored.id,
+              code: issue.code,
+              severity: issue.severity,
+              entity_type: row.entityType,
+              external_id: row.externalId,
+              message: issue.message,
+              details: issue.details === undefined ? null : JSON.stringify(issue.details),
+              resolution: null,
+              resolved_at: null,
+              created_at: new Date(),
+            })
+            .execute();
+        }
+      }
+      const rowNumber = input.startRowNumber + input.rows.length;
+      const eventKey = `preparation:${input.cursorKey}`;
+      const existingEvent = await transaction
+        .selectFrom('import_job_events')
+        .select('id')
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('import_job_id', '=', input.jobId)
+        .where('event_key', '=', eventKey)
+        .executeTakeFirst();
+      if (!existingEvent) {
+        const maximum = await transaction
+          .selectFrom('import_job_events')
+          .select(({ fn }) => fn.max<number>('sequence').as('maximum'))
+          .where('tenant_id', '=', input.tenantId)
+          .where('organization_id', '=', input.organizationId)
+          .where('import_job_id', '=', input.jobId)
+          .executeTakeFirst();
+        await transaction
+          .insertInto('import_job_events')
+          .values({
+            id: this.generateId('ime'),
+            tenant_id: input.tenantId,
+            organization_id: input.organizationId,
+            import_job_id: input.jobId,
+            sequence: Number(maximum?.maximum ?? 0) + 1,
+            event_key: eventKey,
+            type: input.completed ? 'preparation.completed' : 'preparation.progress',
+            severity: 'info',
+            message: input.completed
+              ? 'Source preparation completed.'
+              : 'Source preparation progressed.',
+            data: JSON.stringify({
+              cursorHash: input.nextCursor
+                ? createHash('sha256').update(input.nextCursor).digest('hex')
+                : null,
+              rowNumber,
+            }),
+            created_at: new Date(),
+          })
+          .execute();
+      }
+      await transaction
+        .updateTable('import_jobs')
+        .set({
+          preparation_cursor: input.completed ? null : (input.nextCursor ?? null),
+          preparation_row_number: rowNumber,
+          updated_at: new Date(),
+        })
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('id', '=', input.jobId)
+        .where('status', '=', 'preparing')
+        .execute();
+      if (input.completed) {
+        await transaction
+          .updateTable('import_jobs')
+          .set({ status: 'prepared', completed_at: new Date(), updated_at: new Date() })
+          .where('tenant_id', '=', input.tenantId)
+          .where('organization_id', '=', input.organizationId)
+          .where('id', '=', input.jobId)
+          .where('status', '=', 'preparing')
+          .execute();
+      }
+      return { inserted, rowNumber };
+    });
+  }
   async createCredential(input: {
     tenantId: string;
     organizationId: string;
@@ -158,7 +355,7 @@ export class ImportRepository extends BaseRepository {
         media_type: input.mediaType,
         byte_size: input.byteSize,
         sha256: input.sha256,
-        status: 'pending',
+        status: 'ready',
         created_at: new Date(),
       },
       id,
@@ -243,6 +440,8 @@ export class ImportRepository extends BaseRepository {
           requested_by: input.requestedBy,
           configuration:
             input.configuration === undefined ? null : JSON.stringify(input.configuration),
+          preparation_cursor: null,
+          preparation_row_number: 0,
           summary: null,
           error_code: null,
           error_message: null,

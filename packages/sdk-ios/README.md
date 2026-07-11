@@ -1,21 +1,49 @@
-# Tixkit iOS SDK
+# `sdk-ios`
 
-The Swift SDK mirrors the React Native and Flutter scanner contract:
+## Purpose
 
-- hosted checkout handoff URL generation
-- scanner-device check-in helpers for online and offline scans
-- HMAC-verified offline manifest support
-- offline scan persistence and sync conflict callbacks
-- Keychain-backed scanner credential storage
-- SwiftUI ticket display and scanner status views
+Swift package `TixkitIOS` for hosted checkout, ticket/scanner SwiftUI, online check-in, and signed offline sync.
 
-Run locally with a Swift toolchain:
+## Consumers
 
-```sh
-cd packages/sdk-ios
-swift build
-swift test
-cd Examples/TixkitIOSExample
-swift build
-swift run TixkitIOSExample
-```
+iOS 15+ and macOS 12+ applications.
+
+## Status
+
+Supported Swift package pinned to API version `2026-01-01`.
+
+## Installation
+
+Add this repository’s `packages/sdk-ios` package in Swift Package Manager and link `TixkitIOS`.
+
+## Example
+
+`let client = TixkitScannerClient(deviceId: id, deviceSecret: secret)`
+
+## Public exports
+
+Tixkit API/scanner clients, models, checkout URL helpers, Keychain storage, offline manifest/sync support, and SwiftUI views.
+
+## Runtime
+
+Swift tools 5.9; iOS 15+ or macOS 12+.
+
+## Configuration
+
+Pass the API base URL and device identity explicitly; secure scanner credentials through the provided Keychain store.
+
+## Security
+
+Never place scanner credentials in UserDefaults, URLs, logs, analytics, or screenshots; verify signed offline manifests.
+
+## Validation
+
+`cd packages/sdk-ios && swift build && swift test`
+
+## Compatibility
+
+Swift package products/platforms and API version `2026-01-01` define compatibility.
+
+## Related guides
+
+[iOS SDK guide](../../docs/public/sdks/ios.mdx)

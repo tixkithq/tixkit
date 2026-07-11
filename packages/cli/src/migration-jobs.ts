@@ -1,7 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import type { MigrationPreparationConfiguration } from '@tixkit/migration-core';
 
-export type MigrationJobAction = 'dry-run' | 'commit' | 'pause' | 'resume' | 'cancel' | 'rollback';
+export type MigrationJobAction =
+  | 'prepare'
+  | 'dry-run'
+  | 'commit'
+  | 'pause'
+  | 'resume'
+  | 'cancel'
+  | 'rollback';
 
 export type MigrationJobClientOptions = {
   apiBaseUrl: string;
@@ -11,11 +19,19 @@ export type MigrationJobClientOptions = {
 
 export type MigrationCreateRequest = {
   organizationId: string;
-  sourceSystem: string;
+  sourceSystem: MigrationPreparationConfiguration['sourceSystem'];
   adapterVersion: string;
   mode?: 'dry-run' | 'commit';
-  configuration?: Record<string, unknown>;
+  configuration: MigrationPreparationConfiguration;
   credentialId?: string;
+};
+
+export type MigrationMappingRequest = {
+  organizationId: string;
+  sourceSystem: string;
+  name: string;
+  entityType: string;
+  mapping: Record<string, string | number | boolean | null | string[]>;
 };
 
 export type MigrationCommandResult = {
@@ -50,6 +66,25 @@ export class MigrationJobClient {
       headers: {
         'idempotency-key': `cli:${createHash('sha256').update(body).digest('hex')}`,
       },
+    });
+  }
+
+  adapters(): Promise<MigrationCommandResult> {
+    return this.#request('migration-adapters');
+  }
+
+  registerFile(jobId: string, uploadArtifactId: string): Promise<MigrationCommandResult> {
+    if (!uploadArtifactId.trim()) throw new Error('uploadArtifactId is required.');
+    return this.#request(`migration-jobs/${encodeJobId(jobId)}/files`, {
+      method: 'POST',
+      body: JSON.stringify({ uploadArtifactId }),
+    });
+  }
+
+  saveMapping(request: MigrationMappingRequest): Promise<MigrationCommandResult> {
+    return this.#request('migration-mappings', {
+      method: 'POST',
+      body: JSON.stringify(request),
     });
   }
 

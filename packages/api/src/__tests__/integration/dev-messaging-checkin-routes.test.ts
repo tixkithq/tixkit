@@ -8197,6 +8197,82 @@ describe('checkout pricing tamper resistance', () => {
     return res;
   }
 
+  async function postTestCheckout(
+    principal: Principal | undefined,
+    tables: Record<string, unknown> = pricingTables({
+      events: [{ ...baseEvent, status: 'draft' }],
+    }),
+  ) {
+    const app = await setupApp(checkoutRoutes, principal as Principal, tables, {
+      pricingEngine: new PricingEngine(),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/checkout/sessions',
+      headers: {
+        'idempotency-key': `test_checkout_${Math.random()}`,
+        'x-tixkit-test-order': '1',
+      },
+      payload: {
+        eventId: 'evt_pricing',
+        buyer: { email: 'preview-test@tixkit.invalid' },
+        items: [{ ticketTypeId: 'tt_paid', quantity: 1 }],
+      },
+    });
+    await app.close();
+    return response;
+  }
+
+  it('requires authentication and events.write for draft test checkout', async () => {
+    const unauthenticated = await postTestCheckout(undefined);
+    expect(unauthenticated.statusCode).toBe(403);
+
+    const missingPermission = await postTestCheckout(makePrincipal({ scopes: ['events.read'] }));
+    expect(missingPermission.statusCode).toBe(403);
+  });
+
+  it.each([
+    ['tenant', { tenantId: 'tnt_other' }],
+    ['organization', { organizationIds: ['org_other'] }],
+    ['brand', { brandIds: ['brd_other'] }],
+    ['event', { eventIds: ['evt_other'] }],
+  ])('rejects %s scope crossover for draft test checkout', async (_scope, override) => {
+    const response = await postTestCheckout(makePrincipal(override as Partial<Principal>));
+    expect([403, 404]).toContain(response.statusCode);
+  });
+
+  it('rejects test checkout in live provider mode', async () => {
+    const previousSecret = process.env.STRIPE_SECRET_KEY;
+    const previousTestMode = process.env.PAYMENT_PROVIDER_TEST_MODE;
+    process.env.STRIPE_SECRET_KEY = 'sk_test_route_boundary';
+    delete process.env.PAYMENT_PROVIDER_TEST_MODE;
+    try {
+      const response = await postTestCheckout(makePrincipal());
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).toContain('capture/mock or explicit provider-test mode');
+    } finally {
+      if (previousSecret === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = previousSecret;
+      if (previousTestMode === undefined) delete process.env.PAYMENT_PROVIDER_TEST_MODE;
+      else process.env.PAYMENT_PROVIDER_TEST_MODE = previousTestMode;
+    }
+  });
+
+  it('creates a scoped draft test session in capture mode and persists classification', async () => {
+    const tables = pricingTables({
+      events: [{ ...baseEvent, status: 'draft' }],
+      checkout_sessions: [],
+    });
+    const response = await postTestCheckout(makePrincipal(), tables);
+    expect(response.statusCode).toBe(201);
+    expect(tables.checkout_sessions).toHaveLength(1);
+    expect(tables.checkout_sessions[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      event_id: 'evt_pricing',
+      is_test: true,
+    });
+  });
+
   it('quotes from server-side ticket, discount, tax, and fee rows', async () => {
     const tables = pricingTables();
     const res = await postPricingCheckoutSession({ discountCode: ' save25 ' }, tables);

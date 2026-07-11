@@ -570,7 +570,8 @@ async function generateExportWithWriter(
           'attendees.created_at as created_at',
         ])
         .where('attendees.tenant_id', '=', tenantId)
-        .where('orders.tenant_id', '=', tenantId);
+        .where('orders.tenant_id', '=', tenantId)
+        .where('orders.is_test', '=', false);
 
       if (eventId) {
         query = query.where('attendees.event_id', '=', eventId) as typeof query;
@@ -678,7 +679,8 @@ async function generateExportWithWriter(
           'paid_at',
           'created_at',
         ])
-        .where('tenant_id', '=', tenantId);
+        .where('tenant_id', '=', tenantId)
+        .where('is_test', '=', false);
 
       if (eventId) {
         query = query.where('event_id', '=', eventId) as typeof query;
@@ -730,7 +732,8 @@ async function generateExportWithWriter(
           'tickets.created_at as created_at',
         ])
         .where('tickets.tenant_id', '=', tenantId)
-        .where('orders.tenant_id', '=', tenantId);
+        .where('orders.tenant_id', '=', tenantId)
+        .where('orders.is_test', '=', false);
 
       if (eventId) {
         query = query.where('tickets.event_id', '=', eventId) as typeof query;
@@ -830,6 +833,7 @@ async function generateExportWithWriter(
           'created_at',
         ])
         .where('tenant_id', '=', tenantId)
+        .where('is_test', '=', false)
         .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
 
       if (eventId) {
@@ -879,6 +883,7 @@ async function generateExportWithWriter(
           'created_at',
         ])
         .where('tenant_id', '=', tenantId)
+        .where('is_test', '=', false)
         .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
 
       if (eventId) {

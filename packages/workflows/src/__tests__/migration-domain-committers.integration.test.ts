@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createDb,
+  BrandRepository,
   ImportRepository,
   OrganizationRepository,
   runMigrations,
@@ -9,7 +10,15 @@ import {
   type Database,
 } from "@tixkit/db";
 import {
+  eventbriteApiV3Fixture,
+  GenericCsvMigrationAdapter,
+  SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE,
+  SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
+  ticketTailorApiV1Fixture,
+  migrationAdapter,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
+  sortEntitiesByDependency,
+  type MigrationAdapter,
   type MigrationEntityType,
   type NormalizedMigrationEntity,
 } from "@tixkit/migration-core";
@@ -19,6 +28,7 @@ import {
 } from "../activities/migration.js";
 import { createProductionMigrationCommitters } from "../activities/migration-domain-committers.js";
 import { createRepositoryMigrationActivityService } from "../activities/migration-repository-service.js";
+import { createMigrationPreparationService } from "../activities/migration-preparation.js";
 
 const url = process.env.DATABASE_URL ?? "";
 const describeDatabase = url ? describe.sequential : describe.skip;
@@ -100,6 +110,7 @@ describeDatabase("production migration committers", () => {
   let db: Database;
   let tenantId: string;
   let organizationId: string;
+  let brandId: string;
 
   beforeAll(async () => {
     process.env.DB_DRIVER =
@@ -117,6 +128,14 @@ describeDatabase("production migration committers", () => {
         tenantId,
         name: "Migration organization",
         slug: "migration-organization",
+      })
+    ).id;
+    brandId = (
+      await new BrandRepository(db).create({
+        tenantId,
+        organizationId,
+        name: "Existing migration target brand",
+        slug: "existing-migration-target-brand",
       })
     ).id;
   });
@@ -526,4 +545,575 @@ describeDatabase("production migration committers", () => {
       (await imports.findJob(tenantId, organizationId, liveJob.id))?.status,
     ).toBe("committing");
   });
+
+  it.each([
+    {
+      sourceSystem: "generic-csv" as const,
+      configuration: {
+        documents: [
+          {
+            name: "events.csv",
+            content:
+              "external_id,brand_external_id,name,starts_at,ends_at,timezone,currency\nevent-prod,brand-existing,Production import,2027-07-10T18:00:00Z,2027-07-10T22:00:00Z,UTC,USD\n",
+          },
+        ],
+      },
+    },
+    {
+      sourceSystem: "pretix" as const,
+      configuration: SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
+    },
+    {
+      sourceSystem: "hi-events" as const,
+      configuration: SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE,
+    },
+    {
+      sourceSystem: "eventbrite" as const,
+      configuration: eventbriteApiV3Fixture,
+    },
+    {
+      sourceSystem: "ticket-tailor" as const,
+      configuration: ticketTailorApiV1Fixture,
+    },
+  ])(
+    "persists the $sourceSystem official corpus through durable production rows and resumes at the exact cursor",
+    async ({ sourceSystem, configuration }) => {
+      const adapter =
+        sourceSystem === "generic-csv"
+          ? (new GenericCsvMigrationAdapter() as MigrationAdapter<
+              unknown,
+              string
+            >)
+          : (migrationAdapter(sourceSystem) as MigrationAdapter<
+              unknown,
+              string
+            >);
+      const context = { tenantId, organizationId };
+      const discovery = await adapter.discover(configuration, context);
+      const sourceEntities: NormalizedMigrationEntity[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await adapter.extract({
+          configuration,
+          discovery,
+          cursor,
+          limit: 2,
+          context,
+        });
+        for (const row of page.rows)
+          sourceEntities.push(await adapter.normalize(row, context));
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(sourceEntities.length).toBeGreaterThan(0);
+      const entities = sortEntitiesByDependency(sourceEntities);
+      const sourceKeys = new Set(
+        sourceEntities.map((item) => `${item.entityType}:${item.externalId}`),
+      );
+
+      const repository = new ImportRepository(db);
+      const job = await repository.createJob({
+        tenantId,
+        organizationId,
+        sourceSystem,
+        adapterVersion: adapter.supportedVersions[0]!,
+        mode: "commit",
+        idempotencyKey: `production-corpus-${sourceSystem}`,
+        requestedBy: "test-user",
+      });
+      await repository.transitionJob({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        from: ["pending"],
+        to: "preparing",
+      });
+      const split = Math.max(1, Math.floor(entities.length / 2));
+      const persist = async (
+        selected: readonly NormalizedMigrationEntity[],
+        startRowNumber: number,
+        cursorKey: string,
+        completed: boolean,
+      ) =>
+        repository.persistPreparationChunk({
+          tenantId,
+          organizationId,
+          jobId: job.id,
+          startRowNumber,
+          cursorKey,
+          nextCursor: completed ? undefined : `${sourceSystem}:resume:${split}`,
+          completed,
+          rows: await Promise.all(
+            selected.map(async (normalized) => ({
+              entityType: normalized.entityType,
+              externalId: normalized.externalId,
+              sourceData: { sourcePosition: normalized.sourcePosition },
+              normalizedData: normalized,
+              issues: sourceKeys.has(
+                `${normalized.entityType}:${normalized.externalId}`,
+              )
+                ? (await adapter.validate(normalized, context)).map(
+                    ({ code, severity, message }) => ({
+                      code,
+                      severity,
+                      message,
+                    }),
+                  )
+                : [],
+            })),
+          ),
+        });
+      await persist(
+        entities.slice(0, split),
+        0,
+        `${sourceSystem}:first`,
+        false,
+      );
+      const recovered = await repository.preparationProgress(
+        tenantId,
+        organizationId,
+        job.id,
+      );
+      expect(recovered).toEqual({
+        cursor: `${sourceSystem}:resume:${split}`,
+        rowNumber: split,
+        completed: false,
+      });
+      await persist(
+        entities.slice(split),
+        recovered.rowNumber,
+        `${sourceSystem}:second`,
+        true,
+      );
+      await persist(
+        entities.slice(split),
+        recovered.rowNumber,
+        `${sourceSystem}:second`,
+        true,
+      );
+      const rows = await repository.listRows({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        limit: 500,
+      });
+      expect(rows).toHaveLength(entities.length);
+      expect(rows.every((row) => row.normalized_data !== null)).toBe(true);
+      expect(
+        (await repository.findJob(tenantId, organizationId, job.id))?.status,
+      ).toBe("prepared");
+      await repository.transitionJob({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        from: ["prepared"],
+        to: "ready",
+      });
+      const committers = createRepositoryMigrationActivityService(
+        db,
+        createProductionMigrationCommitters(db),
+      );
+      const entityKeys = new Set(
+        entities.map((item) => `${item.entityType}:${item.externalId}`),
+      );
+      for (const item of entities) {
+        for (const dependency of item.dependencies ?? []) {
+          if (
+            dependency.entityType !== "brand" ||
+            entityKeys.has(`brand:${dependency.externalId}`)
+          )
+            continue;
+          await repository.recordExternalReference({
+            tenantId,
+            organizationId,
+            sourceSystem,
+            entityType: "brand",
+            externalId: dependency.externalId,
+            tixkitId: brandId,
+            importJobId: job.id,
+            createdByJob: false,
+          });
+        }
+      }
+      const commitJob = async (jobId: string) => {
+        const scope = {
+          tenantId,
+          organizationId,
+          jobId,
+          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+        };
+        await committers.beginCommit(scope);
+        const totals = { created: 0, updated: 0, skipped: 0, conflicts: 0 };
+        for (const stage of MIGRATION_COMMIT_STAGES) {
+          let stageCursor: string | undefined;
+          for (;;) {
+            const result = await committers.processStage(scope, {
+              stage,
+              cursor: stageCursor,
+              claimOwner: `${jobId}:${stage}:${stageCursor ?? "first"}`,
+              chunkSize: 2,
+            });
+            totals.created += result.created;
+            totals.updated += result.updated;
+            totals.skipped += result.skipped;
+            totals.conflicts += result.conflicts;
+            if (result.complete) break;
+            stageCursor = result.nextCursor;
+          }
+          if (stage === "events_occurrences") {
+            const missingPools = new Map<string, string>();
+            for (const item of entities) {
+              const eventDependency = item.dependencies?.find(
+                ({ entityType }) => entityType === "event",
+              );
+              for (const dependency of item.dependencies ?? []) {
+                if (
+                  dependency.entityType === "inventory-pool" &&
+                  !entityKeys.has(`inventory-pool:${dependency.externalId}`) &&
+                  eventDependency
+                )
+                  missingPools.set(
+                    dependency.externalId,
+                    eventDependency.externalId,
+                  );
+              }
+            }
+            for (const [poolExternalId, eventExternalId] of missingPools) {
+              const existingPool = await repository.findExternalReference({
+                tenantId,
+                organizationId,
+                sourceSystem,
+                entityType: "inventory-pool",
+                externalId: poolExternalId,
+              });
+              if (existingPool) continue;
+              const eventReference = await repository.findExternalReference({
+                tenantId,
+                organizationId,
+                sourceSystem,
+                entityType: "event",
+                externalId: eventExternalId,
+              });
+              if (!eventReference)
+                throw new Error("TEST_EVENT_MAPPING_REQUIRED");
+              const poolId = `pool_${sourceSystem.replaceAll("-", "_")}_${missingPools.size}`;
+              await db
+                .insertInto("inventory_pools")
+                .values({
+                  id: poolId,
+                  event_id: eventReference.tixkit_id,
+                  name: "Existing mapped capacity",
+                  total_capacity: 10_000,
+                  reserved_count: 0,
+                  sold_count: 0,
+                  hold_ttl_seconds: 900,
+                  created_at: new Date(),
+                  updated_at: new Date(),
+                })
+                .execute();
+              await repository.recordExternalReference({
+                tenantId,
+                organizationId,
+                sourceSystem,
+                entityType: "inventory-pool",
+                externalId: poolExternalId,
+                tixkitId: poolId,
+                importJobId: jobId,
+                createdByJob: false,
+              });
+            }
+          }
+        }
+        await committers.completeCommit(scope);
+        return totals;
+      };
+      const firstCommit = await commitJob(job.id);
+      expect(firstCommit.conflicts).toBe(0);
+      expect(
+        firstCommit.created + firstCommit.updated + firstCommit.skipped,
+      ).toBe(entities.length);
+
+      const replay = await repository.createJob({
+        tenantId,
+        organizationId,
+        sourceSystem,
+        adapterVersion: adapter.supportedVersions[0]!,
+        mode: "commit",
+        idempotencyKey: `production-corpus-replay-${sourceSystem}`,
+        requestedBy: "test-user",
+      });
+      await repository.transitionJob({
+        tenantId,
+        organizationId,
+        jobId: replay.id,
+        from: ["pending"],
+        to: "preparing",
+      });
+      await repository.persistPreparationChunk({
+        tenantId,
+        organizationId,
+        jobId: replay.id,
+        startRowNumber: 0,
+        cursorKey: `${sourceSystem}:replay`,
+        completed: true,
+        rows: entities.map((normalized) => ({
+          entityType: normalized.entityType,
+          externalId: normalized.externalId,
+          sourceData: { sourcePosition: normalized.sourcePosition },
+          normalizedData: normalized,
+          issues: [],
+        })),
+      });
+      const replayRows = await repository.listRows({
+        tenantId,
+        organizationId,
+        jobId: replay.id,
+        limit: 500,
+      });
+      expect(replayRows.map(({ normalized_data }) => normalized_data)).toEqual(
+        rows.map(({ normalized_data }) => normalized_data),
+      );
+      await repository.transitionJob({
+        tenantId,
+        organizationId,
+        jobId: replay.id,
+        from: ["prepared"],
+        to: "ready",
+      });
+      const secondCommit = await commitJob(replay.id);
+      expect(secondCommit).toMatchObject({
+        created: 0,
+        updated: 0,
+        skipped: entities.length,
+        conflicts: 0,
+      });
+    },
+    30_000,
+  );
+
+  it.each([
+    {
+      sourceSystem: "pretix" as const,
+      configuration: {
+        sourceMode: "official-api" as const,
+        sourceSystem: "pretix" as const,
+        organizerSlug: "sample-organizer",
+        eventSlugs: ["sample-event"],
+      },
+      fixture: SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
+    },
+    {
+      sourceSystem: "hi-events" as const,
+      configuration: {
+        sourceMode: "official-api" as const,
+        sourceSystem: "hi-events" as const,
+        accountId: "sample-account",
+        eventIds: ["event-1"],
+      },
+      fixture: SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE,
+    },
+  ])(
+    "acquires native $sourceSystem multi-resource API pages with exact durable resume",
+    async ({ sourceSystem, configuration, fixture }) => {
+      const repository = new ImportRepository(db);
+      const credential = await repository.createCredential({
+        tenantId,
+        organizationId,
+        sourceSystem,
+        secretReference: `vault://migrations/${sourceSystem}/native-fixture`,
+        expiresAt: new Date(Date.now() + 60_000),
+        createdBy: "test-user",
+      });
+      const adapter = migrationAdapter(sourceSystem);
+      const job = await repository.createJob({
+        tenantId,
+        organizationId,
+        sourceSystem,
+        adapterVersion: adapter.supportedVersions[0]!,
+        mode: "commit",
+        idempotencyKey: `native-api-preparation-${sourceSystem}`,
+        requestedBy: "test-user",
+        configuration: { ...configuration, credentialId: credential.id },
+      });
+      const grouped = new Map<string, Record<string, unknown>[]>();
+      for (const page of fixture.pages) {
+        for (const raw of page.records as readonly unknown[]) {
+          const record = raw as {
+            resource?: string;
+            collection?: string;
+            body: Record<string, unknown>;
+          };
+          const key = String(record.resource ?? record.collection);
+          const values = grouped.get(key) ?? [];
+          values.push(structuredClone(record.body));
+          grouped.set(key, values);
+        }
+      }
+      const order = grouped.get("orders")?.[0];
+      if (order) {
+        order.payments = grouped.get("payments") ?? [];
+        order.refunds = grouped.get("refunds") ?? [];
+        if (sourceSystem === "pretix") {
+          const positions = order.positions as Array<Record<string, unknown>>;
+          for (const position of positions) delete position.checkins;
+        }
+      }
+      const requested: string[] = [];
+      const fetcher = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        const url = new URL(String(input));
+        requested.push(url.href);
+        let key: string;
+        if (sourceSystem === "pretix") {
+          if (url.pathname.endsWith('/checkinlists/7/positions/')) {
+            const checkins = grouped.get("checkins") ?? [];
+            const continuation = url.searchParams.get("continuation");
+            return new Response(
+              JSON.stringify({
+                results: continuation
+                  ? [
+                      {
+                        id: String(
+                          ((
+                            order?.positions as
+                              Array<Record<string, unknown>> | undefined
+                          )?.[0]?.id as string | number | undefined) ??
+                            "position-100",
+                        ),
+                        checkins,
+                      },
+                    ]
+                  : [{ id: "position-empty", checkins: [] }],
+                ...(!continuation
+                  ? { pagination: { continuation: "checkin-position-page-2" } }
+                  : {}),
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          }
+          if (url.pathname.endsWith('/checkinlists/')) {
+            return new Response(
+              JSON.stringify({ results: [{ id: 7, name: "Default" }] }),
+              {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          const match = /\/(quotas|items|questions|vouchers|orders)\//u.exec(
+            url.pathname,
+          );
+          key =
+            match?.[1] ??
+            (url.pathname.endsWith("/events/") ? "events" : "organizers");
+        } else {
+          const match =
+            /\/(capacity-assignments|products|questions|promo-codes|orders|check-ins)$/u.exec(
+              url.pathname,
+            );
+          key =
+            match?.[1] ??
+            (url.pathname === "/api/account"
+              ? "accounts"
+              : url.pathname === "/api/venues"
+                ? "venues"
+                : "events");
+        }
+        const bodies = grouped.get(key) ?? [];
+        const continuation = url.searchParams.get("continuation");
+        const paginate =
+          (key === "items" || key === "products") && bodies.length > 1;
+        const results = paginate
+          ? continuation === "native-page-2"
+            ? bodies.slice(1)
+            : bodies.slice(0, 1)
+          : bodies;
+        return new Response(
+          JSON.stringify({
+            results,
+            ...(paginate && !continuation
+              ? { pagination: { continuation: "native-page-2" } }
+              : {}),
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      });
+      const runtime = {
+        fetch: fetcher as typeof fetch,
+        resolveHost: vi.fn(async () => [
+          { address: "8.8.8.8", family: 4 },
+        ]) as never,
+        signal: new AbortController().signal,
+        heartbeat: vi.fn(),
+        cursorEncryptionKey: Buffer.alloc(32, 7).toString("base64"),
+      };
+      const resolver = {
+        resolve: vi.fn(async () => ({
+          material: "ephemeral-native-fixture-token",
+          expiresAt: new Date(Date.now() + 30_000).toISOString(),
+        })),
+      };
+      const firstWorker = createMigrationPreparationService(
+        db,
+        resolver,
+        runtime,
+      );
+      const first = await firstWorker.prepare({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        chunkSize: 100,
+      });
+      expect(first.completed).toBe(false);
+      const recoveredWorker = createMigrationPreparationService(
+        db,
+        resolver,
+        runtime,
+      );
+      let result = await recoveredWorker.prepare({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        chunkSize: 100,
+      });
+      while (!result.completed) {
+        result = await recoveredWorker.prepare({
+          tenantId,
+          organizationId,
+          jobId: job.id,
+          chunkSize: 100,
+        });
+      }
+      const rows = await repository.listRows({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        limit: 500,
+      });
+      expect(rows).toHaveLength(18);
+      const types = new Set(rows.map(({ entity_type }) => entity_type));
+      expect(types.has("historical-payment")).toBe(true);
+      expect(types.has("historical-refund")).toBe(true);
+      expect(types.has("check-in")).toBe(true);
+      expect(
+        requested.some((url) => url.includes("continuation=native-page-2")),
+      ).toBe(true);
+      if (sourceSystem === "pretix") {
+        expect(
+          requested.some((url) => url.includes("/checkinlists/7/positions/")),
+        ).toBe(true);
+        expect(
+          requested.some(
+            (url) =>
+              url.includes("/checkinlists/7/positions/") &&
+              url.includes("continuation=checkin-position-page-2"),
+          ),
+        ).toBe(true);
+      }
+      expect(
+        (await repository.preparationProgress(tenantId, organizationId, job.id))
+          .completed,
+      ).toBe(true);
+      expect(resolver.resolve).toHaveBeenCalled();
+    },
+    30_000,
+  );
 });

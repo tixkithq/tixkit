@@ -200,12 +200,17 @@ export interface EventTable {
   starts_at: Timestamp;
   ends_at: Timestamp | null;
   venue: string | null;
+  venue_id: string | null;
   visibility: string;
   seo: string;
   capacity: number | null;
   minimum_age: number | null;
   cover_image_url: string | null;
   external_url: string | null;
+  version: Generated<number>;
+  last_setup_section: string | null;
+  cover_image_alt: string | null;
+  seo_use_cover_image: Generated<boolean>;
   waitlist_auto_offer_enabled: Generated<boolean>;
   waitlist_offer_ttl_minutes: Generated<number>;
   resale_enabled: Generated<boolean>;
@@ -238,6 +243,7 @@ export interface EventOccurrenceTable {
   ends_at: Timestamp;
   timezone: string;
   venue: string | null;
+  venue_id: string | null;
   capacity: number | null;
   sort_order: number;
   status: string;
@@ -312,6 +318,7 @@ export interface CheckoutSessionTable {
   expires_at: Timestamp;
   idempotency_key: string;
   client_token: string;
+  is_test: Generated<boolean>;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -342,6 +349,7 @@ export interface OrderTable {
   sales_channel: Generated<SalesChannel>;
   operator_id: string | null;
   tender_type: BoxOfficeTenderType | null;
+  is_test: Generated<boolean>;
   paid_at: Timestamp | null;
   refunded_at: Timestamp | null;
   cancelled_at: Timestamp | null;
@@ -424,7 +432,7 @@ export interface InvoiceTable {
 export interface AttendeeTable {
   id: string;
   tenant_id: string;
-  order_id: string;
+  order_id: string | null;
   event_id: string;
   event_occurrence_id: string | null;
   ticket_type_id: string;
@@ -534,6 +542,19 @@ export interface UploadArtifactTable {
   expires_at: Timestamp;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export interface EventReadinessAcknowledgementTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string;
+  step_id: string;
+  step_version: number;
+  subject_fingerprint: string;
+  actor_id: string;
+  acknowledged_at: Timestamp;
 }
 
 export interface WidgetImpressionTable {
@@ -1419,6 +1440,8 @@ export interface ImportJobTable {
   idempotency_key: string;
   requested_by: string;
   configuration: string | null;
+  preparation_cursor: string | null;
+  preparation_row_number: number;
   summary: string | null;
   error_code: string | null;
   error_message: string | null;
@@ -1620,6 +1643,7 @@ export interface DB {
   audit_logs: AuditLogTable;
   privacy_requests: PrivacyRequestTable;
   events: EventTable;
+  event_readiness_acknowledgements: EventReadinessAcknowledgementTable;
   event_pages: EventPageTable;
   event_occurrences: EventOccurrenceTable;
   ticket_types: TicketTypeTable;

@@ -42,7 +42,11 @@ export {
   PrivacyRequestRepository,
   PermissionGrantRepository,
 } from './identity.js';
-export { DiscountCodeRepository, TaxRuleRepository, FeeRuleRepository } from './pricing.js';
+export {
+  DiscountCodeRepository,
+  TaxRuleRepository,
+  FeeRuleRepository,
+} from './pricing.js';
 export {
   WebhookEndpointRepository,
   WebhookEventRepository,
@@ -67,5 +71,14 @@ export {
 
 export { ShortLinkRepository } from './short-links.js';
 export { ContentRepository } from './content.js';
+export {
+  EventReadinessAcknowledgementRepository,
+  type ReadinessScope,
+} from './readiness.js';
 export { executeTableQuery, assertServerField } from './table-query.js';
 export type { TableQueryConfig } from './table-query.js';
+export {
+  ImportRepository,
+  type ImportJobStatus,
+  type RollbackEligibility,
+} from './import.js';

@@ -38,7 +38,7 @@ export type TableQueryConfig<T> = {
   /** Tenant ID for scope isolation. */
   tenantId: string;
   /** Additional scope filters applied BEFORE everything else. */
-  scope?: Record<string, string | string[] | undefined>;
+  scope?: Record<string, string | boolean | string[] | undefined>;
   /** Serialize raw DB rows into the response type. */
   serialize: (row: Record<string, unknown>) => T;
   /** Explicit DB columns needed by the serializer. Defaults to schema columns. */

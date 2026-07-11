@@ -1,5 +1,49 @@
 # `@tixkit/widget`
 
-Browser custom elements implementing Tixkit Embed Contract v1. Load the module once, then use `tixkit-widget` or `tixkit-button`. Public types, schemas, generation, lifecycle names, and validation are re-exported from `@tixkit/embed-core`.
+## Purpose
 
-See `docs/widget-embed-guide.md` and `docs/embed-contract-v1.md` in the Tixkit repository for the complete host contract and compatibility policy.
+Browser custom elements implementing Embed Contract v1 as `tixkit-widget` and `tixkit-button`.
+
+## Consumers
+
+HTML sites, CMS hosts, and framework SDKs embedding Tixkit checkout.
+
+## Status
+
+Public browser package; its custom-element and lifecycle contract is stable within Embed Contract v1.
+
+## Installation
+
+`bun add @tixkit/widget`, then import the module once in the browser.
+
+## Example
+
+`import '@tixkit/widget'; document.body.innerHTML = '<tixkit-widget event-id="evt_public"></tixkit-widget>';`
+
+## Public exports
+
+`TixkitWidget`, `TixkitButton`, and all `@tixkit/embed-core` contract exports; package metadata subpath.
+
+## Runtime
+
+Modern browsers with Custom Elements, DOM, and `postMessage`; build tooling uses Bun/TypeScript.
+
+## Configuration
+
+Element attributes configure event, mode, theme, and trusted checkout origin; no API key is accepted.
+
+## Security
+
+Restrict message origins, deploy a deliberate CSP, and never expose server API keys or scanner secrets in widget markup.
+
+## Validation
+
+`bun run --filter @tixkit/widget typecheck && bun run --filter @tixkit/widget lint && bun run --filter @tixkit/widget test:unit && bun run --filter @tixkit/widget build`
+
+## Compatibility
+
+Widget releases must stay compatible with `@tixkit/embed-core` contract major 1.
+
+## Related guides
+
+[Widget embed guide](../../docs/public/developers/widget/embedding.mdx)

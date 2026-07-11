@@ -6,6 +6,47 @@ import {
 } from '../migration-jobs.js';
 
 describe('MigrationJobClient', () => {
+  it('lists the ordered importer catalog', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ items: [{ id: 'generic-csv' }] }), { status: 200 }),
+      );
+    const client = new MigrationJobClient({
+      apiBaseUrl: 'https://api.example.test/v1/',
+      apiKey: 'test',
+      fetch,
+    });
+    await expect(client.adapters()).resolves.toMatchObject({ ok: true, status: 200 });
+    expect(String(fetch.mock.calls[0]![0])).toBe('https://api.example.test/v1/migration-adapters');
+  });
+
+  it('registers scanned upload artifacts and saved mappings without URL credentials', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ id: 'resource_1' }), { status: 201 }),
+      );
+    const client = new MigrationJobClient({
+      apiBaseUrl: 'https://api.example.test/v1/',
+      apiKey: 'test',
+      fetch,
+    });
+    await client.registerFile('imp_1', 'upl_1');
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      'https://api.example.test/v1/migration-jobs/imp_1/files',
+    );
+    expect(fetch.mock.calls[0]![1]?.body).toBe(JSON.stringify({ uploadArtifactId: 'upl_1' }));
+    await client.saveMapping({
+      organizationId: 'org_1',
+      sourceSystem: 'generic-csv',
+      name: 'events-v1',
+      entityType: 'event',
+      mapping: { source_id: 'externalId' },
+    });
+    expect(String(fetch.mock.calls[1]![0])).toBe('https://api.example.test/v1/migration-mappings');
+  });
+
   it('sends scoped API requests without placing credentials in the URL', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
       new Response(JSON.stringify({ id: 'imp_1', status: 'created' }), {
@@ -23,7 +64,12 @@ describe('MigrationJobClient', () => {
       client.create({
         organizationId: 'org_1',
         sourceSystem: 'generic-csv',
-        adapterVersion: '1.0.0',
+        adapterVersion: 'rfc4180-v1',
+        configuration: {
+          sourceMode: 'official-export',
+          sourceSystem: 'generic-csv',
+          artifactIds: ['upl_12345678'],
+        },
       }),
     ).resolves.toMatchObject({ ok: true, status: 201 });
     const [url, init] = fetch.mock.calls[0]!;

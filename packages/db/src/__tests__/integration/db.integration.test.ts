@@ -21,6 +21,7 @@ import {
   TicketListingRepository,
   TenantRepository,
   TicketTypeRepository,
+  EventReadinessAcknowledgementRepository,
 } from '../../repositories/index.js';
 
 type DriverCase = {
@@ -1101,5 +1102,76 @@ describe.sequential.each(driverCases)('database integration: $driver', ({ driver
         status: 'pending',
       },
     ]);
+  });
+
+  it('round-trips and atomically replaces scoped readiness acknowledgements', async () => {
+    const { tenant, organization, brand, event } = await createCatalog(db);
+    const repository = new EventReadinessAcknowledgementRepository(db);
+    const scope = {
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      eventId: event.id,
+    };
+
+    const acknowledgementsToWrite = [
+      {
+        stepId: 'preview_review',
+        stepVersion: 1,
+        subjectFingerprint: 'a'.repeat(64),
+        actorId: 'usr_one',
+      } as const,
+      {
+        stepId: 'preview_review',
+        stepVersion: 1,
+        subjectFingerprint: 'b'.repeat(64),
+        actorId: 'usr_two',
+      } as const,
+    ];
+    if (driver === 'mssql') {
+      for (const acknowledgement of acknowledgementsToWrite) {
+        await repository.acknowledge(scope, acknowledgement);
+      }
+    } else {
+      await Promise.all(
+        acknowledgementsToWrite.map((acknowledgement) =>
+          repository.acknowledge(scope, acknowledgement),
+        ),
+      );
+    }
+
+    const acknowledgements = await repository.findByEvent(scope);
+    expect(acknowledgements).toHaveLength(1);
+    expect(['a'.repeat(64), 'b'.repeat(64)]).toContain(acknowledgements[0]?.subject_fingerprint);
+    expect(await repository.delete(scope, 'preview_review')).toBe(true);
+    expect(await repository.findByEvent(scope)).toEqual([]);
+  });
+
+  it('rejects an acknowledgement whose hierarchy does not match the event scope', async () => {
+    const { tenant, organization, event } = await createCatalog(db);
+    const secondBrand = await new BrandRepository(db).create({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      name: 'Wrong readiness brand',
+      slug: `wrong-readiness-${event.id.slice(-8)}`,
+    });
+    const repository = new EventReadinessAcknowledgementRepository(db);
+
+    await expect(
+      repository.acknowledge(
+        {
+          tenantId: tenant.id,
+          organizationId: organization.id,
+          brandId: secondBrand.id,
+          eventId: event.id,
+        },
+        {
+          stepId: 'checkout_consent',
+          stepVersion: 1,
+          subjectFingerprint: 'c'.repeat(64),
+          actorId: 'usr_scope',
+        },
+      ),
+    ).rejects.toThrow();
   });
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { validateEnvFile, formatValidationResult } from './setup-check.js';
 import { runDevWebhooks, formatWebhookResult } from './dev-webhooks.js';
 import { seedSampleData } from './seed-sample-data.js';
@@ -12,6 +13,7 @@ import {
   requireMigrationConfirmation,
   type MigrationJobAction,
 } from './migration-jobs.js';
+import { previewCsvFile } from './migration-csv.js';
 import { seedEmailTemplateDefaults } from './seed-email-templates.js';
 import { runQuickstart } from './quickstart.js';
 import {
@@ -47,6 +49,11 @@ function help(): string {
     '  sandbox:reset        Reset an isolated sandbox DB and rotate its 24-hour credential',
     '  sandbox:initialize   Mark a migrated database as an authorized sandbox reset target',
     '  migration:create     Create a durable migration job from a JSON request',
+    '  migration:adapters   List supported importers, versions, mappings, and known losses',
+    '  migration:file       Register a clean migration_import upload artifact on a job',
+    '  migration:mapping    Save a scoped importer mapping from a JSON request',
+    '  migration:csv-preview  Auto-detect and preview a Generic CSV document locally',
+    '  migration:prepare    Start durable source acquisition and normalization',
     '  migration:dry-run    Validate and plan a migration without domain writes',
     '  migration:status     Read migration job state and progress',
     '  migration:report     Download the current validation/commit report as JSON',
@@ -314,6 +321,11 @@ async function main(): Promise<void> {
     }
 
     case 'migration:create':
+    case 'migration:adapters':
+    case 'migration:file':
+    case 'migration:mapping':
+    case 'migration:csv-preview':
+    case 'migration:prepare':
     case 'migration:dry-run':
     case 'migration:status':
     case 'migration:report':
@@ -329,9 +341,29 @@ async function main(): Promise<void> {
         '--api-url',
         process.env.TIXKIT_API_URL ?? 'http://localhost:4000',
       );
+      if (command === 'migration:csv-preview') {
+        const path = parseArg('--file', '');
+        if (!path) throw new Error('migration:csv-preview requires --file <path>.');
+        const preview = await previewCsvFile({
+          path: await resolveRepoRelativePath(path),
+          entityType: parseArg('--entity-type', '') || undefined,
+          defaultCurrency: parseArg('--currency', '') || undefined,
+          defaultTimezone: parseArg('--timezone', '') || undefined,
+        });
+        console.log(JSON.stringify(preview, null, 2));
+        break;
+      }
       const client = new MigrationJobClient({ apiBaseUrl, apiKey });
       let result;
-      if (command === 'migration:create') {
+      if (command === 'migration:adapters') {
+        result = await client.adapters();
+      } else if (command === 'migration:mapping') {
+        const requestFile = parseArg('--request-file', '');
+        if (!requestFile) throw new Error('migration:mapping requires --request-file <path>.');
+        result = await client.saveMapping(
+          JSON.parse(await readFile(await resolveRepoRelativePath(requestFile), 'utf8')),
+        );
+      } else if (command === 'migration:create') {
         const requestFile = parseArg('--request-file', '');
         if (!requestFile) throw new Error('migration:create requires --request-file <path>.');
         result = await client.create(
@@ -342,7 +374,9 @@ async function main(): Promise<void> {
         if (!jobId || jobId.startsWith('-')) {
           throw new Error(`Usage: tixkit ${command} <jobId> [options]`);
         }
-        if (command === 'migration:status') result = await client.get(jobId);
+        if (command === 'migration:file') {
+          result = await client.registerFile(jobId, parseArg('--upload-artifact-id', ''));
+        } else if (command === 'migration:status') result = await client.get(jobId);
         else if (command === 'migration:report') result = await client.report(jobId);
         else if (command === 'migration:rollback-assessment') {
           result = await client.rollbackAssessment(jobId);

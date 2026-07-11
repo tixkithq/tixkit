@@ -342,6 +342,7 @@ const { finalizeOrderActivity, releaseHoldActivity } = checkoutActivities;
 describe('createPaymentIntentActivity capture mode', () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalStripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const originalRuntimeMode = process.env.TIXKIT_RUNTIME_MODE;
 
   beforeEach(() => {
     dbState.tables = {};
@@ -354,12 +355,15 @@ describe('createPaymentIntentActivity capture mode', () => {
     stripeMock.refundsCreate.mockClear();
     seedCheckout({ holdExpiresAt: new Date(Date.now() + 60_000) });
     delete process.env.STRIPE_SECRET_KEY;
+    delete process.env.TIXKIT_RUNTIME_MODE;
     process.env.NODE_ENV = 'development';
   });
 
   afterEach(() => {
     if (originalStripeSecretKey === undefined) delete process.env.STRIPE_SECRET_KEY;
     else process.env.STRIPE_SECRET_KEY = originalStripeSecretKey;
+    if (originalRuntimeMode === undefined) delete process.env.TIXKIT_RUNTIME_MODE;
+    else process.env.TIXKIT_RUNTIME_MODE = originalRuntimeMode;
     if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = originalNodeEnv;
   });
@@ -395,6 +399,20 @@ describe('createPaymentIntentActivity capture mode', () => {
     });
     expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBe('pi_1');
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('pending_payment');
+  });
+
+  it('forces capture in sandbox mode even when Stripe credentials are present', async () => {
+    process.env.TIXKIT_RUNTIME_MODE = 'sandbox';
+    process.env.STRIPE_SECRET_KEY = 'sk_live_must_not_be_called';
+    const result = await checkoutActivities.createPaymentIntentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      amountCents: 2500,
+      currency: 'USD',
+    });
+    expect(result).toMatchObject({ ok: true, value: { provider: 'stripe_capture' } });
+    expect(stripeMock.paymentIntentsCreate).not.toHaveBeenCalled();
   });
 
   it('reuses an existing local payment intent row after a partial commit replay', async () => {
@@ -660,6 +678,23 @@ describe('finalizeOrderActivity inventory holds', () => {
     expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(1);
     expect(dbState.tables.checkout_sessions.cs_1.status).toBe('completed');
     expect(dbState.locks).toEqual(['inventory_pools', 'checkout_holds']);
+  });
+
+  it('releases test holds without changing production inventory counts', async () => {
+    dbState.tables.checkout_sessions.cs_1.is_test = true;
+    dbState.tables.events.evt_1.status = 'draft';
+
+    const result = await finalizeOrderActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      isTest: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.tables.checkout_holds.hld_1.status).toBe('released');
+    expect(dbState.tables.inventory_pools.pool_1.sold_count).toBe(0);
+    expect(dbState.tables.inventory_pools.pool_1.reserved_count).toBe(0);
+    expect(Object.values(dbState.tables.orders)[0]).toMatchObject({ is_test: true });
   });
 
   it('rejects non-published events and releases pending checkout resources', async () => {
@@ -1346,6 +1381,8 @@ describe('finalizeOrderActivity promo code redemption', () => {
       ord_existing: {
         id: 'ord_existing',
         checkout_session_id: 'cs_1',
+        tenant_id: 'tnt_1',
+        is_test: false,
       },
     };
 
@@ -1509,6 +1546,7 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
         brand_id: 'brd_1',
         event_id: 'evt_1',
         status: 'open',
+        is_test: false,
         currency: 'USD',
         quote: JSON.stringify({
           subtotalCents: 1000,
@@ -1545,6 +1583,7 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
     events: {
       evt_1: {
         id: 'evt_1',
+        tenant_id: 'tnt_1',
         organization_id: 'org_1',
         status: 'published',
       },
@@ -1563,6 +1602,7 @@ function seedCheckout(input: { holdExpiresAt: Date }) {
     inventory_pools: {
       pool_1: {
         id: 'pool_1',
+        reserved_count: 0,
         sold_count: 0,
       },
     },
@@ -1691,6 +1731,7 @@ function seedCheckoutWithDiscount(input: {
         brand_id: 'brd_1',
         event_id: 'evt_1',
         status: 'pending',
+        is_test: false,
         currency: 'USD',
         quote: JSON.stringify({
           subtotalCents: 1000,
@@ -1728,6 +1769,7 @@ function seedCheckoutWithDiscount(input: {
     events: {
       evt_1: {
         id: 'evt_1',
+        tenant_id: 'tnt_1',
         organization_id: 'org_1',
         status: 'published',
       },

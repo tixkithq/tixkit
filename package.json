@@ -19,14 +19,33 @@
     "dev:checkout": "bun run --env-file=.env.local --filter @tixkit/checkout dev -- -p 3000",
     "dev:admin": "bun run --env-file=.env.local --filter @tixkit/admin-dashboard dev -- -p 3001",
     "dev:worker": "bun run --env-file=.env.local --filter @tixkit/workflows dev",
-    "dev:all": "sh -c 'bun run dev:api & bun run dev:worker & bun run dev:checkout & bun run dev:admin & wait'",
+    "dev:all": "sh -c 'bun run dev:api & bun run dev:worker & bun run dev:checkout & bun run dev:admin & bun run dev:docs & wait'",
     "quickstart": "bun run --env-file=.env.local --filter tixkit quickstart",
     "seed:sample-data": "bun run --env-file=.env.local --filter tixkit seed:sample-data",
     "init": "bun run --filter tixkit init",
     "embed:generate": "bun run --filter tixkit embed:generate",
+    "sync:widget-public": "node scripts/sync-widget-public.mjs",
+    "sync:embed-fixtures": "bun scripts/generate-embed-fixtures.mjs",
     "setup:check": "bun run --env-file=.env.local --filter tixkit setup:check",
     "dev:webhooks": "bun run --env-file=.env.local --filter tixkit dev:webhooks",
-    "export:oss": "node scripts/export-oss.mjs",
+    "dev:docs": "bun run --filter @tixkit/docs dev",
+    "docs:build": "bun run --filter @tixkit/docs build",
+    "docs:test:e2e": "playwright test --config playwright.docs.config.ts",
+    "docs:frontmatter": "node scripts/docs/check-frontmatter.mjs",
+    "docs:navigation": "node scripts/docs/check-navigation.mjs",
+    "docs:links": "node scripts/docs/check-links.mjs",
+    "docs:redirects": "node scripts/docs/check-redirects.mjs",
+    "docs:performance": "node scripts/docs/check-performance.mjs",
+    "docs:readmes": "node scripts/docs/check-package-readmes.mjs",
+    "docs:examples": "node scripts/docs/check-code-examples.mjs",
+    "docs:dashboard-links": "node scripts/docs/validate-dashboard-doc-links.mjs",
+    "docs:legacy-links": "node scripts/docs/check-legacy-references.mjs",
+    "docs:reference": "bun scripts/docs/generate-openapi-reference.mjs --check",
+    "sdk:parity": "node scripts/sdk-parity-matrix.mjs",
+    "sdk:demos:check": "node scripts/sdk-demo-matrix.mjs --check",
+    "sdk:demos:smoke": "node scripts/sdk-demo-matrix.mjs",
+    "docs:check": "bun run --filter @tixkit/docs-core build && bun run docs:frontmatter && bun run docs:navigation && bun run docs:links && bun run docs:redirects && bun run docs:readmes && bun run docs:examples && bun run docs:dashboard-links && bun run docs:legacy-links && bun run docs:reference && bun run docs:performance",
+    "export:oss": "node scripts/export-oss.mjs --validate-build",
     "guardrails:public-remote": "node scripts/public-remote-guardrails.mjs",
     "validate:completion-backlog": "node scripts/validate-completion-backlog.mjs",
     "validate:final-evidence-checklist": "node scripts/validate-final-evidence-checklist.mjs",
@@ -35,13 +54,15 @@
     "validate:typescript-version": "node scripts/validate-typescript-version.mjs",
     "validate:user-story-matrix": "node scripts/validate-user-story-matrix.mjs",
     "validate:validation-runbook": "node scripts/validate-validation-runbook.mjs",
+    "validate:widget-public": "node scripts/sync-widget-public.mjs --check",
+    "validate:embed-fixtures": "bun scripts/generate-embed-fixtures.mjs --check",
     "format": "oxfmt . --write",
     "format:check": "oxfmt . --check",
     "audit": "bun audit",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "bun run test:unit && bun run test:integration",
-    "test:scripts": "node --test scripts/__tests__/*.test.mjs && bun run validate:typescript-version && bun run validate:completion-backlog && bun run validate:final-evidence-checklist && bun run validate:high-care-ledger && bun run validate:public-remote-guardrails && bun run validate:user-story-matrix && bun run validate:validation-runbook && node scripts/test-contract-test-consumers.mjs",
+    "test:scripts": "bun run --filter @tixkit/docs-core build && node --test scripts/__tests__/*.test.mjs && bun run validate:typescript-version && bun run validate:completion-backlog && bun run validate:final-evidence-checklist && bun run validate:high-care-ledger && bun run validate:public-remote-guardrails && bun run validate:user-story-matrix && bun run validate:validation-runbook && bun run validate:widget-public && bun run validate:embed-fixtures && node scripts/test-contract-test-consumers.mjs",
     "test:unit": "turbo run test:unit --concurrency=2 && bun run test:scripts",
     "test:integration": "turbo run test:integration --concurrency=1",
     "test:integration:serial": "turbo run test:integration --concurrency=1",
@@ -78,11 +99,16 @@
     "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
+    "esbuild": "^0.28.0",
     "oxfmt": "0.58.0",
     "oxlint": "^1.73.0",
+    "remark-frontmatter": "5.0.0",
+    "remark-gfm": "4.0.1",
+    "remark-mdx-frontmatter": "5.2.0",
     "turbo": "^2.10.4",
     "typescript": "7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "2.9.0"
   },
   "engines": {
     "node": ">=20.0.0",
@@ -110,5 +136,19 @@
   "patchedDependencies": {
     "@react-email/editor@1.6.0": "patches/@react-email%2Feditor@1.6.0.patch",
     "next@16.2.10": "patches/next@16.2.10.patch"
-  }
+  },
+  "main": "eslint.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nkgotcode/tixkit.git"
+  },
+  "keywords": [],
+  "author": "",
+  "bugs": {
+    "url": "https://github.com/nkgotcode/tixkit/issues"
+  },
+  "homepage": "https://github.com/nkgotcode/tixkit#readme"
 }

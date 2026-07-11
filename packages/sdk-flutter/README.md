@@ -1,44 +1,49 @@
-# Tixkit Flutter SDK
+# `tixkit_flutter`
 
-The Flutter SDK mirrors the React Native scanner contract:
+## Purpose
 
-- hosted checkout handoff URL generation
-- online scanner-device check-in
-- signed offline manifest download and HMAC verification
-- offline scan persistence and sync with conflict callbacks
-- adapter-based camera scanner widget
-- ticket display and scanner status widgets
+Flutter SDK for ticket display, hosted checkout, scanner check-in, and signed offline synchronization.
 
-The package keeps camera choice app-owned. Pass a `cameraBuilder` that adapts `mobile_scanner`, `camera`, or another QR scanner package and calls the supplied `onPayload` callback when a QR payload is detected.
+## Consumers
 
-```dart
-final client = TixkitScannerClient(
-  deviceId: 'sd_public_123',
-  deviceSecret: 'scanner-secret',
-  manifestSigningKey: 'offline-manifest-signing-key',
-  storage: TixkitMemoryScannerStorage(),
-);
+Flutter 3.22+ mobile applications.
 
-TixkitCameraScanner(
-  client: client,
-  checkInListId: 'cil_123',
-  mode: TixkitScannerMode.auto,
-  cameraBuilder: (context, onPayload) {
-    return MyQrScanner(onQrCode: onPayload);
-  },
-  onResult: (result) {
-    debugPrint(result.message);
-  },
-);
-```
+## Status
 
-Run locally with a Flutter toolchain:
+Supported package version 0.1.0, pinned to API version `2026-01-01`.
 
-```sh
-cd packages/sdk-flutter
-flutter pub get
-flutter test
-cd example
-flutter pub get
-flutter build web --release
-```
+## Installation
+
+Add `tixkit_flutter` to `pubspec.yaml` from the released package or local path.
+
+## Example
+
+`final client = TixkitScannerClient(deviceId: id, deviceSecret: secret);`
+
+## Public exports
+
+API/scanner clients, models, checkout URL helpers, offline storage/sync contracts, and ticket/scanner widgets from `tixkit_flutter.dart`.
+
+## Runtime
+
+Dart `>=3.4.0 <4.0.0` and Flutter `>=3.22.0`.
+
+## Configuration
+
+Pass API base URL, device ID, and signing material explicitly; the application chooses its camera adapter and secure storage.
+
+## Security
+
+Use platform secure storage for scanner secrets; verify offline manifests and exclude secrets from diagnostics.
+
+## Validation
+
+`cd packages/sdk-flutter && flutter analyze && flutter test`
+
+## Compatibility
+
+Flutter/Dart constraints in `pubspec.yaml` and API version `2026-01-01` define compatibility.
+
+## Related guides
+
+[Flutter SDK guide](../../docs/public/sdks/flutter.mdx)

@@ -142,6 +142,9 @@ describe('validateEnvFile', () => {
       for (const mode of rule.requiredFor) {
         expect(['local', 'provider', 'production']).toContain(mode);
       }
+      if (rule.guide) {
+        expect(rule.guide).toMatch(/^docs\/public\/.+\.mdx$/);
+      }
     }
   });
 });

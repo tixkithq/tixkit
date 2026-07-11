@@ -1,23 +1,49 @@
-# Tixkit Android SDK
+# `sdk-android`
 
-The Kotlin Android SDK mirrors the React Native, Flutter, and iOS scanner contract:
+## Purpose
 
-- hosted checkout handoff URL generation
-- scanner-device check-in helpers for online and offline scans
-- native ticket and scanner-status display views
-- HMAC-verified offline manifest support
-- offline scan persistence and sync conflict callbacks
-- Android Keystore-backed SharedPreferences storage for scanner credentials
-- adapter-style scanner controller for app-owned camera/QR readers
-- Maven publication metadata for `com.tixkit:tixkit-android`
+Kotlin Android SDK for hosted checkout handoff, ticket/scanner UI, online check-in, and signed offline synchronization.
 
-Run locally with the Gradle wrapper:
+## Consumers
 
-```sh
-cd packages/sdk-android
-./gradlew build test
-./gradlew :example:testDebugUnitTest
-```
+Android applications integrating Tixkit attendee or scanner experiences.
 
-The example app renders the checkout handoff URL and runs an offline scanner
-happy-path smoke through `TixkitExampleSmoke`.
+## Status
+
+Supported source package with Maven coordinates `com.tixkit:tixkit-android`; API version is `2026-01-01`.
+
+## Installation
+
+Use the repository Gradle build or the published Maven coordinate for a released version.
+
+## Example
+
+`val client = TixkitScannerClient(deviceId, deviceSecret, baseUrl)`
+
+## Public exports
+
+Kotlin API client and models, scanner controller, encrypted credential storage, offline manifest/sync helpers, and Compose views.
+
+## Runtime
+
+Android API/toolchain levels declared in `sdk/build.gradle.kts`; Kotlin 2.1.20 build.
+
+## Configuration
+
+Pass API base URL and scanner identifiers explicitly; credential storage uses Android Keystore-backed preferences.
+
+## Security
+
+Scanner device secrets belong in Keystore-backed storage and must never enter intents, logs, analytics, or screenshots.
+
+## Validation
+
+`cd packages/sdk-android && ./gradlew build test`
+
+## Compatibility
+
+Android SDK API version `2026-01-01`; Maven coordinates and public Kotlin signatures define compatibility.
+
+## Related guides
+
+[Android SDK guide](../../docs/public/sdks/android.mdx)

@@ -25,6 +25,18 @@
       "appDir": "apps/admin-dashboard",
       "route": "/",
       "maxBytes": 900000
+    },
+    {
+      "label": "documentation guide first-load JS",
+      "appDir": "apps/docs",
+      "route": "/[...slug]",
+      "maxBytes": 550000
+    },
+    {
+      "label": "generated API reference first-load JS",
+      "appDir": "apps/docs",
+      "route": "/[...slug]",
+      "maxBytes": 550000
     }
   ]
 }

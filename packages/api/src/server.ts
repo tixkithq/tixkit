@@ -1,11 +1,17 @@
 import { buildApp } from './app.js';
 import { config } from './config/index.js';
 import { buildStartupFailureMessage } from './config/startup-diagnostics.js';
+import { assertSandboxRuntimeBinding } from '@tixkit/db';
 
 async function start(): Promise<void> {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
   try {
     app = await buildApp();
+    await assertSandboxRuntimeBinding(app.context.db, {
+      runtimeMode: process.env.TIXKIT_RUNTIME_MODE,
+      epoch: process.env.TIXKIT_SANDBOX_EPOCH,
+      taskQueues: [config.temporalTaskQueue],
+    });
     await app.listen({ port: config.port, host: '0.0.0.0' });
     app.log.info(`Tixkit API server running on port ${config.port}`);
   } catch (err) {

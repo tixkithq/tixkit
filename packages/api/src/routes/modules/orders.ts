@@ -314,7 +314,9 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Build scope: tenant + principal org/brand/event restrictions + explicit org/brand
-    const scope: Record<string, string | string[]> = {};
+    const scope: Record<string, string | boolean | string[]> = {
+      is_test: false,
+    };
     if (organizationId) {
       scope.organization_id = organizationId;
     } else if (principal.type !== 'system') {

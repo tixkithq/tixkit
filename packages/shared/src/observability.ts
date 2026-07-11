@@ -5,10 +5,10 @@ import {
   trace,
   type Span,
   type SpanAttributes,
-} from '@opentelemetry/api';
-import type { Resource } from '@opentelemetry/resources';
-import type { NodeSDK } from '@opentelemetry/sdk-node';
-import type { SpanExporter } from '@opentelemetry/sdk-trace-base';
+} from "@opentelemetry/api";
+import type { Resource } from "@opentelemetry/resources";
+import type { NodeSDK } from "@opentelemetry/sdk-node";
+import type { SpanExporter } from "@opentelemetry/sdk-trace-base";
 import {
   collectDefaultMetrics,
   Counter,
@@ -16,9 +16,9 @@ import {
   Histogram,
   Pushgateway,
   Registry,
-} from 'prom-client';
+} from "prom-client";
 
-const REDACTED = '[REDACTED]';
+const REDACTED = "[REDACTED]";
 const SENSITIVE_KEY_PATTERN =
   /(authorization|cookie|password|secret|token|api[_-]?key|client[_-]?secret|signature|email|phone|card|buyer|attendee)/i;
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
@@ -40,35 +40,39 @@ export type ObservabilityRuntimeConfig = {
 export type TixkitMetrics = ReturnType<typeof createTixkitMetrics>;
 
 export const pinoRedactionPaths = [
-  'req.headers.authorization',
-  'req.headers.cookie',
+  "req.headers.authorization",
+  "req.headers.cookie",
   'req.headers["x-api-key"]',
   'req.headers["stripe-signature"]',
   'req.headers["telnyx-signature-ed25519"]',
   'res.headers["set-cookie"]',
-  'headers.authorization',
-  'headers.cookie',
+  "headers.authorization",
+  "headers.cookie",
   'headers["x-api-key"]',
   'headers["stripe-signature"]',
   'headers["telnyx-signature-ed25519"]',
-  '*.authorization',
-  '*.password',
-  '*.secret',
-  '*.token',
-  '*.apiKey',
-  '*.clientSecret',
-  '*.email',
-  '*.phone',
+  "*.authorization",
+  "*.password",
+  "*.secret",
+  "*.token",
+  "*.apiKey",
+  "*.clientSecret",
+  "*.email",
+  "*.phone",
 ];
 
 export async function createTelemetryResource(
   config: ObservabilityRuntimeConfig,
 ): Promise<Resource> {
-  const { resourceFromAttributes } = await import('@opentelemetry/resources');
+  const { resourceFromAttributes } = await import("@opentelemetry/resources");
   return resourceFromAttributes({
-    'service.name': config.serviceName,
-    ...(config.serviceVersion ? { 'service.version': config.serviceVersion } : {}),
-    ...(config.environment ? { 'deployment.environment': config.environment } : {}),
+    "service.name": config.serviceName,
+    ...(config.serviceVersion
+      ? { "service.version": config.serviceVersion }
+      : {}),
+    ...(config.environment
+      ? { "deployment.environment": config.environment }
+      : {}),
   });
 }
 
@@ -76,25 +80,30 @@ export async function createTraceExporter(
   config: ObservabilityRuntimeConfig,
 ): Promise<SpanExporter> {
   const { OTLPTraceExporter: _OTLPTraceExporter } =
-    await import('@opentelemetry/exporter-trace-otlp-http');
+    await import("@opentelemetry/exporter-trace-otlp-http");
   const traceEndpoint =
     process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ??
-    formatOtlpTraceEndpoint(config.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT);
-  return new _OTLPTraceExporter(traceEndpoint ? { url: traceEndpoint } : undefined);
+    formatOtlpTraceEndpoint(
+      config.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    );
+  return new _OTLPTraceExporter(
+    traceEndpoint ? { url: traceEndpoint } : undefined,
+  );
 }
 
 export async function startOpenTelemetry(
   config: ObservabilityRuntimeConfig,
 ): Promise<{ shutdown: () => Promise<void> }> {
-  if (config.disabled || process.env.OTEL_SDK_DISABLED === 'true') {
+  if (config.disabled || process.env.OTEL_SDK_DISABLED === "true") {
     return { shutdown: async () => undefined };
   }
 
   if (!sdk) {
-    const [{ NodeSDK: _NodeSDK }, { BatchSpanProcessor: _BatchSpanProcessor }] = await Promise.all([
-      import('@opentelemetry/sdk-node'),
-      import('@opentelemetry/sdk-trace-base'),
-    ]);
+    const [{ NodeSDK: _NodeSDK }, { BatchSpanProcessor: _BatchSpanProcessor }] =
+      await Promise.all([
+        import("@opentelemetry/sdk-node"),
+        import("@opentelemetry/sdk-trace-base"),
+      ]);
     sdk = new _NodeSDK({
       resource: await createTelemetryResource(config),
       spanProcessor: new _BatchSpanProcessor(await createTraceExporter(config)),
@@ -115,7 +124,7 @@ export async function withSpan<T>(
   attributes: SpanAttributes,
   fn: (span: Span) => Promise<T>,
 ): Promise<T> {
-  const tracer = trace.getTracer('tixkit');
+  const tracer = trace.getTracer("tixkit");
   const span = tracer.startSpan(spanName, {
     kind: SpanKind.INTERNAL,
     attributes: sanitizeSpanAttributes(attributes),
@@ -139,23 +148,30 @@ export async function withSpan<T>(
   });
 }
 
-export function sanitizeSpanAttributes(attributes: SpanAttributes): SpanAttributes {
+export function sanitizeSpanAttributes(
+  attributes: SpanAttributes,
+): SpanAttributes {
   const sanitized: SpanAttributes = {};
   for (const [key, value] of Object.entries(attributes)) {
     if (value === undefined || value === null) continue;
-    sanitized[key] = shouldRedactKey(key) ? REDACTED : redactAttributeValue(value);
+    sanitized[key] = shouldRedactKey(key)
+      ? REDACTED
+      : redactAttributeValue(value);
   }
   return sanitized;
 }
 
 export function redactObject<T>(value: T, depth = 0): T {
   if (depth > 8) return REDACTED as T;
-  if (Array.isArray(value)) return value.map((item) => redactObject(item, depth + 1)) as T;
-  if (!value || typeof value !== 'object') return redactScalar(value) as T;
+  if (Array.isArray(value))
+    return value.map((item) => redactObject(item, depth + 1)) as T;
+  if (!value || typeof value !== "object") return redactScalar(value) as T;
 
   const redacted: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    redacted[key] = shouldRedactKey(key) ? REDACTED : redactObject(entry, depth + 1);
+    redacted[key] = shouldRedactKey(key)
+      ? REDACTED
+      : redactObject(entry, depth + 1);
   }
   return redacted as T;
 }
@@ -170,7 +186,8 @@ export function redactError(error: unknown): Error {
 }
 
 export function redactErrorFields(error: unknown): Record<string, unknown> {
-  if (!(error instanceof Error)) return { message: redactString(String(error)) };
+  if (!(error instanceof Error))
+    return { message: redactString(String(error)) };
 
   const record = error as Error & {
     code?: unknown;
@@ -180,7 +197,10 @@ export function redactErrorFields(error: unknown): Record<string, unknown> {
     type: redactString(error.name),
     message: redactString(error.message),
     stack: error.stack ? redactString(error.stack) : undefined,
-    code: typeof record.code === 'string' ? redactString(record.code) : redactObject(record.code),
+    code:
+      typeof record.code === "string"
+        ? redactString(record.code)
+        : redactObject(record.code),
     statusCode: redactObject(record.statusCode),
   };
 }
@@ -188,84 +208,113 @@ export function redactErrorFields(error: unknown): Record<string, unknown> {
 export function createTixkitMetrics(serviceName: string) {
   const registry = new Registry();
   registry.setDefaultLabels({ service: serviceName });
-  collectDefaultMetrics({ register: registry, prefix: 'tixkit_process_' });
+  collectDefaultMetrics({ register: registry, prefix: "tixkit_process_" });
 
   const httpRequestDuration = new Histogram({
-    name: 'tixkit_http_request_duration_seconds',
-    help: 'HTTP request latency by method, route, and status code.',
-    labelNames: ['method', 'route', 'status_code'],
+    name: "tixkit_http_request_duration_seconds",
+    help: "HTTP request latency by method, route, and status code.",
+    labelNames: ["method", "route", "status_code"],
     buckets: [0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
     registers: [registry],
   });
 
   const httpRequestErrors = new Counter({
-    name: 'tixkit_http_request_errors_total',
-    help: 'HTTP responses with a 5xx status code.',
-    labelNames: ['method', 'route', 'status_code'],
+    name: "tixkit_http_request_errors_total",
+    help: "HTTP responses with a 5xx status code.",
+    labelNames: ["method", "route", "status_code"],
     registers: [registry],
   });
 
   const checkoutEvents = new Counter({
-    name: 'tixkit_checkout_events_total',
-    help: 'Checkout API and workflow events by operation and outcome.',
-    labelNames: ['operation', 'outcome'],
+    name: "tixkit_checkout_events_total",
+    help: "Checkout API and workflow events by operation and outcome.",
+    labelNames: ["operation", "outcome"],
     registers: [registry],
   });
 
   const paymentEvents = new Counter({
-    name: 'tixkit_payment_events_total',
-    help: 'Payment provider events by operation, provider, and outcome.',
-    labelNames: ['operation', 'provider', 'outcome'],
+    name: "tixkit_payment_events_total",
+    help: "Payment provider events by operation, provider, and outcome.",
+    labelNames: ["operation", "provider", "outcome"],
     registers: [registry],
   });
 
   const refundEvents = new Counter({
-    name: 'tixkit_refund_events_total',
-    help: 'Refund events by operation, provider, and outcome.',
-    labelNames: ['operation', 'provider', 'outcome'],
+    name: "tixkit_refund_events_total",
+    help: "Refund events by operation, provider, and outcome.",
+    labelNames: ["operation", "provider", "outcome"],
     registers: [registry],
   });
 
   const webhookEvents = new Counter({
-    name: 'tixkit_webhook_events_total',
-    help: 'Inbound and outbound webhook events by operation and outcome.',
-    labelNames: ['operation', 'outcome'],
+    name: "tixkit_webhook_events_total",
+    help: "Inbound and outbound webhook events by operation and outcome.",
+    labelNames: ["operation", "outcome"],
     registers: [registry],
   });
 
   const exportEvents = new Counter({
-    name: 'tixkit_export_events_total',
-    help: 'Export events by operation and outcome.',
-    labelNames: ['operation', 'outcome'],
+    name: "tixkit_export_events_total",
+    help: "Export events by operation and outcome.",
+    labelNames: ["operation", "outcome"],
     registers: [registry],
   });
 
   const scanEvents = new Counter({
-    name: 'tixkit_scan_events_total',
-    help: 'Scanner and check-in events by operation and outcome.',
-    labelNames: ['operation', 'outcome'],
+    name: "tixkit_scan_events_total",
+    help: "Scanner and check-in events by operation and outcome.",
+    labelNames: ["operation", "outcome"],
+    registers: [registry],
+  });
+
+  const onboardingEvents = new Counter({
+    name: "tixkit_onboarding_events_total",
+    help: "Privacy-safe onboarding step, validation, abandonment, preview, and publish outcomes.",
+    labelNames: ["stage", "outcome", "reason_code"],
+    registers: [registry],
+  });
+
+  const onboardingMilestoneDuration = new Histogram({
+    name: "tixkit_onboarding_milestone_duration_seconds",
+    help: "Elapsed time from durable draft creation to onboarding milestones.",
+    labelNames: ["milestone"],
+    buckets: [5, 15, 30, 60, 120, 300, 600, 1800, 3600, 86400],
     registers: [registry],
   });
 
   const inventoryActiveHolds = new Gauge({
-    name: 'tixkit_inventory_active_holds',
-    help: 'Active, non-expired checkout inventory holds.',
-    labelNames: ['scope'],
+    name: "tixkit_inventory_active_holds",
+    help: "Active, non-expired checkout inventory holds.",
+    labelNames: ["scope"],
     registers: [registry],
   });
 
   const temporalActivityDuration = new Histogram({
-    name: 'tixkit_temporal_activity_duration_seconds',
-    help: 'Temporal activity execution latency by activity and outcome.',
-    labelNames: ['activity', 'outcome'],
+    name: "tixkit_temporal_activity_duration_seconds",
+    help: "Temporal activity execution latency by activity and outcome.",
+    labelNames: ["activity", "outcome"],
     buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300],
     registers: [registry],
   });
 
   const temporalActivityEvents = new Counter({
-    name: 'tixkit_temporal_activity_events_total',
-    help: 'Temporal activity completions by activity and outcome.',
-    labelNames: ['activity', 'outcome'],
+    name: "tixkit_temporal_activity_events_total",
+    help: "Temporal activity completions by activity and outcome.",
+    labelNames: ["activity", "outcome"],
+    registers: [registry],
+  });
+
+  const migrationEvents = new Counter({
+    name: "tixkit_migration_events_total",
+    help: "Privacy-safe migration outcomes by bounded phase, outcome, and error code.",
+    labelNames: ["phase", "outcome", "error_code"],
+    registers: [registry],
+  });
+
+  const migrationProgressAge = new Gauge({
+    name: "tixkit_migration_progress_age_seconds",
+    help: "Seconds since the current migration phase last made worker progress.",
+    labelNames: ["phase"],
     registers: [registry],
   });
 
@@ -281,18 +330,61 @@ export function createTixkitMetrics(serviceName: string) {
       webhookEvents,
       exportEvents,
       scanEvents,
+      onboardingEvents,
+      onboardingMilestoneDuration,
       inventoryActiveHolds,
       temporalActivityDuration,
       temporalActivityEvents,
+      migrationEvents,
+      migrationProgressAge,
     },
   };
+}
+
+const MIGRATION_PHASES = new Set([
+  "prepare",
+  "commit",
+  "reconcile",
+  "rollback",
+]);
+const MIGRATION_ERROR_CODES = new Set([
+  "none",
+  "failed",
+  "conflict",
+  "scope_violation",
+  "reconciliation_required",
+  "rollback_refused",
+  "side_effect_attempt",
+]);
+
+export function observeMigrationOperation(
+  metrics: TixkitMetrics,
+  input: {
+    phase: string;
+    outcome: string;
+    errorCode?: string;
+  },
+): void {
+  const phase = MIGRATION_PHASES.has(input.phase) ? input.phase : "reconcile";
+  const errorCode = MIGRATION_ERROR_CODES.has(input.errorCode ?? "none")
+    ? (input.errorCode ?? "none")
+    : "failed";
+  const outcome = input.outcome === "ok" ? "ok" : "error";
+  metrics.metrics.migrationEvents.inc({
+    phase,
+    outcome,
+    error_code: errorCode,
+  });
 }
 
 export function observeTemporalActivity(
   metrics: TixkitMetrics,
   input: { activity: string; outcome: string; durationSeconds: number },
 ): void {
-  metrics.metrics.temporalActivityEvents.inc({ activity: input.activity, outcome: input.outcome });
+  metrics.metrics.temporalActivityEvents.inc({
+    activity: input.activity,
+    outcome: input.outcome,
+  });
   metrics.metrics.temporalActivityDuration.observe(
     { activity: input.activity, outcome: input.outcome },
     input.durationSeconds,
@@ -310,8 +402,10 @@ export async function pushMetricsToGateway(
 
 function formatOtlpTraceEndpoint(endpoint?: string): string | undefined {
   if (!endpoint) return undefined;
-  const normalized = endpoint.replace(/\/+$/, '');
-  return normalized.endsWith('/v1/traces') ? normalized : `${normalized}/v1/traces`;
+  const normalized = endpoint.replace(/\/+$/, "");
+  return normalized.endsWith("/v1/traces")
+    ? normalized
+    : `${normalized}/v1/traces`;
 }
 
 function shouldRedactKey(key: string): boolean {
@@ -319,22 +413,24 @@ function shouldRedactKey(key: string): boolean {
 }
 
 function redactScalar(value: unknown): unknown {
-  if (typeof value !== 'string') return value;
+  if (typeof value !== "string") return value;
   return redactString(value);
 }
 
 function redactAttributeValue(
   value: unknown,
 ): string | number | boolean | string[] | number[] | boolean[] {
-  if (typeof value === 'string') return redactString(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === "string") return redactString(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
     const filtered = value.filter(
       (item): item is string | number | boolean =>
-        typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean',
+        typeof item === "string" ||
+        typeof item === "number" ||
+        typeof item === "boolean",
     );
-    if (filtered.every((item) => typeof item === 'number')) return filtered;
-    if (filtered.every((item) => typeof item === 'boolean')) return filtered;
+    if (filtered.every((item) => typeof item === "number")) return filtered;
+    if (filtered.every((item) => typeof item === "boolean")) return filtered;
     return filtered.map((item) => String(item)).map(redactString);
   }
   return String(value);
@@ -343,10 +439,15 @@ function redactAttributeValue(
 export function redactString(value: string): string {
   return value
     .replace(EMAIL_PATTERN, REDACTED)
-    .replace(SENSITIVE_QUERY_PARAM_PATTERN, (_match, prefix: string, name: string) => {
-      return `${prefix}${name}=${REDACTED}`;
-    })
-    .replace(SECRET_VALUE_PATTERN, (_match, bearerPrefix: string | undefined) =>
-      bearerPrefix ? `${bearerPrefix}${REDACTED}` : REDACTED,
+    .replace(
+      SENSITIVE_QUERY_PARAM_PATTERN,
+      (_match, prefix: string, name: string) => {
+        return `${prefix}${name}=${REDACTED}`;
+      },
+    )
+    .replace(
+      SECRET_VALUE_PATTERN,
+      (_match, bearerPrefix: string | undefined) =>
+        bearerPrefix ? `${bearerPrefix}${REDACTED}` : REDACTED,
     );
 }

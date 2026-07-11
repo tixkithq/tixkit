@@ -404,6 +404,46 @@ export interface paths {
             };
         };
     };
+    "/events/{eventId}/operational-health": {
+        get: {
+            parameters: {
+                path: {
+                    eventId: string;
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": {
+                            eventId: string;
+                            organizationFailedWebhookDeliveries: number;
+                            failedExports: number;
+                            checkedAt: string;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    "/events/{eventId}/setup-section": {
+        put: {
+            parameters: {
+                path: {
+                    eventId: string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        section: "basics" | "schedule" | "sales" | "media" | "marketing-fields";
+                    };
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+    };
     "/events/{eventId}/readiness-acknowledgements/{stepId}": {
         post: {
             parameters: {
@@ -5129,6 +5169,29 @@ export interface paths {
             };
         };
     };
+    "/migration-adapters": {
+        get: {
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": {
+                            items: Array<components["schemas"]["MigrationAdapterCatalogEntry"]>;
+                        };
+                    };
+                };
+                "401": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "403": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+            };
+        };
+    };
     "/migration-credentials": {
         post: {
             requestBody: {
@@ -5142,7 +5205,22 @@ export interface paths {
                 };
             };
             responses: {
-                "201": Record<string, never>;
+                "201": {
+                    content: {
+                        "application/json": {
+                            id: string;
+                            organizationId: string;
+                            sourceSystem: string;
+                            status: string;
+                            expiresAt: string;
+                        };
+                    };
+                };
+                "400": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5163,8 +5241,21 @@ export interface paths {
     };
     "/migration-jobs": {
         get: {
+            parameters: {
+                query?: {
+                    organizationId?: string;
+                    limit?: number;
+                    offset?: number;
+                };
+            };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": {
+                            items: Array<components["schemas"]["MigrationJob"]>;
+                        };
+                    };
+                };
             };
         };
         post: {
@@ -5175,31 +5266,141 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
+                    "application/json": ({
                         organizationId: string;
                         sourceSystem: string;
                         adapterVersion: string;
                         mode?: "dry-run" | "commit";
-                        configuration?: Record<string, unknown>;
+                        configuration: components["schemas"]["MigrationPreparationConfiguration"];
                         credentialId?: string;
-                    };
+                    }) & ({
+                        sourceSystem?: "generic-csv";
+                        configuration?: {
+                            sourceMode: "official-export";
+                            sourceSystem: "generic-csv";
+                        };
+                        credentialId?: never;
+                    } | {
+                        sourceSystem?: "pretix";
+                        configuration?: {
+                            sourceMode: "official-export";
+                            sourceSystem: "pretix";
+                        };
+                        credentialId?: never;
+                    } | {
+                        sourceSystem?: "hi-events";
+                        configuration?: {
+                            sourceMode: "official-export";
+                            sourceSystem: "hi-events";
+                        };
+                        credentialId?: never;
+                    } | {
+                        sourceSystem?: "eventbrite";
+                        configuration?: {
+                            sourceMode: "official-export";
+                            sourceSystem: "eventbrite";
+                        };
+                        credentialId?: never;
+                    } | {
+                        sourceSystem?: "ticket-tailor";
+                        configuration?: {
+                            sourceMode: "official-export";
+                            sourceSystem: "ticket-tailor";
+                        };
+                        credentialId?: never;
+                    } | {
+                        sourceSystem?: "pretix";
+                        configuration?: {
+                            sourceMode: "official-api";
+                            sourceSystem: "pretix";
+                        };
+                        credentialId: unknown;
+                    } | {
+                        sourceSystem?: "hi-events";
+                        configuration?: {
+                            sourceMode: "official-api";
+                            sourceSystem: "hi-events";
+                        };
+                        credentialId: unknown;
+                    } | {
+                        sourceSystem?: "eventbrite";
+                        configuration?: {
+                            sourceMode: "official-api";
+                            sourceSystem: "eventbrite";
+                        };
+                        credentialId: unknown;
+                    } | {
+                        sourceSystem?: "ticket-tailor";
+                        configuration?: {
+                            sourceMode: "official-api";
+                            sourceSystem: "ticket-tailor";
+                        };
+                        credentialId: unknown;
+                    });
                 };
             };
             responses: {
-                "201": Record<string, never>;
-                "409": Record<string, never>;
+                "201": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationJob"];
+                    };
+                };
+                "400": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
     "/migration-mappings": {
         get: {
+            parameters: {
+                query: {
+                    organizationId: string;
+                    sourceSystem?: string;
+                };
+            };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": {
+                            items: Array<components["schemas"]["MigrationMapping"]>;
+                        };
+                    };
+                };
             };
         };
         post: {
+            requestBody: {
+                content: {
+                    "application/json": {
+                        organizationId: string;
+                        sourceSystem: string;
+                        name: string;
+                        entityType: string;
+                        mapping: {
+                            [key: string]: string | Array<string>;
+                        };
+                    };
+                };
+            };
             responses: {
-                "201": Record<string, never>;
+                "201": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationMapping"];
+                    };
+                };
+                "400": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5211,8 +5412,16 @@ export interface paths {
                 };
             };
             responses: {
-                "200": Record<string, never>;
-                "404": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationJob"];
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5224,7 +5433,13 @@ export interface paths {
                 };
             };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": {
+                            items: Array<components["schemas"]["MigrationFile"]>;
+                        };
+                    };
+                };
             };
         };
         post: {
@@ -5241,8 +5456,16 @@ export interface paths {
                 };
             };
             responses: {
-                "201": Record<string, never>;
-                "409": Record<string, never>;
+                "201": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationFile"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5252,9 +5475,25 @@ export interface paths {
                 path: {
                     jobId: string;
                 };
+                query?: {
+                    limit?: number;
+                    entityType?: string;
+                    status?: string;
+                };
             };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": {
+                            items: Array<components["schemas"]["MigrationRow"]>;
+                        };
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5264,9 +5503,24 @@ export interface paths {
                 path: {
                     jobId: string;
                 };
+                query?: {
+                    limit?: number;
+                    offset?: number;
+                };
             };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": {
+                            items: Array<components["schemas"]["MigrationConflict"]>;
+                        };
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5276,9 +5530,23 @@ export interface paths {
                 path: {
                     jobId: string;
                 };
+                query?: {
+                    afterSequence?: number;
+                };
             };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": {
+                            items: Array<components["schemas"]["MigrationEvent"]>;
+                        };
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5290,8 +5558,37 @@ export interface paths {
                 };
             };
             responses: {
-                "200": Record<string, never>;
-                "409": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationDryRunResult"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/prepare": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "202": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationStarted"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5303,7 +5600,11 @@ export interface paths {
                 };
             };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationReport"];
+                    };
+                };
             };
         };
     };
@@ -5317,7 +5618,7 @@ export interface paths {
             responses: {
                 "200": {
                     content: {
-                        "application/json": Record<string, unknown>;
+                        "application/json": components["schemas"]["MigrationReport"];
                     };
                 };
             };
@@ -5334,8 +5635,16 @@ export interface paths {
                 };
             };
             responses: {
-                "202": Record<string, never>;
-                "409": Record<string, never>;
+                "202": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationStarted"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5347,7 +5656,16 @@ export interface paths {
                 };
             };
             responses: {
-                "202": Record<string, never>;
+                "202": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationActionAccepted"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5359,7 +5677,16 @@ export interface paths {
                 };
             };
             responses: {
-                "202": Record<string, never>;
+                "202": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationActionAccepted"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5371,7 +5698,16 @@ export interface paths {
                 };
             };
             responses: {
-                "202": Record<string, never>;
+                "202": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationActionAccepted"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5383,7 +5719,16 @@ export interface paths {
                 };
             };
             responses: {
-                "200": Record<string, never>;
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationRollbackAssessment"];
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -5398,8 +5743,16 @@ export interface paths {
                 };
             };
             responses: {
-                "202": Record<string, never>;
-                "409": Record<string, never>;
+                "202": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationActionAccepted"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -6175,6 +6528,42 @@ export type operations = {
                     "application/json": components["schemas"]["EventLaunchReadiness"];
                 };
             };
+        };
+    };
+    getEventsByEventIdOperationalHealth: {
+        parameters: {
+            path: {
+                eventId: string;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": {
+                        eventId: string;
+                        organizationFailedWebhookDeliveries: number;
+                        failedExports: number;
+                        checkedAt: string;
+                    };
+                };
+            };
+        };
+    };
+    putEventsByEventIdSetupSection: {
+        parameters: {
+            path: {
+                eventId: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    section: "basics" | "schedule" | "sales" | "media" | "marketing-fields";
+                };
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
         };
     };
     postEventsByEventIdReadinessAcknowledgementsByStepId: {
@@ -10618,7 +11007,28 @@ export type operations = {
             };
         };
     };
-    postMigrationCredentials: {
+    listMigrationAdapters: {
+        responses: {
+            "200": {
+                content: {
+                    "application/json": {
+                        items: Array<components["schemas"]["MigrationAdapterCatalogEntry"]>;
+                    };
+                };
+            };
+            "401": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "403": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    createMigrationCredential: {
         requestBody: {
             content: {
                 "application/json": {
@@ -10630,10 +11040,25 @@ export type operations = {
             };
         };
         responses: {
-            "201": Record<string, never>;
+            "201": {
+                content: {
+                    "application/json": {
+                        id: string;
+                        organizationId: string;
+                        sourceSystem: string;
+                        status: string;
+                        expiresAt: string;
+                    };
+                };
+            };
+            "400": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    deleteMigrationCredentialsByCredentialId: {
+    revokeMigrationCredential: {
         parameters: {
             path: {
                 credentialId: string;
@@ -10646,12 +11071,25 @@ export type operations = {
             "204": Record<string, never>;
         };
     };
-    getMigrationJobs: {
+    listMigrationJobs: {
+        parameters: {
+            query?: {
+                organizationId?: string;
+                limit?: number;
+                offset?: number;
+            };
+        };
         responses: {
-            "200": Record<string, never>;
+            "200": {
+                content: {
+                    "application/json": {
+                        items: Array<components["schemas"]["MigrationJob"]>;
+                    };
+                };
+            };
         };
     };
-    postMigrationJobs: {
+    createMigrationJob: {
         parameters: {
             header: {
                 "Idempotency-Key": string;
@@ -10659,53 +11097,177 @@ export type operations = {
         };
         requestBody: {
             content: {
-                "application/json": {
+                "application/json": ({
                     organizationId: string;
                     sourceSystem: string;
                     adapterVersion: string;
                     mode?: "dry-run" | "commit";
-                    configuration?: Record<string, unknown>;
+                    configuration: components["schemas"]["MigrationPreparationConfiguration"];
                     credentialId?: string;
+                }) & ({
+                    sourceSystem?: "generic-csv";
+                    configuration?: {
+                        sourceMode: "official-export";
+                        sourceSystem: "generic-csv";
+                    };
+                    credentialId?: never;
+                } | {
+                    sourceSystem?: "pretix";
+                    configuration?: {
+                        sourceMode: "official-export";
+                        sourceSystem: "pretix";
+                    };
+                    credentialId?: never;
+                } | {
+                    sourceSystem?: "hi-events";
+                    configuration?: {
+                        sourceMode: "official-export";
+                        sourceSystem: "hi-events";
+                    };
+                    credentialId?: never;
+                } | {
+                    sourceSystem?: "eventbrite";
+                    configuration?: {
+                        sourceMode: "official-export";
+                        sourceSystem: "eventbrite";
+                    };
+                    credentialId?: never;
+                } | {
+                    sourceSystem?: "ticket-tailor";
+                    configuration?: {
+                        sourceMode: "official-export";
+                        sourceSystem: "ticket-tailor";
+                    };
+                    credentialId?: never;
+                } | {
+                    sourceSystem?: "pretix";
+                    configuration?: {
+                        sourceMode: "official-api";
+                        sourceSystem: "pretix";
+                    };
+                    credentialId: unknown;
+                } | {
+                    sourceSystem?: "hi-events";
+                    configuration?: {
+                        sourceMode: "official-api";
+                        sourceSystem: "hi-events";
+                    };
+                    credentialId: unknown;
+                } | {
+                    sourceSystem?: "eventbrite";
+                    configuration?: {
+                        sourceMode: "official-api";
+                        sourceSystem: "eventbrite";
+                    };
+                    credentialId: unknown;
+                } | {
+                    sourceSystem?: "ticket-tailor";
+                    configuration?: {
+                        sourceMode: "official-api";
+                        sourceSystem: "ticket-tailor";
+                    };
+                    credentialId: unknown;
+                });
+            };
+        };
+        responses: {
+            "201": {
+                content: {
+                    "application/json": components["schemas"]["MigrationJob"];
+                };
+            };
+            "400": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listMigrationMappings: {
+        parameters: {
+            query: {
+                organizationId: string;
+                sourceSystem?: string;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": {
+                        items: Array<components["schemas"]["MigrationMapping"]>;
+                    };
+                };
+            };
+        };
+    };
+    createMigrationMapping: {
+        requestBody: {
+            content: {
+                "application/json": {
+                    organizationId: string;
+                    sourceSystem: string;
+                    name: string;
+                    entityType: string;
+                    mapping: {
+                        [key: string]: string | Array<string>;
+                    };
                 };
             };
         };
         responses: {
-            "201": Record<string, never>;
-            "409": Record<string, never>;
+            "201": {
+                content: {
+                    "application/json": components["schemas"]["MigrationMapping"];
+                };
+            };
+            "400": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    getMigrationMappings: {
-        responses: {
-            "200": Record<string, never>;
-        };
-    };
-    postMigrationMappings: {
-        responses: {
-            "201": Record<string, never>;
-        };
-    };
-    getMigrationJobsByJobId: {
+    getMigrationJob: {
         parameters: {
             path: {
                 jobId: string;
             };
         };
         responses: {
-            "200": Record<string, never>;
-            "404": Record<string, never>;
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["MigrationJob"];
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    getMigrationJobsByJobIdFiles: {
+    listMigrationJobFiles: {
         parameters: {
             path: {
                 jobId: string;
             };
         };
         responses: {
-            "200": Record<string, never>;
+            "200": {
+                content: {
+                    "application/json": {
+                        items: Array<components["schemas"]["MigrationFile"]>;
+                    };
+                };
+            };
         };
     };
-    postMigrationJobsByJobIdFiles: {
+    registerMigrationJobFile: {
         parameters: {
             path: {
                 jobId: string;
@@ -10719,62 +11281,94 @@ export type operations = {
             };
         };
         responses: {
-            "201": Record<string, never>;
-            "409": Record<string, never>;
+            "201": {
+                content: {
+                    "application/json": components["schemas"]["MigrationFile"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    getMigrationJobsByJobIdRows: {
+    listMigrationJobRows: {
         parameters: {
             path: {
                 jobId: string;
             };
+            query?: {
+                limit?: number;
+                entityType?: string;
+                status?: string;
+            };
         };
         responses: {
-            "200": Record<string, never>;
+            "200": {
+                content: {
+                    "application/json": {
+                        items: Array<components["schemas"]["MigrationRow"]>;
+                    };
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    getMigrationJobsByJobIdConflicts: {
+    listMigrationJobConflicts: {
         parameters: {
             path: {
                 jobId: string;
             };
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
         };
         responses: {
-            "200": Record<string, never>;
+            "200": {
+                content: {
+                    "application/json": {
+                        items: Array<components["schemas"]["MigrationConflict"]>;
+                    };
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    getMigrationJobsByJobIdEvents: {
+    listMigrationJobEvents: {
         parameters: {
             path: {
                 jobId: string;
             };
-        };
-        responses: {
-            "200": Record<string, never>;
-        };
-    };
-    postMigrationJobsByJobIdDryRun: {
-        parameters: {
-            path: {
-                jobId: string;
+            query?: {
+                afterSequence?: number;
             };
         };
         responses: {
-            "200": Record<string, never>;
-            "409": Record<string, never>;
-        };
-    };
-    getMigrationJobsByJobIdReport: {
-        parameters: {
-            path: {
-                jobId: string;
+            "200": {
+                content: {
+                    "application/json": {
+                        items: Array<components["schemas"]["MigrationEvent"]>;
+                    };
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
             };
         };
-        responses: {
-            "200": Record<string, never>;
-        };
     };
-    getMigrationJobsByJobIdReportDownload: {
+    runMigrationDryRun: {
         parameters: {
             path: {
                 jobId: string;
@@ -10783,12 +11377,64 @@ export type operations = {
         responses: {
             "200": {
                 content: {
-                    "application/json": Record<string, unknown>;
+                    "application/json": components["schemas"]["MigrationDryRunResult"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
         };
     };
-    postMigrationJobsByJobIdCommit: {
+    prepareMigrationJob: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "202": {
+                content: {
+                    "application/json": components["schemas"]["MigrationStarted"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getMigrationReport: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["MigrationReport"];
+                };
+            };
+        };
+    };
+    downloadMigrationReport: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["MigrationReport"];
+                };
+            };
+        };
+    };
+    commitMigrationJob: {
         parameters: {
             path: {
                 jobId: string;
@@ -10798,51 +11444,95 @@ export type operations = {
             };
         };
         responses: {
-            "202": Record<string, never>;
-            "409": Record<string, never>;
+            "202": {
+                content: {
+                    "application/json": components["schemas"]["MigrationStarted"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    postMigrationJobsByJobIdPause: {
+    pauseMigrationJob: {
         parameters: {
             path: {
                 jobId: string;
             };
         };
         responses: {
-            "202": Record<string, never>;
+            "202": {
+                content: {
+                    "application/json": components["schemas"]["MigrationActionAccepted"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    postMigrationJobsByJobIdResume: {
+    resumeMigrationJob: {
         parameters: {
             path: {
                 jobId: string;
             };
         };
         responses: {
-            "202": Record<string, never>;
+            "202": {
+                content: {
+                    "application/json": components["schemas"]["MigrationActionAccepted"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    postMigrationJobsByJobIdCancel: {
+    cancelMigrationJob: {
         parameters: {
             path: {
                 jobId: string;
             };
         };
         responses: {
-            "202": Record<string, never>;
+            "202": {
+                content: {
+                    "application/json": components["schemas"]["MigrationActionAccepted"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    getMigrationJobsByJobIdRollbackAssessment: {
+    assessMigrationRollback: {
         parameters: {
             path: {
                 jobId: string;
             };
         };
         responses: {
-            "200": Record<string, never>;
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["MigrationRollbackAssessment"];
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
-    postMigrationJobsByJobIdRollback: {
+    rollbackMigrationJob: {
         parameters: {
             path: {
                 jobId: string;
@@ -10852,8 +11542,16 @@ export type operations = {
             };
         };
         responses: {
-            "202": Record<string, never>;
-            "409": Record<string, never>;
+            "202": {
+                content: {
+                    "application/json": components["schemas"]["MigrationActionAccepted"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
     getWebhookEndpoints: {
@@ -11264,6 +11962,143 @@ export interface components {
                 details?: Record<string, unknown>;
                 requestId: string;
             };
+        };
+        MigrationPreparationConfiguration: {
+            sourceMode: "official-export";
+            sourceSystem: "generic-csv" | "pretix" | "hi-events" | "eventbrite" | "ticket-tailor";
+            artifactIds: Array<string>;
+        } | {
+            sourceMode: "official-api";
+            sourceSystem: "pretix";
+            organizerSlug: string;
+            eventSlugs: Array<string>;
+            baseUrl?: string;
+        } | {
+            sourceMode: "official-api";
+            sourceSystem: "hi-events";
+            accountId: string;
+            eventIds: Array<string>;
+            baseUrl?: string;
+        } | {
+            sourceMode: "official-api";
+            sourceSystem: "eventbrite";
+            organizationId: string;
+            eventIds: Array<string>;
+        } | {
+            sourceMode: "official-api";
+            sourceSystem: "ticket-tailor";
+            accountId: string;
+            eventIds: Array<string>;
+        };
+        MigrationJob: {
+            id: string;
+            tenant_id: string;
+            organization_id: string;
+            source_system: string;
+            adapter_version: string;
+            mode: "dry-run" | "commit";
+            status: string;
+            configurationHash: string;
+            credentialConfigured: boolean;
+            summary?: {
+                [key: string]: unknown;
+            } | null;
+            created_at: string;
+            updated_at: string;
+        };
+        MigrationFile: {
+            id: string;
+            import_job_id: string;
+            original_name: string;
+            media_type: string;
+            byte_size: number;
+            sha256: string;
+            status: string;
+            created_at: string;
+            [key: string]: unknown;
+        };
+        MigrationMapping: {
+            id: string;
+            organization_id: string;
+            source_system: string;
+            name: string;
+            entity_type: string;
+            mapping: {
+                [key: string]: string | Array<string>;
+            };
+            [key: string]: unknown;
+        };
+        MigrationReport: {
+            [key: string]: unknown;
+        };
+        MigrationAdapterCatalogEntry: {
+            id: "generic-csv" | "pretix" | "hi-events" | "eventbrite" | "ticket-tailor";
+            displayName: string;
+            supportedVersions: Array<string>;
+            featureMapping: {
+                [key: string]: unknown;
+            };
+            knownLosses: Array<string>;
+            rateLimitPolicy: {
+                [key: string]: unknown;
+            };
+            sourceModes: Array<"official-api" | "official-export">;
+        };
+        MigrationRow: {
+            id: string;
+            importJobId: string;
+            fileId?: string | null;
+            entityType: string;
+            correlationId: string;
+            rowNumber: number;
+            status: string;
+            severity?: string | null;
+            tixkitId?: string | null;
+            sourceHash: string;
+            normalizedHash?: string | null;
+        };
+        MigrationConflict: {
+            id: string;
+            entity_type: string;
+            correlationId: string;
+            severity: string;
+            code: string;
+            message: unknown;
+            details: unknown;
+        };
+        MigrationEvent: {
+            id: string;
+            sequence: number;
+            type: string;
+            severity: string;
+            message: unknown;
+            createdAt: string;
+            data: unknown;
+        };
+        MigrationAccepted: {
+            accepted: true;
+        };
+        MigrationStarted: {
+            jobId: string;
+            status: string;
+        };
+        MigrationActionAccepted: {
+            jobId: string;
+            action: "pause" | "resume" | "cancel" | "rollback";
+            accepted: true;
+        };
+        MigrationDryRunResult: {
+            status: "ready" | "failed";
+            report: components["schemas"]["MigrationReport"];
+            domainWrites: 0;
+        };
+        MigrationRollbackAssessment: {
+            eligible: boolean;
+            mode: string;
+            blockers: Array<{
+                [key: string]: unknown;
+            }>;
+            [key: string]: unknown;
         };
         ContentValidationIssue: {
             code: string;

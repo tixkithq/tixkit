@@ -1,0 +1,2 @@
+external_id,brand_external_id,name,starts_at,ends_at,timezone,currency
+event-1,brand-1,"Summer, Live",2027-07-10T18:00:00-05:00,2027-07-10T22:00:00-05:00,America/Chicago,USD

@@ -101,6 +101,31 @@ describe('TemporalClient payment reconciliation', () => {
 });
 
 describe('TemporalClient migration rollback', () => {
+  it('starts preparation on its dedicated tenant and organization scoped workflow ID', async () => {
+    const client = {
+      workflow: {
+        start: vi.fn(async (_workflow: unknown, options: { workflowId: string }) => ({
+          workflowId: options.workflowId,
+        })),
+      },
+    };
+    const temporalClient = new TemporalClient(client as never);
+    await expect(
+      temporalClient.startMigrationPreparation({
+        tenantId: 'tenant_1',
+        organizationId: 'org_1',
+        jobId: 'imp_1',
+      }),
+    ).resolves.toEqual({ workflowId: 'migration-prepare:tenant_1:org_1:imp_1' });
+    expect(client.workflow.start).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        workflowId: 'migration-prepare:tenant_1:org_1:imp_1',
+        args: [expect.objectContaining({ version: 1 })],
+      }),
+    );
+  });
+
   it('starts rollback with an ID distinct from the completed commit workflow', async () => {
     const client = {
       workflow: {

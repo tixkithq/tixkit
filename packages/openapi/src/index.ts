@@ -573,6 +573,312 @@ const rawOpenApiSpec = {
         },
         required: ['error'],
       },
+      MigrationPreparationConfiguration: {
+        description: 'Secret-free, source-discriminated migration locator.',
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['sourceMode', 'sourceSystem', 'artifactIds'],
+            properties: {
+              sourceMode: { const: 'official-export' },
+              sourceSystem: {
+                type: 'string',
+                enum: ['generic-csv', 'pretix', 'hi-events', 'eventbrite', 'ticket-tailor'],
+              },
+              artifactIds: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 100,
+                uniqueItems: true,
+                items: {
+                  type: 'string',
+                  pattern: '^upl_[A-Za-z0-9_-]{8,128}$',
+                },
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['sourceMode', 'sourceSystem', 'organizerSlug', 'eventSlugs'],
+            properties: {
+              sourceMode: { const: 'official-api' },
+              sourceSystem: { const: 'pretix' },
+              organizerSlug: { type: 'string', minLength: 1, maxLength: 200 },
+              eventSlugs: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 10000,
+                uniqueItems: true,
+                items: { type: 'string' },
+              },
+              baseUrl: { type: 'string', format: 'uri' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['sourceMode', 'sourceSystem', 'accountId', 'eventIds'],
+            properties: {
+              sourceMode: { const: 'official-api' },
+              sourceSystem: { const: 'hi-events' },
+              accountId: { type: 'string', minLength: 1, maxLength: 200 },
+              eventIds: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 10000,
+                uniqueItems: true,
+                items: { type: 'string' },
+              },
+              baseUrl: { type: 'string', format: 'uri' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['sourceMode', 'sourceSystem', 'organizationId', 'eventIds'],
+            properties: {
+              sourceMode: { const: 'official-api' },
+              sourceSystem: { const: 'eventbrite' },
+              organizationId: { type: 'string', minLength: 1, maxLength: 200 },
+              eventIds: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 10000,
+                uniqueItems: true,
+                items: { type: 'string' },
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['sourceMode', 'sourceSystem', 'accountId', 'eventIds'],
+            properties: {
+              sourceMode: { const: 'official-api' },
+              sourceSystem: { const: 'ticket-tailor' },
+              accountId: { type: 'string', minLength: 1, maxLength: 200 },
+              eventIds: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 10000,
+                uniqueItems: true,
+                items: { type: 'string' },
+              },
+            },
+          },
+        ],
+      },
+      MigrationJob: {
+        type: 'object',
+        required: [
+          'id',
+          'tenant_id',
+          'organization_id',
+          'source_system',
+          'adapter_version',
+          'mode',
+          'status',
+          'configurationHash',
+          'credentialConfigured',
+          'created_at',
+          'updated_at',
+        ],
+        properties: {
+          id: { type: 'string' },
+          tenant_id: { type: 'string' },
+          organization_id: { type: 'string' },
+          source_system: { type: 'string' },
+          adapter_version: { type: 'string' },
+          mode: { type: 'string', enum: ['dry-run', 'commit'] },
+          status: { type: 'string' },
+          configurationHash: { type: 'string' },
+          credentialConfigured: { type: 'boolean' },
+          summary: { type: ['object', 'null'], additionalProperties: true },
+          created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
+        },
+      },
+      MigrationFile: {
+        type: 'object',
+        additionalProperties: true,
+        required: [
+          'id',
+          'import_job_id',
+          'original_name',
+          'media_type',
+          'byte_size',
+          'sha256',
+          'status',
+          'created_at',
+        ],
+        properties: {
+          id: { type: 'string' },
+          import_job_id: { type: 'string' },
+          original_name: { type: 'string' },
+          media_type: { type: 'string' },
+          byte_size: { type: 'integer' },
+          sha256: { type: 'string' },
+          status: { type: 'string' },
+          created_at: { type: 'string', format: 'date-time' },
+        },
+      },
+      MigrationMapping: {
+        type: 'object',
+        additionalProperties: true,
+        required: ['id', 'organization_id', 'source_system', 'name', 'entity_type', 'mapping'],
+        properties: {
+          id: { type: 'string' },
+          organization_id: { type: 'string' },
+          source_system: { type: 'string' },
+          name: { type: 'string' },
+          entity_type: { type: 'string' },
+          mapping: {
+            type: 'object',
+            additionalProperties: {
+              oneOf: [
+                { type: 'string' },
+                { type: 'array', maxItems: 20, items: { type: 'string' } },
+              ],
+            },
+          },
+        },
+      },
+      MigrationReport: { type: 'object', additionalProperties: true },
+      MigrationAdapterCatalogEntry: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'id',
+          'displayName',
+          'supportedVersions',
+          'featureMapping',
+          'knownLosses',
+          'rateLimitPolicy',
+          'sourceModes',
+        ],
+        properties: {
+          id: {
+            type: 'string',
+            enum: ['generic-csv', 'pretix', 'hi-events', 'eventbrite', 'ticket-tailor'],
+          },
+          displayName: { type: 'string' },
+          supportedVersions: { type: 'array', items: { type: 'string' } },
+          featureMapping: { type: 'object', additionalProperties: true },
+          knownLosses: { type: 'array', items: { type: 'string' } },
+          rateLimitPolicy: { type: 'object', additionalProperties: true },
+          sourceModes: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['official-api', 'official-export'],
+            },
+          },
+        },
+      },
+      MigrationRow: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'id',
+          'importJobId',
+          'entityType',
+          'correlationId',
+          'rowNumber',
+          'status',
+          'sourceHash',
+        ],
+        properties: {
+          id: { type: 'string' },
+          importJobId: { type: 'string' },
+          fileId: { type: ['string', 'null'] },
+          entityType: { type: 'string' },
+          correlationId: { type: 'string' },
+          rowNumber: { type: 'integer' },
+          status: { type: 'string' },
+          severity: { type: ['string', 'null'] },
+          tixkitId: { type: ['string', 'null'] },
+          sourceHash: { type: 'string' },
+          normalizedHash: { type: ['string', 'null'] },
+        },
+      },
+      MigrationConflict: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'entity_type', 'correlationId', 'severity', 'code', 'message', 'details'],
+        properties: {
+          id: { type: 'string' },
+          entity_type: { type: 'string' },
+          correlationId: { type: 'string' },
+          severity: { type: 'string' },
+          code: { type: 'string' },
+          message: {},
+          details: {},
+        },
+      },
+      MigrationEvent: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'sequence', 'type', 'severity', 'message', 'createdAt', 'data'],
+        properties: {
+          id: { type: 'string' },
+          sequence: { type: 'integer' },
+          type: { type: 'string' },
+          severity: { type: 'string' },
+          message: {},
+          createdAt: { type: 'string', format: 'date-time' },
+          data: {},
+        },
+      },
+      MigrationAccepted: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['accepted'],
+        properties: { accepted: { const: true } },
+      },
+      MigrationStarted: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['jobId', 'status'],
+        properties: { jobId: { type: 'string' }, status: { type: 'string' } },
+      },
+      MigrationActionAccepted: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['jobId', 'action', 'accepted'],
+        properties: {
+          jobId: { type: 'string' },
+          action: {
+            type: 'string',
+            enum: ['pause', 'resume', 'cancel', 'rollback'],
+          },
+          accepted: { const: true },
+        },
+      },
+      MigrationDryRunResult: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['status', 'report', 'domainWrites'],
+        properties: {
+          status: { type: 'string', enum: ['ready', 'failed'] },
+          report: { $ref: '#/components/schemas/MigrationReport' },
+          domainWrites: { const: 0 },
+        },
+      },
+      MigrationRollbackAssessment: {
+        type: 'object',
+        additionalProperties: true,
+        required: ['eligible', 'mode', 'blockers'],
+        properties: {
+          eligible: { type: 'boolean' },
+          mode: { type: 'string' },
+          blockers: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+        },
+      },
       ContentValidationIssue: {
         type: 'object',
         properties: {
@@ -4976,6 +5282,65 @@ const rawOpenApiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/events/{eventId}/operational-health': {
+      get: {
+        summary: 'Get scoped event operational health',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.read'],
+        responses: {
+          '200': {
+            description: 'Event webhook and export failure health',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: [
+                    'eventId',
+                    'organizationFailedWebhookDeliveries',
+                    'failedExports',
+                    'checkedAt',
+                  ],
+                  properties: {
+                    eventId: { type: 'string' },
+                    organizationFailedWebhookDeliveries: { type: 'integer', minimum: 0 },
+                    failedExports: { type: 'integer', minimum: 0 },
+                    checkedAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/setup-section': {
+      put: {
+        summary: 'Persist the last visited event setup section',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.write'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['section'],
+                properties: {
+                  section: {
+                    type: 'string',
+                    enum: ['basics', 'schedule', 'sales', 'media', 'marketing-fields'],
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Setup section persisted' },
         },
       },
     },
@@ -11964,8 +12329,54 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/migration-adapters': {
+      get: {
+        operationId: 'listMigrationAdapters',
+        summary: 'List supported migration adapters and compatibility metadata',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: {
+          '200': {
+            description: 'Ordered migration adapter catalog',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: {
+                        $ref: '#/components/schemas/MigrationAdapterCatalogEntry',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/migration-credentials': {
       post: {
+        operationId: 'createMigrationCredential',
         summary: 'Register a scoped migration secret-manager reference',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
@@ -11984,7 +12395,7 @@ const rawOpenApiSpec = {
                     type: 'string',
                     writeOnly: true,
                     pattern:
-                      '^(?:aws-secretsmanager|gcp-secretmanager|secret|vault):\\/\\/[A-Za-z0-9_./:@-]+$',
+                      '^(?:aws-secretsmanager|gcp-secretmanager|secret|vault):\\/\\/[A-Za-z0-9_@:-]+(?:\\/(?!\\.{1,2}(?:\\/|$))[A-Za-z0-9_.@:-]+)*$',
                     description: 'Secret-manager reference only; never credential material.',
                   },
                   expiresAt: { type: 'string', format: 'date-time' },
@@ -11993,11 +12404,39 @@ const rawOpenApiSpec = {
             },
           },
         },
-        responses: { '201': { description: 'Migration credential reference' } },
+        responses: {
+          '201': {
+            description: 'Migration credential reference',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'organizationId', 'sourceSystem', 'status', 'expiresAt'],
+                  properties: {
+                    id: { type: 'string' },
+                    organizationId: { type: 'string' },
+                    sourceSystem: { type: 'string' },
+                    status: { type: 'string' },
+                    expiresAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid credential reference',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-credentials/{credentialId}': {
       delete: {
+        operationId: 'revokeMigrationCredential',
         summary: 'Revoke a migration credential reference',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
@@ -12020,17 +12459,62 @@ const rawOpenApiSpec = {
     },
     '/migration-jobs': {
       get: {
+        operationId: 'listMigrationJobs',
         summary: 'List migration jobs',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Migration jobs' } },
+        parameters: [
+          {
+            name: 'organizationId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 1000 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Migration jobs',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MigrationJob' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       post: {
+        operationId: 'createMigrationJob',
         summary: 'Create an idempotent migration job',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
         parameters: [
-          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } },
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         requestBody: {
           required: true,
@@ -12038,63 +12522,129 @@ const rawOpenApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['organizationId', 'sourceSystem', 'adapterVersion'],
+                additionalProperties: false,
+                required: ['organizationId', 'sourceSystem', 'adapterVersion', 'configuration'],
+                oneOf: [
+                  ...['generic-csv', 'pretix', 'hi-events', 'eventbrite', 'ticket-tailor'].map(
+                    (sourceSystem) => ({
+                      properties: {
+                        sourceSystem: { const: sourceSystem },
+                        configuration: {
+                          type: 'object',
+                          required: ['sourceMode', 'sourceSystem'],
+                          properties: {
+                            sourceMode: { const: 'official-export' },
+                            sourceSystem: { const: sourceSystem },
+                          },
+                        },
+                        credentialId: false,
+                      },
+                    }),
+                  ),
+                  ...['pretix', 'hi-events', 'eventbrite', 'ticket-tailor'].map((sourceSystem) => ({
+                    required: ['credentialId'],
+                    properties: {
+                      sourceSystem: { const: sourceSystem },
+                      configuration: {
+                        type: 'object',
+                        required: ['sourceMode', 'sourceSystem'],
+                        properties: {
+                          sourceMode: { const: 'official-api' },
+                          sourceSystem: { const: sourceSystem },
+                        },
+                      },
+                    },
+                  })),
+                ],
                 properties: {
                   organizationId: { type: 'string' },
                   sourceSystem: { type: 'string' },
                   adapterVersion: { type: 'string' },
                   mode: { type: 'string', enum: ['dry-run', 'commit'] },
                   configuration: {
-                    type: 'object',
-                    description:
-                      'Secret-free adapter configuration. Credentials must be referenced by credentialId.',
+                    $ref: '#/components/schemas/MigrationPreparationConfiguration',
                   },
-                  credentialId: { type: 'string', pattern: '^mcred_[A-Za-z0-9_-]{8,128}$' },
+                  /* configuration variants are maintained in the reusable component above. */
+                  credentialId: {
+                    type: 'string',
+                    pattern: '^mcred_[A-Za-z0-9_-]{8,128}$',
+                  },
                 },
               },
             },
           },
         },
         responses: {
-          '201': { description: 'Migration job' },
-          '409': { description: 'Idempotency conflict' },
+          '201': {
+            description: 'Migration job',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationJob' },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid or mismatched source configuration',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description: 'Idempotency conflict',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
     '/migration-mappings': {
       get: {
+        operationId: 'listMigrationMappings',
         summary: 'List saved migration mappings',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Saved mappings' } },
-      },
-      post: {
-        summary: 'Create a migration mapping',
-        security: [{ BearerAuth: [] }, { ApiKey: [] }],
-        'x-required-permissions': ['migrations.write'],
-        responses: { '201': { description: 'Saved mapping' } },
-      },
-    },
-    '/migration-jobs/{jobId}': {
-      get: {
-        summary: 'Get a migration job',
-        security: [{ BearerAuth: [] }, { ApiKey: [] }],
-        'x-required-permissions': ['migrations.read'],
+        parameters: [
+          {
+            name: 'organizationId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 128 },
+          },
+          {
+            name: 'sourceSystem',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', maxLength: 80 },
+          },
+        ],
         responses: {
-          '200': { description: 'Migration job' },
-          '404': { description: 'Migration job not found' },
+          '200': {
+            description: 'Saved mappings',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MigrationMapping' },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
-    },
-    '/migration-jobs/{jobId}/files': {
-      get: {
-        summary: 'List migration job files',
-        security: [{ BearerAuth: [] }, { ApiKey: [] }],
-        'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Registered files' } },
-      },
       post: {
-        summary: 'Register migration file metadata',
+        operationId: 'createMigrationMapping',
+        summary: 'Create a migration mapping',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
         requestBody: {
@@ -12104,76 +12654,450 @@ const rawOpenApiSpec = {
               schema: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['uploadArtifactId'],
-                properties: { uploadArtifactId: { type: 'string' } },
+                required: ['organizationId', 'sourceSystem', 'name', 'entityType', 'mapping'],
+                properties: {
+                  organizationId: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
+                  },
+                  sourceSystem: { type: 'string', minLength: 1, maxLength: 80 },
+                  name: { type: 'string', minLength: 1, maxLength: 120 },
+                  entityType: { type: 'string', minLength: 1, maxLength: 80 },
+                  mapping: {
+                    type: 'object',
+                    maxProperties: 200,
+                    additionalProperties: {
+                      oneOf: [
+                        { type: 'string', minLength: 1, maxLength: 160 },
+                        {
+                          type: 'array',
+                          maxItems: 20,
+                          items: {
+                            type: 'string',
+                            minLength: 1,
+                            maxLength: 160,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
               },
             },
           },
         },
         responses: {
-          '201': { description: 'Registered file' },
-          '409': { description: 'Migration status conflict' },
+          '201': {
+            description: 'Saved mapping',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationMapping' },
+              },
+            },
+          },
+          '400': {
+            description: 'Unsafe or invalid mapping',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}': {
+      get: {
+        operationId: 'getMigrationJob',
+        summary: 'Get a migration job',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Migration job',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationJob' },
+              },
+            },
+          },
+          '404': {
+            description: 'Migration job not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/files': {
+      get: {
+        operationId: 'listMigrationJobFiles',
+        summary: 'List migration job files',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Registered files',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MigrationFile' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        operationId: 'registerMigrationJobFile',
+        summary: 'Register migration file metadata',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['uploadArtifactId'],
+                properties: {
+                  uploadArtifactId: {
+                    type: 'string',
+                    pattern: '^upl_[A-Za-z0-9_-]{8,128}$',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Registered file',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationFile' },
+              },
+            },
+          },
+          '409': {
+            description: 'Migration status conflict',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
     '/migration-jobs/{jobId}/rows': {
       get: {
+        operationId: 'listMigrationJobRows',
         summary: 'List normalized migration rows',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Migration rows' } },
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 1000 },
+          },
+          {
+            name: 'entityType',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Migration rows',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MigrationRow' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Migration job not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/conflicts': {
       get: {
+        operationId: 'listMigrationJobConflicts',
         summary: 'List migration conflicts',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Migration conflicts' } },
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 1000 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Migration conflicts',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MigrationConflict' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Migration job not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/events': {
       get: {
+        operationId: 'listMigrationJobEvents',
         summary: 'List migration progress events',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Migration events' } },
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'afterSequence',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Migration events',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MigrationEvent' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Migration job not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/dry-run': {
       post: {
+        operationId: 'runMigrationDryRun',
         summary: 'Run migration validation without domain writes',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
         responses: {
-          '200': { description: 'Dry-run report' },
-          '409': { description: 'Migration status conflict' },
+          '200': {
+            description: 'Dry-run report',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationDryRunResult' },
+              },
+            },
+          },
+          '409': {
+            description: 'Migration status conflict',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/prepare': {
+      post: {
+        operationId: 'prepareMigrationJob',
+        summary: 'Start durable migration source acquisition and normalization',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        responses: {
+          '202': {
+            description: 'Migration preparation started',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationStarted' },
+              },
+            },
+          },
+          '409': {
+            description: 'Migration job cannot prepare from its current state',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
     '/migration-jobs/{jobId}/report': {
       get: {
+        operationId: 'getMigrationReport',
         summary: 'Get migration report',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Migration report' } },
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Migration report',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationReport' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/report/download': {
       get: {
+        operationId: 'downloadMigrationReport',
         summary: 'Download migration report',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Migration report download',
-            content: { 'application/json': { schema: { type: 'object' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationReport' },
+              },
+            },
           },
         },
       },
     },
     '/migration-jobs/{jobId}/commit': {
       post: {
+        operationId: 'commitMigrationJob',
         summary: 'Start durable migration commit',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
@@ -12186,45 +13110,140 @@ const rawOpenApiSpec = {
           },
         ],
         responses: {
-          '202': { description: 'Commit accepted' },
-          '409': { description: 'Migration status conflict' },
+          '202': {
+            description: 'Commit accepted',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationStarted' },
+              },
+            },
+          },
+          '409': {
+            description: 'Migration status conflict',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
     '/migration-jobs/{jobId}/pause': {
       post: {
+        operationId: 'pauseMigrationJob',
         summary: 'Pause migration commit',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
-        responses: { '202': { description: 'Pause accepted' } },
+        responses: {
+          '202': {
+            description: 'Pause accepted',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/MigrationActionAccepted',
+                },
+              },
+            },
+          },
+          '409': {
+            description: 'Migration status conflict',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/resume': {
       post: {
+        operationId: 'resumeMigrationJob',
         summary: 'Resume migration commit',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
-        responses: { '202': { description: 'Resume accepted' } },
+        responses: {
+          '202': {
+            description: 'Resume accepted',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/MigrationActionAccepted',
+                },
+              },
+            },
+          },
+          '409': {
+            description: 'Migration status conflict',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/cancel': {
       post: {
+        operationId: 'cancelMigrationJob',
         summary: 'Cancel migration job',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
-        responses: { '202': { description: 'Cancellation accepted' } },
+        responses: {
+          '202': {
+            description: 'Cancellation accepted',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/MigrationActionAccepted',
+                },
+              },
+            },
+          },
+          '409': {
+            description: 'Migration status conflict',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/rollback-assessment': {
       get: {
+        operationId: 'assessMigrationRollback',
         summary: 'Assess fail-closed rollback eligibility',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        responses: { '200': { description: 'Rollback assessment' } },
+        responses: {
+          '200': {
+            description: 'Rollback assessment',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/MigrationRollbackAssessment',
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Migration job not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
       },
     },
     '/migration-jobs/{jobId}/rollback': {
       post: {
+        operationId: 'rollbackMigrationJob',
         summary: 'Request eligible migration rollback',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.rollback'],
@@ -12237,8 +13256,24 @@ const rawOpenApiSpec = {
           },
         ],
         responses: {
-          '202': { description: 'Rollback accepted' },
-          '409': { description: 'Rollback is not eligible' },
+          '202': {
+            description: 'Rollback accepted',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/MigrationActionAccepted',
+                },
+              },
+            },
+          },
+          '409': {
+            description: 'Rollback is not eligible',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
         },
       },
     },
