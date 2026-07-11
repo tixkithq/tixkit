@@ -69,6 +69,11 @@ export type AppContext = {
   smsTransport: SmsTransport;
   stripe?: Stripe;
   readinessServiceFactory?: (db: Database) => ReadinessService;
+  eventDuplicationCheckpoint?: (input: {
+    stage: 'after_event_created';
+    sourceEventId: string;
+    duplicatedEventId: string;
+  }) => void | Promise<void>;
 };
 
 class ApiCaptureSmsTransport implements SmsTransport {

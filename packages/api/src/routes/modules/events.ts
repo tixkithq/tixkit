@@ -1052,6 +1052,13 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
           capacity: body.copy.basicsVenue ? (source.capacity ?? undefined) : undefined,
           minimumAge: body.copy.basicsVenue ? (source.minimum_age ?? undefined) : undefined,
         });
+        if (process.env.NODE_ENV === 'test') {
+          await app.context.eventDuplicationCheckpoint?.({
+            stage: 'after_event_created',
+            sourceEventId: eventId,
+            duplicatedEventId: created.id,
+          });
+        }
         if (body.copy.basicsVenue || body.copy.feeResalePolicies) {
           await events.update(created.id, {
             cover_image_alt: null,

@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EventMediaSettings } from './event-media-settings';
 import { EventFeePolicyCard } from './event-fee-policy-card';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 const sections = [
   ['basics', 'Basics'],
@@ -74,7 +75,10 @@ export function EventSettingsView({ eventId }: { eventId: string }) {
             href={`#${id}`}
             onClick={() => {
               window.localStorage.setItem(`tixkit:event:${eventId}:last-setup-section`, id);
-              void adminApi.setEventSetupSection(eventId, id);
+              void adminApi.setEventSetupSection(eventId, id).then((result) => {
+                if (!result.ok)
+                  toast.error('This section is saved in this browser, but could not sync.');
+              });
             }}
           >
             {label}

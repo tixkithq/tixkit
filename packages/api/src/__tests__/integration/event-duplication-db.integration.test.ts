@@ -26,6 +26,7 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
   let app: FastifyInstance;
   let previousDriver: string | undefined;
   let principal: Principal;
+  let duplicationCheckpoint: AppContext['eventDuplicationCheckpoint'];
   const suffix = ulid().slice(-10).toLowerCase();
   const tenantId = `tnt_dup_${suffix}`;
   const organizationId = `org_dup_${suffix}`;
@@ -177,7 +178,12 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
       scopes: ['events.read', 'events.write'],
     };
     app = Fastify();
-    app.decorate('context', { db } as unknown as AppContext);
+    app.decorate('context', {
+      db,
+      eventDuplicationCheckpoint: (
+        input: Parameters<NonNullable<AppContext['eventDuplicationCheckpoint']>>[0],
+      ) => duplicationCheckpoint?.(input),
+    } as unknown as AppContext);
     app.addHook('onRequest', async (request) => {
       request.principal = principal;
     });
@@ -334,6 +340,45 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
       expect([403, 404]).toContain(response.statusCode);
     } finally {
       principal = authorizedPrincipal;
+    }
+    const after = await db
+      .selectFrom('events')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('tenant_id', '=', tenantId)
+      .executeTakeFirstOrThrow();
+    expect(Number(after.count)).toBe(Number(before.count));
+  });
+
+  it('rolls back the new event when a selected child copy fails mid-transaction', async () => {
+    const before = await db
+      .selectFrom('events')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('tenant_id', '=', tenantId)
+      .executeTakeFirstOrThrow();
+    duplicationCheckpoint = () => {
+      throw new Error('injected duplication child failure');
+    };
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/events/${sourceEventId}/duplicate`,
+        payload: {
+          startsAt: '2027-05-01T18:00:00.000Z',
+          copy: {
+            basicsVenue: true,
+            ticketTypes: true,
+            products: true,
+            checkoutQuestions: true,
+            feeResalePolicies: true,
+            eventPageContent: false,
+            lifecycleContent: false,
+            marketingIntegrations: false,
+          },
+        },
+      });
+      expect(response.statusCode).toBe(500);
+    } finally {
+      duplicationCheckpoint = undefined;
     }
     const after = await db
       .selectFrom('events')
