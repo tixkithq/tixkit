@@ -29,6 +29,8 @@
     "embed:generate": "bun run src/index.ts embed:generate",
     "quickstart": "bun run src/index.ts quickstart",
     "seed:sample-data": "bun run src/index.ts seed:sample-data",
+    "sandbox:reset": "bun run src/index.ts sandbox:reset",
+    "sandbox:initialize": "bun run src/index.ts sandbox:initialize",
     "seed:email-templates": "bun run src/index.ts seed:email-templates",
     "setup:check": "bun run src/index.ts setup:check",
     "dev:webhooks": "bun run src/index.ts dev:webhooks",

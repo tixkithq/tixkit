@@ -1,0 +1,27 @@
+---
+title: Operate the integration sandbox
+description: Initialize, reset, isolate, and recover Tixkit's deterministic integration sandbox.
+audience:
+  - operator
+  - developer
+product_area: platform
+content_type: runbook
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A dedicated migrated PostgreSQL or MySQL sandbox database
+related:
+  - /getting-started/test-checkout
+  - /operators/temporal
+---
+
+The sandbox must use a dedicated database, object-storage namespace, and Temporal task queue. Set `TIXKIT_RUNTIME_MODE=sandbox`; this forces payment, refund, email, and SMS activities onto capture/no-provider behavior even if provider credentials are accidentally present.
+
+Initialize a new migrated sandbox database once with `TIXKIT_SANDBOX_INITIALIZE_CONFIRM="INITIALIZE <database-name>"` and `tixkit sandbox:initialize`. The marker is persisted inside the target database. Reset refuses an unmarked database, a primary-database alias, a database outside the anchored `tixkit_sandbox`/`tixkit_test_*` naming convention, or remote reset without the explicit remote-reset flag.
+
+Stop and drain every sandbox API and worker process, then set `TIXKIT_SANDBOX_RESET_COORDINATION=STOPPED` only for `tixkit sandbox:reset`. The result shows a scoped 24-hour API key once and returns `epoch` plus `taskQueue`. Configure both API and worker with `TIXKIT_SANDBOX_EPOCH=<epoch>` and `TEMPORAL_TASK_QUEUE=<taskQueue>`. Startup compares these values with the persisted database marker and fails closed for stale epochs or another queue. Scheduler workflow IDs are epoch-scoped, so the new worker cannot reuse a scheduler bound to the prior queue.
+
+Each reset seeds the canonical sample brand/event, a future event window, free and capture-paid admission, a hidden access-code ticket (`SANDBOX-VIP`), promotion, add-on, checkout question, check-in list, and sample history. Old credentials disappear with the reset; old task queues have no worker in the new epoch.
+
+If sandbox traffic reaches a provider, stop API/workers, revoke the exposed provider credential, preserve non-payload correlation IDs, initialize/reset the sandbox, rotate the task queue, and verify sandbox runtime mode before restoring access.

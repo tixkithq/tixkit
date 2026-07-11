@@ -2039,8 +2039,18 @@ export type AdminApi = {
     input: UpdateWebhookEndpointInput,
   ): Promise<ApiResult<AdminWebhookEndpoint>>;
   /** Lists recent webhook delivery events for an endpoint. */
-  listWebhookEvents(endpointId: string): Promise<ApiResult<AdminWebhookEvent[]>>;
-  replayWebhookEvent(endpointId: string, eventId: string): Promise<ApiResult<{ queued: true }>>;
+  listWebhookEvents(
+    endpointId: string,
+  ): Promise<ApiResult<AdminWebhookEvent[]>>;
+  testWebhookEndpoint(
+    endpointId: string,
+  ): Promise<
+    ApiResult<{ queued: true; test: true; eventId: string; endpointId: string }>
+  >;
+  replayWebhookEvent(
+    endpointId: string,
+    eventId: string,
+  ): Promise<ApiResult<{ queued: true }>>;
 };
 
 function unwrapPage<T>(value: PageResult<T> | T[]): PageResult<T> {
@@ -6864,23 +6874,49 @@ export const adminApi: AdminApi = {
   async listWebhookEvents(endpointId) {
     return withFixture(
       async () => {
-        const result = await request<PageResult<AdminWebhookEvent> | AdminWebhookEvent[]>(
-          `/v1/webhook-endpoints/${endpointId}/events`,
-          { method: 'GET' },
-        );
+        const result = await request<
+          PageResult<AdminWebhookEvent> | AdminWebhookEvent[]
+        >(`/v1/webhook-endpoints/${endpointId}/events`, { method: "GET" });
         return result.ok ? ok(unwrapItems(result.data)) : result;
       },
-      () => ok(fixtureWebhookEvents.filter((e) => e.requestedEndpointId === endpointId)),
+      () =>
+        ok(
+          fixtureWebhookEvents.filter(
+            (e) => e.requestedEndpointId === endpointId,
+          ),
+        ),
     );
   },
 
   async replayWebhookEvent(endpointId, eventId) {
     return withFixture(
       () =>
-        request<{ queued: true }>(`/v1/webhook-endpoints/${endpointId}/events/${eventId}/replay`, {
-          method: 'POST',
-        }),
+        request<{ queued: true }>(
+          `/v1/webhook-endpoints/${endpointId}/events/${eventId}/replay`,
+          {
+            method: "POST",
+          },
+        ),
       () => ok({ queued: true as const }),
+    );
+  },
+
+  async testWebhookEndpoint(endpointId) {
+    return withFixture(
+      () =>
+        request<{
+          queued: true;
+          test: true;
+          eventId: string;
+          endpointId: string;
+        }>(`/v1/webhook-endpoints/${endpointId}/test`, { method: "POST" }),
+      () =>
+        ok({
+          queued: true as const,
+          test: true as const,
+          eventId: newFixtureId("whe_test"),
+          endpointId,
+        }),
     );
   },
 };

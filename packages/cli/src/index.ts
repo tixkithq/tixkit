@@ -4,6 +4,7 @@ import path from 'node:path';
 import { validateEnvFile, formatValidationResult } from './setup-check.js';
 import { runDevWebhooks, formatWebhookResult } from './dev-webhooks.js';
 import { seedSampleData } from './seed-sample-data.js';
+import { initializeSandbox, resetSandbox } from './sandbox-reset.js';
 import { seedEmailTemplateDefaults } from './seed-email-templates.js';
 import { runQuickstart } from './quickstart.js';
 import {
@@ -36,6 +37,8 @@ function help(): string {
     '  setup:check          Validate .env.local for required and mode-specific values',
     '  dev:webhooks         Start Stripe CLI webhook forwarding for local development',
     '  seed:sample-data     Seed idempotent sample tenant / event / order data',
+    '  sandbox:reset        Reset an isolated sandbox DB and rotate its 24-hour credential',
+    '  sandbox:initialize   Mark a migrated database as an authorized sandbox reset target',
     '  seed:email-templates Seed or safely restyle lifecycle email defaults for a brand/event scope',
     '  quickstart           Start local infrastructure, apps, and sample data',
     '',
@@ -269,6 +272,20 @@ async function main(): Promise<void> {
       // the foreground until the child dev:all process exits or the user sends
       // Ctrl+C. The cleanup handlers registered in runQuickstart terminate the
       // child process group on SIGINT/SIGTERM.
+      break;
+    }
+
+    case 'sandbox:reset': {
+      const result = await resetSandbox();
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exitCode = 1;
+      break;
+    }
+
+    case 'sandbox:initialize': {
+      const result = await initializeSandbox();
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exitCode = 1;
       break;
     }
 

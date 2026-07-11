@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
@@ -449,15 +450,21 @@ async function setupDeveloperRouteApp(principal: Principal, db: unknown) {
   return app;
 }
 
-async function setupWebhookRouteApp(principal: Principal, db: unknown) {
+async function setupWebhookRouteApp(
+  principal: Principal,
+  db: unknown,
+  temporalClient: { startWebhookDelivery?: ReturnType<typeof vi.fn> } = {},
+  options: { rateLimit?: boolean } = {},
+) {
   const app = Fastify();
+  if (options.rateLimit) await app.register(rateLimit, { max: 1000, timeWindow: '1 minute' });
   app.decorate('context', {
     db: db as Database,
     pricingEngine: {},
     inventoryService: {},
     qrService: {},
     authService: {},
-    temporalClient: {},
+    temporalClient,
   } as unknown as AppContext);
   app.addHook('onRequest', async (request) => {
     request.principal = principal;
@@ -899,6 +906,161 @@ describe('developer routes integration', () => {
     await app.close();
   });
 
+  it('queues a persisted signed-pipeline test.ping with audit and no commerce fixture', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_endpoints: [
+        {
+          id: 'wh_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://hooks.example.test/tixkit',
+          secret: 'whsec_test_only',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          description: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      webhook_events: [],
+      audit_logs: [],
+    };
+    const startWebhookDelivery = vi.fn().mockResolvedValue({ workflowId: 'wf_test_ping' });
+    const app = await setupWebhookRouteApp(principal, createWebhookDb(tables), {
+      startWebhookDelivery,
+    });
+
+    const response = await app.inject({ method: 'POST', url: '/webhook-endpoints/wh_1/test' });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ queued: true, test: true, endpointId: 'wh_1' });
+    expect(tables.webhook_events).toHaveLength(1);
+    const persistedPayload = JSON.parse(tables.webhook_events[0].payload as string);
+    expect(persistedPayload).toMatchObject({
+      type: 'test.ping',
+      test: true,
+      data: { endpointId: 'wh_1' },
+    });
+    expect(JSON.stringify(persistedPayload)).not.toMatch(/buyer|payment|order|ticket/iu);
+    expect(startWebhookDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpointId: 'wh_1',
+        eventId: tables.webhook_events[0].id,
+        eventType: 'test.ping',
+        maxAttempts: 5,
+      }),
+    );
+    expect(tables.audit_logs).toEqual([
+      expect.objectContaining({
+        action: 'webhook_endpoint.test_delivery_queued',
+        resource_id: 'wh_1',
+      }),
+    ]);
+    await app.close();
+  });
+
+  it('keeps a failed Temporal start visible and replayable with an audited event id', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_endpoints: [
+        {
+          id: 'wh_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://hooks.example.test/tixkit',
+          secret: 'whsec_test_only',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      webhook_events: [],
+      webhook_deliveries: [],
+      audit_logs: [],
+    };
+    const app = await setupWebhookRouteApp(principal, createWebhookDb(tables), {
+      startWebhookDelivery: vi.fn().mockRejectedValue(new Error('Temporal unavailable')),
+    });
+    const response = await app.inject({ method: 'POST', url: '/webhook-endpoints/wh_1/test' });
+    expect(response.statusCode).toBe(503);
+    const body = response.json();
+    expect(body).toMatchObject({
+      queued: false,
+      test: true,
+      endpointId: 'wh_1',
+      error: { code: 'TEMPORAL_UNAVAILABLE' },
+    });
+    expect(tables.webhook_deliveries).toEqual([
+      expect.objectContaining({
+        event_id: body.eventId,
+        requested_endpoint_id: 'wh_1',
+        status: 'pending',
+      }),
+    ]);
+    expect(tables.audit_logs.map((row) => row.action)).toEqual([
+      'webhook_endpoint.test_delivery_queued',
+      'webhook_endpoint.test_delivery_start_failed',
+    ]);
+    await app.close();
+  });
+
+  it('rate limits synthetic webhook deliveries independently of general developer traffic', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_1',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const tables: Record<string, Record<string, unknown>[]> = {
+      webhook_endpoints: [
+        {
+          id: 'wh_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          url: 'https://hooks.example.test/tixkit',
+          secret: 'whsec_test_only',
+          events: JSON.stringify(['order.paid']),
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      ],
+      webhook_events: [],
+      audit_logs: [],
+    };
+    const app = await setupWebhookRouteApp(
+      principal,
+      createWebhookDb(tables),
+      { startWebhookDelivery: vi.fn().mockResolvedValue({}) },
+      { rateLimit: true },
+    );
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      // eslint-disable-next-line no-await-in-loop -- requests intentionally consume the same rate-limit bucket.
+      expect(
+        (await app.inject({ method: 'POST', url: '/webhook-endpoints/wh_1/test' })).statusCode,
+      ).toBe(202);
+    }
+    expect(
+      (await app.inject({ method: 'POST', url: '/webhook-endpoints/wh_1/test' })).statusCode,
+    ).toBe(429);
+    await app.close();
+  });
+
   it('rejects invalid webhook endpoint event subscriptions before creating an endpoint', async () => {
     const principal: Principal = {
       type: 'user',
@@ -989,6 +1151,7 @@ describe('developer routes integration', () => {
       },
       { method: 'GET', url: '/webhook-endpoints' },
       { method: 'GET', url: '/webhook-endpoints/wh_1/events?limit=10' },
+      { method: 'POST', url: '/webhook-endpoints/wh_1/test' },
       { method: 'POST', url: '/webhook-events/whe_1/replay' },
       { method: 'POST', url: '/webhook-endpoints/wh_1/events/whe_1/replay' },
     ] as const;

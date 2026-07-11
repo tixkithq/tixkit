@@ -3,7 +3,12 @@ import type { Principal } from '@tixkit/domain';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { AuditLogRepository, WebhookEndpointRepository, WebhookEventRepository } from '@tixkit/db';
+import {
+  AuditLogRepository,
+  WebhookDeliveryRepository,
+  WebhookEndpointRepository,
+  WebhookEventRepository,
+} from '@tixkit/db';
 import { ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
 import { writeAuditLog } from '../../auth/audit.js';
 import {
@@ -17,6 +22,11 @@ import {
   updateWebhookEndpointSchema,
   parseBody,
 } from '../../http/schemas.js';
+import {
+  createWebhookTestPayload,
+  isWebhookTestPayload,
+  WEBHOOK_TEST_EVENT_TYPE,
+} from '../../services/webhook-test.js';
 
 const scopedWebhookEndpointManagementMessage =
   'Scoped principals cannot manage organization-wide webhook endpoints';
@@ -202,6 +212,75 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     return webhookDeliveryEventPageEnvelope(rows, pagination.limit);
   });
 
+  app.post(
+    '/webhook-endpoints/:endpointId/test',
+    { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const principal = request.principal!;
+      ClerkAuthService.requirePermission(principal, 'developers.write');
+      requireOrganizationWideWebhookEndpointPrincipal(principal);
+      const { endpointId } = request.params as { endpointId: string };
+      const endpointRepo = new WebhookEndpointRepository(db);
+      const endpoint = await endpointRepo.findById(endpointId);
+      if (!endpoint) throw new NotFoundError('WebhookEndpoint', endpointId);
+      ClerkAuthService.requireResourceTenant(principal, endpoint, 'WebhookEndpoint', endpointId);
+      ClerkAuthService.requireOrganizationScope(principal, endpoint.organization_id);
+      if (endpoint.status !== 'active') {
+        throw new ValidationError('Webhook endpoint is not active', { endpointId });
+      }
+
+      const payload = createWebhookTestPayload(endpointId);
+      const event = await new WebhookEventRepository(db).create({
+        tenantId: principal.tenantId,
+        organizationId: endpoint.organization_id,
+        type: WEBHOOK_TEST_EVENT_TYPE,
+        payload,
+      });
+      await new WebhookDeliveryRepository(db).create({
+        endpointId,
+        eventId: event.id,
+        attempt: 1,
+        deliveryKey: 'live',
+      });
+      await writeAuditLog(new AuditLogRepository(db), request, principal, {
+        action: 'webhook_endpoint.test_delivery_queued',
+        organizationId: endpoint.organization_id,
+        resourceType: 'WebhookEndpoint',
+        resourceId: endpointId,
+        diffSummary: { eventId: event.id, eventType: WEBHOOK_TEST_EVENT_TYPE, test: true },
+      });
+      try {
+        await temporalClient.startWebhookDelivery({
+          apiVersion: '2026-01-01',
+          endpointId,
+          eventId: event.id,
+          eventType: WEBHOOK_TEST_EVENT_TYPE,
+          payload,
+          maxAttempts: 5,
+        });
+      } catch {
+        await writeAuditLog(new AuditLogRepository(db), request, principal, {
+          action: 'webhook_endpoint.test_delivery_start_failed',
+          organizationId: endpoint.organization_id,
+          resourceType: 'WebhookEvent',
+          resourceId: event.id,
+          diffSummary: { endpointId, eventType: WEBHOOK_TEST_EVENT_TYPE, test: true },
+        });
+        return reply.status(503).send({
+          queued: false,
+          test: true,
+          eventId: event.id,
+          endpointId,
+          error: {
+            code: 'TEMPORAL_UNAVAILABLE',
+            message: 'Test delivery is persisted but not queued.',
+          },
+        });
+      }
+      return reply.status(202).send({ queued: true, test: true, eventId: event.id, endpointId });
+    },
+  );
+
   app.post('/webhook-events/:eventId/replay', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'developers.write');
@@ -277,7 +356,10 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
 
     const eventType = event.type as string;
     const subscribedEvents = parseWebhookEndpointEvents(endpoint.events);
-    if (!subscribedEvents.includes(eventType)) {
+    const eventPayload = serializeWebhookEvent(event).payload as Record<string, unknown>;
+    const syntheticTest =
+      eventType === WEBHOOK_TEST_EVENT_TYPE && isWebhookTestPayload(eventPayload, endpointId);
+    if (!syntheticTest && !subscribedEvents.includes(eventType)) {
       throw new ValidationError('Webhook endpoint is not subscribed to this event type', {
         endpointId,
         eventId,
@@ -285,7 +367,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const payload = serializeWebhookEvent(event).payload as Record<string, unknown>;
+    const payload = syntheticTest ? createWebhookTestPayload(endpointId) : eventPayload;
     await temporalClient.startWebhookDelivery({
       apiVersion: '2026-01-01',
       endpointId,

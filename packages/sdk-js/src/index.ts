@@ -3443,6 +3443,11 @@ class WebhookEndpointResource {
   ): Promise<{ queued: true; eventId: string; endpointId: string }> {
     return this.client.request('POST', `/webhook-endpoints/${endpointId}/events/${eventId}/replay`);
   }
+  async sendTest(
+    endpointId: string,
+  ): Promise<{ queued: true; test: true; eventId: string; endpointId: string }> {
+    return this.client.request('POST', `/webhook-endpoints/${endpointId}/test`);
+  }
   async replay(eventId: string): Promise<{ queued: true; eventId: string; endpoints: number }> {
     return this.client.request('POST', `/webhook-events/${eventId}/replay`);
   }

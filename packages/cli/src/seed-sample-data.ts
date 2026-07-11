@@ -8,6 +8,7 @@ export const SAMPLE_TENANT_ID = 'tnt_sample_data';
 export const SAMPLE_ORGANIZATION_ID = 'org_sample_data';
 export const SAMPLE_BRAND_ID = 'brd_sample_data';
 export const SAMPLE_EVENT_SLUG = 'sample-summer-showcase';
+export const SAMPLE_EVENT_ID = 'evt_sample_data';
 
 export const SAMPLE_POOL_ID = 'pool_sample_data';
 export const SAMPLE_PUBLIC_TICKET_TYPE_ID = 'tt_pub_sample_data';
@@ -36,9 +37,12 @@ export type SeedContext = {
   productId: string;
   discountCodeId: string;
   checkInListId: string;
+  assumeEmpty?: boolean;
 };
 
-export async function seedSampleData(): Promise<SeedResult> {
+export async function seedSampleData(
+  options: { now?: Date; assumeEmpty?: boolean } = {},
+): Promise<SeedResult> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     return {
@@ -49,11 +53,11 @@ export async function seedSampleData(): Promise<SeedResult> {
 
   const db = createDb(dbUrl);
   try {
-    const now = new Date();
+    const now = options.now ?? new Date();
 
-    await ensureTenant(db, now);
-    await ensureOrganization(db, now);
-    await ensureBrand(db, now);
+    await ensureTenant(db, now, options.assumeEmpty);
+    await ensureOrganization(db, now, options.assumeEmpty);
+    await ensureBrand(db, now, options.assumeEmpty);
     const eventId = await ensureSampleEvent(db, now);
     const ctx: SeedContext = {
       db,
@@ -67,6 +71,7 @@ export async function seedSampleData(): Promise<SeedResult> {
       productId: SAMPLE_PRODUCT_ID,
       discountCodeId: SAMPLE_DISCOUNT_CODE_ID,
       checkInListId: SAMPLE_CHECK_IN_LIST_ID,
+      assumeEmpty: options.assumeEmpty,
     };
 
     await ensureInventoryPool(ctx, now);
@@ -75,7 +80,7 @@ export async function seedSampleData(): Promise<SeedResult> {
     await ensureDiscountCode(ctx, now);
     await ensureQuestions(ctx, now);
     await ensureCheckInList(ctx, now);
-    await publishEventIfNeeded(ctx);
+    await publishEventIfNeeded(ctx, now);
     const orderId = await ensureSampleOrder(ctx, now);
 
     return {
@@ -92,66 +97,57 @@ export async function seedSampleData(): Promise<SeedResult> {
   }
 }
 
-async function ensureTenant(db: Database, now: Date): Promise<void> {
-  await db
-    .insertInto('tenants')
-    .values({
-      id: SAMPLE_TENANT_ID,
-      name: 'Sample Tenant',
-      status: 'active',
-      plan: 'free',
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+async function ensureTenant(db: Database, now: Date, assumeEmpty = false): Promise<void> {
+  const insert = db.insertInto('tenants').values({
+    id: SAMPLE_TENANT_ID,
+    name: 'Sample Tenant',
+    status: 'active',
+    plan: 'free',
+    created_at: now,
+    updated_at: now,
+  });
+  await (assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())).execute();
 }
 
-async function ensureOrganization(db: Database, now: Date): Promise<void> {
-  await db
-    .insertInto('organizations')
-    .values({
-      id: SAMPLE_ORGANIZATION_ID,
-      tenant_id: SAMPLE_TENANT_ID,
-      name: 'Sample Organization',
-      slug: 'sample-org',
-      clerk_organization_id: null,
-      box_office_settings: JSON.stringify({
-        enabled: true,
-        allowedTenderTypes: ['cash', 'manual_card', 'comp'],
-        requireBuyerEmail: false,
-        receiptMode: 'email',
-      }),
-      status: 'active',
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+async function ensureOrganization(db: Database, now: Date, assumeEmpty = false): Promise<void> {
+  const insert = db.insertInto('organizations').values({
+    id: SAMPLE_ORGANIZATION_ID,
+    tenant_id: SAMPLE_TENANT_ID,
+    name: 'Sample Organization',
+    slug: 'sample-org',
+    clerk_organization_id: null,
+    box_office_settings: JSON.stringify({
+      enabled: true,
+      allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+      requireBuyerEmail: false,
+      receiptMode: 'email',
+    }),
+    status: 'active',
+    created_at: now,
+    updated_at: now,
+  });
+  await (assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())).execute();
 }
 
-async function ensureBrand(db: Database, now: Date): Promise<void> {
-  await db
-    .insertInto('brands')
-    .values({
-      id: SAMPLE_BRAND_ID,
-      tenant_id: SAMPLE_TENANT_ID,
-      organization_id: SAMPLE_ORGANIZATION_ID,
-      name: 'Sample Brand',
-      slug: 'sample-brand',
-      status: 'active',
-      theme: JSON.stringify({ color: '#3b82f6' }),
-      email_identity_id: null,
-      sms_identity_id: null,
-      payment_account_id: null,
-      support_url: null,
-      legal_urls: JSON.stringify({}),
-      white_label: false,
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+async function ensureBrand(db: Database, now: Date, assumeEmpty = false): Promise<void> {
+  const insert = db.insertInto('brands').values({
+    id: SAMPLE_BRAND_ID,
+    tenant_id: SAMPLE_TENANT_ID,
+    organization_id: SAMPLE_ORGANIZATION_ID,
+    name: 'Sample Brand',
+    slug: 'sample-brand',
+    status: 'active',
+    theme: JSON.stringify({ color: '#3b82f6' }),
+    email_identity_id: null,
+    sms_identity_id: null,
+    payment_account_id: null,
+    support_url: null,
+    legal_urls: JSON.stringify({}),
+    white_label: false,
+    created_at: now,
+    updated_at: now,
+  });
+  await (assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())).execute();
 }
 
 async function ensureSampleEvent(db: Database, now: Date): Promise<string> {
@@ -166,7 +162,9 @@ async function ensureSampleEvent(db: Database, now: Date): Promise<string> {
     return existing.id;
   }
 
-  const eventId = makeId('evt');
+  const eventId = SAMPLE_EVENT_ID;
+  const startsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const endsAt = new Date(startsAt.getTime() + 4 * 60 * 60 * 1000);
   await db
     .insertInto('events')
     .values({
@@ -180,8 +178,8 @@ async function ensureSampleEvent(db: Database, now: Date): Promise<string> {
       status: 'draft',
       currency: 'USD',
       timezone: 'America/New_York',
-      starts_at: new Date('2026-08-15T19:00:00.000Z'),
-      ends_at: new Date('2026-08-15T23:00:00.000Z'),
+      starts_at: startsAt,
+      ends_at: endsAt,
       venue: JSON.stringify({ name: 'Sample Venue', city: 'New York' }),
       visibility: 'public',
       seo: JSON.stringify({}),
@@ -193,164 +191,160 @@ async function ensureSampleEvent(db: Database, now: Date): Promise<string> {
 }
 
 async function ensureInventoryPool(ctx: SeedContext, now: Date): Promise<void> {
-  await ctx.db
-    .insertInto('inventory_pools')
-    .values({
-      id: ctx.inventoryPoolId,
-      event_id: ctx.eventId,
-      name: 'General Admission',
-      total_capacity: 100,
-      reserved_count: 0,
-      sold_count: 1,
-      hold_ttl_seconds: 600,
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  const insert = ctx.db.insertInto('inventory_pools').values({
+    id: ctx.inventoryPoolId,
+    event_id: ctx.eventId,
+    name: 'General Admission',
+    total_capacity: 100,
+    reserved_count: 0,
+    sold_count: 1,
+    hold_ttl_seconds: 600,
+    created_at: now,
+    updated_at: now,
+  });
+  await (
+    ctx.assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())
+  ).execute();
 }
 
 async function ensureTicketTypes(ctx: SeedContext, now: Date): Promise<void> {
-  await ctx.db
-    .insertInto('ticket_types')
-    .values([
-      {
-        id: ctx.publicTicketTypeId,
-        event_id: ctx.eventId,
-        name: 'Free General Admission',
-        description: 'Free sample ticket.',
-        kind: 'free',
-        status: 'active',
-        visibility: 'public',
-        currency: 'USD',
-        price_cents: 0,
-        min_per_order: 1,
-        max_per_order: 4,
-        inventory_pool_id: ctx.inventoryPoolId,
-        sort_order: 0,
-        requires_access_code: false,
-        created_at: now,
-        updated_at: now,
-      },
-      {
-        id: ctx.paidTicketTypeId,
-        event_id: ctx.eventId,
-        name: 'Paid General Admission',
-        description: 'Paid sample ticket.',
-        kind: 'paid',
-        status: 'active',
-        visibility: 'public',
-        currency: 'USD',
-        price_cents: 2_500,
-        min_per_order: 1,
-        max_per_order: 4,
-        inventory_pool_id: ctx.inventoryPoolId,
-        sort_order: 1,
-        requires_access_code: false,
-        created_at: now,
-        updated_at: now,
-      },
-    ])
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  const insert = ctx.db.insertInto('ticket_types').values([
+    {
+      id: ctx.publicTicketTypeId,
+      event_id: ctx.eventId,
+      name: 'Free General Admission',
+      description: 'Free sample ticket.',
+      kind: 'free',
+      status: 'active',
+      visibility: 'public',
+      currency: 'USD',
+      price_cents: 0,
+      min_per_order: 1,
+      max_per_order: 4,
+      inventory_pool_id: ctx.inventoryPoolId,
+      sort_order: 0,
+      requires_access_code: false,
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: ctx.paidTicketTypeId,
+      event_id: ctx.eventId,
+      name: 'Paid General Admission',
+      description: 'Paid sample ticket.',
+      kind: 'paid',
+      status: 'active',
+      visibility: 'public',
+      currency: 'USD',
+      price_cents: 2_500,
+      min_per_order: 1,
+      max_per_order: 4,
+      inventory_pool_id: ctx.inventoryPoolId,
+      sort_order: 1,
+      requires_access_code: false,
+      created_at: now,
+      updated_at: now,
+    },
+  ]);
+  await (
+    ctx.assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())
+  ).execute();
 }
 
 async function ensureProduct(ctx: SeedContext, now: Date): Promise<void> {
-  await ctx.db
-    .insertInto('products')
-    .values({
-      id: ctx.productId,
-      event_id: ctx.eventId,
-      name: 'Parking Add-on',
-      description: 'Sample product add-on for checkout.',
-      price_cents: 1_000,
-      currency: 'USD',
-      category_id: null,
-      max_per_order: 2,
-      status: 'active',
-      sort_order: 0,
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  const insert = ctx.db.insertInto('products').values({
+    id: ctx.productId,
+    event_id: ctx.eventId,
+    name: 'Parking Add-on',
+    description: 'Sample product add-on for checkout.',
+    price_cents: 1_000,
+    currency: 'USD',
+    category_id: null,
+    max_per_order: 2,
+    status: 'active',
+    sort_order: 0,
+    created_at: now,
+    updated_at: now,
+  });
+  await (
+    ctx.assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())
+  ).execute();
 }
 
 async function ensureDiscountCode(ctx: SeedContext, now: Date): Promise<void> {
   const validFrom = new Date(now.getTime() - 60_000);
   const validUntil = new Date(now.getTime() + 7 * 24 * 60 * 60_000);
 
-  await ctx.db
-    .insertInto('discount_codes')
-    .values({
-      id: ctx.discountCodeId,
-      event_id: ctx.eventId,
-      code: 'SAMPLE20',
-      type: 'percentage',
-      value: 2_000,
-      currency: 'USD',
-      max_uses: 100,
-      uses_count: 0,
-      valid_from: validFrom,
-      valid_until: validUntil,
-      min_order_cents: 1_000,
-      max_discount_cents: null,
-      ticket_type_ids: JSON.stringify([ctx.paidTicketTypeId]),
-      status: 'active',
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.columns(['event_id', 'code']).doNothing())
-    .execute();
+  const insert = ctx.db.insertInto('discount_codes').values({
+    id: ctx.discountCodeId,
+    event_id: ctx.eventId,
+    code: 'SAMPLE20',
+    type: 'percentage',
+    value: 2_000,
+    currency: 'USD',
+    max_uses: 100,
+    uses_count: 0,
+    valid_from: validFrom,
+    valid_until: validUntil,
+    min_order_cents: 1_000,
+    max_discount_cents: null,
+    ticket_type_ids: JSON.stringify([ctx.paidTicketTypeId]),
+    status: 'active',
+    created_at: now,
+    updated_at: now,
+  });
+  await (
+    ctx.assumeEmpty
+      ? insert
+      : insert.onConflict((oc) => oc.columns(['event_id', 'code']).doNothing())
+  ).execute();
 }
 
 async function ensureQuestions(ctx: SeedContext, now: Date): Promise<void> {
-  await ctx.db
-    .insertInto('questions')
-    .values({
-      id: SAMPLE_QUESTION_ID,
-      event_id: ctx.eventId,
-      ticket_type_id: null,
-      type: 'text',
-      label: 'Dietary Restrictions',
-      description: 'Let us know if you have any dietary needs.',
-      required: false,
-      applies_to: 'attendee',
-      options: null,
-      placeholder: 'None',
-      validation_pattern: null,
-      conditional_visibility: null,
-      status: 'active',
-      is_hidden: false,
-      sort_order: 0,
-      is_consent_field: false,
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  const insert = ctx.db.insertInto('questions').values({
+    id: SAMPLE_QUESTION_ID,
+    event_id: ctx.eventId,
+    ticket_type_id: null,
+    type: 'text',
+    label: 'Dietary Restrictions',
+    description: 'Let us know if you have any dietary needs.',
+    required: false,
+    applies_to: 'attendee',
+    options: null,
+    placeholder: 'None',
+    validation_pattern: null,
+    conditional_visibility: null,
+    status: 'active',
+    is_hidden: false,
+    sort_order: 0,
+    is_consent_field: false,
+    created_at: now,
+    updated_at: now,
+  });
+  await (
+    ctx.assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())
+  ).execute();
 }
 
 async function ensureCheckInList(ctx: SeedContext, now: Date): Promise<void> {
-  await ctx.db
-    .insertInto('check_in_lists')
-    .values({
-      id: ctx.checkInListId,
-      event_id: ctx.eventId,
-      name: 'Main Entrance',
-      ticket_type_ids: JSON.stringify([ctx.publicTicketTypeId, ctx.paidTicketTypeId]),
-      status: 'active',
-      created_at: now,
-      updated_at: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  const insert = ctx.db.insertInto('check_in_lists').values({
+    id: ctx.checkInListId,
+    event_id: ctx.eventId,
+    name: 'Main Entrance',
+    ticket_type_ids: JSON.stringify([ctx.publicTicketTypeId, ctx.paidTicketTypeId]),
+    status: 'active',
+    created_at: now,
+    updated_at: now,
+  });
+  await (
+    ctx.assumeEmpty ? insert : insert.onConflict((oc) => oc.column('id').doNothing())
+  ).execute();
 }
 
-async function publishEventIfNeeded(ctx: SeedContext): Promise<void> {
+async function publishEventIfNeeded(ctx: SeedContext, now: Date): Promise<void> {
   await ctx.db
     .updateTable('events')
-    .set({ status: 'published', updated_at: new Date() })
+    .set({ status: 'published', updated_at: now })
     .where('id', '=', ctx.eventId)
     .where('status', '!=', 'published')
     .execute();
@@ -369,12 +363,12 @@ async function ensureSampleOrder(ctx: SeedContext, now: Date): Promise<string | 
     return existing.id;
   }
 
-  const sessionId = makeId('cks');
-  const holdId = makeId('hld');
-  const orderId = makeId('ord');
-  const lineItemId = makeId('oli');
-  const attendeeId = makeId('att');
-  const ticketId = makeId('tkt');
+  const sessionId = 'cks_sample_data';
+  const holdId = 'hld_sample_data';
+  const orderId = 'ord_sample_data';
+  const lineItemId = 'oli_sample_data';
+  const attendeeId = 'att_sample_data';
+  const ticketId = 'tkt_sample_data';
   const expiresAt = new Date(now.getTime() + 30 * 60_000);
 
   await ctx.db.transaction().execute(async (trx) => {

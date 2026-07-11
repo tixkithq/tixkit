@@ -386,6 +386,7 @@ function buildTransport(
 }
 
 function buildSmsTransport(providerType: string, credentialsRef: string): SmsTransport {
+  if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureSmsTransport();
   switch (providerType) {
     case 'telnyx':
       return new TelnyxSmsTransport(credentialsRef);

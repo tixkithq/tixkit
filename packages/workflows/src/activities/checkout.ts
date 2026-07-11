@@ -699,11 +699,16 @@ export async function createPaymentIntentActivity(input: {
   description?: string;
   feeCents?: number;
 }): Promise<
-  WorkflowActivityResult<{ providerIntentId: string; clientSecret?: string; provider?: string }>
+  WorkflowActivityResult<{
+    providerIntentId: string;
+    clientSecret?: string;
+    provider?: string;
+  }>
 > {
   const db = getActivityDb();
   try {
-    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    const stripeSecretKey =
+      process.env.TIXKIT_RUNTIME_MODE === 'sandbox' ? undefined : process.env.STRIPE_SECRET_KEY;
     if (!stripeSecretKey) {
       if (process.env.NODE_ENV === 'production') {
         return errResult('STRIPE_NOT_CONFIGURED', 'Stripe secret key is not configured', false);
@@ -1130,7 +1135,8 @@ export async function compensateOrphanPaymentActivity(input: {
       });
     }
 
-    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    const stripeSecretKey =
+      process.env.TIXKIT_RUNTIME_MODE === 'sandbox' ? undefined : process.env.STRIPE_SECRET_KEY;
     if (!stripeSecretKey) {
       attemptedAction = 'refund';
       const updated = await completePaymentCompensation({

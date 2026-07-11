@@ -136,7 +136,8 @@ export async function processRefundActivity(input: {
   try {
     const callerKey = input.idempotencyKey ?? `refund-${input.orderId}`;
     const stripeIdempotencyKey = `${callerKey}:${input.nonce}`;
-    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    const stripeSecretKey =
+      process.env.TIXKIT_RUNTIME_MODE === 'sandbox' ? undefined : process.env.STRIPE_SECRET_KEY;
     const pendingProviderRefundId = `pending-refund:${input.orderId}:${input.nonce}`;
 
     const reservation = await db.transaction().execute(async (trx): Promise<RefundReservation> => {

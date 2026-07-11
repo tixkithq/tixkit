@@ -54,3 +54,4 @@ export { OrganizationMemberUniqueMigration } from './0053_organization_member_un
 export { CheckInActivityIndexesMigration } from './0054_check_in_activity_indexes.js';
 export { CheckInActivitySequenceMigration } from './0055_check_in_activity_sequence.js';
 export { CheckoutHoldCapacityIndexMigration } from './0056_checkout_hold_capacity_index.js';
+export { SandboxEnvironmentsMigration } from './0056_1_sandbox_environments.js';

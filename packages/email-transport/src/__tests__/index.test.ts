@@ -291,4 +291,11 @@ describe('createDefaultEmailTransport', () => {
     vi.stubEnv('RESEND_API_KEY', '');
     expect(createDefaultEmailTransport()).toBeInstanceOf(CaptureEmailTransport);
   });
+
+  it('forces capture in sandbox mode even when Resend credentials are present', () => {
+    vi.stubEnv('TIXKIT_RUNTIME_MODE', 'sandbox');
+    vi.stubEnv('RESEND_API_KEY', 're_live_must_not_be_called');
+    expect(createDefaultEmailTransport()).toBeInstanceOf(CaptureEmailTransport);
+    expect(buildEmailTransport('resend', 'RESEND_API_KEY')).toBeInstanceOf(CaptureEmailTransport);
+  });
 });

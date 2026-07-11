@@ -57,6 +57,7 @@ import { OrganizationMemberUniqueMigration } from './migrations/0053_organizatio
 import { CheckInActivityIndexesMigration } from './migrations/0054_check_in_activity_indexes.js';
 import { CheckInActivitySequenceMigration } from './migrations/0055_check_in_activity_sequence.js';
 import { CheckoutHoldCapacityIndexMigration } from './migrations/0056_checkout_hold_capacity_index.js';
+import { SandboxEnvironmentsMigration } from './migrations/0056_1_sandbox_environments.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -156,6 +157,8 @@ const ALL_SCHEMA_TABLES = [
   'offline_check_in_sync_chunks',
   'offline_check_in_sync_jobs',
   'ticket_listings',
+  'access_rule_redemptions',
+  'sandbox_environments',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -237,6 +240,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0054_check_in_activity_indexes': CheckInActivityIndexesMigration,
       '0055_check_in_activity_sequence': CheckInActivitySequenceMigration,
       '0056_checkout_hold_capacity_index': CheckoutHoldCapacityIndexMigration,
+      '0056_1_sandbox_environments': SandboxEnvironmentsMigration,
     };
   }
 }

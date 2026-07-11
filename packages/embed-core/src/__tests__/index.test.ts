@@ -12,6 +12,7 @@ import {
   generateCspProfile,
   generateEmbed,
   generateEmbedSnippet,
+  isEmbedLifecycleDetail,
   parseHostHelloMessage,
   validateCheckoutMessageEvent,
   validateEmbedOptions,
@@ -260,5 +261,29 @@ describe('Embed Contract v1', () => {
     );
     expect(embedCheckoutMessageSchema).toEqual(checkoutSchema);
     expect(embedLifecycleSchema).toEqual(lifecycleSchema);
+  });
+
+  it('rejects lifecycle PII, invalid enums, oversized messages, and variant fields', () => {
+    const detail = {
+      contractVersion: '1.0',
+      widgetId: 'widget_1',
+      eventId: 'evt_1',
+      mode: 'inline',
+      timestamp: '2026-07-10T12:00:00.000Z',
+      name: 'loading',
+    } as const;
+    expect(isEmbedLifecycleDetail(detail)).toBe(true);
+    expect(isEmbedLifecycleDetail({ ...detail, buyerEmail: 'buyer@example.test' })).toBe(false);
+    expect(isEmbedLifecycleDetail({ ...detail, mode: 'button' })).toBe(false);
+    expect(isEmbedLifecycleDetail({ ...detail, reason: 'buyer' })).toBe(false);
+    expect(
+      isEmbedLifecycleDetail({
+        ...detail,
+        name: 'recoverable-error',
+        errorCode: 'internal-error',
+        message: 'x'.repeat(241),
+        retryable: true,
+      }),
+    ).toBe(false);
   });
 });

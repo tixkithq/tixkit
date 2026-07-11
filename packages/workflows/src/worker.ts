@@ -1,6 +1,7 @@
 import { Worker, NativeConnection, type ActivityInterceptorsFactory } from '@temporalio/worker';
 import { Connection, Client } from '@temporalio/client';
 import { createTelemetryResource, createTraceExporter } from '@tixkit/shared';
+import { assertSandboxRuntimeBinding, createDb } from '@tixkit/db';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
@@ -134,6 +135,16 @@ async function ensureScheduledWorkflow(
 }
 
 export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
+  const startupDb = createDb(config.databaseUrl);
+  try {
+    await assertSandboxRuntimeBinding(startupDb, {
+      runtimeMode: process.env.TIXKIT_RUNTIME_MODE,
+      epoch: process.env.TIXKIT_SANDBOX_EPOCH,
+      taskQueues: config.temporalWorkerTaskQueues,
+    });
+  } finally {
+    await startupDb.destroy();
+  }
   const observability = await startWorkerObservability();
   const connection = await NativeConnection.connect({
     address: config.temporalAddress,
@@ -198,8 +209,12 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
       ),
     );
 
-    await ensureHoldExpirationScheduler();
-    await ensureProviderEventRecoveryScheduler();
+    const schedulerEpoch =
+      process.env.TIXKIT_RUNTIME_MODE === 'sandbox' ? process.env.TIXKIT_SANDBOX_EPOCH : undefined;
+    await ensureHoldExpirationScheduler({ workflowId: holdExpirationWorkflowId(schedulerEpoch) });
+    await ensureProviderEventRecoveryScheduler({
+      workflowId: providerEventRecoveryWorkflowId(schedulerEpoch),
+    });
 
     const workerRuns = workers.map((worker) => worker.run());
     console.log(`TIXKIT_WORKER_READY taskQueues=${config.temporalWorkerTaskQueues.join(',')}`);

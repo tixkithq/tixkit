@@ -889,6 +889,14 @@ export interface WebhookEndpointTable {
   updated_at: Timestamp;
 }
 
+export interface SandboxEnvironmentTable {
+  id: string;
+  epoch: string;
+  task_queue: string;
+  fixture_version: number;
+  reset_at: Timestamp;
+}
+
 export interface WebhookEventTable {
   id: string;
   tenant_id: string;
@@ -1475,4 +1483,5 @@ export interface DB {
   content_assets: ContentAssetTable;
   content_render_artifacts: ContentRenderArtifactTable;
   content_test_sends: ContentTestSendTable;
+  sandbox_environments: SandboxEnvironmentTable;
 }

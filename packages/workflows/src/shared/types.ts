@@ -60,12 +60,12 @@ export function exportWorkflowId(exportId: string): string {
   return `export:${exportId}`;
 }
 
-export function holdExpirationWorkflowId(): string {
-  return `hold-expiration:scheduled`;
+export function holdExpirationWorkflowId(epoch?: string): string {
+  return epoch ? `hold-expiration:scheduled:${epoch}` : `hold-expiration:scheduled`;
 }
 
-export function providerEventRecoveryWorkflowId(): string {
-  return `provider-event-recovery:scheduled`;
+export function providerEventRecoveryWorkflowId(epoch?: string): string {
+  return epoch ? `provider-event-recovery:scheduled:${epoch}` : `provider-event-recovery:scheduled`;
 }
 
 export function paymentReconciliationRecoveryWorkflowId(

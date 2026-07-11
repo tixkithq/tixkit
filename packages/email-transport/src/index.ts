@@ -528,6 +528,7 @@ export function buildEmailTransport(
   credentialsRef: string,
   senderDomain?: string,
 ): EmailTransport & { providerName?: string } {
+  if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
   switch (providerType) {
     case 'resend':
       return new ResendEmailTransport(credentialsRef);
@@ -554,6 +555,7 @@ export function buildEmailTransport(
  * Default API/worker transport: Resend when RESEND_API_KEY is set, otherwise capture.
  */
 export function createDefaultEmailTransport(): EmailTransport & { providerName?: string } {
+  if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
   if (process.env.RESEND_API_KEY) {
     return new ResendEmailTransport('RESEND_API_KEY');
   }

@@ -414,6 +414,20 @@
         "vitest": "^4.1.9",
       },
     },
+    "packages/contract-tests": {
+      "name": "@tixkit/contract-tests",
+      "version": "0.1.0",
+      "bin": {
+        "tixkit-contract-tests": "./dist/cli.js",
+      },
+      "dependencies": {
+        "@tixkit/embed-core": "1.0.0",
+      },
+      "devDependencies": {
+        "typescript": "7.0.2",
+        "vitest": "^4.1.0",
+      },
+    },
     "packages/db": {
       "name": "@tixkit/db",
       "version": "0.1.0",
@@ -2331,6 +2345,8 @@
     "@tixkit/content-event-page-react": ["@tixkit/content-event-page-react@workspace:packages/content-event-page-react"],
 
     "@tixkit/content-message": ["@tixkit/content-message@workspace:packages/content-message"],
+
+    "@tixkit/contract-tests": ["@tixkit/contract-tests@workspace:packages/contract-tests"],
 
     "@tixkit/db": ["@tixkit/db@workspace:packages/db"],
 

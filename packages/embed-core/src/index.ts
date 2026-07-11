@@ -1195,6 +1195,49 @@ export const embedLifecycleSchema = {
 } as const;
 // oxlint-enable unicorn/no-thenable
 
+/** Runtime equivalent of {@link embedLifecycleSchema}; kept here as the public validation boundary. */
+export function isEmbedLifecycleDetail(value: unknown): value is EmbedLifecycleDetail {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const detail = value as Record<string, unknown>;
+  const allowed = ['contractVersion', 'widgetId', 'event', 'eventId', 'mode', 'timestamp', 'name'];
+  if (
+    detail.contractVersion !== EMBED_CONTRACT_VERSION ||
+    typeof detail.widgetId !== 'string' ||
+    typeof detail.eventId !== 'string' ||
+    (detail.event !== undefined && typeof detail.event !== 'string') ||
+    !isOneOf(detail.mode, ['inline', 'modal', 'redirect'] as const) ||
+    typeof detail.timestamp !== 'string' ||
+    !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/u.test(detail.timestamp) ||
+    !isOneOf(detail.name, EMBED_LIFECYCLE_NAMES)
+  )
+    return false;
+
+  if (detail.name === 'closed') {
+    allowed.push('reason');
+    if (
+      !isOneOf(detail.reason, ['host', 'buyer', 'navigation', 'disconnected', 'unknown'] as const)
+    )
+      return false;
+  } else if (detail.name === 'checkout-session-created') {
+    allowed.push('sessionId');
+    if (typeof detail.sessionId !== 'string') return false;
+  } else if (detail.name === 'order-completed') {
+    allowed.push('sessionId', 'orderId');
+    if (typeof detail.orderId !== 'string') return false;
+    if (detail.sessionId !== undefined && typeof detail.sessionId !== 'string') return false;
+  } else if (detail.name === 'recoverable-error' || detail.name === 'fatal-error') {
+    allowed.push('errorCode', 'message', 'retryable');
+    if (
+      !isOneOf(detail.errorCode, EMBED_ERROR_CODES) ||
+      typeof detail.message !== 'string' ||
+      detail.message.length > 240 ||
+      typeof detail.retryable !== 'boolean'
+    )
+      return false;
+  }
+  return Object.keys(detail).every((key) => allowed.includes(key));
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     'tixkit-widget': TixkitWidgetElement;

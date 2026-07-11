@@ -14,6 +14,13 @@ const startWorkerObservability = vi.fn(async () => ({ metrics: {} }));
 const createTelemetryResource = vi.fn();
 const createTraceExporter = vi.fn();
 const createWorkflowExporterSink = vi.fn();
+const destroyStartupDb = vi.fn(async () => undefined);
+const assertSandboxRuntimeBinding = vi.fn(async () => undefined);
+
+vi.mock('@tixkit/db', () => ({
+  createDb: vi.fn(() => ({ destroy: destroyStartupDb })),
+  assertSandboxRuntimeBinding,
+}));
 
 vi.mock('@temporalio/worker', () => ({
   NativeConnection: { connect: nativeConnectionConnect },
@@ -100,6 +107,9 @@ describe('runWorker', () => {
     delete process.env.TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS;
     delete process.env.TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS;
     delete process.env.TEMPORAL_WORKER_TASK_QUEUES;
+    delete process.env.TEMPORAL_TASK_QUEUE;
+    delete process.env.TIXKIT_RUNTIME_MODE;
+    delete process.env.TIXKIT_SANDBOX_EPOCH;
   });
 
   it('emits readiness only after all recovery schedulers are ensured', async () => {
@@ -147,6 +157,43 @@ describe('runWorker', () => {
         maxConcurrentWorkflowTaskExecutions: 3,
         maxCachedWorkflows: 11,
       }),
+    );
+    await expect(Promise.race([started, Promise.resolve('running')])).resolves.toBe('running');
+  });
+
+  it('starts both recovery schedulers with the sandbox epoch on the rotated queue', async () => {
+    process.env.TIXKIT_RUNTIME_MODE = 'sandbox';
+    process.env.TIXKIT_SANDBOX_EPOCH = 'epoch_2';
+    process.env.TEMPORAL_TASK_QUEUE = 'tixkit-sandbox-epoch_2';
+    process.env.TEMPORAL_WORKER_TASK_QUEUES = 'tixkit-sandbox-epoch_2';
+    const { runWorker } = await import('../worker.js');
+
+    const started = runWorker({ workflowsPath: 'test-workflows.js' });
+    await vi.waitFor(() => expect(workflowStart).toHaveBeenCalledTimes(2));
+
+    expect(assertSandboxRuntimeBinding).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runtimeMode: 'sandbox',
+        epoch: 'epoch_2',
+        taskQueues: ['tixkit-sandbox-epoch_2'],
+      }),
+    );
+    expect(
+      workflowStart.mock.calls.map(
+        (call) => (call as unknown as [unknown, Record<string, unknown>])[1],
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskQueue: 'tixkit-sandbox-epoch_2',
+          workflowId: 'hold-expiration:scheduled:epoch_2',
+        }),
+        expect.objectContaining({
+          taskQueue: 'tixkit-sandbox-epoch_2',
+          workflowId: 'provider-event-recovery:scheduled:epoch_2',
+        }),
+      ]),
     );
     await expect(Promise.race([started, Promise.resolve('running')])).resolves.toBe('running');
   });

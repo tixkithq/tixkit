@@ -11125,6 +11125,86 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/webhook-endpoints/{endpointId}/test': {
+      post: {
+        summary: 'Queue a signed synthetic test webhook delivery',
+        description:
+          'Persists and delivers a test.ping event through the normal Temporal delivery pipeline. Never creates payment, order, fulfillment, notification, or commerce side effects.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
+        parameters: [
+          {
+            name: 'endpointId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '202': {
+            description: 'Synthetic delivery queued',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    queued: { type: 'boolean', enum: [true] },
+                    test: { type: 'boolean', enum: [true] },
+                    eventId: { type: 'string' },
+                    endpointId: { type: 'string' },
+                  },
+                  required: ['queued', 'test', 'eventId', 'endpointId'],
+                },
+              },
+            },
+          },
+          '404': {
+            description: 'Endpoint not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '429': {
+            description: 'Test delivery rate limit exceeded',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '503': {
+            description: 'Test event persisted but Temporal delivery start is unavailable',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    queued: { type: 'boolean', enum: [false] },
+                    test: { type: 'boolean', enum: [true] },
+                    eventId: { type: 'string' },
+                    endpointId: { type: 'string' },
+                    error: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        code: { type: 'string', enum: ['TEMPORAL_UNAVAILABLE'] },
+                        message: { type: 'string' },
+                      },
+                      required: ['code', 'message'],
+                    },
+                  },
+                  required: ['queued', 'test', 'eventId', 'endpointId', 'error'],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/webhook-endpoints/{endpointId}/events': {
       get: {
         summary: 'List webhook delivery events for an endpoint',
