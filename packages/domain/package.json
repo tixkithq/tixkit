@@ -22,6 +22,10 @@
       "types": "./dist/events/index.d.ts",
       "import": "./dist/events/index.js"
     },
+    "./readiness": {
+      "types": "./dist/readiness/index.d.ts",
+      "import": "./dist/readiness/index.js"
+    },
     "./ticketing": {
       "types": "./dist/ticketing/index.d.ts",
       "import": "./dist/ticketing/index.js"

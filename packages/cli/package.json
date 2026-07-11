@@ -31,6 +31,7 @@
     "seed:sample-data": "bun run src/index.ts seed:sample-data",
     "sandbox:reset": "bun run src/index.ts sandbox:reset",
     "sandbox:initialize": "bun run src/index.ts sandbox:initialize",
+    "migration": "bun run src/index.ts",
     "seed:email-templates": "bun run src/index.ts seed:email-templates",
     "setup:check": "bun run src/index.ts setup:check",
     "dev:webhooks": "bun run src/index.ts dev:webhooks",

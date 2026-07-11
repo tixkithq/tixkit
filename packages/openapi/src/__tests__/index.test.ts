@@ -1572,6 +1572,7 @@ describe('openApiSpec', () => {
             'user_avatar',
             'content_email_image',
             'content_event_page_image',
+            'migration_import',
             'event_cover',
             'event_seo_image',
           ],
@@ -1870,5 +1871,23 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.securitySchemes).toHaveProperty('SvixSignature');
     expect(openApiSpec.components.securitySchemes).toHaveProperty('TelnyxSignature');
     expect(openApiSpec.components.securitySchemes).toHaveProperty('EmailProviderSignature');
+  });
+
+  it('documents migration credential references as write-only and scoped revocation inputs', () => {
+    const create = openApiSpec.paths['/migration-credentials'].post;
+    const schema = create.requestBody.content['application/json'].schema;
+    expect(schema.properties.secretReference).toMatchObject({
+      type: 'string',
+      writeOnly: true,
+      pattern: expect.stringContaining('secretmanager'),
+    });
+
+    const revoke = openApiSpec.paths['/migration-credentials/{credentialId}'].delete;
+    expect(revoke.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'credentialId', in: 'path', required: true }),
+        expect.objectContaining({ name: 'organizationId', in: 'query', required: true }),
+      ]),
+    );
   });
 });

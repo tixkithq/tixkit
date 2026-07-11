@@ -1,0 +1,148 @@
+---
+title: Operate durable migrations
+description: Dry-run, commit, recover, reconcile, and safely correct tenant migration jobs.
+audience:
+  - operator
+  - developer
+product_area: platform
+content_type: runbook
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites:
+  - A tenant-scoped Tixkit API key, a secret-manager reference for the source credential, and immutable source exports
+related:
+  - /operators/reports-and-exports
+  - /operators/team-and-permissions
+---
+
+Tixkit migrations are durable, tenant-scoped jobs. Treat the job report—not an adapter log—as the source of truth for dry-run readiness, progress, and conflicts. Treat the live rollback assessment as the source of truth for rollback eligibility. Migration workers may retry a chunk; adapters and the core therefore use stable external references and idempotent writes.
+
+## Operator lifecycle
+
+1. Upload source objects with upload purpose `migration_import` and wait for a clean malware-scan result. Retain the returned opaque `uploadArtifactId`.
+2. Register an expiring source-credential reference, then create the job with its source system, adapter version, mapping profile, timezone, currency assumptions, and credential ID.
+3. Register each clean `uploadArtifactId` on the job. Tixkit derives storage metadata and checksums; clients never submit object keys or asserted hashes.
+4. Save or select mappings, then run the dry run. Resolve every fatal/error issue and review warnings, unsupported features, duplicates, mapping failures, counts, and runtime/storage estimates.
+5. Save the final report and approval evidence. Confirm that its input/configuration hashes still match the job.
+6. Commit using the exact job-bound acknowledgement. Monitor durable progress events and reconciliation metrics.
+7. Activate imported entities only after reconciliation. Keep source files and reports under the configured retention policy.
+
+Never skip directly from creation to commit. The API rejects a stale or unsuccessful dry run even if a client attempts it.
+
+## CLI workflow
+
+Keep credentials out of command arguments and shell history:
+
+```bash
+export TIXKIT_API_URL=https://api.example.com
+export TIXKIT_API_KEY='from-your-secret-manager'
+
+tixkit migration:create --request-file ./migration-request.json --json
+tixkit migration:dry-run imp_01JEXAMPLE --json
+tixkit migration:status imp_01JEXAMPLE --json
+tixkit migration:report imp_01JEXAMPLE --json > migration-report.json
+tixkit migration:commit imp_01JEXAMPLE --confirm 'COMMIT imp_01JEXAMPLE' --json
+tixkit migration:rollback-assessment imp_01JEXAMPLE --json > rollback-assessment.json
+# Only after reviewing an eligible assessment:
+tixkit migration:rollback imp_01JEXAMPLE --confirm 'ROLLBACK imp_01JEXAMPLE' --json
+```
+
+A minimal create request is:
+
+```json
+{
+  "organizationId": "org_01JEXAMPLE",
+  "sourceSystem": "generic-csv",
+  "adapterVersion": "1.0.0",
+  "mode": "commit",
+  "configuration": { "timezone": "America/Chicago", "currency": "USD" },
+  "credentialId": "mcred_01JEXAMPLE"
+}
+```
+
+Upload source files with upload purpose `migration_import`, complete malware scanning, then
+register the returned `uploadArtifactId` on the job. The server derives the immutable object key,
+size, media type, and SHA-256 from the tenant- and organization-scoped upload artifact; clients
+cannot supply an arbitrary storage key.
+
+Use `migration:pause`, `migration:resume`, and `migration:cancel` for lifecycle control. These are requests: wait until job status confirms the durable checkpoint. Run `migration:rollback-assessment` immediately before rollback and review `eligible`, `mode`, blockers, and any `correctivePlanId`. `migration:rollback` requires `--confirm 'ROLLBACK <jobId>'` and still fails closed when the server detects live activity or downstream references.
+
+## API key and source credential
+
+`TIXKIT_API_KEY` authenticates the operator to Tixkit. It is not the credential used to read a source system. Source credentials stay in the deployment's secret manager; Tixkit stores only an expiring reference:
+
+```bash
+curl -sS https://api.example.com/v1/migration-credentials \
+  -H "Authorization: Bearer $TIXKIT_API_KEY" \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "organizationId":"org_01JEXAMPLE",
+    "sourceSystem":"generic-csv",
+    "secretReference":"secret://migrations/generic-csv/2026-07",
+    "expiresAt":"2026-07-11T18:00:00Z"
+  }'
+```
+
+Never submit the raw source token, password, cookie, or authorization header in job configuration or mappings. The credential reference is organization- and source-scoped. Tixkit revalidates its registry expiry and secret-manager availability when commit begins. If it expires, is revoked, or no longer resolves, register a new reference, update a new job configuration, and repeat the dry run; do not extend or replace committed evidence in place. Revoke a superseded reference with `DELETE /v1/migration-credentials/{credentialId}?organizationId={organizationId}`.
+
+Self-hosted workers bind accepted `aws-secretsmanager://`, `gcp-secretmanager://`, `secret://`, or `vault://` references to injected environment variables through `TIXKIT_MIGRATION_CREDENTIAL_BINDINGS`. The JSON registry contains no secret material and must match both the complete reference and source system:
+
+```json
+{
+  "secret://migrations/generic-csv/2026-07": {
+    "tenantId": "tenant_01JEXAMPLE",
+    "organizationId": "org_01JEXAMPLE",
+    "sourceSystem": "generic-csv",
+    "envName": "TIXKIT_MIGRATION_GENERIC_CSV_SECRET"
+  }
+}
+```
+
+Set `TIXKIT_MIGRATION_GENERIC_CSV_SECRET` through the deployment secret manager. Bindings must match the exact reference, tenant, organization, and source system. Public `env://` references are rejected, malformed registries fail closed, and missing bindings or environment material prevent commit.
+
+## Dry-run guarantee
+
+A dry run may persist job-control rows, uploaded file metadata, normalized staging rows, validation findings, mappings, conflicts, and progress events. It performs zero writes to live event, inventory, buyer, order, payment, ticket, or check-in domains. It does not reserve inventory, send messages, deliver webhooks, fulfill tickets, or contact payment providers.
+
+Before approving commit, verify the report contains create/update/skip/conflict counts, issue severities, unsupported-feature losses, duplicate and mapping findings, date/timezone/currency findings, and runtime/storage estimates. Changing any source object, adapter, mapping, or behavior-affecting option invalidates the report and requires another dry run.
+
+## Source object safety
+
+- Use tenant- and organization-scoped `migration_import` upload artifacts and short-lived upload credentials.
+- Verify content length and SHA-256 before parsing and again before commit.
+- Reject path traversal, archives with unsafe entries or expansion ratios, unsupported encodings, and unexpected media types.
+- Malware-scan uploads where the deployment supports scanning. Quarantine rather than parse failed objects.
+- Encrypt source objects and reports at rest. Redact secrets and unnecessary buyer PII from logs and progress events.
+- Do not replace an object in place. A changed hash is a new input and invalidates the dry run.
+- Apply explicit retention and deletion policies to source exports, row payloads, and reports.
+
+## Historical financial records
+
+Imported payments and refunds are historical snapshots with source amount, currency, provider reference, source timestamp, and provenance. They are not proof that a Tixkit provider transaction succeeded. Migration code must never generate provider-success events, settle funds, initiate refunds, create synthetic completed payments, or trigger fulfillment, notification, or webhook side effects.
+
+Reconcile snapshots explicitly against provider records when required. A reconciliation result is separate provenance; it must not rewrite the original source values silently. Amount or currency mismatches block activation until an operator records the approved correction.
+
+## Cancellation, rollback, and correction
+
+Before commit, cancellation is safe and leaves live domains unchanged. During commit, cancellation takes effect at a durable chunk boundary; already committed chunks remain idempotently recorded and are reconciled before any resume or rollback decision.
+
+After commit but before activation, rollback may delete only untouched entities created by that job. It must refuse destructive rollback when an imported entity has a new sale, scan, transfer, edit, provider event, or downstream reference. Entities updated rather than created are not blindly restored.
+
+After live activity, the rollback assessment refuses deletion and persists an immutable `rollback.corrective-plan` event. Download the report again and inspect its `correctivePlans` collection. Each plan identifies its event ID, blockers, impacted entities, saved mappings, and safe actions. The migration owner must attach the plan to the incident, obtain the same operational/financial approval required for the affected records, execute only additive or scoped corrections, and retain the completion evidence. Typical corrections are additive mappings, scoped edits, compensating historical snapshots, or explicit deactivation. Never delete evidence or manufacture provider history to make totals agree.
+
+## Incident and recovery
+
+1. Pause the affected job and prevent activation. Do not terminate Temporal histories or edit job state directly.
+2. Capture the job ID, run/workflow ID, adapter/version, input/configuration hashes, last durable cursor, failing chunk, and redacted error code.
+3. Determine whether the failure is deterministic data validation, transient infrastructure, adapter incompatibility, or a domain invariant failure.
+4. For transient failures, restore the dependency and resume from the recorded checkpoint. Idempotency and external-reference uniqueness must make replay safe.
+5. For bad inputs or mappings, cancel the job, create immutable corrected inputs/configuration, and run a new dry run. Do not mutate committed evidence.
+6. Reconcile row counts, external references, entity totals, currencies, historical payment/refund snapshots, ticket state, and check-in history before activation.
+7. If partial writes cannot be proven safe, keep the job paused, disable activation, and escalate with the corrective plan. Do not force completion.
+
+Alert on stalled progress, repeated chunk failures, conflict spikes, tenant-scope violations, input hash mismatches, reconciliation drift, rollback refusal, and accidental side-effect attempts. Operational dashboards and audit logs must use job/entity identifiers and error codes rather than buyer PII.
+
+## Release and compatibility
+
+Pin the migration adapter and source-version matrix used by every job. Adapter upgrades do not alter an existing job’s semantics. Breaking mapping or normalization changes require a new adapter major version, migration guide, fixtures, dry-run/commit/idempotency tests, and an explicit operator choice for new jobs.

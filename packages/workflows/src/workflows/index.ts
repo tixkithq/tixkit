@@ -8,3 +8,4 @@ export * from './export.js';
 export * from './clerk-identity-sync.js';
 export * from './payment-reconciliation.js';
 export * from './privacy.js';
+export * from './migration.js';

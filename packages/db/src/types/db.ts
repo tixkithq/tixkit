@@ -1395,6 +1395,216 @@ export interface ContentTestSendTable {
   created_at: Timestamp;
 }
 
+export interface MigrationCredentialTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  source_system: string;
+  secret_reference: string;
+  status: string;
+  expires_at: Timestamp;
+  created_by: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ImportJobTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  source_system: string;
+  adapter_version: string;
+  mode: string;
+  status: string;
+  idempotency_key: string;
+  requested_by: string;
+  configuration: string | null;
+  summary: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  started_at: Timestamp | null;
+  completed_at: Timestamp | null;
+  activated_at: Timestamp | null;
+  cancelled_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ImportJobFileTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  object_key: string;
+  original_name: string;
+  media_type: string;
+  byte_size: string | number | bigint;
+  sha256: string;
+  status: string;
+  created_at: Timestamp;
+}
+
+export interface ImportJobRowTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  import_job_file_id: string | null;
+  entity_type: string;
+  external_id: string | null;
+  row_number: number;
+  status: string;
+  claim_owner: string | null;
+  claim_attempt: Generated<number>;
+  claim_expires_at: Timestamp | null;
+  severity: string | null;
+  source_data: string;
+  normalized_data: string | null;
+  tixkit_id: string | null;
+  created_entity: Generated<boolean>;
+  domain_activity_at: Timestamp | null;
+  rollback_blocked_reason: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ImportJobEventTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  sequence: number;
+  event_key: string;
+  type: string;
+  severity: string;
+  message: string;
+  data: string | null;
+  created_at: Timestamp;
+}
+
+export interface ImportMappingTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  source_system: string;
+  name: string;
+  entity_type: string;
+  mapping: string;
+  version: number;
+  created_by: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ExternalReferenceTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  source_system: string;
+  entity_type: string;
+  external_id: string;
+  tixkit_id: string;
+  created_by_import_job_id: string | null;
+  last_seen_import_job_id: string;
+  source_provenance: string | null;
+  rollback_blocked_at: Timestamp | null;
+  rollback_blocked_reason: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ImportConflictTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  import_job_row_id: string | null;
+  code: string;
+  severity: string;
+  entity_type: string;
+  external_id: string | null;
+  message: string;
+  details: string | null;
+  resolution: string | null;
+  resolved_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+export interface ImportedDomainEntityTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  created_by_import_job_id: string;
+  last_seen_import_job_id: string;
+  source_system: string;
+  entity_type: string;
+  source_external_id: string;
+  attributes: string;
+  financial_snapshot: string | null;
+  source_provenance: string;
+  canonical_hash: string;
+  side_effects_suppressed: boolean;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ImportedEntityDependencyTable {
+  tenant_id: string;
+  organization_id: string;
+  entity_id: string;
+  depends_on_entity_id: string;
+  created_at: Timestamp;
+}
+
+export interface VenueTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  name: string;
+  address: string | null;
+  timezone: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface BuyerTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface HistoricalFinancialSnapshotTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  order_id: string;
+  kind: string;
+  amount_minor: string | number | bigint;
+  currency: string;
+  provider_reference: string | null;
+  occurred_at: Timestamp;
+  provenance: string;
+  reconciliation_status: string;
+  created_at: Timestamp;
+}
+
+export interface HistoricalCheckInTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  ticket_id: string;
+  occurred_at: Timestamp;
+  result: string;
+  provenance: string;
+  created_at: Timestamp;
+}
+
 export interface DB {
   tenants: TenantTable;
   organizations: OrganizationTable;
@@ -1484,4 +1694,18 @@ export interface DB {
   content_render_artifacts: ContentRenderArtifactTable;
   content_test_sends: ContentTestSendTable;
   sandbox_environments: SandboxEnvironmentTable;
+  import_jobs: ImportJobTable;
+  migration_credentials: MigrationCredentialTable;
+  import_job_files: ImportJobFileTable;
+  import_job_rows: ImportJobRowTable;
+  import_job_events: ImportJobEventTable;
+  import_mappings: ImportMappingTable;
+  external_references: ExternalReferenceTable;
+  import_conflicts: ImportConflictTable;
+  imported_domain_entities: ImportedDomainEntityTable;
+  imported_entity_dependencies: ImportedEntityDependencyTable;
+  venues: VenueTable;
+  buyers: BuyerTable;
+  historical_financial_snapshots: HistoricalFinancialSnapshotTable;
+  historical_check_ins: HistoricalCheckInTable;
 }

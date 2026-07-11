@@ -5,6 +5,13 @@ import { validateEnvFile, formatValidationResult } from './setup-check.js';
 import { runDevWebhooks, formatWebhookResult } from './dev-webhooks.js';
 import { seedSampleData } from './seed-sample-data.js';
 import { initializeSandbox, resetSandbox } from './sandbox-reset.js';
+import {
+  MigrationJobClient,
+  formatMigrationResult,
+  readMigrationCreateRequest,
+  requireMigrationConfirmation,
+  type MigrationJobAction,
+} from './migration-jobs.js';
 import { seedEmailTemplateDefaults } from './seed-email-templates.js';
 import { runQuickstart } from './quickstart.js';
 import {
@@ -39,6 +46,16 @@ function help(): string {
     '  seed:sample-data     Seed idempotent sample tenant / event / order data',
     '  sandbox:reset        Reset an isolated sandbox DB and rotate its 24-hour credential',
     '  sandbox:initialize   Mark a migrated database as an authorized sandbox reset target',
+    '  migration:create     Create a durable migration job from a JSON request',
+    '  migration:dry-run    Validate and plan a migration without domain writes',
+    '  migration:status     Read migration job state and progress',
+    '  migration:report     Download the current validation/commit report as JSON',
+    '  migration:rollback-assessment  Inspect live rollback eligibility and blockers',
+    '  migration:commit     Commit a reviewed dry run (exact confirmation required)',
+    '  migration:pause      Pause processing at a durable checkpoint',
+    '  migration:resume     Resume paused processing',
+    '  migration:cancel     Request safe cancellation',
+    '  migration:rollback   Request eligible rollback (exact confirmation required)',
     '  seed:email-templates Seed or safely restyle lifecycle email defaults for a brand/event scope',
     '  quickstart           Start local infrastructure, apps, and sample data',
     '',
@@ -84,6 +101,13 @@ function help(): string {
     'Options for quickstart:',
     '  --no-open            Do not open the browser after services are healthy',
     '  --skip-seed          Start services without seeding sample data',
+    '',
+    'Options for migration commands:',
+    '  --api-url <url>       API base URL (default: TIXKIT_API_URL or http://localhost:4000)',
+    '  --request-file <path> Create request JSON containing sourceSystem (migration:create)',
+    '  --confirm <text>      Exact "COMMIT <jobId>" or "ROLLBACK <jobId>" acknowledgement',
+    '  --json                Emit a stable result envelope for automation',
+    '  Authentication uses TIXKIT_API_KEY; the key is never accepted in a URL.',
   ].join('\n');
 }
 
@@ -289,6 +313,56 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'migration:create':
+    case 'migration:dry-run':
+    case 'migration:status':
+    case 'migration:report':
+    case 'migration:rollback-assessment':
+    case 'migration:commit':
+    case 'migration:pause':
+    case 'migration:resume':
+    case 'migration:cancel':
+    case 'migration:rollback': {
+      const json = hasFlag('--json');
+      const apiKey = process.env.TIXKIT_API_KEY ?? '';
+      const apiBaseUrl = parseArg(
+        '--api-url',
+        process.env.TIXKIT_API_URL ?? 'http://localhost:4000',
+      );
+      const client = new MigrationJobClient({ apiBaseUrl, apiKey });
+      let result;
+      if (command === 'migration:create') {
+        const requestFile = parseArg('--request-file', '');
+        if (!requestFile) throw new Error('migration:create requires --request-file <path>.');
+        result = await client.create(
+          await readMigrationCreateRequest(await resolveRepoRelativePath(requestFile)),
+        );
+      } else {
+        const jobId = args[1];
+        if (!jobId || jobId.startsWith('-')) {
+          throw new Error(`Usage: tixkit ${command} <jobId> [options]`);
+        }
+        if (command === 'migration:status') result = await client.get(jobId);
+        else if (command === 'migration:report') result = await client.report(jobId);
+        else if (command === 'migration:rollback-assessment') {
+          result = await client.rollbackAssessment(jobId);
+        } else {
+          const action = command.slice('migration:'.length) as MigrationJobAction;
+          if (action === 'commit' || action === 'rollback') {
+            requireMigrationConfirmation(action, jobId, parseArg('--confirm', ''));
+          }
+          result = await client.action(jobId, action);
+        }
+      }
+      console.log(
+        command === 'migration:report' && json && result.ok
+          ? JSON.stringify(result.data, null, 2)
+          : formatMigrationResult(result, json),
+      );
+      if (!result.ok) process.exitCode = 1;
+      break;
+    }
+
     default: {
       console.log(help());
       process.exit(command ? 1 : 0);
@@ -297,6 +371,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  const message = error instanceof Error ? error.message : String(error);
+  if (args.includes('--json')) {
+    console.error(JSON.stringify({ ok: false, status: 0, error: message }, null, 2));
+  } else {
+    console.error(message);
+  }
   process.exit(1);
 });

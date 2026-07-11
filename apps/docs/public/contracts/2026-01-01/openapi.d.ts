@@ -5129,6 +5129,280 @@ export interface paths {
             };
         };
     };
+    "/migration-credentials": {
+        post: {
+            requestBody: {
+                content: {
+                    "application/json": {
+                        organizationId: string;
+                        sourceSystem: string;
+                        secretReference: string;
+                        expiresAt: string;
+                    };
+                };
+            };
+            responses: {
+                "201": Record<string, never>;
+            };
+        };
+    };
+    "/migration-credentials/{credentialId}": {
+        delete: {
+            parameters: {
+                path: {
+                    credentialId: string;
+                };
+                query: {
+                    organizationId: string;
+                };
+            };
+            responses: {
+                "204": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs": {
+        get: {
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+        post: {
+            parameters: {
+                header: {
+                    "Idempotency-Key": string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        organizationId: string;
+                        sourceSystem: string;
+                        adapterVersion: string;
+                        mode?: "dry-run" | "commit";
+                        configuration?: Record<string, unknown>;
+                        credentialId?: string;
+                    };
+                };
+            };
+            responses: {
+                "201": Record<string, never>;
+                "409": Record<string, never>;
+            };
+        };
+    };
+    "/migration-mappings": {
+        get: {
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+        post: {
+            responses: {
+                "201": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+                "404": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/files": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        uploadArtifactId: string;
+                    };
+                };
+            };
+            responses: {
+                "201": Record<string, never>;
+                "409": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/rows": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/conflicts": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/events": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/dry-run": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+                "409": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/report": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/report/download": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": Record<string, unknown>;
+                    };
+                };
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/commit": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+                header: {
+                    "x-tixkit-confirmation": string;
+                };
+            };
+            responses: {
+                "202": Record<string, never>;
+                "409": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/pause": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "202": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/resume": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "202": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/cancel": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "202": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/rollback-assessment": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": Record<string, never>;
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/rollback": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+                header: {
+                    "x-tixkit-confirmation": string;
+                };
+            };
+            responses: {
+                "202": Record<string, never>;
+                "409": Record<string, never>;
+            };
+        };
+    };
     "/webhook-endpoints": {
         get: {
             parameters: {
@@ -10344,6 +10618,244 @@ export type operations = {
             };
         };
     };
+    postMigrationCredentials: {
+        requestBody: {
+            content: {
+                "application/json": {
+                    organizationId: string;
+                    sourceSystem: string;
+                    secretReference: string;
+                    expiresAt: string;
+                };
+            };
+        };
+        responses: {
+            "201": Record<string, never>;
+        };
+    };
+    deleteMigrationCredentialsByCredentialId: {
+        parameters: {
+            path: {
+                credentialId: string;
+            };
+            query: {
+                organizationId: string;
+            };
+        };
+        responses: {
+            "204": Record<string, never>;
+        };
+    };
+    getMigrationJobs: {
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    postMigrationJobs: {
+        parameters: {
+            header: {
+                "Idempotency-Key": string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    organizationId: string;
+                    sourceSystem: string;
+                    adapterVersion: string;
+                    mode?: "dry-run" | "commit";
+                    configuration?: Record<string, unknown>;
+                    credentialId?: string;
+                };
+            };
+        };
+        responses: {
+            "201": Record<string, never>;
+            "409": Record<string, never>;
+        };
+    };
+    getMigrationMappings: {
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    postMigrationMappings: {
+        responses: {
+            "201": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobId: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+            "404": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobIdFiles: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    postMigrationJobsByJobIdFiles: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    uploadArtifactId: string;
+                };
+            };
+        };
+        responses: {
+            "201": Record<string, never>;
+            "409": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobIdRows: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobIdConflicts: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobIdEvents: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    postMigrationJobsByJobIdDryRun: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+            "409": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobIdReport: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobIdReportDownload: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+        };
+    };
+    postMigrationJobsByJobIdCommit: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+            header: {
+                "x-tixkit-confirmation": string;
+            };
+        };
+        responses: {
+            "202": Record<string, never>;
+            "409": Record<string, never>;
+        };
+    };
+    postMigrationJobsByJobIdPause: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "202": Record<string, never>;
+        };
+    };
+    postMigrationJobsByJobIdResume: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "202": Record<string, never>;
+        };
+    };
+    postMigrationJobsByJobIdCancel: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "202": Record<string, never>;
+        };
+    };
+    getMigrationJobsByJobIdRollbackAssessment: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": Record<string, never>;
+        };
+    };
+    postMigrationJobsByJobIdRollback: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+            header: {
+                "x-tixkit-confirmation": string;
+            };
+        };
+        responses: {
+            "202": Record<string, never>;
+            "409": Record<string, never>;
+        };
+    };
     getWebhookEndpoints: {
         parameters: {
             query?: {
@@ -11101,7 +11613,7 @@ export interface components {
             priority: "required" | "recommended";
             reasonCodes: Array<"workspace_selected" | "organization_inactive" | "brand_inactive" | "brand_identity_configured" | "brand_identity_incomplete" | "payment_capture_mode" | "payment_capture_mode_paid_unsupported" | "payment_path_ready" | "payment_path_missing" | "payment_account_inactive" | "payment_charges_disabled" | "payment_currency_mismatch" | "team_access_configured" | "team_access_single_member" | "legal_configuration_complete" | "legal_configuration_missing" | "sender_identity_verified" | "sender_identity_missing" | "event_basics_valid" | "event_title_missing" | "event_schedule_invalid" | "event_start_invalid" | "event_timezone_missing" | "sellable_ticket_available" | "sellable_ticket_missing" | "ticket_inventory_unavailable" | "inventory_invalid" | "sales_window_invalid" | "currency_coherent" | "ticket_currency_mismatch" | "product_currency_mismatch" | "pricing_valid" | "pricing_invalid" | "checkout_reviewed" | "checkout_review_required" | "public_content_published" | "public_content_missing" | "confirmation_content_valid" | "confirmation_content_missing" | "payment_not_required" | "payment_ready" | "preview_reviewed" | "preview_review_required" | "test_order_complete" | "test_order_recommended" | "test_order_not_applicable" | "check_in_configured" | "check_in_configuration_missing" | "required_steps_complete" | "required_steps_incomplete" | "event_published" | "event_unpublished" | "acknowledgement_stale" | "permission_required">;
             actionId: "select_workspace" | "configure_brand" | "configure_payments" | "manage_team" | "configure_legal" | "configure_sender" | "edit_event_basics" | "manage_tickets" | "manage_products" | "review_fees" | "review_checkout" | "edit_event_content" | "edit_confirmation_content" | "review_preview" | "run_test_order" | "configure_check_in" | "publish_event" | "view_event" | null;
-            requiredPermission: "events.read" | "events.write" | "tickets.write" | "orders.read" | "orders.write" | "refunds.write" | "attendees.read" | "attendees.write" | "checkins.read" | "checkins.write" | "box_office.write" | "messages.write" | "reports.read" | "settings.write" | "developers.write" | "billing.write" | null;
+            requiredPermission: "events.read" | "events.write" | "tickets.write" | "orders.read" | "orders.write" | "refunds.write" | "attendees.read" | "attendees.write" | "checkins.read" | "checkins.write" | "box_office.write" | "messages.write" | "reports.read" | "settings.write" | "developers.write" | "migrations.read" | "migrations.write" | "migrations.commit" | "migrations.rollback" | "billing.write" | null;
             updatedAt: string | null;
             acknowledgedAt: string | null;
             acknowledgementValid: boolean | null;
@@ -11608,7 +12120,7 @@ export interface components {
             }>;
         };
         CreateUploadArtifact: {
-            purpose: "checkout_answer" | "brand_logo" | "user_avatar" | "content_email_image" | "content_event_page_image" | "event_cover" | "event_seo_image";
+            purpose: "checkout_answer" | "brand_logo" | "user_avatar" | "content_email_image" | "content_event_page_image" | "migration_import" | "event_cover" | "event_seo_image";
             fileName: string;
             contentType: string;
             sizeBytes: number;

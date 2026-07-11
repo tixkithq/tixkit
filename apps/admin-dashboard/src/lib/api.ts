@@ -1669,9 +1669,77 @@ export type ReportDateRange = {
   to?: string;
 };
 
+export type AdminMigrationJob = {
+  id: string;
+  organization_id: string;
+  source_system: string;
+  adapter_version: string;
+  mode: 'dry-run' | 'commit';
+  status: string;
+  configurationHash: string;
+  credentialConfigured: boolean;
+  summary: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateAdminMigrationJobInput = {
+  organizationId: string;
+  sourceSystem: string;
+  adapterVersion: string;
+  mode?: 'dry-run' | 'commit';
+  configuration?: Record<string, unknown>;
+  credentialId?: string;
+};
+
+export type CreateAdminMigrationCredentialInput = {
+  organizationId: string;
+  sourceSystem: string;
+  secretReference: string;
+  expiresAt: string;
+};
+
+export type AdminMigrationConfirmation = `commit:${string}` | `rollback:${string}`;
+
 export type AdminApi = {
   /** Resolves the authenticated Tixkit principal + permissions (`GET /v1/me`). */
   getPrincipal(token?: string): Promise<ApiResult<TixkitPrincipal>>;
+
+  listMigrationJobs(organizationId: string): Promise<ApiResult<{ items: AdminMigrationJob[] }>>;
+  createMigrationCredential(
+    input: CreateAdminMigrationCredentialInput,
+  ): Promise<ApiResult<{ id: string; status: string; expiresAt: string }>>;
+  revokeMigrationCredential(credentialId: string, organizationId: string): Promise<ApiResult<void>>;
+  getMigrationJob(jobId: string): Promise<ApiResult<AdminMigrationJob>>;
+  createMigrationJob(input: CreateAdminMigrationJobInput): Promise<ApiResult<AdminMigrationJob>>;
+  registerMigrationFile(
+    jobId: string,
+    uploadArtifactId: string,
+  ): Promise<ApiResult<Record<string, unknown>>>;
+  listMigrationFiles(jobId: string): Promise<ApiResult<{ items: Record<string, unknown>[] }>>;
+  saveMigrationMapping(input: Record<string, unknown>): Promise<ApiResult<Record<string, unknown>>>;
+  listMigrationMappings(
+    organizationId: string,
+    sourceSystem: string,
+  ): Promise<ApiResult<{ items: Record<string, unknown>[] }>>;
+  listMigrationRows(jobId: string): Promise<ApiResult<{ items: Record<string, unknown>[] }>>;
+  listMigrationConflicts(jobId: string): Promise<ApiResult<{ items: Record<string, unknown>[] }>>;
+  listMigrationEvents(jobId: string): Promise<ApiResult<{ items: Record<string, unknown>[] }>>;
+  getMigrationReport(jobId: string): Promise<ApiResult<Record<string, unknown>>>;
+  getMigrationRollbackAssessment(jobId: string): Promise<ApiResult<Record<string, unknown>>>;
+  runMigrationDryRun(jobId: string): Promise<ApiResult<Record<string, unknown>>>;
+  commitMigration(
+    jobId: string,
+    confirmation: `commit:${string}`,
+  ): Promise<ApiResult<Record<string, unknown>>>;
+  rollbackMigration(
+    jobId: string,
+    confirmation: `rollback:${string}`,
+  ): Promise<ApiResult<Record<string, unknown>>>;
+  controlMigration(
+    jobId: string,
+    action: 'pause' | 'resume' | 'cancel',
+  ): Promise<ApiResult<Record<string, unknown>>>;
 
   getBootstrapContext(): Promise<ApiResult<AdminBootstrapContext>>;
   listOrganizations(): Promise<ApiResult<AdminOrganization[]>>;
@@ -3878,6 +3946,148 @@ function adminIdempotencyKey(prefix: string): string {
 }
 
 export const adminApi: AdminApi = {
+  async createMigrationCredential(input) {
+    return withFixture(
+      () => request('/v1/migration-credentials', { method: 'POST', body: JSON.stringify(input) }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration credentials are unavailable in fixture mode')),
+    );
+  },
+  async revokeMigrationCredential(credentialId, organizationId) {
+    return withFixture(
+      () =>
+        request(
+          `/v1/migration-credentials/${encodeURIComponent(credentialId)}?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'DELETE' },
+        ),
+      () => err(apiError('NOT_AVAILABLE', 'Migration credentials are unavailable in fixture mode')),
+    );
+  },
+  async listMigrationJobs(organizationId) {
+    return withFixture(
+      () =>
+        request(`/v1/migration-jobs?organizationId=${encodeURIComponent(organizationId)}`, {
+          method: 'GET',
+        }),
+      () => ok({ items: [] }),
+    );
+  },
+  async getMigrationJob(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}`, { method: 'GET' }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async createMigrationJob(input) {
+    return withFixture(
+      () =>
+        request('/v1/migration-jobs', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': newIdempotencyKey('migration') },
+          body: JSON.stringify(input),
+        }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async registerMigrationFile(jobId, uploadArtifactId) {
+    return withFixture(
+      () =>
+        request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/files`, {
+          method: 'POST',
+          body: JSON.stringify({ uploadArtifactId }),
+        }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async listMigrationFiles(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/files`),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async saveMigrationMapping(input) {
+    return withFixture(
+      () => request('/v1/migration-mappings', { method: 'POST', body: JSON.stringify(input) }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration mappings are unavailable in fixture mode')),
+    );
+  },
+  async listMigrationMappings(organizationId, sourceSystem) {
+    const query = new URLSearchParams({ organizationId, sourceSystem });
+    return withFixture(
+      () => request(`/v1/migration-mappings?${query.toString()}`),
+      () => err(apiError('NOT_AVAILABLE', 'Migration mappings are unavailable in fixture mode')),
+    );
+  },
+  async listMigrationRows(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/rows`),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async listMigrationConflicts(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/conflicts`),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async listMigrationEvents(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/events`),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async getMigrationReport(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/report/download`),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async getMigrationRollbackAssessment(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/rollback-assessment`),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async runMigrationDryRun(jobId) {
+    return withFixture(
+      () => request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/dry-run`, { method: 'POST' }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async commitMigration(jobId, confirmation) {
+    if (confirmation !== `commit:${jobId}`) {
+      return err(apiError('CONFIRMATION_REQUIRED', `Confirmation must equal commit:${jobId}`));
+    }
+    return withFixture(
+      () =>
+        request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/commit`, {
+          method: 'POST',
+          headers: { 'x-tixkit-confirmation': confirmation },
+        }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async rollbackMigration(jobId, confirmation) {
+    if (confirmation !== `rollback:${jobId}`) {
+      return err(apiError('CONFIRMATION_REQUIRED', `Confirmation must equal rollback:${jobId}`));
+    }
+    return withFixture(
+      () =>
+        request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/rollback`, {
+          method: 'POST',
+          headers: { 'x-tixkit-confirmation': confirmation },
+        }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
+  async controlMigration(jobId, action) {
+    return withFixture(
+      () =>
+        request(`/v1/migration-jobs/${encodeURIComponent(jobId)}/${action}`, {
+          method: 'POST',
+        }),
+      () => err(apiError('NOT_AVAILABLE', 'Migration jobs are unavailable in fixture mode')),
+    );
+  },
   // ---- Principal / permissions ----
   async getPrincipal(token?: string) {
     return withFixture(

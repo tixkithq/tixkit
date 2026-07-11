@@ -18,7 +18,10 @@ export type UploadPurpose =
   | 'brand_logo'
   | 'user_avatar'
   | 'content_email_image'
-  | 'content_event_page_image';
+  | 'content_event_page_image'
+  | 'migration_import'
+  | 'event_cover'
+  | 'event_seo_image';
 
 export type CreateUploadInput = {
   tenantId: string;
@@ -81,6 +84,21 @@ const PURPOSE_LIMITS: Record<
     maxSizeBytes: 5 * 1024 * 1024,
     contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
     prefix: 'content-event-page-images',
+  },
+  migration_import: {
+    maxSizeBytes: 1024 * 1024 * 1024,
+    contentTypes: new Set(['application/json', 'application/zip', 'text/csv', 'text/plain']),
+    prefix: 'migration-imports',
+  },
+  event_cover: {
+    maxSizeBytes: 8 * 1024 * 1024,
+    contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
+    prefix: 'event-covers',
+  },
+  event_seo_image: {
+    maxSizeBytes: 8 * 1024 * 1024,
+    contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
+    prefix: 'event-seo-images',
   },
 };
 
@@ -312,8 +330,8 @@ export async function cleanupExpiredUploadArtifacts(
 ): Promise<number> {
   const rows = await db
     .selectFrom('upload_artifacts')
-    .select(['id', 'status', 'scan_result', 'bucket', 'object_key'])
-    .where('status', 'in', ['pending', 'rejected'])
+    .select(['id', 'status', 'scan_result', 'bucket', 'object_key', 'purpose', 'event_id'])
+    .where('status', 'in', ['pending', 'rejected', 'uploaded'])
     .where('expires_at', '<', now)
     .orderBy('expires_at')
     .limit(limit)
@@ -322,23 +340,42 @@ export async function cleanupExpiredUploadArtifacts(
   if (rows.length === 0) return 0;
 
   const s3 = createS3Client();
-  await Promise.all(
+  const cleaned = await Promise.all(
     rows.map(async (row) => {
+      if (row.status === 'uploaded') {
+        if (!row.event_id || (row.purpose !== 'event_cover' && row.purpose !== 'event_seo_image')) {
+          return false;
+        }
+        const event = await db
+          .selectFrom('events')
+          .select(['cover_image_url', 'seo'])
+          .where('id', '=', row.event_id)
+          .executeTakeFirst();
+        const referenced =
+          event?.cover_image_url?.includes(row.id) === true ||
+          (typeof event?.seo === 'string' && event.seo.includes(row.id));
+        if (referenced) return false;
+      }
       await tryDeleteUploadObject(s3, row.bucket, row.object_key);
       await db
         .updateTable('upload_artifacts')
         .set({
           status: 'rejected',
           scan_status: 'blocked',
-          scan_result: row.scan_result ?? 'Upload artifact expired before completion',
+          scan_result:
+            row.scan_result ??
+            (row.status === 'uploaded'
+              ? 'Unattached event media artifact expired'
+              : 'Upload artifact expired before completion'),
           updated_at: now,
         })
         .where('id', '=', row.id)
         .execute();
+      return true;
     }),
   );
 
-  return rows.length;
+  return cleaned.filter(Boolean).length;
 }
 
 export async function scanUploadBuffer(
@@ -390,7 +427,10 @@ export async function createUploadArtifact(
       ContentType: input.contentType,
       ContentLength: input.sizeBytes,
     }),
-    { expiresIn: UPLOAD_TTL_SECONDS, signableHeaders: new Set(['content-type', 'content-length']) },
+    {
+      expiresIn: UPLOAD_TTL_SECONDS,
+      signableHeaders: new Set(['content-type', 'content-length']),
+    },
   );
 
   await db
@@ -443,7 +483,11 @@ export async function completeUploadArtifact(
     .executeTakeFirst();
   if (!artifact) throw new NotFoundError('UploadArtifact', artifactId);
   if (artifact.status === 'uploaded' && artifact.scan_status === 'clean') {
-    return { artifactId, status: artifact.status, scanStatus: artifact.scan_status };
+    return {
+      artifactId,
+      status: artifact.status,
+      scanStatus: artifact.scan_status,
+    };
   }
   if (new Date(artifact.expires_at) < new Date()) {
     const result = 'Upload artifact URL has expired';
@@ -600,7 +644,12 @@ export type PublicUploadArtifact = {
 async function getPublicUploadArtifact(
   db: Database,
   artifactId: string,
-  purpose: 'brand_logo' | 'content_email_image' | 'content_event_page_image',
+  purpose:
+    | 'brand_logo'
+    | 'content_email_image'
+    | 'content_event_page_image'
+    | 'event_cover'
+    | 'event_seo_image',
 ): Promise<PublicUploadArtifact> {
   const artifact = await db
     .selectFrom('upload_artifacts')
@@ -642,6 +691,30 @@ export async function getBrandLogoArtifact(
   artifactId: string,
 ): Promise<PublicUploadArtifact> {
   return getPublicUploadArtifact(db, artifactId, 'brand_logo');
+}
+
+export async function getEventMediaArtifact(
+  db: Database,
+  artifactId: string,
+  purpose: 'event_cover' | 'event_seo_image',
+): Promise<PublicUploadArtifact> {
+  const artifact = await db
+    .selectFrom('upload_artifacts')
+    .select(['event_id'])
+    .where('id', '=', artifactId)
+    .where('purpose', '=', purpose)
+    .executeTakeFirst();
+  if (!artifact?.event_id) throw new NotFoundError('UploadArtifact', artifactId);
+  const event = await db
+    .selectFrom('events')
+    .select(['cover_image_url', 'seo'])
+    .where('id', '=', artifact.event_id)
+    .executeTakeFirst();
+  const attached =
+    event?.cover_image_url?.includes(artifactId) === true ||
+    (typeof event?.seo === 'string' && event.seo.includes(artifactId));
+  if (!attached) throw new NotFoundError('UploadArtifact', artifactId);
+  return getPublicUploadArtifact(db, artifactId, purpose);
 }
 
 async function streamPublicUploadArtifact(artifact: PublicUploadArtifact): Promise<{
@@ -698,6 +771,14 @@ export async function streamBrandLogo(
   fileName: string;
 }> {
   return streamPublicUploadArtifact(await getBrandLogoArtifact(db, artifactId));
+}
+
+export async function streamEventMedia(
+  db: Database,
+  artifactId: string,
+  purpose: 'event_cover' | 'event_seo_image',
+) {
+  return streamPublicUploadArtifact(await getEventMediaArtifact(db, artifactId, purpose));
 }
 
 function uploadArtifactAnswerEntries(answers: Record<string, unknown>): Array<[string, string]> {

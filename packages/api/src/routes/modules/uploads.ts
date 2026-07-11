@@ -16,6 +16,7 @@ import {
   streamBrandLogo,
   streamContentEmailImage,
   streamContentEventPageImage,
+  streamEventMedia,
   uploadTokenMatches,
   type UploadPurpose,
 } from '../../services/uploads.js';
@@ -27,6 +28,8 @@ const uploadPurposeSchema = z.enum([
   'user_avatar',
   'content_email_image',
   'content_event_page_image',
+  'event_cover',
+  'event_seo_image',
 ]);
 
 const createUploadSchema = z
@@ -195,6 +198,10 @@ function requireUploadArtifactAccess(
     ClerkAuthService.requirePermission(principal, 'events.write');
     return;
   }
+  if (artifact.purpose === 'event_cover' || artifact.purpose === 'event_seo_image') {
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    return;
+  }
 
   throw new ForbiddenError('Upload artifact purpose is not supported');
 }
@@ -272,6 +279,17 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
     reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
     return reply.send(stream);
   });
+
+  app.get('/public/event-media/:purpose/:artifactId', async (request, reply) => {
+    const { purpose, artifactId } = request.params as { purpose: string; artifactId: string };
+    if (purpose !== 'event_cover' && purpose !== 'event_seo_image') throw new NotFoundError('UploadArtifact', artifactId);
+    const { stream, contentType, fileName } = await streamEventMedia(db, artifactId, purpose);
+    reply.header('Content-Type', contentType);
+    reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+    return reply.send(stream);
+  });
 };
 
 export const uploadRoutes: FastifyPluginAsync = async (app) => {
@@ -319,6 +337,17 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       if (hasCheckoutQuestionMetadata(body.metadata)) {
         throw new ValidationError('metadata.questionId is not allowed for user avatar uploads');
       }
+    } else if (body.purpose === 'event_cover' || body.purpose === 'event_seo_image') {
+      ClerkAuthService.requirePermission(principal, 'events.write');
+      if (!eventId) throw new ValidationError('eventId is required for event media uploads');
+      const event = await new EventRepository(db).findById(eventId);
+      if (!event) throw new NotFoundError('Event', eventId);
+      ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+      ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+      ClerkAuthService.requireBrandScope(principal, event.brand_id);
+      ClerkAuthService.requireEventScope(principal, eventId);
+      if (brandId && brandId !== event.brand_id) throw new ValidationError('brandId must match the event brand');
+      tenantId = event.tenant_id; organizationId = event.organization_id; brandId = event.brand_id;
     } else if (
       body.purpose === 'content_email_image' ||
       body.purpose === 'content_event_page_image'
@@ -430,6 +459,9 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
         downloadUrl: `/v1/public/content-event-page-images/${artifactId}`,
         durable: true,
       };
+    }
+    if (artifact.purpose === 'event_cover' || artifact.purpose === 'event_seo_image') {
+      return { downloadUrl: `/v1/public/event-media/${artifact.purpose}/${artifactId}`, durable: true };
     }
 
     const downloadUrl = await getUploadArtifactDownloadUrl(db, artifactId);

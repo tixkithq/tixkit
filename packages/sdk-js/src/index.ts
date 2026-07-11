@@ -2305,6 +2305,35 @@ export type CreateRefundInput = {
   restoreInventory?: boolean;
 } & IdempotencyOptions;
 
+export type MigrationJob = {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  source_system: string;
+  adapter_version: string;
+  mode: 'dry-run' | 'commit';
+  status: string;
+  configurationHash: string;
+  credentialConfigured: boolean;
+  summary: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+export type CreateMigrationJobInput = {
+  organizationId: string;
+  sourceSystem: string;
+  adapterVersion: string;
+  mode?: 'dry-run' | 'commit';
+  configuration?: Record<string, unknown>;
+  credentialId?: string;
+} & IdempotencyOptions;
+export type CreateMigrationCredentialInput = {
+  organizationId: string;
+  sourceSystem: string;
+  secretReference: string;
+  expiresAt: string;
+};
+
 export class TixkitClient {
   private readonly apiKey?: string;
   private readonly apiBaseUrl: string;
@@ -2331,6 +2360,7 @@ export class TixkitClient {
   readonly messages: MessageResource;
   readonly content: ContentResource;
   readonly webhookEndpoints: WebhookEndpointResource;
+  readonly migrations: MigrationResource;
   readonly paymentAccounts: PaymentAccountResource;
   readonly questions: QuestionResource;
   readonly oauthApplications: OAuthApplicationResource;
@@ -2369,6 +2399,7 @@ export class TixkitClient {
     this.messages = new MessageResource(this);
     this.content = new ContentResource(this);
     this.webhookEndpoints = new WebhookEndpointResource(this);
+    this.migrations = new MigrationResource(this);
     this.paymentAccounts = new PaymentAccountResource(this);
     this.questions = new QuestionResource(this);
     this.oauthApplications = new OAuthApplicationResource(this);
@@ -3891,6 +3922,106 @@ class MessageResource {
       'GET',
       `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`,
     );
+  }
+}
+
+class MigrationResource {
+  constructor(private client: TixkitClient) {}
+  createCredential(input: CreateMigrationCredentialInput): Promise<{ id: string; organizationId: string; sourceSystem: string; status: string; expiresAt: string }> {
+    return this.client.request('POST', '/migration-credentials', { body: input });
+  }
+  revokeCredential(credentialId: string, organizationId: string): Promise<void> {
+    return this.client.request('DELETE', `/migration-credentials/${credentialId}`, { params: { organizationId } });
+  }
+  list(params?: {
+    organizationId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: MigrationJob[] }> {
+    return this.client.request('GET', '/migration-jobs', {
+      params: params
+        ? Object.fromEntries(
+            Object.entries(params)
+              .filter((entry) => entry[1] !== undefined)
+              .map(([key, value]) => [key, String(value)]),
+          )
+        : undefined,
+    });
+  }
+  get(jobId: string): Promise<MigrationJob> {
+    return this.client.request('GET', `/migration-jobs/${jobId}`);
+  }
+  create(input: CreateMigrationJobInput): Promise<MigrationJob> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/migration-jobs', { body, idempotencyKey });
+  }
+  registerFile(
+    jobId: string,
+    input: { uploadArtifactId: string },
+  ): Promise<Record<string, unknown>> {
+    return this.client.request('POST', `/migration-jobs/${jobId}/files`, { body: input });
+  }
+  rows(
+    jobId: string,
+    params?: { limit?: number; entityType?: string; status?: string },
+  ): Promise<{ items: Record<string, unknown>[] }> {
+    return this.client.request('GET', `/migration-jobs/${jobId}/rows`, {
+      params: params
+        ? Object.fromEntries(
+            Object.entries(params)
+              .filter((entry) => entry[1] !== undefined)
+              .map(([key, value]) => [key, String(value)]),
+          )
+        : undefined,
+    });
+  }
+  conflicts(
+    jobId: string,
+    params?: PaginationParams,
+  ): Promise<{ items: Record<string, unknown>[] }> {
+    return this.client.request('GET', `/migration-jobs/${jobId}/conflicts`, {
+      params: paginationParams(params),
+    });
+  }
+  events(jobId: string, afterSequence?: number): Promise<{ items: Record<string, unknown>[] }> {
+    return this.client.request('GET', `/migration-jobs/${jobId}/events`, {
+      params: afterSequence === undefined ? undefined : { afterSequence: String(afterSequence) },
+    });
+  }
+  dryRun(
+    jobId: string,
+  ): Promise<{ status: 'ready' | 'failed'; report: Record<string, unknown>; domainWrites: 0 }> {
+    return this.client.request('POST', `/migration-jobs/${jobId}/dry-run`);
+  }
+  report(jobId: string): Promise<Record<string, unknown>> {
+    return this.client.request('GET', `/migration-jobs/${jobId}/report`);
+  }
+  commit(jobId: string): Promise<{ jobId: string; status: 'committing' }> {
+    return this.client.request('POST', `/migration-jobs/${jobId}/commit`, {
+      headers: { 'x-tixkit-confirmation': `commit:${jobId}` },
+    });
+  }
+  pause(jobId: string) {
+    return this.action(jobId, 'pause');
+  }
+  resume(jobId: string) {
+    return this.action(jobId, 'resume');
+  }
+  cancel(jobId: string) {
+    return this.action(jobId, 'cancel');
+  }
+  rollback(jobId: string) {
+    return this.action(jobId, 'rollback');
+  }
+  rollbackAssessment(
+    jobId: string,
+  ): Promise<{ eligible: boolean; mode: string; blockers: Array<Record<string, unknown>> }> {
+    return this.client.request('GET', `/migration-jobs/${jobId}/rollback-assessment`);
+  }
+  private action(jobId: string, action: string): Promise<{ accepted: true }> {
+    return this.client.request('POST', `/migration-jobs/${jobId}/${action}`, {
+      headers: action === 'rollback' ? { 'x-tixkit-confirmation': `rollback:${jobId}` } : undefined,
+    });
   }
 }
 

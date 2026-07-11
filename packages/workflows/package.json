@@ -25,6 +25,7 @@
     "@tixkit/db": "workspace:*",
     "@tixkit/domain": "workspace:*",
     "@tixkit/email-transport": "workspace:*",
+    "@tixkit/migration-core": "workspace:*",
     "@tixkit/shared": "workspace:*",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/core": "2.8.0",

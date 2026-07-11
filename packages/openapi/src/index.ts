@@ -203,6 +203,8 @@ function tagForPath(path: string): string {
     'api-keys': 'Developer',
     'scanner-devices': 'Developer',
     'webhook-endpoints': 'Webhooks',
+    'migration-jobs': 'Migrations',
+    'migration-mappings': 'Migrations',
     'webhook-events': 'Webhooks',
     webhooks: 'Provider webhooks',
     oauth: 'OAuth',
@@ -1535,6 +1537,10 @@ const rawOpenApiSpec = {
               'reports.read',
               'settings.write',
               'developers.write',
+              'migrations.read',
+              'migrations.write',
+              'migrations.commit',
+              'migrations.rollback',
               'billing.write',
               null,
             ],
@@ -2618,6 +2624,7 @@ const rawOpenApiSpec = {
               'user_avatar',
               'content_email_image',
               'content_event_page_image',
+              'migration_import',
               'event_cover',
               'event_seo_image',
             ],
@@ -11954,6 +11961,284 @@ const rawOpenApiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/migration-credentials': {
+      post: {
+        summary: 'Register a scoped migration secret-manager reference',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['organizationId', 'sourceSystem', 'secretReference', 'expiresAt'],
+                properties: {
+                  organizationId: { type: 'string' },
+                  sourceSystem: { type: 'string' },
+                  secretReference: {
+                    type: 'string',
+                    writeOnly: true,
+                    pattern:
+                      '^(?:aws-secretsmanager|gcp-secretmanager|secret|vault):\\/\\/[A-Za-z0-9_./:@-]+$',
+                    description: 'Secret-manager reference only; never credential material.',
+                  },
+                  expiresAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            },
+          },
+        },
+        responses: { '201': { description: 'Migration credential reference' } },
+      },
+    },
+    '/migration-credentials/{credentialId}': {
+      delete: {
+        summary: 'Revoke a migration credential reference',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          {
+            name: 'credentialId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^mcred_[A-Za-z0-9_-]{8,128}$' },
+          },
+          {
+            name: 'organizationId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 128 },
+          },
+        ],
+        responses: { '204': { description: 'Migration credential revoked' } },
+      },
+    },
+    '/migration-jobs': {
+      get: {
+        summary: 'List migration jobs',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Migration jobs' } },
+      },
+      post: {
+        summary: 'Create an idempotent migration job',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['organizationId', 'sourceSystem', 'adapterVersion'],
+                properties: {
+                  organizationId: { type: 'string' },
+                  sourceSystem: { type: 'string' },
+                  adapterVersion: { type: 'string' },
+                  mode: { type: 'string', enum: ['dry-run', 'commit'] },
+                  configuration: {
+                    type: 'object',
+                    description:
+                      'Secret-free adapter configuration. Credentials must be referenced by credentialId.',
+                  },
+                  credentialId: { type: 'string', pattern: '^mcred_[A-Za-z0-9_-]{8,128}$' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Migration job' },
+          '409': { description: 'Idempotency conflict' },
+        },
+      },
+    },
+    '/migration-mappings': {
+      get: {
+        summary: 'List saved migration mappings',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Saved mappings' } },
+      },
+      post: {
+        summary: 'Create a migration mapping',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        responses: { '201': { description: 'Saved mapping' } },
+      },
+    },
+    '/migration-jobs/{jobId}': {
+      get: {
+        summary: 'Get a migration job',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: {
+          '200': { description: 'Migration job' },
+          '404': { description: 'Migration job not found' },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/files': {
+      get: {
+        summary: 'List migration job files',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Registered files' } },
+      },
+      post: {
+        summary: 'Register migration file metadata',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['uploadArtifactId'],
+                properties: { uploadArtifactId: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Registered file' },
+          '409': { description: 'Migration status conflict' },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/rows': {
+      get: {
+        summary: 'List normalized migration rows',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Migration rows' } },
+      },
+    },
+    '/migration-jobs/{jobId}/conflicts': {
+      get: {
+        summary: 'List migration conflicts',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Migration conflicts' } },
+      },
+    },
+    '/migration-jobs/{jobId}/events': {
+      get: {
+        summary: 'List migration progress events',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Migration events' } },
+      },
+    },
+    '/migration-jobs/{jobId}/dry-run': {
+      post: {
+        summary: 'Run migration validation without domain writes',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        responses: {
+          '200': { description: 'Dry-run report' },
+          '409': { description: 'Migration status conflict' },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/report': {
+      get: {
+        summary: 'Get migration report',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Migration report' } },
+      },
+    },
+    '/migration-jobs/{jobId}/report/download': {
+      get: {
+        summary: 'Download migration report',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: {
+          '200': {
+            description: 'Migration report download',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/commit': {
+      post: {
+        summary: 'Start durable migration commit',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.commit'],
+        parameters: [
+          {
+            name: 'x-tixkit-confirmation',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', pattern: '^commit:.+$' },
+          },
+        ],
+        responses: {
+          '202': { description: 'Commit accepted' },
+          '409': { description: 'Migration status conflict' },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/pause': {
+      post: {
+        summary: 'Pause migration commit',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.commit'],
+        responses: { '202': { description: 'Pause accepted' } },
+      },
+    },
+    '/migration-jobs/{jobId}/resume': {
+      post: {
+        summary: 'Resume migration commit',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.commit'],
+        responses: { '202': { description: 'Resume accepted' } },
+      },
+    },
+    '/migration-jobs/{jobId}/cancel': {
+      post: {
+        summary: 'Cancel migration job',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.commit'],
+        responses: { '202': { description: 'Cancellation accepted' } },
+      },
+    },
+    '/migration-jobs/{jobId}/rollback-assessment': {
+      get: {
+        summary: 'Assess fail-closed rollback eligibility',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        responses: { '200': { description: 'Rollback assessment' } },
+      },
+    },
+    '/migration-jobs/{jobId}/rollback': {
+      post: {
+        summary: 'Request eligible migration rollback',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.rollback'],
+        parameters: [
+          {
+            name: 'x-tixkit-confirmation',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', pattern: '^rollback:.+$' },
+          },
+        ],
+        responses: {
+          '202': { description: 'Rollback accepted' },
+          '409': { description: 'Rollback is not eligible' },
         },
       },
     },

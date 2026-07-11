@@ -100,6 +100,41 @@ describe('TemporalClient payment reconciliation', () => {
   });
 });
 
+describe('TemporalClient migration rollback', () => {
+  it('starts rollback with an ID distinct from the completed commit workflow', async () => {
+    const client = {
+      workflow: {
+        start: vi.fn(async (_workflow: unknown, options: { workflowId: string }) => ({
+          workflowId: options.workflowId,
+        })),
+      },
+    };
+    const temporalClient = new TemporalClient(client as never);
+    const result = await temporalClient.startMigrationRollback({
+      tenantId: 'tenant_1',
+      organizationId: 'org_1',
+      jobId: 'imp_1',
+    });
+    expect(result).toMatchObject({
+      workflowId: 'migration-rollback:tenant_1:org_1:imp_1',
+    });
+    expect(client.workflow.start).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        workflowId: 'migration-rollback:tenant_1:org_1:imp_1',
+        args: [
+          expect.objectContaining({
+            version: 1,
+            tenantId: 'tenant_1',
+            organizationId: 'org_1',
+            jobId: 'imp_1',
+          }),
+        ],
+      }),
+    );
+  });
+});
+
 describe('TemporalClient Clerk identity sync', () => {
   it('scopes workflow IDs by provider event ID instead of Clerk subject ID', async () => {
     const client = {

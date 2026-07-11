@@ -19,6 +19,10 @@ export type TixkitPermission =
   | 'reports.read'
   | 'settings.write'
   | 'developers.write'
+  | 'migrations.read'
+  | 'migrations.write'
+  | 'migrations.commit'
+  | 'migrations.rollback'
   | 'billing.write';
 
 export type NavBadgeTone = 'default' | 'muted' | 'success' | 'warning' | 'destructive';
@@ -43,6 +47,10 @@ export const LOCAL_DEV_PERMISSIONS: TixkitPermission[] = [
   'reports.read',
   'settings.write',
   'developers.write',
+  'migrations.read',
+  'migrations.write',
+  'migrations.commit',
+  'migrations.rollback',
   'billing.write',
 ];
 

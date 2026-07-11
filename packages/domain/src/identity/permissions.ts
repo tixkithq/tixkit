@@ -14,6 +14,10 @@ export type Permission =
   | 'reports.read'
   | 'settings.write'
   | 'developers.write'
+  | 'migrations.read'
+  | 'migrations.write'
+  | 'migrations.commit'
+  | 'migrations.rollback'
   | 'billing.write';
 
 export const ALL_PERMISSIONS: Permission[] = [
@@ -32,5 +36,9 @@ export const ALL_PERMISSIONS: Permission[] = [
   'reports.read',
   'settings.write',
   'developers.write',
+  'migrations.read',
+  'migrations.write',
+  'migrations.commit',
+  'migrations.rollback',
   'billing.write',
 ];

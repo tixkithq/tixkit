@@ -184,6 +184,7 @@ async function setupUploadApp(db: Database, routes = uploadRoutes, principal = m
   app.addHook('onRequest', async (request) => {
     request.principal = principal;
   });
+
   registerErrorHandler(app);
   await app.register(routes);
   return app;
@@ -1038,6 +1039,19 @@ describe('upload artifact service', () => {
 });
 
 describe('upload artifact routes', () => {
+  it('scopes event-cover uploads and returns a durable public artifact URL', async () => {
+    const { db, tables } = createMockDb({ events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', status: 'draft' }] });
+    const app = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: ['events.write'] }));
+    const response = await app.inject({ method: 'POST', url: '/upload-artifacts', payload: { purpose: 'event_cover', brandId: 'brd_1', eventId: 'evt_1', fileName: 'cover.webp', contentType: 'image/webp', sizeBytes: 1024 } });
+    expect(response.statusCode).toBe(201);
+    expect(tables.upload_artifacts[0]).toMatchObject({ tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1', event_id: 'evt_1', purpose: 'event_cover' });
+    tables.upload_artifacts[0] = { ...tables.upload_artifacts[0], status: 'uploaded', scan_status: 'clean' };
+    const download = await app.inject({ method: 'GET', url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/download` });
+    expect(download.json()).toMatchObject({ downloadUrl: `/v1/public/event-media/event_cover/${tables.upload_artifacts[0]?.id}`, durable: true });
+    const wrongBrand = await app.inject({ method: 'POST', url: '/upload-artifacts', payload: { purpose: 'event_cover', brandId: 'brd_other', eventId: 'evt_1', fileName: 'cover.webp', contentType: 'image/webp', sizeBytes: 1024 } });
+    expect(wrongBrand.statusCode).toBe(400);
+    await app.close();
+  });
   beforeEach(() => {
     signedUrlInputs.length = 0;
     s3Send.mockReset();
