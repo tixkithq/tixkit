@@ -1,0 +1,159 @@
+name: API Contract Release
+
+on:
+  pull_request:
+    paths:
+      - "packages/openapi/**"
+      - "packages/api/src/routes/**"
+      - "packages/sdk-*/**"
+      - "packages/domain/**"
+      - "packages/contract-tests/**"
+      - "apps/docs/src/components/**"
+      - "scripts/docs/generate-openapi-reference.mjs"
+      - "scripts/lib/openapi-compatibility.ts"
+      - "scripts/lib/public-artifact-safety.ts"
+      - "scripts/verify-public-api-release.mjs"
+      - "scripts/__tests__/openapi-compatibility.test.ts"
+      - "scripts/__tests__/public-artifact-safety.test.ts"
+      - "artifacts/api/**"
+      - "scripts/build-api-release.ts"
+      - "scripts/__tests__/api-release.test.mjs"
+      - "apps/docs/public/contracts/**"
+      - "apps/docs/src/generated/api-release-index.ts"
+      - "docs/public/reference/migrations/**"
+      - ".github/workflows/api-contract-release.yml"
+      - ".github/workflows/api-post-publication-verify.yml"
+  workflow_dispatch:
+    inputs:
+      approve_breaking:
+        description: Rebuild an approved new API version with the protected breaking override
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: api-contract-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-contract-release:
+    name: Build versioned API contracts
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || !inputs.approve_breaking
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify GitHub Action refs are pinned
+        run: infra/ci/scripts/verify-github-action-pins.sh
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Build release artifacts and fail on breaking changes
+        run: bun run scripts/build-api-release.ts
+      - name: Resolve exact release directory
+        id: release
+        run: |
+          version="$(bun -e "import { openApiSpec } from './packages/openapi/src/index.ts'; process.stdout.write(openApiSpec.info.version)")"
+          test -f "artifacts/api/${version}/release-manifest.json"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "dir=artifacts/api/${version}" >> "$GITHUB_OUTPUT"
+      - name: Require synchronized checked-in artifacts and docs copies
+        run: |
+          git diff --exit-code -- "${{ steps.release.outputs.dir }}" "apps/docs/public/contracts/${{ steps.release.outputs.version }}" "apps/docs/src/generated/api-release-index.ts"
+          test -z "$(git ls-files --others --exclude-standard -- "${{ steps.release.outputs.dir }}" "apps/docs/public/contracts/${{ steps.release.outputs.version }}" "apps/docs/src/generated/api-release-index.ts")"
+      - name: Verify release checksums
+        run: |
+          (cd "${{ steps.release.outputs.dir }}" && sha256sum --check CHECKSUMS.sha256)
+      - name: Verify generated declarations
+        run: bunx tsc --noEmit --skipLibCheck "${{ steps.release.outputs.dir }}/openapi.d.ts"
+      - name: Run route, OpenAPI, SDK, and packed-consumer parity gates
+        run: |
+          bun run --filter @tixkit/openapi test:unit
+          node scripts/sdk-parity-matrix.mjs
+          node scripts/test-contract-test-consumers.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tixkit-api-contracts-${{ github.sha }}
+          path: ${{ steps.release.outputs.dir }}/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        if: github.event_name != 'pull_request'
+        with:
+          subject-path: ${{ steps.release.outputs.dir }}/**
+
+  approved-breaking-build:
+    name: Protected approved breaking build
+    if: github.event_name == 'workflow_dispatch' && inputs.approve_breaking
+    runs-on: ubuntu-latest
+    environment: api-contract-staging
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Rebuild the approved commit with breaking override
+        env:
+          ALLOW_BREAKING_API_RELEASE: "1"
+        run: bun run scripts/build-api-release.ts
+      - name: Resolve and verify exact candidate
+        id: release
+        run: |
+          version="$(bun -e "import { openApiSpec } from './packages/openapi/src/index.ts'; process.stdout.write(openApiSpec.info.version)")"
+          release_dir="artifacts/api/${version}"
+          source_commit="$(node -p "require('./${release_dir}/release-manifest.json').commit")"
+          git merge-base --is-ancestor "$source_commit" "$GITHUB_SHA"
+          (cd "$release_dir" && sha256sum --check CHECKSUMS.sha256)
+          echo "dir=${release_dir}" >> "$GITHUB_OUTPUT"
+      - name: Run declarations, OpenAPI, SDK, and packed-consumer parity gates
+        run: |
+          bunx tsc --noEmit --skipLibCheck "${{ steps.release.outputs.dir }}/openapi.d.ts"
+          bun run --filter @tixkit/openapi test:unit
+          node scripts/sdk-parity-matrix.mjs
+          node scripts/test-contract-test-consumers.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tixkit-api-contracts-${{ github.sha }}
+          path: ${{ steps.release.outputs.dir }}/
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: ${{ steps.release.outputs.dir }}/**
+
+  publication-gate:
+    name: Publication requires release approval
+    if: always() && github.event_name == 'workflow_dispatch' && (needs.build-contract-release.result == 'success' || needs.approved-breaking-build.result == 'success')
+    needs: [build-contract-release, approved-breaking-build]
+    runs-on: ubuntu-latest
+    environment: api-contract-production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: tixkit-api-contracts-${{ github.sha }}
+          path: candidate
+      - name: Verify downloaded candidate and provenance binding
+        run: |
+          source_commit="$(node -p "require('./candidate/release-manifest.json').commit")"
+          git merge-base --is-ancestor "$source_commit" "$GITHUB_SHA"
+          (cd candidate && sha256sum --check CHECKSUMS.sha256)
+          node -e "const fs=require('fs');const m=require('./candidate/release-manifest.json');const expected=new Set([...m.artifacts.map(x=>x.name),'release-manifest.json','CHECKSUMS.sha256']);const actual=fs.readdirSync('candidate');if(actual.some(x=>!expected.has(x))||expected.size!==actual.length)process.exit(1)"
+          while IFS= read -r artifact; do
+            gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"
+          done < <(find candidate -maxdepth 1 -type f -print | sort)
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Preserve the external release gate
+        run: |
+          echo 'Artifacts are verified and ready.'
+          echo 'Public registry publication, production CDN upload, and release tagging remain manual approval actions.'

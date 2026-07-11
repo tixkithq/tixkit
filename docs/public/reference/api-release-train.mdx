@@ -1,0 +1,38 @@
+---
+title: API contract release train
+description: Versioning, compatibility, verification, and publication gates for Tixkit API and SDK contracts.
+audience: [developer]
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-10
+prerequisites: [A sandbox API credential]
+related: [/reference/api, /reference/api-versions, /sdks/javascript]
+---
+
+# API contract release train
+
+Every contract release is stored under `artifacts/api/<API version>` and exposed by the documentation site at `/contracts/<API version>/`. A release contains OpenAPI JSON and YAML, generated TypeScript declarations, the webhook catalog, sanitized examples, an API diff, a changelog, a manifest, and SHA-256 checksums.
+
+The API version uses a date. Additive operations and optional fields may ship within the current version. Removing an operation or named schema is detected as breaking and fails the release build. A breaking contract requires a new API version, migration guidance, SDK compatibility updates, and explicit release approval. The current and immediately previous versions remain supported during the documented deprecation window.
+
+Before release, run:
+
+```bash
+bun run scripts/build-api-release.ts
+(cd artifacts/api/2026-01-01 && sha256sum --check CHECKSUMS.sha256)
+bunx tsc --noEmit --skipLibCheck artifacts/api/2026-01-01/openapi.d.ts
+node scripts/sdk-parity-matrix.mjs
+node scripts/test-contract-test-consumers.mjs
+```
+
+The `API Contract Release` workflow repeats these gates and uploads a private workflow artifact. It does not publish a package, create a public release, upload production CDN content, or create a tag. Those actions require the protected `api-contract-production` environment and final release approval.
+
+After approved publication, verify each registry or CDN object by downloading it into a clean directory, comparing its SHA-256 value with `CHECKSUMS.sha256`, installing the packed SDK, running the SDK consumer contract, and confirming that the public release manifest source commit is an ancestor of the approved tag commit.
+
+## Incident and rollback procedure
+
+If any checksum, attestation, manifest commit, registry package, documentation copy, or staged CDN object disagrees, stop before advancing an alias or tag and retain every candidate plus workflow log as incident evidence. Never overwrite an immutable version.
+
+For a partial publication, restore the prior documentation/CDN alias atomically, purge only mutable caches, and verify the previous manifest again. Deprecate a bad registry package with a corrective message instead of deleting or republishing its version. Retract any pending deprecation window, publish a corrective compatibility plan, and notify affected consumers only through the approved incident channel. Production aliases, package publication, tags, and consumer communication remain external approval actions.

@@ -40,6 +40,7 @@ const webhookEvents = [
   'order.created',
   'order.paid',
   'order.refunded',
+  'order.disputed',
   'ticket.issued',
   'ticket.checked_in',
   'attendee.updated',

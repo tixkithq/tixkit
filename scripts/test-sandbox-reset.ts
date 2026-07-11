@@ -124,6 +124,8 @@ async function run(driver: 'postgres' | 'mysql') {
   if (!initialized.ok) throw new Error(initialized.message);
   const first = await resetSandbox(base);
   if (!first.ok || !first.apiKey || !first.epoch) throw new Error(first.message);
+  if (!/^tk_sandbox_[a-f0-9]{64}$/u.test(first.apiKey))
+    throw new Error(`${driver} sandbox credential format is not environment-bound`);
   const firstSnapshot = await snapshot(url);
   const event = firstSnapshot.events.find((row) => row.id === first.eventId);
   if (!event || new Date(event.starts_at as Date).getTime() <= Date.now())
@@ -133,6 +135,8 @@ async function run(driver: 'postgres' | 'mysql') {
     throw new Error(`${driver} sandbox paid history is not capture-local`);
   const second = await resetSandbox(base);
   if (!second.ok || !second.apiKey || !second.epoch) throw new Error(second.message);
+  if (!/^tk_sandbox_[a-f0-9]{64}$/u.test(second.apiKey))
+    throw new Error(`${driver} rotated credential format is not environment-bound`);
   const secondSnapshot = await snapshot(url);
   if (JSON.stringify(firstSnapshot) !== JSON.stringify(secondSnapshot))
     throw new Error(`${driver} sandbox fixture changed across resets`);

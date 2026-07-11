@@ -1,0 +1,45 @@
+{
+  "releaseVersion": "2026-01-01",
+  "apiVersion": "2026-01-01",
+  "commit": "66836d9502000c60e5983f5c96846ddc9d7ed813",
+  "timestamp": "2026-07-10T21:45:24-05:00",
+  "artifacts": [
+    {
+      "name": "openapi.json",
+      "sha256": "c195b78d31df6a65c7e1c655bfb009a095038f1822dcf7b98489a4da53617a89",
+      "size": 764868
+    },
+    {
+      "name": "openapi.yaml",
+      "sha256": "e6c44549e90890cbc78836cdb155fb6bae2a225a8c80c5867fe851544b3186d9",
+      "size": 525240
+    },
+    {
+      "name": "openapi.d.ts",
+      "sha256": "0bb9d712dfc0f1f9c0aef6ff5ff66fcb30f7efa9101be6fb6b1df423ae1fab7d",
+      "size": 386121
+    },
+    {
+      "name": "webhook-events.json",
+      "sha256": "786ad28be30087727e5c6d757aea16574e6bbff079853246ceea3dd87017e0bb",
+      "size": 13246
+    },
+    {
+      "name": "examples.json",
+      "sha256": "e26c2fc8b896b76f098539603f1ca44bfcd787ef9d07f45edd20ae5636bee4c7",
+      "size": 420
+    },
+    {
+      "name": "api-diff.json",
+      "sha256": "7f66e9cc5642df1a84d9c390b21daab81978fdd180f91d4885230b3e70bcd8d6",
+      "size": 173
+    },
+    {
+      "name": "CHANGELOG.md",
+      "sha256": "4a4994cd9651ecf4984051b05f271a6f1d7810538e4de245e8c19d37418b07cd",
+      "size": 253
+    }
+  ],
+  "breaking": false,
+  "publication": "approval-required"
+}

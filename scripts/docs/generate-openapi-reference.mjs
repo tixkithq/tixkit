@@ -1,0 +1,183 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { openApiSpec } from "../../packages/openapi/src/index.ts";
+import {
+  WEBHOOK_CANONICAL_DATA_FIXTURES,
+  WEBHOOK_EVENT_CATALOG,
+} from "../../packages/domain/src/developer/index.ts";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const publicArtifact = resolve(root, "apps/docs/public/openapi.json");
+const referenceArtifact = resolve(
+  root,
+  "apps/docs/src/generated/openapi-reference.ts",
+);
+const webhookArtifact = resolve(
+  root,
+  "apps/docs/src/generated/webhook-reference.ts",
+);
+const check = process.argv.includes("--check");
+const methods = new Set([
+  "get",
+  "put",
+  "post",
+  "delete",
+  "options",
+  "head",
+  "patch",
+  "trace",
+]);
+
+function writeOrCheck(path, value) {
+  if (check) {
+    if (!existsSync(path) || readFileSync(path, "utf8") !== value) {
+      throw new Error(
+        `${path.slice(root.length + 1)} is stale; run bun scripts/docs/generate-openapi-reference.mjs`,
+      );
+    }
+    return;
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, value, "utf8");
+}
+
+const operations = Object.entries(openApiSpec.paths).flatMap(
+  ([path, pathItem]) =>
+    Object.entries(pathItem)
+      .filter(([method]) => methods.has(method))
+      .map(([method, operation]) => ({
+        method: method.toUpperCase(),
+        path,
+        operationId: operation.operationId,
+        tags: operation.tags,
+        summary: operation.summary ?? operation.operationId,
+        description: operation.description ?? "",
+        security: operation.security,
+        requiredPermissions: operation["x-required-permissions"] ?? null,
+        parameters: operation.parameters ?? [],
+        requestBody: operation.requestBody ?? null,
+        responses: operation.responses ?? {},
+      })),
+);
+
+const schemas = Object.entries(openApiSpec.components.schemas).map(
+  ([name, schema]) => ({
+    name,
+    type:
+      schema.type ??
+      (schema.oneOf ? "oneOf" : schema.allOf ? "allOf" : "object"),
+    description: schema.description ?? "",
+    required: schema.required ?? [],
+    properties: Object.keys(schema.properties ?? {}),
+  }),
+);
+
+const webhookMetadata = {
+  "order.created": {
+    trigger: "A checkout or box-office workflow safely finalizes an order.",
+    fields: ["orderId", "eventId", "checkoutSessionId"],
+    example: {
+      orderId: "ord_example",
+      eventId: "evt_example",
+      checkoutSessionId: "cs_example",
+    },
+  },
+  "order.paid": {
+    trigger:
+      "A paid or free order is safely finalized; provider payment alone is insufficient.",
+    fields: ["orderId", "eventId", "checkoutSessionId"],
+    example: {
+      orderId: "ord_example",
+      eventId: "evt_example",
+      checkoutSessionId: "cs_example",
+    },
+  },
+  "order.refunded": {
+    trigger: "The refund workflow completes.",
+    fields: ["orderId", "eventId", "checkoutSessionId"],
+  },
+  "order.disputed": {
+    trigger:
+      "Payment reconciliation records a provider dispute against the order.",
+    fields: ["orderId", "eventId", "checkoutSessionId"],
+  },
+  "ticket.issued": {
+    trigger: "Ticket issuance completes after order finalization.",
+    fields: ["orderId", "ticketIds"],
+    example: { orderId: "ord_example", ticketIds: ["tkt_example"] },
+  },
+  "ticket.checked_in": {
+    trigger: "An authorized scan admits a ticket.",
+    fields: ["ticketId", "eventId", "checkInListId"],
+    example: {
+      ticketId: "tkt_example",
+      eventId: "evt_example",
+      checkInListId: "cil_example",
+    },
+  },
+  "attendee.updated": {
+    trigger: "An authorized attendee update is persisted.",
+    fields: ["attendeeId", "eventId"],
+    example: { attendeeId: "att_example", eventId: "evt_example" },
+  },
+  "event.published": {
+    trigger: "An event transitions to published.",
+    fields: ["eventId"],
+    example: { eventId: "evt_example" },
+  },
+  "event.cancelled": {
+    trigger: "An event transitions to cancelled.",
+    fields: ["eventId"],
+    example: { eventId: "evt_example" },
+  },
+  "test.ping": {
+    trigger:
+      "A developer explicitly requests a sanitized synthetic delivery for one endpoint.",
+    fields: ["endpointId"],
+    example: { endpointId: "wh_example" },
+  },
+};
+
+const runtimeEvents = [
+  ...WEBHOOK_EVENT_CATALOG.map(({ type }) => type),
+  "test.ping",
+];
+const metadataEvents = Object.keys(webhookMetadata);
+if (
+  runtimeEvents.length !== metadataEvents.length ||
+  runtimeEvents.some((event) => !Object.hasOwn(webhookMetadata, event))
+) {
+  throw new Error(
+    "Webhook reference metadata does not match the runtime and synthetic catalog",
+  );
+}
+
+const openApiJson = `${JSON.stringify(openApiSpec, null, 2)}\n`;
+const referenceSource = `/* Generated by scripts/docs/generate-openapi-reference.mjs. */
+export const apiReferenceVersion = ${JSON.stringify(openApiSpec.info.version)};
+export const apiReferenceOperations = ${JSON.stringify(operations, null, 2)} as const;
+export const apiReferenceSchemas = ${JSON.stringify(schemas, null, 2)} as const;
+`;
+const webhookSource = `/* Generated by scripts/docs/generate-openapi-reference.mjs. */
+export const webhookReferenceEvents = ${JSON.stringify(
+  runtimeEvents.map((type) => ({
+    type,
+    stability: "stable",
+    ...webhookMetadata[type],
+    example:
+      type === "test.ping"
+        ? webhookMetadata[type].example
+        : WEBHOOK_CANONICAL_DATA_FIXTURES[type],
+  })),
+  null,
+  2,
+)} as const;
+`;
+
+writeOrCheck(publicArtifact, openApiJson);
+writeOrCheck(referenceArtifact, referenceSource);
+writeOrCheck(webhookArtifact, webhookSource);
+console.log(
+  `${check ? "Validated" : "Generated"} ${operations.length} OpenAPI operations, ${schemas.length} schemas, and ${runtimeEvents.length} webhook events`,
+);

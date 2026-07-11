@@ -1,0 +1,55 @@
+name: API Post-publication Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      contracts_url:
+        description: Immutable HTTPS contract release directory
+        required: true
+        type: string
+      sdk_spec:
+        description: Exact published SDK coordinate, for example @tixkit/js@1.2.3
+        required: true
+        type: string
+      contract_tests_spec:
+        description: Exact published @tixkit/contract-tests coordinate
+        required: true
+        type: string
+      release_tag:
+        description: Protected release tag pointing at the published manifest commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  verify-public-release:
+    runs-on: ubuntu-latest
+    environment: api-post-publication-verification
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+      - name: Resolve the protected tag commit
+        id: tag
+        run: |
+          git fetch --tags --force
+          test "$(git tag --points-at "${{ inputs.release_tag }}" | grep -Fx "${{ inputs.release_tag }}")" = "${{ inputs.release_tag }}"
+          echo "commit=$(git rev-list -n1 "${{ inputs.release_tag }}")" >> "$GITHUB_OUTPUT"
+      - name: Clean-download and verify contracts and registry SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/verify-public-api-release.mjs
+          --contracts-url "${{ inputs.contracts_url }}"
+          --sdk-spec "${{ inputs.sdk_spec }}"
+          --contract-tests-spec "${{ inputs.contract_tests_spec }}"
+          --trusted-contracts-root artifacts/api
+          --commit "${{ steps.tag.outputs.commit }}"
+          --repository "${{ github.repository }}"

@@ -58,12 +58,374 @@ export type Event = {
   minimumAge: number | null;
   coverImageUrl?: string;
   externalUrl?: string;
+  version: number;
+  lastSetupSection?: string;
+  coverImageAlt?: string;
+  seoUseCoverImage: boolean;
   resalePolicy: ResalePolicy;
   grossSalesCents: number;
   ticketsSold: number;
   checkIns: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type DuplicateEventInput = {
+  startsAt: string;
+  title?: string;
+  copy: {
+    basicsVenue: boolean;
+    ticketTypes: boolean;
+    products: boolean;
+    checkoutQuestions: boolean;
+    feeResalePolicies: boolean;
+    eventPageContent: boolean;
+    lifecycleContent: boolean;
+    marketingIntegrations: boolean;
+  };
+};
+
+export type ReadinessStatus = 'complete' | 'incomplete' | 'blocked' | 'not_applicable';
+export type ReadinessPriority = 'required' | 'recommended';
+export type Permission =
+  | 'events.read'
+  | 'events.write'
+  | 'tickets.write'
+  | 'orders.read'
+  | 'orders.write'
+  | 'refunds.write'
+  | 'attendees.read'
+  | 'attendees.write'
+  | 'checkins.read'
+  | 'checkins.write'
+  | 'box_office.write'
+  | 'messages.write'
+  | 'reports.read'
+  | 'settings.write'
+  | 'developers.write'
+  | 'billing.write';
+export type ReadinessStepId =
+  | 'workspace_selection'
+  | 'brand_identity'
+  | 'payment_path'
+  | 'team_access'
+  | 'legal_configuration'
+  | 'sender_identity'
+  | 'basics_schedule'
+  | 'sellable_tickets'
+  | 'currency_coherence'
+  | 'fee_pricing'
+  | 'checkout_consent'
+  | 'public_content'
+  | 'confirmation_content'
+  | 'payment_readiness'
+  | 'preview_review'
+  | 'test_order'
+  | 'check_in_configuration'
+  | 'publishability'
+  | 'publication_status';
+export type ReadinessActionId =
+  | 'select_workspace'
+  | 'configure_brand'
+  | 'configure_payments'
+  | 'manage_team'
+  | 'configure_legal'
+  | 'configure_sender'
+  | 'edit_event_basics'
+  | 'manage_tickets'
+  | 'manage_products'
+  | 'review_fees'
+  | 'review_checkout'
+  | 'edit_event_content'
+  | 'edit_confirmation_content'
+  | 'review_preview'
+  | 'run_test_order'
+  | 'configure_check_in'
+  | 'publish_event'
+  | 'view_event';
+export type ReadinessReasonCode =
+  | 'workspace_selected'
+  | 'organization_inactive'
+  | 'brand_inactive'
+  | 'brand_identity_configured'
+  | 'brand_identity_incomplete'
+  | 'payment_capture_mode'
+  | 'payment_capture_mode_paid_unsupported'
+  | 'payment_path_ready'
+  | 'payment_path_missing'
+  | 'payment_account_inactive'
+  | 'payment_charges_disabled'
+  | 'payment_currency_mismatch'
+  | 'team_access_configured'
+  | 'team_access_single_member'
+  | 'legal_configuration_complete'
+  | 'legal_configuration_missing'
+  | 'sender_identity_verified'
+  | 'sender_identity_missing'
+  | 'event_basics_valid'
+  | 'event_title_missing'
+  | 'event_schedule_invalid'
+  | 'event_start_invalid'
+  | 'event_timezone_missing'
+  | 'sellable_ticket_available'
+  | 'sellable_ticket_missing'
+  | 'ticket_inventory_unavailable'
+  | 'inventory_invalid'
+  | 'sales_window_invalid'
+  | 'currency_coherent'
+  | 'ticket_currency_mismatch'
+  | 'product_currency_mismatch'
+  | 'pricing_valid'
+  | 'pricing_invalid'
+  | 'checkout_reviewed'
+  | 'checkout_review_required'
+  | 'public_content_published'
+  | 'public_content_missing'
+  | 'confirmation_content_valid'
+  | 'confirmation_content_missing'
+  | 'payment_not_required'
+  | 'payment_ready'
+  | 'preview_reviewed'
+  | 'preview_review_required'
+  | 'test_order_complete'
+  | 'test_order_recommended'
+  | 'test_order_not_applicable'
+  | 'check_in_configured'
+  | 'check_in_configuration_missing'
+  | 'required_steps_complete'
+  | 'required_steps_incomplete'
+  | 'event_published'
+  | 'event_unpublished'
+  | 'acknowledgement_stale'
+  | 'permission_required';
+export type ReadinessStep = {
+  id: ReadinessStepId;
+  status: ReadinessStatus;
+  priority: ReadinessPriority;
+  reasonCodes: ReadinessReasonCode[];
+  actionId: ReadinessActionId | null;
+  requiredPermission: Permission | null;
+  updatedAt: string | null;
+  acknowledgedAt: string | null;
+  acknowledgementValid: boolean | null;
+};
+export type WorkspaceReadiness = {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  generatedAt: string;
+  paymentMode: 'capture' | 'provider_test' | 'provider';
+  complete: boolean;
+  steps: ReadinessStep[];
+};
+export type EventLaunchReadiness = {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId: string;
+  eventVersion: number;
+  generatedAt: string;
+  paymentMode: 'capture' | 'provider_test' | 'provider';
+  launchable: boolean;
+  published: boolean;
+  requiredBlockers: ReadinessStep[];
+  recommendedWarnings: ReadinessStep[];
+  steps: ReadinessStep[];
+};
+export type LaunchReadinessFailureDetails = {
+  requiredBlockers: ReadinessStep[];
+  recommendedWarnings: ReadinessStep[];
+};
+
+const readinessStatuses = new Set(['complete', 'incomplete', 'blocked', 'not_applicable']);
+const readinessPriorities = new Set(['required', 'recommended']);
+const readinessStepIds = new Set([
+  'workspace_selection',
+  'brand_identity',
+  'payment_path',
+  'team_access',
+  'legal_configuration',
+  'sender_identity',
+  'basics_schedule',
+  'sellable_tickets',
+  'currency_coherence',
+  'fee_pricing',
+  'checkout_consent',
+  'public_content',
+  'confirmation_content',
+  'payment_readiness',
+  'preview_review',
+  'test_order',
+  'check_in_configuration',
+  'publishability',
+  'publication_status',
+]);
+const readinessActionIds = new Set([
+  'select_workspace',
+  'configure_brand',
+  'configure_payments',
+  'manage_team',
+  'configure_legal',
+  'configure_sender',
+  'edit_event_basics',
+  'manage_tickets',
+  'manage_products',
+  'review_fees',
+  'review_checkout',
+  'edit_event_content',
+  'edit_confirmation_content',
+  'review_preview',
+  'run_test_order',
+  'configure_check_in',
+  'publish_event',
+  'view_event',
+]);
+const readinessPermissions = new Set([
+  'events.read',
+  'events.write',
+  'tickets.write',
+  'orders.read',
+  'orders.write',
+  'refunds.write',
+  'attendees.read',
+  'attendees.write',
+  'checkins.read',
+  'checkins.write',
+  'box_office.write',
+  'messages.write',
+  'reports.read',
+  'settings.write',
+  'developers.write',
+  'billing.write',
+]);
+const readinessReasonCodeValues = new Set<ReadinessReasonCode>([
+  'workspace_selected',
+  'organization_inactive',
+  'brand_inactive',
+  'brand_identity_configured',
+  'brand_identity_incomplete',
+  'payment_capture_mode',
+  'payment_capture_mode_paid_unsupported',
+  'payment_path_ready',
+  'payment_path_missing',
+  'payment_account_inactive',
+  'payment_charges_disabled',
+  'payment_currency_mismatch',
+  'team_access_configured',
+  'team_access_single_member',
+  'legal_configuration_complete',
+  'legal_configuration_missing',
+  'sender_identity_verified',
+  'sender_identity_missing',
+  'event_basics_valid',
+  'event_title_missing',
+  'event_schedule_invalid',
+  'event_start_invalid',
+  'event_timezone_missing',
+  'sellable_ticket_available',
+  'sellable_ticket_missing',
+  'ticket_inventory_unavailable',
+  'inventory_invalid',
+  'sales_window_invalid',
+  'currency_coherent',
+  'ticket_currency_mismatch',
+  'product_currency_mismatch',
+  'pricing_valid',
+  'pricing_invalid',
+  'checkout_reviewed',
+  'checkout_review_required',
+  'public_content_published',
+  'public_content_missing',
+  'confirmation_content_valid',
+  'confirmation_content_missing',
+  'payment_not_required',
+  'payment_ready',
+  'preview_reviewed',
+  'preview_review_required',
+  'test_order_complete',
+  'test_order_recommended',
+  'test_order_not_applicable',
+  'check_in_configured',
+  'check_in_configuration_missing',
+  'required_steps_complete',
+  'required_steps_incomplete',
+  'event_published',
+  'event_unpublished',
+  'acknowledgement_stale',
+  'permission_required',
+]);
+
+function isReadinessStep(value: unknown): value is ReadinessStep {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const step = value as Record<string, unknown>;
+  return (
+    typeof step.id === 'string' &&
+    readinessStepIds.has(step.id) &&
+    typeof step.status === 'string' &&
+    readinessStatuses.has(step.status) &&
+    typeof step.priority === 'string' &&
+    readinessPriorities.has(step.priority) &&
+    Array.isArray(step.reasonCodes) &&
+    step.reasonCodes.length > 0 &&
+    step.reasonCodes.every(
+      (reason) =>
+        typeof reason === 'string' && readinessReasonCodeValues.has(reason as ReadinessReasonCode),
+    ) &&
+    (step.actionId === null ||
+      (typeof step.actionId === 'string' && readinessActionIds.has(step.actionId))) &&
+    (step.requiredPermission === null ||
+      (typeof step.requiredPermission === 'string' &&
+        readinessPermissions.has(step.requiredPermission))) &&
+    (step.updatedAt === null || typeof step.updatedAt === 'string') &&
+    (step.acknowledgedAt === null || typeof step.acknowledgedAt === 'string') &&
+    (step.acknowledgementValid === null || typeof step.acknowledgementValid === 'boolean')
+  );
+}
+
+export function isLaunchReadinessFailure(
+  error: unknown,
+): error is TixkitApiError & { details: LaunchReadinessFailureDetails } {
+  if (!(error instanceof TixkitApiError) || error.code !== 'launch_readiness_failed') return false;
+  const details = error.details;
+  return Boolean(
+    details &&
+    Array.isArray(details.requiredBlockers) &&
+    details.requiredBlockers.every(isReadinessStep) &&
+    Array.isArray(details.recommendedWarnings) &&
+    details.recommendedWarnings.every(isReadinessStep),
+  );
+}
+
+export type StaleEventVersionDetails = {
+  expectedVersion: number;
+  currentVersion: number;
+};
+
+export function isStaleEventVersionFailure(
+  error: unknown,
+): error is TixkitApiError & { details: StaleEventVersionDetails } {
+  if (!(error instanceof TixkitApiError) || error.code !== 'stale_event_version') return false;
+  const details = error.details as Partial<StaleEventVersionDetails> | undefined;
+  return Boolean(
+    details &&
+    Number.isInteger(details.expectedVersion) &&
+    Number.isInteger(details.currentVersion),
+  );
+}
+
+export function isArchivedEventFailure(error: unknown): error is TixkitApiError {
+  return error instanceof TixkitApiError && error.code === 'event_archived';
+}
+export type ReadinessAcknowledgement = {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId: string;
+  stepId: 'checkout_consent' | 'preview_review';
+  stepVersion: number;
+  subjectFingerprint: string;
+  actorId: string;
+  acknowledgedAt: string;
 };
 
 export type PublicMarketingIntegration = {
@@ -109,11 +471,13 @@ export type FeeRule = {
 
 export type EventFeePolicy = {
   eventId: string;
+  eventVersion: number;
   passFeesToBuyer: boolean;
   rules: FeeRule[];
 };
 
 export type UpdateEventFeePolicyInput = {
+  expectedVersion: number;
   passFeesToBuyer: boolean;
   rules: Array<{
     id?: string;
@@ -300,7 +664,10 @@ export type UploadPurpose =
   | 'checkout_answer'
   | 'brand_logo'
   | 'user_avatar'
-  | 'content_email_image';
+  | 'content_email_image'
+  | 'content_event_page_image'
+  | 'event_cover'
+  | 'event_seo_image';
 
 export type CreateUploadArtifactInput = {
   purpose: UploadPurpose;
@@ -1114,6 +1481,7 @@ export type WebhookEventType =
   | 'order.created'
   | 'order.paid'
   | 'order.refunded'
+  | 'order.disputed'
   | 'ticket.issued'
   | 'ticket.checked_in'
   | 'attendee.updated'
@@ -1203,7 +1571,11 @@ export type SyncScanResult = {
   results: { qrHash: string; outcome: string }[];
 };
 
-export type OfflineSyncScan = { qrHash: string; scannedAt: string; offline: boolean };
+export type OfflineSyncScan = {
+  qrHash: string;
+  scannedAt: string;
+  offline: boolean;
+};
 
 export type BulkSyncErrorSample = {
   sequence: number;
@@ -2193,7 +2565,10 @@ export class TixkitClient {
 }
 
 function isBrowserRuntime(): boolean {
-  const runtime = globalThis as typeof globalThis & { window?: unknown; document?: unknown };
+  const runtime = globalThis as typeof globalThis & {
+    window?: unknown;
+    document?: unknown;
+  };
   return runtime.window !== undefined && runtime.document !== undefined;
 }
 
@@ -2292,12 +2667,14 @@ class CheckoutResource {
       cancelUrl?: string;
       accessCode?: string;
       waitlistClaimToken?: string;
+      testOrder?: boolean;
     } & IdempotencyOptions,
   ): Promise<CheckoutSession> {
-    const { idempotencyKey, ...body } = input;
+    const { idempotencyKey, testOrder, ...body } = input;
     return this.client.request('POST', '/checkout/sessions', {
       body,
       idempotencyKey,
+      headers: testOrder ? { 'X-Tixkit-Test-Order': '1' } : undefined,
     });
   }
 
@@ -2367,7 +2744,10 @@ class CheckoutResource {
 
   async confirm(
     sessionId: string,
-    input: { paymentMethodId?: string; clientToken: string } & IdempotencyOptions,
+    input: {
+      paymentMethodId?: string;
+      clientToken: string;
+    } & IdempotencyOptions,
   ): Promise<CheckoutConfirmResult> {
     const { idempotencyKey, clientToken, ...body } = input;
     return this.client.request('POST', `/checkout/sessions/${sessionId}/confirm`, {
@@ -2409,7 +2789,9 @@ class EventResource {
   constructor(private client: TixkitClient) {}
 
   async list(params?: EventListParams): Promise<AdminTablePage<Event>> {
-    return this.client.request('GET', '/events', { params: paginationParams(params) });
+    return this.client.request('GET', '/events', {
+      params: paginationParams(params),
+    });
   }
 
   async get(eventId: string): Promise<Event> {
@@ -2435,6 +2817,34 @@ class EventResource {
     return this.client.request('POST', `/events/${eventId}/publish`);
   }
 
+  async duplicate(eventId: string, input: DuplicateEventInput): Promise<Event> {
+    return this.client.request('POST', `/events/${eventId}/duplicate`, {
+      body: input,
+    });
+  }
+
+  async launchReadiness(eventId: string): Promise<EventLaunchReadiness> {
+    return this.client.request('GET', `/events/${eventId}/launch-readiness`);
+  }
+
+  async acknowledgeReadinessStep(
+    eventId: string,
+    stepId: ReadinessAcknowledgement['stepId'],
+  ): Promise<ReadinessAcknowledgement> {
+    return this.client.request('POST', `/events/${eventId}/readiness-acknowledgements/${stepId}`);
+  }
+
+  async removeReadinessAcknowledgement(
+    eventId: string,
+    stepId: ReadinessAcknowledgement['stepId'],
+  ): Promise<void> {
+    await this.client.requestRaw(
+      'DELETE',
+      `/events/${eventId}/readiness-acknowledgements/${stepId}`,
+      { successStatuses: [204] },
+    );
+  }
+
   async update(
     eventId: string,
     input: Partial<
@@ -2453,8 +2863,11 @@ class EventResource {
         | 'externalUrl'
         | 'venue'
         | 'seo'
+        | 'coverImageAlt'
+        | 'seoUseCoverImage'
+        | 'lastSetupSection'
       >
-    >,
+    > & { expectedVersion: number },
   ): Promise<Event> {
     return this.client.request('PATCH', `/events/${eventId}`, { body: input });
   }
@@ -2472,7 +2885,9 @@ class EventResource {
   }
 
   async updateResalePolicy(eventId: string, input: ResalePolicy): Promise<ResalePolicy> {
-    return this.client.request('PUT', `/events/${eventId}/resale-policy`, { body: input });
+    return this.client.request('PUT', `/events/${eventId}/resale-policy`, {
+      body: input,
+    });
   }
 
   async getFeePolicy(eventId: string): Promise<EventFeePolicy> {
@@ -2483,7 +2898,9 @@ class EventResource {
     eventId: string,
     input: UpdateEventFeePolicyInput,
   ): Promise<EventFeePolicy> {
-    return this.client.request('PUT', `/events/${eventId}/fee-policy`, { body: input });
+    return this.client.request('PUT', `/events/${eventId}/fee-policy`, {
+      body: input,
+    });
   }
 
   async listResaleListings(
@@ -2536,7 +2953,9 @@ class EventResource {
       status?: EventOccurrence['status'];
     },
   ): Promise<EventOccurrence> {
-    return this.client.request('POST', `/events/${eventId}/occurrences`, { body: input });
+    return this.client.request('POST', `/events/${eventId}/occurrences`, {
+      body: input,
+    });
   }
 
   async updateOccurrence(
@@ -2604,7 +3023,9 @@ class OrderResource {
   constructor(private client: TixkitClient) {}
 
   async list(params?: OrderListParams): Promise<AdminTablePage<Order>> {
-    return this.client.request('GET', '/orders', { params: paginationParams(params) });
+    return this.client.request('GET', '/orders', {
+      params: paginationParams(params),
+    });
   }
 
   async get(orderId: string): Promise<OrderDetail> {
@@ -2699,6 +3120,11 @@ class OrganizationResource {
   async list(): Promise<Organization[]> {
     return this.client.request('GET', '/organizations');
   }
+  async readiness(organizationId: string, brandId: string): Promise<WorkspaceReadiness> {
+    return this.client.request('GET', `/organizations/${organizationId}/readiness`, {
+      params: { brandId },
+    });
+  }
   async create(input: {
     name: string;
     slug: string;
@@ -2711,7 +3137,9 @@ class OrganizationResource {
     organizationId: string,
     input: Partial<Pick<Organization, 'name' | 'slug' | 'status' | 'boxOfficeSettings'>>,
   ): Promise<Organization> {
-    return this.client.request('PATCH', `/organizations/${organizationId}`, { body: input });
+    return this.client.request('PATCH', `/organizations/${organizationId}`, {
+      body: input,
+    });
   }
   async updateMember(
     organizationId: string,
@@ -2765,7 +3193,9 @@ class BrandResource {
     brandId: string,
     input: { domain: string; isPrimary?: boolean },
   ): Promise<BrandDomain> {
-    return this.client.request('POST', `/brands/${brandId}/domains`, { body: input });
+    return this.client.request('POST', `/brands/${brandId}/domains`, {
+      body: input,
+    });
   }
   async listSenderIdentities(brandId: string): Promise<BrandSenderIdentity[]> {
     return this.client.request('GET', `/brands/${brandId}/email-sender-identities`);
@@ -2780,10 +3210,14 @@ class TicketTypeResource {
     });
   }
   async create(eventId: string, input: Record<string, unknown>): Promise<TicketType> {
-    return this.client.request('POST', `/events/${eventId}/ticket-types`, { body: input });
+    return this.client.request('POST', `/events/${eventId}/ticket-types`, {
+      body: input,
+    });
   }
   async update(ticketTypeId: string, input: Record<string, unknown>): Promise<TicketType> {
-    return this.client.request('PATCH', `/ticket-types/${ticketTypeId}`, { body: input });
+    return this.client.request('PATCH', `/ticket-types/${ticketTypeId}`, {
+      body: input,
+    });
   }
   async createBatch(
     eventId: string,
@@ -2795,7 +3229,9 @@ class TicketTypeResource {
     ticketTypeId: string,
     input: UpdateTicketTypeBatchInput,
   ): Promise<TicketTypeBatchResult> {
-    return this.client.request('PATCH', `/ticket-types/${ticketTypeId}/batch`, { body: input });
+    return this.client.request('PATCH', `/ticket-types/${ticketTypeId}/batch`, {
+      body: input,
+    });
   }
   async listAccessRules(ticketTypeId: string): Promise<PageResult<AccessRule>> {
     return this.client.request('GET', `/ticket-types/${ticketTypeId}/access-rules`);
@@ -2813,7 +3249,9 @@ class TicketTypeResource {
 class InventoryPoolResource {
   constructor(private client: TixkitClient) {}
   async create(eventId: string, input: CreateInventoryPoolInput): Promise<InventoryPool> {
-    return this.client.request('POST', `/events/${eventId}/inventory-pools`, { body: input });
+    return this.client.request('POST', `/events/${eventId}/inventory-pools`, {
+      body: input,
+    });
   }
 }
 
@@ -2839,7 +3277,9 @@ class ProductResource {
       sortOrder?: number;
     },
   ): Promise<Product> {
-    return this.client.request('POST', `/events/${eventId}/products`, { body: input });
+    return this.client.request('POST', `/events/${eventId}/products`, {
+      body: input,
+    });
   }
   async update(
     productId: string,
@@ -2856,7 +3296,9 @@ class ProductResource {
       sortOrder: number;
     }>,
   ): Promise<Product> {
-    return this.client.request('PATCH', `/products/${productId}`, { body: input });
+    return this.client.request('PATCH', `/products/${productId}`, {
+      body: input,
+    });
   }
   async listCategories(
     eventId: string,
@@ -2891,7 +3333,9 @@ class AttendeeResource {
     attendeeId: string,
     input: Partial<Pick<Attendee, 'firstName' | 'lastName' | 'email' | 'phone' | 'status'>>,
   ): Promise<Attendee> {
-    return this.client.request('PATCH', `/attendees/${attendeeId}`, { body: input });
+    return this.client.request('PATCH', `/attendees/${attendeeId}`, {
+      body: input,
+    });
   }
 }
 
@@ -2953,7 +3397,12 @@ class CheckInListResource {
 class CheckInResource {
   constructor(private client: TixkitClient) {}
   async scan(
-    input: { checkInListId: string; qrPayload: string; scannedAt: string; offline?: boolean } & {
+    input: {
+      checkInListId: string;
+      qrPayload: string;
+      scannedAt: string;
+      offline?: boolean;
+    } & {
       headers: Record<string, string>;
     },
   ): Promise<ScanResult> {
@@ -2967,7 +3416,11 @@ class CheckInResource {
     } & IdempotencyOptions & { headers: Record<string, string> },
   ): Promise<SyncScanResult> {
     const { idempotencyKey, headers, ...body } = input;
-    return this.client.request('POST', '/check-ins/sync', { body, idempotencyKey, headers });
+    return this.client.request('POST', '/check-ins/sync', {
+      body,
+      idempotencyKey,
+      headers,
+    });
   }
 
   async createBulkSyncJob(
@@ -2989,7 +3442,9 @@ class CheckInResource {
   async uploadBulkSyncChunk(
     jobId: string,
     sequence: number,
-    input: { scans: OfflineSyncScan[] } & IdempotencyOptions & { headers: Record<string, string> },
+    input: { scans: OfflineSyncScan[] } & IdempotencyOptions & {
+        headers: Record<string, string>;
+      },
   ): Promise<BulkSyncChunk> {
     const { idempotencyKey, headers, ...body } = input;
     return this.client.request('PUT', `/check-ins/bulk-sync-jobs/${jobId}/chunks/${sequence}`, {
@@ -3074,7 +3529,12 @@ class CheckInResource {
     if (!forceAsync && scans.length <= MAX_OFFLINE_SYNC_SCANS) {
       return {
         mode: 'sync',
-        result: await this.sync({ checkInListId, scans, idempotencyKey, headers }),
+        result: await this.sync({
+          checkInListId,
+          scans,
+          idempotencyKey,
+          headers,
+        }),
       };
     }
 
@@ -3119,7 +3579,9 @@ class CheckInResource {
 class ApiKeyResource {
   constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<ApiKey>> {
-    return this.client.request('GET', '/api-keys', { params: paginationParams(params) });
+    return this.client.request('GET', '/api-keys', {
+      params: paginationParams(params),
+    });
   }
   async create(input: {
     organizationId: string;
@@ -3139,7 +3601,9 @@ class ApiKeyResource {
 class ScannerDeviceResource {
   constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<ScannerDevice>> {
-    return this.client.request('GET', '/scanner-devices', { params: paginationParams(params) });
+    return this.client.request('GET', '/scanner-devices', {
+      params: paginationParams(params),
+    });
   }
   async create(input: {
     organizationId: string;
@@ -3221,11 +3685,15 @@ class PrivacyResource {
   constructor(private client: TixkitClient) {}
 
   async listAuditLogs(params?: AuditLogListParams): Promise<AdminTablePage<AuditLog>> {
-    return this.client.request('GET', '/audit-logs', { params: paginationParams(params) });
+    return this.client.request('GET', '/audit-logs', {
+      params: paginationParams(params),
+    });
   }
 
   async listRequests(params?: PrivacyRequestListParams): Promise<AdminTablePage<PrivacyRequest>> {
-    return this.client.request('GET', '/privacy/requests', { params: paginationParams(params) });
+    return this.client.request('GET', '/privacy/requests', {
+      params: paginationParams(params),
+    });
   }
 
   async getRequest(requestId: string): Promise<PrivacyRequest> {
@@ -3234,12 +3702,18 @@ class PrivacyResource {
 
   async createDataExport(input: PrivacyRequestInput & IdempotencyOptions): Promise<PrivacyRequest> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', '/privacy/data-exports', { body, idempotencyKey });
+    return this.client.request('POST', '/privacy/data-exports', {
+      body,
+      idempotencyKey,
+    });
   }
 
   async createErasure(input: PrivacyRequestInput & IdempotencyOptions): Promise<PrivacyRequest> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', '/privacy/erasures', { body, idempotencyKey });
+    return this.client.request('POST', '/privacy/erasures', {
+      body,
+      idempotencyKey,
+    });
   }
 }
 
@@ -3267,13 +3741,18 @@ class ContentResource {
   }
 
   async update(documentId: string, input: UpdateContentDocumentInput): Promise<ContentDocument> {
-    return this.client.request('PATCH', `/content-documents/${documentId}`, { body: input });
+    return this.client.request('PATCH', `/content-documents/${documentId}`, {
+      body: input,
+    });
   }
 
   async duplicate(
     documentId: string,
     input: DuplicateContentDocumentInput = {},
-  ): Promise<{ document: ContentDocument; versions: ContentDocumentVersion[] }> {
+  ): Promise<{
+    document: ContentDocument;
+    versions: ContentDocumentVersion[];
+  }> {
     return this.client.request('POST', `/content-documents/${documentId}/duplicate`, {
       body: input,
     });
@@ -3342,13 +3821,18 @@ class MessageResource {
   constructor(private client: TixkitClient) {}
   async send(eventId: string, input: SendMessageInput): Promise<MessageQueued> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', `/events/${eventId}/messages`, { body, idempotencyKey });
+    return this.client.request('POST', `/events/${eventId}/messages`, {
+      body,
+      idempotencyKey,
+    });
   }
   async previewRecipients(
     eventId: string,
     input: { audience: string; attendeeIds?: string[]; channel: string },
   ): Promise<MessageRecipientPreview> {
-    return this.client.request('POST', `/events/${eventId}/messages/preview`, { body: input });
+    return this.client.request('POST', `/events/${eventId}/messages/preview`, {
+      body: input,
+    });
   }
   async renderPreview(
     eventId: string,
@@ -3413,7 +3897,9 @@ class MessageResource {
 class WebhookEndpointResource {
   constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<WebhookEndpoint>> {
-    return this.client.request('GET', '/webhook-endpoints', { params: paginationParams(params) });
+    return this.client.request('GET', '/webhook-endpoints', {
+      params: paginationParams(params),
+    });
   }
   async create(input: {
     organizationId: string;
@@ -3427,7 +3913,9 @@ class WebhookEndpointResource {
     endpointId: string,
     input: Partial<Pick<WebhookEndpoint, 'url' | 'events' | 'status' | 'description'>>,
   ): Promise<WebhookEndpoint> {
-    return this.client.request('PATCH', `/webhook-endpoints/${endpointId}`, { body: input });
+    return this.client.request('PATCH', `/webhook-endpoints/${endpointId}`, {
+      body: input,
+    });
   }
   async listEvents(
     endpointId: string,
@@ -3443,9 +3931,12 @@ class WebhookEndpointResource {
   ): Promise<{ queued: true; eventId: string; endpointId: string }> {
     return this.client.request('POST', `/webhook-endpoints/${endpointId}/events/${eventId}/replay`);
   }
-  async sendTest(
-    endpointId: string,
-  ): Promise<{ queued: true; test: true; eventId: string; endpointId: string }> {
+  async sendTest(endpointId: string): Promise<{
+    queued: true;
+    test: true;
+    eventId: string;
+    endpointId: string;
+  }> {
     return this.client.request('POST', `/webhook-endpoints/${endpointId}/test`);
   }
   async replay(eventId: string): Promise<{ queued: true; eventId: string; endpoints: number }> {
@@ -3481,10 +3972,14 @@ class QuestionResource {
     return this.client.request('GET', `/events/${eventId}/questions`);
   }
   async create(eventId: string, input: CreateQuestionInput): Promise<Question> {
-    return this.client.request('POST', `/events/${eventId}/questions`, { body: input });
+    return this.client.request('POST', `/events/${eventId}/questions`, {
+      body: input,
+    });
   }
   async update(questionId: string, input: UpdateQuestionInput): Promise<Question> {
-    return this.client.request('PATCH', `/questions/${questionId}`, { body: input });
+    return this.client.request('PATCH', `/questions/${questionId}`, {
+      body: input,
+    });
   }
   async reorder(eventId: string, questions: ReorderQuestionInput[]): Promise<PageResult<Question>> {
     return this.client.request('POST', `/events/${eventId}/questions/reorder`, {
@@ -3499,7 +3994,9 @@ class QuestionResource {
 class OAuthApplicationResource {
   constructor(private client: TixkitClient) {}
   async list(params?: PaginationParams): Promise<PageResult<OAuthApplication>> {
-    return this.client.request('GET', '/oauth-applications', { params: paginationParams(params) });
+    return this.client.request('GET', '/oauth-applications', {
+      params: paginationParams(params),
+    });
   }
   async create(input: {
     organizationId: string;
@@ -3697,7 +4194,9 @@ class PublicResource {
     });
   }
   async joinWaitlist(eventId: string, input: JoinWaitlistInput): Promise<WaitlistEntry> {
-    return this.client.request('POST', `/public/events/${eventId}/waitlist`, { body: input });
+    return this.client.request('POST', `/public/events/${eventId}/waitlist`, {
+      body: input,
+    });
   }
   async getWaitlistClaim(token: string): Promise<WaitlistEntry> {
     return this.client.request('GET', `/public/waitlist/claims/${encodeURIComponent(token)}`);

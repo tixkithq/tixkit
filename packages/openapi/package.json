@@ -11,6 +11,9 @@
     "test:unit": "vitest run",
     "clean": "rm -rf dist"
   },
+  "dependencies": {
+    "@tixkit/domain": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "7.0.2",
     "vitest": "^4.1.0"

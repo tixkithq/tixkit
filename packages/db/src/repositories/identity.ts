@@ -89,9 +89,10 @@ export class ApiKeyRepository extends BaseRepository {
     brandIds?: string[];
     eventIds?: string[];
     expiresAt?: Date;
+    kind?: 'standard' | 'sandbox';
   }): Promise<{ apiKey: string; record: Record<string, unknown> }> {
     const id = `key_${ulid()}`;
-    const rawKey = `tk_${randomBytes(32).toString('hex')}`;
+    const rawKey = `tk_${input.kind === 'sandbox' ? 'sandbox_' : ''}${randomBytes(32).toString('hex')}`;
     const keyPrefix = rawKey.substring(0, 12);
     const hashedKey = createHash('sha256').update(rawKey).digest('hex');
     const now = new Date();

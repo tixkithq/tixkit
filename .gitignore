@@ -93,7 +93,9 @@ apps/checkout/public/tixkit-widget.js
 .reference/
 .vscode/
 .playwright*
-artifacts/
+artifacts/*
+!artifacts/api/
+!artifacts/api/**
 .continue-*
 .next-codex-cdp*/
 .next-*/

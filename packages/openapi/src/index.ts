@@ -1,3 +1,5 @@
+import { ALL_PERMISSIONS } from '@tixkit/domain';
+
 export type OpenApiReference = { $ref: string };
 export { generateOpenApiTypes } from './generate-types.js';
 export type { OpenApiTypeGenerationOptions } from './generate-types.js';
@@ -29,7 +31,11 @@ type NormalizedOpenApiOperation<T, HasPathTemplate extends boolean> =
     ? Omit<T, 'parameters'> &
         (HasPathTemplate extends true
           ? { parameters: OpenApiParameter[] }
-          : { parameters?: OpenApiParameter[] })
+          : { parameters?: OpenApiParameter[] }) & {
+          operationId: string;
+          tags: string[];
+          security: readonly Record<string, readonly string[]>[];
+        }
     : T;
 type NormalizedOpenApiPathItem<Path extends string, T> =
   T extends Record<string, unknown>
@@ -61,6 +67,7 @@ const webhookEventTypeValues = [
   'order.created',
   'order.paid',
   'order.refunded',
+  'order.disputed',
   'ticket.issued',
   'ticket.checked_in',
   'attendee.updated',
@@ -155,6 +162,252 @@ function withDeclaredPathParameters<const T extends OpenApiDocument>(
   return spec as unknown as NormalizedOpenApiDocument<T>;
 }
 
+function operationIdFor(method: HttpMethod, path: string): string {
+  const tokens = path
+    .split('/')
+    .filter(Boolean)
+    .flatMap((segment) => {
+      const parameter = segment.match(/^\{(.+)\}$/)?.[1];
+      return parameter ? ['by', parameter] : segment.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+    });
+  const name = tokens
+    .map((token, index) =>
+      index === 0 ? token.toLowerCase() : `${token.slice(0, 1).toUpperCase()}${token.slice(1)}`,
+    )
+    .join('');
+  return `${method}${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
+}
+
+function tagForPath(path: string): string {
+  const segments = path.split('/').filter(Boolean);
+  if (segments[0] === 'public') return `Public ${segments[1] ?? 'buyer'}`;
+  const tagBySegment: Readonly<Record<string, string>> = {
+    health: 'System',
+    organizations: 'Organizations',
+    brands: 'Brands',
+    events: 'Events',
+    tickets: 'Tickets',
+    'ticket-types': 'Ticket types',
+    products: 'Products',
+    inventory: 'Inventory',
+    'inventory-pools': 'Inventory',
+    checkout: 'Checkout',
+    orders: 'Orders',
+    refunds: 'Refunds',
+    attendees: 'Attendees',
+    'check-ins': 'Check-in',
+    'check-in-lists': 'Check-in',
+    messages: 'Messaging',
+    exports: 'Reports and exports',
+    reports: 'Reports and exports',
+    'api-keys': 'Developer',
+    'scanner-devices': 'Developer',
+    'webhook-endpoints': 'Webhooks',
+    'webhook-events': 'Webhooks',
+    webhooks: 'Provider webhooks',
+    oauth: 'OAuth',
+    content: 'Content',
+    'content-documents': 'Content',
+    uploads: 'Uploads',
+    'upload-artifacts': 'Uploads',
+    privacy: 'Privacy',
+    settings: 'Settings',
+    me: 'Identity',
+    'bootstrap-context': 'Identity',
+    s: 'Short links',
+  };
+  return tagBySegment[segments[0] ?? ''] ?? 'Platform';
+}
+
+function explicitSecurity(path: string): readonly Record<string, readonly string[]>[] {
+  if (
+    path === '/health' ||
+    path.startsWith('/public/') ||
+    path.startsWith('/checkout/') ||
+    path.startsWith('/wallet-passes/') ||
+    path.startsWith('/oauth/') ||
+    path.startsWith('/s/')
+  ) {
+    return [];
+  }
+  if (path === '/webhooks/stripe') return [{ StripeSignature: [] }];
+  if (path === '/webhooks/clerk') return [{ SvixSignature: [] }];
+  if (path === '/webhooks/telnyx/sms') return [{ TelnyxSignature: [] }];
+  if (path.startsWith('/webhooks/email/')) return [{ EmailProviderSignature: [] }];
+  return [{ BearerAuth: [] }, { ApiKey: [] }];
+}
+
+function exampleString(name: string, schema: Record<string, unknown>): string {
+  const normalizedName = name.toLowerCase();
+  if (/(?:secret|password|token|signature)/.test(normalizedName)) return '$REDACTED_SECRET';
+  if (normalizedName.endsWith('id') || normalizedName === 'id') {
+    return `${normalizedName.replace(/id$/, '') || 'resource'}_example`;
+  }
+  if (normalizedName.includes('email')) return 'operator@example.test';
+  if (normalizedName.includes('url') || schema.format === 'uri')
+    return 'https://example.test/tixkit';
+  if (schema.format === 'date-time') return '2026-07-10T12:00:00.000Z';
+  if (schema.format === 'date') return '2026-07-10';
+  if (schema.format === 'uuid') return '00000000-0000-4000-8000-000000000001';
+  return `${name || 'value'} example`;
+}
+
+function schemaExample(
+  schema: unknown,
+  schemas: Record<string, Record<string, unknown>>,
+  name = 'value',
+  seen = new Set<string>(),
+): unknown {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return null;
+  const value = schema as Record<string, unknown>;
+  if (value.example !== undefined) return value.example;
+  if (value.const !== undefined) return value.const;
+  if (value.default !== undefined) return value.default;
+  if (Array.isArray(value.enum) && value.enum.length > 0) return value.enum[0];
+  if (typeof value.$ref === 'string') {
+    const referenceName = value.$ref.split('/').at(-1);
+    if (!referenceName || seen.has(referenceName)) return `${name}_example`;
+    const target = schemas[referenceName];
+    if (!target) return `${name}_example`;
+    return schemaExample(target, schemas, referenceName, new Set([...seen, referenceName]));
+  }
+  if (Array.isArray(value.oneOf) && value.oneOf.length > 0) {
+    return schemaExample(value.oneOf[0], schemas, name, seen);
+  }
+  if (Array.isArray(value.anyOf) && value.anyOf.length > 0) {
+    return schemaExample(value.anyOf[0], schemas, name, seen);
+  }
+  if (Array.isArray(value.allOf)) {
+    return Object.assign(
+      {},
+      ...value.allOf
+        .map((entry) => schemaExample(entry, schemas, name, seen))
+        .filter(
+          (entry): entry is Record<string, unknown> =>
+            Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry),
+        ),
+    );
+  }
+  const declaredType = Array.isArray(value.type)
+    ? (value.type.find((entry) => entry !== 'null') ?? 'null')
+    : value.type;
+  if (declaredType === 'null') return null;
+  if (declaredType === 'array') {
+    return [schemaExample(value.items, schemas, name.replace(/s$/, '') || 'item', seen)];
+  }
+  if (declaredType === 'boolean') return true;
+  if (declaredType === 'integer' || declaredType === 'number') return 1;
+  if (declaredType === 'string') return exampleString(name, value);
+
+  const properties =
+    value.properties && typeof value.properties === 'object' && !Array.isArray(value.properties)
+      ? (value.properties as Record<string, unknown>)
+      : {};
+  const required = Array.isArray(value.required)
+    ? value.required.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const keys = required.length > 0 ? required : Object.keys(properties).slice(0, 4);
+  return Object.fromEntries(
+    keys
+      .filter((key) => Object.hasOwn(properties, key))
+      .map((key) => [key, schemaExample(properties[key], schemas, key, seen)]),
+  );
+}
+
+function addJsonExample(content: unknown, schemas: Record<string, Record<string, unknown>>): void {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return;
+  const json = (content as Record<string, unknown>)['application/json'];
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return;
+  const mediaType = json as Record<string, unknown>;
+  if (mediaType.example !== undefined || mediaType.examples !== undefined) return;
+  mediaType.example = schemaExample(mediaType.schema, schemas);
+}
+
+function normalizeOpenApiOperations<const T extends OpenApiDocument>(
+  spec: T,
+): NormalizedOpenApiDocument<T> {
+  const components = spec.components as
+    | { securitySchemes?: Record<string, Record<string, unknown>> }
+    | undefined;
+  if (components) {
+    components.securitySchemes = {
+      ...components.securitySchemes,
+      StripeSignature: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'Stripe-Signature',
+        description: 'Stripe webhook signature verified against the configured endpoint secret.',
+      },
+      SvixSignature: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'svix-signature',
+        description:
+          'Svix signature verified with the Clerk webhook signing secret and timestamp headers.',
+      },
+      TelnyxSignature: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'telnyx-signature-ed25519',
+        description: 'Telnyx Ed25519 signature verified with the configured public key.',
+      },
+      EmailProviderSignature: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-tixkit-provider-signature',
+        description: 'Provider feedback signature verified with the configured HMAC secret.',
+      },
+    };
+  }
+
+  const schemas =
+    components &&
+    'schemas' in components &&
+    components.schemas &&
+    typeof components.schemas === 'object'
+      ? (components.schemas as Record<string, Record<string, unknown>>)
+      : {};
+
+  const operationIds = new Set<string>();
+  for (const [path, pathItem] of Object.entries(spec.paths)) {
+    for (const [method, value] of Object.entries(pathItem)) {
+      if (!isHttpMethod(method) || !value || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const operation = value as OpenApiOperation;
+      const operationId =
+        typeof operation.operationId === 'string' && operation.operationId.trim() !== ''
+          ? operation.operationId
+          : operationIdFor(method, path);
+      if (operationIds.has(operationId)) {
+        throw new Error(`Duplicate OpenAPI operationId ${operationId}`);
+      }
+      operationIds.add(operationId);
+      operation.operationId = operationId;
+      operation.tags =
+        Array.isArray(operation.tags) && operation.tags.length > 0
+          ? operation.tags
+          : [tagForPath(path)];
+      operation.security = Array.isArray(operation.security)
+        ? operation.security
+        : explicitSecurity(path);
+      const requestBody = operation.requestBody;
+      if (requestBody && typeof requestBody === 'object' && !Array.isArray(requestBody)) {
+        addJsonExample((requestBody as Record<string, unknown>).content, schemas);
+      }
+      const responses = operation.responses;
+      if (responses && typeof responses === 'object' && !Array.isArray(responses)) {
+        for (const response of Object.values(responses as Record<string, unknown>)) {
+          if (response && typeof response === 'object' && !Array.isArray(response)) {
+            addJsonExample((response as Record<string, unknown>).content, schemas);
+          }
+        }
+      }
+    }
+  }
+  return spec as unknown as NormalizedOpenApiDocument<T>;
+}
+
 const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
@@ -179,6 +432,7 @@ const rawOpenApiSpec = {
         in: 'header',
         name: 'Authorization',
         description: 'Bearer tk_<key>',
+        'x-api-key-scopes': ALL_PERMISSIONS,
       },
       ScannerDeviceAuth: {
         type: 'apiKey',
@@ -347,6 +601,7 @@ const rawOpenApiSpec = {
           organizationId: { type: 'string' },
           brandId: { type: 'string' },
           eventId: { type: 'string' },
+          eventVersion: { type: 'integer', minimum: 1 },
           channel: {
             type: 'string',
             enum: ['event_page', 'email', 'sms', 'imessage', 'social_invite'],
@@ -1114,6 +1369,10 @@ const rawOpenApiSpec = {
           grossSalesCents: { type: 'integer', minimum: 0 },
           ticketsSold: { type: 'integer', minimum: 0 },
           checkIns: { type: 'integer', minimum: 0 },
+          version: { type: 'integer', minimum: 1 },
+          lastSetupSection: { type: 'string' },
+          coverImageAlt: { type: 'string' },
+          seoUseCoverImage: { type: 'boolean' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -1133,9 +1392,415 @@ const rawOpenApiSpec = {
           'grossSalesCents',
           'ticketsSold',
           'checkIns',
+          'version',
+          'seoUseCoverImage',
           'createdAt',
           'updatedAt',
         ],
+      },
+      ReadinessStep: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            enum: [
+              'workspace_selection',
+              'brand_identity',
+              'payment_path',
+              'team_access',
+              'legal_configuration',
+              'sender_identity',
+              'basics_schedule',
+              'sellable_tickets',
+              'currency_coherence',
+              'fee_pricing',
+              'checkout_consent',
+              'public_content',
+              'confirmation_content',
+              'payment_readiness',
+              'preview_review',
+              'test_order',
+              'check_in_configuration',
+              'publishability',
+              'publication_status',
+            ],
+          },
+          status: {
+            type: 'string',
+            enum: ['complete', 'incomplete', 'blocked', 'not_applicable'],
+          },
+          priority: { type: 'string', enum: ['required', 'recommended'] },
+          reasonCodes: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'string',
+              enum: [
+                'workspace_selected',
+                'organization_inactive',
+                'brand_inactive',
+                'brand_identity_configured',
+                'brand_identity_incomplete',
+                'payment_capture_mode',
+                'payment_capture_mode_paid_unsupported',
+                'payment_path_ready',
+                'payment_path_missing',
+                'payment_account_inactive',
+                'payment_charges_disabled',
+                'payment_currency_mismatch',
+                'team_access_configured',
+                'team_access_single_member',
+                'legal_configuration_complete',
+                'legal_configuration_missing',
+                'sender_identity_verified',
+                'sender_identity_missing',
+                'event_basics_valid',
+                'event_title_missing',
+                'event_schedule_invalid',
+                'event_start_invalid',
+                'event_timezone_missing',
+                'sellable_ticket_available',
+                'sellable_ticket_missing',
+                'ticket_inventory_unavailable',
+                'inventory_invalid',
+                'sales_window_invalid',
+                'currency_coherent',
+                'ticket_currency_mismatch',
+                'product_currency_mismatch',
+                'pricing_valid',
+                'pricing_invalid',
+                'checkout_reviewed',
+                'checkout_review_required',
+                'public_content_published',
+                'public_content_missing',
+                'confirmation_content_valid',
+                'confirmation_content_missing',
+                'payment_not_required',
+                'payment_ready',
+                'preview_reviewed',
+                'preview_review_required',
+                'test_order_complete',
+                'test_order_recommended',
+                'test_order_not_applicable',
+                'check_in_configured',
+                'check_in_configuration_missing',
+                'required_steps_complete',
+                'required_steps_incomplete',
+                'event_published',
+                'event_unpublished',
+                'acknowledgement_stale',
+                'permission_required',
+              ],
+            },
+          },
+          actionId: {
+            type: ['string', 'null'],
+            enum: [
+              'select_workspace',
+              'configure_brand',
+              'configure_payments',
+              'manage_team',
+              'configure_legal',
+              'configure_sender',
+              'edit_event_basics',
+              'manage_tickets',
+              'manage_products',
+              'review_fees',
+              'review_checkout',
+              'edit_event_content',
+              'edit_confirmation_content',
+              'review_preview',
+              'run_test_order',
+              'configure_check_in',
+              'publish_event',
+              'view_event',
+              null,
+            ],
+          },
+          requiredPermission: {
+            type: ['string', 'null'],
+            enum: [
+              'events.read',
+              'events.write',
+              'tickets.write',
+              'orders.read',
+              'orders.write',
+              'refunds.write',
+              'attendees.read',
+              'attendees.write',
+              'checkins.read',
+              'checkins.write',
+              'box_office.write',
+              'messages.write',
+              'reports.read',
+              'settings.write',
+              'developers.write',
+              'billing.write',
+              null,
+            ],
+          },
+          updatedAt: { type: ['string', 'null'], format: 'date-time' },
+          acknowledgedAt: { type: ['string', 'null'], format: 'date-time' },
+          acknowledgementValid: { type: ['boolean', 'null'] },
+        },
+        required: [
+          'id',
+          'status',
+          'priority',
+          'reasonCodes',
+          'actionId',
+          'requiredPermission',
+          'updatedAt',
+          'acknowledgedAt',
+          'acknowledgementValid',
+        ],
+      },
+      WorkspaceReadiness: {
+        type: 'object',
+        properties: {
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
+          generatedAt: { type: 'string', format: 'date-time' },
+          paymentMode: {
+            type: 'string',
+            enum: ['capture', 'provider_test', 'provider'],
+          },
+          complete: { type: 'boolean' },
+          steps: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ReadinessStep' },
+          },
+        },
+        required: [
+          'tenantId',
+          'organizationId',
+          'brandId',
+          'generatedAt',
+          'paymentMode',
+          'complete',
+          'steps',
+        ],
+      },
+      EventLaunchReadiness: {
+        type: 'object',
+        example: {
+          tenantId: 'tnt_example',
+          organizationId: 'org_example',
+          brandId: 'brd_example',
+          eventId: 'evt_example',
+          eventVersion: 1,
+          generatedAt: '2026-07-10T12:00:00.000Z',
+          paymentMode: 'provider_test',
+          launchable: true,
+          published: false,
+          requiredBlockers: [],
+          recommendedWarnings: [],
+          steps: [
+            {
+              id: 'basics_schedule',
+              status: 'complete',
+              priority: 'required',
+              reasonCodes: ['event_basics_valid'],
+              actionId: null,
+              requiredPermission: 'events.write',
+              updatedAt: null,
+              acknowledgedAt: null,
+              acknowledgementValid: null,
+            },
+          ],
+        },
+        properties: {
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
+          eventId: { type: 'string' },
+          eventVersion: { type: 'integer', minimum: 1 },
+          generatedAt: { type: 'string', format: 'date-time' },
+          paymentMode: {
+            type: 'string',
+            enum: ['capture', 'provider_test', 'provider'],
+          },
+          launchable: { type: 'boolean' },
+          published: { type: 'boolean' },
+          requiredBlockers: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ReadinessStep' },
+          },
+          recommendedWarnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ReadinessStep' },
+          },
+          steps: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ReadinessStep' },
+          },
+        },
+        required: [
+          'tenantId',
+          'organizationId',
+          'brandId',
+          'eventId',
+          'eventVersion',
+          'generatedAt',
+          'paymentMode',
+          'launchable',
+          'published',
+          'requiredBlockers',
+          'recommendedWarnings',
+          'steps',
+        ],
+      },
+      ReadinessAcknowledgement: {
+        type: 'object',
+        properties: {
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
+          eventId: { type: 'string' },
+          stepId: {
+            type: 'string',
+            enum: ['checkout_consent', 'preview_review'],
+          },
+          stepVersion: { type: 'integer', minimum: 1 },
+          subjectFingerprint: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          actorId: { type: 'string' },
+          acknowledgedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'tenantId',
+          'organizationId',
+          'brandId',
+          'eventId',
+          'stepId',
+          'stepVersion',
+          'subjectFingerprint',
+          'actorId',
+          'acknowledgedAt',
+        ],
+      },
+      LaunchReadinessFailedError: {
+        type: 'object',
+        example: {
+          error: {
+            code: 'launch_readiness_failed',
+            message: 'Event launch readiness checks failed.',
+            details: {
+              requiredBlockers: [
+                {
+                  id: 'sellable_tickets',
+                  status: 'incomplete',
+                  priority: 'required',
+                  reasonCodes: ['sellable_ticket_missing'],
+                  actionId: 'manage_tickets',
+                  requiredPermission: 'tickets.write',
+                  updatedAt: null,
+                  acknowledgedAt: null,
+                  acknowledgementValid: null,
+                },
+              ],
+              recommendedWarnings: [],
+            },
+            requestId: 'req_example',
+          },
+        },
+        properties: {
+          error: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', const: 'launch_readiness_failed' },
+              message: { type: 'string' },
+              details: {
+                type: 'object',
+                properties: {
+                  requiredBlockers: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/ReadinessStep' },
+                  },
+                  recommendedWarnings: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/ReadinessStep' },
+                  },
+                },
+                required: ['requiredBlockers', 'recommendedWarnings'],
+              },
+              requestId: { type: 'string' },
+            },
+            required: ['code', 'message', 'details', 'requestId'],
+          },
+        },
+        required: ['error'],
+      },
+      StaleEventVersionError: {
+        type: 'object',
+        properties: {
+          error: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', const: 'stale_event_version' },
+              message: { type: 'string' },
+              details: {
+                type: 'object',
+                properties: {
+                  expectedVersion: { type: 'integer', minimum: 1 },
+                  currentVersion: { type: 'integer', minimum: 1 },
+                },
+                required: ['expectedVersion', 'currentVersion'],
+              },
+              requestId: { type: 'string' },
+            },
+            required: ['code', 'message', 'details', 'requestId'],
+          },
+        },
+        required: ['error'],
+      },
+      EventArchivedError: {
+        type: 'object',
+        properties: {
+          error: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', const: 'event_archived' },
+              message: { type: 'string' },
+              requestId: { type: 'string' },
+            },
+            required: ['code', 'message', 'requestId'],
+          },
+        },
+        required: ['error'],
+      },
+      DuplicateEventRequest: {
+        type: 'object',
+        properties: {
+          startsAt: { type: 'string', format: 'date-time' },
+          title: { type: 'string', minLength: 1, maxLength: 200 },
+          copy: {
+            type: 'object',
+            properties: Object.fromEntries(
+              [
+                'basicsVenue',
+                'ticketTypes',
+                'products',
+                'checkoutQuestions',
+                'feeResalePolicies',
+                'eventPageContent',
+                'lifecycleContent',
+                'marketingIntegrations',
+              ].map((key) => [key, { type: 'boolean' }]),
+            ),
+            required: [
+              'basicsVenue',
+              'ticketTypes',
+              'products',
+              'checkoutQuestions',
+              'feeResalePolicies',
+              'eventPageContent',
+              'lifecycleContent',
+              'marketingIntegrations',
+            ],
+          },
+        },
+        required: ['startsAt', 'copy'],
       },
       ResalePolicy: {
         type: 'object',
@@ -1165,17 +1830,19 @@ const rawOpenApiSpec = {
         type: 'object',
         properties: {
           eventId: { type: 'string' },
+          eventVersion: { type: 'integer', minimum: 1 },
           passFeesToBuyer: { type: 'boolean' },
           rules: {
             type: 'array',
             items: { $ref: '#/components/schemas/FeeRule' },
           },
         },
-        required: ['eventId', 'passFeesToBuyer', 'rules'],
+        required: ['eventId', 'eventVersion', 'passFeesToBuyer', 'rules'],
       },
       UpdateEventFeePolicyInput: {
         type: 'object',
         properties: {
+          expectedVersion: { type: 'integer', minimum: 1 },
           passFeesToBuyer: { type: 'boolean' },
           rules: {
             type: 'array',
@@ -1196,7 +1863,7 @@ const rawOpenApiSpec = {
             },
           },
         },
-        required: ['passFeesToBuyer', 'rules'],
+        required: ['expectedVersion', 'passFeesToBuyer', 'rules'],
       },
       AdminTableSortEntry: {
         type: 'object',
@@ -1945,7 +2612,15 @@ const rawOpenApiSpec = {
         properties: {
           purpose: {
             type: 'string',
-            enum: ['checkout_answer', 'brand_logo', 'user_avatar', 'content_email_image'],
+            enum: [
+              'checkout_answer',
+              'brand_logo',
+              'user_avatar',
+              'content_email_image',
+              'content_event_page_image',
+              'event_cover',
+              'event_seo_image',
+            ],
           },
           fileName: { type: 'string', minLength: 1, maxLength: 255 },
           contentType: { type: 'string', minLength: 1, maxLength: 255 },
@@ -2116,6 +2791,11 @@ const rawOpenApiSpec = {
           salesChannel: { type: 'string', enum: ['online', 'box_office'] },
           operatorId: { type: 'string' },
           tenderType: { type: 'string', enum: ['comp', 'cash', 'manual_card'] },
+          isTest: {
+            type: 'boolean',
+            description:
+              'True for explicit capture/mock or provider-test checkout; excluded from production reporting.',
+          },
           paidAt: { type: 'string', format: 'date-time' },
           refundedAt: { type: 'string', format: 'date-time' },
           cancelledAt: { type: 'string', format: 'date-time' },
@@ -3669,7 +4349,7 @@ const rawOpenApiSpec = {
         summary: 'Get scoped admin bootstrap context',
         description:
           'Returns the organizations and brands visible to the current principal for dashboard scope selection. Principals with settings.write receive settings details; other dashboard operators receive minimal scoped identity only.',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         responses: {
           '200': {
             description: 'Scoped dashboard bootstrap context',
@@ -3701,7 +4381,8 @@ const rawOpenApiSpec = {
     '/organizations': {
       get: {
         summary: 'List organizations',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['settings.write'],
         responses: {
           '200': {
             description: 'Organizations visible to the principal',
@@ -3734,7 +4415,7 @@ const rawOpenApiSpec = {
       },
       post: {
         summary: 'Create organization',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         requestBody: {
           required: true,
           content: {
@@ -3801,7 +4482,8 @@ const rawOpenApiSpec = {
     '/brands': {
       get: {
         summary: 'List brands',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['settings.write'],
         responses: {
           '200': {
             description: 'Brands visible to the principal',
@@ -3954,7 +4636,7 @@ const rawOpenApiSpec = {
     '/events': {
       get: {
         summary: 'List events',
-        security: [{ BearerAuth: [] }],
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
           ...adminTableQueryParameterRefs,
           {
@@ -4023,10 +4705,20 @@ const rawOpenApiSpec = {
                     type: 'string',
                     enum: ['public', 'unlisted', 'private'],
                   },
-                  seo: { type: 'object' },
+                  seo: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      title: { type: 'string', maxLength: 200 },
+                      description: { type: 'string', maxLength: 500 },
+                    },
+                  },
                   capacity: { type: 'integer' },
-                  minimumAge: { type: ['integer', 'null'], minimum: 0, maximum: 120 },
-                  coverImageUrl: { type: 'string', format: 'uri' },
+                  minimumAge: {
+                    type: ['integer', 'null'],
+                    minimum: 0,
+                    maximum: 120,
+                  },
                   externalUrl: { type: 'string', format: 'uri' },
                 },
                 required: [
@@ -4094,9 +4786,21 @@ const rawOpenApiSpec = {
                     type: 'string',
                     enum: ['public', 'unlisted', 'private'],
                   },
-                  seo: { type: 'object' },
+                  seo: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      title: { type: 'string', maxLength: 200 },
+                      description: { type: 'string', maxLength: 500 },
+                      imageUrl: { type: 'string', format: 'uri' },
+                    },
+                  },
                   capacity: { type: 'integer', nullable: true },
-                  minimumAge: { type: ['integer', 'null'], minimum: 0, maximum: 120 },
+                  minimumAge: {
+                    type: ['integer', 'null'],
+                    minimum: 0,
+                    maximum: 120,
+                  },
                   coverImageUrl: {
                     type: 'string',
                     format: 'uri',
@@ -4107,7 +4811,15 @@ const rawOpenApiSpec = {
                     format: 'uri',
                     nullable: true,
                   },
+                  coverImageAlt: { type: ['string', 'null'], maxLength: 500 },
+                  seoUseCoverImage: { type: 'boolean' },
+                  lastSetupSection: {
+                    type: ['string', 'null'],
+                    maxLength: 100,
+                  },
+                  expectedVersion: { type: 'integer', minimum: 1 },
                 },
+                required: ['expectedVersion'],
               },
             },
           },
@@ -4118,6 +4830,62 @@ const rawOpenApiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/Event' },
+              },
+            },
+          },
+          '409': {
+            description: 'The event version is stale',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/StaleEventVersionError' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/duplicate': {
+      post: {
+        summary: 'Transactionally duplicate selected safe event configuration into a new draft',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/DuplicateEventRequest' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Duplicated draft',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Event' },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description: 'Source event not found',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },
@@ -4145,7 +4913,88 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '409': {
+            description: 'Publish preflight failed, the event changed, or the event is archived',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    { $ref: '#/components/schemas/LaunchReadinessFailedError' },
+                    { $ref: '#/components/schemas/StaleEventVersionError' },
+                    { $ref: '#/components/schemas/EventArchivedError' },
+                  ],
+                },
+              },
+            },
+          },
         },
+      },
+    },
+    '/organizations/{organizationId}/readiness': {
+      get: {
+        summary: 'Get authoritative workspace readiness for a selected brand',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.read'],
+        parameters: [
+          {
+            name: 'brandId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Workspace readiness',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WorkspaceReadiness' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/launch-readiness': {
+      get: {
+        summary: 'Get authoritative event launch readiness',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.read'],
+        responses: {
+          '200': {
+            description: 'Event launch readiness',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventLaunchReadiness' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/readiness-acknowledgements/{stepId}': {
+      post: {
+        summary: 'Acknowledge a human-review readiness step',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.write'],
+        responses: {
+          '201': {
+            description: 'Readiness acknowledgement',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/ReadinessAcknowledgement',
+                },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        summary: 'Remove a human-review readiness acknowledgement',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.write'],
+        responses: { '204': { description: 'Acknowledgement removed' } },
       },
     },
     '/events/{eventId}/pause': {
@@ -5793,6 +6642,62 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/public/event-media/{purpose}/{artifactId}': {
+      get: {
+        summary: 'Download event cover or SEO media (public, durable, cacheable)',
+        description:
+          'Streams a published event media artifact by ID. The purpose must match the artifact and responses are cached immutably for one year.',
+        parameters: [
+          {
+            name: 'purpose',
+            in: 'path',
+            required: true,
+            schema: {
+              type: 'string',
+              enum: ['event_cover', 'event_seo_image'],
+            },
+          },
+          {
+            name: 'artifactId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Event media binary stream',
+            headers: {
+              'Content-Type': {
+                schema: { type: 'string' },
+                description: 'MIME type of the stored media',
+              },
+              'Content-Disposition': {
+                schema: { type: 'string' },
+                description: 'inline; filename=...',
+              },
+              'Cache-Control': {
+                schema: { type: 'string' },
+                description: 'public, max-age=31536000, immutable',
+              },
+            },
+            content: {
+              'application/octet-stream': {
+                schema: { type: 'string', format: 'binary' },
+              },
+            },
+          },
+          '404': {
+            description: 'Event media artifact not found or purpose mismatch',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/events/{eventId}/box-office/orders': {
       post: {
         summary: 'Create a box-office order (admin, Idempotency-Key required)',
@@ -5869,7 +6774,17 @@ const rawOpenApiSpec = {
     '/checkout/sessions': {
       post: {
         summary: 'Create checkout session (public, Idempotency-Key required)',
-        parameters: [{ $ref: '#/components/parameters/RequiredIdempotencyKey' }],
+        parameters: [
+          { $ref: '#/components/parameters/RequiredIdempotencyKey' },
+          {
+            name: 'X-Tixkit-Test-Order',
+            in: 'header',
+            required: false,
+            schema: { type: 'string', enum: ['1'] },
+            description:
+              'Authenticated events.write users may set this only in capture/mock or explicit provider-test mode. Draft checkout is allowed, no provider charge is created, and the resulting order is tagged as test.',
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -6227,13 +7142,17 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Session is expired, completed, or hosted checkout is unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Session not found or the session credential is invalid',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -6259,19 +7178,25 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Checkout session with a client credential for hosted checkout',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/CheckoutSession' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutSession' },
+              },
             },
           },
           '400': {
             description: 'Handoff body is invalid',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Handoff is invalid, expired, cancelled, or no longer redeemable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -9817,7 +10742,9 @@ const rawOpenApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                properties: { name: { type: 'string', minLength: 1, maxLength: 160 } },
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 160 },
+                },
                 required: ['name'],
                 additionalProperties: false,
               },
@@ -11191,7 +12118,10 @@ const rawOpenApiSpec = {
                       type: 'object',
                       additionalProperties: false,
                       properties: {
-                        code: { type: 'string', enum: ['TEMPORAL_UNAVAILABLE'] },
+                        code: {
+                          type: 'string',
+                          enum: ['TEMPORAL_UNAVAILABLE'],
+                        },
                         message: { type: 'string' },
                       },
                       required: ['code', 'message'],
@@ -11288,6 +12218,7 @@ const rawOpenApiSpec = {
         description:
           'Queues one webhook delivery for the selected endpoint when the endpoint is active and subscribed to the event type.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
         parameters: [
           {
             name: 'endpointId',
@@ -11352,6 +12283,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Replay webhook event',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['developers.write'],
         responses: {
           '202': {
             description: 'Webhook replay queued',
@@ -11644,5 +12576,5 @@ const rawOpenApiSpec = {
   },
 } as const;
 
-export const openApiSpec = withDeclaredPathParameters(rawOpenApiSpec);
+export const openApiSpec = normalizeOpenApiOperations(withDeclaredPathParameters(rawOpenApiSpec));
 export type OpenApiSpec = typeof openApiSpec;

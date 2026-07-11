@@ -222,6 +222,7 @@ export async function resetSandbox(
         brandIds: [SAMPLE_BRAND_ID],
         eventIds: [seeded.eventId],
         expiresAt,
+        kind: 'sandbox',
       });
       return {
         ok: true,
