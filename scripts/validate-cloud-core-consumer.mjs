@@ -231,6 +231,54 @@ function checksumFor(contractDirectory, fileName) {
   return line?.split(/\s+/u)[0];
 }
 
+export function privateCloudSourceBoundaryViolations(cloudRoot) {
+  const violations = [];
+  const distribution = validatePublicDistribution(loadPublicDistribution(publicRoot), publicRoot);
+  const publicSourcePaths = new Set([
+    ...distribution.source.applications,
+    ...distribution.source.packages,
+  ]);
+  const sourceFingerprints = publicSourceFingerprints(publicSourcePaths);
+  const sourceSimilarityIndex = publicSourceSimilarityIndex(publicSourcePaths);
+  for (const path of publicSourcePaths)
+    if (statSync(resolve(cloudRoot, path), { throwIfNoEntry: false }))
+      violations.push(`private Cloud tree copies public source path: ${path}`);
+  for (const file of walk(cloudRoot)) {
+    const relativePath = relative(cloudRoot, file).split(sep).join('/');
+    const metadata = lstatSync(file, { throwIfNoEntry: false });
+    if (!metadata?.isFile()) {
+      violations.push(`private Cloud tree contains a symbolic or invalid path: ${relativePath}`);
+      continue;
+    }
+    if (!sourceExtension.test(file)) continue;
+    const bytes = readFileSync(file);
+    const content = normalizedSource(bytes);
+    if (content.length >= 20) {
+      const matches = sourceFingerprints.get(sha256(content));
+      if (matches)
+        violations.push(`${relativePath}: copies public source content from ${matches.join(', ')}`);
+    }
+    const shingles = sourceShingles(bytes);
+    if (shingles.size < 15) continue;
+    const candidates = new Set();
+    for (const shingle of shingleSignature(shingles))
+      for (const publicPath of sourceSimilarityIndex.bySignature.get(shingle) ?? [])
+        candidates.add(publicPath);
+    const similar = [...candidates]
+      .map((publicPath) => {
+        const publicShingles = sourceSimilarityIndex.shinglesByPath.get(publicPath);
+        const overlap = [...shingles].filter((shingle) => publicShingles.has(shingle)).length;
+        return [publicPath, overlap];
+      })
+      .find(([, overlap]) => overlap / shingles.size >= 0.8);
+    if (similar)
+      violations.push(
+        `${relativePath}: structurally copies public source content from ${similar[0]} (${similar[1]}/${shingles.size} shingles)`,
+      );
+  }
+  return violations;
+}
+
 function currentMigrationRange() {
   const ids = readdirSync(resolve(publicRoot, 'packages/db/src/migrations'))
     .map((name) => name.match(/^(\d{4}(?:_\d+)?)/u)?.[1])

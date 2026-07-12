@@ -21,7 +21,11 @@ import {
   publicReleaseContextViolations,
   publicReleaseManifestViolations,
 } from '../build-public-release-manifest.mjs';
-import { parseBunLock, validateCloudCoreConsumer } from '../validate-cloud-core-consumer.mjs';
+import {
+  parseBunLock,
+  privateCloudSourceBoundaryViolations,
+  validateCloudCoreConsumer,
+} from '../validate-cloud-core-consumer.mjs';
 import { publishPublicNpmArtifacts } from '../publish-public-npm-artifacts.mjs';
 import {
   finalizePublicGithubRelease,
@@ -164,6 +168,22 @@ test('parses the repository Bun JSONC lock with real importers and package tuple
   assert.equal(lock.workspaces[''].devDependencies.oxfmt, '0.58.0');
   assert.match(lock.packages.oxfmt[0], /^oxfmt@/u);
   assert.match(lock.packages.oxfmt[3], /^sha512-/u);
+});
+
+test('standalone private extraction boundary rejects renamed public source copies', () => {
+  const cloudRoot = cloudFixture();
+  try {
+    const copied = resolve(cloudRoot, 'packages/control-plane/src/copied-domain.ts');
+    mkdirSync(resolve(cloudRoot, 'packages/control-plane/src'), { recursive: true });
+    writeFileSync(copied, readFileSync(resolve(root, 'packages/domain/src/index.ts')));
+    assert.ok(
+      privateCloudSourceBoundaryViolations(cloudRoot).some((violation) =>
+        violation.includes('copies public source content'),
+      ),
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
 });
 
 test('public release schema rejects an unconstrained core envelope', () => {

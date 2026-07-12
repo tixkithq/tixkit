@@ -11,6 +11,8 @@ const boundaryControlPaths = new Set([
   'scripts/validate-public-distribution.mjs',
   'scripts/__tests__/public-distribution.test.mjs',
   'scripts/__tests__/export-oss.test.mjs',
+  'scripts/rehearse-repository-cutover.mjs',
+  'scripts/__tests__/repository-cutover-rehearsal.test.mjs',
 ]);
 
 export function loadPublicDistribution(root) {
