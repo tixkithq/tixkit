@@ -20,6 +20,7 @@ import { writeAuditLog } from '../../auth/audit.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   approvePortableImport,
+  activatePortableImport,
   attestPortableDryRun,
   authorizePortableImportCommit,
   bindPortableImportDestination,
@@ -1208,11 +1209,13 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         request.log.error({ err: error, jobId }, 'Portable import approval validation failed');
         throw new PortableDryRunAttestationUnavailableError();
       }
-      await app.context.temporalClient.startMigrationCommit({
-        tenantId: principal.tenantId,
-        organizationId,
-        jobId,
-      });
+      const authorizedJob = await repository.findJob(principal.tenantId, organizationId, jobId);
+      if (authorizedJob?.status === 'ready')
+        await app.context.temporalClient.startMigrationCommit({
+          tenantId: principal.tenantId,
+          organizationId,
+          jobId,
+        });
       await auditMutation(
         app,
         request,
@@ -1220,7 +1223,13 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         jobId,
         'migration_job.portable_commit_authorized',
       );
-      return reply.status(202).send({ jobId, status: 'committing' });
+      return reply.status(202).send({
+        jobId,
+        status:
+          authorizedJob?.status === 'ready'
+            ? 'committing'
+            : (authorizedJob?.status ?? 'committing'),
+      });
     }
     if (job.mode !== 'commit' || job.status !== 'ready') {
       throw new ConflictError('Only a ready commit-mode migration can be committed');
@@ -1276,6 +1285,42 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     });
     await auditMutation(app, request, organizationId, jobId, 'migration_job.commit_requested');
     return reply.status(202).send({ jobId, status: 'committing' });
+  });
+
+  app.post('/migration-jobs/:jobId/activate', async (request, reply) => {
+    const principal = request.principal!;
+    requireMigrationPermission(principal, 'migrations.commit');
+    const { jobId } = request.params as { jobId: string };
+    parse(z.object({}).strict(), request.body ?? {});
+    if (request.headers['x-tixkit-confirmation'] !== `activate:${jobId}`)
+      throw new ValidationError(`x-tixkit-confirmation must equal activate:${jobId}`);
+    const repository = repo();
+    const { job, organizationId } = await scopedJob(repository, request, jobId);
+    if (job.source_system !== 'tixkit-portable')
+      throw new ValidationError('Explicit activation is only available for portable imports');
+    try {
+      const activated = await activatePortableImport({
+        db: app.context.db,
+        tenantId: principal.tenantId,
+        organizationId,
+        jobId,
+        activatedBy: principal.id,
+      });
+      await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_activated');
+      return reply.status(200).send(activated);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === 'PORTABLE_IMPORT_ACTIVATION_JOB_NOT_COMMITTED' ||
+          error.message === 'PORTABLE_IMPORT_ACTIVATION_AUTHORIZATION_REQUIRED' ||
+          error.message === 'PORTABLE_IMPORT_ACTIVATION_INPUT_CHANGED' ||
+          error.message === 'PORTABLE_IMPORT_ACTIVATION_RECONCILIATION_REQUIRED' ||
+          error.message === 'PORTABLE_IMPORT_ACTIVATION_EVIDENCE_INVALID' ||
+          error.message === 'PORTABLE_IMPORT_ACTIVATION_CONFLICT')
+      )
+        throw new ConflictError('Portable import is not eligible for activation');
+      throw error;
+    }
   });
 
   app.get('/migration-jobs/:jobId/portable-rebindings', async (request) => {

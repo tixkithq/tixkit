@@ -15,6 +15,7 @@ import { PortableImportPreflightsMigration } from '@tixkit/db/migrations';
 import { PortableImportApprovalsMigration } from '@tixkit/db/migrations';
 import { PortableImportRebindingsMigration } from '@tixkit/db/migrations';
 import { PortableImportCommitAuthorizationsMigration } from '@tixkit/db/migrations';
+import { ImportEventImmutabilityMigration } from '@tixkit/db/migrations';
 import {
   buildPortableLogicalExport,
   canonicalPortableJson,
@@ -36,6 +37,7 @@ import { migrationRoutes } from '../../routes/modules/migrations.js';
 import {
   createProductionMigrationCommitters,
   createRepositoryMigrationActivityService,
+  MIGRATION_COMMIT_STAGES,
   MIGRATION_SIDE_EFFECT_POLICY,
 } from '@tixkit/workflows';
 
@@ -195,6 +197,20 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       expectedAssets: canonicalPortableJson([]),
       requiredRebindings: canonicalPortableJson(preflight.requiredRebindings),
     });
+    await repository.addRows(tenantId, organizationId, job.id, [
+      {
+        entityType: 'organization',
+        externalId: 'organization_source_01',
+        rowNumber: 1,
+        status: 'validated',
+        sourceData: { portableId: 'organization_source_01' },
+        normalizedData: {
+          entityType: 'organization',
+          externalId: 'organization_source_01',
+          attributes: { name: 'Source' },
+        },
+      },
+    ]);
     const currentInputSha256 = await portableImportCurrentInputHash({
       db,
       tenantId,
@@ -838,13 +854,82 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
     });
     expect((await repository.findJob(tenantId, organizationId, job.id))?.status).toBe('committing');
+    for (const stage of MIGRATION_COMMIT_STAGES) {
+      const result = await workerService.processStage(
+        {
+          tenantId,
+          organizationId,
+          jobId: job.id,
+          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+        },
+        { stage, claimOwner: `portable-round-trip:${stage}`, chunkSize: 100 },
+      );
+      expect(result.complete).toBe(true);
+    }
+    await expect(
+      workerService.reconcile({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toEqual({ repaired: 0, unresolved: 0 });
+    await workerService.completeCommit({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    });
+    expect((await repository.findJob(tenantId, organizationId, job.id))?.status).toBe('committed');
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/activate`,
+          headers: { 'x-tixkit-confirmation': 'activate:wrong' },
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(400);
+    const activation = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/activate`,
+      headers: { 'x-tixkit-confirmation': `activate:${job.id}` },
+      payload: {},
+    });
+    expect(activation.statusCode, activation.body).toBe(200);
+    expect(activation.json()).toEqual({ jobId: job.id, status: 'activated' });
+    const activationRetry = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/activate`,
+      headers: { 'x-tixkit-confirmation': `activate:${job.id}` },
+      payload: {},
+    });
+    expect(activationRetry.statusCode, activationRetry.body).toBe(200);
+    expect(activationRetry.json()).toEqual(activation.json());
+    await expect(
+      db
+        .updateTable('import_job_events')
+        .set({ message: 'tampered activation evidence' })
+        .where('import_job_id', '=', job.id)
+        .where('event_key', '=', 'commit:activated')
+        .execute(),
+    ).rejects.toThrow(/immutable/u);
+    await expect(
+      db
+        .deleteFrom('import_job_events')
+        .where('import_job_id', '=', job.id)
+        .where('event_key', '=', 'commit:activated')
+        .execute(),
+    ).rejects.toThrow(/immutable/u);
     const lostResponseRetry = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/commit`,
       headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
     });
     expect(lostResponseRetry.statusCode, lostResponseRetry.body).toBe(202);
-    expect(startedCommits).toEqual([job.id, job.id, job.id]);
+    expect(lostResponseRetry.json()).toEqual({ jobId: job.id, status: 'activated' });
+    expect(startedCommits).toEqual([job.id, job.id]);
     const revokeResponse = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/portable-approvals/${approvedBody.approvalId}/revoke`,
@@ -873,6 +958,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     expect(Number(auditCount.count)).toBeGreaterThanOrEqual(3);
     await app.close();
     await truncateAllData(db);
+    await ImportEventImmutabilityMigration.down!(db);
     await PortableImportCommitAuthorizationsMigration.down!(db);
     await PortableImportRebindingsMigration.down!(db);
     await PortableImportApprovalsMigration.down!(db);
@@ -881,6 +967,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     await PortableImportApprovalsMigration.up(db);
     await PortableImportRebindingsMigration.up(db);
     await PortableImportCommitAuthorizationsMigration.up(db);
+    await ImportEventImmutabilityMigration.up(db);
     await expect(
       db.selectFrom('portable_import_preflights').selectAll().execute(),
     ).resolves.toEqual([]);

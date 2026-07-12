@@ -1,4 +1,4 @@
-import { Connection, Client } from '@temporalio/client';
+import { Connection, Client, WorkflowIdReusePolicy } from '@temporalio/client';
 import {
   checkoutSessionWorkflow,
   paymentReconciliationWorkflow,
@@ -326,6 +326,7 @@ export class TemporalClient {
       return await this.client.workflow.start(migrationCommitWorkflow, {
         taskQueue: config.temporalTaskQueue,
         workflowId,
+        workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
         args: [{ version: MIGRATION_COMMIT_WORKFLOW_VERSION, ...input }],
       });
     } catch (err) {

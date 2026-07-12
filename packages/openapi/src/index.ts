@@ -946,6 +946,15 @@ const rawOpenApiSpec = {
           revokedAt: { type: 'string', format: 'date-time' },
         },
       },
+      PortableImportActivated: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['jobId', 'status'],
+        properties: {
+          jobId: { type: 'string' },
+          status: { const: 'activated' },
+        },
+      },
       MigrationActionAccepted: {
         type: 'object',
         additionalProperties: false,
@@ -13786,6 +13795,59 @@ const rawOpenApiSpec = {
           },
           '503': {
             description: 'Approval evidence persistence is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/activate': {
+      post: {
+        operationId: 'activatePortableMigrationJob',
+        summary: 'Activate a committed portable import after zero-drift reconciliation',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.commit'],
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'x-tixkit-confirmation',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', pattern: '^activate:.+$' },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { type: 'object', additionalProperties: false, maxProperties: 0 },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Portable import activated',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PortableImportActivated' },
+              },
+            },
+          },
+          '400': {
+            description: 'Malformed confirmation or request body',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Migration job not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Commit, authorization, input, or reconciliation gate is incomplete',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
             },

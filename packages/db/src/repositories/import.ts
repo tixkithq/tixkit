@@ -1306,7 +1306,17 @@ export class ImportRepository extends BaseRepository {
             .where('import_job_id', '=', input.jobId)
             .where('event_key', '=', input.eventKey)
             .executeTakeFirst();
-          if (existing) return existing;
+          if (existing) {
+            const expectedData = input.data === undefined ? null : JSON.stringify(input.data);
+            if (
+              existing.type !== input.type ||
+              existing.severity !== input.severity ||
+              existing.message !== input.message ||
+              existing.data !== expectedData
+            )
+              throw new Error('IMPORT_EVENT_IDEMPOTENCY_CONFLICT');
+            return existing;
+          }
           const maximum = await transaction
             .selectFrom('import_job_events')
             .select(({ fn }) => fn.max<number>('sequence').as('maximum'))
@@ -1347,10 +1357,80 @@ export class ImportRepository extends BaseRepository {
           .where('import_job_id', '=', input.jobId)
           .where('event_key', '=', input.eventKey)
           .executeTakeFirst();
-        if (replay) return replay;
+        if (replay) {
+          const expectedData = input.data === undefined ? null : JSON.stringify(input.data);
+          if (
+            replay.type !== input.type ||
+            replay.severity !== input.severity ||
+            replay.message !== input.message ||
+            replay.data !== expectedData
+          )
+            throw new Error('IMPORT_EVENT_IDEMPOTENCY_CONFLICT', { cause: error });
+          return replay;
+        }
       }
     }
     throw new Error('Import event sequence allocation exhausted');
+  }
+
+  async appendIdempotentEventInCurrentTransaction(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    eventKey: string;
+    type: string;
+    severity: 'fatal' | 'error' | 'warning' | 'info';
+    message: string;
+    data?: unknown;
+  }): Promise<Selectable<ImportJobEventTable>> {
+    const existing = await this.db
+      .selectFrom('import_job_events')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('event_key', '=', input.eventKey)
+      .executeTakeFirst();
+    if (existing) {
+      const expectedData = input.data === undefined ? null : JSON.stringify(input.data);
+      if (
+        existing.type !== input.type ||
+        existing.severity !== input.severity ||
+        existing.message !== input.message ||
+        existing.data !== expectedData
+      )
+        throw new Error('IMPORT_EVENT_IDEMPOTENCY_CONFLICT');
+      return existing;
+    }
+    const maximum = await this.db
+      .selectFrom('import_job_events')
+      .select(({ fn }) => fn.max<number>('sequence').as('maximum'))
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .executeTakeFirst();
+    const id = this.generateId('ime');
+    await this.db
+      .insertInto('import_job_events')
+      .values({
+        id,
+        tenant_id: input.tenantId,
+        organization_id: input.organizationId,
+        import_job_id: input.jobId,
+        sequence: Number(maximum?.maximum ?? 0) + 1,
+        event_key: input.eventKey,
+        type: input.type,
+        severity: input.severity,
+        message: input.message,
+        data: input.data === undefined ? null : JSON.stringify(input.data),
+        created_at: new Date(),
+      })
+      .execute();
+    return this.db
+      .selectFrom('import_job_events')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow();
   }
 
   listEvents(

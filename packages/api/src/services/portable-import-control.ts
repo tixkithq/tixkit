@@ -949,6 +949,121 @@ export async function authorizePortableImportCommit(input: {
   throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_RETRY_EXHAUSTED');
 }
 
+export async function activatePortableImport(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  activatedBy: string;
+  now?: Date;
+}) {
+  return input.db
+    .transaction()
+    .setIsolationLevel('serializable')
+    .execute(async (transaction) => {
+      const repository = new ImportRepository(transaction as Database);
+      const job = await repository.findJobForUpdate(
+        input.tenantId,
+        input.organizationId,
+        input.jobId,
+      );
+      if (
+        !job ||
+        job.source_system !== 'tixkit-portable' ||
+        !['committed', 'activated'].includes(job.status)
+      )
+        throw new Error('PORTABLE_IMPORT_ACTIVATION_JOB_NOT_COMMITTED');
+      const authorization = await repository.findPortableImportCommitAuthorization(
+        input.tenantId,
+        input.organizationId,
+        input.jobId,
+      );
+      if (!authorization) throw new Error('PORTABLE_IMPORT_ACTIVATION_AUTHORIZATION_REQUIRED');
+      const currentInputSha256 = await portableImportCurrentInputHashFromDatabase({
+        db: transaction as Database,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        sourceSystem: job.source_system,
+      });
+      const currentRebindingsSha256 = await portableImportRebindingsHash({
+        repository,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+      });
+      if (
+        currentInputSha256 !== authorization.input_sha256 ||
+        currentRebindingsSha256 !== authorization.rebindings_sha256
+      )
+        throw new Error('PORTABLE_IMPORT_ACTIVATION_INPUT_CHANGED');
+      const unresolved = await repository.listRowsForReconciliation(
+        input.tenantId,
+        input.organizationId,
+        input.jobId,
+        1,
+        0,
+      );
+      const events = await repository.listEvents(input.tenantId, input.organizationId, input.jobId);
+      let reconciliation: (typeof events)[number] | undefined;
+      const existingActivation = events.find((event) => event.type === 'commit.activated');
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        if (events[index]?.type === 'commit.reconciled') {
+          reconciliation = events[index];
+          break;
+        }
+      }
+      const reconciliationData = reconciliation?.data
+        ? (JSON.parse(reconciliation.data) as { repaired?: number; unresolved?: number })
+        : null;
+      if (
+        unresolved.length > 0 ||
+        reconciliationData?.unresolved !== 0 ||
+        typeof reconciliationData.repaired !== 'number'
+      )
+        throw new Error('PORTABLE_IMPORT_ACTIVATION_RECONCILIATION_REQUIRED');
+      if (job.status === 'activated') {
+        const activationData = existingActivation?.data
+          ? (JSON.parse(existingActivation.data) as {
+              activatedBy?: string;
+              authorizationApprovalId?: string;
+              reconciliationEventId?: string;
+            })
+          : null;
+        if (
+          activationData?.activatedBy !== input.activatedBy ||
+          activationData.authorizationApprovalId !== authorization.approval_id ||
+          activationData.reconciliationEventId !== reconciliation?.id
+        )
+          throw new Error('PORTABLE_IMPORT_ACTIVATION_EVIDENCE_INVALID');
+        return { jobId: input.jobId, status: 'activated' as const };
+      }
+      const changed = await repository.transitionJob({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        from: ['committed'],
+        to: 'activated',
+      });
+      if (!changed) throw new Error('PORTABLE_IMPORT_ACTIVATION_CONFLICT');
+      await repository.appendIdempotentEventInCurrentTransaction({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        eventKey: 'commit:activated',
+        type: 'commit.activated',
+        severity: 'info',
+        message: 'Portable import activated after reconciliation.',
+        data: {
+          activatedBy: input.activatedBy,
+          authorizationApprovalId: authorization.approval_id,
+          reconciliationEventId: reconciliation!.id,
+        },
+      });
+      return { jobId: input.jobId, status: 'activated' as const };
+    });
+}
+
 export async function revokePortableImportApproval(input: {
   db: Database;
   tenantId: string;

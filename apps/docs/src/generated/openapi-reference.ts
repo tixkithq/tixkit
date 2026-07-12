@@ -21490,6 +21490,126 @@ export const apiReferenceOperations = [
   },
   {
     "method": "POST",
+    "path": "/migration-jobs/{jobId}/activate",
+    "operationId": "activatePortableMigrationJob",
+    "tags": [
+      "Migrations"
+    ],
+    "summary": "Activate a committed portable import after zero-drift reconciliation",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.commit"
+    ],
+    "parameters": [
+      {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "x-tixkit-confirmation",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^activate:.+$"
+        }
+      }
+    ],
+    "requestBody": {
+      "required": false,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "maxProperties": 0
+          },
+          "example": {}
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Portable import activated",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PortableImportActivated"
+            },
+            "example": {
+              "jobId": "job_example",
+              "status": "activated"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Malformed confirmation or request body",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Migration job not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Commit, authorization, input, or reconciliation gate is incomplete",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
     "path": "/migration-jobs/{jobId}/commit",
     "operationId": "commitMigrationJob",
     "tags": [
@@ -23610,6 +23730,19 @@ export const apiReferenceSchemas = [
       "approvalId",
       "revoked",
       "revokedAt"
+    ]
+  },
+  {
+    "name": "PortableImportActivated",
+    "type": "object",
+    "description": "",
+    "required": [
+      "jobId",
+      "status"
+    ],
+    "properties": [
+      "jobId",
+      "status"
     ]
   },
   {

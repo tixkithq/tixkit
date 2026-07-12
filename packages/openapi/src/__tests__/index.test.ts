@@ -1997,6 +1997,10 @@ describe('openApiSpec', () => {
       expect.arrayContaining([expect.objectContaining({ name: 'jobId', in: 'path' })]),
     );
     expect(portableCommit.responses).toHaveProperty('503');
+    expect(openApiSpec.paths['/migration-jobs/{jobId}/activate'].post).toMatchObject({
+      operationId: 'activatePortableMigrationJob',
+      'x-required-permissions': ['migrations.commit'],
+    });
   });
 
   it('gives every body-bearing successful migration response a JSON schema', () => {

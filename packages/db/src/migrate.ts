@@ -74,6 +74,7 @@ import { PortableImportPreflightsMigration } from './migrations/0070_portable_im
 import { PortableImportApprovalsMigration } from './migrations/0071_portable_import_approvals.js';
 import { PortableImportRebindingsMigration } from './migrations/0072_portable_import_rebindings.js';
 import { PortableImportCommitAuthorizationsMigration } from './migrations/0073_portable_import_commit_authorizations.js';
+import { ImportEventImmutabilityMigration } from './migrations/0074_import_event_immutability.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -308,6 +309,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0071_portable_import_approvals': PortableImportApprovalsMigration,
       '0072_portable_import_rebindings': PortableImportRebindingsMigration,
       '0073_portable_import_commit_authorizations': PortableImportCommitAuthorizationsMigration,
+      '0074_import_event_immutability': ImportEventImmutabilityMigration,
     };
   }
 }
@@ -518,6 +520,7 @@ export async function dropAllTables(db: Database): Promise<void> {
     'reject_portable_import_control_mutation',
     'reject_portable_import_approval_mutation',
     'reject_portable_import_commit_authorization_mutation',
+    'reject_import_job_event_mutation',
   ]) {
     // eslint-disable-next-line no-await-in-loop -- PostgreSQL reset removes standalone trigger functions after their tables.
     await sql`DROP FUNCTION IF EXISTS ${sql.raw(functionName)}() CASCADE`
@@ -562,6 +565,7 @@ export async function truncateAllData(db: Database): Promise<void> {
       'portable_import_approval_revocations',
       'portable_import_rebindings',
       'portable_import_commit_authorizations',
+      'import_job_events',
     ]) {
       await sql
         .raw(
@@ -610,6 +614,7 @@ export async function truncateAllData(db: Database): Promise<void> {
         'portable_import_approval_revocations',
         'portable_import_rebindings',
         'portable_import_commit_authorizations',
+        'import_job_events',
       ]) {
         await sql
           .raw(
