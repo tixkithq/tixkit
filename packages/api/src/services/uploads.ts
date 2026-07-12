@@ -10,6 +10,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ulid } from 'ulid';
+import sharp from 'sharp';
 import type { Database } from '@tixkit/db';
 import { ValidationError, NotFoundError } from '@tixkit/domain';
 import { config } from '../config/index.js';
@@ -22,6 +23,8 @@ export type UploadPurpose =
   | 'content_event_page_image'
   | 'migration_import'
   | 'event_cover'
+  | 'event_poster'
+  | 'event_social'
   | 'event_seo_image';
 
 export type CreateUploadInput = {
@@ -95,6 +98,16 @@ const PURPOSE_LIMITS: Record<
     maxSizeBytes: 8 * 1024 * 1024,
     contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
     prefix: 'event-covers',
+  },
+  event_poster: {
+    maxSizeBytes: 12 * 1024 * 1024,
+    contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
+    prefix: 'event-posters',
+  },
+  event_social: {
+    maxSizeBytes: 8 * 1024 * 1024,
+    contentTypes: new Set(['image/jpeg', 'image/png', 'image/webp']),
+    prefix: 'event-social',
   },
   event_seo_image: {
     maxSizeBytes: 8 * 1024 * 1024,
@@ -192,6 +205,43 @@ function validateImageBytes(contentType: string, buffer: Buffer): void {
   }
 }
 
+const EVENT_MEDIA_PURPOSES: ReadonlySet<UploadPurpose> = new Set([
+  'event_cover',
+  'event_poster',
+  'event_social',
+  'event_seo_image',
+]);
+const EVENT_MEDIA_MAX_INPUT_PIXELS = 40_000_000;
+
+async function inspectEventMediaImage(buffer: Buffer): Promise<{
+  width: number;
+  height: number;
+  format: 'jpeg' | 'png' | 'webp';
+}> {
+  let metadata;
+  try {
+    metadata = await sharp(buffer, {
+      failOn: 'warning',
+      limitInputPixels: EVENT_MEDIA_MAX_INPUT_PIXELS,
+      sequentialRead: true,
+    }).metadata();
+  } catch {
+    throw new ValidationError('Event media image is malformed or exceeds the pixel limit');
+  }
+  if (
+    !metadata.width ||
+    !metadata.height ||
+    metadata.width * metadata.height > EVENT_MEDIA_MAX_INPUT_PIXELS ||
+    (metadata.format !== 'jpeg' && metadata.format !== 'png' && metadata.format !== 'webp')
+  )
+    throw new ValidationError('Event media image dimensions or format are unsupported');
+  return {
+    width: metadata.width,
+    height: metadata.height,
+    format: metadata.format,
+  };
+}
+
 class UploadScannerUnavailableError extends Error {
   readonly code = 'SERVICE_UNAVAILABLE';
   readonly statusCode = 503;
@@ -216,9 +266,11 @@ function assertProductionUploadScannerConfigured(mode: string): void {
   }
 }
 
-function finalObjectKeyFromStaging(stagingKey: string): string {
-  if (stagingKey.includes('/staging/')) return stagingKey.replace('/staging/', '/final/');
-  return `${stagingKey}.final`;
+function finalObjectKeyFromStaging(stagingKey: string, checksum: string): string {
+  const immutableSuffix = `/${checksum}`;
+  if (stagingKey.includes('/staging/'))
+    return `${stagingKey.replace('/staging/', '/final/')}${immutableSuffix}`;
+  return `${stagingKey}.final${immutableSuffix}`;
 }
 
 function createS3Client(): S3Client {
@@ -236,7 +288,21 @@ function createS3Client(): S3Client {
   return new S3Client(options);
 }
 
-async function bodyToBuffer(body: unknown): Promise<Buffer> {
+async function bodyToBuffer(
+  body: unknown,
+  maximumBytes = Number.POSITIVE_INFINITY,
+): Promise<Buffer> {
+  if (body && Symbol.asyncIterator in Object(body)) {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of body as AsyncIterable<Uint8Array>) {
+      const buffer = Buffer.from(chunk);
+      total += buffer.length;
+      if (total > maximumBytes) throw new ValidationError('Uploaded object exceeds its size limit');
+      chunks.push(buffer);
+    }
+    return Buffer.concat(chunks, total);
+  }
   if (
     !body ||
     typeof (body as { transformToByteArray?: unknown }).transformToByteArray !== 'function'
@@ -246,7 +312,10 @@ async function bodyToBuffer(body: unknown): Promise<Buffer> {
   const bytes = await (
     body as { transformToByteArray(): Promise<Uint8Array> }
   ).transformToByteArray();
-  return Buffer.from(bytes);
+  const buffer = Buffer.from(bytes);
+  if (buffer.length > maximumBytes)
+    throw new ValidationError('Uploaded object exceeds its size limit');
+  return buffer;
 }
 
 async function scanWithClamAv(buffer: Buffer): Promise<{ clean: boolean; result: string }> {
@@ -390,7 +459,9 @@ export async function cleanupExpiredUploadArtifacts(
         if (referenced) {
           await db
             .updateTable('upload_artifacts')
-            .set({ expires_at: new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000) })
+            .set({
+              expires_at: new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000),
+            })
             .where('id', '=', row.id)
             .where('status', '=', 'uploaded')
             .execute();
@@ -588,6 +659,59 @@ export async function completeUploadArtifact(
     throw new ValidationError(result);
   }
 
+  const claimToken = `ucl_${ulid()}`;
+  const claimStartedAt = new Date();
+  let claimQuery = db
+    .updateTable('upload_artifacts')
+    .set({
+      status: 'processing',
+      scan_status: 'scanning',
+      completion_owner_token: claimToken,
+      completion_started_at: claimStartedAt,
+      updated_at: claimStartedAt,
+    })
+    .where('id', '=', artifact.id);
+  if (artifact.status === 'pending' && artifact.scan_status === 'pending') {
+    claimQuery = claimQuery.where('status', '=', 'pending').where('scan_status', '=', 'pending');
+  } else if (
+    artifact.status === 'processing' &&
+    artifact.scan_status === 'scanning' &&
+    new Date(artifact.updated_at).getTime() < claimStartedAt.getTime() - 5 * 60_000
+  ) {
+    claimQuery = claimQuery
+      .where('status', '=', 'processing')
+      .where('scan_status', '=', 'scanning')
+      .where(
+        'completion_owner_token',
+        artifact.completion_owner_token === null ? 'is' : '=',
+        artifact.completion_owner_token,
+      );
+  } else {
+    throw new ValidationError('Upload artifact completion is already in progress');
+  }
+  const claim = await claimQuery.executeTakeFirst();
+  if (Number(claim.numUpdatedRows) !== 1)
+    throw new ValidationError('Upload artifact completion is already in progress');
+
+  const rejectClaimedArtifact = async (result: string, checksumSha256?: string): Promise<void> => {
+    const rejected = await db
+      .updateTable('upload_artifacts')
+      .set({
+        status: 'rejected',
+        scan_status: 'blocked',
+        scan_result: result,
+        checksum_sha256: checksumSha256 ?? artifact.checksum_sha256,
+        completion_owner_token: null,
+        completion_started_at: null,
+        updated_at: new Date(),
+      })
+      .where('id', '=', artifact.id)
+      .where('completion_owner_token', '=', claimToken)
+      .executeTakeFirst();
+    if (Number(rejected.numUpdatedRows) !== 1)
+      throw new ValidationError('Upload artifact completion lease was lost');
+  };
+
   const s3 = createS3Client();
   const stagingObjectKey = artifact.object_key;
   let head;
@@ -596,7 +720,7 @@ export async function completeUploadArtifact(
   } catch (error) {
     if (!isMissingS3ObjectError(error)) throw error;
     const result = 'Uploaded object is missing from storage';
-    await markUploadArtifactRejected(db, artifact.id, result);
+    await rejectClaimedArtifact(result);
     throw new ValidationError(result);
   }
   const actualSize = Number(head.ContentLength ?? 0);
@@ -610,19 +734,19 @@ export async function completeUploadArtifact(
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
     const result = `Uploaded object metadata is invalid: ${error.message}`;
-    await markUploadArtifactRejected(db, artifact.id, result);
+    await rejectClaimedArtifact(result);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError(result);
   }
   if (actualSize !== artifact.size_bytes) {
     const result = `Uploaded object size does not match declared size: expected ${artifact.size_bytes} bytes, received ${actualSize} bytes`;
-    await markUploadArtifactRejected(db, artifact.id, result);
+    await rejectClaimedArtifact(result);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError(result);
   }
   if (actualType !== artifact.content_type) {
     const result = `Uploaded object content type does not match declared content type: expected ${artifact.content_type}, received ${actualType}`;
-    await markUploadArtifactRejected(db, artifact.id, result);
+    await rejectClaimedArtifact(result);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError(result);
   }
@@ -630,18 +754,18 @@ export async function completeUploadArtifact(
   const object = await s3.send(
     new GetObjectCommand({ Bucket: artifact.bucket, Key: stagingObjectKey }),
   );
-  const buffer = await bodyToBuffer(object.Body);
+  const buffer = await bodyToBuffer(object.Body, artifact.size_bytes);
   const objectContentType =
     typeof object.ContentType === 'string' ? object.ContentType : actualType;
   if (buffer.length !== artifact.size_bytes) {
     const result = `Uploaded object size does not match declared size: expected ${artifact.size_bytes} bytes, received ${buffer.length} bytes`;
-    await markUploadArtifactRejected(db, artifact.id, result);
+    await rejectClaimedArtifact(result);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError(result);
   }
   if (objectContentType !== artifact.content_type) {
     const result = `Uploaded object content type does not match declared content type: expected ${artifact.content_type}, received ${objectContentType}`;
-    await markUploadArtifactRejected(db, artifact.id, result);
+    await rejectClaimedArtifact(result);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError(result);
   }
@@ -649,17 +773,7 @@ export async function completeUploadArtifact(
   const checksum = createHash('sha256').update(buffer).digest('hex');
   const now = new Date();
   if (!scan.clean) {
-    await db
-      .updateTable('upload_artifacts')
-      .set({
-        status: 'rejected',
-        scan_status: 'blocked',
-        scan_result: scan.result,
-        checksum_sha256: checksum,
-        updated_at: now,
-      })
-      .where('id', '=', artifact.id)
-      .execute();
+    await rejectClaimedArtifact(scan.result, checksum);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError('Uploaded file failed malware scan');
   }
@@ -669,22 +783,56 @@ export async function completeUploadArtifact(
   } catch (error) {
     if (!(error instanceof ValidationError)) throw error;
     const result = error.message;
-    await markUploadArtifactRejected(db, artifact.id, result);
+    await rejectClaimedArtifact(result, checksum);
     await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
     throw new ValidationError(result);
   }
 
-  const finalObjectKey = finalObjectKeyFromStaging(stagingObjectKey);
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: artifact.bucket,
-      Key: finalObjectKey,
-      Body: buffer,
-      ContentType: artifact.content_type,
-      ContentLength: buffer.length,
-    }),
-  );
-  await db
+  let eventMediaMetadata: {
+    width: number;
+    height: number;
+    format: 'jpeg' | 'png' | 'webp';
+  } | null = null;
+  if (EVENT_MEDIA_PURPOSES.has(artifact.purpose as UploadPurpose)) {
+    try {
+      eventMediaMetadata = await inspectEventMediaImage(buffer);
+    } catch (error) {
+      if (!(error instanceof ValidationError)) throw error;
+      await rejectClaimedArtifact(error.message);
+      await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
+      throw error;
+    }
+  }
+
+  const finalObjectKey = finalObjectKeyFromStaging(stagingObjectKey, checksum);
+  try {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: artifact.bucket,
+        Key: finalObjectKey,
+        Body: buffer,
+        ContentType: artifact.content_type,
+        ContentLength: buffer.length,
+        ChecksumSHA256: Buffer.from(checksum, 'hex').toString('base64'),
+        ServerSideEncryption: 'AES256',
+        IfNoneMatch: '*',
+      }),
+    );
+  } catch (error) {
+    const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (candidate.name !== 'PreconditionFailed' && candidate.$metadata?.httpStatusCode !== 412)
+      throw error;
+    const existing = await s3.send(
+      new GetObjectCommand({ Bucket: artifact.bucket, Key: finalObjectKey }),
+    );
+    const existingBuffer = await bodyToBuffer(existing.Body, artifact.size_bytes);
+    if (
+      existingBuffer.length !== buffer.length ||
+      createHash('sha256').update(existingBuffer).digest('hex') !== checksum
+    )
+      throw new ValidationError('Immutable upload object conflicts with completion evidence');
+  }
+  const finalized = await db
     .updateTable('upload_artifacts')
     .set({
       status: 'uploaded',
@@ -692,10 +840,23 @@ export async function completeUploadArtifact(
       scan_result: scan.result,
       checksum_sha256: checksum,
       object_key: finalObjectKey,
+      metadata: eventMediaMetadata
+        ? JSON.stringify({
+            ...(JSON.parse(artifact.metadata) as Record<string, unknown>),
+            image: eventMediaMetadata,
+          })
+        : artifact.metadata,
+      completion_owner_token: null,
+      completion_started_at: null,
       updated_at: now,
     })
     .where('id', '=', artifact.id)
-    .execute();
+    .where('status', '=', 'processing')
+    .where('scan_status', '=', 'scanning')
+    .where('completion_owner_token', '=', claimToken)
+    .executeTakeFirst();
+  if (Number(finalized.numUpdatedRows) !== 1)
+    throw new ValidationError('Upload artifact completion lease was lost');
   await tryDeleteUploadObject(s3, artifact.bucket, stagingObjectKey);
 
   return { artifactId, status: 'uploaded', scanStatus: 'clean' };
@@ -725,6 +886,92 @@ export async function getUploadArtifactDownloadUrl(
   );
 }
 
+export async function readCleanUploadArtifact(
+  db: Database,
+  artifactId: string,
+): Promise<{
+  artifact: {
+    id: string;
+    tenant_id: string;
+    organization_id: string | null;
+    brand_id: string | null;
+    event_id: string | null;
+    purpose: string;
+    bucket: string;
+    object_key: string;
+    content_type: string;
+    size_bytes: number;
+    checksum_sha256: string | null;
+    metadata: string;
+  };
+  buffer: Buffer;
+}> {
+  const artifact = await db
+    .selectFrom('upload_artifacts')
+    .select([
+      'id',
+      'tenant_id',
+      'organization_id',
+      'brand_id',
+      'event_id',
+      'purpose',
+      'bucket',
+      'object_key',
+      'content_type',
+      'size_bytes',
+      'checksum_sha256',
+      'metadata',
+      'status',
+      'scan_status',
+    ])
+    .where('id', '=', artifactId)
+    .executeTakeFirst();
+  if (!artifact || artifact.status !== 'uploaded' || artifact.scan_status !== 'clean')
+    throw new NotFoundError('UploadArtifact', artifactId);
+  const object = await createS3Client().send(
+    new GetObjectCommand({ Bucket: artifact.bucket, Key: artifact.object_key }),
+  );
+  const buffer = await bodyToBuffer(object.Body, artifact.size_bytes);
+  const checksum = createHash('sha256').update(buffer).digest('hex');
+  if (
+    buffer.length !== artifact.size_bytes ||
+    !artifact.checksum_sha256 ||
+    checksum !== artifact.checksum_sha256
+  )
+    throw new ValidationError('Uploaded artifact storage evidence does not match');
+  const { status: _status, scan_status: _scanStatus, ...safeArtifact } = artifact;
+  return { artifact: safeArtifact, buffer };
+}
+
+export async function writeEventMediaRendition(input: {
+  bucket: string;
+  objectKey: string;
+  body: Buffer;
+  contentType: string;
+  checksumSha256: string;
+}): Promise<void> {
+  await createS3Client().send(
+    new PutObjectCommand({
+      Bucket: input.bucket,
+      Key: input.objectKey,
+      Body: input.body,
+      ContentType: input.contentType,
+      ContentLength: input.body.length,
+      CacheControl: 'public, max-age=31536000, immutable',
+      IfNoneMatch: '*',
+      ChecksumSHA256: Buffer.from(input.checksumSha256, 'hex').toString('base64'),
+      ServerSideEncryption: 'AES256',
+    }),
+  );
+}
+
+export async function deleteEventMediaRendition(
+  bucket: string,
+  objectKey: string,
+): Promise<boolean> {
+  return tryDeleteUploadObject(createS3Client(), bucket, objectKey);
+}
+
 export type PublicUploadArtifact = {
   bucket: string;
   objectKey: string;
@@ -740,6 +987,8 @@ async function getPublicUploadArtifact(
     | 'content_email_image'
     | 'content_event_page_image'
     | 'event_cover'
+    | 'event_poster'
+    | 'event_social'
     | 'event_seo_image',
 ): Promise<PublicUploadArtifact> {
   const artifact = await db
@@ -784,31 +1033,7 @@ export async function getBrandLogoArtifact(
   return getPublicUploadArtifact(db, artifactId, 'brand_logo');
 }
 
-export async function getEventMediaArtifact(
-  db: Database,
-  artifactId: string,
-  purpose: 'event_cover' | 'event_seo_image',
-): Promise<PublicUploadArtifact> {
-  const artifact = await db
-    .selectFrom('upload_artifacts')
-    .select(['event_id'])
-    .where('id', '=', artifactId)
-    .where('purpose', '=', purpose)
-    .executeTakeFirst();
-  if (!artifact?.event_id) throw new NotFoundError('UploadArtifact', artifactId);
-  const event = await db
-    .selectFrom('events')
-    .select(['cover_image_url', 'seo'])
-    .where('id', '=', artifact.event_id)
-    .executeTakeFirst();
-  const attached =
-    event?.cover_image_url?.includes(artifactId) === true ||
-    (typeof event?.seo === 'string' && event.seo.includes(artifactId));
-  if (!attached) throw new NotFoundError('UploadArtifact', artifactId);
-  return getPublicUploadArtifact(db, artifactId, purpose);
-}
-
-async function streamPublicUploadArtifact(artifact: PublicUploadArtifact): Promise<{
+export async function streamPublicUploadArtifact(artifact: PublicUploadArtifact): Promise<{
   stream: NodeJS.ReadableStream;
   contentType: string;
   fileName: string;
@@ -862,14 +1087,6 @@ export async function streamBrandLogo(
   fileName: string;
 }> {
   return streamPublicUploadArtifact(await getBrandLogoArtifact(db, artifactId));
-}
-
-export async function streamEventMedia(
-  db: Database,
-  artifactId: string,
-  purpose: 'event_cover' | 'event_seo_image',
-) {
-  return streamPublicUploadArtifact(await getEventMediaArtifact(db, artifactId, purpose));
 }
 
 function uploadArtifactAnswerEntries(answers: Record<string, unknown>): Array<[string, string]> {

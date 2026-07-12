@@ -19,6 +19,7 @@ import { TemporalClient } from './services/temporal.js';
 import type { PortableDryRunAttestationConfiguration } from './services/portable-import-control.js';
 import { tenantRoutes } from './routes/modules/tenant.js';
 import { eventRoutes } from './routes/modules/events.js';
+import { eventMediaRoutes } from './routes/modules/event-media.js';
 import { readinessRoutes } from './routes/modules/readiness.js';
 import { ticketingRoutes } from './routes/modules/ticketing.js';
 import { checkoutRoutes } from './routes/modules/checkout.js';
@@ -325,7 +326,9 @@ export async function createRateLimitRedisClient(): Promise<Redis | undefined> {
   } catch (error) {
     redis.disconnect();
     if (config.nodeEnv === 'production') {
-      throw new Error('Redis is required for production rate limiting', { cause: error });
+      throw new Error('Redis is required for production rate limiting', {
+        cause: error,
+      });
     }
     return undefined;
   }
@@ -408,10 +411,18 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(async (publicWebhooks) => {
     await registerIpRateLimit(publicWebhooks, { redis: rateLimitRedis });
     registerJsonBodyParser(publicWebhooks, { captureRawBody: true });
-    await publicWebhooks.register(clerkWebhookRoutes, { prefix: '/v1/webhooks/clerk' });
-    await publicWebhooks.register(stripeWebhookRoutes, { prefix: '/v1/webhooks/stripe' });
-    await publicWebhooks.register(telnyxWebhookRoutes, { prefix: '/v1/webhooks/telnyx' });
-    await publicWebhooks.register(emailWebhookRoutes, { prefix: '/v1/webhooks/email' });
+    await publicWebhooks.register(clerkWebhookRoutes, {
+      prefix: '/v1/webhooks/clerk',
+    });
+    await publicWebhooks.register(stripeWebhookRoutes, {
+      prefix: '/v1/webhooks/stripe',
+    });
+    await publicWebhooks.register(telnyxWebhookRoutes, {
+      prefix: '/v1/webhooks/telnyx',
+    });
+    await publicWebhooks.register(emailWebhookRoutes, {
+      prefix: '/v1/webhooks/email',
+    });
   });
 
   // Public buyer-facing routes (no admin auth). Checkout is intentionally public:
@@ -440,6 +451,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
     await authenticated.register(tenantRoutes, { prefix: '/v1' });
     await authenticated.register(eventRoutes, { prefix: '/v1' });
+    await authenticated.register(eventMediaRoutes, { prefix: '/v1' });
     await authenticated.register(readinessRoutes, { prefix: '/v1' });
     await authenticated.register(ticketingRoutes, { prefix: '/v1' });
     await authenticated.register(orderRoutes, { prefix: '/v1' });

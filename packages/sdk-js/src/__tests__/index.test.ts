@@ -228,6 +228,31 @@ describe('TixkitClient', () => {
     });
   });
 
+  it('keeps scoped event media attachment endpoints in SDK parity', async () => {
+    const fetchMock = mockFetch(200, []);
+    const client = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await client.events.listMedia('evt_1');
+    expect(getCall(fetchMock)).toMatchObject({
+      method: 'GET',
+      url: 'https://api.test/v1/events/evt_1/media',
+    });
+
+    await client.events.attachMedia('evt_1', 'poster', {
+      uploadArtifactId: 'upl_1',
+      altText: 'Festival poster',
+      focalPoint: { x: 0.5, y: 0.4 },
+    });
+    expect(getCall(fetchMock, 1)).toMatchObject({
+      method: 'PUT',
+      url: 'https://api.test/v1/events/evt_1/media/poster',
+    });
+  });
+
   it('rejects malformed readiness blocker envelopes', () => {
     const malformed = new TixkitApiError('launch_readiness_failed', 'blocked', 409, 'req_1', {
       requiredBlockers: [null] as never[],

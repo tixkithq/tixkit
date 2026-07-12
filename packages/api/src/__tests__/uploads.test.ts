@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
@@ -15,6 +16,8 @@ import {
   scanUploadBuffer,
 } from '../services/uploads.js';
 import { publicUploadRoutes, uploadRoutes } from '../routes/modules/uploads.js';
+import { attachEventMedia } from '../services/event-media.js';
+import sharp from 'sharp';
 
 const s3Send = vi.fn();
 const signedUrlInputs: unknown[] = [];
@@ -35,7 +38,13 @@ vi.mock('@aws-sdk/client-s3', () => {
   class GetObjectCommand {
     constructor(public readonly input: Record<string, unknown>) {}
   }
-  return { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, GetObjectCommand };
+  return {
+    S3Client,
+    PutObjectCommand,
+    DeleteObjectCommand,
+    HeadObjectCommand,
+    GetObjectCommand,
+  };
 });
 
 vi.mock('@aws-sdk/s3-request-presigner', () => ({
@@ -114,10 +123,14 @@ function createMockDb(
 
   function insertInto(table: string) {
     return {
-      values(values: Row) {
+      values(values: Row | Row[]) {
         return {
           execute: async () => {
-            rowsFor(table).push({ ...values });
+            rowsFor(table).push(
+              ...(Array.isArray(values) ? values : [values]).map((value) => ({
+                ...value,
+              })),
+            );
           },
         };
       },
@@ -160,10 +173,35 @@ function createMockDb(
     };
   }
 
-  return {
-    tables,
-    db: { selectFrom, insertInto, updateTable } as unknown as Database,
-  };
+  function deleteFrom(table: string) {
+    const conditions: Array<[string, string, unknown]> = [];
+    const query = {
+      where(column: string, operator: string, value: unknown) {
+        conditions.push([column, operator, value]);
+        return query;
+      },
+      execute: async () => {
+        const retained = rowsFor(table).filter((row) => !matches(row, conditions));
+        const deleted = rowsFor(table).length - retained.length;
+        tables[table] = retained;
+        return [{ numDeletedRows: BigInt(deleted) }];
+      },
+    };
+    return query;
+  }
+
+  const db = {
+    selectFrom,
+    insertInto,
+    updateTable,
+    deleteFrom,
+  } as unknown as Database;
+  Object.assign(db, {
+    transaction: () => ({
+      execute: (work: (transaction: Database) => unknown) => work(db),
+    }),
+  });
+  return { tables, db };
 }
 
 type RowPredicateBuilder = ((column: string, operator: string, value: unknown) => RowPredicate) & {
@@ -256,7 +294,9 @@ describe('upload artifact service', () => {
     });
 
     expect(artifact.artifactId).toMatch(/^upl_/);
-    expect(artifact.uploadHeaders).toEqual({ 'Content-Type': 'application/pdf' });
+    expect(artifact.uploadHeaders).toEqual({
+      'Content-Type': 'application/pdf',
+    });
     expect(artifact.completeUrl).toBe(
       `/v1/public/upload-artifacts/${artifact.artifactId}/complete`,
     );
@@ -467,7 +507,9 @@ describe('upload artifact service', () => {
 
     expect(results.reduce((sum, result) => sum + result, 0)).toBe(1);
     expect(s3Send).toHaveBeenCalledTimes(1);
-    expect(tables.upload_artifacts[0]).toMatchObject({ status: 'cleanup_complete' });
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'cleanup_complete',
+    });
     await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
     expect(s3Send).toHaveBeenCalledTimes(1);
   });
@@ -654,7 +696,9 @@ describe('upload artifact service', () => {
     s3Send
       .mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' })
       .mockResolvedValueOnce({
-        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+        Body: {
+          transformToByteArray: async () => new TextEncoder().encode('clean'),
+        },
       })
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({});
@@ -665,7 +709,8 @@ describe('upload artifact service', () => {
       scanStatus: 'clean',
     });
     const stagingKey = `uploads/tnt_1/checkout-answers/evt_1/staging/${artifact.artifactId}.txt`;
-    const finalKey = `uploads/tnt_1/checkout-answers/evt_1/final/${artifact.artifactId}.txt`;
+    const checksum = createHash('sha256').update('clean').digest('hex');
+    const finalKey = `uploads/tnt_1/checkout-answers/evt_1/final/${artifact.artifactId}.txt/${checksum}`;
     expect(tables.upload_artifacts[0]).toMatchObject({
       status: 'uploaded',
       scan_status: 'clean',
@@ -673,8 +718,14 @@ describe('upload artifact service', () => {
       object_key: finalKey,
     });
     expect(tables.upload_artifacts[0].checksum_sha256).toEqual(expect.any(String));
-    expect(s3Send.mock.calls[0][0].input).toMatchObject({ Bucket: 'tixkit', Key: stagingKey });
-    expect(s3Send.mock.calls[1][0].input).toMatchObject({ Bucket: 'tixkit', Key: stagingKey });
+    expect(s3Send.mock.calls[0][0].input).toMatchObject({
+      Bucket: 'tixkit',
+      Key: stagingKey,
+    });
+    expect(s3Send.mock.calls[1][0].input).toMatchObject({
+      Bucket: 'tixkit',
+      Key: stagingKey,
+    });
     expect(Buffer.isBuffer(s3Send.mock.calls[2][0].input.Body)).toBe(true);
     expect(s3Send.mock.calls[2][0].input.Body.toString('utf8')).toBe('clean');
     expect(s3Send.mock.calls[2][0].input).toMatchObject({
@@ -685,7 +736,10 @@ describe('upload artifact service', () => {
     });
     expect(s3Send.mock.calls[2][0].input).not.toHaveProperty('CopySource');
     expect(s3Send.mock.calls[2][0].input).not.toHaveProperty('MetadataDirective');
-    expect(s3Send.mock.calls[3][0].input).toMatchObject({ Bucket: 'tixkit', Key: stagingKey });
+    expect(s3Send.mock.calls[3][0].input).toMatchObject({
+      Bucket: 'tixkit',
+      Key: stagingKey,
+    });
 
     const downloadUrl = await getUploadArtifactDownloadUrl(db, artifact.artifactId);
     expect(downloadUrl).toBe(`https://s3.test/${encodeURIComponent(finalKey)}`);
@@ -702,6 +756,67 @@ describe('upload artifact service', () => {
     });
   });
 
+  it('atomically claims upload completion so concurrent workers cannot publish conflicting evidence', async () => {
+    const { db } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'checkout_answer',
+      fileName: 'note.txt',
+      contentType: 'text/plain',
+      sizeBytes: 5,
+    });
+    s3Send
+      .mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+      })
+      .mockResolvedValue({});
+
+    const results = await Promise.allSettled([
+      completeUploadArtifact(db, artifact.artifactId),
+      completeUploadArtifact(db, artifact.artifactId),
+    ]);
+
+    expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect(s3Send.mock.calls.filter(([command]) => command.input.Body)).toHaveLength(1);
+  });
+
+  it('rejects a worker that arrives after another worker owns the completion lease', async () => {
+    const { db } = createMockDb();
+    const artifact = await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      eventId: 'evt_1',
+      purpose: 'checkout_answer',
+      fileName: 'note.txt',
+      contentType: 'text/plain',
+      sizeBytes: 5,
+    });
+    let releaseHead!: () => void;
+    const headBlocked = new Promise<void>((resolve) => {
+      releaseHead = resolve;
+    });
+    s3Send
+      .mockImplementationOnce(async () => {
+        await headBlocked;
+        return { ContentLength: 5, ContentType: 'text/plain' };
+      })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+      })
+      .mockResolvedValue({});
+
+    const owner = completeUploadArtifact(db, artifact.artifactId);
+    await vi.waitFor(() => expect(s3Send).toHaveBeenCalledTimes(1));
+    await expect(completeUploadArtifact(db, artifact.artifactId)).rejects.toThrow(
+      'already in progress',
+    );
+    releaseHead();
+    await expect(owner).resolves.toMatchObject({ status: 'uploaded', scanStatus: 'clean' });
+    expect(s3Send.mock.calls.filter(([command]) => command.input.Body)).toHaveLength(1);
+  });
+
   it('rejects image uploads whose bytes do not match the declared content type', async () => {
     const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const fakeBytes = Buffer.from('not a real image');
@@ -716,7 +831,10 @@ describe('upload artifact service', () => {
         sizeBytes: fakeBytes.length,
       });
       s3Send
-        .mockResolvedValueOnce({ ContentLength: fakeBytes.length, ContentType: 'image/png' })
+        .mockResolvedValueOnce({
+          ContentLength: fakeBytes.length,
+          ContentType: 'image/png',
+        })
         .mockResolvedValueOnce({
           Body: { transformToByteArray: async () => new Uint8Array(fakeBytes) },
         })
@@ -745,7 +863,10 @@ describe('upload artifact service', () => {
       sizeBytes: validPng.length,
     });
     s3Send
-      .mockResolvedValueOnce({ ContentLength: validPng.length, ContentType: 'image/png' })
+      .mockResolvedValueOnce({
+        ContentLength: validPng.length,
+        ContentType: 'image/png',
+      })
       .mockResolvedValueOnce({
         Body: { transformToByteArray: async () => new Uint8Array(validPng) },
       })
@@ -768,9 +889,21 @@ describe('upload artifact service', () => {
     ]);
     const gifMagic = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
     const cases = [
-      { name: 'jpeg', bytes: Buffer.concat([jpegMagic, Buffer.alloc(64)]), type: 'image/jpeg' },
-      { name: 'webp', bytes: Buffer.concat([webpMagic, Buffer.alloc(64)]), type: 'image/webp' },
-      { name: 'gif', bytes: Buffer.concat([gifMagic, Buffer.alloc(64)]), type: 'image/gif' },
+      {
+        name: 'jpeg',
+        bytes: Buffer.concat([jpegMagic, Buffer.alloc(64)]),
+        type: 'image/jpeg',
+      },
+      {
+        name: 'webp',
+        bytes: Buffer.concat([webpMagic, Buffer.alloc(64)]),
+        type: 'image/webp',
+      },
+      {
+        name: 'gif',
+        bytes: Buffer.concat([gifMagic, Buffer.alloc(64)]),
+        type: 'image/gif',
+      },
     ];
     for (const c of cases) {
       const { db, tables } = createMockDb();
@@ -783,7 +916,10 @@ describe('upload artifact service', () => {
         sizeBytes: c.bytes.length,
       });
       s3Send
-        .mockResolvedValueOnce({ ContentLength: c.bytes.length, ContentType: c.type })
+        .mockResolvedValueOnce({
+          ContentLength: c.bytes.length,
+          ContentType: c.type,
+        })
         .mockResolvedValueOnce({
           Body: { transformToByteArray: async () => new Uint8Array(c.bytes) },
         })
@@ -856,7 +992,10 @@ describe('upload artifact service', () => {
         },
       ],
     });
-    s3Send.mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' });
+    s3Send.mockResolvedValueOnce({
+      ContentLength: 5,
+      ContentType: 'text/plain',
+    });
     s3Send.mockResolvedValueOnce({});
 
     await expect(completeUploadArtifact(db, 'upl_future')).rejects.toThrow(
@@ -906,7 +1045,10 @@ describe('upload artifact service', () => {
       'Uploaded object size does not match declared size: expected 5 bytes, received 6 bytes',
     );
     expect(s3Send).toHaveBeenCalledTimes(2);
-    expect(s3Send.mock.calls[1][0].input).toMatchObject({ Bucket: 'tixkit', Key: stagingKey });
+    expect(s3Send.mock.calls[1][0].input).toMatchObject({
+      Bucket: 'tixkit',
+      Key: stagingKey,
+    });
   });
 
   it('rejects content-type-mismatched uploaded objects, blocks the row, and deletes the staging object', async () => {
@@ -936,7 +1078,10 @@ describe('upload artifact service', () => {
       'Uploaded object content type does not match declared content type: expected text/plain, received image/png',
     );
     expect(s3Send).toHaveBeenCalledTimes(2);
-    expect(s3Send.mock.calls[1][0].input).toMatchObject({ Bucket: 'tixkit', Key: stagingKey });
+    expect(s3Send.mock.calls[1][0].input).toMatchObject({
+      Bucket: 'tixkit',
+      Key: stagingKey,
+    });
   });
 
   it('rejects missing storage objects and blocks the row', async () => {
@@ -973,9 +1118,14 @@ describe('upload artifact service', () => {
       sizeBytes: signature.length,
     });
     s3Send
-      .mockResolvedValueOnce({ ContentLength: signature.length, ContentType: 'text/plain' })
       .mockResolvedValueOnce({
-        Body: { transformToByteArray: async () => new TextEncoder().encode(signature) },
+        ContentLength: signature.length,
+        ContentType: 'text/plain',
+      })
+      .mockResolvedValueOnce({
+        Body: {
+          transformToByteArray: async () => new TextEncoder().encode(signature),
+        },
       })
       .mockResolvedValueOnce({});
 
@@ -1276,6 +1426,140 @@ describe('upload artifact service', () => {
       }),
     ).rejects.toThrow('without question metadata');
   });
+
+  it('preserves event media originals and generates immutable focal-point renditions', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    const writes: Array<Record<string, unknown>> = [];
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      if (command.input.Body) writes.push(command.input);
+      return command.input.Body
+        ? {}
+        : {
+            Body: { transformToByteArray: async () => original },
+            ContentType: 'image/jpeg',
+          };
+    });
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+        },
+      ],
+      upload_artifacts: [
+        {
+          id: 'upl_cover',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/original.jpg',
+          checksum_sha256: checksum,
+          size_bytes: original.length,
+          metadata: JSON.stringify({
+            image: { width: 1600, height: 1000, format: 'jpeg' },
+          }),
+        },
+      ],
+    });
+
+    const media = await attachEventMedia({
+      db,
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      eventId: 'evt_1',
+      uploadArtifactId: 'upl_cover',
+      role: 'cover',
+      altText: 'Crowd watching the main stage',
+      focalPoint: { x: 0.75, y: 0.4 },
+      createdBy: 'usr_1',
+    });
+
+    expect(media.renditions.map(({ width, height }) => [width, height])).toEqual([
+      [480, 270],
+      [1600, 900],
+      [1200, 630],
+    ]);
+    expect(writes).toHaveLength(3);
+    expect(new Set(writes.map((write) => write.Key))).toHaveLength(3);
+    expect(writes.every((write) => String(write.Key).includes('/emr_'))).toBe(true);
+    expect(tables.event_media_assets).toHaveLength(1);
+    expect(tables.event_media_renditions).toHaveLength(3);
+    expect(tables.upload_artifacts).toHaveLength(1);
+  });
+
+  it('compensates every attempted rendition object when a later write fails', async () => {
+    const original = await sharp({
+      create: { width: 1600, height: 1000, channels: 3, background: '#14532d' },
+    })
+      .jpeg()
+      .toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    let writes = 0;
+    const deletedKeys: string[] = [];
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      if (command.input.Body) {
+        writes += 1;
+        if (writes === 2) throw new Error('object store unavailable');
+        return {};
+      }
+      if (String(command.input.Key).startsWith('event-media/')) {
+        deletedKeys.push(String(command.input.Key));
+        return {};
+      }
+      return { Body: { transformToByteArray: async () => original } };
+    });
+    const { db, tables } = createMockDb({
+      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' }],
+      upload_artifacts: [
+        {
+          id: 'upl_cover',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/original.jpg',
+          checksum_sha256: checksum,
+          size_bytes: original.length,
+          metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'jpeg' } }),
+        },
+      ],
+    });
+
+    await expect(
+      attachEventMedia({
+        db,
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        uploadArtifactId: 'upl_cover',
+        role: 'cover',
+        altText: 'Crowd watching the main stage',
+        focalPoint: { x: 0.5, y: 0.5 },
+        createdBy: 'usr_1',
+      }),
+    ).rejects.toThrow('object store unavailable');
+    expect(deletedKeys).toHaveLength(2);
+    expect(tables.event_media_assets ?? []).toHaveLength(0);
+    expect(tables.event_media_renditions ?? []).toHaveLength(0);
+  });
 });
 
 describe('upload artifact routes', () => {
@@ -1322,9 +1606,9 @@ describe('upload artifact routes', () => {
       url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/download`,
     });
     expect(download.json()).toMatchObject({
-      downloadUrl: `/v1/public/event-media/event_cover/${tables.upload_artifacts[0]?.id}`,
-      durable: true,
+      downloadUrl: expect.stringContaining('https://s3.test/'),
     });
+    expect(download.json()).not.toHaveProperty('durable');
     const wrongBrand = await app.inject({
       method: 'POST',
       url: '/upload-artifacts',
@@ -1602,7 +1886,10 @@ describe('upload artifact routes', () => {
         fileName: 'hero.png',
         contentType: 'image/png',
         sizeBytes: 12,
-        metadata: { source: 'admin_event_page_editor', contentDocumentId: 'cdoc_page_1' },
+        metadata: {
+          source: 'admin_event_page_editor',
+          contentDocumentId: 'cdoc_page_1',
+        },
       },
     });
 
@@ -1734,7 +2021,10 @@ describe('upload artifact routes', () => {
     const wrongEvent = await wrongEventApp.inject({
       method: 'POST',
       url: '/upload-artifacts',
-      payload: { ...basePayload, metadata: { contentDocumentId: 'cdoc_other_event' } },
+      payload: {
+        ...basePayload,
+        metadata: { contentDocumentId: 'cdoc_other_event' },
+      },
     });
     expect(wrongEvent.statusCode).toBe(404);
     expect(wrongEventDb.tables.upload_artifacts).toHaveLength(0);
@@ -1920,7 +2210,10 @@ describe('upload artifact routes', () => {
     });
     const app = await setupUploadApp(db, publicUploadRoutes);
     const imageStream = Readable.from([Buffer.from('image-data')]);
-    s3Send.mockResolvedValueOnce({ Body: imageStream, ContentType: 'image/png' });
+    s3Send.mockResolvedValueOnce({
+      Body: imageStream,
+      ContentType: 'image/png',
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -1960,7 +2253,10 @@ describe('upload artifact routes', () => {
     });
     const app = await setupUploadApp(db, publicUploadRoutes);
     const imageStream = Readable.from([Buffer.from('logo-data')]);
-    s3Send.mockResolvedValueOnce({ Body: imageStream, ContentType: 'image/png' });
+    s3Send.mockResolvedValueOnce({
+      Body: imageStream,
+      ContentType: 'image/png',
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -2285,7 +2581,10 @@ describe('upload artifact routes', () => {
       ],
     });
     const app = await setupUploadApp(db);
-    const res = await app.inject({ method: 'GET', url: '/upload-artifacts/upl_other/download' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_other/download',
+    });
     expect(res.statusCode).toBe(404);
     expect(signedUrlInputs).toHaveLength(0);
     await app.close();

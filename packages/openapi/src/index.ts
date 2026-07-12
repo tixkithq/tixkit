@@ -3045,7 +3045,9 @@ const rawOpenApiSpec = {
               'content_email_image',
               'content_event_page_image',
               'migration_import',
+              'event_poster',
               'event_cover',
+              'event_social',
               'event_seo_image',
             ],
           },
@@ -3114,6 +3116,87 @@ const rawOpenApiSpec = {
           durable: { type: 'boolean' },
         },
         required: ['downloadUrl'],
+      },
+      EventMediaRendition: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          variant: { type: 'string', enum: ['thumbnail', 'page', 'social'] },
+          width: { type: 'integer', minimum: 1 },
+          height: { type: 'integer', minimum: 1 },
+          format: { type: 'string', enum: ['webp'] },
+          checksumSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          sizeBytes: { type: 'integer', minimum: 1 },
+          url: { type: 'string' },
+        },
+        required: [
+          'id',
+          'variant',
+          'width',
+          'height',
+          'format',
+          'checksumSha256',
+          'sizeBytes',
+          'url',
+        ],
+      },
+      EventMediaAsset: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          role: { type: 'string', enum: ['poster', 'cover', 'social'] },
+          original: {
+            type: 'object',
+            properties: {
+              uploadArtifactId: { type: 'string' },
+              width: { type: 'integer', minimum: 1 },
+              height: { type: 'integer', minimum: 1 },
+              format: { type: 'string', enum: ['jpeg', 'png', 'webp'] },
+              checksumSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              sizeBytes: { type: 'integer', minimum: 1 },
+            },
+            required: [
+              'uploadArtifactId',
+              'width',
+              'height',
+              'format',
+              'checksumSha256',
+              'sizeBytes',
+            ],
+          },
+          focalPoint: {
+            type: 'object',
+            properties: {
+              x: { type: 'number', minimum: 0, maximum: 1 },
+              y: { type: 'number', minimum: 0, maximum: 1 },
+            },
+            required: ['x', 'y'],
+          },
+          altText: { type: 'string', minLength: 1, maxLength: 500 },
+          renditions: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/EventMediaRendition' },
+          },
+        },
+        required: ['id', 'role', 'original', 'focalPoint', 'altText', 'renditions'],
+      },
+      AttachEventMedia: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          uploadArtifactId: { type: 'string', minLength: 1 },
+          altText: { type: 'string', minLength: 1, maxLength: 500 },
+          focalPoint: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              x: { type: 'number', minimum: 0, maximum: 1 },
+              y: { type: 'number', minimum: 0, maximum: 1 },
+            },
+            required: ['x', 'y'],
+          },
+        },
+        required: ['uploadArtifactId', 'altText', 'focalPoint'],
       },
       CheckoutConfirmCompleted: {
         type: 'object',
@@ -7351,58 +7434,98 @@ const rawOpenApiSpec = {
         },
       },
     },
-    '/public/event-media/{purpose}/{artifactId}': {
+    '/events/{eventId}/media': {
       get: {
-        summary: 'Download event cover or SEO media (public, durable, cacheable)',
-        description:
-          'Streams a published event media artifact by ID. The purpose must match the artifact and responses are cached immutably for one year.',
-        parameters: [
-          {
-            name: 'purpose',
-            in: 'path',
-            required: true,
-            schema: {
-              type: 'string',
-              enum: ['event_cover', 'event_seo_image'],
+        summary: 'List scoped event media assets and optimized renditions',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Event media assets',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/EventMediaAsset' } },
+              },
             },
           },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/events/{eventId}/media/{role}': {
+      put: {
+        summary: 'Attach an owned original and generate optimized event media renditions',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
           {
-            name: 'artifactId',
+            name: 'role',
             in: 'path',
             required: true,
-            schema: { type: 'string' },
+            schema: { type: 'string', enum: ['poster', 'cover', 'social'] },
           },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/AttachEventMedia' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Attached event media asset',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/EventMediaAsset' } },
+            },
+          },
+          '400': {
+            description: 'Invalid image, role, alt text, or focal point',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event or upload artifact not found in scope',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/public/event-media/renditions/{renditionId}': {
+      get: {
+        summary: 'Stream an immutable rendition for a public event',
+        parameters: [
+          { name: 'renditionId', in: 'path', required: true, schema: { type: 'string' } },
         ],
         responses: {
           '200': {
-            description: 'Event media binary stream',
+            description: 'WebP event media rendition',
             headers: {
-              'Content-Type': {
-                schema: { type: 'string' },
-                description: 'MIME type of the stored media',
-              },
-              'Content-Disposition': {
-                schema: { type: 'string' },
-                description: 'inline; filename=...',
-              },
-              'Cache-Control': {
-                schema: { type: 'string' },
-                description: 'public, max-age=31536000, immutable',
-              },
+              'Cache-Control': { schema: { type: 'string' } },
+              ETag: { schema: { type: 'string' } },
             },
-            content: {
-              'application/octet-stream': {
-                schema: { type: 'string', format: 'binary' },
-              },
-            },
+            content: { 'image/webp': { schema: { type: 'string', format: 'binary' } } },
           },
           '404': {
-            description: 'Event media artifact not found or purpose mismatch',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ApiError' },
-              },
-            },
+            description: 'Rendition not found or event is not public',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },
       },

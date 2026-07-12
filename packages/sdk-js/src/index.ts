@@ -666,7 +666,10 @@ export type UploadPurpose =
   | 'user_avatar'
   | 'content_email_image'
   | 'content_event_page_image'
+  | 'migration_import'
+  | 'event_poster'
   | 'event_cover'
+  | 'event_social'
   | 'event_seo_image';
 
 export type CreateUploadArtifactInput = {
@@ -704,6 +707,32 @@ export type CompletedUploadArtifact = {
 export type UploadArtifactDownload = {
   downloadUrl: string;
   durable?: boolean;
+};
+
+export type EventMediaRole = 'poster' | 'cover' | 'social';
+export type EventMediaAsset = {
+  id: string;
+  role: EventMediaRole;
+  original: {
+    uploadArtifactId: string;
+    width: number;
+    height: number;
+    format: 'jpeg' | 'png' | 'webp';
+    checksumSha256: string;
+    sizeBytes: number;
+  };
+  focalPoint: { x: number; y: number };
+  altText: string;
+  renditions: Array<{
+    id: string;
+    variant: 'thumbnail' | 'page' | 'social';
+    width: number;
+    height: number;
+    format: 'webp';
+    checksumSha256: string;
+    sizeBytes: number;
+    url: string;
+  }>;
 };
 
 export type WidgetImpressionInput = {
@@ -2953,6 +2982,22 @@ class EventResource {
 
   async get(eventId: string): Promise<Event> {
     return this.client.request('GET', `/events/${eventId}`);
+  }
+
+  async listMedia(eventId: string): Promise<EventMediaAsset[]> {
+    return this.client.request('GET', `/events/${eventId}/media`);
+  }
+
+  async attachMedia(
+    eventId: string,
+    role: EventMediaRole,
+    input: {
+      uploadArtifactId: string;
+      altText: string;
+      focalPoint: { x: number; y: number };
+    },
+  ): Promise<EventMediaAsset> {
+    return this.client.request('PUT', `/events/${eventId}/media/${role}`, { body: input });
   }
 
   async create(input: {

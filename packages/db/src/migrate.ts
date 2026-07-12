@@ -75,6 +75,7 @@ import { PortableImportApprovalsMigration } from './migrations/0071_portable_imp
 import { PortableImportRebindingsMigration } from './migrations/0072_portable_import_rebindings.js';
 import { PortableImportCommitAuthorizationsMigration } from './migrations/0073_portable_import_commit_authorizations.js';
 import { ImportEventImmutabilityMigration } from './migrations/0074_import_event_immutability.js';
+import { EventMediaAssetsMigration } from './migrations/0075_event_media_assets.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -211,6 +212,8 @@ const ALL_SCHEMA_TABLES = [
   'portable_import_rebindings',
   'portable_destination_resources',
   'portable_import_commit_authorizations',
+  'event_media_renditions',
+  'event_media_assets',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -310,6 +313,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0072_portable_import_rebindings': PortableImportRebindingsMigration,
       '0073_portable_import_commit_authorizations': PortableImportCommitAuthorizationsMigration,
       '0074_import_event_immutability': ImportEventImmutabilityMigration,
+      '0075_event_media_assets': EventMediaAssetsMigration,
     };
   }
 }

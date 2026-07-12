@@ -72,3 +72,4 @@ export { PortableImportApprovalsMigration } from './0071_portable_import_approva
 export { PortableImportRebindingsMigration } from './0072_portable_import_rebindings.js';
 export { PortableImportCommitAuthorizationsMigration } from './0073_portable_import_commit_authorizations.js';
 export { ImportEventImmutabilityMigration } from './0074_import_event_immutability.js';
+export { EventMediaAssetsMigration } from './0075_event_media_assets.js';

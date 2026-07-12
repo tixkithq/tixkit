@@ -1174,4 +1174,67 @@ describe.sequential.each(driverCases)('database integration: $driver', ({ driver
       ),
     ).rejects.toThrow();
   });
+
+  it('rejects event media whose stored hierarchy does not match its event and upload', async () => {
+    const { tenant, organization, brand, event } = await createCatalog(db);
+    const wrongBrand = await new BrandRepository(db).create({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      name: 'Wrong media brand',
+      slug: `wrong-media-${event.id.slice(-8)}`,
+    });
+    const now = new Date();
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: 'upl_media_scope_test',
+        tenant_id: tenant.id,
+        organization_id: organization.id,
+        brand_id: brand.id,
+        event_id: event.id,
+        created_by_user_id: null,
+        purpose: 'event_cover',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: 'clean',
+        bucket: 'integration',
+        object_key: 'media/original.jpg',
+        file_name: 'original.jpg',
+        content_type: 'image/jpeg',
+        size_bytes: 100,
+        checksum_sha256: 'a'.repeat(64),
+        client_token_hash: null,
+        metadata: JSON.stringify({ image: { width: 10, height: 10, format: 'jpeg' } }),
+        expires_at: new Date(now.getTime() + 60_000),
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+
+    await expect(
+      db
+        .insertInto('event_media_assets')
+        .values({
+          id: 'ema_scope_test',
+          tenant_id: tenant.id,
+          organization_id: organization.id,
+          brand_id: wrongBrand.id,
+          event_id: event.id,
+          upload_artifact_id: 'upl_media_scope_test',
+          role: 'cover',
+          width: 10,
+          height: 10,
+          format: 'jpeg',
+          checksum_sha256: 'a'.repeat(64),
+          size_bytes: 100,
+          focal_x: '0.5',
+          focal_y: '0.5',
+          alt_text: 'Scope test',
+          created_by: 'usr_scope',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+    ).rejects.toThrow();
+  });
 });

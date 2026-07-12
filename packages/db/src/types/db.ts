@@ -708,9 +708,47 @@ export interface UploadArtifactTable {
   metadata: string;
   consumed_by_checkout_session_id: string | null;
   consumed_at: Timestamp | null;
+  completion_owner_token: string | null;
+  completion_started_at: Timestamp | null;
   expires_at: Timestamp;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export interface EventMediaAssetTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  event_id: string;
+  upload_artifact_id: string;
+  role: string;
+  width: number;
+  height: number;
+  format: string;
+  checksum_sha256: string;
+  size_bytes: number | string | bigint;
+  focal_x: number | string;
+  focal_y: number | string;
+  alt_text: string;
+  created_by: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface EventMediaRenditionTable {
+  id: string;
+  asset_id: string;
+  variant: string;
+  width: number;
+  height: number;
+  format: string;
+  content_type: string;
+  bucket: string;
+  object_key: string;
+  checksum_sha256: string;
+  size_bytes: number | string | bigint;
+  created_at: Timestamp;
 }
 
 export interface EventReadinessAcknowledgementTable {
@@ -1981,6 +2019,8 @@ export interface DB {
   ticket_listings: TicketListingTable;
   wallet_passes: WalletPassTable;
   upload_artifacts: UploadArtifactTable;
+  event_media_assets: EventMediaAssetTable;
+  event_media_renditions: EventMediaRenditionTable;
   widget_impressions: WidgetImpressionTable;
   waitlist_entries: WaitlistEntryTable;
   ticket_secrets: TicketSecretTable;

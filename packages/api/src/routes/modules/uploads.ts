@@ -16,10 +16,10 @@ import {
   streamBrandLogo,
   streamContentEmailImage,
   streamContentEventPageImage,
-  streamEventMedia,
   uploadTokenMatches,
   type UploadPurpose,
 } from '../../services/uploads.js';
+import { streamEventMediaRendition } from '../../services/event-media.js';
 import { parseBody } from '../../http/schemas.js';
 
 const uploadPurposeSchema = z.enum([
@@ -29,6 +29,8 @@ const uploadPurposeSchema = z.enum([
   'content_email_image',
   'content_event_page_image',
   'event_cover',
+  'event_poster',
+  'event_social',
   'event_seo_image',
 ]);
 
@@ -198,7 +200,12 @@ function requireUploadArtifactAccess(
     ClerkAuthService.requirePermission(principal, 'events.write');
     return;
   }
-  if (artifact.purpose === 'event_cover' || artifact.purpose === 'event_seo_image') {
+  if (
+    artifact.purpose === 'event_cover' ||
+    artifact.purpose === 'event_poster' ||
+    artifact.purpose === 'event_social' ||
+    artifact.purpose === 'event_seo_image'
+  ) {
     ClerkAuthService.requirePermission(principal, 'events.write');
     return;
   }
@@ -280,14 +287,16 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(stream);
   });
 
-  app.get('/public/event-media/:purpose/:artifactId', async (request, reply) => {
-    const { purpose, artifactId } = request.params as { purpose: string; artifactId: string };
-    if (purpose !== 'event_cover' && purpose !== 'event_seo_image')
-      throw new NotFoundError('UploadArtifact', artifactId);
-    const { stream, contentType, fileName } = await streamEventMedia(db, artifactId, purpose);
+  app.get('/public/event-media/renditions/:renditionId', async (request, reply) => {
+    const { renditionId } = request.params as { renditionId: string };
+    const { stream, contentType, fileName, checksumSha256 } = await streamEventMediaRendition(
+      db,
+      renditionId,
+    );
     reply.header('Content-Type', contentType);
     reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    reply.header('ETag', `"${checksumSha256}"`);
     reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
     return reply.send(stream);
   });
@@ -338,7 +347,12 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       if (hasCheckoutQuestionMetadata(body.metadata)) {
         throw new ValidationError('metadata.questionId is not allowed for user avatar uploads');
       }
-    } else if (body.purpose === 'event_cover' || body.purpose === 'event_seo_image') {
+    } else if (
+      body.purpose === 'event_cover' ||
+      body.purpose === 'event_poster' ||
+      body.purpose === 'event_social' ||
+      body.purpose === 'event_seo_image'
+    ) {
       ClerkAuthService.requirePermission(principal, 'events.write');
       if (!eventId) throw new ValidationError('eventId is required for event media uploads');
       const event = await new EventRepository(db).findById(eventId);
@@ -464,13 +478,6 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
         durable: true,
       };
     }
-    if (artifact.purpose === 'event_cover' || artifact.purpose === 'event_seo_image') {
-      return {
-        downloadUrl: `/v1/public/event-media/${artifact.purpose}/${artifactId}`,
-        durable: true,
-      };
-    }
-
     const downloadUrl = await getUploadArtifactDownloadUrl(db, artifactId);
     return { downloadUrl };
   });

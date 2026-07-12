@@ -38,8 +38,23 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
 describe('openApiSpec', () => {
   it('documents event media purposes and safe test checkout tagging', () => {
     expect(openApiSpec.components.schemas.CreateUploadArtifact.properties.purpose.enum).toEqual(
-      expect.arrayContaining(['event_cover', 'event_seo_image']),
+      expect.arrayContaining(['event_poster', 'event_cover', 'event_social', 'event_seo_image']),
     );
+    expect(
+      openApiSpec.paths['/events/{eventId}/media/{role}'].put.requestBody.content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/AttachEventMedia' });
+    expect(
+      openApiSpec.paths['/public/event-media/renditions/{renditionId}'].get.responses['200']
+        .content['image/webp'].schema,
+    ).toMatchObject({ format: 'binary' });
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        openApiSpec.paths,
+        '/public/event-media/{purpose}/{artifactId}',
+      ),
+    ).toBe(false);
     expect(openApiSpec.components.schemas.Order.properties.isTest).toMatchObject({
       type: 'boolean',
     });
@@ -1579,7 +1594,9 @@ describe('openApiSpec', () => {
             'content_email_image',
             'content_event_page_image',
             'migration_import',
+            'event_poster',
             'event_cover',
+            'event_social',
             'event_seo_image',
           ],
         },

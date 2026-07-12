@@ -42,6 +42,7 @@ import { PortableImportApprovalsMigration } from '../../migrations/0071_portable
 import { PortableImportRebindingsMigration } from '../../migrations/0072_portable_import_rebindings.js';
 import { PortableImportCommitAuthorizationsMigration } from '../../migrations/0073_portable_import_commit_authorizations.js';
 import { ImportEventImmutabilityMigration } from '../../migrations/0074_import_event_immutability.js';
+import { EventMediaAssetsMigration } from '../../migrations/0075_event_media_assets.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -123,12 +124,18 @@ class FakeAlterTableBuilder {
   }
 
   addCheckConstraint(constraintName: string, _expression: unknown) {
-    this.db.addedConstraints.push({ tableName: this.tableName, constraintName });
+    this.db.addedConstraints.push({
+      tableName: this.tableName,
+      constraintName,
+    });
     return this;
   }
 
   dropConstraint(constraintName: string) {
-    this.db.droppedConstraints.push({ tableName: this.tableName, constraintName });
+    this.db.droppedConstraints.push({
+      tableName: this.tableName,
+      constraintName,
+    });
     return this;
   }
 
@@ -198,8 +205,16 @@ class FakeOrderSalesChannelDb {
   readonly addedConstraints: ConstraintOperation[] = [];
   readonly droppedColumns: { tableName: string; columnName: string }[] = [];
   readonly droppedConstraints: ConstraintOperation[] = [];
-  readonly createdIndexes: { indexName: string; tableName?: string; columnNames: string[] }[] = [];
-  readonly droppedIndexes: { indexName: string; tableName?: string; ifExists: boolean }[] = [];
+  readonly createdIndexes: {
+    indexName: string;
+    tableName?: string;
+    columnNames: string[];
+  }[] = [];
+  readonly droppedIndexes: {
+    indexName: string;
+    tableName?: string;
+    ifExists: boolean;
+  }[] = [];
 
   readonly schema = {
     alterTable: (tableName: string) => new FakeAlterTableBuilder(tableName, this),
@@ -212,13 +227,14 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0074_import_event_immutability');
+    expect(Object.keys(migrations).at(-1)).toBe('0075_event_media_assets');
     expect(migrations['0071_portable_import_approvals']).toBe(PortableImportApprovalsMigration);
     expect(migrations['0072_portable_import_rebindings']).toBe(PortableImportRebindingsMigration);
     expect(migrations['0073_portable_import_commit_authorizations']).toBe(
       PortableImportCommitAuthorizationsMigration,
     );
     expect(migrations['0074_import_event_immutability']).toBe(ImportEventImmutabilityMigration);
+    expect(migrations['0075_event_media_assets']).toBe(EventMediaAssetsMigration);
     expect(migrations['0070_portable_import_preflights']).toBe(PortableImportPreflightsMigration);
     expect(migrations['0069_portable_export_build_leases']).toBe(
       PortableExportBuildLeasesMigration,
