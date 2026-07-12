@@ -11,13 +11,13 @@
     {
       "severity": "compatible",
       "category": "operation-added",
-      "path": "POST /migration-jobs/{jobId}/portable-approval",
+      "path": "GET /migration-jobs/{jobId}/portable-rebindings",
       "message": "Operation was added."
     },
     {
       "severity": "compatible",
       "category": "operation-added",
-      "path": "POST /migration-jobs/{jobId}/portable-approvals/{approvalId}/revoke",
+      "path": "PUT /migration-jobs/{jobId}/portable-rebindings/{portableId}",
       "message": "Operation was added."
     }
   ]

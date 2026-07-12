@@ -1,13 +1,13 @@
 {
   "releaseVersion": "2026-01-01",
   "apiVersion": "2026-01-01",
-  "commit": "dbc9643eae6c8905a5919396e8147c42044a46bb",
-  "timestamp": "2026-07-12T17:20:15-05:00",
+  "commit": "8b487eb57b034a2071097603ad0f832e04b8c4f4",
+  "timestamp": "2026-07-12T17:42:04-05:00",
   "provenance": {
-    "sourceCommit": "dbc9643eae6c8905a5919396e8147c42044a46bb",
-    "headTreeHash": "0d6588c60843c2eae72e30ecf961da511f246e67",
-    "sourceTreeHash": "cb8e88ff97153b09ab52a885bd708f275db42b03d253213f3205634a81d176de",
-    "trackedFileCount": 1809,
+    "sourceCommit": "8b487eb57b034a2071097603ad0f832e04b8c4f4",
+    "headTreeHash": "5d114663f60e3940fa5406ad6b4ea5301422958e",
+    "sourceTreeHash": "216abcd2691abc0478f171e4e78ecd094442c0089c8f926f68dfe0f32bde050a",
+    "trackedFileCount": 1810,
     "excludedGeneratedPaths": [
       "apps/docs/public/contracts/",
       "apps/docs/public/openapi.json",
@@ -22,18 +22,18 @@
   "artifacts": [
     {
       "name": "openapi.json",
-      "sha256": "384789cff449249fc08b3411d75ed54874a6a4829e1dfe54f6aab0a706b2df92",
-      "size": 875561
+      "sha256": "913cbf9dd1ac4f351f61e0e99d17864f87df6e6791d5ae5a7d7284ce191fe1b7",
+      "size": 883895
     },
     {
       "name": "openapi.yaml",
-      "sha256": "ce3b8ee22ea0ba9ff0712fd8728044d94e16c3ed0923c319de09a3beab8275f2",
-      "size": 600816
+      "sha256": "ac8107f6939cbad7fb452925e4fc9d4fbdf133191a8ec87beead9d79254a19ca",
+      "size": 606646
     },
     {
       "name": "openapi.d.ts",
-      "sha256": "b92fa21661f9b1cd01dd4c516f3a0c99586a2305d8eb6cd0f3e08c446e2d01ae",
-      "size": 444818
+      "sha256": "abae9a5ceaca208ade1c89ae8f927434ef8232fee6eab43ccb0e7c7a950309fe",
+      "size": 449182
     },
     {
       "name": "webhook-events.json",
@@ -47,8 +47,8 @@
     },
     {
       "name": "api-diff.json",
-      "sha256": "bf040e5bffd40f92cc33310527bfa0bad9a2f5318addca1bf1a358dff95bf506",
-      "size": 568
+      "sha256": "0a405cf8fef29570c1e892278dddd483143e6a7066a71f7d356b6e4d25de402f",
+      "size": 562
     },
     {
       "name": "CHANGELOG.md",

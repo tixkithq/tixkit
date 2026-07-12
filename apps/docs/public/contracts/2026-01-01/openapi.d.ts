@@ -5815,6 +5815,71 @@ export interface paths {
             };
         };
     };
+    "/migration-jobs/{jobId}/portable-rebindings": {
+        get: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["PortableImportRebindingStatus"];
+                    };
+                };
+                "400": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+            };
+        };
+    };
+    "/migration-jobs/{jobId}/portable-rebindings/{portableId}": {
+        put: {
+            parameters: {
+                path: {
+                    jobId: string;
+                    portableId: string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        destinationReference: string;
+                    };
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["PortableImportRebinding"];
+                    };
+                };
+                "400": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+            };
+        };
+    };
     "/migration-jobs/{jobId}/portable-approval": {
         post: {
             parameters: {
@@ -11893,6 +11958,67 @@ export type operations = {
             };
         };
     };
+    getPortableMigrationRebindings: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["PortableImportRebindingStatus"];
+                };
+            };
+            "400": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    bindPortableMigrationDestination: {
+        parameters: {
+            path: {
+                jobId: string;
+                portableId: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    destinationReference: string;
+                };
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["PortableImportRebinding"];
+                };
+            };
+            "400": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     approvePortableMigrationJob: {
         parameters: {
             path: {
@@ -12656,6 +12782,21 @@ export interface components {
             approvalDigest: string;
             expiresAt: string;
             commitConfirmation: string;
+        };
+        PortableImportRebinding: {
+            portableId: string;
+            kind: "custom_domain" | "provider_account" | "tax_registration" | "sending_identity" | "wallet_credential" | "oauth_redirect_origin" | "webhook_endpoint";
+            destinationReference: string;
+            boundBy?: string;
+            provenanceSha256: string;
+            updatedAt: string;
+        };
+        PortableImportRebindingStatus: {
+            required: Array<{
+                [key: string]: unknown;
+            }>;
+            completed: Array<components["schemas"]["PortableImportRebinding"]>;
+            complete: boolean;
         };
         PortableImportApprovalRevocation: {
             approvalId: string;
