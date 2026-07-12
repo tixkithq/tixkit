@@ -81,9 +81,30 @@ function requireProductionConfig(): void {
 
   const requiredDatabaseVariable =
     process.env.DB_DRIVER === 'mysql' ? 'DATABASE_URL_MYSQL' : 'DATABASE_URL';
-  const missing = requireEnvValues([requiredDatabaseVariable, 'REDIS_URL']);
+  const observabilityRequired =
+    process.env.OTEL_SDK_DISABLED === 'true'
+      ? []
+      : ['OTEL_EXPORTER_OTLP_ENDPOINT', 'PROMETHEUS_PUSHGATEWAY_URL'];
+  const missing = requireEnvValues([
+    requiredDatabaseVariable,
+    'REDIS_URL',
+    ...observabilityRequired,
+  ]);
   if (missing.length > 0) {
     throw new Error(`Production worker config requires ${missing.join(', ')}`);
+  }
+  for (const name of observabilityRequired) {
+    try {
+      const value =
+        name === 'OTEL_EXPORTER_OTLP_ENDPOINT'
+          ? (process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ?? process.env[name])
+          : process.env[name];
+      if (new URL(value ?? '').protocol !== 'https:') throw new Error();
+    } catch {
+      throw new Error(
+        `${name === 'OTEL_EXPORTER_OTLP_ENDPOINT' ? 'effective OTLP traces endpoint' : name} must be an absolute HTTPS URL in production`,
+      );
+    }
   }
 
   const localEndpoints = [

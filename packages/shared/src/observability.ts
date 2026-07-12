@@ -80,7 +80,30 @@ export async function createTraceExporter(
   const traceEndpoint =
     process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ??
     formatOtlpTraceEndpoint(config.otlpEndpoint ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT);
-  return new _OTLPTraceExporter(traceEndpoint ? { url: traceEndpoint } : undefined);
+  const headers = parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS);
+  return new _OTLPTraceExporter({
+    ...(traceEndpoint ? { url: traceEndpoint } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+  });
+}
+
+export function parseOtlpHeaders(value: string | undefined): Record<string, string> {
+  if (!value?.trim()) return {};
+  const headers: Record<string, string> = {};
+  for (const entry of value.split(',')) {
+    const separator = entry.indexOf('=');
+    if (separator <= 0) throw new Error('OTEL_EXPORTER_OTLP_HEADERS entries must be key=value');
+    const key = decodeURIComponent(entry.slice(0, separator).trim()).toLowerCase();
+    const headerValue = decodeURIComponent(entry.slice(separator + 1).trim());
+    if (!/^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(key) || /[\r\n]/.test(headerValue)) {
+      throw new Error('OTEL_EXPORTER_OTLP_HEADERS contains an invalid header');
+    }
+    if (Object.hasOwn(headers, key)) {
+      throw new Error(`OTEL_EXPORTER_OTLP_HEADERS contains duplicate header ${key}`);
+    }
+    headers[key] = headerValue;
+  }
+  return headers;
 }
 
 export async function startOpenTelemetry(
@@ -368,11 +391,27 @@ export function observeTemporalActivity(
 
 export async function pushMetricsToGateway(
   metrics: TixkitMetrics,
-  input: { gatewayUrl?: string; jobName: string },
+  input: { gatewayUrl?: string; jobName: string; instance?: string },
 ): Promise<void> {
   if (!input.gatewayUrl) return;
   const gateway = new Pushgateway(input.gatewayUrl, {}, metrics.registry);
-  await gateway.push({ jobName: input.jobName });
+  await gateway.push({
+    jobName: input.jobName,
+    ...(input.instance ? { groupings: { instance: input.instance } } : {}),
+  });
+}
+
+export async function deleteMetricsFromGateway(input: {
+  gatewayUrl?: string;
+  jobName: string;
+  instance?: string;
+}): Promise<void> {
+  if (!input.gatewayUrl) return;
+  const gateway = new Pushgateway(input.gatewayUrl);
+  await gateway.delete({
+    jobName: input.jobName,
+    ...(input.instance ? { groupings: { instance: input.instance } } : {}),
+  });
 }
 
 function formatOtlpTraceEndpoint(endpoint?: string): string | undefined {

@@ -3,6 +3,7 @@ import {
   createTixkitMetrics,
   createTelemetryResource,
   observeMigrationOperation,
+  parseOtlpHeaders,
   redactObject,
   redactString,
   sanitizeSpanAttributes,
@@ -17,6 +18,25 @@ afterEach(() => {
   } else {
     process.env.OTEL_SDK_DISABLED = originalOtelSdkDisabled;
   }
+});
+
+describe('OTLP header configuration', () => {
+  it('decodes authenticated collector headers without exposing them as resource attributes', () => {
+    expect(parseOtlpHeaders('Authorization=Bearer%20secret,x-tenant=tixkit')).toEqual({
+      authorization: 'Bearer secret',
+      'x-tenant': 'tixkit',
+    });
+  });
+
+  it('rejects malformed, duplicate, and newline-bearing headers', () => {
+    for (const value of [
+      'missing-separator',
+      'authorization=one,Authorization=two',
+      'authorization=one%0Atwo',
+    ]) {
+      expect(() => parseOtlpHeaders(value), value).toThrow(/OTEL_EXPORTER_OTLP_HEADERS/);
+    }
+  });
 });
 
 describe('observability redaction', () => {

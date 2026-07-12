@@ -25,6 +25,33 @@
 {{- if ne .Values.migrations.strategy "manual" -}}
 {{- fail "production profile requires migrations.strategy=manual" -}}
 {{- end -}}
+{{- if not .Values.observability.enabled -}}
+{{- fail "production profile requires observability.enabled" -}}
+{{- end -}}
+{{- if ne .Values.observability.otlp.protocol "http/protobuf" -}}
+{{- fail "production profile currently supports observability.otlp.protocol=http/protobuf" -}}
+{{- end -}}
+{{- if not (has .Values.observability.metrics.mode (list "service-monitor" "external")) -}}
+{{- fail "observability.metrics.mode must be service-monitor or external" -}}
+{{- end -}}
+{{- if and (eq .Values.observability.metrics.mode "service-monitor") (not .Values.observability.metrics.serviceMonitor.namespace) -}}
+{{- fail "service-monitor mode requires observability.metrics.serviceMonitor.namespace" -}}
+{{- end -}}
+{{- if and .Values.observability.alerts.enabled (not (regexMatch "^https://" .Values.observability.alerts.runbookUrl)) -}}
+{{- fail "production alert runbookUrl must be absolute HTTPS" -}}
+{{- end -}}
+{{- if or (le (float64 .Values.observability.alerts.apiErrorRateThreshold) 0.0) (ge (float64 .Values.observability.alerts.apiErrorRateThreshold) 1.0) -}}
+{{- fail "observability apiErrorRateThreshold must be between 0 and 1" -}}
+{{- end -}}
+{{- if le (float64 .Values.observability.alerts.apiP95LatencySeconds) 0.0 -}}
+{{- fail "observability apiP95LatencySeconds must be positive" -}}
+{{- end -}}
+{{- if le (int .Values.observability.alerts.migrationProgressAgeSeconds) 0 -}}
+{{- fail "observability migrationProgressAgeSeconds must be positive" -}}
+{{- end -}}
+{{- if lt (int .Values.observability.alerts.workerPushFreshnessSeconds) 90 -}}
+{{- fail "observability workerPushFreshnessSeconds must be at least 90 seconds" -}}
+{{- end -}}
 {{- if or .Values.postgres.enabled .Values.redis.enabled .Values.temporal.enabled .Values.minio.enabled -}}
 {{- fail "production profile requires external PostgreSQL/MySQL, Redis, Temporal, and object storage" -}}
 {{- end -}}
@@ -81,6 +108,9 @@
 {{- end -}}
 {{- $databaseKey := ternary "DATABASE_URL_MYSQL" "DATABASE_URL" (eq .Values.database.driver "mysql") -}}
 {{- $required := list $databaseKey "REDIS_URL" "TEMPORAL_ADDRESS" "STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET" "METRICS_BEARER_TOKEN" -}}
+{{- if .Values.observability.enabled -}}
+{{- $required = concat $required (list "OTEL_EXPORTER_OTLP_ENDPOINT" "PROMETHEUS_PUSHGATEWAY_URL") -}}
+{{- end -}}
 {{- if eq .Values.auth.provider "clerk" -}}
 {{- $required = concat $required (list "CLERK_SECRET_KEY" "CLERK_PUBLISHABLE_KEY" "CLERK_WEBHOOK_SECRET") -}}
 {{- else -}}

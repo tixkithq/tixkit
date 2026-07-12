@@ -7,6 +7,7 @@ import type {
 import type { Database } from '@tixkit/db';
 import {
   createTixkitMetrics,
+  deleteMetricsFromGateway,
   observeTemporalActivity,
   observeMigrationOperation,
   pushMetricsToGateway,
@@ -17,6 +18,10 @@ import {
 export type WorkerObservability = {
   metrics: TixkitMetrics;
 };
+
+function workerMetricsInstance(): string | undefined {
+  return process.env.POD_NAME ?? process.env.HOSTNAME;
+}
 
 let observability: WorkerObservability | undefined;
 let metricsPushInFlight: Promise<void> | undefined;
@@ -34,6 +39,7 @@ function scheduleMetricsPush(metrics: TixkitMetrics): void {
   metricsPushInFlight = pushMetricsToGateway(metrics, {
     gatewayUrl,
     jobName: 'tixkit-worker',
+    instance: workerMetricsInstance(),
   })
     .then(() => undefined)
     .catch(() => undefined)
@@ -44,6 +50,18 @@ function scheduleMetricsPush(metrics: TixkitMetrics): void {
         scheduleMetricsPush(metrics);
       }
     });
+}
+
+export async function deleteWorkerMetricsGrouping(): Promise<void> {
+  try {
+    await deleteMetricsFromGateway({
+      gatewayUrl: process.env.PROMETHEUS_PUSHGATEWAY_URL,
+      jobName: 'tixkit-worker',
+      instance: workerMetricsInstance(),
+    });
+  } catch {
+    // Shutdown must continue; freshness-bounded alerts ignore a grouping left by hard loss.
+  }
 }
 
 export async function startWorkerObservability(): Promise<WorkerObservability> {
@@ -168,6 +186,7 @@ export function startMigrationProgressAgeRefresh(
   metrics: TixkitMetrics,
   db: Database,
   intervalMs = 30_000,
+  load: () => Promise<DurableMigrationProgress[]> = () => loadDurableMigrationProgress(db),
 ): () => void {
   let stopped = false;
   let inFlight = false;
@@ -175,7 +194,8 @@ export function startMigrationProgressAgeRefresh(
     if (stopped || inFlight) return;
     inFlight = true;
     try {
-      await refreshMigrationProgressAgeMetrics(metrics, () => loadDurableMigrationProgress(db));
+      await refreshMigrationProgressAgeMetrics(metrics, load);
+      scheduleMetricsPush(metrics);
     } finally {
       inFlight = false;
     }

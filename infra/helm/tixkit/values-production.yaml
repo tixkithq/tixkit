@@ -44,3 +44,12 @@ networkPolicy:
   enabled: true
   externalEgressCidrs: []
   databaseEgressCidrs: []
+
+observability:
+  enabled: true
+  otlp:
+    resourceAttributes: service.namespace=tixkit,deployment.profile=production
+  metrics:
+    mode: service-monitor
+  alerts:
+    enabled: true

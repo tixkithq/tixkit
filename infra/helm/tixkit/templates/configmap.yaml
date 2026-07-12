@@ -26,4 +26,8 @@ data:
   S3_REGION: {{ .Values.secrets.s3Region | quote }}
   S3_AUTH_MODE: {{ .Values.secrets.s3AuthMode | quote }}
   S3_FORCE_PATH_STYLE: {{ .Values.secrets.s3ForcePathStyle | quote }}
-  OTEL_SDK_DISABLED: "false"
+  OTEL_SDK_DISABLED: {{ not .Values.observability.enabled | quote }}
+  OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.observability.otlp.protocol | quote }}
+  OTEL_RESOURCE_ATTRIBUTES: {{ .Values.observability.otlp.resourceAttributes | quote }}
+  OTEL_TRACES_SAMPLER: {{ .Values.observability.otlp.tracesSampler | quote }}
+  OTEL_TRACES_SAMPLER_ARG: {{ .Values.observability.otlp.tracesSamplerArg | quote }}

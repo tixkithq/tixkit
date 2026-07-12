@@ -19,6 +19,7 @@ import {
 import { buildWorkerStartupFailureMessage } from './startup-diagnostics.js';
 import {
   TixkitActivityMetricsInterceptor,
+  deleteWorkerMetricsGrouping,
   startMigrationProgressAgeRefresh,
   startWorkerObservability,
 } from './observability.js';
@@ -285,6 +286,7 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
   } finally {
     await rm('/tmp/tixkit-worker-ready', { force: true });
     stopMigrationProgressAgeRefresh();
+    await deleteWorkerMetricsGrouping();
     unregisterMigrationPreparationService();
     unregisterMigrationService();
     await activityDb.destroy();

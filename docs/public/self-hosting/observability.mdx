@@ -7,7 +7,7 @@ product_area: self-hosting
 content_type: how-to
 status: beta
 owner: platform-operations
-last_verified: 2026-07-10
+last_verified: 2026-07-12
 prerequisites:
   - A telemetry backend compatible with the repository configuration
 related:
@@ -26,3 +26,21 @@ Use request, workflow, delivery, export-job, checkout-session, and order identif
 Alert on error/latency saturation, worker/task-queue lag, failed checkout finalization, payment reconciliation, webhook dead letters, export failures, database pool pressure, storage errors, and documentation smoke failures. Avoid alerts based only on process uptime.
 
 Link alerts to the exact [incident runbook](/operations/incidents) and verify alert routing during release rehearsal.
+
+## Production Helm contract
+
+The Production values require observability to remain enabled. Configure `OTEL_EXPORTER_OTLP_ENDPOINT` in the runtime Secret with an HTTPS collector origin; Tixkit appends `/v1/traces`. If the collector requires headers, set `OTEL_EXPORTER_OTLP_HEADERS` as comma-separated, URL-encoded `key=value` entries. Header values are credentials: keep them in the Secret, never in `OTEL_RESOURCE_ATTRIBUTES` or committed values.
+
+The chart fixes the supported transport to `http/protobuf`, uses parent-based ratio sampling, and labels telemetry with the `tixkit` service namespace and deployment profile. Change the sampling ratio only after checking collector capacity and trace cost.
+
+When `observability.metrics.mode=service-monitor`, the cluster must already have the Prometheus Operator CRDs. The chart creates:
+
+- an API `ServiceMonitor` for `/metrics` using `METRICS_BEARER_TOKEN` from the runtime Secret;
+- alert rules for sustained API 5xx rate, API p95 latency, and stalled durable migration progress;
+- worker metric delivery through `PROMETHEUS_PUSHGATEWAY_URL`.
+
+Workers publish under a per-pod Pushgateway grouping, delete that grouping on graceful shutdown, and bound migration-stall alerts by the grouping's `push_time_seconds`. This prevents a hard-lost pod's last gauge from alerting forever; monitor Pushgateway storage separately and retain its own stale-series cleanup policy.
+
+If another metrics system owns discovery, set the mode to `external` and reproduce the same authenticated scrape and alert semantics outside the chart. Never expose `/metrics` through public ingress.
+
+Before accepting a release, prove a trace reaches the collector, an authenticated scrape succeeds while an unauthenticated scrape returns `401`, worker activity metrics arrive, and a test alert reaches the intended route. A rendered `ServiceMonitor` alone is not runtime proof.

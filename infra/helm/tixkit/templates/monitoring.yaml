@@ -1,0 +1,91 @@
+{{- if and .Values.observability.enabled (eq .Values.observability.metrics.mode "service-monitor") }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "tixkit.fullname" . }}-api
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    {{- with .Values.observability.metrics.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  selector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.observability.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.metrics.serviceMonitor.scrapeTimeout }}
+      bearerTokenSecret:
+        name: {{ .Values.secrets.name }}
+        key: METRICS_BEARER_TOKEN
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "tixkit.fullname" . }}-metrics-ingress
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.metrics.serviceMonitor.namespace | quote }}
+          {{- with .Values.observability.metrics.serviceMonitor.podSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+{{- if .Values.observability.alerts.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "tixkit.fullname" . }}
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+    {{- with .Values.observability.alerts.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: tixkit.production
+      rules:
+        - alert: TixkitApiHighErrorRate
+          expr: (sum(rate(tixkit_http_request_errors_total{service="tixkit-api"}[5m])) / sum(rate(tixkit_http_request_duration_seconds_count{service="tixkit-api"}[5m])) > {{ .Values.observability.alerts.apiErrorRateThreshold }}) and (sum(rate(tixkit_http_request_duration_seconds_count{service="tixkit-api"}[5m])) > 0)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Tixkit API error rate exceeds its production threshold
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+        - alert: TixkitApiHighP95Latency
+          expr: histogram_quantile(0.95, sum by (le) (rate(tixkit_http_request_duration_seconds_bucket{service="tixkit-api"}[5m]))) > {{ .Values.observability.alerts.apiP95LatencySeconds }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Tixkit API p95 latency exceeds its production threshold
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+        - alert: TixkitMigrationProgressStalled
+          expr: max(tixkit_migration_progress_age_seconds{service="tixkit-worker"} and on(job, instance) (time() - push_time_seconds{job="tixkit-worker"} < {{ .Values.observability.alerts.workerPushFreshnessSeconds }})) > {{ .Values.observability.alerts.migrationProgressAgeSeconds }}
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: A Tixkit migration has stopped making durable progress
+            runbook_url: {{ .Values.observability.alerts.runbookUrl | quote }}
+{{- end }}
+{{- end }}

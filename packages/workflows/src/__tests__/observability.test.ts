@@ -6,7 +6,9 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { describe, expect, it, vi } from 'vitest';
 import {
   TixkitActivityMetricsInterceptor,
+  deleteWorkerMetricsGrouping,
   refreshMigrationProgressAgeMetrics,
+  startMigrationProgressAgeRefresh,
 } from '../observability.js';
 import { createWorkflowExporterSink } from '../otel-workflow-exporter.js';
 
@@ -16,11 +18,13 @@ vi.mock('@temporalio/interceptors-opentelemetry', () => ({
 }));
 
 const pushMetricsToGatewayMock = vi.hoisted(() => vi.fn(async () => undefined));
+const deleteMetricsFromGatewayMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('@tixkit/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tixkit/shared')>();
   return {
     ...actual,
+    deleteMetricsFromGateway: deleteMetricsFromGatewayMock,
     pushMetricsToGateway: pushMetricsToGatewayMock,
     startOpenTelemetry: () => ({ shutdown: async () => undefined }),
   };
@@ -69,6 +73,46 @@ describe('worker observability', () => {
 
     expect(typeof OpenTelemetryActivityInboundInterceptor).toBe('function');
     expect(typeof startOpenTelemetry).toBe('function');
+  });
+
+  it('pushes advancing durable migration age without requiring new activity execution', async () => {
+    const originalGatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY_URL;
+    process.env.PROMETHEUS_PUSHGATEWAY_URL = 'https://pushgateway.test';
+    pushMetricsToGatewayMock.mockClear();
+    const stop = startMigrationProgressAgeRefresh(
+      createTixkitMetrics('test-worker-stall-push'),
+      {} as never,
+      10,
+      async () => [{ phase: 'commit', lastProgressAt: new Date(Date.now() - 901_000) }],
+    );
+    try {
+      await vi.waitFor(() => expect(pushMetricsToGatewayMock).toHaveBeenCalled());
+    } finally {
+      stop();
+      if (originalGatewayUrl === undefined) delete process.env.PROMETHEUS_PUSHGATEWAY_URL;
+      else process.env.PROMETHEUS_PUSHGATEWAY_URL = originalGatewayUrl;
+    }
+  });
+
+  it('deletes the exact per-pod Pushgateway grouping during graceful shutdown', async () => {
+    const originalGatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY_URL;
+    const originalPodName = process.env.POD_NAME;
+    process.env.PROMETHEUS_PUSHGATEWAY_URL = 'https://pushgateway.test';
+    process.env.POD_NAME = 'worker-7';
+    deleteMetricsFromGatewayMock.mockClear();
+    try {
+      await deleteWorkerMetricsGrouping();
+      expect(deleteMetricsFromGatewayMock).toHaveBeenCalledWith({
+        gatewayUrl: 'https://pushgateway.test',
+        jobName: 'tixkit-worker',
+        instance: 'worker-7',
+      });
+    } finally {
+      if (originalGatewayUrl === undefined) delete process.env.PROMETHEUS_PUSHGATEWAY_URL;
+      else process.env.PROMETHEUS_PUSHGATEWAY_URL = originalGatewayUrl;
+      if (originalPodName === undefined) delete process.env.POD_NAME;
+      else process.env.POD_NAME = originalPodName;
+    }
   });
 
   it('exports serialized workflow spans through the OTel 2.x exporter shape', async () => {
@@ -156,7 +200,10 @@ describe('worker observability', () => {
 
   it('does not overlap metrics pushes when the gateway never settles', async () => {
     const originalGatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY_URL;
+    const originalPodName = process.env.POD_NAME;
     process.env.PROMETHEUS_PUSHGATEWAY_URL = 'http://pushgateway.test';
+    process.env.POD_NAME = 'worker-0';
+    pushMetricsToGatewayMock.mockClear();
     pushMetricsToGatewayMock.mockImplementationOnce(() => new Promise<undefined>(() => undefined));
     const interceptor = new TixkitActivityMetricsInterceptor(
       activityContext('hungGatewayActivity'),
@@ -167,9 +214,15 @@ describe('worker observability', () => {
       await interceptor.execute({ args: [], headers: {} as never }, async () => ({ ok: true }));
       await interceptor.execute({ args: [], headers: {} as never }, async () => ({ ok: true }));
       await vi.waitFor(() => expect(pushMetricsToGatewayMock).toHaveBeenCalledTimes(1));
+      expect(pushMetricsToGatewayMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ instance: 'worker-0' }),
+      );
     } finally {
       if (originalGatewayUrl === undefined) delete process.env.PROMETHEUS_PUSHGATEWAY_URL;
       else process.env.PROMETHEUS_PUSHGATEWAY_URL = originalGatewayUrl;
+      if (originalPodName === undefined) delete process.env.POD_NAME;
+      else process.env.POD_NAME = originalPodName;
     }
   });
 });

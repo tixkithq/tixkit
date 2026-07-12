@@ -44,6 +44,11 @@ spec:
                 name: {{ include "tixkit.fullname" . }}-config
             - secretRef:
                 name: {{ .Values.secrets.name }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
       volumes:

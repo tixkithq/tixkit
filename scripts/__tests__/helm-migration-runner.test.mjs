@@ -119,6 +119,8 @@ function externalSecretKeysForValues() {
     'CLERK_WEBHOOK_SECRET',
     'S3_ACCESS_KEY_ID',
     'S3_SECRET_ACCESS_KEY',
+    'OTEL_EXPORTER_OTLP_ENDPOINT',
+    'PROMETHEUS_PUSHGATEWAY_URL',
   ];
 }
 

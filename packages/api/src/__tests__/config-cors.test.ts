@@ -21,6 +21,9 @@ const ENV_KEYS = [
   'NODE_ENV',
   'OIDC_AUDIENCE',
   'OIDC_ISSUER_URL',
+  'OTEL_EXPORTER_OTLP_ENDPOINT',
+  'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT',
+  'OTEL_SDK_DISABLED',
   'RATE_LIMIT_MAX',
   'RATE_LIMIT_TIME_WINDOW',
   'REDIS_URL',
@@ -61,6 +64,7 @@ function setValidProductionConfig(): void {
   process.env.CORS_ALLOWED_ORIGINS = 'https://admin.example.com,https://checkout.example.com';
   process.env.DATABASE_URL = 'postgres://tixkit:secret@db.example.com:5432/tixkit';
   process.env.METRICS_BEARER_TOKEN = 'metrics-token';
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'https://otel.example.com';
   process.env.REDIS_URL = 'rediss://redis.example.com:6379';
   process.env.S3_ACCESS_KEY_ID = 's3-production-key';
   process.env.S3_BUCKET = 'tixkit-production';
@@ -314,6 +318,29 @@ describe('API exposure config parsing', () => {
     expect(config.s3Endpoint).toBe('');
     expect(config.s3AccessKeyId).toBe('');
     expect(config.s3SecretAccessKey).toBe('');
+  });
+
+  it('requires an HTTPS OTLP collector whenever production telemetry is enabled', () => {
+    setValidProductionConfig();
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    expect(() => loadConfig()).toThrow('Production config requires OTEL_EXPORTER_OTLP_ENDPOINT');
+
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://otel.example.com';
+    expect(() => loadConfig()).toThrow(
+      'effective OTLP traces endpoint must be an absolute HTTPS URL in production',
+    );
+  });
+
+  it('validates the effective traces-specific OTLP override', () => {
+    setValidProductionConfig();
+    for (const value of ['http://otel.example.com/v1/traces', 'not-a-url']) {
+      process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = value;
+      expect(() => loadConfig(), value).toThrow(
+        'effective OTLP traces endpoint must be an absolute HTTPS URL in production',
+      );
+    }
+    process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = 'https://traces.example.com/v1/traces';
+    expect(loadConfig().nodeEnv).toBe('production');
   });
 
   it('rejects missing production Temporal config', () => {

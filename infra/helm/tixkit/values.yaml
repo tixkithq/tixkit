@@ -63,6 +63,7 @@ secrets:
   s3AuthMode: static
   s3ForcePathStyle: true
   otelExporterOtlpEndpoint: ''
+  otelExporterOtlpHeaders: ''
   prometheusPushgatewayUrl: ''
   metricsBearerToken: ''
 
@@ -195,6 +196,30 @@ networkPolicy:
   externalEgressCidrs: []
   externalEgressPorts: [443, 3306, 4317, 4318, 5432, 6379, 7233]
   databaseEgressCidrs: []
+
+observability:
+  enabled: false
+  otlp:
+    protocol: http/protobuf
+    resourceAttributes: service.namespace=tixkit,deployment.profile=evaluation
+    tracesSampler: parentbased_traceidratio
+    tracesSamplerArg: '0.10'
+  metrics:
+    mode: external
+    serviceMonitor:
+      interval: 30s
+      scrapeTimeout: 10s
+      namespace: monitoring
+      podSelector: {}
+      additionalLabels: {}
+  alerts:
+    enabled: false
+    apiErrorRateThreshold: 0.05
+    apiP95LatencySeconds: 2
+    migrationProgressAgeSeconds: 900
+    workerPushFreshnessSeconds: 120
+    runbookUrl: https://docs.tixkit.com/operations/incidents
+    additionalLabels: {}
 
 migrations:
   enabled: true

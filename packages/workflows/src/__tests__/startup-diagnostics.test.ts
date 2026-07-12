@@ -7,6 +7,10 @@ const originalEnv = {
   DATABASE_URL_MYSQL: process.env.DATABASE_URL_MYSQL,
   DB_DRIVER: process.env.DB_DRIVER,
   NODE_ENV: process.env.NODE_ENV,
+  OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+  OTEL_SDK_DISABLED: process.env.OTEL_SDK_DISABLED,
+  PROMETHEUS_PUSHGATEWAY_URL: process.env.PROMETHEUS_PUSHGATEWAY_URL,
   REDIS_URL: process.env.REDIS_URL,
   TEMPORAL_ADDRESS: process.env.TEMPORAL_ADDRESS,
   TEMPORAL_EXPORT_TASK_QUEUE: process.env.TEMPORAL_EXPORT_TASK_QUEUE,
@@ -27,6 +31,10 @@ afterEach(() => {
   restoreEnv('DATABASE_URL_MYSQL', originalEnv.DATABASE_URL_MYSQL);
   restoreEnv('DB_DRIVER', originalEnv.DB_DRIVER);
   restoreEnv('NODE_ENV', originalEnv.NODE_ENV);
+  restoreEnv('OTEL_EXPORTER_OTLP_ENDPOINT', originalEnv.OTEL_EXPORTER_OTLP_ENDPOINT);
+  restoreEnv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', originalEnv.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT);
+  restoreEnv('OTEL_SDK_DISABLED', originalEnv.OTEL_SDK_DISABLED);
+  restoreEnv('PROMETHEUS_PUSHGATEWAY_URL', originalEnv.PROMETHEUS_PUSHGATEWAY_URL);
   restoreEnv('REDIS_URL', originalEnv.REDIS_URL);
   restoreEnv('TEMPORAL_ADDRESS', originalEnv.TEMPORAL_ADDRESS);
   restoreEnv('TEMPORAL_EXPORT_TASK_QUEUE', originalEnv.TEMPORAL_EXPORT_TASK_QUEUE);
@@ -61,6 +69,8 @@ function restoreEnv(key: keyof typeof originalEnv, value: string | undefined): v
 function setValidProductionConfig(): void {
   process.env.DATABASE_URL = 'postgres://tixkit:secret@db.example.com:5432/tixkit';
   process.env.NODE_ENV = 'production';
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'https://otel.example.com';
+  process.env.PROMETHEUS_PUSHGATEWAY_URL = 'https://pushgateway.example.com';
   process.env.REDIS_URL = 'rediss://redis.example.com:6379';
   process.env.TEMPORAL_ADDRESS = 'temporal.example.com:7233';
   process.env.TEMPORAL_NAMESPACE = 'tixkit.production';
@@ -157,6 +167,30 @@ describe('worker Temporal config', () => {
     delete process.env.DATABASE_URL_MYSQL;
 
     expect(() => loadConfig()).toThrow('Production worker config requires DATABASE_URL_MYSQL');
+  });
+
+  it('requires HTTPS OTLP and Pushgateway endpoints in production', () => {
+    for (const key of ['OTEL_EXPORTER_OTLP_ENDPOINT', 'PROMETHEUS_PUSHGATEWAY_URL'] as const) {
+      setValidProductionConfig();
+      delete process.env[key];
+      expect(() => loadConfig(), key).toThrow(`Production worker config requires ${key}`);
+
+      setValidProductionConfig();
+      process.env[key] = `http://${key.toLowerCase()}.example.com`;
+      expect(() => loadConfig(), key).toThrow(
+        `${key === 'OTEL_EXPORTER_OTLP_ENDPOINT' ? 'effective OTLP traces endpoint' : key} must be an absolute HTTPS URL in production`,
+      );
+    }
+  });
+
+  it('validates the effective traces-specific OTLP override', () => {
+    setValidProductionConfig();
+    process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = 'http://otel.example.com/v1/traces';
+    expect(() => loadConfig()).toThrow(
+      'effective OTLP traces endpoint must be an absolute HTTPS URL in production',
+    );
+    process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = 'https://otel.example.com/v1/traces';
+    expect(loadConfig().temporalTaskQueue).toBe('tixkit-production');
   });
 
   it('rejects local production database and Redis endpoints', () => {

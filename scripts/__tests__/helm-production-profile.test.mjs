@@ -33,6 +33,8 @@ const externalSecretKeys = [
   'CLERK_WEBHOOK_SECRET',
   'S3_ACCESS_KEY_ID',
   'S3_SECRET_ACCESS_KEY',
+  'OTEL_EXPORTER_OTLP_ENDPOINT',
+  'PROMETHEUS_PUSHGATEWAY_URL',
 ];
 
 function externalSecretDataOverrides(keys = externalSecretKeys) {
@@ -86,13 +88,45 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     rendered.filter((resource) => resource.kind === 'HorizontalPodAutoscaler').length,
     4,
   );
-  assert.equal(rendered.filter((resource) => resource.kind === 'NetworkPolicy').length, 5);
+  assert.equal(rendered.filter((resource) => resource.kind === 'NetworkPolicy').length, 6);
+  const serviceMonitor = rendered.find((resource) => resource.kind === 'ServiceMonitor');
+  assert.equal(serviceMonitor.spec.endpoints[0].path, '/metrics');
+  assert.deepEqual(serviceMonitor.spec.endpoints[0].bearerTokenSecret, {
+    name: 'tixkit-production-secrets',
+    key: 'METRICS_BEARER_TOKEN',
+  });
+  const alerts = rendered.find((resource) => resource.kind === 'PrometheusRule');
+  assert.deepEqual(
+    alerts.spec.groups[0].rules.map((rule) => rule.alert),
+    ['TixkitApiHighErrorRate', 'TixkitApiHighP95Latency', 'TixkitMigrationProgressStalled'],
+  );
+  const errorRateExpression = alerts.spec.groups[0].rules[0].expr;
+  assert.doesNotMatch(errorRateExpression, /clamp_min/);
+  assert.match(errorRateExpression, /and \(sum\(rate\(.+\)\) > 0\)/);
+  const migrationStallExpression = alerts.spec.groups[0].rules[2].expr;
+  assert.match(migrationStallExpression, /push_time_seconds\{job="tixkit-worker"\}/);
+  assert.match(migrationStallExpression, /< 120/);
+  const metricsIngress = rendered.find(
+    (resource) =>
+      resource.kind === 'NetworkPolicy' && resource.metadata.name.endsWith('metrics-ingress'),
+  );
+  assert.equal(
+    metricsIngress.spec.ingress[0].from[0].namespaceSelector.matchLabels[
+      'kubernetes.io/metadata.name'
+    ],
+    'monitoring',
+  );
+  assert.deepEqual(metricsIngress.spec.ingress[0].ports, [{ protocol: 'TCP', port: 4000 }]);
   const worker = rendered.find(
     (resource) =>
       resource.kind === 'Deployment' &&
       resource.metadata?.labels?.['app.kubernetes.io/component'] === 'worker',
   );
   assert.equal(worker.spec.template.spec.containers[0].volumeMounts[0].mountPath, '/tmp');
+  assert.deepEqual(worker.spec.template.spec.containers[0].env[0], {
+    name: 'POD_NAME',
+    valueFrom: { fieldRef: { fieldPath: 'metadata.name' } },
+  });
   const ingress = rendered.find(
     (resource) =>
       resource.kind === 'NetworkPolicy' && resource.metadata.name.endsWith('public-ingress'),
@@ -230,7 +264,7 @@ test('External Secrets mode rejects an incomplete required-key inventory', () =>
         'secrets.externalSecret.secretStoreName=production-store',
         ...externalSecretDataOverrides(externalSecretKeys.slice(0, -1)),
       ]),
-    /ExternalSecret data must map required key S3_SECRET_ACCESS_KEY/,
+    /ExternalSecret data must map required key PROMETHEUS_PUSHGATEWAY_URL/,
   );
 });
 
@@ -245,6 +279,8 @@ test('External Secret inventory follows MySQL, OIDC, workload identity, and Temp
     'METRICS_BEARER_TOKEN',
     'OIDC_ISSUER_URL',
     'OIDC_AUDIENCE',
+    'OTEL_EXPORTER_OTLP_ENDPOINT',
+    'PROMETHEUS_PUSHGATEWAY_URL',
   ];
   const rendered = resources(
     render(production, [
@@ -335,6 +371,26 @@ test('Production rejects unrestricted database egress CIDRs', () => {
           `networkPolicy.databaseEgressCidrs[0]=${cidr}`,
         ]),
       /forbids unrestricted networkPolicy database egress CIDRs/,
+    );
+  }
+});
+
+test('Production rejects observability thresholds that disable meaningful alerts', () => {
+  for (const [override, message] of [
+    ['observability.alerts.apiErrorRateThreshold=0', 'apiErrorRateThreshold'],
+    ['observability.alerts.apiErrorRateThreshold=1', 'apiErrorRateThreshold'],
+    ['observability.alerts.apiP95LatencySeconds=0', 'apiP95LatencySeconds'],
+    ['observability.alerts.migrationProgressAgeSeconds=0', 'migrationProgressAgeSeconds'],
+    ['observability.alerts.workerPushFreshnessSeconds=60', 'workerPushFreshnessSeconds'],
+  ]) {
+    assert.throws(
+      () =>
+        render(production, [
+          'global.imageRegistry=ghcr.io/tixkit/tixkit',
+          'secrets.name=tixkit-production-secrets',
+          override,
+        ]),
+      new RegExp(message),
     );
   }
 });

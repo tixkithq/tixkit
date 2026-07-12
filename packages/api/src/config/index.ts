@@ -126,6 +126,14 @@ function requireProductionTemporalConfig(): void {
   }
 }
 
+function requireHttpsEndpoint(name: string, value: string | undefined): void {
+  try {
+    if (new URL(value ?? '').protocol !== 'https:') throw new Error();
+  } catch {
+    throw new Error(`${name} must be an absolute HTTPS URL in production`);
+  }
+}
+
 function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig): void {
   if (nodeEnv !== 'production') return;
 
@@ -154,6 +162,7 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
     'STRIPE_WEBHOOK_SECRET',
     'S3_BUCKET',
     'S3_REGION',
+    ...(process.env.OTEL_SDK_DISABLED === 'true' ? [] : ['OTEL_EXPORTER_OTLP_ENDPOINT']),
     ...(process.env.S3_AUTH_MODE === 'workload-identity'
       ? []
       : ['S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY']),
@@ -164,6 +173,12 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
   const missing = requireEnvValues(required);
   if (missing.length > 0) {
     throw new Error(`Production config requires ${missing.join(', ')}`);
+  }
+  if (process.env.OTEL_SDK_DISABLED !== 'true') {
+    requireHttpsEndpoint(
+      'effective OTLP traces endpoint',
+      process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    );
   }
 
   const localEndpoints = [
