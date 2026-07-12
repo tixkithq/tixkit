@@ -5,7 +5,14 @@
   "breaking": false,
   "summary": {
     "breaking": 0,
-    "compatible": 0
+    "compatible": 1
   },
-  "changes": []
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /migration-jobs/{jobId}/activate",
+      "message": "Operation was added."
+    }
+  ]
 }

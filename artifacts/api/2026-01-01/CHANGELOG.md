@@ -1,6 +1,6 @@
 # API 2026-01-01
 
-Compared with 2026-01-01. Breaking changes: 0. Compatible changes: 0.
+Compared with 2026-01-01. Breaking changes: 0. Compatible changes: 1.
 
 - OpenAPI JSON and YAML
 - Generated TypeScript declarations

@@ -5962,6 +5962,45 @@ export interface paths {
             };
         };
     };
+    "/migration-jobs/{jobId}/activate": {
+        post: {
+            parameters: {
+                path: {
+                    jobId: string;
+                };
+                header: {
+                    "x-tixkit-confirmation": string;
+                };
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["PortableImportActivated"];
+                    };
+                };
+                "400": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "404": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+            };
+        };
+    };
     "/migration-jobs/{jobId}/commit": {
         post: {
             parameters: {
@@ -12097,6 +12136,43 @@ export type operations = {
             };
         };
     };
+    activatePortableMigrationJob: {
+        parameters: {
+            path: {
+                jobId: string;
+            };
+            header: {
+                "x-tixkit-confirmation": string;
+            };
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["PortableImportActivated"];
+                };
+            };
+            "400": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "404": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     commitMigrationJob: {
         parameters: {
             path: {
@@ -12802,6 +12878,10 @@ export interface components {
             approvalId: string;
             revoked: true;
             revokedAt: string;
+        };
+        PortableImportActivated: {
+            jobId: string;
+            status: "activated";
         };
         MigrationActionAccepted: {
             jobId: string;
