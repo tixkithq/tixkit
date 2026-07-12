@@ -8,7 +8,8 @@ function timestampType(): ColumnDataType {
 
 export const AgentMemoryMigration: Migration = {
   async up(db): Promise<void> {
-    await db.schema.createTable('agent_memory_entries')
+    await db.schema
+      .createTable('agent_memory_entries')
       .addColumn('id', 'varchar(64)', (column) => column.primaryKey())
       .addColumn('tenant_id', 'varchar(32)', (column) => column.notNull())
       .addColumn('sponsor_principal_id', 'varchar(64)', (column) => column.notNull())
@@ -25,13 +26,23 @@ export const AgentMemoryMigration: Migration = {
       .addColumn('created_at', timestampType(), (column) => column.notNull())
       .addColumn('updated_at', timestampType(), (column) => column.notNull())
       .addForeignKeyConstraint('agent_memory_entries_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addUniqueConstraint('agent_memory_namespace_key_unique', ['tenant_id',
-        'sponsor_principal_id', 'scope_type', 'scope_id', 'purpose', 'memory_key'])
+      .addUniqueConstraint('agent_memory_namespace_key_unique', [
+        'tenant_id',
+        'sponsor_principal_id',
+        'scope_type',
+        'scope_id',
+        'purpose',
+        'memory_key',
+      ])
       .execute();
-    await db.schema.createIndex('agent_memory_retention_idx').on('agent_memory_entries')
-      .columns(['retention_expires_at', 'tenant_id']).execute();
+    await db.schema
+      .createIndex('agent_memory_retention_idx')
+      .on('agent_memory_entries')
+      .columns(['retention_expires_at', 'tenant_id'])
+      .execute();
 
-    await db.schema.createTable('agent_memory_events')
+    await db.schema
+      .createTable('agent_memory_events')
       .addColumn('id', 'varchar(64)', (column) => column.primaryKey())
       .addColumn('tenant_id', 'varchar(32)', (column) => column.notNull())
       .addColumn('sponsor_principal_id', 'varchar(64)', (column) => column.notNull())
@@ -53,16 +64,25 @@ export const AgentMemoryMigration: Migration = {
       .addColumn('outcome', 'varchar(20)', (column) => column.notNull())
       .addColumn('occurred_at', timestampType(), (column) => column.notNull())
       .addForeignKeyConstraint('agent_memory_events_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addUniqueConstraint('agent_memory_events_idempotency_unique', ['tenant_id', 'idempotency_key'])
+      .addUniqueConstraint('agent_memory_events_idempotency_unique', [
+        'tenant_id',
+        'idempotency_key',
+      ])
       .execute();
     if (process.env.DB_DRIVER === 'mysql') {
       await sql`create trigger agent_memory_events_no_update before update on agent_memory_events
-        for each row signal sqlstate '45000' set message_text = 'agent memory events are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent memory events are immutable'`.execute(
+        db,
+      );
       await sql`create trigger agent_memory_events_no_delete before delete on agent_memory_events
-        for each row signal sqlstate '45000' set message_text = 'agent memory events are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent memory events are immutable'`.execute(
+        db,
+      );
     } else if (process.env.DB_DRIVER === 'mssql') {
       await sql`create trigger agent_memory_events_immutable on agent_memory_events
-        instead of update, delete as throw 51000, 'agent memory events are immutable', 1`.execute(db);
+        instead of update, delete as throw 51000, 'agent memory events are immutable', 1`.execute(
+        db,
+      );
     } else {
       await sql`create function reject_agent_memory_event_mutation() returns trigger language plpgsql as $$
         begin raise exception 'agent memory events are immutable'; end $$`.execute(db);

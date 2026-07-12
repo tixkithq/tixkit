@@ -101,12 +101,18 @@ export const AgentExecutionMigration: Migration = {
       .execute();
     if (process.env.DB_DRIVER === 'mysql') {
       await sql`create trigger agent_audit_events_no_update before update on agent_audit_events
-        for each row signal sqlstate '45000' set message_text = 'agent audit events are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent audit events are immutable'`.execute(
+        db,
+      );
       await sql`create trigger agent_audit_events_no_delete before delete on agent_audit_events
-        for each row signal sqlstate '45000' set message_text = 'agent audit events are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent audit events are immutable'`.execute(
+        db,
+      );
     } else if (process.env.DB_DRIVER === 'mssql') {
       await sql`create trigger agent_audit_events_immutable on agent_audit_events
-        instead of update, delete as throw 51000, 'agent audit events are immutable', 1`.execute(db);
+        instead of update, delete as throw 51000, 'agent audit events are immutable', 1`.execute(
+        db,
+      );
     } else {
       await sql`create function reject_agent_audit_mutation() returns trigger language plpgsql as $$
         begin raise exception 'agent audit events are immutable'; end $$`.execute(db);

@@ -218,11 +218,24 @@ const SHA256 = /^[a-f0-9]{64}$/u;
 const CURRENCY = /^[A-Z]{3}$/u;
 const PERMISSION = /^[a-z][a-z0-9_-]{1,31}:[a-z][a-z0-9_-]{1,63}$/u;
 const CAPABILITIES = new Set<AgentCapability>([
-  'events.read', 'events.prepare', 'events.execute', 'readiness.read', 'reports.read',
-  'content.prepare', 'campaigns.prepare', 'campaigns.execute', 'inventory.prepare',
-  'inventory.execute', 'refunds.prepare', 'refunds.execute', 'exports.prepare',
-  'exports.execute', 'settings.prepare', 'settings.execute',
-  'memory.read', 'memory.write',
+  'events.read',
+  'events.prepare',
+  'events.execute',
+  'readiness.read',
+  'reports.read',
+  'content.prepare',
+  'campaigns.prepare',
+  'campaigns.execute',
+  'inventory.prepare',
+  'inventory.execute',
+  'refunds.prepare',
+  'refunds.execute',
+  'exports.prepare',
+  'exports.execute',
+  'settings.prepare',
+  'settings.execute',
+  'memory.read',
+  'memory.write',
 ]);
 const KINDS = new Set<AgentKind>(['managed_cloud', 'third_party', 'self_hosted']);
 const AUTONOMY = new Set<AgentAutonomy>(['read', 'recommend', 'prepare', 'execute_with_approval']);
@@ -233,14 +246,28 @@ function validUniqueStrings(values: readonly string[], maximum: number): boolean
 }
 
 export function validateAgentPrincipal(principal: AgentPrincipal): void {
-  const invalidField = !ID.test(principal.id) ? 'id' : !ID.test(principal.tenantId) ? 'tenantId' :
-    !ID.test(principal.sponsorPrincipalId) ? 'sponsorPrincipalId' : !KINDS.has(principal.kind) ? 'kind' :
-      !AUTONOMY.has(principal.maximumAutonomy) ? 'maximumAutonomy' : !STATES.has(principal.state) ? 'state' :
-        principal.protocolVersion !== AGENT_PROTOCOL_VERSION ? 'protocolVersion' :
-          !validUniqueStrings(principal.capabilities, CAPABILITIES.size) ||
-          principal.capabilities.some((capability) => !CAPABILITIES.has(capability)) ? 'capabilities' :
-            !Number.isFinite(new Date(principal.registeredAt).getTime()) ? 'registeredAt' : undefined;
-  if (invalidField) throw new AgentProtocolValidationError(`agent principal ${invalidField} is invalid`);
+  const invalidField = !ID.test(principal.id)
+    ? 'id'
+    : !ID.test(principal.tenantId)
+      ? 'tenantId'
+      : !ID.test(principal.sponsorPrincipalId)
+        ? 'sponsorPrincipalId'
+        : !KINDS.has(principal.kind)
+          ? 'kind'
+          : !AUTONOMY.has(principal.maximumAutonomy)
+            ? 'maximumAutonomy'
+            : !STATES.has(principal.state)
+              ? 'state'
+              : principal.protocolVersion !== AGENT_PROTOCOL_VERSION
+                ? 'protocolVersion'
+                : !validUniqueStrings(principal.capabilities, CAPABILITIES.size) ||
+                    principal.capabilities.some((capability) => !CAPABILITIES.has(capability))
+                  ? 'capabilities'
+                  : !Number.isFinite(new Date(principal.registeredAt).getTime())
+                    ? 'registeredAt'
+                    : undefined;
+  if (invalidField)
+    throw new AgentProtocolValidationError(`agent principal ${invalidField} is invalid`);
 }
 
 export function validateAgentDelegation(
@@ -249,18 +276,24 @@ export function validateAgentDelegation(
 ): void {
   const issuedAt = new Date(delegation.issuedAt).getTime();
   const expiresAt = new Date(delegation.expiresAt).getTime();
-  if (!ID.test(delegation.id) || delegation.tenantId !== principal.tenantId ||
+  if (
+    !ID.test(delegation.id) ||
+    delegation.tenantId !== principal.tenantId ||
     delegation.agentPrincipalId !== principal.id ||
     delegation.sponsorPrincipalId !== principal.sponsorPrincipalId ||
     !validUniqueStrings(delegation.capabilities, CAPABILITIES.size) ||
-    delegation.capabilities.some((capability) => !CAPABILITIES.has(capability) ||
-      !principal.capabilities.includes(capability)) ||
+    delegation.capabilities.some(
+      (capability) => !CAPABILITIES.has(capability) || !principal.capabilities.includes(capability),
+    ) ||
     !validUniqueStrings(delegation.resourceScopes, 100) ||
     delegation.resourceScopes.some((scope) => !SCOPE.test(scope)) ||
     !validUniqueStrings(delegation.permissionSnapshot, 100) ||
     delegation.permissionSnapshot.some((permission) => !PERMISSION.test(permission)) ||
-    !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || issuedAt >= expiresAt ||
-    (delegation.revokedAt && !Number.isFinite(new Date(delegation.revokedAt).getTime())))
+    !Number.isFinite(issuedAt) ||
+    !Number.isFinite(expiresAt) ||
+    issuedAt >= expiresAt ||
+    (delegation.revokedAt && !Number.isFinite(new Date(delegation.revokedAt).getTime()))
+  )
     throw new AgentProtocolValidationError('agent delegation is invalid');
 }
 export const AGENT_ACTION_DESCRIPTORS: Readonly<Record<AgentActionKind, AgentActionDescriptor>> = {

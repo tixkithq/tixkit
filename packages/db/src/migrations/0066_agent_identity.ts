@@ -42,14 +42,22 @@ export const AgentIdentityMigration: Migration = {
       .addColumn('revoked_at', timestampType())
       .addColumn('created_at', timestampType(), (column) => column.notNull())
       .addForeignKeyConstraint('agent_delegations_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addForeignKeyConstraint('agent_delegations_principal_fk', ['tenant_id', 'agent_principal_id'],
-        'agent_principals', ['tenant_id', 'id'])
+      .addForeignKeyConstraint(
+        'agent_delegations_principal_fk',
+        ['tenant_id', 'agent_principal_id'],
+        'agent_principals',
+        ['tenant_id', 'id'],
+      )
       .addUniqueConstraint('agent_delegations_tenant_id_unique', ['tenant_id', 'id'])
       .execute();
-    await db.schema.createIndex('agent_delegations_principal_idx').on('agent_delegations')
-      .columns(['tenant_id', 'agent_principal_id', 'revoked_at']).execute();
+    await db.schema
+      .createIndex('agent_delegations_principal_idx')
+      .on('agent_delegations')
+      .columns(['tenant_id', 'agent_principal_id', 'revoked_at'])
+      .execute();
 
-    await db.schema.createTable('agent_action_policies')
+    await db.schema
+      .createTable('agent_action_policies')
       .addColumn('tenant_id', 'varchar(32)', (column) => column.notNull())
       .addColumn('action_kind', 'varchar(64)', (column) => column.notNull())
       .addColumn('allowed', booleanType(), (column) => column.notNull())
@@ -60,7 +68,8 @@ export const AgentIdentityMigration: Migration = {
       .addForeignKeyConstraint('agent_action_policies_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .execute();
 
-    await db.schema.createTable('agent_action_effects')
+    await db.schema
+      .createTable('agent_action_effects')
       .addColumn('execution_id', 'varchar(64)', (column) => column.primaryKey())
       .addColumn('tenant_id', 'varchar(32)', (column) => column.notNull())
       .addColumn('action_digest', 'varchar(64)', (column) => column.notNull())
@@ -74,17 +83,27 @@ export const AgentIdentityMigration: Migration = {
       .addColumn('result', 'text', (column) => column.notNull())
       .addColumn('result_sha256', 'varchar(64)', (column) => column.notNull())
       .addColumn('created_at', timestampType(), (column) => column.notNull())
-      .addForeignKeyConstraint('agent_action_effects_execution_fk', ['tenant_id', 'execution_id'],
-        'agent_executions', ['tenant_id', 'id'])
+      .addForeignKeyConstraint(
+        'agent_action_effects_execution_fk',
+        ['tenant_id', 'execution_id'],
+        'agent_executions',
+        ['tenant_id', 'id'],
+      )
       .execute();
     if (process.env.DB_DRIVER === 'mysql') {
       await sql`create trigger agent_action_effects_no_update before update on agent_action_effects
-        for each row signal sqlstate '45000' set message_text = 'agent action effects are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent action effects are immutable'`.execute(
+        db,
+      );
       await sql`create trigger agent_action_effects_no_delete before delete on agent_action_effects
-        for each row signal sqlstate '45000' set message_text = 'agent action effects are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent action effects are immutable'`.execute(
+        db,
+      );
     } else if (process.env.DB_DRIVER === 'mssql') {
       await sql`create trigger agent_action_effects_immutable on agent_action_effects
-        instead of update, delete as throw 51000, 'agent action effects are immutable', 1`.execute(db);
+        instead of update, delete as throw 51000, 'agent action effects are immutable', 1`.execute(
+        db,
+      );
     } else {
       await sql`create function reject_agent_action_effect_mutation() returns trigger language plpgsql as $$
         begin raise exception 'agent action effects are immutable'; end $$`.execute(db);
@@ -92,7 +111,8 @@ export const AgentIdentityMigration: Migration = {
         for each row execute function reject_agent_action_effect_mutation()`.execute(db);
     }
 
-    await db.schema.createTable('agent_control_events')
+    await db.schema
+      .createTable('agent_control_events')
       .addColumn('id', 'varchar(64)', (column) => column.primaryKey())
       .addColumn('tenant_id', 'varchar(32)', (column) => column.notNull())
       .addColumn('actor_principal_id', 'varchar(64)', (column) => column.notNull())
@@ -108,16 +128,25 @@ export const AgentIdentityMigration: Migration = {
       .addColumn('outcome', 'varchar(20)', (column) => column.notNull())
       .addColumn('occurred_at', timestampType(), (column) => column.notNull())
       .addForeignKeyConstraint('agent_control_events_tenant_fk', ['tenant_id'], 'tenants', ['id'])
-      .addUniqueConstraint('agent_control_events_idempotency_unique', ['tenant_id', 'idempotency_key'])
+      .addUniqueConstraint('agent_control_events_idempotency_unique', [
+        'tenant_id',
+        'idempotency_key',
+      ])
       .execute();
     if (process.env.DB_DRIVER === 'mysql') {
       await sql`create trigger agent_control_events_no_update before update on agent_control_events
-        for each row signal sqlstate '45000' set message_text = 'agent control events are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent control events are immutable'`.execute(
+        db,
+      );
       await sql`create trigger agent_control_events_no_delete before delete on agent_control_events
-        for each row signal sqlstate '45000' set message_text = 'agent control events are immutable'`.execute(db);
+        for each row signal sqlstate '45000' set message_text = 'agent control events are immutable'`.execute(
+        db,
+      );
     } else if (process.env.DB_DRIVER === 'mssql') {
       await sql`create trigger agent_control_events_immutable on agent_control_events
-        instead of update, delete as throw 51000, 'agent control events are immutable', 1`.execute(db);
+        instead of update, delete as throw 51000, 'agent control events are immutable', 1`.execute(
+        db,
+      );
     } else {
       await sql`create function reject_agent_control_mutation() returns trigger language plpgsql as $$
         begin raise exception 'agent control events are immutable'; end $$`.execute(db);

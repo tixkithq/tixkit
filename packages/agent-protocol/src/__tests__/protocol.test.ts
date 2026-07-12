@@ -94,15 +94,19 @@ function authorization(item: AgentAction = action()): AgentAuthorizationInput {
 describe('agent protocol', () => {
   it('rejects invalid principals and delegations that exceed principal authority', () => {
     expect(() => validateAgentPrincipal(principal)).not.toThrow();
-    expect(() => validateAgentPrincipal({ ...principal,
-      capabilities: ['events.read', 'events.read'] })).toThrow(AgentProtocolValidationError);
+    expect(() =>
+      validateAgentPrincipal({ ...principal, capabilities: ['events.read', 'events.read'] }),
+    ).toThrow(AgentProtocolValidationError);
     expect(() => validateAgentDelegation(delegation, principal)).not.toThrow();
-    expect(() => validateAgentDelegation({ ...delegation,
-      capabilities: ['refunds.execute'] }, principal)).toThrow(AgentProtocolValidationError);
-    expect(() => validateAgentDelegation({ ...delegation,
-      resourceScopes: ['*:*'] }, principal)).toThrow(AgentProtocolValidationError);
-    expect(() => validateAgentDelegation({ ...delegation,
-      expiresAt: delegation.issuedAt }, principal)).toThrow(AgentProtocolValidationError);
+    expect(() =>
+      validateAgentDelegation({ ...delegation, capabilities: ['refunds.execute'] }, principal),
+    ).toThrow(AgentProtocolValidationError);
+    expect(() =>
+      validateAgentDelegation({ ...delegation, resourceScopes: ['*:*'] }, principal),
+    ).toThrow(AgentProtocolValidationError);
+    expect(() =>
+      validateAgentDelegation({ ...delegation, expiresAt: delegation.issuedAt }, principal),
+    ).toThrow(AgentProtocolValidationError);
   });
   it('canonicalizes object ordering and binds every material action field', () => {
     expect(canonicalAgentJson({ z: 1, nested: { b: 2, a: 1 }, a: 3 })).toBe(
