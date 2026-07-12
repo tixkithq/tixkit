@@ -57,7 +57,7 @@ test('detects high-confidence secrets without returning values and allows fixed 
     [`sk_test_${'D'.repeat(24)}`, 'stripe-api-key'],
     [`rk_test_${'E'.repeat(24)}`, 'stripe-api-key'],
     [`whsec_${'F'.repeat(24)}`, 'stripe-webhook-secret'],
-    ['-----BEGIN ENCRYPTED PRIVATE KEY-----', 'private-key'],
+    [['-----BEGIN', 'RSA PRIVATE KEY-----'].join(' '), 'private-key'],
   ];
   for (const [credential, kind] of credentials)
     assert.deepEqual(highConfidenceSecretKinds(Buffer.from(`token ${credential}`)), [kind]);
