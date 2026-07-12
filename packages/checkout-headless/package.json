@@ -2,7 +2,12 @@
   "name": "@tixkit/checkout-headless",
   "version": "0.1.0",
   "description": "Framework-neutral Tixkit checkout controller and hosted-payment handoff",
-  "license": "MIT",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/checkout-headless"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",

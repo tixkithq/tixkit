@@ -3,21 +3,16 @@ name: SDK Release Dry Run
 on:
   pull_request:
     paths:
-      - 'packages/sdk-js/**'
-      - 'packages/sdk-next/**'
-      - 'packages/sdk-sveltekit/**'
-      - 'packages/sdk-react-native/**'
-      - 'packages/sdk-flutter/**'
-      - 'packages/sdk-ios/**'
-      - 'packages/sdk-android/**'
-      - 'packages/sdk-go/**'
-      - 'packages/sdk-rust/**'
+      - 'packages/**'
       - 'apps/sdk-*-demo/**'
       - 'docs/public/guides/sdks/**'
       - 'packages/docs-core/src/sdk-snippets.ts'
       - 'scripts/lib/sdk-parity.mjs'
       - 'scripts/sdk-demo-matrix.mjs'
       - 'scripts/sdk-parity-matrix.mjs'
+      - 'scripts/public-npm-release-dry-run.mjs'
+      - 'scripts/lib/public-distribution.mjs'
+      - 'distribution/**'
       - '.github/workflows/sdk-release-dry-run.yml'
   workflow_dispatch:
 
@@ -37,35 +32,24 @@ jobs:
           node-version: 24
       - name: Verify SDK parity matrix
         run: |
+          node scripts/validate-public-distribution.mjs
           node scripts/sdk-parity-matrix.mjs
           node scripts/sdk-demo-matrix.mjs --check
 
-  npm-sdk-dry-run:
-    name: NPM SDK Dry Run
+  public-npm-dry-run:
+    name: Public NPM Package Dry Run
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
-      - name: Build package SDKs
-        run: |
-          bun run --filter @tixkit/js build
-          bun run --filter @tixkit/next build
-          bun run --filter @tixkit/sveltekit build
-          bun run --filter @tixkit/react-native build
-      - name: Pack packages without publishing
-        run: |
-          set -euo pipefail
-          mkdir -p sdk-release-provenance
-          (cd packages/sdk-js && npm pack --dry-run --json) | tee sdk-release-provenance/sdk-js-npm-pack.json
-          (cd packages/sdk-next && npm pack --dry-run --json) | tee sdk-release-provenance/sdk-next-npm-pack.json
-          (cd packages/sdk-sveltekit && npm pack --dry-run --json) | tee sdk-release-provenance/sdk-sveltekit-npm-pack.json
-          (cd packages/sdk-react-native && npm pack --dry-run --json) | tee sdk-release-provenance/sdk-react-native-npm-pack.json
+      - name: Pack every manifest-declared npm package
+        run: bun run release:public:npm:dry-run
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: npm-sdk-dry-run-provenance
-          path: sdk-release-provenance/
+          name: public-npm-release-provenance
+          path: public-release-provenance/
           if-no-files-found: error
 
   flutter-sdk-dry-run:

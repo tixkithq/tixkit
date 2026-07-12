@@ -4,17 +4,27 @@
   "private": false,
   "type": "module",
   "description": "Tixkit developer-experience CLI: quickstart, setup validation, and local webhook automation",
-  "license": "MIT",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/cli"
+  },
   "main": "./dist/index.js",
   "bin": {
     "tixkit": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
     "README.md"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "engines": {
     "node": ">=22"

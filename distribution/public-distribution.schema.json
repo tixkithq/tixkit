@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/public-distribution.schema.json",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "authority",
+    "licensing",
+    "source",
+    "classification",
+    "release",
+    "forbiddenDependencies"
+  ],
+  "properties": {
+    "$schema": { "const": "./public-distribution.schema.json" },
+    "schemaVersion": { "const": 1 },
+    "authority": {
+      "type": "object",
+      "required": ["publicRepository", "cloudRepository", "sharedFixPolicy", "cloudConsumption"],
+      "properties": {
+        "publicRepository": { "const": "tixkit/tixkit" },
+        "cloudRepository": { "const": "tixkit/tixkit-cloud" },
+        "sharedFixPolicy": { "const": "public-first" },
+        "cloudConsumption": { "const": "immutable-artifacts-only" }
+      },
+      "additionalProperties": false
+    },
+    "licensing": {
+      "type": "object",
+      "required": [
+        "intendedPublicLicense",
+        "status",
+        "mayClaimLegalApproval",
+        "legalReviewEvidence"
+      ],
+      "properties": {
+        "intendedPublicLicense": { "const": "MIT" },
+        "status": { "enum": ["pending-legal-review", "approved"] },
+        "mayClaimLegalApproval": { "type": "boolean" },
+        "legalReviewEvidence": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["rootFiles", "rootDirectories", "applications", "packages", "documentation"],
+      "properties": {
+        "rootFiles": { "$ref": "#/$defs/pathArray" },
+        "rootDirectories": { "$ref": "#/$defs/pathArray" },
+        "applications": { "$ref": "#/$defs/pathArray" },
+        "packages": { "$ref": "#/$defs/pathArray" },
+        "documentation": { "$ref": "#/$defs/pathArray" }
+      },
+      "additionalProperties": false
+    },
+    "classification": {
+      "type": "object",
+      "required": ["topLevel", "docs", "generatedRoots"],
+      "properties": {
+        "topLevel": {
+          "type": "object",
+          "required": ["public", "privateCloud", "internalPlanning", "mixed"],
+          "properties": {
+            "public": { "$ref": "#/$defs/pathArray" },
+            "privateCloud": { "$ref": "#/$defs/pathArray" },
+            "internalPlanning": { "$ref": "#/$defs/pathArray" },
+            "mixed": { "$ref": "#/$defs/pathArray" }
+          },
+          "additionalProperties": false
+        },
+        "docs": {
+          "type": "object",
+          "required": ["public", "internalPlanning"],
+          "properties": {
+            "public": { "$ref": "#/$defs/pathArray" },
+            "internalPlanning": { "$ref": "#/$defs/pathArray" }
+          },
+          "additionalProperties": false
+        },
+        "generatedRoots": { "$ref": "#/$defs/pathArray" }
+      },
+      "additionalProperties": false
+    },
+    "release": {
+      "type": "object",
+      "required": ["packages", "images", "contracts", "selfHostedProfiles"],
+      "properties": {
+        "packages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "ecosystem"],
+            "properties": {
+              "path": { "$ref": "#/$defs/path" },
+              "ecosystem": {
+                "enum": ["npm", "npm-and-cdn", "pub", "swift", "maven", "go", "cargo"]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "images": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "dockerfile"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "dockerfile": { "$ref": "#/$defs/path" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "contracts": { "$ref": "#/$defs/pathArray" },
+        "selfHostedProfiles": {
+          "type": "object",
+          "required": ["compact", "production"],
+          "properties": {
+            "compact": { "$ref": "#/$defs/path" },
+            "production": { "$ref": "#/$defs/path" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "forbiddenDependencies": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+    "pathArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/path" }
+    }
+  },
+  "additionalProperties": false
+}

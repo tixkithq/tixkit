@@ -17,7 +17,7 @@ const DEFAULT_REQUIRED_STATUS_CHECKS = [
   'E2E Browser Matrix (webkit)',
   'Provider Tests (Stripe)',
   'SDK Parity Matrix',
-  'NPM SDK Dry Run',
+  'Public NPM Package Dry Run',
   'Flutter SDK Dry Run',
   'iOS SDK Dry Run',
   'Android SDK Dry Run',

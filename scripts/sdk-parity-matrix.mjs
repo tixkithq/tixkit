@@ -6,6 +6,9 @@ import { validateSdkParity } from './lib/sdk-parity.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const apiVersion = '2026-01-01';
+const distribution = JSON.parse(
+  readFileSync(new URL('../distribution/public-distribution.json', import.meta.url), 'utf8'),
+);
 
 const checks = [
   {
@@ -330,6 +333,21 @@ function assert(condition, message) {
 }
 
 const failures = [];
+
+const manifestSdkPaths = new Set(
+  distribution.release.packages
+    .map((entry) => entry.path)
+    .filter((path) => path.startsWith('packages/sdk-')),
+);
+const checkedSdkPaths = new Set(checks.map((check) => check.file.split('/').slice(0, 2).join('/')));
+for (const sdkPath of manifestSdkPaths) {
+  if (!checkedSdkPaths.has(sdkPath))
+    failures.push(`Distribution SDK lacks parity checks: ${sdkPath}`);
+}
+for (const sdkPath of checkedSdkPaths) {
+  if (!manifestSdkPaths.has(sdkPath))
+    failures.push(`Parity SDK is absent from distribution: ${sdkPath}`);
+}
 
 for (const check of checks) {
   try {

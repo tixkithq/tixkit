@@ -1,6 +1,13 @@
 {
   "name": "@tixkit/sveltekit",
   "version": "0.1.0",
+  "description": "Official SvelteKit integration for Tixkit",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/sdk-sveltekit"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -9,7 +16,8 @@
     "dist",
     "!dist/__tests__",
     "!dist/**/*.test.*",
-    "!dist/.tsbuildinfo"
+    "!dist/.tsbuildinfo",
+    "README.md"
   ],
   "exports": {
     ".": {
@@ -28,7 +36,12 @@
       "types": "./dist/TixkitWidget.svelte.d.ts",
       "svelte": "./dist/TixkitWidget.svelte",
       "default": "./dist/TixkitWidget.svelte"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -b && cp src/TixkitWidget.svelte src/TixkitWidget.svelte.d.ts dist/",

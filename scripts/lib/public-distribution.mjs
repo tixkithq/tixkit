@@ -1,0 +1,595 @@
+import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+
+const boundaryControlPaths = new Set([
+  'distribution/public-distribution.json',
+  'distribution/public-distribution.schema.json',
+  'distribution/README.md',
+  'scripts/export-oss.mjs',
+  'scripts/lib/public-distribution.mjs',
+  'scripts/validate-public-distribution.mjs',
+  'scripts/__tests__/public-distribution.test.mjs',
+  'scripts/__tests__/export-oss.test.mjs',
+]);
+
+export function loadPublicDistribution(root) {
+  return JSON.parse(readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'));
+}
+
+function duplicateValues(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    if (seen.has(value)) return true;
+    seen.add(value);
+    return false;
+  });
+}
+
+function immediateDirectories(root, parent) {
+  return readdirSync(join(root, parent), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${parent}/${entry.name}`)
+    .sort();
+}
+
+function walkFiles(directory, symlinks) {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (
+      [
+        '.astro',
+        '.build',
+        '.dart_tool',
+        '.gradle',
+        '.nuxt',
+        '.svelte-kit',
+        '.turbo',
+        'build',
+        'coverage',
+        'dist',
+        'node_modules',
+        'out',
+        'target',
+      ].includes(entry.name) ||
+      entry.name === '.next' ||
+      entry.name.startsWith('.next-')
+    )
+      continue;
+    const path = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      symlinks.push(path);
+      continue;
+    }
+    if (entry.isDirectory()) files.push(...walkFiles(path, symlinks));
+    else if (entry.isFile()) files.push(path);
+  }
+  return files;
+}
+
+function isInsideRoot(root, candidate) {
+  if (typeof candidate !== 'string' || candidate.length === 0 || candidate.includes('\0')) {
+    return false;
+  }
+  const rootPath = resolve(root);
+  const candidatePath = resolve(rootPath, candidate);
+  const path = relative(rootPath, candidatePath);
+  return path !== '..' && !path.startsWith(`..${sep}`) && !path.startsWith('/');
+}
+
+function validateExistingPath(root, candidate, label, violations, options = {}) {
+  if (!isInsideRoot(root, candidate)) {
+    violations.push(`${label} contains unsafe path ${String(candidate)}`);
+    return undefined;
+  }
+  const absolute = resolve(root, candidate);
+  const metadata = lstatSync(absolute, { throwIfNoEntry: false });
+  if (!metadata) {
+    if (!options.allowMissing) violations.push(`${label} path does not exist: ${candidate}`);
+    return undefined;
+  }
+  if (metadata.isSymbolicLink()) {
+    violations.push(`${label} must not be a symbolic link: ${candidate}`);
+    return undefined;
+  }
+  const realRoot = realpathSync(root);
+  const realCandidate = realpathSync(absolute);
+  const realRelative = relative(realRoot, realCandidate);
+  if (
+    realRelative === '..' ||
+    realRelative.startsWith(`..${sep}`) ||
+    realRelative.startsWith('/')
+  ) {
+    violations.push(`${label} resolves outside the repository: ${candidate}`);
+    return undefined;
+  }
+  if (options.kind === 'file' && !metadata.isFile()) {
+    violations.push(`${label} must be a file: ${candidate}`);
+  }
+  if (options.kind === 'directory' && !metadata.isDirectory()) {
+    violations.push(`${label} must be a directory: ${candidate}`);
+  }
+  return metadata;
+}
+
+function trackedInventory(root) {
+  try {
+    const output = execFileSync(
+      'git',
+      ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const files = output.split('\0').filter(Boolean);
+    return {
+      topLevel: [...new Set(files.map((path) => path.split('/')[0]))].sort(),
+      docs: [
+        ...new Set(
+          files
+            .filter((path) => path.startsWith('docs/'))
+            .map((path) => path.split('/').slice(0, 2).join('/')),
+        ),
+      ].sort(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function classifyCoverage(actual, groups, label, violations) {
+  const classified = groups.flatMap((group) => group ?? []);
+  for (const duplicate of duplicateValues(classified)) {
+    violations.push(`${label} path has multiple classifications: ${duplicate}`);
+  }
+  const classifiedSet = new Set(classified);
+  for (const path of actual) {
+    if (!classifiedSet.has(path)) violations.push(`unclassified ${label} path: ${path}`);
+  }
+  for (const path of classifiedSet) {
+    if (!actual.includes(path)) violations.push(`stale ${label} classification: ${path}`);
+  }
+}
+
+function matchesForbiddenDependency(value, forbiddenDependencies) {
+  const normalized = value.toLowerCase();
+  return forbiddenDependencies.some((forbidden) => normalized.includes(forbidden.toLowerCase()));
+}
+
+function referencesPrivateRoot(value, privateRoots) {
+  const pathSegments = value
+    .replaceAll('\\', '/')
+    .split(/[\s'"`()=:,]+/u)
+    .flatMap((token) => token.split('/'))
+    .filter(Boolean);
+  return privateRoots.some((privateRoot) => pathSegments.includes(privateRoot));
+}
+
+function publicScanEntries(manifest, root) {
+  const paths = [
+    ...(manifest.source.rootFiles ?? []),
+    ...(manifest.source.rootDirectories ?? []),
+    ...(manifest.source.applications ?? []),
+    ...(manifest.source.packages ?? []),
+    ...(manifest.source.documentation ?? []),
+  ];
+  const files = new Set();
+  const symlinks = [];
+  for (const path of paths) {
+    const absolute = resolve(root, path);
+    const metadata = lstatSync(absolute, { throwIfNoEntry: false });
+    if (!metadata) continue;
+    if (metadata.isSymbolicLink()) {
+      symlinks.push(absolute);
+      continue;
+    }
+    if (metadata.isDirectory()) {
+      for (const file of walkFiles(absolute, symlinks)) files.add(file);
+    } else if (metadata.isFile()) {
+      files.add(absolute);
+    }
+  }
+  return { files: [...files], symlinks };
+}
+
+export function publicDependencyBoundaryViolations(manifest, root) {
+  const violations = [];
+  const forbiddenDependencies = manifest?.forbiddenDependencies ?? [];
+  const privateRoots = manifest?.classification?.topLevel?.privateCloud ?? [];
+  const { files, symlinks } = publicScanEntries(manifest, root);
+  for (const symlink of symlinks) {
+    violations.push(
+      `${relative(root, symlink).split(sep).join('/')}: symbolic links are forbidden in public source`,
+    );
+  }
+  for (const file of files) {
+    const relativePath = relative(root, file).split(sep).join('/');
+    if (boundaryControlPaths.has(relativePath)) continue;
+    let content;
+    try {
+      content = readFileSync(file, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (file.endsWith('package.json')) {
+      const packageManifest = JSON.parse(content);
+      for (const field of [
+        'dependencies',
+        'devDependencies',
+        'optionalDependencies',
+        'peerDependencies',
+      ]) {
+        for (const [name, version] of Object.entries(packageManifest[field] ?? {})) {
+          if (
+            matchesForbiddenDependency(`${name} ${String(version)}`, forbiddenDependencies) ||
+            referencesPrivateRoot(`${name} ${String(version)}`, privateRoots)
+          ) {
+            violations.push(`${relativePath}: forbidden ${field} dependency ${name}`);
+          }
+        }
+      }
+      for (const [name, command] of Object.entries(packageManifest.scripts ?? {})) {
+        if (
+          matchesForbiddenDependency(String(command), forbiddenDependencies) ||
+          referencesPrivateRoot(String(command), privateRoots)
+        ) {
+          violations.push(`${relativePath}: forbidden private script reference ${name}`);
+        }
+      }
+      continue;
+    }
+    if (/^(?:tsconfig(?:\.[a-z0-9_-]+)?|turbo)\.json$/u.test(basename(file))) {
+      if (referencesPrivateRoot(content, privateRoots)) {
+        violations.push(`${relativePath}: forbidden private JSON build reference`);
+      }
+      continue;
+    }
+    if (
+      !/\.(?:cjs|css|dockerfile|go|html|js|jsx|kt|kts|md|mdx|mjs|rs|sh|swift|toml|ts|tsx|yaml|yml)$/u.test(
+        file,
+      ) &&
+      !file.split(sep).at(-1)?.startsWith('Dockerfile')
+    )
+      continue;
+    for (const line of content.split('\n')) {
+      const hasForbiddenIdentifier = matchesForbiddenDependency(line, forbiddenDependencies);
+      const hasPrivateRootReference = referencesPrivateRoot(line, privateRoots);
+      if (!hasForbiddenIdentifier && !hasPrivateRootReference) continue;
+      const hasBuildReference =
+        /^\s*(?:-\s*)?(?:require|replace|uses:|run:|FROM|COPY)\s+/u.test(line) ||
+        /\b(?:from|import|require)\s*(?:\(|[`'"])/u.test(line);
+      const hasRemoteReference = /(?:https?:\/\/|git@)\S+/u.test(line);
+      if (
+        (hasForbiddenIdentifier && (hasBuildReference || hasRemoteReference)) ||
+        (hasPrivateRootReference && hasBuildReference)
+      ) {
+        violations.push(`${relativePath}: forbidden private dependency/build reference`);
+        break;
+      }
+    }
+  }
+  return violations;
+}
+
+function valueType(value) {
+  if (Array.isArray(value)) return 'array';
+  if (value === null) return 'null';
+  return typeof value;
+}
+
+export function jsonSchemaViolations(value, schema, path = '$', rootSchema = schema) {
+  const violations = [];
+  if (schema.$ref) {
+    if (!schema.$ref.startsWith('#/'))
+      return [`${path} uses unsupported schema ref ${schema.$ref}`];
+    const target = schema.$ref
+      .slice(2)
+      .split('/')
+      .reduce(
+        (current, segment) => current?.[segment.replaceAll('~1', '/').replaceAll('~0', '~')],
+        rootSchema,
+      );
+    if (!target) return [`${path} references missing schema ${schema.$ref}`];
+    return jsonSchemaViolations(value, target, path, rootSchema);
+  }
+  if (schema.const !== undefined && value !== schema.const) {
+    violations.push(`${path} must equal ${JSON.stringify(schema.const)}`);
+    return violations;
+  }
+  if (schema.enum && !schema.enum.includes(value)) {
+    violations.push(`${path} must be one of ${schema.enum.join(', ')}`);
+    return violations;
+  }
+  if (schema.type && valueType(value) !== schema.type) {
+    violations.push(`${path} must be ${schema.type}`);
+    return violations;
+  }
+  if (schema.type === 'object') {
+    for (const required of schema.required ?? []) {
+      if (!(required in value)) violations.push(`${path}.${required} is required`);
+    }
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!(key in (schema.properties ?? {}))) violations.push(`${path}.${key} is not allowed`);
+      }
+    }
+    for (const [key, childSchema] of Object.entries(schema.properties ?? {})) {
+      if (key in value)
+        violations.push(
+          ...jsonSchemaViolations(value[key], childSchema, `${path}.${key}`, rootSchema),
+        );
+    }
+  }
+  if (schema.type === 'array') {
+    if (schema.minItems !== undefined && value.length < schema.minItems) {
+      violations.push(`${path} must contain at least ${schema.minItems} items`);
+    }
+    value.forEach((item, index) => {
+      violations.push(
+        ...jsonSchemaViolations(item, schema.items ?? {}, `${path}[${index}]`, rootSchema),
+      );
+    });
+  }
+  if (schema.type === 'string') {
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      violations.push(`${path} must contain at least ${schema.minLength} characters`);
+    }
+    if (schema.pattern && !new RegExp(schema.pattern, 'u').test(value)) {
+      violations.push(`${path} must match ${schema.pattern}`);
+    }
+  }
+  return violations;
+}
+
+function validateNpmReleaseMetadata(entry, manifest, root, violations) {
+  const packagePath = resolve(root, entry.path, 'package.json');
+  const packageManifest = JSON.parse(readFileSync(packagePath, 'utf8'));
+  const expectedRepository = {
+    type: 'git',
+    url: 'git+https://github.com/tixkit/tixkit.git',
+    directory: entry.path,
+  };
+  if (packageManifest.private === true)
+    violations.push(`${entry.path}: release package is private`);
+  const expectedLicense =
+    manifest.licensing.status === 'approved'
+      ? manifest.licensing.intendedPublicLicense
+      : 'UNLICENSED';
+  if (packageManifest.license !== expectedLicense) {
+    violations.push(`${entry.path}: license must be ${expectedLicense}`);
+  }
+  if (JSON.stringify(packageManifest.repository) !== JSON.stringify(expectedRepository)) {
+    violations.push(`${entry.path}: repository metadata must point to tixkit/tixkit`);
+  }
+  if (
+    packageManifest.homepage &&
+    packageManifest.homepage !== 'https://github.com/tixkit/tixkit#readme'
+  ) {
+    violations.push(`${entry.path}: homepage metadata must point to tixkit/tixkit`);
+  }
+  if (
+    packageManifest.bugs?.url &&
+    packageManifest.bugs.url !== 'https://github.com/tixkit/tixkit/issues'
+  ) {
+    violations.push(`${entry.path}: bugs metadata must point to tixkit/tixkit`);
+  }
+  if (!Array.isArray(packageManifest.files) || packageManifest.files.length === 0) {
+    violations.push(`${entry.path}: files must define the published package boundary`);
+  }
+  if (!packageManifest.exports?.['./package.json']) {
+    violations.push(`${entry.path}: exports must expose ./package.json`);
+  }
+  if (
+    packageManifest.publishConfig?.access !== 'public' ||
+    packageManifest.publishConfig?.provenance !== true
+  ) {
+    violations.push(`${entry.path}: publishConfig must require public access and provenance`);
+  }
+  if (!statSync(resolve(root, entry.path, 'README.md'), { throwIfNoEntry: false })) {
+    violations.push(`${entry.path}: README.md is required`);
+  }
+}
+
+export function sdkReleaseWorkflowViolations(manifest, workflow) {
+  const violations = [];
+  if (!/^\s+- ['"]packages\/\*\*['"]$/mu.test(workflow)) {
+    violations.push('SDK release workflow must trigger for every packages/** change');
+  }
+  for (const entry of manifest.release.packages.filter(({ path }) =>
+    path.split('/').at(-1)?.startsWith('sdk-'),
+  )) {
+    const job =
+      entry.ecosystem === 'npm'
+        ? 'public-npm-dry-run'
+        : `${entry.path.split('/').at(-1).slice(4)}-sdk-dry-run`;
+    if (!new RegExp(`^  ${job}:$`, 'mu').test(workflow)) {
+      violations.push(`${entry.path}: SDK release workflow is missing job ${job}`);
+    }
+  }
+  return violations;
+}
+
+function validateSdkReleaseWorkflow(manifest, root, violations) {
+  const workflowPath = resolve(root, '.github/workflows/sdk-release-dry-run.yml');
+  const workflow = readFileSync(workflowPath, 'utf8');
+  violations.push(...sdkReleaseWorkflowViolations(manifest, workflow));
+}
+
+export function validatePublicDistribution(manifest, root, schema) {
+  const violations = [];
+  const resolvedSchema =
+    schema ??
+    JSON.parse(readFileSync(resolve(root, 'distribution/public-distribution.schema.json'), 'utf8'));
+  violations.push(...jsonSchemaViolations(manifest, resolvedSchema));
+  if (violations.length > 0) {
+    throw new Error(
+      `Public distribution manifest validation failed:\n${violations.map((item) => `- ${item}`).join('\n')}`,
+    );
+  }
+
+  if (manifest.authority.publicRepository !== 'tixkit/tixkit')
+    violations.push('publicRepository must be tixkit/tixkit');
+  if (manifest.authority.cloudRepository !== 'tixkit/tixkit-cloud')
+    violations.push('cloudRepository must be tixkit/tixkit-cloud');
+  if (manifest.authority.sharedFixPolicy !== 'public-first')
+    violations.push('sharedFixPolicy must be public-first');
+  if (manifest.authority.cloudConsumption !== 'immutable-artifacts-only')
+    violations.push('cloudConsumption must be immutable-artifacts-only');
+  if (manifest.licensing.intendedPublicLicense !== 'MIT')
+    violations.push('intendedPublicLicense must be MIT');
+  if (
+    manifest.licensing.status === 'pending-legal-review' &&
+    (manifest.licensing.mayClaimLegalApproval !== false ||
+      manifest.licensing.legalReviewEvidence !== '')
+  ) {
+    violations.push('pending legal review must not claim legal approval or approval evidence');
+  }
+  if (
+    manifest.licensing.status === 'approved' &&
+    (manifest.licensing.mayClaimLegalApproval !== true ||
+      manifest.licensing.legalReviewEvidence !== 'docs/completion/legal-review-approval.md')
+  ) {
+    violations.push(
+      'approved legal status requires an approval claim and canonical legal evidence',
+    );
+  }
+  if (manifest.licensing.status === 'approved')
+    validateExistingPath(
+      root,
+      manifest.licensing.legalReviewEvidence,
+      'legal approval evidence',
+      violations,
+      { kind: 'file' },
+    );
+
+  for (const [group, values] of Object.entries(manifest.source)) {
+    for (const duplicate of duplicateValues(values))
+      violations.push(`source.${group} duplicates ${duplicate}`);
+    for (const path of values) validateExistingPath(root, path, `source.${group}`, violations);
+  }
+
+  const inventory = trackedInventory(root);
+  if (inventory) {
+    classifyCoverage(
+      inventory.topLevel,
+      Object.values(manifest.classification.topLevel),
+      'top-level',
+      violations,
+    );
+    classifyCoverage(
+      inventory.docs,
+      Object.values(manifest.classification.docs),
+      'docs',
+      violations,
+    );
+  }
+  if (inventory) {
+    for (const path of [
+      ...Object.values(manifest.classification.topLevel).flat(),
+      ...Object.values(manifest.classification.docs).flat(),
+      ...manifest.classification.generatedRoots,
+    ]) {
+      validateExistingPath(root, path, 'classification', violations, {
+        allowMissing: path === 'graphify-out',
+      });
+    }
+  }
+
+  for (const parent of ['apps', 'packages']) {
+    const declared = new Set(
+      parent === 'apps' ? manifest.source.applications : manifest.source.packages,
+    );
+    const actual = immediateDirectories(root, parent);
+    for (const path of actual)
+      if (!declared.has(path)) violations.push(`unclassified public ${parent} directory: ${path}`);
+    for (const path of declared)
+      if (!actual.includes(path)) violations.push(`stale ${parent} classification: ${path}`);
+  }
+
+  const sourcePackages = new Set(manifest.source.packages);
+  const releaseEntries = manifest.release.packages;
+  const releasePaths = new Set(releaseEntries.map((entry) => entry.path));
+  for (const packagePath of sourcePackages) {
+    if (packagePath.split('/').at(-1)?.startsWith('sdk-') && !releasePaths.has(packagePath)) {
+      violations.push(`public SDK missing from release.packages: ${packagePath}`);
+    }
+    const packageJson = resolve(root, packagePath, 'package.json');
+    if (!statSync(packageJson, { throwIfNoEntry: false })) continue;
+    const packageManifest = JSON.parse(readFileSync(packageJson, 'utf8'));
+    if (
+      (packageManifest.private === false || packageManifest.publishConfig?.access === 'public') &&
+      !releasePaths.has(packagePath)
+    ) {
+      violations.push(`publishable package missing from release.packages: ${packagePath}`);
+    }
+  }
+  const packageNameToPath = new Map();
+  for (const packagePath of sourcePackages) {
+    const packageJson = resolve(root, packagePath, 'package.json');
+    if (!statSync(packageJson, { throwIfNoEntry: false })) continue;
+    const packageManifest = JSON.parse(readFileSync(packageJson, 'utf8'));
+    if (typeof packageManifest.name === 'string')
+      packageNameToPath.set(packageManifest.name, packagePath);
+  }
+  for (const entry of releaseEntries) {
+    if (!sourcePackages.has(entry.path))
+      violations.push(`release package is not a public source package: ${entry.path}`);
+    validateExistingPath(root, entry.path, 'release.packages', violations, { kind: 'directory' });
+    if (entry.ecosystem === 'npm' || entry.ecosystem === 'npm-and-cdn') {
+      validateNpmReleaseMetadata(entry, manifest, root, violations);
+      const packageManifest = JSON.parse(
+        readFileSync(resolve(root, entry.path, 'package.json'), 'utf8'),
+      );
+      for (const field of ['dependencies', 'optionalDependencies']) {
+        for (const [name, version] of Object.entries(packageManifest[field] ?? {})) {
+          const dependencyPath = packageNameToPath.get(name);
+          if (
+            String(version).startsWith('workspace:') &&
+            dependencyPath &&
+            !releasePaths.has(dependencyPath)
+          ) {
+            violations.push(
+              `${entry.path}: workspace dependency is not released: ${dependencyPath}`,
+            );
+          }
+        }
+      }
+    }
+  }
+  validateSdkReleaseWorkflow(manifest, root, violations);
+
+  const declaredDockerfiles = new Set(manifest.release.images.map((image) => image.dockerfile));
+  const repositoryDockerfiles = readdirSync(root)
+    .filter((name) => /^Dockerfile\.[a-z0-9-]+$/u.test(name))
+    .sort();
+  for (const image of manifest.release.images)
+    validateExistingPath(root, image.dockerfile, 'release.images', violations, { kind: 'file' });
+  for (const dockerfile of repositoryDockerfiles)
+    if (!declaredDockerfiles.has(dockerfile))
+      violations.push(`unclassified release image Dockerfile: ${dockerfile}`);
+  for (const dockerfile of declaredDockerfiles)
+    if (!repositoryDockerfiles.includes(dockerfile))
+      violations.push(`stale release image Dockerfile classification: ${dockerfile}`);
+  for (const contract of manifest.release.contracts)
+    validateExistingPath(root, contract, 'release.contracts', violations);
+  for (const [profile, path] of Object.entries(manifest.release.selfHostedProfiles)) {
+    validateExistingPath(root, path, `self-hosted ${profile}`, violations);
+  }
+
+  const privateRoots = new Set(manifest.classification.topLevel.privateCloud);
+  const publicSelections = Object.values(manifest.source).flat();
+  for (const privateRoot of privateRoots) {
+    if (
+      publicSelections.some((path) => path === privateRoot || path.startsWith(`${privateRoot}/`))
+    ) {
+      violations.push(`private Cloud root is included publicly: ${privateRoot}`);
+    }
+  }
+  violations.push(...publicDependencyBoundaryViolations(manifest, root));
+
+  if (violations.length > 0) {
+    throw new Error(
+      `Public distribution manifest validation failed:\n${violations.map((item) => `- ${item}`).join('\n')}`,
+    );
+  }
+  return manifest;
+}

@@ -1,6 +1,13 @@
 {
   "name": "@tixkit/next",
   "version": "0.1.0",
+  "description": "Official Next.js integration for Tixkit",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/sdk-next"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -9,7 +16,8 @@
     "dist",
     "!dist/__tests__",
     "!dist/**/*.test.*",
-    "!dist/.tsbuildinfo"
+    "!dist/.tsbuildinfo",
+    "README.md"
   ],
   "exports": {
     ".": {
@@ -27,13 +35,19 @@
     "./route-handlers": {
       "types": "./dist/route-handlers.d.ts",
       "import": "./dist/route-handlers.js"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -b",
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test:unit": "vitest run",
+    "prepack": "bun run build",
     "clean": "rm -rf dist"
   },
   "dependencies": {

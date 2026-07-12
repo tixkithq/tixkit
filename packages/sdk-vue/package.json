@@ -1,6 +1,13 @@
 {
   "name": "@tixkit/vue",
   "version": "0.1.0",
+  "description": "Official Vue and Nuxt integration for Tixkit",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/sdk-vue"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -8,7 +15,8 @@
     "dist",
     "!dist/__tests__",
     "!dist/**/*.test.*",
-    "!dist/.tsbuildinfo"
+    "!dist/.tsbuildinfo",
+    "README.md"
   ],
   "exports": {
     ".": {
@@ -22,13 +30,19 @@
     "./client": {
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -b",
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test:unit": "vitest run",
+    "prepack": "bun run build",
     "clean": "rm -rf dist"
   },
   "dependencies": {

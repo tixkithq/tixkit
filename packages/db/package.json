@@ -1,10 +1,23 @@
 {
   "name": "@tixkit/db",
   "version": "0.1.0",
-  "private": true,
+  "description": "Tixkit database schema, migrations, and tenant-safe repositories",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/db"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/__tests__",
+    "!dist/**/*.test.*",
+    "!dist/.tsbuildinfo",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -21,7 +34,12 @@
     "./migrate": {
       "types": "./dist/migrate.d.ts",
       "import": "./dist/migrate.js"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -b",
@@ -37,6 +55,7 @@
     "test:integration": "vitest run src/__tests__/integration --maxWorkers=1",
     "test:mysql": "DB_INTEGRATION_DRIVER=mysql vitest run src/__tests__/integration --maxWorkers=1",
     "test:mssql": "DB_INTEGRATION_DRIVER=mssql vitest run src/__tests__/integration --maxWorkers=1",
+    "prepack": "bun run build",
     "clean": "rm -rf dist"
   },
   "dependencies": {

@@ -1,10 +1,23 @@
 {
   "name": "@tixkit/domain",
   "version": "0.1.0",
-  "private": true,
+  "description": "Shared Tixkit event-commerce domain contracts and business rules",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/domain"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/__tests__",
+    "!dist/**/*.test.*",
+    "!dist/.tsbuildinfo",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -65,13 +78,19 @@
     "./eligibility": {
       "types": "./dist/eligibility/index.d.ts",
       "import": "./dist/eligibility/index.js"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -b",
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test:unit": "vitest run",
+    "prepack": "bun run build",
     "clean": "rm -rf dist"
   },
   "dependencies": {
