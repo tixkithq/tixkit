@@ -5341,6 +5341,59 @@ export interface paths {
             };
         };
     };
+    "/portable-exports": {
+        post: {
+            parameters: {
+                header: {
+                    "Idempotency-Key": string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        organizationId: string;
+                        mode?: "configuration";
+                    };
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/vnd.tixkit.portable+json": string;
+                    };
+                    headers: {
+                        "X-Tixkit-Portable-Job-Id": string;
+                        "Content-Disposition": string;
+                    };
+                };
+                "400": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "401": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "403": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                "503": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+            };
+        };
+    };
     "/portable-migration-jobs": {
         post: {
             parameters: {
@@ -11298,6 +11351,57 @@ export type operations = {
         };
         responses: {
             "204": Record<string, never>;
+        };
+    };
+    createPortableExport: {
+        parameters: {
+            header: {
+                "Idempotency-Key": string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    organizationId: string;
+                    mode?: "configuration";
+                };
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/vnd.tixkit.portable+json": string;
+                };
+                headers: {
+                    "X-Tixkit-Portable-Job-Id": string;
+                    "Content-Disposition": string;
+                };
+            };
+            "400": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "401": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "403": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            "503": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
     createPortableMigrationJob: {

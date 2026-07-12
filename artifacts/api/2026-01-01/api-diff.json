@@ -11,7 +11,7 @@
     {
       "severity": "compatible",
       "category": "operation-added",
-      "path": "POST /portable-migration-jobs",
+      "path": "POST /portable-exports",
       "message": "Operation was added."
     }
   ]

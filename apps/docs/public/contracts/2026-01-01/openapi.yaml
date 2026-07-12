@@ -18392,6 +18392,115 @@ paths:
           description: Migration credential revoked
       tags:
         - Platform
+  /portable-exports:
+    post:
+      operationId: createPortableExport
+      summary: Create or replay a signed Tixkit configuration export
+      description: Self-Hosted export endpoint. Returns immutable bytes for the same principal, organization, request, and idempotency key.
+      security:
+        - BearerAuth: []
+        - ApiKey: []
+      x-required-permissions:
+        - migrations.write
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - organizationId
+              properties:
+                organizationId:
+                  type: string
+                  minLength: 3
+                  maxLength: 32
+                mode:
+                  const: configuration
+                  default: configuration
+            example:
+              organizationId: organization_example
+      responses:
+        "200":
+          description: Signed, checksummed Tixkit portable bundle
+          headers:
+            X-Tixkit-Portable-Job-Id:
+              schema:
+                type: string
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/vnd.tixkit.portable+json:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid export request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: code example
+                  message: message example
+                  requestId: request_example
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: code example
+                  message: message example
+                  requestId: request_example
+        "403":
+          description: Insufficient permission or invalid principal scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: code example
+                  message: message example
+                  requestId: request_example
+        "409":
+          description: Idempotency conflict or export already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: code example
+                  message: message example
+                  requestId: request_example
+        "503":
+          description: Export signing or immutable storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: code example
+                  message: message example
+                  requestId: request_example
+      tags:
+        - Platform
   /portable-migration-jobs:
     post:
       operationId: createPortableMigrationJob
