@@ -123,6 +123,41 @@ function numberAttribute(entity: NormalizedMigrationEntity, name: string, fallba
   return value;
 }
 
+function nullableNumberAttribute(entity: NormalizedMigrationEntity, name: string): number | null {
+  const value = entity.attributes[name];
+  return value === undefined || value === null ? null : numberAttribute(entity, name);
+}
+
+function booleanAttribute(
+  entity: NormalizedMigrationEntity,
+  name: string,
+  fallback = false,
+): boolean {
+  const value = entity.attributes[name];
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'boolean')
+    throw new Error(`MIGRATION_ATTRIBUTE_INVALID:${entity.entityType}:${name}`);
+  return value;
+}
+
+function nullableDateAttribute(entity: NormalizedMigrationEntity, name: string): Date | null {
+  const value = entity.attributes[name];
+  if (value === undefined || value === null || value === '') return null;
+  const date = new Date(String(value));
+  if (!Number.isFinite(date.getTime()))
+    throw new Error(`MIGRATION_ATTRIBUTE_INVALID:${entity.entityType}:${name}`);
+  return date;
+}
+
+function jsonAttribute(entity: NormalizedMigrationEntity, name: string, fallback: unknown): string {
+  const value = entity.attributes[name] ?? fallback;
+  try {
+    return JSON.stringify(typeof value === 'string' ? JSON.parse(value) : value);
+  } catch {
+    throw new Error(`MIGRATION_ATTRIBUTE_INVALID:${entity.entityType}:${name}`);
+  }
+}
+
 function dependency(ids: DependencyIds, type: MigrationEntityType): string {
   const id = ids.get(type);
   if (!id) throw new Error(`MIGRATION_DEPENDENCY_REQUIRED:${type}`);
@@ -184,19 +219,12 @@ async function writeCanonicalEntity(
         throw new Error('MIGRATION_ORGANIZATION_TARGET_REQUIRED');
       }
       if (
-        Number(
-          (
-            await tx
-              .updateTable('organizations')
-              .set({
-                name: textAttribute(entity, 'name'),
-                updated_at: now,
-              })
-              .where('tenant_id', '=', input.tenantId)
-              .where('id', '=', input.organizationId)
-              .executeTakeFirst()
-          ).numUpdatedRows,
-        ) !== 1
+        !(await tx
+          .selectFrom('organizations')
+          .select('id')
+          .where('tenant_id', '=', input.tenantId)
+          .where('id', '=', input.organizationId)
+          .executeTakeFirst())
       )
         throw new Error('MIGRATION_ORGANIZATION_TARGET_NOT_FOUND');
       return;
@@ -206,14 +234,14 @@ async function writeCanonicalEntity(
         organization_id: organizationId,
         name: textAttribute(entity, 'name'),
         slug: textAttribute(entity, 'slug', `import-${id}`),
-        status: 'active',
-        theme: '{}',
+        status: 'draft',
+        theme: jsonAttribute(entity, 'theme', {}),
         email_identity_id: null,
         sms_identity_id: null,
         payment_account_id: null,
-        support_url: null,
-        legal_urls: '{}',
-        white_label: false,
+        support_url: textAttribute(entity, 'supportUrl') || null,
+        legal_urls: jsonAttribute(entity, 'legalUrls', {}),
+        white_label: booleanAttribute(entity, 'whiteLabel'),
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });
@@ -242,18 +270,21 @@ async function writeCanonicalEntity(
         currency: textAttribute(entity, 'currency'),
         timezone: textAttribute(entity, 'timezone'),
         starts_at: new Date(textAttribute(entity, 'startsAt', now.toISOString())),
-        ends_at: null,
+        ends_at: nullableDateAttribute(entity, 'endsAt'),
         venue: null,
         visibility: 'private',
         seo: '{}',
-        capacity: null,
-        minimum_age: null,
+        capacity: nullableNumberAttribute(entity, 'capacity'),
+        minimum_age: nullableNumberAttribute(entity, 'minimumAge'),
         cover_image_url: null,
         external_url: null,
         last_setup_section: null,
         cover_image_alt: null,
         resale_max_absolute_cents: null,
-        code_format: null,
+        code_format:
+          entity.attributes.codeFormat === undefined || entity.attributes.codeFormat === null
+            ? null
+            : jsonAttribute(entity, 'codeFormat', null),
         public_revision: null,
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
@@ -268,9 +299,9 @@ async function writeCanonicalEntity(
         timezone: textAttribute(entity, 'timezone'),
         venue: null,
         venue_id: deps.get('venue') ?? null,
-        capacity: null,
-        sort_order: 0,
-        status: 'active',
+        capacity: nullableNumberAttribute(entity, 'capacity'),
+        sort_order: numberAttribute(entity, 'sortOrder'),
+        status: 'cancelled',
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });
@@ -280,7 +311,7 @@ async function writeCanonicalEntity(
         event_id: dependency(deps, 'event'),
         name: textAttribute(entity, 'name'),
         total_capacity: numberAttribute(entity, 'totalCapacity'),
-        hold_ttl_seconds: 900,
+        hold_ttl_seconds: numberAttribute(entity, 'holdTtlSeconds', 900),
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });
@@ -289,20 +320,20 @@ async function writeCanonicalEntity(
       await updateOrInsert('ticket_types', {
         event_id: dependency(deps, 'event'),
         name: textAttribute(entity, 'name'),
-        description: null,
-        kind: 'paid',
-        status: 'active',
-        visibility: 'visible',
+        description: textAttribute(entity, 'description') || null,
+        kind: textAttribute(entity, 'kind', 'paid'),
+        status: 'draft',
+        visibility: 'hidden',
         currency: textAttribute(entity, 'currency'),
         price_cents: numberAttribute(entity, 'priceMinor'),
-        minimum_price_cents: null,
-        sales_start_at: null,
-        sales_end_at: null,
-        min_per_order: 1,
-        max_per_order: 10,
+        minimum_price_cents: nullableNumberAttribute(entity, 'minimumPriceMinor'),
+        sales_start_at: nullableDateAttribute(entity, 'salesStartAt'),
+        sales_end_at: nullableDateAttribute(entity, 'salesEndAt'),
+        min_per_order: numberAttribute(entity, 'minPerOrder', 1),
+        max_per_order: numberAttribute(entity, 'maxPerOrder', 10),
         inventory_pool_id: dependency(deps, 'inventory-pool'),
-        sort_order: 0,
-        requires_access_code: false,
+        sort_order: numberAttribute(entity, 'sortOrder'),
+        requires_access_code: booleanAttribute(entity, 'requiresAccessCode'),
         access_code_hint: null,
         event_occurrence_id: deps.get('occurrence') ?? null,
         updated_at: now,
@@ -313,15 +344,15 @@ async function writeCanonicalEntity(
       await updateOrInsert('products', {
         event_id: dependency(deps, 'event'),
         name: textAttribute(entity, 'name'),
-        description: null,
+        description: textAttribute(entity, 'description') || null,
         price_cents: numberAttribute(entity, 'priceMinor'),
         currency: textAttribute(entity, 'currency'),
         category_id: null,
-        max_per_order: 10,
-        available_from: null,
-        available_until: null,
-        status: 'active',
-        sort_order: 0,
+        max_per_order: numberAttribute(entity, 'maxPerOrder', 10),
+        available_from: nullableDateAttribute(entity, 'availableFrom'),
+        available_until: nullableDateAttribute(entity, 'availableUntil'),
+        status: 'inactive',
+        sort_order: numberAttribute(entity, 'sortOrder'),
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });
@@ -332,19 +363,22 @@ async function writeCanonicalEntity(
         ticket_type_id: deps.get('ticket-type') ?? null,
         type: textAttribute(entity, 'type'),
         label: textAttribute(entity, 'label'),
-        description: null,
-        required: false,
-        applies_to: 'attendee',
-        options: null,
-        placeholder: null,
+        description: textAttribute(entity, 'description') || null,
+        required: booleanAttribute(entity, 'required'),
+        applies_to: textAttribute(entity, 'appliesTo', 'attendee'),
+        options:
+          entity.attributes.options === undefined || entity.attributes.options === null
+            ? null
+            : jsonAttribute(entity, 'options', null),
+        placeholder: textAttribute(entity, 'placeholder') || null,
         validation_pattern: null,
         conditional_visibility: null,
         hidden_at: null,
         deleted_at: null,
-        sort_order: 0,
-        is_consent_field: false,
-        consent_text: null,
-        consent_version: null,
+        sort_order: numberAttribute(entity, 'sortOrder'),
+        is_consent_field: booleanAttribute(entity, 'isConsentField'),
+        consent_text: textAttribute(entity, 'consentText') || null,
+        consent_version: textAttribute(entity, 'consentVersion') || null,
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });
@@ -357,12 +391,12 @@ async function writeCanonicalEntity(
         value: numberAttribute(entity, 'value'),
         currency: textAttribute(entity, 'currency', 'USD'),
         max_uses: numberAttribute(entity, 'maxUses', 0),
-        valid_from: null,
-        valid_until: null,
-        min_order_cents: null,
-        max_discount_cents: null,
+        valid_from: nullableDateAttribute(entity, 'validFrom'),
+        valid_until: nullableDateAttribute(entity, 'validUntil'),
+        min_order_cents: nullableNumberAttribute(entity, 'minOrderMinor'),
+        max_discount_cents: nullableNumberAttribute(entity, 'maxDiscountMinor'),
         ticket_type_ids: null,
-        status: 'active',
+        status: 'inactive',
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });
@@ -370,10 +404,10 @@ async function writeCanonicalEntity(
     case 'access-code':
       await updateOrInsert('access_rules', {
         ticket_type_id: dependency(deps, 'ticket-type'),
-        type: 'code',
+        type: textAttribute(entity, 'type', 'code'),
         value: textAttribute(entity, 'code'),
-        max_uses: null,
-        expires_at: null,
+        max_uses: nullableNumberAttribute(entity, 'maxUses'),
+        expires_at: nullableDateAttribute(entity, 'expiresAt'),
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });

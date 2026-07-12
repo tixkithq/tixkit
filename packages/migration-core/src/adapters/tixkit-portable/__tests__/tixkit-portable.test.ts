@@ -1,5 +1,6 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import {
+  buildPortableLogicalExport,
   scanPortablePayload,
   signPortableManifest,
   type PortableBundleManifest,
@@ -275,6 +276,107 @@ describe('TixkitPortableMigrationAdapter', () => {
         organizationId: 'organization_primary',
       }),
     ).resolves.toMatchObject({ source: { sourceSystem: 'tixkit-portable' } });
+  });
+
+  it('rejects oversized transport and excessive payload entries before payload decoding', () => {
+    const value = fixture();
+    expect(() =>
+      prepareTixkitPortableUpload(new Uint8Array(50 * 1024 * 1024 + 1), {} as never),
+    ).toThrow(/transport exceeds/u);
+    const payloads = Object.fromEntries(
+      Array.from({ length: 10_001 }, (_, index) => [`data/empty-${index}.jsonl`, '']),
+    );
+    expect(() =>
+      prepareTixkitPortableUpload(
+        Buffer.from(JSON.stringify({ envelope: value.envelope, payloads })),
+        {} as never,
+      ),
+    ).toThrow(/entry count exceeds/u);
+  });
+
+  it('consumes the canonical public export builder transport through hardened preparation', async () => {
+    const bundleKeys = generateKeyPairSync('ed25519');
+    const payloadKeys = generateKeyPairSync('ed25519');
+    const policy = {
+      schemaId: 'organizations_schema_01',
+      schemaSha256: '1'.repeat(64),
+      policySha256: '2'.repeat(64),
+      scannerId: 'payload_scanner_01',
+      validateRecord: () => true,
+    };
+    const built = buildPortableLogicalExport({
+      bundleId: 'bundle_import_roundtrip_01',
+      mode: 'configuration',
+      source: {
+        operatingModel: 'self-hosted',
+        deploymentId: 'deployment_source',
+        tenantId: 'tenant_source',
+        exportSequence: 1,
+        changeCursor: 'cursor_1',
+      },
+      apiVersion: '2026-01-01',
+      dataSchemaVersion: '0067',
+      exportedAt: '2026-07-12T20:00:00.000Z',
+      currentTime: '2026-07-12T20:00:00.000Z',
+      compatibility: {
+        minimumApiVersion: '2026-01-01',
+        maximumApiVersion: '2026-12-31',
+        minimumDataSchemaVersion: '0064',
+        maximumDataSchemaVersion: '0069',
+        requiredCapabilities: ['portable-bundle-v1'],
+        requiredEntitlements: [],
+      },
+      sections: new Map([
+        [
+          'organizations',
+          [{ portableId: 'organization_1', attributes: { name: 'Portable organization' } }],
+        ],
+      ]),
+      bundleSigning: { keyId: 'bundle_key_01', privateKey: bundleKeys.privateKey },
+      payloadSigning: { keyId: 'payload_key_01', privateKey: payloadKeys.privateKey },
+      payloadPolicies: new Map([['organizations', policy]]),
+    });
+    const configuration = prepareTixkitPortableUpload(built.transport, {
+      destination: {
+        deploymentId: 'deployment_destination',
+        apiVersion: '2026-01-01',
+        dataSchemaVersion: '0067',
+        capabilities: ['portable-bundle-v1'],
+        entitlements: [],
+        availableStorageBytes: 1024,
+        acceptedSourceOperatingModels: ['self-hosted'],
+      },
+      trustedBundleKeys: new Map([['bundle_key_01', bundleKeys.publicKey]]),
+      trustedPayloadKeys: new Map([['payload_key_01', payloadKeys.publicKey]]),
+      trustedPayloadPolicies: new Map([
+        [
+          'organizations',
+          {
+            schemaId: policy.schemaId,
+            schemaSha256: policy.schemaSha256,
+            policySha256: policy.policySha256,
+            scannerId: policy.scannerId,
+            keyId: 'payload_key_01',
+          },
+        ],
+      ]),
+      trustedMediaKeys: new Map(),
+      trustedMediaPolicies: new Map(),
+      destinationTenantId: 'tenant_destination',
+      destinationOrganizationId: 'organization_destination',
+    });
+    const adapter = new TixkitPortableMigrationAdapter();
+    const context = {
+      tenantId: 'tenant_destination',
+      organizationId: 'organization_destination',
+    };
+    const discovery = await adapter.discover(configuration, context);
+    const page = await adapter.extract({ configuration, discovery, limit: 10, context });
+    await expect(adapter.normalize(page.rows[0]!, context)).resolves.toMatchObject({
+      externalId: 'organization_1',
+      entityType: 'organization',
+      attributes: { name: 'Portable organization' },
+    });
   });
 
   it('rejects payload byte drift before migration discovery', () => {

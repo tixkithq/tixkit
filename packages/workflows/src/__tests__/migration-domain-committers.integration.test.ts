@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createDb,
   BrandRepository,
+  EventRepository,
   ImportRepository,
   OrganizationRepository,
   runMigrations,
@@ -17,13 +18,17 @@ import {
   SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
   ticketTailorApiV1Fixture,
   migrationAdapter,
+  prepareTixkitPortableUpload,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
   sortEntitiesByDependency,
+  TixkitPortableMigrationAdapter,
   type MigrationAdapter,
   type MigrationEntityType,
   type NormalizedMigrationEntity,
 } from '@tixkit/migration-core';
 import {
+  buildPortableLogicalExport,
+  createPortableConfigurationPayloadPolicies,
   scanPortablePayload,
   signPortableManifest,
   type PortableBundleManifest,
@@ -32,34 +37,115 @@ import { MIGRATION_COMMIT_STAGES, MIGRATION_SIDE_EFFECT_POLICY } from '../activi
 import { createProductionMigrationCommitters } from '../activities/migration-domain-committers.js';
 import { createRepositoryMigrationActivityService } from '../activities/migration-repository-service.js';
 import { createMigrationPreparationService } from '../activities/migration-preparation.js';
+import { loadPortableConfigurationSections } from '../activities/portable-export.js';
 
-const url = process.env.DATABASE_URL ?? '';
+const integrationDriver = process.env.DB_INTEGRATION_DRIVER === 'mysql' ? 'mysql' : 'postgres';
+const url =
+  integrationDriver === 'mysql'
+    ? (process.env.DATABASE_URL_MYSQL ?? '')
+    : (process.env.DATABASE_URL ?? '');
 const describeDatabase = url ? describe.sequential : describe.skip;
 
 const attributes: Record<MigrationEntityType, Record<string, unknown>> = {
-  organization: { name: 'Imported organization' },
-  brand: { name: 'Imported brand' },
-  venue: { name: 'Imported venue' },
+  organization: {
+    name: 'Imported organization',
+    slug: 'imported-organization',
+    status: 'active',
+    boxOfficeSettings: {
+      enabled: true,
+      allowedTenderTypes: ['cash', 'manual_card'],
+      requireBuyerEmail: true,
+      receiptMode: 'email',
+    },
+    eventDefaults: { timezone: 'America/Chicago' },
+  },
+  brand: {
+    name: 'Imported brand',
+    slug: 'imported-brand',
+    status: 'active',
+    theme: { primaryColor: '#123456' },
+    supportUrl: 'https://support.example.test',
+    legalUrls: { privacy: 'https://example.test/privacy' },
+    whiteLabel: true,
+  },
+  venue: { name: 'Imported venue', address: '123 Main St', timezone: 'America/Chicago' },
   event: {
     title: 'Imported event',
     currency: 'USD',
     timezone: 'America/Chicago',
+    slug: 'imported-event',
+    description: 'Portable event description',
+    status: 'published',
+    startsAt: '2026-10-01T18:00:00Z',
+    endsAt: '2026-10-01T22:00:00Z',
+    visibility: 'public',
+    capacity: 321,
+    minimumAge: 18,
+    codeFormat: { symbology: 'qr', payloadFormat: 'compact_v2' },
   },
   occurrence: {
     startsAt: '2026-10-01T18:00:00Z',
     endsAt: '2026-10-01T20:00:00Z',
     timezone: 'America/Chicago',
+    title: 'Evening session',
+    capacity: 200,
+    status: 'active',
+    sortOrder: 7,
   },
-  'inventory-pool': { name: 'General', totalCapacity: 100 },
+  'inventory-pool': { name: 'General', totalCapacity: 100, holdTtlSeconds: 1200 },
   'ticket-type': {
     name: 'General admission',
     currency: 'USD',
     priceMinor: 2500,
+    description: 'Portable admission',
+    kind: 'paid',
+    status: 'active',
+    visibility: 'visible',
+    minimumPriceMinor: 1500,
+    salesStartAt: '2026-01-01T00:00:00Z',
+    salesEndAt: '2026-09-30T00:00:00Z',
+    minPerOrder: 2,
+    maxPerOrder: 8,
+    sortOrder: 4,
+    requiresAccessCode: true,
   },
-  product: { name: 'Poster', currency: 'USD', priceMinor: 1000 },
-  question: { label: 'Dietary requirements', type: 'text' },
-  discount: { code: 'SAVE10', type: 'percentage', value: 10 },
-  'access-code': { code: 'LOCKED' },
+  product: {
+    name: 'Poster',
+    description: 'Limited poster',
+    currency: 'USD',
+    priceMinor: 1000,
+    maxPerOrder: 3,
+    availableFrom: '2026-01-01T00:00:00Z',
+    availableUntil: '2026-10-01T00:00:00Z',
+    status: 'active',
+    sortOrder: 5,
+  },
+  question: {
+    label: 'Dietary requirements',
+    type: 'select',
+    description: 'Choose one',
+    required: true,
+    appliesTo: 'attendee',
+    options: ['vegan', 'none'],
+    placeholder: 'Choose',
+    sortOrder: 6,
+    isConsentField: true,
+    consentText: 'I consent',
+    consentVersion: 'v2',
+  },
+  discount: {
+    code: 'SAVE10',
+    type: 'percentage',
+    value: 10,
+    currency: 'USD',
+    maxUses: 25,
+    validFrom: '2026-01-01T00:00:00Z',
+    validUntil: '2026-09-30T00:00:00Z',
+    minOrderMinor: 2000,
+    maxDiscountMinor: 5000,
+    status: 'active',
+  },
+  'access-code': { code: 'LOCKED', type: 'code', maxUses: 5, expiresAt: '2026-09-30T00:00:00Z' },
   buyer: { email: 'buyer@example.test' },
   attendee: { email: 'attendee@example.test' },
   'historical-order': {
@@ -111,7 +197,7 @@ describeDatabase('production migration committers', () => {
   let brandId: string;
 
   beforeAll(async () => {
-    process.env.DB_DRIVER = process.env.DB_INTEGRATION_DRIVER === 'mysql' ? 'mysql' : 'postgres';
+    process.env.DB_DRIVER = integrationDriver;
     await runMigrations(url);
     db = createDb(url);
     await truncateAllData(db);
@@ -402,6 +488,347 @@ describeDatabase('production migration committers', () => {
         sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
       }),
     ).resolves.toMatchObject({ disposition: 'conflict' });
+  });
+
+  it('loads an organization-scoped configuration bundle from production tables', async () => {
+    await importChain('portable-export:source');
+    const sourceBrandReference = await new ImportRepository(db).findExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      entityType: 'brand',
+      externalId: 'brand-1',
+    });
+    await db
+      .updateTable('brands')
+      .set({
+        theme: JSON.stringify({
+          primaryColor: '#123456',
+          secondaryColor: '#234567',
+          accentColor: '#345678',
+          backgroundColor: '#ffffff',
+          textColor: '#111111',
+          fontFamily: 'Inter, sans-serif',
+          borderRadius: 8,
+          logoArtifactId: 'upl_local_logo',
+          iconArtifactId: 'upl_local_icon',
+          logoUrl: '/v1/public/brand-logos/upl_local_logo',
+          iconUrl: '/v1/public/brand-logos/upl_local_icon',
+          faviconUrl: 'https://source.example.test/favicon.ico',
+          customCss: 'body { color: red; }',
+        }),
+      })
+      .where('id', '=', sourceBrandReference!.tixkit_id)
+      .execute();
+    const suffix = Date.now().toString(36);
+    const otherOrganization = await new OrganizationRepository(db).create({
+      tenantId,
+      name: `Other ${suffix}`,
+      slug: `other-${suffix}`,
+    });
+    const otherBrand = await new BrandRepository(db).create({
+      tenantId,
+      organizationId: otherOrganization.id,
+      name: `Other ${suffix}`,
+      slug: `other-${suffix}`,
+    });
+    const otherEvent = await new EventRepository(db).create({
+      tenantId,
+      organizationId: otherOrganization.id,
+      brandId: otherBrand.id,
+      slug: `other-${suffix}`,
+      title: 'Other event',
+      currency: 'USD',
+      timezone: 'UTC',
+      startsAt: new Date('2027-01-01T00:00:00.000Z'),
+    });
+    const sections = await loadPortableConfigurationSections(db, { tenantId, organizationId });
+    expect(sections.get('organizations')).toHaveLength(1);
+    expect(sections.get('events')?.length).toBeGreaterThan(0);
+    expect(sections.get('ticket_types')?.length).toBeGreaterThan(0);
+    expect(sections.get('products')?.length).toBeGreaterThan(0);
+    expect(sections.get('checkout_questions')?.length).toBeGreaterThan(0);
+    expect(sections.get('discounts')?.length).toBeGreaterThan(0);
+    expect(sections.get('access_codes')?.length).toBeGreaterThan(0);
+    expect(
+      sections
+        .get('brands')!
+        .find(({ portableId }) => portableId === sourceBrandReference!.tixkit_id)!.attributes.theme,
+    ).toEqual({
+      primaryColor: '#123456',
+      secondaryColor: '#234567',
+      accentColor: '#345678',
+      backgroundColor: '#ffffff',
+      textColor: '#111111',
+      fontFamily: 'Inter, sans-serif',
+      borderRadius: 8,
+    });
+    expect(sections.get('events')?.some(({ portableId }) => portableId === otherEvent.id)).toBe(
+      false,
+    );
+
+    const bundleKeys = generateKeyPairSync('ed25519');
+    const payloadKeys = generateKeyPairSync('ed25519');
+    const payloadPolicies = createPortableConfigurationPayloadPolicies();
+    const build = (selectedSections: typeof sections) =>
+      buildPortableLogicalExport({
+        bundleId: `bundle_${suffix}`,
+        mode: 'configuration',
+        source: {
+          operatingModel: 'self-hosted',
+          deploymentId: 'integration_source',
+          tenantId,
+          exportSequence: 1,
+          changeCursor: `cursor_${suffix}`,
+        },
+        apiVersion: '2026-01-01',
+        dataSchemaVersion: '0067',
+        exportedAt: '2026-07-12T20:00:00.000Z',
+        currentTime: '2026-07-12T20:00:00.000Z',
+        compatibility: {
+          minimumApiVersion: '2026-01-01',
+          maximumApiVersion: '2026-12-31',
+          minimumDataSchemaVersion: '0064',
+          maximumDataSchemaVersion: '0069',
+          requiredCapabilities: ['portable-bundle-v1'],
+          requiredEntitlements: [],
+        },
+        sections: selectedSections,
+        bundleSigning: { keyId: 'bundle_key_01', privateKey: bundleKeys.privateKey },
+        payloadSigning: { keyId: 'payload_key_01', privateKey: payloadKeys.privateKey },
+        payloadPolicies,
+      });
+    const built = build(sections);
+    expect(built.envelope.manifest.files).toHaveLength(sections.size);
+    expect(built.transport.byteLength).toBeGreaterThan(0);
+    const transportText = new TextDecoder().decode(built.transport);
+    expect(transportText).not.toMatch(
+      /logoArtifactId|iconArtifactId|logoUrl|iconUrl|faviconUrl|customCss|upl_local_/u,
+    );
+
+    const destinationTenant = await new TenantRepository(db).create({
+      name: `Portable destination ${suffix}`,
+    });
+    const destinationOrganization = await new OrganizationRepository(db).create({
+      tenantId: destinationTenant.id,
+      name: `Portable destination ${suffix}`,
+      slug: `portable-destination-${suffix}`,
+    });
+    await db
+      .updateTable('organizations')
+      .set({
+        box_office_settings: JSON.stringify({
+          enabled: false,
+          allowedTenderTypes: ['comp'],
+          requireBuyerEmail: false,
+          receiptMode: 'print',
+        }),
+        event_defaults: JSON.stringify({ currency: 'CAD', country: 'CA' }),
+      })
+      .where('tenant_id', '=', destinationTenant.id)
+      .where('id', '=', destinationOrganization.id)
+      .execute();
+    const destinationOrganizationBefore = (
+      await loadPortableConfigurationSections(db, {
+        tenantId: destinationTenant.id,
+        organizationId: destinationOrganization.id,
+      })
+    ).get('organizations')![0]!.attributes;
+    const configuration = prepareTixkitPortableUpload(built.transport, {
+      destination: {
+        deploymentId: 'integration_destination',
+        apiVersion: '2026-01-01',
+        dataSchemaVersion: '0067',
+        capabilities: ['portable-bundle-v1'],
+        entitlements: [],
+        availableStorageBytes: 64 * 1024 * 1024,
+        acceptedSourceOperatingModels: ['self-hosted'],
+      },
+      trustedBundleKeys: new Map([['bundle_key_01', bundleKeys.publicKey]]),
+      trustedPayloadKeys: new Map([['payload_key_01', payloadKeys.publicKey]]),
+      trustedPayloadPolicies: new Map(
+        [...payloadPolicies].map(([section, policy]) => [
+          section,
+          {
+            schemaId: policy.schemaId,
+            schemaSha256: policy.schemaSha256,
+            policySha256: policy.policySha256,
+            scannerId: policy.scannerId,
+            keyId: 'payload_key_01',
+          },
+        ]),
+      ),
+      trustedMediaKeys: new Map(),
+      trustedMediaPolicies: new Map(),
+      destinationTenantId: destinationTenant.id,
+      destinationOrganizationId: destinationOrganization.id,
+    });
+    const adapter = new TixkitPortableMigrationAdapter();
+    const context = {
+      tenantId: destinationTenant.id,
+      organizationId: destinationOrganization.id,
+    };
+    const discovery = await adapter.discover(configuration, context);
+    const normalized: NormalizedMigrationEntity[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await adapter.extract({
+        configuration,
+        discovery,
+        cursor,
+        limit: 5,
+        context,
+      });
+      for (const row of page.rows) normalized.push(await adapter.normalize(row, context));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(normalized).toHaveLength(
+      [...sections.values()].reduce((count, records) => count + records.length, 0),
+    );
+
+    const destinationJob = await new ImportRepository(db).createJob({
+      tenantId: destinationTenant.id,
+      organizationId: destinationOrganization.id,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: `portable-roundtrip:${suffix}`,
+      requestedBy: 'test-user',
+    });
+    const committers = createProductionMigrationCommitters(db);
+    const imports = new ImportRepository(db);
+    for (const item of sortEntitiesByDependency(normalized)) {
+      const outcome = await committers.get(item.entityType)!.commit({
+        tenantId: destinationTenant.id,
+        organizationId: destinationOrganization.id,
+        jobId: destinationJob.id,
+        entity: item,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      });
+      await imports.recordExternalReference({
+        tenantId: destinationTenant.id,
+        organizationId: destinationOrganization.id,
+        sourceSystem: 'tixkit-portable',
+        entityType: item.entityType,
+        externalId: item.externalId,
+        tixkitId: outcome.tixkitId!,
+        importJobId: destinationJob.id,
+        createdByJob: outcome.disposition === 'created',
+      });
+      if (item.entityType === 'event') {
+        const stagedEvent = await db
+          .selectFrom('events')
+          .innerJoin('brands', 'brands.id', 'events.brand_id')
+          .select(['events.status', 'events.visibility', 'brands.status as brand_status'])
+          .where('events.id', '=', outcome.tixkitId!)
+          .executeTakeFirstOrThrow();
+        expect(stagedEvent).toEqual({
+          status: 'draft',
+          visibility: 'private',
+          brand_status: 'draft',
+        });
+      }
+    }
+    const destinationId = async (entityType: MigrationEntityType, externalId: string) =>
+      (await imports.findExternalReference({
+        tenantId: destinationTenant.id,
+        organizationId: destinationOrganization.id,
+        sourceSystem: 'tixkit-portable',
+        entityType,
+        externalId,
+      }))!.tixkit_id;
+    const sectionEntityType = new Map([
+      ['organizations', 'organization'],
+      ['brands', 'brand'],
+      ['venues', 'venue'],
+      ['events', 'event'],
+      ['occurrences', 'occurrence'],
+      ['inventory', 'inventory-pool'],
+      ['ticket_types', 'ticket-type'],
+      ['products', 'product'],
+      ['checkout_questions', 'question'],
+      ['discounts', 'discount'],
+      ['access_codes', 'access-code'],
+    ] as const);
+    const destinationSections = await loadPortableConfigurationSections(db, {
+      tenantId: destinationTenant.id,
+      organizationId: destinationOrganization.id,
+    });
+    const inertStateOverrides = new Map([
+      ['brands', { status: 'draft' }],
+      ['events', { status: 'draft', visibility: 'private' }],
+      ['occurrences', { status: 'cancelled' }],
+      ['ticket_types', { status: 'draft', visibility: 'hidden' }],
+      ['products', { status: 'inactive' }],
+      ['discounts', { status: 'inactive' }],
+    ] as const);
+    for (const [section, sourceRecords] of sections) {
+      const entityType = sectionEntityType.get(section as never);
+      expect(entityType, `missing entity mapping for ${section}`).toBeDefined();
+      for (const sourceRecord of sourceRecords) {
+        const mappedId = await destinationId(entityType!, sourceRecord.portableId);
+        const destinationRecord = destinationSections
+          .get(section)
+          ?.find(({ portableId }) => portableId === mappedId);
+        expect(destinationRecord?.attributes, `${section}:${sourceRecord.portableId}`).toEqual({
+          ...(section === 'organizations'
+            ? destinationOrganizationBefore
+            : sourceRecord.attributes),
+          ...inertStateOverrides.get(section as never),
+        });
+        const staged = await db
+          .selectFrom('imported_domain_entities')
+          .select('attributes')
+          .where('tenant_id', '=', destinationTenant.id)
+          .where('organization_id', '=', destinationOrganization.id)
+          .where('id', '=', mappedId)
+          .executeTakeFirstOrThrow();
+        expect(JSON.parse(staged.attributes)).toEqual(sourceRecord.attributes);
+      }
+    }
+    const sourceEvent = sections.get('events')![0]!;
+    const sourceBrandId = sourceEvent.dependencies!.find(
+      ({ section }) => section === 'brands',
+    )!.portableId;
+    await db
+      .updateTable('events')
+      .set({ brand_id: otherBrand.id })
+      .where('id', '=', sourceEvent.portableId)
+      .execute();
+    try {
+      const corruptSections = await loadPortableConfigurationSections(db, {
+        tenantId,
+        organizationId,
+      });
+      expect(() => build(corruptSections)).toThrow(/dependency identity is absent/u);
+    } finally {
+      await db
+        .updateTable('events')
+        .set({ brand_id: sourceBrandId })
+        .where('id', '=', sourceEvent.portableId)
+        .execute();
+    }
+    const originalEventDefaults = sections.get('organizations')![0]!.attributes.eventDefaults;
+    await db
+      .updateTable('organizations')
+      .set({ event_defaults: JSON.stringify({ nested: { apiKey: 'must-not-export' } }) })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .execute();
+    try {
+      const secretSections = await loadPortableConfigurationSections(db, {
+        tenantId,
+        organizationId,
+      });
+      expect(() => build(secretSections)).toThrow(/forbidden field/u);
+    } finally {
+      await db
+        .updateTable('organizations')
+        .set({ event_defaults: JSON.stringify(originalEventDefaults) })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', organizationId)
+        .execute();
+    }
   });
 
   it('cannot resolve dependencies from another organization in the same tenant', async () => {

@@ -26,8 +26,13 @@ const sectionToEntity = new Map<PortableSection, MigrationEntityType>([
   ['events', 'event'],
   ['occurrences', 'occurrence'],
   ['inventory', 'inventory-pool'],
+  ['ticket_types', 'ticket-type'],
   ['products', 'product'],
   ['checkout_questions', 'question'],
+  ['discounts', 'discount'],
+  ['access_codes', 'access-code'],
+  ['buyers', 'buyer'],
+  ['attendees', 'attendee'],
   ['orders', 'historical-order'],
   ['payments', 'historical-payment'],
   ['refunds', 'historical-refund'],
@@ -182,6 +187,11 @@ export function prepareTixkitPortableUpload(
   bytes: Uint8Array,
   trust: TixkitPortableImportTrust,
 ): TixkitPortableAdapterConfiguration {
+  const maxTransportBytes = 50 * 1024 * 1024;
+  const maxPayloadEntries = 10_000;
+  if (bytes.byteLength > maxTransportBytes) {
+    throw new Error('portable migration transport exceeds the import limit');
+  }
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   const parsed = parsePortableJson(text);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -199,9 +209,13 @@ export function prepareTixkitPortableUpload(
   ) {
     throw new Error('portable migration upload shape is invalid');
   }
+  const payloadEntries = Object.entries(upload.payloads);
+  if (payloadEntries.length > maxPayloadEntries) {
+    throw new Error('portable migration payload entry count exceeds the import limit');
+  }
   const payloads = new Map<string, Uint8Array>();
   let decodedBytes = 0;
-  for (const [path, encoded] of Object.entries(upload.payloads)) {
+  for (const [path, encoded] of payloadEntries) {
     if (
       typeof encoded !== 'string' ||
       !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)

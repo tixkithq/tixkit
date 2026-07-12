@@ -1,0 +1,18 @@
+{
+  "policyVersion": "tixkit-portable-configuration-policy-v1",
+  "validatorVersion": "tixkit-portable-configuration-validator-v1",
+  "secretPolicyVersion": "tixkit-portable-secret-policy-v1",
+  "sections": {
+    "organizations": { "schemaSha256": "273cb7dbcdfa1081a0cddc64a6cca8ba1bac5ac8ed996e9419b1c0570d799f4d", "policySha256": "061d057e3c2838d63e993ea2216aa53d2a7af61901f848b81735454ebff8e8ee" },
+    "brands": { "schemaSha256": "4ef6f2c3838d464b74b7da3e33a6b0fa15fea91b86d468d8400817843dbe57cb", "policySha256": "e8517c0661df5a62516cd6a3f716f5cfeec711654ef96f1cfd920e4b4e94ae82" },
+    "venues": { "schemaSha256": "e0790c59ca43b3f4943c6a09c02334a7579b939c2744582da43028ddbbb1f91b", "policySha256": "d4658eb82c546fdd487d3e80af0952d4d4f711ca4213a14bb9ebb91a0b75d753" },
+    "events": { "schemaSha256": "5d2a998bfe0e1592a657ac5e94bcd16d014f2ae160c485509ebe843347154054", "policySha256": "11f1ac4ebad87fec0745974ce46f1c9a16eba22eea1036fcb7ba09ed2fe77c36" },
+    "occurrences": { "schemaSha256": "20e438995133a35b1cce3aee34413756f952dc1ed285e83820909f7ba857d485", "policySha256": "35a1627381b398ca1326088ea43f4a1abf69ddb8a5eaba7ab460ff693fa6bdfb" },
+    "inventory": { "schemaSha256": "48234f31ad9bc72644e16657925e5fcb3077873597be1565e63309b8ed019a55", "policySha256": "0cf05820017fa839703bcb8b681fddced77293a169e8ffb787d2e6d9614df5df" },
+    "ticket_types": { "schemaSha256": "321c02a6b47d407f80fc58c7d8408637e669133538836d902885521870c1f108", "policySha256": "f535065b077721a840ef32471bb6929755b86db1364345bdcc477aeff9d7efd2" },
+    "products": { "schemaSha256": "dcc194e8d61680050fa1666e3d83a069d6b22a62248eaa841529a2b97aae9314", "policySha256": "0b89b9467e63c9b7afcbf7a6a0b6281d9ea7e11732f86653a85ac3793637b125" },
+    "checkout_questions": { "schemaSha256": "a02f78acffe00084e3346ae7cade1d96b6929f3d026053e3e380588b168759d7", "policySha256": "7c2097f8b54246cfeb1081200388fa6dda6e29a2b05e2b372b5bbfd8d7ba909e" },
+    "discounts": { "schemaSha256": "e69091fd2c2c37be59b64a6a55cada93b7951ad3ccffc1c576c8674bd4db6533", "policySha256": "589cd9e4903feddb104e1f21711c5ace9daba2f5fb5a03ccad11f03ce35667b6" },
+    "access_codes": { "schemaSha256": "3e98c625ee3ac51ff467d91765e61a09840d0b76bd16437d8fadafa0d6879db5", "policySha256": "a2e19fb8c229ba35d9b633e68f2b3a865a825eb7cf63080335bc032168441231" }
+  }
+}

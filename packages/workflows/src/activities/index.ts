@@ -11,5 +11,6 @@ export * from './privacy.js';
 export * from './migration.js';
 export * from './migration-repository-service.js';
 export * from './migration-domain-committers.js';
+export * from './portable-export.js';
 export * from './migration-credential-resolver.js';
 export * from './migration-preparation.js';

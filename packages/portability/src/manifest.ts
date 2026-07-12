@@ -26,14 +26,19 @@ export const PORTABLE_SECTIONS = [
   'events',
   'occurrences',
   'inventory',
+  'ticket_types',
   'products',
   'checkout_questions',
+  'discounts',
+  'access_codes',
   'policies',
   'content',
   'templates',
   'webhooks',
   'oauth_applications',
   'configuration',
+  'buyers',
+  'attendees',
   'orders',
   'payments',
   'refunds',
@@ -48,6 +53,8 @@ export type PortableSection = (typeof PORTABLE_SECTIONS)[number];
 const PORTABLE_SECTION_SET: ReadonlySet<string> = new Set(PORTABLE_SECTIONS);
 
 export const HISTORICAL_SECTIONS: ReadonlySet<PortableSection> = new Set([
+  'buyers',
+  'attendees',
   'orders',
   'payments',
   'refunds',
@@ -66,6 +73,22 @@ export interface PortableBundleFile {
   bytes: number;
   records: number;
   contentType: 'application/jsonl' | 'application/json' | 'application/octet-stream';
+}
+
+export interface PortableLogicalRecord {
+  portableId: string;
+  attributes: Readonly<Record<string, unknown>>;
+  dependencies?: Array<{ section: PortableSection; portableId: string }>;
+  financialSnapshot?: {
+    kind: 'historical-payment' | 'historical-refund';
+    amountMinor: number;
+    currency: string;
+    providerReference?: string;
+    occurredAt: string;
+    provenance: { sourceSystem: string; sourceExternalId: string; importedAt: string };
+    reconciliationStatus: 'unreconciled' | 'reconciled';
+    sideEffects: 'suppressed';
+  };
 }
 
 export interface PortableAsset {
@@ -223,6 +246,10 @@ export interface PortablePayloadSafetyAttestation {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/u;
+
+export function isPortableProtocolId(value: unknown): value is string {
+  return typeof value === 'string' && ID_PATTERN.test(value);
+}
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const SAFE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u;
 const FORBIDDEN_PAYLOAD_KEYS = new Set([
@@ -268,6 +295,10 @@ function canonicalize(value: unknown): unknown {
 
 export function canonicalPortableManifest(manifest: PortableBundleManifest): string {
   return `${JSON.stringify(canonicalize(manifest))}\n`;
+}
+
+export function canonicalPortableJson(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
 }
 
 export function portableManifestSha256(manifest: PortableBundleManifest): string {
@@ -631,7 +662,7 @@ export function scanPortablePayload(
       record && typeof record === 'object' && !Array.isArray(record)
         ? (record as Record<string, unknown>).portableId
         : undefined;
-    if (typeof portableId !== 'string' || !ID_PATTERN.test(portableId)) {
+    if (!isPortableProtocolId(portableId)) {
       throw new Error(`portable payload record lacks a valid portableId at ${file.path}[${index}]`);
     }
     return portableId;
