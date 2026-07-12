@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { adoptionPathsForRoute } from '../../packages/docs-core/dist/index.js';
 import { loadPublicDocuments } from './lib/content.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -79,7 +80,7 @@ const searchRecords = expandedDocuments.map((document) => ({
   contentType: document.frontmatter.content_type,
   status: document.frontmatter.status,
   keywords: document.frontmatter.keywords ?? [],
-  adoptionPaths: document.frontmatter.adoption_paths ?? [],
+  adoptionPaths: adoptionPathsForRoute(document.route, document.frontmatter.adoption_paths),
 }));
 mkdirSync(dirname(searchOutput), { recursive: true });
 writeFileSync(searchOutput, `${JSON.stringify(searchRecords, null, 2)}\n`, 'utf8');

@@ -167,7 +167,9 @@
     "contentType": "concept",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/api-fundamentals/errors",
@@ -193,7 +195,9 @@
     "contentType": "concept",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/api-fundamentals/idempotency",
@@ -208,7 +212,9 @@
     "contentType": "concept",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/api-fundamentals",
@@ -239,7 +245,9 @@
     "contentType": "overview",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/api-fundamentals/pagination",
@@ -260,7 +268,9 @@
     "contentType": "concept",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/api-fundamentals/permissions",
@@ -286,7 +296,9 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/webhooks/setup",
@@ -317,7 +329,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/webhooks/testing",
@@ -343,7 +357,9 @@
     "contentType": "tutorial",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/webhooks/troubleshooting",
@@ -379,7 +395,9 @@
     "contentType": "troubleshooting",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/webhooks/verify-signatures",
@@ -405,7 +423,9 @@
     "contentType": "how-to",
     "status": "stable",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/developers/widget/embedding",
@@ -431,7 +451,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/getting-started/deployment-model",
@@ -472,7 +494,11 @@
       "local",
       "self-hosted"
     ],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/getting-started/first-api-call",
@@ -507,7 +533,9 @@
       "curl",
       "first request"
     ],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/getting-started/first-event",
@@ -557,7 +585,9 @@
       "publish",
       "ticket inventory"
     ],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/getting-started/local-quickstart",
@@ -604,7 +634,9 @@
       "docker compose",
       "setup check"
     ],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/getting-started/platform-overview",
@@ -647,7 +679,11 @@
       "event commerce",
       "architecture"
     ],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/getting-started/test-checkout",
@@ -688,7 +724,9 @@
       "order",
       "payment capture"
     ],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operations/incidents",
@@ -729,7 +767,9 @@
     "contentType": "runbook",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/operations/temporal",
@@ -760,7 +800,9 @@
     "contentType": "runbook",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/operators/attendees",
@@ -791,7 +833,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/box-office",
@@ -822,7 +866,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/brands",
@@ -853,7 +899,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/check-in",
@@ -884,7 +932,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/events",
@@ -915,7 +965,9 @@
     "contentType": "overview",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/events/checkout-forms",
@@ -946,7 +998,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/events/schedules",
@@ -977,7 +1031,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/events/tickets-and-products",
@@ -1008,7 +1064,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/messaging",
@@ -1039,7 +1097,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/migration-operations",
@@ -1106,7 +1166,9 @@
     "contentType": "runbook",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/migrations/bespoke-adapters",
@@ -1121,7 +1183,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/migrations/eventbrite",
@@ -1137,7 +1201,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/migrations/generic-csv",
@@ -1153,7 +1219,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/migrations/hi-events",
@@ -1169,7 +1237,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/migrations/pretix",
@@ -1185,7 +1255,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/migrations/ticket-tailor",
@@ -1201,7 +1273,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/orders",
@@ -1232,7 +1306,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/orders/refunds",
@@ -1263,7 +1339,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/reports-and-exports",
@@ -1294,7 +1372,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/sandbox-operations",
@@ -1310,7 +1390,9 @@
     "contentType": "runbook",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/team-and-permissions",
@@ -1341,7 +1423,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/operators/workspace",
@@ -1372,7 +1456,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell"
+    ]
   },
   {
     "url": "/platform",
@@ -1473,7 +1559,11 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/reference/api-release-train",
@@ -1494,7 +1584,11 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/reference/api-versions",
@@ -1509,7 +1603,11 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/reference/api",
@@ -1527,7 +1625,11 @@
       "endpoint reference",
       "OpenAPI"
     ],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/reference/api/schemas",
@@ -1542,7 +1644,11 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/reference/performance",
@@ -1559,7 +1665,11 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/reference/privacy-and-retention",
@@ -1576,7 +1686,11 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/reference/webhook-events",
@@ -1591,7 +1705,11 @@
     "contentType": "reference",
     "status": "stable",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   },
   {
     "url": "/sdks/android",
@@ -1632,7 +1750,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/astro",
@@ -1673,7 +1793,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/flutter",
@@ -1714,7 +1836,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/go",
@@ -1755,7 +1879,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/ios",
@@ -1796,7 +1922,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/javascript",
@@ -1837,7 +1965,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/nextjs",
@@ -1878,7 +2008,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/react-native",
@@ -1919,7 +2051,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/remix",
@@ -1960,7 +2094,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/rust",
@@ -2001,7 +2137,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/sveltekit",
@@ -2042,7 +2180,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/sdks/vue-and-nuxt",
@@ -2083,7 +2223,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "platform"
+    ]
   },
   {
     "url": "/self-hosted",
@@ -2146,7 +2288,9 @@
     "contentType": "concept",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/authentication",
@@ -2172,7 +2316,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/backups-and-restore",
@@ -2213,7 +2359,9 @@
     "contentType": "runbook",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/compact",
@@ -2254,7 +2402,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/configuration",
@@ -2285,7 +2435,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/databases",
@@ -2316,7 +2468,9 @@
     "contentType": "reference",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/deployment",
@@ -2347,7 +2501,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/object-storage",
@@ -2362,7 +2518,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/observability",
@@ -2393,7 +2551,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/production",
@@ -2424,7 +2584,9 @@
     "contentType": "how-to",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/self-hosting/upgrades",
@@ -2450,7 +2612,9 @@
     "contentType": "runbook",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "self-hosted"
+    ]
   },
   {
     "url": "/sell",
@@ -2552,6 +2716,10 @@
     "contentType": "overview",
     "status": "beta",
     "keywords": [],
-    "adoptionPaths": []
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
   }
 ]

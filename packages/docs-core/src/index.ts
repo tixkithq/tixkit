@@ -1,4 +1,5 @@
 export * from './content-schema.js';
+export * from './adoption-paths.js';
 export * from './help-registry.js';
 export * from './readiness.js';
 export * from './routes.js';

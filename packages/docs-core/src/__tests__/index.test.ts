@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adoptionPathsForRoute,
   canonicalDocRoutes,
   dashboardHelpRegistry,
   docRouteIds,
@@ -19,6 +20,19 @@ describe('@tixkit/docs-core', () => {
     expect(canonicalDocRoutes.every((path) => path === '/' || /^\/[a-z0-9/-]+$/.test(path))).toBe(
       true,
     );
+  });
+
+  it('classifies legacy and shared guides into adoption paths deterministically', () => {
+    expect(adoptionPathsForRoute('/operators/events')).toEqual(['sell']);
+    expect(adoptionPathsForRoute('/developers/webhooks/setup')).toEqual(['platform']);
+    expect(adoptionPathsForRoute('/self-hosting/production')).toEqual(['self-hosted']);
+    expect(adoptionPathsForRoute('/reference/accessibility')).toEqual([
+      'sell',
+      'platform',
+      'self-hosted',
+    ]);
+    expect(adoptionPathsForRoute('/contributing/testing')).toEqual([]);
+    expect(adoptionPathsForRoute('/operators/events', ['platform'])).toEqual(['platform']);
   });
 
   it('resolves relative and absolute documentation URLs safely', () => {

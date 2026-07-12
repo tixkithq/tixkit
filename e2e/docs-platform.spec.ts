@@ -107,8 +107,20 @@ test('local search supports keyboard use and audience filtering', async ({ page 
     '/sdks/android#troubleshoot',
   );
   await page.getByLabel('Adoption path').selectOption('sell');
+  await page.getByLabel('Audience').selectOption('operator');
+  await input.fill('check-in scanner');
+  await expect(page.getByRole('link', { name: /Prepare and run check-in/ }).first()).toBeVisible();
+  await page.getByLabel('Audience').selectOption('developer');
   await input.fill('hosted platform api');
-  await expect(page.getByText('No matching documentation. Try a task or symptom.')).toBeVisible();
+  await expect(page.getByRole('link', { name: /Start with the hosted Platform API/ })).toHaveCount(
+    0,
+  );
+  await page.getByLabel('Adoption path').selectOption('self-hosted');
+  await page.getByLabel('Audience').selectOption('self-hoster');
+  await input.fill('backup restore');
+  await expect(
+    page.getByRole('link', { name: /Back up and restore Tixkit/ }).first(),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Close search' }).click();
   await expect(page.getByRole('button', { name: /Search documentation/ })).toBeFocused();
 });
