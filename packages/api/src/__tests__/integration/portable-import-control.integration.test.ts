@@ -14,6 +14,7 @@ import {
 import { PortableImportPreflightsMigration } from '@tixkit/db/migrations';
 import { PortableImportApprovalsMigration } from '@tixkit/db/migrations';
 import { PortableImportRebindingsMigration } from '@tixkit/db/migrations';
+import { PortableImportCommitAuthorizationsMigration } from '@tixkit/db/migrations';
 import {
   buildPortableLogicalExport,
   canonicalPortableJson,
@@ -32,6 +33,11 @@ import {
 } from '../../services/portable-import-control.js';
 import { registerErrorHandler } from '../../app.js';
 import { migrationRoutes } from '../../routes/modules/migrations.js';
+import {
+  createProductionMigrationCommitters,
+  createRepositoryMigrationActivityService,
+  MIGRATION_SIDE_EFFECT_POLICY,
+} from '@tixkit/workflows';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
@@ -589,6 +595,55 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         .where('approval_id', '=', approval.id)
         .execute(),
     ).rejects.toThrow(/immutable/u);
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'provider_account',
+      resourceId: 'acct_revoked_after_approval',
+      registeredBy: 'system_test',
+    });
+    await bindPortableImportDestination({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_revoked_after_approval',
+      boundBy: 'user_approver',
+    });
+    const destinationRevocationApproval = await approvePortableImport({
+      ...approvalRequest,
+      idempotencyKey: 'portable-approval-destination-revocation',
+      now: new Date('2026-07-12T21:07:00.000Z'),
+    });
+    expect(
+      await repository.revokePortableDestinationResource({
+        tenantId,
+        organizationId,
+        kind: 'provider_account',
+        resourceId: 'acct_revoked_after_approval',
+      }),
+    ).toBe(true);
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: `commit:${job.id}:${destinationRevocationApproval.id}:${destinationRevocationApproval.approval_digest}`,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:08:00.000Z'),
+      }),
+    ).rejects.toThrow(/REBINDING_DESTINATION_NOT_FOUND/u);
+    await bindPortableImportDestination({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_destination_01',
+      boundBy: 'user_approver',
+    });
     let activePrincipal: Principal = {
       type: 'user',
       id: 'user_route_approver',
@@ -596,11 +651,16 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       organizationIds: [organizationId],
       scopes: ['migrations.commit'],
     };
+    const startedCommits: string[] = [];
     const app = Fastify();
     app.decorate('context', {
       db,
       portableDryRunAttestation: request.attestation,
-      temporalClient: {},
+      temporalClient: {
+        startMigrationCommit: async ({ jobId: startedJobId }: { jobId: string }) => {
+          startedCommits.push(startedJobId);
+        },
+      },
     } as never);
     app.addHook('preHandler', async (fastifyRequest) => {
       fastifyRequest.principal = activePrincipal;
@@ -717,31 +777,92 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       ).statusCode,
     ).toBe(503);
     app.context.portableDryRunAttestation = request.attestation;
-    const validCommit = await app.inject({
+    const authorizedCommits = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/commit`,
+          headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+        }),
+      ),
+    );
+    for (const validCommit of authorizedCommits) {
+      expect(validCommit.statusCode, validCommit.body).toBe(202);
+      expect(validCommit.json()).toMatchObject({ jobId: job.id, status: 'committing' });
+    }
+    expect(startedCommits).toEqual([job.id, job.id]);
+    const authorizationCount = await db
+      .selectFrom('portable_import_commit_authorizations')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow();
+    expect(Number(authorizationCount.count)).toBe(1);
+    await expect(
+      db
+        .updateTable('portable_import_commit_authorizations')
+        .set({ approval_digest: 'f'.repeat(64) })
+        .where('import_job_id', '=', job.id)
+        .execute(),
+    ).rejects.toThrow(/immutable/u);
+    await expect(
+      db
+        .deleteFrom('portable_import_commit_authorizations')
+        .where('import_job_id', '=', job.id)
+        .execute(),
+    ).rejects.toThrow(/immutable/u);
+    const workerService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+    );
+    await db
+      .updateTable('import_jobs')
+      .set({ configuration: JSON.stringify({ changedAfterAuthorization: true }) })
+      .where('id', '=', job.id)
+      .execute();
+    await expect(
+      workerService.beginCommit({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow(/PORTABILITY_COMMIT_INPUT_CHANGED/u);
+    await db
+      .updateTable('import_jobs')
+      .set({ configuration: job.configuration })
+      .where('id', '=', job.id)
+      .execute();
+    await workerService.beginCommit({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    });
+    expect((await repository.findJob(tenantId, organizationId, job.id))?.status).toBe('committing');
+    const lostResponseRetry = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/commit`,
       headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
     });
-    expect(validCommit.statusCode, validCommit.body).toBe(409);
-    expect(validCommit.json()).toMatchObject({
-      error: { message: expect.stringMatching(/rebindings/u) },
-    });
+    expect(lostResponseRetry.statusCode, lostResponseRetry.body).toBe(202);
+    expect(startedCommits).toEqual([job.id, job.id, job.id]);
     const revokeResponse = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/portable-approvals/${approvedBody.approvalId}/revoke`,
       headers: { 'x-tixkit-confirmation': `revoke:${approvedBody.approvalId}` },
       payload: { reason: 'Route lifecycle proof' },
     });
-    expect(revokeResponse.statusCode, revokeResponse.body).toBe(200);
-    const revokedCommit = await app.inject({
-      method: 'POST',
-      url: `/migration-jobs/${job.id}/commit`,
-      headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+    expect(revokeResponse.statusCode, revokeResponse.body).toBe(409);
+    expect(revokeResponse.json()).toMatchObject({
+      error: { message: expect.stringMatching(/after execution starts/u) },
     });
-    expect(revokedCommit.statusCode).toBe(409);
-    expect(revokedCommit.json()).toMatchObject({
-      error: { message: expect.stringMatching(/fresh, unrevoked/u) },
-    });
+    await expect(
+      repository.revokePortableDestinationResource({
+        tenantId,
+        organizationId,
+        kind: 'provider_account',
+        resourceId: 'acct_destination_01',
+      }),
+    ).rejects.toThrow(/EXECUTION_STARTED/u);
     const auditCount = await db
       .selectFrom('audit_logs')
       .select(({ fn }) => fn.countAll<number>().as('count'))
@@ -750,56 +871,18 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       .where('resource_id', '=', job.id)
       .executeTakeFirstOrThrow();
     expect(Number(auditCount.count)).toBeGreaterThanOrEqual(3);
-    await repository.registerPortableDestinationResource({
-      tenantId,
-      organizationId,
-      kind: 'provider_account',
-      resourceId: 'acct_revoked_after_approval',
-      registeredBy: 'system_test',
-    });
-    await bindPortableImportDestination({
-      db,
-      tenantId,
-      organizationId,
-      jobId: job.id,
-      portableId: 'provider_stripe',
-      destinationReference: 'acct_revoked_after_approval',
-      boundBy: 'user_approver',
-    });
-    const destinationRevocationApproval = await approvePortableImport({
-      ...approvalRequest,
-      idempotencyKey: 'portable-approval-destination-revocation',
-      now: new Date('2026-07-12T21:07:00.000Z'),
-    });
-    expect(
-      await repository.revokePortableDestinationResource({
-        tenantId,
-        organizationId,
-        kind: 'provider_account',
-        resourceId: 'acct_revoked_after_approval',
-      }),
-    ).toBe(true);
-    await expect(
-      validatePortableImportApproval({
-        db,
-        tenantId,
-        organizationId,
-        jobId: job.id,
-        confirmation: `commit:${job.id}:${destinationRevocationApproval.id}:${destinationRevocationApproval.approval_digest}`,
-        attestation: request.attestation,
-        now: new Date('2026-07-12T21:08:00.000Z'),
-      }),
-    ).rejects.toThrow(/REBINDING_DESTINATION_NOT_FOUND/u);
     await app.close();
     await truncateAllData(db);
+    await PortableImportCommitAuthorizationsMigration.down!(db);
     await PortableImportRebindingsMigration.down!(db);
     await PortableImportApprovalsMigration.down!(db);
     await PortableImportPreflightsMigration.down!(db);
     await PortableImportPreflightsMigration.up(db);
     await PortableImportApprovalsMigration.up(db);
     await PortableImportRebindingsMigration.up(db);
+    await PortableImportCommitAuthorizationsMigration.up(db);
     await expect(
       db.selectFrom('portable_import_preflights').selectAll().execute(),
     ).resolves.toEqual([]);
-  });
+  }, 15_000);
 });

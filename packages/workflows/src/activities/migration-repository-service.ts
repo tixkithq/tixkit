@@ -1,5 +1,11 @@
 import { ImportRepository, type Database } from '@tixkit/db';
 import {
+  canonicalPortableJson,
+  portableImportControlInputSha256,
+  portableRebindingProvenanceSha256,
+} from '@tixkit/portability';
+import { createHash } from 'node:crypto';
+import {
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
   assertHistoricalFinancialEntity,
   type MigrationCredentialResolver,
@@ -115,7 +121,150 @@ export function createRepositoryMigrationActivityService(
       );
       if (!pendingJob) throw new Error('MIGRATION_JOB_NOT_FOUND');
       if (pendingJob.source_system === 'tixkit-portable') {
-        throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_UNAVAILABLE');
+        await db
+          .transaction()
+          .setIsolationLevel('serializable')
+          .execute(async (transaction) => {
+            const transactionRepository = new ImportRepository(transaction as Database);
+            const job = await transactionRepository.findJobForUpdate(
+              context.tenantId,
+              context.organizationId,
+              context.jobId,
+            );
+            const authorization = await transactionRepository.findPortableImportCommitAuthorization(
+              context.tenantId,
+              context.organizationId,
+              context.jobId,
+            );
+            if (!job || job.source_system !== 'tixkit-portable' || job.mode !== 'commit')
+              throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_INVALID');
+            if (!authorization) throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_REQUIRED');
+            const approval = await transactionRepository.findPortableImportApproval({
+              tenantId: context.tenantId,
+              organizationId: context.organizationId,
+              jobId: context.jobId,
+              approvalId: authorization.approval_id,
+            });
+            const revocation = approval
+              ? await transactionRepository.findPortableImportApprovalRevocation({
+                  tenantId: context.tenantId,
+                  organizationId: context.organizationId,
+                  jobId: context.jobId,
+                  approvalId: approval.id,
+                })
+              : undefined;
+            if (
+              !approval ||
+              revocation ||
+              approval.approval_digest !== authorization.approval_digest ||
+              approval.rebindings_sha256 !== authorization.rebindings_sha256 ||
+              approval.approved_by !== authorization.authorized_by ||
+              new Date(authorization.authorized_at) < new Date(approval.created_at) ||
+              new Date(authorization.authorized_at) > new Date(approval.expires_at)
+            )
+              throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_INVALID');
+            const rebindings = await transactionRepository.listPortableImportRebindings(
+              context.tenantId,
+              context.organizationId,
+              context.jobId,
+            );
+            for (const rebinding of rebindings) {
+              if (
+                rebinding.provenance_sha256 !==
+                  portableRebindingProvenanceSha256({
+                    portableId: rebinding.portable_id,
+                    destinationReference: rebinding.destination_reference,
+                  }) ||
+                !(await transactionRepository.findPortableDestinationResource({
+                  tenantId: context.tenantId,
+                  organizationId: context.organizationId,
+                  kind: rebinding.kind,
+                  resourceId: rebinding.destination_reference,
+                  lockForAuthorization: true,
+                }))
+              )
+                throw new Error('PORTABILITY_COMMIT_REBINDING_INVALID');
+            }
+            const rebindingsSha256 = createHash('sha256')
+              .update(
+                canonicalPortableJson(
+                  rebindings.map((rebinding) => ({
+                    portableId: rebinding.portable_id,
+                    kind: rebinding.kind,
+                    destinationReference: rebinding.destination_reference,
+                    provenanceSha256: rebinding.provenance_sha256,
+                  })),
+                ),
+              )
+              .digest('hex');
+            if (rebindingsSha256 !== authorization.rebindings_sha256)
+              throw new Error('PORTABILITY_COMMIT_REBINDING_INVALID');
+            const rows = [];
+            for (let offset = 0; ; offset += 5_000) {
+              const page = await transactionRepository.listRows({
+                tenantId: context.tenantId,
+                organizationId: context.organizationId,
+                jobId: context.jobId,
+                limit: 5_000,
+                offset,
+              });
+              rows.push(...page);
+              if (page.length < 5_000) break;
+            }
+            const files = await transactionRepository.listFiles(
+              context.tenantId,
+              context.organizationId,
+              context.jobId,
+            );
+            const mappings = await transactionRepository.listMappings(
+              context.tenantId,
+              context.organizationId,
+              job.source_system,
+            );
+            const inputSha256 = portableImportControlInputSha256({
+              configuration: job.configuration ? JSON.parse(job.configuration) : null,
+              files: files.map((file) => ({
+                id: file.id,
+                sha256: file.sha256,
+                byteSize: String(file.byte_size),
+              })),
+              mappings: mappings.map((mapping) => ({
+                id: mapping.id,
+                version: mapping.version,
+                mapping: JSON.parse(mapping.mapping),
+              })),
+              rows: rows.map((row) => ({
+                id: row.id,
+                source: JSON.parse(row.source_data),
+                normalized: row.normalized_data ? JSON.parse(row.normalized_data) : null,
+              })),
+            });
+            const dryRunSummary = job.summary
+              ? (JSON.parse(job.summary) as { accepted?: boolean; inputHash?: string })
+              : null;
+            if (
+              inputSha256 !== authorization.input_sha256 ||
+              inputSha256 !== approval.input_sha256 ||
+              dryRunSummary?.accepted !== true ||
+              dryRunSummary.inputHash !== inputSha256
+            )
+              throw new Error('PORTABILITY_COMMIT_INPUT_CHANGED');
+            await transactionRepository.beginCommit({
+              tenantId: context.tenantId,
+              organizationId: context.organizationId,
+              jobId: context.jobId,
+            });
+          });
+        await repository.appendIdempotentEvent({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          eventKey: 'commit:begin',
+          type: 'commit.begin',
+          severity: 'info',
+          message: 'Authorized portable migration commit started.',
+        });
+        return;
       }
       const configuration = pendingJob.configuration
         ? (JSON.parse(pendingJob.configuration) as Record<string, unknown>)

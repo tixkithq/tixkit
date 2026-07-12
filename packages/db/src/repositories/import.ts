@@ -10,6 +10,7 @@ import type {
   PortableDestinationResourceTable,
 } from '../types/db.js';
 import { BaseRepository } from './base.js';
+import type { Database } from '../client.js';
 
 function isUniqueViolation(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -126,16 +127,143 @@ export class ImportRepository extends BaseRepository {
     resourceId: string;
     now?: Date;
   }): Promise<boolean> {
-    const result = await this.db
-      .updateTable('portable_destination_resources')
-      .set({ revoked_at: input.now ?? new Date() })
+    return this.db
+      .transaction()
+      .setIsolationLevel('serializable')
+      .execute(async (transaction) => {
+        const repository = new ImportRepository(transaction as Database);
+        const resource = await repository.findPortableDestinationResourceForUpdate(input);
+        if (!resource) return false;
+        const executing = await transaction
+          .selectFrom('portable_import_rebindings as rebinding')
+          .innerJoin('import_jobs as job', (join) =>
+            join
+              .onRef('job.tenant_id', '=', 'rebinding.tenant_id')
+              .onRef('job.organization_id', '=', 'rebinding.organization_id')
+              .onRef('job.id', '=', 'rebinding.import_job_id'),
+          )
+          .select('job.id')
+          .where('rebinding.tenant_id', '=', input.tenantId)
+          .where('rebinding.organization_id', '=', input.organizationId)
+          .where('rebinding.kind', '=', input.kind)
+          .where('rebinding.destination_reference', '=', input.resourceId)
+          .where('job.status', 'in', ['committing', 'committed', 'activated'])
+          .executeTakeFirst();
+        if (executing) throw new Error('PORTABLE_DESTINATION_RESOURCE_EXECUTION_STARTED');
+        const result = await transaction
+          .updateTable('portable_destination_resources')
+          .set({ revoked_at: input.now ?? new Date() })
+          .where('id', '=', resource.id)
+          .where('revoked_at', 'is', null)
+          .executeTakeFirst();
+        return Number(result.numUpdatedRows) === 1;
+      });
+  }
+
+  private findPortableDestinationResourceForUpdate(input: {
+    tenantId: string;
+    organizationId: string;
+    kind: string;
+    resourceId: string;
+  }) {
+    if (process.env.DB_DRIVER === 'mssql') {
+      return sql<Selectable<PortableDestinationResourceTable>>`
+        select * from portable_destination_resources with (updlock, holdlock)
+        where tenant_id = ${input.tenantId}
+          and organization_id = ${input.organizationId}
+          and kind = ${input.kind}
+          and resource_id = ${input.resourceId}
+          and revoked_at is null
+      `
+        .execute(this.db)
+        .then((result) => result.rows[0]);
+    }
+    return this.db
+      .selectFrom('portable_destination_resources')
+      .selectAll()
       .where('tenant_id', '=', input.tenantId)
       .where('organization_id', '=', input.organizationId)
       .where('kind', '=', input.kind)
       .where('resource_id', '=', input.resourceId)
       .where('revoked_at', 'is', null)
+      .forUpdate()
       .executeTakeFirst();
-    return Number(result.numUpdatedRows) === 1;
+  }
+
+  findJobForUpdate(tenantId: string, organizationId: string, jobId: string) {
+    if (process.env.DB_DRIVER === 'mssql') {
+      return sql<Selectable<ImportJobTable>>`
+        select * from import_jobs with (updlock, holdlock)
+        where tenant_id = ${tenantId}
+          and organization_id = ${organizationId}
+          and id = ${jobId}
+      `
+        .execute(this.db)
+        .then((result) => result.rows[0]);
+    }
+    return this.db
+      .selectFrom('import_jobs')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('id', '=', jobId)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
+  findPortableImportCommitAuthorization(tenantId: string, organizationId: string, jobId: string) {
+    return this.db
+      .selectFrom('portable_import_commit_authorizations')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('import_job_id', '=', jobId)
+      .executeTakeFirst();
+  }
+
+  async authorizePortableImportCommit(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    approvalId: string;
+    approvalDigest: string;
+    inputSha256: string;
+    rebindingsSha256: string;
+    authorizedBy: string;
+    authorizedAt: Date;
+  }) {
+    const values = {
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      import_job_id: input.jobId,
+      approval_id: input.approvalId,
+      approval_digest: input.approvalDigest,
+      input_sha256: input.inputSha256,
+      rebindings_sha256: input.rebindingsSha256,
+      authorized_by: input.authorizedBy,
+      authorized_at: input.authorizedAt,
+    };
+    await this.db.insertInto('portable_import_commit_authorizations').values(values).execute();
+    const promoted = await this.db
+      .updateTable('import_jobs')
+      .set({ mode: 'commit', updated_at: input.authorizedAt })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.jobId)
+      .where('source_system', '=', 'tixkit-portable')
+      .where('mode', '=', 'dry-run')
+      .where('status', '=', 'ready')
+      .executeTakeFirst();
+    if (Number(promoted.numUpdatedRows) !== 1)
+      throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_JOB_CHANGED');
+    return this.findPortableImportCommitAuthorization(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    ).then((authorization) => {
+      if (!authorization) throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_NOT_FOUND');
+      return authorization;
+    });
   }
 
   listPortableImportRebindings(tenantId: string, organizationId: string, jobId: string) {

@@ -5,6 +5,7 @@ import {
   createPortableDryRunReceipt,
   parsePortableJson,
   portableManifestSha256,
+  portableImportControlInputSha256,
   portableRebindingProvenanceSha256,
   verifyPortableDryRunReceipt,
   type PortableBundleManifest,
@@ -88,7 +89,7 @@ async function portableImportCurrentInputHashFromDatabase(input: {
     input.organizationId,
     input.sourceSystem,
   );
-  return stablePortableControlHash({
+  return portableImportControlInputSha256({
     configuration: parsedJson(job.configuration),
     files: files.map((file) => ({
       id: file.id,
@@ -98,12 +99,12 @@ async function portableImportCurrentInputHashFromDatabase(input: {
     mappings: mappings.map((mapping) => ({
       id: mapping.id,
       version: mapping.version,
-      mapping: stablePortableControlHash(parsedJson(mapping.mapping)),
+      mapping: parsedJson(mapping.mapping),
     })),
     rows: rows.map((row) => ({
       id: row.id,
-      source: stablePortableControlHash(parsedJson(row.source_data)),
-      normalized: stablePortableControlHash(parsedJson(row.normalized_data)),
+      source: parsedJson(row.source_data),
+      normalized: parsedJson(row.normalized_data),
     })),
   });
 }
@@ -680,6 +681,105 @@ export async function approvePortableImport(input: {
   throw new Error('PORTABLE_IMPORT_APPROVAL_RETRY_EXHAUSTED');
 }
 
+async function validatePortableImportApprovalFromDatabase(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  confirmation: string;
+  attestation: PortableDryRunAttestationConfiguration;
+  now?: Date;
+}) {
+  const repository = new ImportRepository(input.db);
+  const now = input.now ?? new Date();
+  const prefix = `commit:${input.jobId}:`;
+  const confirmationParts = input.confirmation.startsWith(prefix)
+    ? input.confirmation.slice(prefix.length).split(':')
+    : [];
+  if (
+    confirmationParts.length !== 2 ||
+    !confirmationParts[0] ||
+    !/^[a-f0-9]{64}$/u.test(confirmationParts[1] ?? '')
+  )
+    throw new Error('PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID');
+  const approval = await repository.findPortableImportApproval({
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    jobId: input.jobId,
+    approvalId: confirmationParts[0]!,
+  });
+  if (
+    !approval ||
+    new Date(approval.expires_at) <= now ||
+    (await repository.findPortableImportApprovalRevocation({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      approvalId: confirmationParts[0]!,
+    }))
+  )
+    throw new Error('PORTABLE_IMPORT_APPROVAL_REQUIRED');
+  if (input.confirmation !== `commit:${input.jobId}:${approval.id}:${approval.approval_digest}`)
+    throw new Error('PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID');
+  const { receipt } = await attestPortableDryRun({
+    db: input.db,
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    jobId: input.jobId,
+    inputSha256: approval.input_sha256,
+    createdBy: approval.approved_by,
+    attestation: input.attestation,
+  });
+  const typedReceipt = receipt as PortableDryRunReceipt;
+  const expectedDigest = portableApprovalDigest({
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    jobId: input.jobId,
+    operationId: approval.operation_id,
+    manifestSha256: approval.manifest_sha256,
+    artifactSha256: approval.artifact_sha256,
+    inputSha256: approval.input_sha256,
+    receiptSha256: approval.receipt_sha256,
+    rebindingsSha256: approval.rebindings_sha256,
+    approvedBy: approval.approved_by,
+    approvedAt: new Date(approval.created_at).toISOString(),
+    expiresAt: new Date(approval.expires_at).toISOString(),
+  });
+  if (
+    expectedDigest !== approval.approval_digest ||
+    typedReceipt.operationId !== approval.operation_id ||
+    typedReceipt.manifestSha256 !== approval.manifest_sha256 ||
+    typedReceipt.artifactSha256 !== approval.artifact_sha256 ||
+    typedReceipt.inputSha256 !== approval.input_sha256
+  )
+    throw new Error('PORTABLE_IMPORT_APPROVAL_EVIDENCE_INVALID');
+  const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
+  if (!job || job.source_system !== 'tixkit-portable' || job.status !== 'ready')
+    throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
+  const summary = parsedJson(job.summary) as { accepted?: boolean; inputHash?: string } | null;
+  const currentInputSha256 = await portableImportCurrentInputHashFromDatabase({
+    db: input.db,
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    jobId: input.jobId,
+    sourceSystem: job.source_system,
+  });
+  const currentRebindingsSha256 = await portableImportRebindingsHash({
+    repository,
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    jobId: input.jobId,
+  });
+  if (
+    summary?.accepted !== true ||
+    summary.inputHash !== currentInputSha256 ||
+    approval.input_sha256 !== currentInputSha256 ||
+    approval.rebindings_sha256 !== currentRebindingsSha256
+  )
+    throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
+  return approval;
+}
+
 export async function validatePortableImportApproval(input: {
   db: Database;
   tenantId: string;
@@ -692,97 +792,161 @@ export async function validatePortableImportApproval(input: {
   return input.db
     .transaction()
     .setIsolationLevel('repeatable read')
-    .execute(async (transaction) => {
-      const transactionDatabase = transaction as Database;
-      const repository = new ImportRepository(transactionDatabase);
-      const now = input.now ?? new Date();
-      const prefix = `commit:${input.jobId}:`;
-      const confirmationParts = input.confirmation.startsWith(prefix)
-        ? input.confirmation.slice(prefix.length).split(':')
-        : [];
-      if (
-        confirmationParts.length !== 2 ||
-        !confirmationParts[0] ||
-        !/^[a-f0-9]{64}$/u.test(confirmationParts[1] ?? '')
-      )
-        throw new Error('PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID');
-      const approval = await repository.findPortableImportApproval({
-        tenantId: input.tenantId,
-        organizationId: input.organizationId,
-        jobId: input.jobId,
-        approvalId: confirmationParts[0]!,
-      });
-      if (
-        !approval ||
-        new Date(approval.expires_at) <= now ||
-        (await repository.findPortableImportApprovalRevocation({
+    .execute((transaction) =>
+      validatePortableImportApprovalFromDatabase({ ...input, db: transaction as Database }),
+    );
+}
+
+export async function authorizePortableImportCommit(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  confirmation: string;
+  attestation: PortableDryRunAttestationConfiguration;
+  authorizedBy: string;
+  now?: Date;
+}) {
+  const durableReplay = async () => {
+    const repository = new ImportRepository(input.db);
+    const authorization = await repository.findPortableImportCommitAuthorization(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    );
+    if (!authorization) return undefined;
+    const approval = await repository.findPortableImportApproval({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      approvalId: authorization.approval_id,
+    });
+    const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
+    const revocation = approval
+      ? await repository.findPortableImportApprovalRevocation({
           tenantId: input.tenantId,
           organizationId: input.organizationId,
           jobId: input.jobId,
-          approvalId: confirmationParts[0]!,
-        }))
-      )
-        throw new Error('PORTABLE_IMPORT_APPROVAL_REQUIRED');
-      if (input.confirmation !== `commit:${input.jobId}:${approval.id}:${approval.approval_digest}`)
-        throw new Error('PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID');
-      const { receipt } = await attestPortableDryRun({
-        db: transactionDatabase,
-        tenantId: input.tenantId,
-        organizationId: input.organizationId,
-        jobId: input.jobId,
-        inputSha256: approval.input_sha256,
-        createdBy: approval.approved_by,
-        attestation: input.attestation,
-      });
-      const typedReceipt = receipt as PortableDryRunReceipt;
-      const expectedDigest = portableApprovalDigest({
-        tenantId: input.tenantId,
-        organizationId: input.organizationId,
-        jobId: input.jobId,
-        operationId: approval.operation_id,
-        manifestSha256: approval.manifest_sha256,
-        artifactSha256: approval.artifact_sha256,
-        inputSha256: approval.input_sha256,
-        receiptSha256: approval.receipt_sha256,
-        rebindingsSha256: approval.rebindings_sha256,
-        approvedBy: approval.approved_by,
-        approvedAt: new Date(approval.created_at).toISOString(),
-        expiresAt: new Date(approval.expires_at).toISOString(),
-      });
-      if (
-        expectedDigest !== approval.approval_digest ||
-        typedReceipt.operationId !== approval.operation_id ||
-        typedReceipt.manifestSha256 !== approval.manifest_sha256 ||
-        typedReceipt.artifactSha256 !== approval.artifact_sha256 ||
-        typedReceipt.inputSha256 !== approval.input_sha256
-      )
-        throw new Error('PORTABLE_IMPORT_APPROVAL_EVIDENCE_INVALID');
-      const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
-      if (!job || job.source_system !== 'tixkit-portable' || job.status !== 'ready')
-        throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
-      const summary = parsedJson(job.summary) as { accepted?: boolean; inputHash?: string } | null;
-      const currentInputSha256 = await portableImportCurrentInputHashFromDatabase({
-        db: transactionDatabase,
-        tenantId: input.tenantId,
-        organizationId: input.organizationId,
-        jobId: input.jobId,
-        sourceSystem: job.source_system,
-      });
-      const currentRebindingsSha256 = await portableImportRebindingsHash({
-        repository,
-        tenantId: input.tenantId,
-        organizationId: input.organizationId,
-        jobId: input.jobId,
-      });
-      if (
-        summary?.accepted !== true ||
-        summary.inputHash !== currentInputSha256 ||
-        approval.input_sha256 !== currentInputSha256 ||
-        approval.rebindings_sha256 !== currentRebindingsSha256
-      )
-        throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
-      return approval;
-    });
+          approvalId: approval.id,
+        })
+      : undefined;
+    if (
+      !approval ||
+      !job ||
+      job.mode !== 'commit' ||
+      !['ready', 'committing', 'committed', 'activated'].includes(job.status) ||
+      revocation
+    )
+      return undefined;
+    if (
+      input.confirmation !==
+        `commit:${input.jobId}:${authorization.approval_id}:${authorization.approval_digest}` ||
+      authorization.authorized_by !== input.authorizedBy ||
+      authorization.approval_digest !== approval.approval_digest ||
+      authorization.input_sha256 !== approval.input_sha256 ||
+      authorization.rebindings_sha256 !== approval.rebindings_sha256
+    )
+      throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT');
+    return authorization;
+  };
+  const alreadyAuthorized = await durableReplay();
+  if (alreadyAuthorized) return alreadyAuthorized;
+  let expected:
+    | {
+        approvalId: string;
+        approvalDigest: string;
+        inputSha256: string;
+        rebindingsSha256: string;
+      }
+    | undefined;
+  const exactReplay = async () => {
+    if (!expected) return undefined;
+    const existing = await new ImportRepository(input.db).findPortableImportCommitAuthorization(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    );
+    if (!existing) return undefined;
+    if (
+      existing.approval_id !== expected.approvalId ||
+      existing.approval_digest !== expected.approvalDigest ||
+      existing.input_sha256 !== expected.inputSha256 ||
+      existing.rebindings_sha256 !== expected.rebindingsSha256 ||
+      existing.authorized_by !== input.authorizedBy
+    )
+      throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT');
+    return existing;
+  };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await input.db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (transaction) => {
+          const transactionDatabase = transaction as Database;
+          const approval = await validatePortableImportApprovalFromDatabase({
+            ...input,
+            db: transactionDatabase,
+          });
+          if (approval.approved_by !== input.authorizedBy)
+            throw new Error('PORTABLE_IMPORT_COMMIT_PRINCIPAL_MISMATCH');
+          expected = {
+            approvalId: approval.id,
+            approvalDigest: approval.approval_digest,
+            inputSha256: approval.input_sha256,
+            rebindingsSha256: approval.rebindings_sha256,
+          };
+          const repository = new ImportRepository(transactionDatabase);
+          const existing = await repository.findPortableImportCommitAuthorization(
+            input.tenantId,
+            input.organizationId,
+            input.jobId,
+          );
+          if (existing) {
+            if (
+              existing.approval_id !== expected.approvalId ||
+              existing.approval_digest !== expected.approvalDigest ||
+              existing.input_sha256 !== expected.inputSha256 ||
+              existing.rebindings_sha256 !== expected.rebindingsSha256 ||
+              existing.authorized_by !== input.authorizedBy
+            )
+              throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT');
+            return existing;
+          }
+          return repository.authorizePortableImportCommit({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            ...expected,
+            authorizedBy: input.authorizedBy,
+            authorizedAt: input.now ?? new Date(),
+          });
+        });
+    } catch (error) {
+      const replay = await exactReplay();
+      if (replay) return replay;
+      const databaseError = error as {
+        code?: string;
+        number?: number;
+        errno?: number;
+        cause?: { code?: string; number?: number; errno?: number };
+      };
+      const code = databaseError.code ?? databaseError.cause?.code;
+      const number = databaseError.number ?? databaseError.cause?.number;
+      const errno = databaseError.errno ?? databaseError.cause?.errno;
+      const retryable =
+        code === '23505' ||
+        code === 'ER_DUP_ENTRY' ||
+        number === 2601 ||
+        number === 2627 ||
+        code === '40001' ||
+        code === '40P01' ||
+        code === 'ER_LOCK_DEADLOCK' ||
+        errno === 1213;
+      if (!retryable || attempt === 4) throw error;
+    }
+  }
+  throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_RETRY_EXHAUSTED');
 }
 
 export async function revokePortableImportApproval(input: {
@@ -795,13 +959,33 @@ export async function revokePortableImportApproval(input: {
   reason?: string;
   now?: Date;
 }) {
-  return new ImportRepository(input.db).revokePortableImportApproval({
-    tenantId: input.tenantId,
-    organizationId: input.organizationId,
-    jobId: input.jobId,
-    approvalId: input.approvalId,
-    revokedBy: input.revokedBy,
-    reason: input.reason,
-    now: input.now ?? new Date(),
-  });
+  return input.db
+    .transaction()
+    .setIsolationLevel('serializable')
+    .execute(async (transaction) => {
+      const repository = new ImportRepository(transaction as Database);
+      const job = await repository.findJobForUpdate(
+        input.tenantId,
+        input.organizationId,
+        input.jobId,
+      );
+      if (!job) throw new Error('PORTABLE_IMPORT_APPROVAL_NOT_FOUND');
+      if (['committing', 'committed', 'activated'].includes(job.status))
+        throw new Error('PORTABLE_IMPORT_APPROVAL_EXECUTION_STARTED');
+      const existing = await repository.findPortableImportApprovalRevocation(input);
+      if (existing) {
+        if (existing.revoked_by !== input.revokedBy || existing.reason !== (input.reason ?? null))
+          throw new Error('PORTABLE_IMPORT_APPROVAL_REVOCATION_CONFLICT');
+        return existing;
+      }
+      return repository.revokePortableImportApproval({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        approvalId: input.approvalId,
+        revokedBy: input.revokedBy,
+        reason: input.reason,
+        now: input.now ?? new Date(),
+      });
+    });
 }

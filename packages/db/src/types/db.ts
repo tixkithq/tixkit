@@ -1927,6 +1927,18 @@ export interface PortableDestinationResourceTable {
   revoked_at: Timestamp | null;
 }
 
+export interface PortableImportCommitAuthorizationTable {
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  approval_id: string;
+  approval_digest: string;
+  input_sha256: string;
+  rebindings_sha256: string;
+  authorized_by: string;
+  authorized_at: Timestamp;
+}
+
 export interface DB {
   agent_principals: AgentPrincipalTable;
   agent_delegations: AgentDelegationTable;
@@ -2050,4 +2062,5 @@ export interface DB {
   portable_import_approval_revocations: PortableImportApprovalRevocationTable;
   portable_import_rebindings: PortableImportRebindingTable;
   portable_destination_resources: PortableDestinationResourceTable;
+  portable_import_commit_authorizations: PortableImportCommitAuthorizationTable;
 }

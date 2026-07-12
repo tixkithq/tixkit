@@ -73,6 +73,7 @@ import { PortableExportBuildLeasesMigration } from './migrations/0069_portable_e
 import { PortableImportPreflightsMigration } from './migrations/0070_portable_import_preflights.js';
 import { PortableImportApprovalsMigration } from './migrations/0071_portable_import_approvals.js';
 import { PortableImportRebindingsMigration } from './migrations/0072_portable_import_rebindings.js';
+import { PortableImportCommitAuthorizationsMigration } from './migrations/0073_portable_import_commit_authorizations.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -208,6 +209,7 @@ const ALL_SCHEMA_TABLES = [
   'portable_import_approvals',
   'portable_import_rebindings',
   'portable_destination_resources',
+  'portable_import_commit_authorizations',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -305,6 +307,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0070_portable_import_preflights': PortableImportPreflightsMigration,
       '0071_portable_import_approvals': PortableImportApprovalsMigration,
       '0072_portable_import_rebindings': PortableImportRebindingsMigration,
+      '0073_portable_import_commit_authorizations': PortableImportCommitAuthorizationsMigration,
     };
   }
 }
@@ -514,6 +517,7 @@ export async function dropAllTables(db: Database): Promise<void> {
     'reject_portable_export_event_mutation',
     'reject_portable_import_control_mutation',
     'reject_portable_import_approval_mutation',
+    'reject_portable_import_commit_authorization_mutation',
   ]) {
     // eslint-disable-next-line no-await-in-loop -- PostgreSQL reset removes standalone trigger functions after their tables.
     await sql`DROP FUNCTION IF EXISTS ${sql.raw(functionName)}() CASCADE`
@@ -557,6 +561,7 @@ export async function truncateAllData(db: Database): Promise<void> {
       'portable_import_approvals',
       'portable_import_approval_revocations',
       'portable_import_rebindings',
+      'portable_import_commit_authorizations',
     ]) {
       await sql
         .raw(
@@ -604,6 +609,7 @@ export async function truncateAllData(db: Database): Promise<void> {
         'portable_import_approvals',
         'portable_import_approval_revocations',
         'portable_import_rebindings',
+        'portable_import_commit_authorizations',
       ]) {
         await sql
           .raw(

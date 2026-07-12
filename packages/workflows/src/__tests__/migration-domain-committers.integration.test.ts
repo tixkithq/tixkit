@@ -1716,6 +1716,6 @@ describeDatabase('production migration committers', () => {
         jobId: unauthorizedCommitJob.id,
         sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
       }),
-    ).rejects.toThrow('PORTABILITY_COMMIT_AUTHORIZATION_UNAVAILABLE');
+    ).rejects.toThrow('PORTABILITY_COMMIT_AUTHORIZATION_REQUIRED');
   });
 });

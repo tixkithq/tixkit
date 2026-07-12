@@ -70,3 +70,4 @@ export { PortableExportBuildLeasesMigration } from './0069_portable_export_build
 export { PortableImportPreflightsMigration } from './0070_portable_import_preflights.js';
 export { PortableImportApprovalsMigration } from './0071_portable_import_approvals.js';
 export { PortableImportRebindingsMigration } from './0072_portable_import_rebindings.js';
+export { PortableImportCommitAuthorizationsMigration } from './0073_portable_import_commit_authorizations.js';

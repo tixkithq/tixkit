@@ -1,5 +1,6 @@
 import { createHash, sign as cryptoSign, verify as cryptoVerify, type KeyLike } from 'node:crypto';
 import {
+  canonicalPortableJson,
   portableManifestSha256,
   portableOperationId,
   validatePortableManifest,
@@ -213,6 +214,30 @@ export function portableRebindingProvenanceSha256(input: {
       })}\n`,
     )
     .digest('hex');
+}
+
+export function portableImportControlInputSha256(input: {
+  configuration: unknown;
+  files: Array<{ id: string; sha256: string; byteSize: string }>;
+  mappings: Array<{ id: string; version: number; mapping: unknown }>;
+  rows: Array<{ id: string; source: unknown; normalized: unknown }>;
+}): string {
+  const hash = (value: unknown) =>
+    createHash('sha256').update(canonicalPortableJson(value)).digest('hex');
+  return hash({
+    configuration: input.configuration,
+    files: input.files,
+    mappings: input.mappings.map((mapping) => ({
+      id: mapping.id,
+      version: mapping.version,
+      mapping: hash(mapping.mapping),
+    })),
+    rows: input.rows.map((row) => ({
+      id: row.id,
+      source: hash(row.source),
+      normalized: hash(row.normalized),
+    })),
+  });
 }
 
 export interface PortableDryRunReceipt {

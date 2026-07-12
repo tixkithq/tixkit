@@ -21,12 +21,12 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@
 import {
   approvePortableImport,
   attestPortableDryRun,
+  authorizePortableImportCommit,
   bindPortableImportDestination,
   portableDryRunAttestationFromEnvironment,
   portableImportRebindingStatus,
   revokePortableImportApproval,
   stablePortableControlHash,
-  validatePortableImportApproval,
 } from '../../services/portable-import-control.js';
 
 class PortableDryRunAttestationUnavailableError extends Error {
@@ -1177,13 +1177,14 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const { job, organizationId } = await scopedJob(repository, request, jobId);
     if (job.source_system === 'tixkit-portable') {
       try {
-        await validatePortableImportApproval({
+        await authorizePortableImportCommit({
           db: app.context.db,
           tenantId: principal.tenantId,
           organizationId,
           jobId,
           confirmation: String(request.headers['x-tixkit-confirmation'] ?? ''),
           attestation: portableAttestation(),
+          authorizedBy: principal.id,
         });
       } catch (error) {
         if (
@@ -1196,7 +1197,10 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
           error instanceof Error &&
           (error.message === 'PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED' ||
             error.message === 'PORTABLE_IMPORT_REBINDINGS_REQUIRED' ||
-            error.message === 'PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND')
+            error.message === 'PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND' ||
+            error.message === 'PORTABLE_IMPORT_COMMIT_PRINCIPAL_MISMATCH' ||
+            error.message === 'PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT' ||
+            error.message === 'PORTABLE_IMPORT_COMMIT_AUTHORIZATION_JOB_CHANGED')
         )
           throw new ConflictError(
             'Portable import input changed after approval; create a new approval',
@@ -1204,9 +1208,19 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         request.log.error({ err: error, jobId }, 'Portable import approval validation failed');
         throw new PortableDryRunAttestationUnavailableError();
       }
-      throw new ConflictError(
-        'Portable import approval is valid; required destination rebindings must complete before commit',
+      await app.context.temporalClient.startMigrationCommit({
+        tenantId: principal.tenantId,
+        organizationId,
+        jobId,
+      });
+      await auditMutation(
+        app,
+        request,
+        organizationId,
+        jobId,
+        'migration_job.portable_commit_authorized',
       );
+      return reply.status(202).send({ jobId, status: 'committing' });
     }
     if (job.mode !== 'commit' || job.status !== 'ready') {
       throw new ConflictError('Only a ready commit-mode migration can be committed');
@@ -1420,6 +1434,8 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         error.message === 'PORTABLE_IMPORT_APPROVAL_REVOCATION_CONFLICT'
       )
         throw new ConflictError('Portable approval was already revoked with different evidence');
+      if (error instanceof Error && error.message === 'PORTABLE_IMPORT_APPROVAL_EXECUTION_STARTED')
+        throw new ConflictError('Portable approval cannot be revoked after execution starts');
       request.log.error({ err: error, jobId, approvalId }, 'Portable approval revocation failed');
       throw new PortableDryRunAttestationUnavailableError();
     }
