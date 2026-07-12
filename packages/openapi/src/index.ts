@@ -748,6 +748,16 @@ const rawOpenApiSpec = {
       MigrationReport: {
         type: 'object',
         additionalProperties: true,
+        properties: {
+          job: { type: 'object', additionalProperties: true },
+          report: { type: 'object', additionalProperties: true },
+          conflicts: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          correctivePlans: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          portableDryRunReceipt: { $ref: '#/components/schemas/PortableDryRunReceipt' },
+        },
       },
       PortableDryRunReceipt: {
         type: 'object',
@@ -779,21 +789,6 @@ const rawOpenApiSpec = {
           sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           attestationKeyId: { type: 'string' },
           signature: { type: 'string' },
-        },
-      },
-      MigrationReportResponse: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['job', 'report', 'conflicts', 'correctivePlans'],
-        properties: {
-          job: { type: 'object', additionalProperties: true },
-          report: { $ref: '#/components/schemas/MigrationReport' },
-          conflicts: { type: 'array', items: { type: 'object', additionalProperties: true } },
-          correctivePlans: {
-            type: 'array',
-            items: { type: 'object', additionalProperties: true },
-          },
-          portableDryRunReceipt: { $ref: '#/components/schemas/PortableDryRunReceipt' },
         },
       },
       MigrationAdapterCatalogEntry: {
@@ -13501,7 +13496,7 @@ const rawOpenApiSpec = {
             description: 'Migration report',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MigrationReportResponse' },
+                schema: { $ref: '#/components/schemas/MigrationReport' },
               },
             },
           },
@@ -13527,7 +13522,7 @@ const rawOpenApiSpec = {
             description: 'Migration report download',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MigrationReportResponse' },
+                schema: { $ref: '#/components/schemas/MigrationReport' },
               },
             },
           },

@@ -593,7 +593,34 @@
       },
       "MigrationReport": {
         "type": "object",
-        "additionalProperties": true
+        "additionalProperties": true,
+        "properties": {
+          "job": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "report": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "correctivePlans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "portableDryRunReceipt": {
+            "$ref": "#/components/schemas/PortableDryRunReceipt"
+          }
+        }
       },
       "PortableDryRunReceipt": {
         "type": "object",
@@ -656,42 +683,6 @@
           },
           "signature": {
             "type": "string"
-          }
-        }
-      },
-      "MigrationReportResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "job",
-          "report",
-          "conflicts",
-          "correctivePlans"
-        ],
-        "properties": {
-          "job": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "report": {
-            "$ref": "#/components/schemas/MigrationReport"
-          },
-          "conflicts": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "correctivePlans": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "portableDryRunReceipt": {
-            "$ref": "#/components/schemas/PortableDryRunReceipt"
           }
         }
       },
@@ -29093,7 +29084,16 @@
                 },
                 "example": {
                   "status": "ready",
-                  "report": {},
+                  "report": {
+                    "job": {},
+                    "report": {},
+                    "conflicts": [
+                      {}
+                    ],
+                    "correctivePlans": [
+                      {}
+                    ]
+                  },
                   "domainWrites": 0
                 }
               }
@@ -29243,7 +29243,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MigrationReportResponse"
+                  "$ref": "#/components/schemas/MigrationReport"
                 },
                 "example": {
                   "job": {},
@@ -29295,7 +29295,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MigrationReportResponse"
+                  "$ref": "#/components/schemas/MigrationReport"
                 },
                 "example": {
                   "job": {},

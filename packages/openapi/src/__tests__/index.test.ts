@@ -1964,7 +1964,7 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/migration-jobs/{jobId}/report/download'].get.responses['200'].content[
         'application/json'
       ].schema,
-    ).toEqual({ $ref: '#/components/schemas/MigrationReportResponse' });
+    ).toEqual({ $ref: '#/components/schemas/MigrationReport' });
     expect(openApiSpec.components.schemas.PortableDryRunReceipt.required).toEqual(
       expect.arrayContaining(['inputSha256', 'artifactSha256', 'signature']),
     );

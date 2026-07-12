@@ -20764,7 +20764,16 @@ export const apiReferenceOperations = [
             },
             "example": {
               "status": "ready",
-              "report": {},
+              "report": {
+                "job": {},
+                "report": {},
+                "conflicts": [
+                  {}
+                ],
+                "correctivePlans": [
+                  {}
+                ]
+              },
               "domainWrites": 0
             }
           }
@@ -20908,7 +20917,7 @@ export const apiReferenceOperations = [
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/MigrationReportResponse"
+              "$ref": "#/components/schemas/MigrationReport"
             },
             "example": {
               "job": {},
@@ -20962,7 +20971,7 @@ export const apiReferenceOperations = [
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/MigrationReportResponse"
+              "$ref": "#/components/schemas/MigrationReport"
             },
             "example": {
               "job": {},
@@ -22858,7 +22867,13 @@ export const apiReferenceSchemas = [
     "type": "object",
     "description": "",
     "required": [],
-    "properties": []
+    "properties": [
+      "job",
+      "report",
+      "conflicts",
+      "correctivePlans",
+      "portableDryRunReceipt"
+    ]
   },
   {
     "name": "PortableDryRunReceipt",
@@ -22891,24 +22906,6 @@ export const apiReferenceSchemas = [
       "sha256",
       "attestationKeyId",
       "signature"
-    ]
-  },
-  {
-    "name": "MigrationReportResponse",
-    "type": "object",
-    "description": "",
-    "required": [
-      "job",
-      "report",
-      "conflicts",
-      "correctivePlans"
-    ],
-    "properties": [
-      "job",
-      "report",
-      "conflicts",
-      "correctivePlans",
-      "portableDryRunReceipt"
     ]
   },
   {
