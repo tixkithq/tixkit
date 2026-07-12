@@ -15,6 +15,12 @@ global:
 database:
   driver: postgres
 
+auth:
+  provider: clerk
+
+temporalConnection:
+  mode: self-hosted-ha
+
 secrets:
   mode: create
   create: true
@@ -32,11 +38,14 @@ secrets:
   temporalTlsCa: ''
   temporalTlsCert: ''
   temporalTlsKey: ''
+  temporalTlsEnabled: false
   temporalNamespace: default
   temporalTaskQueue: tixkit-production
   clerkSecretKey: ''
   clerkPublishableKey: ''
   clerkWebhookSecret: ''
+  oidcIssuerUrl: ''
+  oidcAudience: ''
   stripeSecretKey: ''
   stripeWebhookSecret: ''
   stripePublishableKey: ''
@@ -185,12 +194,17 @@ networkPolicy:
   ingressNamespace: ingress-nginx
   externalEgressCidrs: []
   externalEgressPorts: [443, 3306, 4317, 4318, 5432, 6379, 7233]
+  databaseEgressCidrs: []
 
 migrations:
   enabled: true
+  strategy: hook
+  execution: install
+  invocation: ''
   image: db-migrate
   imageDigest: sha256:5555555555555555555555555555555555555555555555555555555555555555
   backoffLimit: 1
+  activeDeadlineSeconds: 900
 
 ingress:
   enabled: false

@@ -18,16 +18,37 @@ const productionImages = [
 const productionNetwork = [
   'networkPolicy.externalEgressCidrs[0]=192.0.2.0/24',
   'networkPolicy.externalEgressCidrs[1]=2001:db8::/32',
+  'networkPolicy.databaseEgressCidrs[0]=198.51.100.0/24',
 ];
 const productionRuntime = [...productionImages, ...productionNetwork];
+const externalSecretKeys = [
+  'DATABASE_URL',
+  'REDIS_URL',
+  'TEMPORAL_ADDRESS',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'METRICS_BEARER_TOKEN',
+  'CLERK_SECRET_KEY',
+  'CLERK_PUBLISHABLE_KEY',
+  'CLERK_WEBHOOK_SECRET',
+  'S3_ACCESS_KEY_ID',
+  'S3_SECRET_ACCESS_KEY',
+];
 
-function render(values, set = []) {
+function externalSecretDataOverrides(keys = externalSecretKeys) {
+  return keys.flatMap((key, index) => [
+    `secrets.externalSecret.data[${index}].secretKey=${key}`,
+    `secrets.externalSecret.data[${index}].remoteRef.key=tixkit/${key.toLowerCase()}`,
+  ]);
+}
+
+function render(values, set = [], release = 'tixkit') {
   const effectiveSet = values === production ? [...productionRuntime, ...set] : set;
   return execFileSync(
     'helm',
     [
       'template',
-      'tixkit',
+      release,
       chart,
       '--values',
       values,
@@ -65,7 +86,7 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     rendered.filter((resource) => resource.kind === 'HorizontalPodAutoscaler').length,
     4,
   );
-  assert.equal(rendered.filter((resource) => resource.kind === 'NetworkPolicy').length, 4);
+  assert.equal(rendered.filter((resource) => resource.kind === 'NetworkPolicy').length, 5);
   const worker = rendered.find(
     (resource) =>
       resource.kind === 'Deployment' &&
@@ -80,6 +101,18 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     ingress.spec.ingress[0].ports.map((port) => port.port),
     [4000, 3000, 3001],
   );
+  const migrationEgress = rendered.find(
+    (resource) =>
+      resource.kind === 'NetworkPolicy' && resource.metadata.name.endsWith('migration-egress'),
+  );
+  assert.equal(
+    migrationEgress.spec.podSelector.matchLabels['app.kubernetes.io/component'],
+    'migrate',
+  );
+  assert.deepEqual(migrationEgress.spec.egress[1], {
+    to: [{ ipBlock: { cidr: '198.51.100.0/24' } }],
+    ports: [{ protocol: 'TCP', port: 5432 }],
+  });
   assert.equal(
     ingress.spec.ingress[0].from[0].namespaceSelector.matchLabels['kubernetes.io/metadata.name'],
     'ingress-nginx',
@@ -155,6 +188,8 @@ test('Production Helm render requires bounded operator-selected egress CIDRs', (
         '--set',
         'secrets.name=tixkit-production-secrets',
         ...productionImages.flatMap((value) => ['--set', value]),
+        '--set',
+        'networkPolicy.databaseEgressCidrs[0]=198.51.100.0/24',
         ...(cidr ? ['--set', `networkPolicy.externalEgressCidrs[0]=${cidr}`] : []),
       ],
       { cwd: root, encoding: 'utf8' },
@@ -169,16 +204,139 @@ test('External Secrets mode renders a provider-neutral SecretStore reference', (
     render(production, [
       'global.imageRegistry=ghcr.io/tixkit/tixkit',
       'secrets.mode=external',
-      'migrations.enabled=false',
+      'migrations.strategy=manual',
       'secrets.name=tixkit-production-secrets',
       'secrets.externalSecret.secretStoreName=production-store',
-      'secrets.externalSecret.data[0].secretKey=DATABASE_URL',
-      'secrets.externalSecret.data[0].remoteRef.key=tixkit/database-url',
+      ...externalSecretDataOverrides(),
     ]),
   );
   const externalSecret = rendered.find((resource) => resource.kind === 'ExternalSecret');
   assert.equal(externalSecret.spec.secretStoreRef.name, 'production-store');
   assert.equal(externalSecret.spec.target.name, 'tixkit-production-secrets');
+  assert.equal(
+    rendered.some((resource) => resource.kind === 'Job'),
+    false,
+  );
+});
+
+test('External Secrets mode rejects an incomplete required-key inventory', () => {
+  assert.throws(
+    () =>
+      render(production, [
+        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'secrets.mode=external',
+        'migrations.strategy=manual',
+        'secrets.name=tixkit-production-secrets',
+        'secrets.externalSecret.secretStoreName=production-store',
+        ...externalSecretDataOverrides(externalSecretKeys.slice(0, -1)),
+      ]),
+    /ExternalSecret data must map required key S3_SECRET_ACCESS_KEY/,
+  );
+});
+
+test('External Secret inventory follows MySQL, OIDC, workload identity, and Temporal Cloud modes', () => {
+  const keys = [
+    'DATABASE_URL_MYSQL',
+    'REDIS_URL',
+    'TEMPORAL_ADDRESS',
+    'TEMPORAL_API_KEY',
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'METRICS_BEARER_TOKEN',
+    'OIDC_ISSUER_URL',
+    'OIDC_AUDIENCE',
+  ];
+  const rendered = resources(
+    render(production, [
+      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'database.driver=mysql',
+      'auth.provider=oidc',
+      'temporalConnection.mode=cloud',
+      'secrets.temporalTlsEnabled=true',
+      'secrets.s3AuthMode=workload-identity',
+      'secrets.mode=external',
+      'migrations.strategy=manual',
+      'secrets.name=tixkit-production-secrets',
+      'secrets.externalSecret.secretStoreName=production-store',
+      ...externalSecretDataOverrides(keys),
+    ]),
+  );
+  const mappedKeys = rendered
+    .find((resource) => resource.kind === 'ExternalSecret')
+    .spec.data.map((entry) => entry.secretKey);
+  assert.deepEqual(mappedKeys, keys);
+});
+
+test('Temporal Cloud mode fails closed without TLS', () => {
+  assert.throws(
+    () =>
+      render(production, [
+        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'secrets.name=tixkit-production-secrets',
+        'temporalConnection.mode=cloud',
+      ]),
+    /Temporal Cloud requires secrets.temporalTlsEnabled=true/,
+  );
+});
+
+test('manual migration execution renders one non-hook Job after secret reconciliation', () => {
+  const rendered = resources(
+    render(production, [
+      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'secrets.name=tixkit-production-secrets',
+      'migrations.strategy=manual',
+      'migrations.execution=manual-run',
+      'migrations.invocation=test-run',
+    ]),
+  );
+  const jobs = rendered.filter((resource) => resource.kind === 'Job');
+  assert.equal(jobs.length, 1);
+  assert.match(jobs[0].metadata.name, /^tixkit-tixkit-migrate-[0-9a-f]{8}-test-run$/);
+  assert.equal(jobs[0].metadata.annotations?.['helm.sh/hook'], undefined);
+  assert.equal(jobs[0].spec.activeDeadlineSeconds, 900);
+});
+
+test('manual migration names remain unique and Kubernetes-safe at boundaries', () => {
+  const longRelease = 'r'.repeat(53);
+  const rendered = resources(
+    render(
+      production,
+      [
+        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'secrets.name=tixkit-production-secrets',
+        'migrations.execution=manual-run',
+        'migrations.invocation=abcdefghijklmnop',
+      ],
+      longRelease,
+    ),
+  );
+  const name = rendered.find((resource) => resource.kind === 'Job').metadata.name;
+  assert.ok(name.length <= 63);
+  assert.match(name, /-migrate-[0-9a-f]{8}-abcdefghijklmnop$/);
+  assert.throws(
+    () =>
+      render(production, [
+        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'secrets.name=tixkit-production-secrets',
+        'migrations.execution=manual-run',
+        'migrations.invocation=abcdefghijklmnopq',
+      ]),
+    /at most 16 characters/,
+  );
+});
+
+test('Production rejects unrestricted database egress CIDRs', () => {
+  for (const cidr of ['0.0.0.0/0', '::/0']) {
+    assert.throws(
+      () =>
+        render(production, [
+          'global.imageRegistry=ghcr.io/tixkit/tixkit',
+          'secrets.name=tixkit-production-secrets',
+          `networkPolicy.databaseEgressCidrs[0]=${cidr}`,
+        ]),
+      /forbids unrestricted networkPolicy database egress CIDRs/,
+    );
+  }
 });
 
 test('External Secrets mode rejects an unsafe pre-install migration race', () => {
@@ -195,6 +353,8 @@ test('External Secrets mode rejects an unsafe pre-install migration race', () =>
       '--set',
       'secrets.mode=external',
       '--set',
+      'migrations.strategy=hook',
+      '--set',
       'secrets.name=tixkit-production-secrets',
       '--set',
       'secrets.externalSecret.secretStoreName=production-store',
@@ -203,7 +363,7 @@ test('External Secrets mode rejects an unsafe pre-install migration race', () =>
     { cwd: root, encoding: 'utf8' },
   );
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /cannot satisfy a pre-install migration hook/);
+  assert.match(result.stderr, /requires migrations.strategy=manual/);
 });
 
 test('Evaluation Helm render remains explicitly bundled and separate', () => {

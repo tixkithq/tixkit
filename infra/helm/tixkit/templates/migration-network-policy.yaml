@@ -1,0 +1,30 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "tixkit.fullname" . }}-migration-egress
+  labels:
+    {{- include "tixkit.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: migrate
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- range .Values.networkPolicy.databaseEgressCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ ternary 3306 5432 (eq $.Values.database.driver "mysql") }}
+    {{- end }}
+{{- end }}

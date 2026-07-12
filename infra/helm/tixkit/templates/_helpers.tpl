@@ -9,10 +9,22 @@
 {{- if not (has .Values.database.driver (list "postgres" "mysql")) -}}
 {{- fail "database.driver must be postgres or mysql" -}}
 {{- end -}}
+{{- if not (has .Values.auth.provider (list "clerk" "oidc")) -}}
+{{- fail "auth.provider must be clerk or oidc" -}}
+{{- end -}}
+{{- if not (has .Values.temporalConnection.mode (list "self-hosted-ha" "cloud")) -}}
+{{- fail "temporalConnection.mode must be self-hosted-ha or cloud" -}}
+{{- end -}}
+{{- if and (eq .Values.temporalConnection.mode "cloud") (not .Values.secrets.temporalTlsEnabled) -}}
+{{- fail "Temporal Cloud requires secrets.temporalTlsEnabled=true" -}}
+{{- end -}}
 {{- if not (has .Values.secrets.s3AuthMode (list "static" "workload-identity")) -}}
 {{- fail "secrets.s3AuthMode must be static or workload-identity" -}}
 {{- end -}}
 {{- if eq .Values.deploymentProfile "production" -}}
+{{- if ne .Values.migrations.strategy "manual" -}}
+{{- fail "production profile requires migrations.strategy=manual" -}}
+{{- end -}}
 {{- if or .Values.postgres.enabled .Values.redis.enabled .Values.temporal.enabled .Values.minio.enabled -}}
 {{- fail "production profile requires external PostgreSQL/MySQL, Redis, Temporal, and object storage" -}}
 {{- end -}}
@@ -34,8 +46,14 @@
 {{- if empty .Values.networkPolicy.externalEgressCidrs -}}
 {{- fail "production profile requires explicit networkPolicy.externalEgressCidrs" -}}
 {{- end -}}
+{{- if empty .Values.networkPolicy.databaseEgressCidrs -}}
+{{- fail "production profile requires explicit networkPolicy.databaseEgressCidrs" -}}
+{{- end -}}
 {{- if or (has "0.0.0.0/0" .Values.networkPolicy.externalEgressCidrs) (has "::/0" .Values.networkPolicy.externalEgressCidrs) -}}
 {{- fail "production profile forbids unrestricted networkPolicy external egress CIDRs" -}}
+{{- end -}}
+{{- if or (has "0.0.0.0/0" .Values.networkPolicy.databaseEgressCidrs) (has "::/0" .Values.networkPolicy.databaseEgressCidrs) -}}
+{{- fail "production profile forbids unrestricted networkPolicy database egress CIDRs" -}}
 {{- end -}}
 {{- if not .Values.availability.podDisruptionBudget.enabled -}}
 {{- fail "production profile requires pod disruption budgets" -}}
@@ -43,17 +61,58 @@
 {{- if not .Values.availability.topologySpread.enabled -}}
 {{- fail "production profile requires topology spread" -}}
 {{- end -}}
-{{- if and (eq .Values.secrets.mode "external") .Values.migrations.enabled -}}
-{{- fail "external-secret reconciliation cannot satisfy a pre-install migration hook; pre-provision secrets.name or disable migrations for a separately controlled migration" -}}
+{{- if not (has .Values.migrations.strategy (list "hook" "manual")) -}}
+{{- fail "migrations.strategy must be hook or manual" -}}
+{{- end -}}
+{{- if and (eq .Values.migrations.execution "manual-run") (not (regexMatch "^[a-z0-9]([-a-z0-9]{0,14}[a-z0-9])?$" .Values.migrations.invocation)) -}}
+{{- fail "manual migration execution requires a lowercase DNS-safe migrations.invocation of at most 16 characters" -}}
+{{- end -}}
+{{- if and (eq .Values.secrets.mode "external") (ne .Values.migrations.strategy "manual") -}}
+{{- fail "External Secrets mode requires migrations.strategy=manual so reconciliation completes before migration execution" -}}
 {{- end -}}
 {{- end -}}
 {{- if not (has .Values.secrets.mode (list "create" "existing" "external")) -}}
 {{- fail "secrets.mode must be create, existing, or external" -}}
 {{- end -}}
+{{- if eq .Values.secrets.mode "external" -}}
+{{- $provided := dict -}}
+{{- range .Values.secrets.externalSecret.data -}}
+{{- $_ := set $provided .secretKey true -}}
+{{- end -}}
+{{- $databaseKey := ternary "DATABASE_URL_MYSQL" "DATABASE_URL" (eq .Values.database.driver "mysql") -}}
+{{- $required := list $databaseKey "REDIS_URL" "TEMPORAL_ADDRESS" "STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET" "METRICS_BEARER_TOKEN" -}}
+{{- if eq .Values.auth.provider "clerk" -}}
+{{- $required = concat $required (list "CLERK_SECRET_KEY" "CLERK_PUBLISHABLE_KEY" "CLERK_WEBHOOK_SECRET") -}}
+{{- else -}}
+{{- $required = concat $required (list "OIDC_ISSUER_URL" "OIDC_AUDIENCE") -}}
+{{- end -}}
+{{- if eq .Values.secrets.s3AuthMode "static" -}}
+{{- $required = concat $required (list "S3_ACCESS_KEY_ID" "S3_SECRET_ACCESS_KEY") -}}
+{{- end -}}
+{{- if eq .Values.temporalConnection.mode "cloud" -}}
+{{- $required = concat $required (list "TEMPORAL_API_KEY") -}}
+{{- end -}}
+{{- range $required -}}
+{{- if not (hasKey $provided .) -}}
+{{- fail (printf "ExternalSecret data must map required key %s" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "tixkit.serviceAccountName" -}}
 {{- default (include "tixkit.fullname" .) .Values.security.serviceAccount.name -}}
+{{- end -}}
+
+{{- define "tixkit.migrationJobName" -}}
+{{- if eq .Values.migrations.execution "manual-run" -}}
+{{- $releaseHash := sha256sum .Release.Name | trunc 8 -}}
+{{- $suffix := printf "migrate-%s-%s" $releaseHash .Values.migrations.invocation -}}
+{{- $prefixLength := sub 62 (len $suffix) | int -}}
+{{- printf "%s-%s" (include "tixkit.fullname" . | trunc $prefixLength | trimSuffix "-") $suffix -}}
+{{- else -}}
+{{- printf "%s-migrate" (include "tixkit.fullname" . | trunc 55 | trimSuffix "-") -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "tixkit.podSecurity" -}}

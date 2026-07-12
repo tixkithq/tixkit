@@ -8,6 +8,7 @@ metadata:
 data:
   NODE_ENV: {{ .Values.global.environment | quote }}
   DB_DRIVER: {{ .Values.database.driver | quote }}
+  AUTH_PROVIDER: {{ .Values.auth.provider | quote }}
   API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
   CORS_ALLOWED_ORIGINS: {{ join "," .Values.global.corsAllowedOrigins | quote }}
   CUSTOM_DOMAIN_CORS_ENABLED: {{ .Values.global.customDomainCorsEnabled | quote }}
@@ -18,6 +19,8 @@ data:
   TEMPORAL_NAMESPACE: {{ .Values.secrets.temporalNamespace | quote }}
   TEMPORAL_TASK_QUEUE: {{ .Values.secrets.temporalTaskQueue | quote }}
   TEMPORAL_TLS_ENABLED: {{ .Values.secrets.temporalTlsEnabled | default false | quote }}
+  OIDC_ISSUER_URL: {{ .Values.secrets.oidcIssuerUrl | quote }}
+  OIDC_AUDIENCE: {{ .Values.secrets.oidcAudience | quote }}
   OFFLINE_MANIFEST_KEY_ID: {{ .Values.secrets.offlineManifestKeyId | quote }}
   S3_BUCKET: {{ .Values.secrets.s3Bucket | quote }}
   S3_REGION: {{ .Values.secrets.s3Region | quote }}
