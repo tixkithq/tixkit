@@ -36,6 +36,15 @@ const distribution = JSON.parse(
 );
 
 function compatibilityManifest() {
+  const agentContract = distribution.release.contracts.find((path) =>
+    path.includes('agent-protocol'),
+  );
+  const agentVersion = agentContract
+    ? agentContract
+        .split('/')
+        .at(-1)
+        .replace(/^agent-protocol-|\.json$/gu, '')
+    : '';
   const packages = distribution.release.packages
     .filter(({ ecosystem }) => ecosystem === 'npm' || ecosystem === 'npm-and-cdn')
     .map((entry) => {
@@ -50,7 +59,9 @@ function compatibilityManifest() {
       sourceTreeSha256: 'c'.repeat(64),
       apiVersion: '2026-01-01',
       migrationRange: { minimum: '0001', maximum: '0064' },
-      agentProtocol: { status: 'unavailable', version: '' },
+      agentProtocol: agentContract
+        ? { status: 'supported', version: agentVersion }
+        : { status: 'unavailable', version: '' },
       packages,
       images: distribution.release.images.map(({ name }) => ({
         name,
@@ -72,6 +83,17 @@ function compatibilityManifest() {
             .find((line) => line.endsWith('  openapi.json'))
             .split(/\s+/u)[0],
         },
+        ...(agentContract
+          ? [
+              {
+                name: agentContract,
+                version: '1',
+                sha256: createHash('sha256')
+                  .update(readFileSync(resolve(root, agentContract)))
+                  .digest('hex'),
+              },
+            ]
+          : []),
       ],
     },
   };
@@ -448,11 +470,11 @@ test('verified Cloud commands fail when an installed public package byte changes
   }
 });
 
-test('fails closed on premature agent support and migration or schema drift', () => {
+test('fails closed on missing agent support and migration or schema drift', () => {
   const cloudRoot = cloudFixture();
   try {
     const manifest = compatibilityManifest();
-    manifest.core.agentProtocol = { status: 'supported', version: '1.0.0' };
+    manifest.core.agentProtocol = { status: 'unavailable', version: '' };
     manifest.core.migrationRange.maximum = '0063';
     manifest.unreviewed = true;
     const violations = validateCloudCoreConsumer(
@@ -470,9 +492,7 @@ test('fails closed on premature agent support and migration or schema drift', ()
     );
     assert.ok(semanticViolations.includes('migration maximum must equal 0064'));
     assert.ok(
-      semanticViolations.includes(
-        'agent protocol must remain unavailable until a public contract is released',
-      ),
+      semanticViolations.includes('released agent protocol requires a supported pinned version'),
     );
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });

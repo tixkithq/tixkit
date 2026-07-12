@@ -223,7 +223,10 @@ export function buildPublicReleaseManifest(images, releaseVersion, packageArtifa
       apiVersion: basename(apiContract),
       migrationRange: migrationRange(),
       agentProtocol: agentContract
-        ? { status: 'supported', version: basename(agentContract) }
+        ? {
+            status: 'supported',
+            version: basename(agentContract, '.json').replace(/^agent-protocol-/u, ''),
+          }
         : { status: 'unavailable', version: '' },
       packages: packFromSourceArchive(distribution, sourceArchive, packageArtifactDirectory),
       images: [...images].sort((left, right) => left.name.localeCompare(right.name)),

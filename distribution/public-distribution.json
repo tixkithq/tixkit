@@ -74,6 +74,7 @@
     ],
     "packages": [
       "packages/admin-table-core",
+      "packages/agent-protocol",
       "packages/api",
       "packages/checkout-headless",
       "packages/cli",
@@ -209,6 +210,7 @@
   "release": {
     "packages": [
       { "path": "packages/admin-table-core", "ecosystem": "npm" },
+      { "path": "packages/agent-protocol", "ecosystem": "npm" },
       { "path": "packages/checkout-headless", "ecosystem": "npm" },
       { "path": "packages/content-core", "ecosystem": "npm" },
       { "path": "packages/content-email", "ecosystem": "npm" },
@@ -243,6 +245,7 @@
       "artifacts/api/2026-01-01",
       "distribution/cloud-core-compatibility.schema.json",
       "distribution/public-release-manifest.schema.json",
+      "packages/agent-protocol/schemas/agent-protocol-2026-07-11.json",
       "packages/embed-core/schemas/checkout-message.schema.json",
       "packages/embed-core/schemas/lifecycle.schema.json"
     ],

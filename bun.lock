@@ -273,6 +273,16 @@
         "vitest": "^4.1.0",
       },
     },
+    "packages/agent-protocol": {
+      "name": "@tixkit/agent-protocol",
+      "version": "0.1.0",
+      "devDependencies": {
+        "ajv": "^8.20.0",
+        "ajv-formats": "^3.0.1",
+        "typescript": "7.0.2",
+        "vitest": "^4.1.0",
+      },
+    },
     "packages/api": {
       "name": "@tixkit/api",
       "version": "0.1.0",
@@ -2390,6 +2400,8 @@
     "@tixkit/admin-dashboard": ["@tixkit/admin-dashboard@workspace:apps/admin-dashboard"],
 
     "@tixkit/admin-table-core": ["@tixkit/admin-table-core@workspace:packages/admin-table-core"],
+
+    "@tixkit/agent-protocol": ["@tixkit/agent-protocol@workspace:packages/agent-protocol"],
 
     "@tixkit/api": ["@tixkit/api@workspace:packages/api"],
 
