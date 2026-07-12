@@ -5,50 +5,20 @@
   "breaking": false,
   "summary": {
     "breaking": 0,
-    "compatible": 7
+    "compatible": 2
   },
   "changes": [
     {
       "severity": "compatible",
-      "category": "property-added",
-      "path": "components.schemas.MigrationReport.properties.job",
-      "message": "An optional property was added."
+      "category": "operation-added",
+      "path": "POST /migration-jobs/{jobId}/portable-approval",
+      "message": "Operation was added."
     },
     {
       "severity": "compatible",
-      "category": "property-added",
-      "path": "components.schemas.MigrationReport.properties.report",
-      "message": "An optional property was added."
-    },
-    {
-      "severity": "compatible",
-      "category": "property-added",
-      "path": "components.schemas.MigrationReport.properties.conflicts",
-      "message": "An optional property was added."
-    },
-    {
-      "severity": "compatible",
-      "category": "property-added",
-      "path": "components.schemas.MigrationReport.properties.correctivePlans",
-      "message": "An optional property was added."
-    },
-    {
-      "severity": "compatible",
-      "category": "property-added",
-      "path": "components.schemas.MigrationReport.properties.portableDryRunReceipt",
-      "message": "An optional property was added."
-    },
-    {
-      "severity": "compatible",
-      "category": "property-added",
-      "path": "components.schemas.MigrationDryRunResult.properties.portableDryRunReceipt",
-      "message": "An optional property was added."
-    },
-    {
-      "severity": "compatible",
-      "category": "property-added",
-      "path": "components.schemas.MigrationDryRunResult.properties.portableDryRunReceiptSha256",
-      "message": "An optional property was added."
+      "category": "operation-added",
+      "path": "POST /migration-jobs/{jobId}/portable-approvals/{approvalId}/revoke",
+      "message": "Operation was added."
     }
   ]
 }
