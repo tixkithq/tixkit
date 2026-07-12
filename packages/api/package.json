@@ -25,6 +25,7 @@
     "@fastify/helmet": "^12.0.0",
     "@fastify/rate-limit": "^10.0.0",
     "@tixkit/admin-table-core": "workspace:*",
+    "@tixkit/agent-protocol": "workspace:*",
     "@tixkit/content-core": "workspace:*",
     "@tixkit/content-email": "workspace:*",
     "@tixkit/content-event-page": "workspace:*",

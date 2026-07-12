@@ -18,6 +18,75 @@ export interface AgentApprovalTable {
   consumed_execution_id: string | null;
 }
 
+export interface AgentPrincipalTable {
+  id: string;
+  tenant_id: string;
+  kind: string;
+  sponsor_principal_id: string;
+  capabilities: string;
+  maximum_autonomy: string;
+  protocol_version: string;
+  state: string;
+  registered_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface AgentDelegationTable {
+  id: string;
+  tenant_id: string;
+  agent_principal_id: string;
+  sponsor_principal_id: string;
+  capabilities: string;
+  resource_scopes: string;
+  permission_snapshot: string;
+  issued_at: Timestamp;
+  expires_at: Timestamp;
+  revoked_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+export interface AgentControlEventTable {
+  id: string;
+  tenant_id: string;
+  actor_principal_id: string;
+  target_type: string;
+  target_id: string;
+  operation: string;
+  previous_state_sha256: string | null;
+  new_state_sha256: string;
+  reason_code: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  actor_authorization_sha256: string;
+  outcome: string;
+  occurred_at: Timestamp;
+}
+
+export interface AgentActionPolicyTable {
+  tenant_id: string;
+  action_kind: string;
+  allowed: boolean | number;
+  risk_allowed: boolean | number;
+  policy_version: number | string | bigint;
+  updated_at: Timestamp;
+}
+
+export interface AgentActionEffectTable {
+  execution_id: string;
+  tenant_id: string;
+  action_digest: string;
+  resource_type: string;
+  resource_id: string;
+  operation: string;
+  idempotency_key: string;
+  expected_policy_version: number | string | bigint;
+  expected_resource_version: number | string | bigint;
+  effect_fence_token: number | string | bigint;
+  result: string;
+  result_sha256: string;
+  created_at: Timestamp;
+}
+
 export interface AgentExecutionTable {
   id: string;
   tenant_id: string;
@@ -1688,6 +1757,11 @@ export interface HistoricalCheckInTable {
 }
 
 export interface DB {
+  agent_principals: AgentPrincipalTable;
+  agent_delegations: AgentDelegationTable;
+  agent_control_events: AgentControlEventTable;
+  agent_action_policies: AgentActionPolicyTable;
+  agent_action_effects: AgentActionEffectTable;
   agent_approvals: AgentApprovalTable;
   agent_executions: AgentExecutionTable;
   agent_audit_events: AgentAuditEventTable;

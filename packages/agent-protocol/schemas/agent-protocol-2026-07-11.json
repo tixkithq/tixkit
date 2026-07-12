@@ -343,7 +343,7 @@
   ],
   "additionalProperties": false,
   "$defs": {
-    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,62}$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$" },
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "canonicalObject": {
       "type": "object",

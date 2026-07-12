@@ -49,6 +49,7 @@ class MemoryStore implements AgentExecutionStore {
   approvalConsumed = false;
   audits: AgentAuditRecord[] = [];
   completeAllowed = true;
+  effect?: { resourceId: string; resourceVersion: number; status: string };
 
   async reserveAndConsume(input: Parameters<AgentExecutionStore['reserveAndConsume']>[0]) {
     if (this.execution) return { created: false, execution: this.execution };
@@ -77,9 +78,11 @@ class MemoryStore implements AgentExecutionStore {
     this.audits.push(input.audit);
     return true;
   }
+
+  async recoverEffect() { return this.effect; }
 }
 
-function harness(store = new MemoryStore()) {
+function harness(store = new MemoryStore(), current: Record<string, unknown> = {}) {
   let executionId = 0;
   let auditId = 0;
   const invocations: Array<Record<string, unknown>> = [];
@@ -89,7 +92,9 @@ function harness(store = new MemoryStore()) {
   }, { now: () => now }, {
     executionId: () => `execution_${++executionId}`,
     auditId: () => `agent_audit_${++auditId}`,
-  });
+  }, { async load({ execution }) { return { ...authorization,
+    approval, approvalExecutionId: execution.id, riskPolicyAllowed: true,
+    observedAt: now.toISOString(), ...current }; } });
   return { service, store, invocations };
 }
 
@@ -133,6 +138,31 @@ describe('durable agent execution service', () => {
     expect(store.execution?.state).toBe('running');
   });
 
+  it('lets a fenced successor recover an exact effect before stale resource authorization', async () => {
+    const store = new MemoryStore();
+    let authorizationLoads = 0;
+    const service = new DurableAgentExecutionService(store, {
+      async invoke() {
+        store.effect = { resourceId: 'evt_primary', resourceVersion: 8, status: 'published' };
+        return store.effect;
+      },
+    }, { now: () => now }, { executionId: () => 'execution_effect_recovery',
+      auditId: () => `agent_audit_${store.audits.length}` }, {
+      async load({ execution }) { authorizationLoads += 1; return { ...authorization, approval,
+        approvalExecutionId: execution.id, riskPolicyAllowed: true,
+        currentResourceVersion: authorizationLoads === 1 ? 7 : 8, observedAt: now.toISOString() }; },
+    });
+    const reserved = await service.reserve(authorization);
+    store.completeAllowed = false;
+    await expect(service.run({ action, execution: reserved, workerId: 'worker_lost_response' }))
+      .rejects.toBeInstanceOf(AgentExecutionConflictError);
+    store.completeAllowed = true;
+    await expect(service.run({ action, execution: reserved, workerId: 'worker_successor' }))
+      .resolves.toMatchObject({ state: 'succeeded', result: { resourceVersion: 8 } });
+    expect(authorizationLoads).toBe(1);
+    expect(store.audits.at(-1)?.phase).toBe('succeeded');
+  });
+
   it('rejects a forged execution shell after authoritative claim without invocation', async () => {
     const { service, store, invocations } = harness();
     const reserved = await service.reserve(authorization);
@@ -156,13 +186,33 @@ describe('durable agent execution service', () => {
       status: 'published' });
   });
 
+  it.each([
+    { currentResourceVersion: 8 },
+    { currentPolicyVersion: 4 },
+    { sponsorPermissions: [] },
+    { tenantAllowedActions: [] },
+    { riskPolicyAllowed: false },
+    { principal: { ...authorization.principal, capabilities: [] } },
+    { delegation: { ...authorization.delegation, resourceScopes: [] } },
+  ])('fails a reserved execution when current authorization narrows: %o', async (current) => {
+    const { service, store, invocations } = harness(new MemoryStore(), current);
+    const reserved = await service.reserve(authorization);
+    await expect(service.run({ action, execution: reserved, workerId: 'worker_changed_auth' }))
+      .resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_AUTHORIZATION_CHANGED' });
+    expect(invocations).toHaveLength(0);
+    expect(store.audits.at(-1)).toMatchObject({ phase: 'failed' });
+    expect(store.audits.at(-1)?.reasonCodes.length).toBeGreaterThan(0);
+  });
+
   it('rejects provider-shaped results with extra fields instead of persisting them', async () => {
     const store = new MemoryStore();
     const service = new DurableAgentExecutionService(store, {
       async invoke() { return { resourceId: 'evt_primary', resourceVersion: 8,
         status: 'published', providerSecret: 'sk_live_secret' }; },
     }, { now: () => now }, { executionId: () => 'execution_unsafe_result',
-      auditId: () => `agent_audit_${store.audits.length}` });
+      auditId: () => `agent_audit_${store.audits.length}` },
+    { async load({ execution }) { return { ...authorization, approval,
+      approvalExecutionId: execution.id, riskPolicyAllowed: true, observedAt: now.toISOString() }; } });
     const reserved = await service.reserve(authorization);
     await expect(service.run({ action, execution: reserved, workerId: 'worker_unsafe_result' }))
       .resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_ACTION_FAILED' });
@@ -172,7 +222,9 @@ describe('durable agent execution service', () => {
       async invoke() { return { resourceId: 'evt_primary', resourceVersion: 8,
         status: `published_${'x'.repeat(2_000)}` }; },
     }, { now: () => now }, { executionId: () => 'execution_oversized_result',
-      auditId: () => `agent_audit_${oversizedStore.audits.length}` });
+      auditId: () => `agent_audit_${oversizedStore.audits.length}` },
+    { async load({ execution }) { return { ...authorization, approval,
+      approvalExecutionId: execution.id, riskPolicyAllowed: true, observedAt: now.toISOString() }; } });
     const oversizedReserved = await oversizedService.reserve(authorization);
     await expect(oversizedService.run({ action, execution: oversizedReserved,
       workerId: 'worker_oversized_result' })).resolves.toMatchObject({ state: 'failed' });
@@ -189,7 +241,9 @@ describe('durable agent execution service', () => {
     const service = new DurableAgentExecutionService(store, {
       async invoke() { return unsafeResult as never; },
     }, { now: () => now }, { executionId: () => 'execution_invalid_result',
-      auditId: () => `agent_audit_${store.audits.length}` });
+      auditId: () => `agent_audit_${store.audits.length}` },
+    { async load({ execution }) { return { ...authorization, approval,
+      approvalExecutionId: execution.id, riskPolicyAllowed: true, observedAt: now.toISOString() }; } });
     const reserved = await service.reserve(authorization);
     await expect(service.run({ action, execution: reserved, workerId: 'worker_invalid_result' }))
       .resolves.toMatchObject({ state: 'failed' });
@@ -201,7 +255,9 @@ describe('durable agent execution service', () => {
     const service = new DurableAgentExecutionService(store, {
       async invoke() { throw Object.assign(new Error('provider secret detail'), { code: 'TIMEOUT' }); },
     }, { now: () => now }, { executionId: () => 'execution_failure',
-      auditId: () => `agent_audit_${store.audits.length}` });
+      auditId: () => `agent_audit_${store.audits.length}` },
+    { async load({ execution }) { return { ...authorization, approval,
+      approvalExecutionId: execution.id, riskPolicyAllowed: true, observedAt: now.toISOString() }; } });
     const reserved = await service.reserve(authorization);
     await expect(service.run({ action, execution: reserved, workerId: 'worker_failure' }))
       .resolves.toMatchObject({ state: 'failed', failureCode: 'TIMEOUT' });

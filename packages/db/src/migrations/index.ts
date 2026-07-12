@@ -63,3 +63,4 @@ export { MigrationPreparationCursorMigration } from './0062_migration_preparatio
 export { EventCheckoutConfigurationRevisionMigration } from './0063_event_checkout_configuration_revision.js';
 export { OrganizationEventDefaultsMigration } from './0064_organization_event_defaults.js';
 export { AgentExecutionMigration } from './0065_agent_execution.js';
+export { AgentIdentityMigration } from './0066_agent_identity.js';

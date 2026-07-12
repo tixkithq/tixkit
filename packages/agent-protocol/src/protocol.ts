@@ -208,12 +208,58 @@ export interface AgentAuditRecord {
 
 export class AgentProtocolValidationError extends Error {}
 
-const ID = /^[a-z0-9][a-z0-9_-]{1,62}$/u;
+const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$/u;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/u;
 const SCOPE = /^[a-z][a-z0-9_-]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/u;
 const OPERATION = /^[a-z][a-z0-9_.-]{2,127}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const CURRENCY = /^[A-Z]{3}$/u;
+const PERMISSION = /^[a-z][a-z0-9_-]{1,31}:[a-z][a-z0-9_-]{1,63}$/u;
+const CAPABILITIES = new Set<AgentCapability>([
+  'events.read', 'events.prepare', 'events.execute', 'readiness.read', 'reports.read',
+  'content.prepare', 'campaigns.prepare', 'campaigns.execute', 'inventory.prepare',
+  'inventory.execute', 'refunds.prepare', 'refunds.execute', 'exports.prepare',
+  'exports.execute', 'settings.prepare', 'settings.execute',
+]);
+const KINDS = new Set<AgentKind>(['managed_cloud', 'third_party', 'self_hosted']);
+const AUTONOMY = new Set<AgentAutonomy>(['read', 'recommend', 'prepare', 'execute_with_approval']);
+const STATES = new Set<AgentPrincipal['state']>(['active', 'suspended', 'revoked']);
+
+function validUniqueStrings(values: readonly string[], maximum: number): boolean {
+  return values.length > 0 && values.length <= maximum && new Set(values).size === values.length;
+}
+
+export function validateAgentPrincipal(principal: AgentPrincipal): void {
+  const invalidField = !ID.test(principal.id) ? 'id' : !ID.test(principal.tenantId) ? 'tenantId' :
+    !ID.test(principal.sponsorPrincipalId) ? 'sponsorPrincipalId' : !KINDS.has(principal.kind) ? 'kind' :
+      !AUTONOMY.has(principal.maximumAutonomy) ? 'maximumAutonomy' : !STATES.has(principal.state) ? 'state' :
+        principal.protocolVersion !== AGENT_PROTOCOL_VERSION ? 'protocolVersion' :
+          !validUniqueStrings(principal.capabilities, CAPABILITIES.size) ||
+          principal.capabilities.some((capability) => !CAPABILITIES.has(capability)) ? 'capabilities' :
+            !Number.isFinite(new Date(principal.registeredAt).getTime()) ? 'registeredAt' : undefined;
+  if (invalidField) throw new AgentProtocolValidationError(`agent principal ${invalidField} is invalid`);
+}
+
+export function validateAgentDelegation(
+  delegation: AgentDelegationGrant,
+  principal: AgentPrincipal,
+): void {
+  const issuedAt = new Date(delegation.issuedAt).getTime();
+  const expiresAt = new Date(delegation.expiresAt).getTime();
+  if (!ID.test(delegation.id) || delegation.tenantId !== principal.tenantId ||
+    delegation.agentPrincipalId !== principal.id ||
+    delegation.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    !validUniqueStrings(delegation.capabilities, CAPABILITIES.size) ||
+    delegation.capabilities.some((capability) => !CAPABILITIES.has(capability) ||
+      !principal.capabilities.includes(capability)) ||
+    !validUniqueStrings(delegation.resourceScopes, 100) ||
+    delegation.resourceScopes.some((scope) => !SCOPE.test(scope)) ||
+    !validUniqueStrings(delegation.permissionSnapshot, 100) ||
+    delegation.permissionSnapshot.some((permission) => !PERMISSION.test(permission)) ||
+    !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || issuedAt >= expiresAt ||
+    (delegation.revokedAt && !Number.isFinite(new Date(delegation.revokedAt).getTime())))
+    throw new AgentProtocolValidationError('agent delegation is invalid');
+}
 export const AGENT_ACTION_DESCRIPTORS: Readonly<Record<AgentActionKind, AgentActionDescriptor>> = {
   'event.read': {
     capability: 'events.read',

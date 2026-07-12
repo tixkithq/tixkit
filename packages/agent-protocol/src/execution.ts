@@ -9,6 +9,8 @@ import {
   type AgentApproval,
   type AgentAuditRecord,
   type AgentAuthorizationInput,
+  type AgentDelegationGrant,
+  type AgentPrincipal,
 } from './protocol.js';
 
 export interface AgentExecution {
@@ -60,10 +62,12 @@ export interface AgentExecutionStore {
     expectedRevision: { fenceToken: number; leaseOwner: string };
     audit: AgentAuditRecord;
   }): Promise<boolean>;
+  /** Returns only exact, immutable, digest-validated evidence of an already committed effect. */
+  recoverEffect(input: { execution: AgentExecution; action: AgentAction }): Promise<AgentActionResult | undefined>;
 }
 
 export interface AgentActionInvoker {
-  /** Invokes only the action's registry-validated public API/workflow operation. */
+  /** Invokes only the action's registry operation and atomically rechecks authorizationStateDigest. */
   invoke(input: {
     tenantId: string;
     operation: string;
@@ -74,7 +78,44 @@ export interface AgentActionInvoker {
     idempotencyKey: string;
     agentPrincipalId: string;
     sponsorPrincipalId: string;
+    delegationGrantId: string;
+    approvalId: string;
+    executionId: string;
+    actionKind: AgentAction['kind'];
+    actionDigest: string;
+    expectedPolicyVersion: number;
+    authorizationStateDigest: string;
+    expectedLeaseOwner: string;
+    expectedFenceToken: number;
   }): Promise<AgentActionResult>;
+}
+
+export interface AgentCurrentAuthorization {
+  principal: AgentPrincipal;
+  delegation: AgentDelegationGrant;
+  approval: AgentApproval;
+  approvalExecutionId: string;
+  sponsorPermissions: readonly string[];
+  tenantAllowedActions: AgentAuthorizationInput['tenantAllowedActions'];
+  currentResourceVersion: number;
+  currentPolicyVersion: number;
+  riskPolicyAllowed: boolean;
+  observedAt: string;
+}
+
+export interface AgentAuthorizationStateProvider {
+  /** Reads the current authoritative permission, policy, resource and approval state. */
+  load(input: { action: AgentAction; execution: AgentExecution }): Promise<AgentCurrentAuthorization>;
+}
+
+export function agentAuthorizationStateDigest(current: AgentCurrentAuthorization): string {
+  return agentSha256({ principal: current.principal, delegation: current.delegation,
+    approval: current.approval, approvalExecutionId: current.approvalExecutionId,
+    sponsorPermissions: [...current.sponsorPermissions].sort(),
+    tenantAllowedActions: [...current.tenantAllowedActions].sort(),
+    currentResourceVersion: current.currentResourceVersion,
+    currentPolicyVersion: current.currentPolicyVersion,
+    riskPolicyAllowed: current.riskPolicyAllowed });
 }
 
 export interface AgentActionResult extends Readonly<Record<string, unknown>> {
@@ -94,12 +135,12 @@ export interface AgentExecutionClock {
 
 export class AgentExecutionConflictError extends Error {}
 
-const ID = /^[a-z0-9][a-z0-9_-]{1,62}$/u;
+const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$/u;
 const FAILURE_CODE = /^[A-Z0-9_]{3,64}$/u;
 const RESULT_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const RESULT_KEYS = new Set(['resourceId', 'resourceVersion', 'status']);
 
-function validateResult(result: AgentActionResult): void {
+export function validateAgentActionResult(result: AgentActionResult): void {
   const keys = Object.keys(result);
   if (keys.length !== RESULT_KEYS.size || keys.some((key) => !RESULT_KEYS.has(key)) ||
     typeof result.resourceId !== 'string' || typeof result.status !== 'string' ||
@@ -107,6 +148,17 @@ function validateResult(result: AgentActionResult): void {
     !Number.isSafeInteger(result.resourceVersion) || result.resourceVersion < 0 ||
     Buffer.byteLength(canonicalAgentJson(result), 'utf8') > 1_024)
     throw new AgentProtocolValidationError('agent action result is unsafe');
+}
+
+export function validateAgentActionResultForAction(action: AgentAction,
+  result: AgentActionResult): void {
+  validateAgentActionResult(result);
+  if (result.resourceId !== action.target.resourceId)
+    throw new AgentProtocolValidationError('agent action result resource is invalid');
+  if (action.kind === 'event.publish' && (result.status !== 'published' ||
+    (result.resourceVersion !== action.target.resourceVersion &&
+      result.resourceVersion !== action.target.resourceVersion + 1)))
+    throw new AgentProtocolValidationError('event publish result is invalid');
 }
 
 function requestFingerprint(action: AgentAction, actionDigest: string): string {
@@ -128,6 +180,7 @@ export class DurableAgentExecutionService {
     private readonly invoker: AgentActionInvoker,
     private readonly clock: AgentExecutionClock,
     private readonly ids: AgentExecutionIds,
+    private readonly authorizationState: AgentAuthorizationStateProvider,
   ) {}
 
   async reserve(input: AgentAuthorizationInput & {
@@ -192,14 +245,41 @@ export class DurableAgentExecutionService {
     if (claimed.state === 'succeeded' || claimed.state === 'compensated') return claimed;
     if (!claimed.leaseOwner || claimed.state !== 'running')
       throw new AgentExecutionConflictError('execution is not claimable');
+    const recovered = await this.store.recoverEffect({ execution: claimed, action: input.action });
+    if (recovered) {
+      validateAgentActionResultForAction(input.action, recovered);
+      const completed: AgentExecution = { ...claimed, state: 'succeeded', result: recovered,
+        leaseOwner: undefined, leaseExpiresAt: undefined, updatedAt: this.clock.now().toISOString() };
+      if (!await this.store.complete({ execution: completed,
+        expectedRevision: { fenceToken: claimed.fenceToken, leaseOwner: claimed.leaseOwner },
+        audit: this.audit(completed, 'succeeded', completed.updatedAt) }))
+        throw new AgentExecutionConflictError('effect recovery completion raced');
+      return completed;
+    }
+    const current = await this.authorizationState.load({ action: input.action, execution: claimed });
+    const approval = current.approvalExecutionId === claimed.id ?
+      { ...current.approval, consumedAt: undefined } : current.approval;
+    const currentDecision = authorizeAgentAction({ principal: current.principal,
+      delegation: current.delegation, action: input.action, actionDigest: claimed.actionDigest,
+      sponsorPermissions: current.sponsorPermissions,
+      tenantAllowedActions: current.riskPolicyAllowed ? current.tenantAllowedActions : [],
+      currentResourceVersion: current.currentResourceVersion,
+      currentPolicyVersion: current.currentPolicyVersion, now: current.observedAt, approval });
+    const authorizationStateDigest = agentAuthorizationStateDigest(current);
+    if (!currentDecision.allowed) return this.failAuthorization(claimed, currentDecision.reasons);
     try {
       const result = await this.invoker.invoke({ tenantId: claimed.tenantId,
         operation: input.action.target.apiOperation, resourceType: input.action.target.resourceType,
         resourceId: input.action.target.resourceId,
         expectedResourceVersion: claimed.resourceVersion, payload: input.action.payload,
         idempotencyKey: claimed.idempotencyKey, agentPrincipalId: claimed.agentPrincipalId,
-        sponsorPrincipalId: claimed.sponsorPrincipalId });
-      validateResult(result);
+        sponsorPrincipalId: claimed.sponsorPrincipalId,
+        delegationGrantId: claimed.delegationGrantId, approvalId: claimed.approvalId,
+        executionId: claimed.id, actionKind: input.action.kind,
+        actionDigest: claimed.actionDigest,
+        expectedPolicyVersion: claimed.policyVersion, authorizationStateDigest,
+        expectedLeaseOwner: claimed.leaseOwner, expectedFenceToken: claimed.fenceToken });
+      validateAgentActionResult(result);
       const completed: AgentExecution = { ...claimed, state: 'succeeded', result,
         leaseOwner: undefined, leaseExpiresAt: undefined, updatedAt: this.clock.now().toISOString() };
       if (!await this.store.complete({ execution: completed,
@@ -217,6 +297,18 @@ export class DurableAgentExecutionService {
         throw new AgentExecutionConflictError('execution failure commit raced');
       return failed;
     }
+  }
+
+  private async failAuthorization(execution: AgentExecution,
+    reasons: readonly string[]): Promise<AgentExecution> {
+    const failed: AgentExecution = { ...execution, state: 'failed',
+      failureCode: 'AGENT_AUTHORIZATION_CHANGED', leaseOwner: undefined,
+      leaseExpiresAt: undefined, updatedAt: this.clock.now().toISOString() };
+    if (!execution.leaseOwner || !await this.store.complete({ execution: failed,
+      expectedRevision: { fenceToken: execution.fenceToken, leaseOwner: execution.leaseOwner },
+      audit: { ...this.audit(failed, 'failed', failed.updatedAt), reasonCodes: reasons } }))
+      throw new AgentExecutionConflictError('authorization denial commit raced');
+    return failed;
   }
 
   private audit(execution: AgentExecution, phase: AgentAuditRecord['phase'], occurredAt: string): AgentAuditRecord {
