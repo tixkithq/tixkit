@@ -5341,6 +5341,37 @@ export interface paths {
             };
         };
     };
+    "/portable-migration-jobs": {
+        post: {
+            parameters: {
+                header: {
+                    "Idempotency-Key": string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        organizationId: string;
+                        sourceSystem: "tixkit-portable";
+                        adapterVersion: "tixkit-portable-bundle-v1";
+                        mode?: "dry-run";
+                        configuration: {
+                            sourceMode: "official-export";
+                            sourceSystem: "tixkit-portable";
+                            artifactIds: Array<string>;
+                        };
+                    };
+                };
+            };
+            responses: {
+                "201": {
+                    content: {
+                        "application/json": components["schemas"]["MigrationJob"];
+                    };
+                };
+            };
+        };
+    };
     "/migration-jobs": {
         get: {
             parameters: {
@@ -11267,6 +11298,35 @@ export type operations = {
         };
         responses: {
             "204": Record<string, never>;
+        };
+    };
+    createPortableMigrationJob: {
+        parameters: {
+            header: {
+                "Idempotency-Key": string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    organizationId: string;
+                    sourceSystem: "tixkit-portable";
+                    adapterVersion: "tixkit-portable-bundle-v1";
+                    mode?: "dry-run";
+                    configuration: {
+                        sourceMode: "official-export";
+                        sourceSystem: "tixkit-portable";
+                        artifactIds: Array<string>;
+                    };
+                };
+            };
+        };
+        responses: {
+            "201": {
+                content: {
+                    "application/json": components["schemas"]["MigrationJob"];
+                };
+            };
         };
     };
     listMigrationJobs: {
