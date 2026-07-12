@@ -1,5 +1,8 @@
 export const docRoutes = {
   home: '/',
+  sellTickets: '/sell',
+  platformApi: '/platform',
+  selfHosted: '/self-hosted',
   platformOverview: '/getting-started/platform-overview',
   deploymentModel: '/getting-started/deployment-model',
   localQuickstart: '/getting-started/local-quickstart',

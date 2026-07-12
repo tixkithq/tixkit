@@ -199,7 +199,10 @@ export function ApiExplorer({
           <code>{curl}</code>
         </pre>
       </details>
-      <pre aria-label="Sandbox response body">{result}</pre>
+      <figure>
+        <figcaption>Sandbox response body</figcaption>
+        <pre>{result}</pre>
+      </figure>
     </section>
   );
 }

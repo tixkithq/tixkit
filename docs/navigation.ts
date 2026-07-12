@@ -10,6 +10,9 @@ export const documentationNavigation = [
   {
     label: 'Getting Started',
     children: [
+      { label: 'Sell tickets with Tixkit', routeId: 'sellTickets' },
+      { label: 'Add ticketing to my product', routeId: 'platformApi' },
+      { label: 'Run Tixkit on my infrastructure', routeId: 'selfHosted' },
       { label: 'Platform overview', routeId: 'platformOverview' },
       { label: 'Choose a deployment model', routeId: 'deploymentModel' },
       { label: 'Local quickstart', routeId: 'localQuickstart' },
@@ -19,7 +22,7 @@ export const documentationNavigation = [
     ],
   },
   {
-    label: 'Operate Tixkit',
+    label: 'Sell tickets with Tixkit',
     children: [
       { label: 'Workspace and organizations', routeId: 'workspace' },
       { label: 'Brands and domains', routeId: 'brands' },
@@ -51,7 +54,7 @@ export const documentationNavigation = [
     ],
   },
   {
-    label: 'Build with Tixkit',
+    label: 'Add ticketing to my product',
     children: [
       { label: 'API fundamentals', routeId: 'apiFundamentals' },
       { label: 'Authentication', routeId: 'apiAuthentication' },
@@ -97,7 +100,7 @@ export const documentationNavigation = [
     ],
   },
   {
-    label: 'Self-Host',
+    label: 'Run Tixkit on my infrastructure',
     children: [
       { label: 'Architecture', routeId: 'selfHostingArchitecture' },
       { label: 'Compact profile', routeId: 'selfHostingCompact' },

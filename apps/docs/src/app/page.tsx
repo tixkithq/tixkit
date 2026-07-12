@@ -1,28 +1,6 @@
 import Link from 'next/link';
 import { docRoutes } from '@tixkit/docs-core';
-
-const paths = [
-  {
-    title: 'Run Tixkit locally',
-    description: 'Start the complete local stack and verify every service.',
-    href: docRoutes.localQuickstart,
-  },
-  {
-    title: 'Operate an event',
-    description: 'Create inventory, test checkout, publish, and prepare check-in.',
-    href: docRoutes.firstEvent,
-  },
-  {
-    title: 'Build an integration',
-    description: 'Choose an SDK, create a scoped key, and make a safe first call.',
-    href: docRoutes.firstApiCall,
-  },
-  {
-    title: 'Deploy and self-host',
-    description: 'Choose a topology and configure durable production services.',
-    href: docRoutes.selfHostingDeployment,
-  },
-];
+import { adoptionPaths } from '../lib/adoption-paths';
 
 export default function HomePage() {
   return (
@@ -37,9 +15,9 @@ export default function HomePage() {
         </p>
       </section>
       <section aria-labelledby="choose-path">
-        <h2 id="choose-path">Choose your path</h2>
+        <h2 id="choose-path">How do you want to use Tixkit?</h2>
         <div className="path-grid">
-          {paths.map((path) => (
+          {adoptionPaths.map((path) => (
             <Link key={path.href} href={path.href}>
               <h3>{path.title}</h3>
               <p>{path.description}</p>

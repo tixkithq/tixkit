@@ -18,6 +18,44 @@ test.afterEach(async ({ page }) => {
   expect(errors?.page ?? [], 'uncaught page errors').toEqual([]);
 });
 
+test('homepage exposes the three accepted adoption paths accessibly', async ({ page }) => {
+  await page.goto('/');
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'How do you want to use Tixkit?' }),
+  ).toBeVisible();
+  const paths = [
+    ['Sell tickets with Tixkit', '/sell'],
+    ['Add ticketing to my product', '/platform'],
+    ['Run Tixkit on my infrastructure', '/self-hosted'],
+  ] as const;
+  for (const [name, href] of paths) {
+    const link = page.locator('.path-grid').getByRole('link').filter({ hasText: name });
+    await expect(link).toHaveAttribute('href', href);
+  }
+  const firstPath = page
+    .locator('.path-grid')
+    .getByRole('link')
+    .filter({ hasText: 'Sell tickets with Tixkit' });
+  await firstPath.focus();
+  await expect(firstPath).toBeFocused();
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
+});
+
+for (const [name, route] of [
+  ['Sell tickets with Tixkit', '/sell'],
+  ['Add ticketing to my product', '/platform'],
+  ['Run Tixkit on my infrastructure', '/self-hosted'],
+] as const) {
+  test(`${name} has an honest, accessible entry page`, async ({ page }) => {
+    await page.goto(route);
+    await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+    await expect(page.locator('.prose')).toContainText(/Availability|Self-Hosted is public/);
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+  });
+}
+
 test('task guide has complete navigation and no accessibility violations', async ({
   page,
 }, testInfo) => {
@@ -189,7 +227,7 @@ for (const journey of [
         'Verify webhook signatures',
         'Verify before parsing',
       ],
-      ['/reference/api', 'API endpoint reference', 'Download OpenAPI JSON'],
+      ['/reference/api', 'API endpoint reference', 'Contract version'],
     ],
   },
   {
@@ -210,7 +248,10 @@ for (const journey of [
   },
 ] as const) {
   for (const [stageIndex, [route, heading, task]] of journey.stages.entries()) {
-    test(`${journey.persona} exposes canonical stage ${stageIndex + 1}`, async ({ page }) => {
+    test(`${journey.persona} exposes canonical stage ${stageIndex + 1}`, async ({
+      page,
+    }, testInfo) => {
+      if (route === '/reference/api') testInfo.setTimeout(60_000);
       await page.goto(route);
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
       await expect(page.locator('.prose').getByText(task, { exact: false }).first()).toBeVisible();

@@ -297,6 +297,12 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     headings: [{"id":"confirm-the-selected-context","text":"Confirm the selected context","level":2},{"id":"update-workspace-identity","text":"Update workspace identity","level":2},{"id":"diagnose-a-context-mismatch","text":"Diagnose a context mismatch","level":2}],
     load: () => import("../../../../docs/public/operators/workspace.mdx"),
   },
+  "/platform": {
+    sourcePath: "docs/public/platform/index.mdx",
+    frontmatter: {"title":"Add ticketing to my product","description":"Integrate ticketing through the Tixkit Platform API, SDKs, webhooks, and embeds.","audience":["developer"],"product_area":"platform","content_type":"overview","status":"experimental","owner":"developer-experience","last_verified":"2026-07-12","prerequisites":[],"related":["/getting-started/first-api-call","/developers/api-fundamentals","/developers/webhooks/setup"],"keywords":["platform api","ticketing api","sdk"]},
+    headings: [{"id":"make-a-safe-first-integration","text":"Make a safe first integration","level":2},{"id":"agent-connections","text":"Agent connections","level":2},{"id":"continue","text":"Continue","level":2}],
+    load: () => import("../../../../docs/public/platform/index.mdx"),
+  },
   "/reference/accessibility": {
     sourcePath: "docs/public/reference/accessibility.mdx",
     frontmatter: {"title":"Accessibility conformance","description":"Understand the accessibility target, tested documentation and product surfaces, and known reporting path.","audience":["operator","developer","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"product-ui","last_verified":"2026-07-10","prerequisites":[],"related":["/support","/contributing/testing"]},
@@ -417,6 +423,12 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     headings: [{"id":"install","text":"Install","level":2},{"id":"configure","text":"Configure securely","level":2},{"id":"first-request","text":"Make the first request","level":2},{"id":"troubleshoot","text":"Troubleshoot","level":2},{"id":"verify-and-continue","text":"Verify and continue","level":2}],
     load: () => import("../../../../docs/public/sdks/vue-and-nuxt.mdx"),
   },
+  "/self-hosted": {
+    sourcePath: "docs/public/self-hosted/index.mdx",
+    frontmatter: {"title":"Run Tixkit on my infrastructure","description":"Choose, install, and operate a complete Tixkit Self-Hosted profile.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"overview","status":"beta","owner":"platform-operations","last_verified":"2026-07-12","prerequisites":["Ownership of the infrastructure and operational lifecycle"],"related":["/self-hosting/compact","/self-hosting/production","/self-hosting/architecture"],"keywords":["self-hosted","compact","kubernetes"]},
+    headings: [{"id":"choose-a-profile","text":"Choose a profile","level":2},{"id":"understand-the-operating-boundary","text":"Understand the operating boundary","level":2},{"id":"continue","text":"Continue","level":2}],
+    load: () => import("../../../../docs/public/self-hosted/index.mdx"),
+  },
   "/self-hosting/architecture": {
     sourcePath: "docs/public/self-hosting/architecture.mdx",
     frontmatter: {"title":"Self-hosting architecture","description":"Map Tixkit applications, durable services, trust boundaries, and public ingress before deployment.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"concept","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["Familiarity with containerized web services and relational databases"],"related":["/self-hosting/configuration","/self-hosting/deployment"]},
@@ -482,6 +494,12 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     frontmatter: {"title":"Upgrade Tixkit","description":"Rehearse contract, migration, workflow, SDK, documentation, and rollback compatibility before production rollout.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-12","prerequisites":["A tested backup and restore path"],"related":["/self-hosting/compact","/self-hosting/deployment","/contributing/testing"]},
     headings: [{"id":"rehearse","text":"Rehearse","level":2},{"id":"roll-forward-or-back","text":"Roll forward or back","level":2}],
     load: () => import("../../../../docs/public/self-hosting/upgrades.mdx"),
+  },
+  "/sell": {
+    sourcePath: "docs/public/sell/index.mdx",
+    frontmatter: {"title":"Sell tickets with Tixkit","description":"Create, publish, and operate an event with Tixkit's organizer tools.","audience":["operator"],"product_area":"sell","content_type":"overview","status":"experimental","owner":"organizer-experience","last_verified":"2026-07-12","prerequisites":[],"related":["/getting-started/first-event","/getting-started/test-checkout","/operators/check-in"],"keywords":["sell tickets","organizer","event operations"]},
+    headings: [{"id":"start-with-a-complete-test-event","text":"Start with a complete test event","level":2},{"id":"operate-the-event","text":"Operate the event","level":2},{"id":"continue","text":"Continue","level":2}],
+    load: () => import("../../../../docs/public/sell/index.mdx"),
   },
   "/support": {
     sourcePath: "docs/public/support.mdx",

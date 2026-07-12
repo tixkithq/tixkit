@@ -1,0 +1,40 @@
+---
+title: Add ticketing to my product
+description: Integrate ticketing through the Tixkit Platform API, SDKs, webhooks, and embeds.
+audience:
+  - developer
+product_area: platform
+content_type: overview
+status: experimental
+owner: developer-experience
+last_verified: 2026-07-12
+prerequisites: []
+related:
+  - /getting-started/first-api-call
+  - /developers/api-fundamentals
+  - /developers/webhooks/setup
+keywords:
+  - platform api
+  - ticketing api
+  - sdk
+---
+
+The Tixkit Platform API is the developer-facing capability inside Tixkit Cloud. It shares the same event, inventory, checkout, order, attendee, webhook, workflow, migration, OpenAPI, and SDK contracts as the rest of Tixkit.
+
+> **Availability:** hosted Platform API access is planned for an experimental private beta. Public API contracts and SDK source are available for evaluation, but production Cloud credentials and support terms are not generally available.
+
+## Make a safe first integration
+
+1. Read the [API fundamentals](/developers/api-fundamentals), including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries.
+2. [Make the first API call](/getting-started/first-api-call) with the narrowest useful credential scope.
+3. Choose a [supported SDK](/sdks/javascript) or use the generated OpenAPI contract directly.
+4. [Configure webhooks](/developers/webhooks/setup), verify every signature, and make consumers idempotent.
+5. Add the [embedded widget](/developers/widget/embedding) only after the server-side contract and failure behavior are understood.
+
+## Agent connections
+
+Third-party agents will connect through the same Platform API. The shared protocol will require explicit agent principals, bounded delegation, typed actions, dry-run plans, digest-bound approval, audit, revocation, and scoped memory. Those contracts are not yet advertised as production-ready.
+
+## Continue
+
+[Make the first API call](/getting-started/first-api-call), browse the [API reference](/reference/api), or choose an [SDK guide](/sdks/javascript).

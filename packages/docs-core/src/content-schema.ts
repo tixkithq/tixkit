@@ -24,6 +24,7 @@ export type ContentStatus = (typeof contentStatuses)[number];
 
 export const productAreas = [
   'platform',
+  'sell',
   'workspace',
   'brands',
   'events',

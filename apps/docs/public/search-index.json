@@ -1328,6 +1328,40 @@
     "keywords": []
   },
   {
+    "url": "/platform",
+    "title": "Add ticketing to my product",
+    "description": "Integrate ticketing through the Tixkit Platform API, SDKs, webhooks, and embeds.",
+    "headings": [
+      {
+        "id": "make-a-safe-first-integration",
+        "text": "Make a safe first integration",
+        "level": 2
+      },
+      {
+        "id": "agent-connections",
+        "text": "Agent connections",
+        "level": 2
+      },
+      {
+        "id": "continue",
+        "text": "Continue",
+        "level": 2
+      }
+    ],
+    "body": "The Tixkit Platform API is the developer facing capability inside Tixkit Cloud. It shares the same event, inventory, checkout, order, attendee, webhook, workflow, migration, OpenAPI, and SDK contracts as the rest of Tixkit. Availability: hosted Platform API access is planned for an experimental private beta. Public API contracts and SDK source are available for evaluation, but production Cloud credentials and support terms are not generally available. Make a safe first integration 1. Read the API fundamentals /developers/api fundamentals , including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries. 2. Make the first API call /getting started/first api call with the narrowest useful credential scope. 3. Choose a supported SDK /sdks/javascript or use the generated OpenAPI contract directly. 4. Configure webhooks /developers/webhooks/setup , verify every signature, and make consumers idempotent. 5. Add the embedded widget /developers/widget/embedding only after the server side contract and failure behavior are understood. Agent connections Third party agents will connect through the same Platform API. The shared protocol will require explicit agent principals, bounded delegation, typed actions, dry run plans, digest bound approval, audit, revocation, and scoped memory. Those contracts are not yet advertised as production ready. Continue Make the first API call /getting started/first api call , browse the API reference /reference/api , or choose an SDK guide /sdks/javascript .",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "overview",
+    "status": "experimental",
+    "keywords": [
+      "platform api",
+      "ticketing api",
+      "sdk"
+    ]
+  },
+  {
     "url": "/reference/accessibility",
     "title": "Accessibility conformance",
     "description": "Understand the accessibility target, tested documentation and product surfaces, and known reporting path.",
@@ -1935,6 +1969,40 @@
     "keywords": []
   },
   {
+    "url": "/self-hosted",
+    "title": "Run Tixkit on my infrastructure",
+    "description": "Choose, install, and operate a complete Tixkit Self-Hosted profile.",
+    "headings": [
+      {
+        "id": "choose-a-profile",
+        "text": "Choose a profile",
+        "level": 2
+      },
+      {
+        "id": "understand-the-operating-boundary",
+        "text": "Understand the operating boundary",
+        "level": 2
+      },
+      {
+        "id": "continue",
+        "text": "Continue",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit Self Hosted includes the complete shared runtime: organizer dashboard, checkout, API, worker, workflows, migrations, documentation, and public integration contracts. Choose a profile Compact is the supported one host profile for evaluation and smaller installations. Follow the Compact runbook /self hosting/compact for start, restart, backup, restore, upgrade, and uninstall. Production is the Kubernetes profile for independent scaling and availability. It requires operator managed durable services and production like failure, upgrade, rollback, and disaster recovery proof. Follow the Production runbook /self hosting/production . Self Hosted is public, but the current profile documentation remains beta until clean public clone and production cluster evidence closes the listed gates. Tixkit Cloud and its managed agent orchestration are separate planned private beta capabilities and are not required to build or operate Self Hosted. Understand the operating boundary Start with the Self Hosting architecture /self hosting/architecture , then configure authentication, databases, object storage, observability, backups, upgrades, and incident response. Public code and CI do not depend on private Cloud source. Self hosters may bring their own agent orchestrator through the shared public protocol once that protocol reaches its documented beta. Agents must still use the API and workflows; direct database writes and hidden user impersonation are not supported. Continue Run the Compact profile /self hosting/compact or prepare the Production profile /self hosting/production .",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "overview",
+    "status": "beta",
+    "keywords": [
+      "self-hosted",
+      "compact",
+      "kubernetes"
+    ]
+  },
+  {
     "url": "/self-hosting/architecture",
     "title": "Self-hosting architecture",
     "description": "Map Tixkit applications, durable services, trust boundaries, and public ingress before deployment.",
@@ -2252,6 +2320,40 @@
     "contentType": "runbook",
     "status": "beta",
     "keywords": []
+  },
+  {
+    "url": "/sell",
+    "title": "Sell tickets with Tixkit",
+    "description": "Create, publish, and operate an event with Tixkit's organizer tools.",
+    "headings": [
+      {
+        "id": "start-with-a-complete-test-event",
+        "text": "Start with a complete test event",
+        "level": 2
+      },
+      {
+        "id": "operate-the-event",
+        "text": "Operate the event",
+        "level": 2
+      },
+      {
+        "id": "continue",
+        "text": "Continue",
+        "level": 2
+      }
+    ],
+    "body": "Tixkit gives organizers one workflow for event setup, ticket inventory, checkout, orders, attendees, messaging, reporting, and event day operations. Availability: the managed Tixkit Cloud organizer experience is planned for an experimental private beta. It is not generally available, and this documentation does not promise hosted access, support terms, or a launch date. Start with a complete test event 1. Create your first event /getting started/first event , including ticket types and availability. 2. Complete a test checkout /getting started/test checkout before publishing or accepting live payments. 3. Review orders and fulfillment /operators/orders , attendee records /operators/attendees , and refund behavior /operators/orders/refunds . 4. Prepare check in /operators/check in , box office /operators/box office , team permissions, and incident ownership before event day. Operate the event Use the organizer dashboard for event configuration, schedules, ticket products, checkout forms, orders, attendees, messaging, and reports. Each operational guide identifies current stability and any provider dependent proof that remains. Managed organizer agents are also planned for an experimental private beta. Their initial scope is read, recommend, prepare, and execute only after approval; buyer purchasing and unrestricted delegated autonomy are outside that release. Continue Create the first event /getting started/first event or review the organizer workflow guides /operators/events .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "sell",
+    "contentType": "overview",
+    "status": "experimental",
+    "keywords": [
+      "sell tickets",
+      "organizer",
+      "event operations"
+    ]
   },
   {
     "url": "/support",

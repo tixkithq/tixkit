@@ -1,0 +1,40 @@
+---
+title: Run Tixkit on my infrastructure
+description: Choose, install, and operate a complete Tixkit Self-Hosted profile.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: overview
+status: beta
+owner: platform-operations
+last_verified: 2026-07-12
+prerequisites:
+  - Ownership of the infrastructure and operational lifecycle
+related:
+  - /self-hosting/compact
+  - /self-hosting/production
+  - /self-hosting/architecture
+keywords:
+  - self-hosted
+  - compact
+  - kubernetes
+---
+
+Tixkit Self-Hosted includes the complete shared runtime: organizer dashboard, checkout, API, worker, workflows, migrations, documentation, and public integration contracts.
+
+## Choose a profile
+
+- **Compact** is the supported one-host profile for evaluation and smaller installations. Follow the [Compact runbook](/self-hosting/compact) for start, restart, backup, restore, upgrade, and uninstall.
+- **Production** is the Kubernetes profile for independent scaling and availability. It requires operator-managed durable services and production-like failure, upgrade, rollback, and disaster-recovery proof. Follow the [Production runbook](/self-hosting/production).
+
+Self-Hosted is public, but the current profile documentation remains beta until clean public-clone and production-cluster evidence closes the listed gates. Tixkit Cloud and its managed agent orchestration are separate planned private-beta capabilities and are not required to build or operate Self-Hosted.
+
+## Understand the operating boundary
+
+Start with the [Self-Hosting architecture](/self-hosting/architecture), then configure authentication, databases, object storage, observability, backups, upgrades, and incident response. Public code and CI do not depend on private Cloud source.
+
+Self-hosters may bring their own agent orchestrator through the shared public protocol once that protocol reaches its documented beta. Agents must still use the API and workflows; direct database writes and hidden user impersonation are not supported.
+
+## Continue
+
+[Run the Compact profile](/self-hosting/compact) or prepare the [Production profile](/self-hosting/production).
