@@ -34,6 +34,7 @@ import { EventCheckoutConfigurationRevisionMigration } from '../../migrations/00
 import { OrganizationEventDefaultsMigration } from '../../migrations/0064_organization_event_defaults.js';
 import { AgentExecutionMigration } from '../../migrations/0065_agent_execution.js';
 import { AgentIdentityMigration } from '../../migrations/0066_agent_identity.js';
+import { AgentMemoryMigration } from '../../migrations/0067_agent_memory.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -204,7 +205,8 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0066_agent_identity');
+    expect(Object.keys(migrations).at(-1)).toBe('0067_agent_memory');
+    expect(migrations['0067_agent_memory']).toBe(AgentMemoryMigration);
     expect(migrations['0066_agent_identity']).toBe(AgentIdentityMigration);
     expect(migrations['0065_agent_execution']).toBe(AgentExecutionMigration);
     expect(migrations['0064_organization_event_defaults']).toBe(OrganizationEventDefaultsMigration);

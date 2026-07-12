@@ -67,6 +67,7 @@ import { EventCheckoutConfigurationRevisionMigration } from './migrations/0063_e
 import { OrganizationEventDefaultsMigration } from './migrations/0064_organization_event_defaults.js';
 import { AgentExecutionMigration } from './migrations/0065_agent_execution.js';
 import { AgentIdentityMigration } from './migrations/0066_agent_identity.js';
+import { AgentMemoryMigration } from './migrations/0067_agent_memory.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -191,6 +192,8 @@ const ALL_SCHEMA_TABLES = [
   'agent_delegations',
   'agent_principals',
   'agent_action_policies',
+  'agent_memory_events',
+  'agent_memory_entries',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -282,6 +285,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0064_organization_event_defaults': OrganizationEventDefaultsMigration,
       '0065_agent_execution': AgentExecutionMigration,
       '0066_agent_identity': AgentIdentityMigration,
+      '0067_agent_memory': AgentMemoryMigration,
     };
   }
 }

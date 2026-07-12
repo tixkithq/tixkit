@@ -19,7 +19,9 @@ export type AgentCapability =
   | 'exports.prepare'
   | 'exports.execute'
   | 'settings.prepare'
-  | 'settings.execute';
+  | 'settings.execute'
+  | 'memory.read'
+  | 'memory.write';
 
 export interface AgentPrincipal {
   id: string;
@@ -220,6 +222,7 @@ const CAPABILITIES = new Set<AgentCapability>([
   'content.prepare', 'campaigns.prepare', 'campaigns.execute', 'inventory.prepare',
   'inventory.execute', 'refunds.prepare', 'refunds.execute', 'exports.prepare',
   'exports.execute', 'settings.prepare', 'settings.execute',
+  'memory.read', 'memory.write',
 ]);
 const KINDS = new Set<AgentKind>(['managed_cloud', 'third_party', 'self_hosted']);
 const AUTONOMY = new Set<AgentAutonomy>(['read', 'recommend', 'prepare', 'execute_with_approval']);

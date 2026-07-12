@@ -87,6 +87,47 @@ export interface AgentActionEffectTable {
   created_at: Timestamp;
 }
 
+export interface AgentMemoryEntryTable {
+  id: string;
+  tenant_id: string;
+  sponsor_principal_id: string;
+  scope_type: string;
+  scope_id: string;
+  purpose: string;
+  memory_key: string;
+  content: string;
+  content_sha256: string;
+  resource_binding_sha256: string;
+  provenance: string;
+  version: number | string | bigint;
+  retention_expires_at: Timestamp;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface AgentMemoryEventTable {
+  id: string;
+  tenant_id: string;
+  sponsor_principal_id: string;
+  scope_type: string;
+  scope_id: string;
+  purpose: string;
+  entry_id: string;
+  actor_type: string;
+  actor_principal_id: string;
+  delegation_id: string | null;
+  use_id: string | null;
+  authorization_sha256: string | null;
+  operation: string;
+  previous_sha256: string | null;
+  new_sha256: string | null;
+  reason_code: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  outcome: string;
+  occurred_at: Timestamp;
+}
+
 export interface AgentExecutionTable {
   id: string;
   tenant_id: string;
@@ -1762,6 +1803,8 @@ export interface DB {
   agent_control_events: AgentControlEventTable;
   agent_action_policies: AgentActionPolicyTable;
   agent_action_effects: AgentActionEffectTable;
+  agent_memory_entries: AgentMemoryEntryTable;
+  agent_memory_events: AgentMemoryEventTable;
   agent_approvals: AgentApprovalTable;
   agent_executions: AgentExecutionTable;
   agent_audit_events: AgentAuditEventTable;
