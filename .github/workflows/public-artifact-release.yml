@@ -1,0 +1,310 @@
+name: Public Artifact Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-artifact-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Re-prove tagged public repository
+    runs-on: ubuntu-latest
+    environment: public-artifact-release
+    permissions:
+      attestations: read
+      contents: read
+    outputs:
+      resume: ${{ steps.resume.outputs.resume }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Require authoritative, approved public release context
+        run: node scripts/build-public-release-manifest.mjs --preflight
+      - name: Run independent public repository rehearsal
+        run: bun run validate:public-repository -- --repository .
+      - name: Recover a previously staged immutable candidate
+        id: resume
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft >/tmp/tixkit-release.json 2>/tmp/tixkit-release-error; then
+            mkdir -p resumed-public-release
+            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir resumed-public-release
+            classification="$(node scripts/validate-staged-public-release.mjs \
+              --directory resumed-public-release --classify)"
+            if test "$classification" = incomplete; then
+              test "$(jq -r .isDraft /tmp/tixkit-release.json)" = true
+              gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
+              echo "resume=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            test "$classification" = complete
+            node scripts/validate-staged-public-release.mjs \
+              --directory resumed-public-release \
+              --source-commit "$GITHUB_SHA" \
+              --release-version "${GITHUB_REF_NAME#v}"
+            signer="${GITHUB_REPOSITORY}/.github/workflows/public-artifact-release.yml"
+            for asset in resumed-public-release/*; do
+              gh attestation verify "$asset" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$signer" \
+                --source-ref "$GITHUB_REF" \
+                --source-digest "$GITHUB_SHA" \
+                --deny-self-hosted-runners
+            done
+            jq -r '.[].reference' resumed-public-release/images.json | while read -r reference; do
+              gh attestation verify "oci://${reference}" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$signer" \
+                --source-ref "$GITHUB_REF" \
+                --source-digest "$GITHUB_SHA" \
+                --deny-self-hosted-runners
+              gh attestation verify "oci://${reference}" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$signer" \
+                --source-ref "$GITHUB_REF" \
+                --source-digest "$GITHUB_SHA" \
+                --predicate-type https://spdx.dev/Document \
+                --deny-self-hosted-runners
+            done
+            echo "resume=true" >> "$GITHUB_OUTPUT"
+          elif grep -Eqi 'release not found|HTTP 404' /tmp/tixkit-release-error; then
+            echo "resume=false" >> "$GITHUB_OUTPUT"
+          else
+            cat /tmp/tixkit-release-error >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: steps.resume.outputs.resume == 'true'
+        with:
+          name: resumed-public-release
+          path: resumed-public-release/
+          if-no-files-found: error
+
+  build-images:
+    name: Build and attest ${{ matrix.name }} image
+    runs-on: ubuntu-latest
+    environment: public-artifact-release
+    needs: validate
+    if: needs.validate.outputs.resume != 'true'
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: Dockerfile.api
+          - name: worker
+            dockerfile: Dockerfile.worker
+          - name: admin
+            dockerfile: Dockerfile.admin
+          - name: checkout
+            dockerfile: Dockerfile.checkout
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Require authoritative, approved public release context
+        run: node scripts/build-public-release-manifest.mjs --preflight
+      - name: Authenticate to the public container registry
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable image
+        id: image
+        env:
+          IMAGE_NAME: ${{ matrix.name }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          repository="ghcr.io/${GITHUB_REPOSITORY}-${IMAGE_NAME}"
+          candidate="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --file "$DOCKERFILE" --tag "${repository}:${candidate}" .
+          docker push "${repository}:${candidate}"
+          reference="$(docker inspect --format '{{index .RepoDigests 0}}' "${repository}:${candidate}")"
+          digest="${reference##*@}"
+          test -n "$digest"
+          jq -n --arg name "$IMAGE_NAME" --arg reference "$reference" --arg digest "$digest" \
+            '{name:$name,reference:$reference,digest:$digest}' > "image-${IMAGE_NAME}.json"
+          echo "subject-name=${repository}" >> "$GITHUB_OUTPUT"
+          echo "subject-digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "reference=${reference}" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ${{ steps.image.outputs.subject-name }}
+          subject-digest: ${{ steps.image.outputs.subject-digest }}
+          push-to-registry: true
+      - name: Generate image SBOM
+        uses: anchore/sbom-action@aa0e114b2e19480f157109b9922bda359bd98b90 # v0.20.8
+        with:
+          image: ${{ steps.image.outputs.reference }}
+          format: spdx-json
+          output-file: image-${{ matrix.name }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Reject high-severity image vulnerabilities
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        with:
+          sbom: image-${{ matrix.name }}.spdx.json
+          fail-build: true
+          severity-cutoff: high
+      - uses: actions/attest-sbom@51e74621a501c89df81fc1391c5a8f4cfc9fab2f # v3
+        with:
+          subject-name: ${{ steps.image.outputs.subject-name }}
+          subject-digest: ${{ steps.image.outputs.subject-digest }}
+          sbom-path: image-${{ matrix.name }}.spdx.json
+          push-to-registry: true
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: image-${{ matrix.name }}.spdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: public-image-${{ matrix.name }}
+          path: |
+            image-${{ matrix.name }}.json
+            image-${{ matrix.name }}.spdx.json
+          if-no-files-found: error
+
+  release:
+    name: Publish and attest public artifact set
+    needs: [validate, build-images]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      (needs.build-images.result == 'success' || needs.build-images.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: public-artifact-release
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-js
+      - run: bun install --frozen-lockfile
+      - name: Require authoritative, approved public release context
+        run: node scripts/build-public-release-manifest.mjs --preflight
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: needs.validate.outputs.resume != 'true'
+        with:
+          pattern: public-image-*
+          path: public-image-metadata
+          merge-multiple: true
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: needs.validate.outputs.resume == 'true'
+        with:
+          name: resumed-public-release
+          path: public-release
+      - name: Build manifest and exact npm tarballs from the committed source archive
+        if: needs.validate.outputs.resume != 'true'
+        run: |
+          mkdir -p public-release/packages
+          jq -s 'sort_by(.name)' \
+            public-image-metadata/image-{admin,api,checkout,worker}.json \
+            > public-release/images.json
+          node scripts/build-public-release-manifest.mjs \
+            --images public-release/images.json \
+            --package-artifacts public-release/packages \
+            --release-version "${GITHUB_REF_NAME#v}" \
+            --out public-release/public-release-manifest.json
+      - name: Generate package-set SBOM
+        if: needs.validate.outputs.resume != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/public-package-sbom-root"
+          for artifact in public-release/packages/*.tgz; do
+            destination="$RUNNER_TEMP/public-package-sbom-root/$(basename "$artifact" .tgz)"
+            mkdir -p "$destination"
+            tar -xzf "$artifact" -C "$destination"
+          done
+      - name: Catalog package-set SBOM
+        if: needs.validate.outputs.resume != 'true'
+        uses: anchore/sbom-action@aa0e114b2e19480f157109b9922bda359bd98b90 # v0.20.8
+        with:
+          path: ${{ runner.temp }}/public-package-sbom-root
+          format: spdx-json
+          output-file: public-release/npm-packages.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Reject high-severity package vulnerabilities
+        if: needs.validate.outputs.resume != 'true'
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        with:
+          sbom: public-release/npm-packages.spdx.json
+          fail-build: true
+          severity-cutoff: high
+      - name: Create complete release checksums
+        if: needs.validate.outputs.resume != 'true'
+        run: |
+          cp public-image-metadata/*.spdx.json public-release/
+          node scripts/publish-public-github-release.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --directory public-release \
+            --write-checksums
+      - name: Restore resumed package artifact layout
+        if: needs.validate.outputs.resume == 'true'
+        run: |
+          mkdir -p public-release/packages
+          mv public-release/*.tgz public-release/packages/
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        if: needs.validate.outputs.resume != 'true'
+        with:
+          subject-path: public-release/public-release-manifest.json
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        if: needs.validate.outputs.resume != 'true'
+        with:
+          subject-path: |
+            public-release/CHECKSUMS.sha256
+            public-release/images.json
+            public-release/npm-packages.spdx.json
+            public-release/image-*.spdx.json
+      - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        if: needs.validate.outputs.resume != 'true'
+        with:
+          subject-path: public-release/packages/*.tgz
+      - uses: actions/attest-sbom@51e74621a501c89df81fc1391c5a8f4cfc9fab2f # v3
+        if: needs.validate.outputs.resume != 'true'
+        with:
+          subject-path: public-release/packages/*.tgz
+          sbom-path: public-release/npm-packages.spdx.json
+      - name: Stage or reconcile the immutable draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/publish-public-github-release.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --directory public-release
+      - name: Publish the exact attested npm tarballs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          node scripts/publish-public-npm-artifacts.mjs \
+            --manifest public-release/public-release-manifest.json \
+            --package-artifacts public-release/packages
+      - name: Finalize the reconciled immutable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/publish-public-github-release.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --finalize

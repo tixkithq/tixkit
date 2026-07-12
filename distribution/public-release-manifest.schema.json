@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/public-release-manifest.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "releaseVersion", "core"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "releaseVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "core": { "$ref": "./cloud-core-compatibility.schema.json#/$defs/core" }
+  },
+  "additionalProperties": false
+}

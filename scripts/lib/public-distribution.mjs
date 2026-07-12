@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, join, relative, resolve, sep } from 'node:path';
 
 const boundaryControlPaths = new Set([
   'distribution/public-distribution.json',
@@ -155,12 +155,14 @@ function matchesForbiddenDependency(value, forbiddenDependencies) {
 }
 
 function referencesPrivateRoot(value, privateRoots) {
-  const pathSegments = value
-    .replaceAll('\\', '/')
-    .split(/[\s'"`()=:,]+/u)
-    .flatMap((token) => token.split('/'))
-    .filter(Boolean);
-  return privateRoots.some((privateRoot) => pathSegments.includes(privateRoot));
+  const pathSegments = new Set(
+    value
+      .replaceAll('\\', '/')
+      .split(/[\s'"`()=:,]+/u)
+      .flatMap((token) => token.split('/'))
+      .filter(Boolean),
+  );
+  return privateRoots.some((privateRoot) => pathSegments.has(privateRoot));
 }
 
 function publicScanEntries(manifest, root) {
@@ -446,7 +448,9 @@ export function validatePublicDistribution(manifest, root, schema) {
   if (
     manifest.licensing.status === 'approved' &&
     (manifest.licensing.mayClaimLegalApproval !== true ||
-      manifest.licensing.legalReviewEvidence !== 'docs/completion/legal-review-approval.md')
+      !['docs/completion/legal-review-approval.md', 'LEGAL_APPROVAL.md'].includes(
+        manifest.licensing.legalReviewEvidence,
+      ))
   ) {
     violations.push(
       'approved legal status requires an approval claim and canonical legal evidence',
@@ -459,6 +463,15 @@ export function validatePublicDistribution(manifest, root, schema) {
       'legal approval evidence',
       violations,
       { kind: 'file' },
+    );
+  if (
+    manifest.licensing.legalReviewEvidence === 'LEGAL_APPROVAL.md' &&
+    (manifest.classification.topLevel.privateCloud.length > 0 ||
+      manifest.classification.topLevel.internalPlanning.length > 0 ||
+      manifest.classification.docs.internalPlanning.length > 0)
+  )
+    violations.push(
+      'public legal approval receipt is valid only in the extracted public repository',
     );
 
   for (const [group, values] of Object.entries(manifest.source)) {

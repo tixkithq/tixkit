@@ -41,7 +41,7 @@ while IFS=: read -r path line raw_line; do
     printf '%s:%s uses mutable or malformed service image: %s\n' "${path}" "${line}" "${image}" >&2
     failures=1
   fi
-done < <(rg --no-heading --line-number '^[[:space:]]*image:[[:space:]]*' .github/workflows)
+done < <(rg --no-heading --line-number '^ {8}image:[[:space:]]*' .github/workflows)
 
 while IFS= read -r workflow; do
   if ! awk '
