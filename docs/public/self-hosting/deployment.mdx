@@ -12,6 +12,7 @@ prerequisites:
   - Validated production configuration and durable service dependencies
 related:
   - /self-hosting/compact
+  - /self-hosting/production
   - /self-hosting/observability
   - /operations/incidents
 ---
@@ -19,6 +20,8 @@ related:
 Deploy immutable artifacts built from one reviewed commit. The API, worker, OpenAPI reference, SDK compatibility statements, dashboard, checkout, and docs must describe the same contract.
 
 Use the [Compact profile](/self-hosting/compact) for a complete supported single-host evaluation or smaller installation. Use the Production profile and externally operated backing services for high availability and independent scaling.
+
+Follow the dedicated [Production profile runbook](/self-hosting/production) for compatibility, sizing, secret, migration, network, observability, and recovery gates.
 
 The Production chart is `infra/helm/tixkit` with `values-production.yaml`. It intentionally refuses placeholder image digests, bundled datastores, unrestricted network CIDRs, automatic migration hooks, missing observability, and incomplete ExternalSecret mappings. Supply release-manifest image digests and environment-specific ingress, database, and service egress ranges; do not weaken these checks with a copied evaluation file.
 

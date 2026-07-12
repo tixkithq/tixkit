@@ -106,6 +106,7 @@ export const documentationNavigation = [
       { label: 'Databases', routeId: 'selfHostingDatabases' },
       { label: 'Object storage', routeId: 'selfHostingStorage' },
       { label: 'Deployment', routeId: 'selfHostingDeployment' },
+      { label: 'Production profile', routeId: 'selfHostingProduction' },
       { label: 'Observability', routeId: 'selfHostingObservability' },
       { label: 'Backups and restore', routeId: 'backups' },
       { label: 'Upgrades', routeId: 'upgrades' },

@@ -107,7 +107,10 @@
     "dr:backup:mysql": "infra/scripts/backup-mysql.sh",
     "dr:restore:mysql": "infra/scripts/restore-mysql.sh",
     "dr:backup:object-storage": "infra/scripts/backup-object-storage.sh",
+    "dr:backup:production": "infra/scripts/production-backup.sh",
     "dr:restore:object-storage": "infra/scripts/restore-object-storage.sh",
+    "dr:restore:production": "infra/scripts/production-restore.sh",
+    "dr:promote-restored-target": "infra/scripts/promote-restored-target.sh",
     "dr:migration-rehearsal": "infra/scripts/migration-rehearsal.sh",
     "clean": "turbo run clean && rm -rf node_modules"
   },

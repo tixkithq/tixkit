@@ -1,0 +1,45 @@
+---
+title: Run the Production profile
+description: Configure, size, upgrade, and recover the high-availability Kubernetes profile.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: how-to
+status: beta
+owner: platform-operations
+last_verified: 2026-07-12
+prerequisites:
+  - A Kubernetes cluster with independent managed backing services
+  - Release image digests and an operator-owned secret manager
+related:
+  - /self-hosting/deployment
+  - /self-hosting/backups-and-restore
+  - /self-hosting/observability
+  - /self-hosting/upgrades
+---
+
+The Production profile is the high-availability Self-Hosted path. It consumes immutable public images and requires external PostgreSQL or MySQL, Redis, Temporal, object storage, secrets, telemetry, and backup services. It does not install evaluation datastores.
+
+## Compatibility contract
+
+Pin one public Tixkit release manifest and keep its API image, worker image, migration image, admin image, checkout image, OpenAPI version, migration range, and Temporal workflow code together. The chart requires digest-addressed images. Validate PostgreSQL 16 or MySQL 8.4, Redis 7, a compatible Temporal 1.24+ service or Temporal Cloud namespace, and the target S3-compatible API in a staging cluster before production adoption. A provider claiming protocol compatibility is not proof; run the repository's database, Temporal replay, object, and provider failure suites.
+
+Do not roll application images behind an incompatible schema or workflow deployment. Use the [upgrade runbook](/self-hosting/upgrades), and retain the prior public release manifest and restored target until post-cutover verification completes.
+
+## Initial sizing tiers
+
+These are load-test starting points, not capacity guarantees:
+
+| Tier   | API                                | Worker                                        | Admin                      | Checkout                   | Starting use                         |
+| ------ | ---------------------------------- | --------------------------------------------- | -------------------------- | -------------------------- | ------------------------------------ |
+| Small  | 2 × 250m CPU / 512 MiB             | 2 × 250m / 512 MiB                            | 2 × 200m / 384 MiB         | 2 × 200m / 384 MiB         | Staging and smaller steady workloads |
+| Medium | 3–6 × 500m / 1 GiB                 | 3–8 × 500m / 1 GiB                            | 2–4 × 250m / 512 MiB       | 3–8 × 300m / 512 MiB       | Multiple concurrent onsales          |
+| Large  | Result of measured load/soak tests | Separate task queues and measured concurrency | Measured dashboard traffic | Measured burst concurrency | High-volume or event-day peaks       |
+
+Keep at least two replicas, topology spreading, disruption budgets, bounded autoscaling, and enough cluster headroom to replace one failure domain. Size relational connections, Redis, Temporal task queues, object throughput, OTLP, and Pushgateway alongside pods. Run checkout/inventory concurrency, webhook replay, check-in sync, exports, and failure injection at the intended peak plus safety margin; record saturation and recovery, then set requests, limits, HPA bounds, and worker concurrency from that evidence.
+
+## Installation controls
+
+Start from `infra/helm/tixkit/values-production.yaml`. The chart fails when image digests, operator-selected network CIDRs, manual migration strategy, observability, or required external secret mappings are absent. For External Secrets, reconcile the secret, run `infra/scripts/run-helm-migration.sh`, and only then install or upgrade workloads. The migration runner uses a lock, unique Job, isolated egress policy, and current logs; it never reuses an old completed Job.
+
+Before accepting the release, prove pod replacement, zone disruption, dependency loss, retry recovery, upgrade, application rollback, staged data restore, failed-cutover rollback, authenticated metrics, trace delivery, and alert routing. Record actual RPO/RTO from the [backup and restore runbook](/self-hosting/backups-and-restore). Until those drills pass in the operator's environment, the profile is configured but not production-proven.

@@ -66,6 +66,7 @@ export const docRoutes = {
   selfHostingDatabases: '/self-hosting/databases',
   selfHostingStorage: '/self-hosting/object-storage',
   selfHostingDeployment: '/self-hosting/deployment',
+  selfHostingProduction: '/self-hosting/production',
   selfHostingObservability: '/self-hosting/observability',
   backups: '/self-hosting/backups-and-restore',
   upgrades: '/self-hosting/upgrades',
