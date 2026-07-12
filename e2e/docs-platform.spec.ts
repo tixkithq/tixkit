@@ -60,6 +60,22 @@ for (const [name, route] of [
   });
 }
 
+for (const [legacyRoute, canonicalRoute, heading] of [
+  ['/docs/sell', '/sell', 'Sell tickets with Tixkit'],
+  ['/docs/sell/quickstart', '/sell/quickstart', 'Start selling with Tixkit Cloud'],
+  ['/docs/platform', '/platform', 'Add ticketing to my product'],
+  ['/docs/platform/quickstart', '/platform/quickstart', 'Start with the hosted Platform API'],
+  ['/docs/self-hosted', '/self-hosted', 'Run Tixkit on my infrastructure'],
+] as const) {
+  test(`${legacyRoute} redirects once to its canonical adoption path`, async ({ page }) => {
+    const response = await page.goto(legacyRoute);
+    expect(response?.request().redirectedFrom()?.url()).toContain(legacyRoute);
+    expect(response?.request().redirectedFrom()?.redirectedFrom()).toBeNull();
+    await expect(page).toHaveURL(new RegExp(`${canonicalRoute}$`));
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+  });
+}
+
 test('task guide has complete navigation and no accessibility violations', async ({
   page,
 }, testInfo) => {
