@@ -1,0 +1,274 @@
+name: tixkit-compact
+
+x-app-environment: &app-environment
+  NODE_ENV: development
+  TIXKIT_RUNTIME_MODE: development
+  TIXKIT_SANDBOX_EPOCH: ${TIXKIT_SANDBOX_EPOCH:?run bun run compact:init}
+  DATABASE_URL: postgres://tixkit:${POSTGRES_PASSWORD:?run bun run compact:init}@postgres:5432/tixkit
+  REDIS_URL: redis://redis:6379
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TEMPORAL_TASK_QUEUE: tixkit
+  TEMPORAL_WORKER_TASK_QUEUES: tixkit,tixkit-export,tixkit-pdf,tixkit-wallet
+  TEMPORAL_EXPORT_TASK_QUEUE: tixkit-export
+  TEMPORAL_PDF_TASK_QUEUE: tixkit-pdf
+  TEMPORAL_WALLET_TASK_QUEUE: tixkit-wallet
+  API_BASE_URL: http://api:4000
+  ADMIN_DASHBOARD_URL: http://localhost:${ADMIN_PORT:-3001}
+  CHECKOUT_URL: http://localhost:${CHECKOUT_PORT:-3000}
+  PUBLIC_CHECKOUT_URL: http://localhost:${CHECKOUT_PORT:-3000}
+  CORS_ALLOWED_ORIGINS: http://localhost:${CHECKOUT_PORT:-3000},http://localhost:${ADMIN_PORT:-3001}
+  AUTH_PROVIDER: dev
+  S3_ENDPOINT: http://minio:9000
+  S3_BUCKET: tixkit
+  S3_EXPORT_BUCKET: tixkit
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?run bun run compact:init}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?run bun run compact:init}
+  S3_REGION: us-east-1
+  S3_FORCE_PATH_STYLE: 'true'
+  QR_SIGNING_SECRET: ${QR_SIGNING_SECRET:?run bun run compact:init}
+  OFFLINE_MANIFEST_SIGNING_KEY: ${OFFLINE_MANIFEST_SIGNING_KEY:?run bun run compact:init}
+  OFFLINE_MANIFEST_KEY_ID: compact:v1
+  WIDGET_IMPRESSION_HASH_SECRET: ${WIDGET_IMPRESSION_HASH_SECRET:?run bun run compact:init}
+  TIXKIT_MIGRATION_CURSOR_KEY: ${TIXKIT_MIGRATION_CURSOR_KEY:?run bun run compact:init}
+  TIXKIT_MIGRATION_CURSOR_ACTIVE_KEY_ID: compact-v1
+  TIXKIT_MIGRATION_CURSOR_KEYS: '{"compact-v1":"${TIXKIT_MIGRATION_CURSOR_KEY:?run bun run compact:init}"}'
+  OTEL_SDK_DISABLED: 'true'
+
+x-api-image: &api-image
+  image: tixkit/api:${TIXKIT_VERSION:-local}
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tixkit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run bun run compact:init}
+      POSTGRES_DB: tixkit
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tixkit -d tixkit']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  temporal-postgres:
+    image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:?run bun run compact:init}
+    volumes:
+      - temporal-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U temporal']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  temporal:
+    image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_POSTGRES_PASSWORD:?run bun run compact:init}
+      POSTGRES_SEEDS: temporal-postgres
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/config/dynamicconfig/development.yaml
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    volumes:
+      - ../dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    healthcheck:
+      test: ['CMD', 'tctl', '--address', 'temporal:7233', 'cluster', 'health']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  temporal-ui:
+    image: temporalio/ui:2.32.0@sha256:82bf98dbe005a831b6bc5dc12ccd7bffd606af2032dae4821ae133caaa943d3d
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:${TEMPORAL_UI_PORT:-8080}
+    ports:
+      - '127.0.0.1:${TEMPORAL_UI_PORT:-8080}:8080'
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?run bun run compact:init}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?run bun run compact:init}
+    ports:
+      - '127.0.0.1:${MINIO_API_PORT:-9000}:9000'
+      - '127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  storage-init:
+    <<: *api-image
+    restart: 'no'
+    command: ['node', 'packages/api/dist/compact-storage-init.js']
+    environment: *app-environment
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  migrate:
+    <<: *api-image
+    restart: 'no'
+    command: ['node', 'packages/db/dist/migrate.js']
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  seed:
+    <<: *api-image
+    restart: 'no'
+    command: ['node', 'packages/cli/dist/index.js', 'seed:sample-data']
+    environment: *app-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    <<: *api-image
+    build:
+      context: ../..
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      PORT: 4000
+    ports:
+      - '127.0.0.1:${API_PORT:-4000}:4000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "const r=await fetch('http://localhost:4000/ready');process.exit(r.ok?0:1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    image: tixkit/worker:${TIXKIT_VERSION:-local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    environment: *app-environment
+    depends_on:
+      api:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', 'packages/workflows/dist/healthcheck.js']
+      interval: 15s
+      timeout: 10s
+      retries: 2
+      start_period: 30s
+
+  checkout:
+    image: tixkit/checkout:${TIXKIT_VERSION:-local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.checkout
+      args:
+        NEXT_PUBLIC_TIXKIT_API_BASE_URL: http://localhost:${API_PORT:-4000}/v1
+        ALLOW_INSECURE_LOCAL_ORIGINS: '1'
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      NEXT_PUBLIC_TIXKIT_API_BASE_URL: http://localhost:${API_PORT:-4000}/v1
+      NEXT_PUBLIC_AUTH_PROVIDER: dev
+    ports:
+      - '127.0.0.1:${CHECKOUT_PORT:-3000}:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ['CMD', 'bun', '-e', "const r=await fetch('http://localhost:3000');process.exit(r.ok?0:1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  admin:
+    image: tixkit/admin:${TIXKIT_VERSION:-local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.admin
+      args:
+        NEXT_PUBLIC_ADMIN_API_BASE_URL: http://localhost:${API_PORT:-4000}
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_PORT:-4000}
+        ALLOW_INSECURE_LOCAL_ORIGINS: '1'
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      NEXT_PUBLIC_ADMIN_API_BASE_URL: http://localhost:${API_PORT:-4000}
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_PORT:-4000}
+      NEXT_PUBLIC_AUTH_PROVIDER: dev
+    ports:
+      - '127.0.0.1:${ADMIN_PORT:-3001}:3001'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ['CMD', 'bun', '-e', "const r=await fetch('http://localhost:3001');process.exit(r.ok?0:1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres-data:
+  redis-data:
+  temporal-data:
+  minio-data:

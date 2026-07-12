@@ -22,6 +22,7 @@ artifacts
 
 **/.turbo
 **/.next
+**/.next*
 **/.svelte-kit
 **/.astro
 **/.nuxt
@@ -30,9 +31,11 @@ artifacts
 **/.build
 **/build
 **/dist
+**/dist/**
 **/coverage
 **/node_modules
 **/target
+**/target/**
 
 .env
 .env.*

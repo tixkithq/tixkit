@@ -35,6 +35,7 @@ coverage/
 test-results/
 playwright-report/
 public-release-provenance/
+backups/
 
 # TypeScript
 *.tsbuildinfo

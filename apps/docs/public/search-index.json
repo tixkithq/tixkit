@@ -2000,12 +2000,52 @@
         "level": 2
       }
     ],
-    "body": "Backups are not complete until a restore rehearsal proves usable application state. Protect database data and required object storage artifacts; document which ephemeral Redis/Temporal state is reconstructed and which durable Temporal persistence is protected by its own service plan. Backup Run the repository's engine/object storage backup procedures with encrypted destinations, least privilege access, retention, and monitoring. Record timestamps and non secret artifact identifiers. Restore rehearsal Restore into an isolated environment, run migrations only as required by the target commit, start API/worker/application processes, and verify tenant scope, a representative event/order, artifact download, workflow visibility, and health checks. Measure recovery point and recovery time from actual rehearsal evidence. Do not publish invented RPO/RTO claims.",
+    "body": "Backups are not complete until a restore rehearsal proves usable application state. Protect database data and required object storage artifacts; document which ephemeral Redis/Temporal state is reconstructed and which durable Temporal persistence is protected by its own service plan. Backup Run the repository's engine/object storage backup procedures with encrypted destinations, least privilege access, retention, and monitoring. Record timestamps and non secret artifact identifiers. Compact operators use bun run compact:backup and bun run compact:restore . The Compact runbook /self hosting/compact defines the artifact contents, checksum gate, and Temporal volume boundary. Restore rehearsal Restore into an isolated environment, run migrations only as required by the target commit, start API/worker/application processes, and verify tenant scope, a representative event/order, artifact download, workflow visibility, and health checks. Measure recovery point and recovery time from actual rehearsal evidence. Do not publish invented RPO/RTO claims.",
     "audience": [
       "self-hoster"
     ],
     "productArea": "self-hosting",
     "contentType": "runbook",
+    "status": "beta",
+    "keywords": []
+  },
+  {
+    "url": "/self-hosting/compact",
+    "title": "Run the Compact profile",
+    "description": "Start, operate, back up, restore, upgrade, and remove a complete single-host Tixkit installation.",
+    "headings": [
+      {
+        "id": "host-envelope",
+        "text": "Host envelope",
+        "level": 2
+      },
+      {
+        "id": "first-start",
+        "text": "First start",
+        "level": 2
+      },
+      {
+        "id": "operate",
+        "text": "Operate",
+        "level": 2
+      },
+      {
+        "id": "back-up-and-restore",
+        "text": "Back up and restore",
+        "level": 2
+      },
+      {
+        "id": "upgrade-and-uninstall",
+        "text": "Upgrade and uninstall",
+        "level": 2
+      }
+    ],
+    "body": "Compact is the supported single host profile for evaluation and smaller installations. It runs the API, worker, admin dashboard, checkout, migrations, seeded evaluation data, PostgreSQL, Redis, Temporal, Temporal UI, and S3 compatible object storage. It is not highly available and does not run MySQL alongside its default PostgreSQL database. Host envelope Use a 64 bit Linux host or Docker Desktop with at least 4 CPU cores, 8 GiB of memory, and 30 GiB of free disk. Building all application images is resource intensive; 8 cores, 16 GiB of memory, and 60 GiB of free disk is the recommended starting envelope. Measure your own event, checkout, workflow, media, and retention load before production use. Move to the Production profile when you need multiple hosts, independent scaling, managed backing services, availability guarantees, or formal disaster recovery objectives. First start From the repository root: compact:init writes infra/compact/.env with mode 0600 and unique persistent service and signing secrets. It refuses to overwrite an existing file. Back up this file separately; do not commit or share it. compact:up builds the application images, applies idempotent migrations, creates the object bucket, seeds an evaluation organization and event, and waits for every service health condition. The default endpoints are: checkout: http://localhost:3000 admin: http://localhost:3001 API readiness: http://localhost:4000/ready Temporal UI: http://localhost:8080 MinIO console: http://localhost:9001 Edit the non secret PORT values in infra/compact/.env before compact:up when a host port is already occupied. Frontend API URLs are baked into their images, so rerun compact:up after changing API PORT . Operate Restarting the host or Docker preserves the four named data volumes. Running bun run compact:up again rechecks migrations, storage initialization, seed idempotency, and service health. Back up and restore The backup quiesces the application and workflow tier, then captures the application database, both Temporal databases, and owned object storage as one logical snapshot. Its manifest records the Tixkit version, source commit, byte counts, and SHA 256 checksums. Restore verifies the exact artifact set, checksums, version, and archive entry safety, restores into temporary databases and a temporary bucket, and validates their required schemas before cutover. It retains rollback databases and objects until the complete profile is healthy. Keep backup directories and infra/compact/.env encrypted outside the host's failure domain. Compact Redis state is reconstructible and is not backed up. Upgrade and uninstall After checking out the reviewed target release: The command creates a checksummed pre upgrade backup, pulls current base images, rebuilds the application images from the checked out release, reapplies migrations, and waits for health. Test restore before upgrading important installations. Remove containers while preserving data and secrets with bun run compact:uninstall . Destructive removal is explicit: The destructive form removes Compact volumes and its generated environment file. Verify an external backup first.",
+    "audience": [
+      "self-hoster"
+    ],
+    "productArea": "self-hosting",
+    "contentType": "how-to",
     "status": "beta",
     "keywords": []
   },
@@ -2090,7 +2130,7 @@
         "level": 2
       }
     ],
-    "body": "Deploy immutable artifacts built from one reviewed commit. The API, worker, OpenAPI reference, SDK compatibility statements, dashboard, checkout, and docs must describe the same contract. Release order 1. Back up and verify restore readiness. 2. Run the release dry run and documentation/OSS export gates. 3. Apply forward compatible migrations using the approved migration identity. 4. Deploy API and worker with compatible Temporal workflow code. 5. Deploy admin, checkout, and docs. 6. Verify health, representative public/authenticated reads, checkout, workflow, webhook, and documentation routes. Rollback Roll back application artifacts independently only while contract and migration compatibility permits it. Prefer a forward fix for destructive schema changes. Preserve documentation redirects so dashboard links remain valid across a docs rollback. Smoke checks Verify /health for API and docs, worker readiness, a real published test event, authenticated context, and a test safe checkout. A green homepage is not a complete deployment proof. Continue with observability configuration /self hosting/observability before accepting the release.",
+    "body": "Deploy immutable artifacts built from one reviewed commit. The API, worker, OpenAPI reference, SDK compatibility statements, dashboard, checkout, and docs must describe the same contract. Use the Compact profile /self hosting/compact for a complete supported single host evaluation or smaller installation. Use the Production profile and externally operated backing services for high availability and independent scaling. Release order 1. Back up and verify restore readiness. 2. Run the release dry run and documentation/OSS export gates. 3. Apply forward compatible migrations using the approved migration identity. 4. Deploy API and worker with compatible Temporal workflow code. 5. Deploy admin, checkout, and docs. 6. Verify health, representative public/authenticated reads, checkout, workflow, webhook, and documentation routes. Rollback Roll back application artifacts independently only while contract and migration compatibility permits it. Prefer a forward fix for destructive schema changes. Preserve documentation redirects so dashboard links remain valid across a docs rollback. Smoke checks Verify /health for API and docs, worker readiness, a real published test event, authenticated context, and a test safe checkout. A green homepage is not a complete deployment proof. Continue with observability configuration /self hosting/observability before accepting the release.",
     "audience": [
       "self-hoster"
     ],
@@ -2154,7 +2194,7 @@
         "level": 2
       }
     ],
-    "body": "Read release and documentation changes for API, SDK, CLI, configuration, providers, migrations, and workflows. Build the sanitized OSS tree and run the release dry run before upgrading. Rehearse Clone production like data into an isolated environment using the approved sanitization process. Apply migrations, deploy API/worker together where workflow compatibility requires it, then run checkout, order, webhook, export, check in, and docs smoke paths. Roll forward or back Confirm the old application can run against the new schema before treating binary rollback as safe. Preserve Temporal replay compatibility. When rollback is unsafe, use the documented forward repair and restore decision instead of forcing an older binary. Monitor errors, workflow failures, provider outcomes, and database performance through the rollout window.",
+    "body": "Read release and documentation changes for API, SDK, CLI, configuration, providers, migrations, and workflows. Build the sanitized OSS tree and run the release dry run before upgrading. Compact operators check out the reviewed target release and run bun run compact:upgrade . The command creates a pre upgrade backup before rebuilding, migrating, and waiting for the complete profile to become healthy. Rehearse Clone production like data into an isolated environment using the approved sanitization process. Apply migrations, deploy API/worker together where workflow compatibility requires it, then run checkout, order, webhook, export, check in, and docs smoke paths. Roll forward or back Confirm the old application can run against the new schema before treating binary rollback as safe. Preserve Temporal replay compatibility. When rollback is unsafe, use the documented forward repair and restore decision instead of forcing an older binary. Monitor errors, workflow failures, provider outcomes, and database performance through the rollout window.",
     "audience": [
       "self-hoster"
     ],

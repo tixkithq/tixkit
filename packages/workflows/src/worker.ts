@@ -3,6 +3,7 @@ import { Connection, Client } from '@temporalio/client';
 import { createTelemetryResource, createTraceExporter } from '@tixkit/shared';
 import { assertSandboxRuntimeBinding, createDb } from '@tixkit/db';
 import { createRequire } from 'node:module';
+import { rm, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import * as allActivities from './activities/index.js';
@@ -263,9 +264,25 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
     });
 
     const workerRuns = workers.map((worker) => worker.run());
+    const writeHeartbeat = () =>
+      writeFile(
+        '/tmp/tixkit-worker-ready',
+        `${JSON.stringify({ pid: process.pid, heartbeatAt: Date.now() })}\n`,
+        { mode: 0o600 },
+      );
+    await writeHeartbeat();
+    const heartbeat = setInterval(
+      () => void writeHeartbeat().catch((error) => console.error('Worker heartbeat failed', error)),
+      5_000,
+    );
     console.log(`TIXKIT_WORKER_READY taskQueues=${config.temporalWorkerTaskQueues.join(',')}`);
-    await Promise.all(workerRuns);
+    try {
+      await Promise.all(workerRuns);
+    } finally {
+      clearInterval(heartbeat);
+    }
   } finally {
+    await rm('/tmp/tixkit-worker-ready', { force: true });
     stopMigrationProgressAgeRefresh();
     unregisterMigrationPreparationService();
     unregisterMigrationService();

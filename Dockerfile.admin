@@ -5,6 +5,7 @@ ENV NODE_ENV=production
 ENV PORT=3001
 ARG NEXT_PUBLIC_ADMIN_API_BASE_URL
 ARG NEXT_PUBLIC_API_BASE_URL
+ARG ALLOW_INSECURE_LOCAL_ORIGINS=0
 ENV NEXT_PUBLIC_ADMIN_API_BASE_URL=${NEXT_PUBLIC_ADMIN_API_BASE_URL}
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 
@@ -12,34 +13,29 @@ COPY . .
 RUN bun install --frozen-lockfile
 RUN test -n "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" && \
   test -n "${NEXT_PUBLIC_API_BASE_URL}" && \
-  case "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" in \
-    https://*) ;; \
-    *) exit 1 ;; \
-  esac && \
-  case "${NEXT_PUBLIC_API_BASE_URL}" in \
-    https://*) ;; \
-    *) exit 1 ;; \
-  esac && \
-  case "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" in \
-    http://localhost*|http://127.*|http://0.0.0.0*) exit 1 ;; \
-  esac && \
-  case "${NEXT_PUBLIC_API_BASE_URL}" in \
-    http://localhost*|http://127.*|http://0.0.0.0*) exit 1 ;; \
-  esac && \
+  if [ "${ALLOW_INSECURE_LOCAL_ORIGINS}" = 1 ]; then \
+    case "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" in http://localhost:*|http://127.0.0.1:*) ;; *) exit 1 ;; esac; \
+    case "${NEXT_PUBLIC_API_BASE_URL}" in http://localhost:*|http://127.0.0.1:*) ;; *) exit 1 ;; esac; \
+  else \
+    case "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" in https://*) ;; *) exit 1 ;; esac; \
+    case "${NEXT_PUBLIC_API_BASE_URL}" in https://*) ;; *) exit 1 ;; esac; \
+  fi && \
   case "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" in \
     https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*) exit 1 ;; \
   esac && \
   case "${NEXT_PUBLIC_API_BASE_URL}" in \
     https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*) exit 1 ;; \
   esac && \
-  bun run build
-RUN bun install --frozen-lockfile --production
+  bunx turbo run build --filter=@tixkit/admin-dashboard
+RUN rm -rf node_modules && bun install --frozen-lockfile --production --filter=@tixkit/admin-dashboard
 RUN mkdir -p /runtime/packages && \
   for package_json in packages/*/package.json; do \
     package_dir="${package_json%/package.json}"; \
     mkdir -p "/runtime/${package_dir}"; \
     cp "${package_json}" "/runtime/${package_dir}/package.json"; \
+    if [ -d "${package_dir}/src" ]; then cp -R "${package_dir}/src" "/runtime/${package_dir}/src"; fi; \
     if [ -d "${package_dir}/dist" ]; then cp -R "${package_dir}/dist" "/runtime/${package_dir}/dist"; fi; \
+    if [ -d "${package_dir}/node_modules" ]; then cp -R "${package_dir}/node_modules" "/runtime/${package_dir}/node_modules"; fi; \
   done
 
 FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS runtime
@@ -52,6 +48,7 @@ COPY --from=builder /app/package.json /app/bun.lock /app/turbo.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /runtime/packages ./packages
 COPY --from=builder /app/apps/admin-dashboard/package.json /app/apps/admin-dashboard/next.config.mjs ./apps/admin-dashboard/
+COPY --from=builder /app/apps/admin-dashboard/node_modules ./apps/admin-dashboard/node_modules
 COPY --from=builder /app/apps/admin-dashboard/.next ./apps/admin-dashboard/.next
 
 EXPOSE 3001

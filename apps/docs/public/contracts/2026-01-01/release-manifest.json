@@ -4,10 +4,10 @@
   "commit": null,
   "timestamp": null,
   "provenance": {
-    "sourceCommit": "62f0c2dd14552581c31d21c63af0a32593c366ce",
-    "headTreeHash": "821db3c917c6652a236fb638a3903bee1f02fed9",
-    "sourceTreeHash": "dc847045b03dc9afb3c848be1394134b8b8aca2d004ae7edf68c09fa4777cf69",
-    "trackedFileCount": 1671,
+    "sourceCommit": "2778b289509a67b11873d60975ddc183eb00f85a",
+    "headTreeHash": "c29ff737bc64a68a361b5e446a8ecf4c25c5d177",
+    "sourceTreeHash": "23fc03ef47a37638199de295782adb69efcc56d647e8c9f4087c1c1829b1491b",
+    "trackedFileCount": 1678,
     "excludedGeneratedPaths": [
       "apps/docs/public/contracts/",
       "apps/docs/public/openapi.json",

@@ -258,7 +258,7 @@
       "packages/embed-core/schemas/lifecycle.schema.json"
     ],
     "selfHostedProfiles": {
-      "compact": "infra/docker-compose.yml",
+      "compact": "infra/compact/compose.yml",
       "production": "infra/helm/tixkit"
     }
   },

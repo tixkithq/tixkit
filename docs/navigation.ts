@@ -100,6 +100,7 @@ export const documentationNavigation = [
     label: 'Self-Host',
     children: [
       { label: 'Architecture', routeId: 'selfHostingArchitecture' },
+      { label: 'Compact profile', routeId: 'selfHostingCompact' },
       { label: 'Configuration', routeId: 'selfHostingConfiguration' },
       { label: 'Authentication', routeId: 'selfHostingAuthentication' },
       { label: 'Databases', routeId: 'selfHostingDatabases' },

@@ -60,6 +60,7 @@ export const docRoutes = {
   sdkGo: '/sdks/go',
   sdkRust: '/sdks/rust',
   selfHostingArchitecture: '/self-hosting/architecture',
+  selfHostingCompact: '/self-hosting/compact',
   selfHostingConfiguration: '/self-hosting/configuration',
   selfHostingAuthentication: '/self-hosting/authentication',
   selfHostingDatabases: '/self-hosting/databases',

@@ -431,9 +431,15 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosting/backups-and-restore": {
     sourcePath: "docs/public/self-hosting/backups-and-restore.mdx",
-    frontmatter: {"title":"Back up and restore Tixkit","description":"Protect relational data and object artifacts with measured, rehearsed recovery procedures.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["Backup destinations isolated from the primary failure domain"],"related":["/self-hosting/databases","/operations/incidents"]},
+    frontmatter: {"title":"Back up and restore Tixkit","description":"Protect relational data and object artifacts with measured, rehearsed recovery procedures.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["Backup destinations isolated from the primary failure domain"],"related":["/self-hosting/compact","/self-hosting/databases","/operations/incidents"]},
     headings: [{"id":"backup","text":"Backup","level":2},{"id":"restore-rehearsal","text":"Restore rehearsal","level":2}],
     load: () => import("../../../../docs/public/self-hosting/backups-and-restore.mdx"),
+  },
+  "/self-hosting/compact": {
+    sourcePath: "docs/public/self-hosting/compact.mdx",
+    frontmatter: {"title":"Run the Compact profile","description":"Start, operate, back up, restore, upgrade, and remove a complete single-host Tixkit installation.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-11","prerequisites":["Docker Desktop or Docker Engine with Compose v2","A clean checkout of the authoritative public repository"],"related":["/self-hosting/backups-and-restore","/self-hosting/upgrades","/self-hosting/architecture"]},
+    headings: [{"id":"host-envelope","text":"Host envelope","level":2},{"id":"first-start","text":"First start","level":2},{"id":"operate","text":"Operate","level":2},{"id":"back-up-and-restore","text":"Back up and restore","level":2},{"id":"upgrade-and-uninstall","text":"Upgrade and uninstall","level":2}],
+    load: () => import("../../../../docs/public/self-hosting/compact.mdx"),
   },
   "/self-hosting/configuration": {
     sourcePath: "docs/public/self-hosting/configuration.mdx",
@@ -449,7 +455,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosting/deployment": {
     sourcePath: "docs/public/self-hosting/deployment.mdx",
-    frontmatter: {"title":"Deploy Tixkit","description":"Build, migrate, release, smoke-test, and roll back the API, worker, applications, and documentation coherently.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["Validated production configuration and durable service dependencies"],"related":["/self-hosting/observability","/operations/incidents"]},
+    frontmatter: {"title":"Deploy Tixkit","description":"Build, migrate, release, smoke-test, and roll back the API, worker, applications, and documentation coherently.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["Validated production configuration and durable service dependencies"],"related":["/self-hosting/compact","/self-hosting/observability","/operations/incidents"]},
     headings: [{"id":"release-order","text":"Release order","level":2},{"id":"rollback","text":"Rollback","level":2},{"id":"smoke-checks","text":"Smoke checks","level":2}],
     load: () => import("../../../../docs/public/self-hosting/deployment.mdx"),
   },
@@ -467,7 +473,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosting/upgrades": {
     sourcePath: "docs/public/self-hosting/upgrades.mdx",
-    frontmatter: {"title":"Upgrade Tixkit","description":"Rehearse contract, migration, workflow, SDK, documentation, and rollback compatibility before production rollout.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["A tested backup and restore path"],"related":["/self-hosting/deployment","/contributing/testing"]},
+    frontmatter: {"title":"Upgrade Tixkit","description":"Rehearse contract, migration, workflow, SDK, documentation, and rollback compatibility before production rollout.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["A tested backup and restore path"],"related":["/self-hosting/compact","/self-hosting/deployment","/contributing/testing"]},
     headings: [{"id":"rehearse","text":"Rehearse","level":2},{"id":"roll-forward-or-back","text":"Roll forward or back","level":2}],
     load: () => import("../../../../docs/public/self-hosting/upgrades.mdx"),
   },
