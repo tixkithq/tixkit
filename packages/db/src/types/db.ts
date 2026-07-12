@@ -1882,6 +1882,7 @@ export interface PortableImportApprovalTable {
   artifact_sha256: string;
   input_sha256: string;
   receipt_sha256: string;
+  rebindings_sha256: string;
   approval_digest: string;
   approved_by: string;
   idempotency_key_sha256: string;
@@ -1899,6 +1900,31 @@ export interface PortableImportApprovalRevocationTable {
   revoked_by: string;
   reason: string | null;
   created_at: Timestamp;
+}
+
+export interface PortableImportRebindingTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  portable_id: string;
+  kind: string;
+  destination_reference: string;
+  provenance_sha256: string;
+  bound_by: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface PortableDestinationResourceTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  kind: string;
+  resource_id: string;
+  registered_by: string;
+  created_at: Timestamp;
+  revoked_at: Timestamp | null;
 }
 
 export interface DB {
@@ -2022,4 +2048,6 @@ export interface DB {
   portable_import_dry_run_receipts: PortableImportDryRunReceiptTable;
   portable_import_approvals: PortableImportApprovalTable;
   portable_import_approval_revocations: PortableImportApprovalRevocationTable;
+  portable_import_rebindings: PortableImportRebindingTable;
+  portable_destination_resources: PortableDestinationResourceTable;
 }

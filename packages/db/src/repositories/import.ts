@@ -1,4 +1,4 @@
-import type { Selectable } from 'kysely';
+import { sql, type Selectable } from 'kysely';
 import { createHash } from 'node:crypto';
 import type {
   ExternalReferenceTable,
@@ -7,6 +7,7 @@ import type {
   ImportJobRowTable,
   ImportJobTable,
   MigrationCredentialTable,
+  PortableDestinationResourceTable,
 } from '../types/db.js';
 import { BaseRepository } from './base.js';
 
@@ -51,6 +52,164 @@ export interface RollbackEligibility {
 }
 
 export class ImportRepository extends BaseRepository {
+  async registerPortableDestinationResource(input: {
+    tenantId: string;
+    organizationId: string;
+    kind: string;
+    resourceId: string;
+    registeredBy: string;
+    now?: Date;
+  }) {
+    const existing = await this.findPortableDestinationResource(input);
+    if (existing) return existing;
+    const values = {
+      id: this.generateId('pdr'),
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      kind: input.kind,
+      resource_id: input.resourceId,
+      registered_by: input.registeredBy,
+      created_at: input.now ?? new Date(),
+      revoked_at: null,
+    };
+    try {
+      await this.db.insertInto('portable_destination_resources').values(values).execute();
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+    return this.db
+      .selectFrom('portable_destination_resources')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('kind', '=', input.kind)
+      .where('resource_id', '=', input.resourceId)
+      .where('revoked_at', 'is', null)
+      .executeTakeFirstOrThrow();
+  }
+
+  findPortableDestinationResource(input: {
+    tenantId: string;
+    organizationId: string;
+    kind: string;
+    resourceId: string;
+    lockForAuthorization?: boolean;
+  }) {
+    if (input.lockForAuthorization && process.env.DB_DRIVER === 'mssql') {
+      return sql<Selectable<PortableDestinationResourceTable>>`
+        select * from portable_destination_resources with (updlock, holdlock)
+        where tenant_id = ${input.tenantId}
+          and organization_id = ${input.organizationId}
+          and kind = ${input.kind}
+          and resource_id = ${input.resourceId}
+          and revoked_at is null
+      `
+        .execute(this.db)
+        .then((result) => result.rows[0]);
+    }
+    let query = this.db
+      .selectFrom('portable_destination_resources')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('kind', '=', input.kind)
+      .where('resource_id', '=', input.resourceId)
+      .where('revoked_at', 'is', null);
+    if (input.lockForAuthorization) query = query.forShare();
+    return query.executeTakeFirst();
+  }
+
+  async revokePortableDestinationResource(input: {
+    tenantId: string;
+    organizationId: string;
+    kind: string;
+    resourceId: string;
+    now?: Date;
+  }): Promise<boolean> {
+    const result = await this.db
+      .updateTable('portable_destination_resources')
+      .set({ revoked_at: input.now ?? new Date() })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('kind', '=', input.kind)
+      .where('resource_id', '=', input.resourceId)
+      .where('revoked_at', 'is', null)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) === 1;
+  }
+
+  listPortableImportRebindings(tenantId: string, organizationId: string, jobId: string) {
+    return this.db
+      .selectFrom('portable_import_rebindings')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('import_job_id', '=', jobId)
+      .orderBy('portable_id', 'asc')
+      .execute();
+  }
+
+  async upsertPortableImportRebinding(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    portableId: string;
+    kind: string;
+    destinationReference: string;
+    provenanceSha256: string;
+    boundBy: string;
+    now?: Date;
+  }) {
+    const now = input.now ?? new Date();
+    const update = () =>
+      this.db
+        .updateTable('portable_import_rebindings')
+        .set({
+          kind: input.kind,
+          destination_reference: input.destinationReference,
+          provenance_sha256: input.provenanceSha256,
+          bound_by: input.boundBy,
+          updated_at: now,
+        })
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('import_job_id', '=', input.jobId)
+        .where('portable_id', '=', input.portableId)
+        .executeTakeFirst();
+    const updated = await update();
+    if (Number(updated.numUpdatedRows) === 0) {
+      try {
+        await this.db
+          .insertInto('portable_import_rebindings')
+          .values({
+            id: this.generateId('pir'),
+            tenant_id: input.tenantId,
+            organization_id: input.organizationId,
+            import_job_id: input.jobId,
+            portable_id: input.portableId,
+            kind: input.kind,
+            destination_reference: input.destinationReference,
+            provenance_sha256: input.provenanceSha256,
+            bound_by: input.boundBy,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        await update();
+      }
+    }
+    return this.db
+      .selectFrom('portable_import_rebindings')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('portable_id', '=', input.portableId)
+      .executeTakeFirstOrThrow();
+  }
+
   async recordPortablePreflight(input: {
     tenantId: string;
     organizationId: string;
@@ -217,6 +376,7 @@ export class ImportRepository extends BaseRepository {
     artifactSha256: string;
     inputSha256: string;
     receiptSha256: string;
+    rebindingsSha256: string;
     approvalDigest: string;
     approvedBy: string;
     idempotencyKeySha256: string;
@@ -233,6 +393,7 @@ export class ImportRepository extends BaseRepository {
       !/^[a-f0-9]{64}$/u.test(input.artifactSha256) ||
       !/^[a-f0-9]{64}$/u.test(input.inputSha256) ||
       !/^[a-f0-9]{64}$/u.test(input.receiptSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.rebindingsSha256) ||
       !/^[a-f0-9]{64}$/u.test(input.approvalDigest) ||
       !input.approvedBy.trim() ||
       !/^[a-f0-9]{64}$/u.test(input.idempotencyKeySha256) ||
@@ -253,6 +414,7 @@ export class ImportRepository extends BaseRepository {
       artifact_sha256: input.artifactSha256,
       input_sha256: input.inputSha256,
       receipt_sha256: input.receiptSha256,
+      rebindings_sha256: input.rebindingsSha256,
       approval_digest: input.approvalDigest,
       approved_by: input.approvedBy,
       idempotency_key_sha256: input.idempotencyKeySha256,

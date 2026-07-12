@@ -55,6 +55,7 @@ export interface PortableLogicalExportInput {
   exportedAt: string;
   currentTime: string;
   compatibility: PortableBundleManifest['compatibility'];
+  rebindings?: PortableBundleManifest['rebindings'];
   sections: ReadonlyMap<PortableSection, readonly PortableLogicalRecord[]>;
   bundleSigning: { keyId: string; privateKey: KeyLike };
   payloadSigning: { keyId: string; privateKey: KeyLike };
@@ -254,7 +255,9 @@ export function buildPortableLogicalExport(
       section,
       dependsOn: [...(dependencyGraph.get(section) ?? [])].sort(sectionOrder),
     })),
-    rebindings: [],
+    rebindings: [...(input.rebindings ?? [])].sort((left, right) =>
+      compareCodeUnits(left.portableId, right.portableId),
+    ),
   };
   const envelope = {
     manifest,

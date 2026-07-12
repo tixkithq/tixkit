@@ -1968,6 +1968,16 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.PortableDryRunReceipt.required).toEqual(
       expect.arrayContaining(['inputSha256', 'artifactSha256', 'signature']),
     );
+    expect(openApiSpec.paths['/migration-jobs/{jobId}/portable-rebindings'].get).toMatchObject({
+      operationId: 'getPortableMigrationRebindings',
+      'x-required-permissions': ['migrations.read'],
+    });
+    expect(
+      openApiSpec.paths['/migration-jobs/{jobId}/portable-rebindings/{portableId}'].put,
+    ).toMatchObject({
+      operationId: 'bindPortableMigrationDestination',
+      'x-required-permissions': ['migrations.write'],
+    });
     const portableApproval = openApiSpec.paths['/migration-jobs/{jobId}/portable-approval'].post;
     expect(portableApproval).toMatchObject({
       operationId: 'approvePortableMigrationJob',

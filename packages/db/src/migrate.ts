@@ -72,6 +72,7 @@ import { PortableExportsMigration } from './migrations/0068_portable_exports.js'
 import { PortableExportBuildLeasesMigration } from './migrations/0069_portable_export_build_leases.js';
 import { PortableImportPreflightsMigration } from './migrations/0070_portable_import_preflights.js';
 import { PortableImportApprovalsMigration } from './migrations/0071_portable_import_approvals.js';
+import { PortableImportRebindingsMigration } from './migrations/0072_portable_import_rebindings.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -205,6 +206,8 @@ const ALL_SCHEMA_TABLES = [
   'portable_import_preflights',
   'portable_import_approval_revocations',
   'portable_import_approvals',
+  'portable_import_rebindings',
+  'portable_destination_resources',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -301,6 +304,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0069_portable_export_build_leases': PortableExportBuildLeasesMigration,
       '0070_portable_import_preflights': PortableImportPreflightsMigration,
       '0071_portable_import_approvals': PortableImportApprovalsMigration,
+      '0072_portable_import_rebindings': PortableImportRebindingsMigration,
     };
   }
 }
@@ -552,6 +556,7 @@ export async function truncateAllData(db: Database): Promise<void> {
       'portable_import_dry_run_receipts',
       'portable_import_approvals',
       'portable_import_approval_revocations',
+      'portable_import_rebindings',
     ]) {
       await sql
         .raw(
@@ -598,6 +603,7 @@ export async function truncateAllData(db: Database): Promise<void> {
         'portable_import_dry_run_receipts',
         'portable_import_approvals',
         'portable_import_approval_revocations',
+        'portable_import_rebindings',
       ]) {
         await sql
           .raw(

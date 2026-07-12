@@ -899,6 +899,43 @@ const rawOpenApiSpec = {
           commitConfirmation: { type: 'string', pattern: '^commit:.+$' },
         },
       },
+      PortableImportRebinding: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['portableId', 'kind', 'destinationReference', 'provenanceSha256', 'updatedAt'],
+        properties: {
+          portableId: { type: 'string' },
+          kind: {
+            type: 'string',
+            enum: [
+              'custom_domain',
+              'provider_account',
+              'tax_registration',
+              'sending_identity',
+              'wallet_credential',
+              'oauth_redirect_origin',
+              'webhook_endpoint',
+            ],
+          },
+          destinationReference: { type: 'string' },
+          boundBy: { type: 'string' },
+          provenanceSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      PortableImportRebindingStatus: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['required', 'completed', 'complete'],
+        properties: {
+          required: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          completed: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PortableImportRebinding' },
+          },
+          complete: { type: 'boolean' },
+        },
+      },
       PortableImportApprovalRevocation: {
         type: 'object',
         additionalProperties: false,
@@ -13545,6 +13582,92 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: { $ref: '#/components/schemas/MigrationReport' },
               },
+            },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/portable-rebindings': {
+      get: {
+        operationId: 'getPortableMigrationRebindings',
+        summary: 'List required and completed portable destination rebindings',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.read'],
+        parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Portable destination rebinding status',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PortableImportRebindingStatus' },
+              },
+            },
+          },
+          '400': {
+            description: 'Job is not a portable import',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Migration job or preflight not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/portable-rebindings/{portableId}': {
+      put: {
+        operationId: 'bindPortableMigrationDestination',
+        summary: 'Bind a required portable source reference to an existing destination resource',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'portableId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['destinationReference'],
+                properties: {
+                  destinationReference: { type: 'string', minLength: 1, maxLength: 200 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Destination rebinding evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PortableImportRebinding' },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid, secret-bearing, or unrequested destination reference',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Migration job not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Portable dry-run is not ready for rebinding',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
             },
           },
         },

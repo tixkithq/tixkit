@@ -13,6 +13,7 @@ import {
 } from '@tixkit/db';
 import { PortableImportPreflightsMigration } from '@tixkit/db/migrations';
 import { PortableImportApprovalsMigration } from '@tixkit/db/migrations';
+import { PortableImportRebindingsMigration } from '@tixkit/db/migrations';
 import {
   buildPortableLogicalExport,
   canonicalPortableJson,
@@ -23,6 +24,7 @@ import {
 import {
   approvePortableImport,
   attestPortableDryRun,
+  bindPortableImportDestination,
   createLocalPortableDryRunAttestation,
   portableImportCurrentInputHash,
   revokePortableImportApproval,
@@ -92,6 +94,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         requiredCapabilities: ['portable-bundle-v1'],
         requiredEntitlements: [],
       },
+      rebindings: [{ kind: 'provider_account', portableId: 'provider_stripe', required: true }],
       sections: new Map([
         [
           'organizations',
@@ -308,6 +311,158 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       .set({ configuration: job.configuration })
       .where('id', '=', job.id)
       .execute();
+    await expect(approvePortableImport(approvalRequest)).rejects.toThrow(
+      /PORTABLE_IMPORT_REBINDINGS_REQUIRED/u,
+    );
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'provider_account',
+      resourceId: 'acct_revoked_before_approval',
+      registeredBy: 'system_test',
+    });
+    await bindPortableImportDestination({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_revoked_before_approval',
+      boundBy: 'user_approver',
+    });
+    expect(
+      await repository.revokePortableDestinationResource({
+        tenantId,
+        organizationId,
+        kind: 'provider_account',
+        resourceId: 'acct_revoked_before_approval',
+      }),
+    ).toBe(true);
+    await expect(approvePortableImport(approvalRequest)).rejects.toThrow(
+      /REBINDING_DESTINATION_NOT_FOUND/u,
+    );
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'provider_account',
+      resourceId: 'acct_destination_01',
+      registeredBy: 'system_test',
+    });
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'provider_account',
+      resourceId: 'acct_destination_changed',
+      registeredBy: 'system_test',
+    });
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'provider_account',
+      resourceId: 'acct_authorization_lock_race',
+      registeredBy: 'system_test',
+    });
+    let releaseAuthorizationLock!: () => void;
+    const authorizationMayFinish = new Promise<void>((resolve) => {
+      releaseAuthorizationLock = resolve;
+    });
+    let authorizationLocked!: () => void;
+    const authorizationHasLock = new Promise<void>((resolve) => {
+      authorizationLocked = resolve;
+    });
+    const authorization = db
+      .transaction()
+      .setIsolationLevel('repeatable read')
+      .execute(async (transaction) => {
+        const locked = await new ImportRepository(
+          transaction as Database,
+        ).findPortableDestinationResource({
+          tenantId,
+          organizationId,
+          kind: 'provider_account',
+          resourceId: 'acct_authorization_lock_race',
+          lockForAuthorization: true,
+        });
+        expect(locked?.resource_id).toBe('acct_authorization_lock_race');
+        authorizationLocked();
+        await authorizationMayFinish;
+      });
+    await authorizationHasLock;
+    let revocationCompleted = false;
+    const concurrentRevocation = repository
+      .revokePortableDestinationResource({
+        tenantId,
+        organizationId,
+        kind: 'provider_account',
+        resourceId: 'acct_authorization_lock_race',
+      })
+      .then((revoked) => {
+        revocationCompleted = true;
+        return revoked;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(revocationCompleted).toBe(false);
+    releaseAuthorizationLock();
+    await authorization;
+    await expect(concurrentRevocation).resolves.toBe(true);
+    const otherOrganizationId = (
+      await new OrganizationRepository(db).create({
+        tenantId,
+        name: `Portable control other ${driver}`,
+        slug: `portable-control-other-${driver}`,
+      })
+    ).id;
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId: otherOrganizationId,
+      kind: 'provider_account',
+      resourceId: 'acct_other_tenant_scope',
+      registeredBy: 'system_test',
+    });
+    await expect(
+      bindPortableImportDestination({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        portableId: 'provider_stripe',
+        destinationReference: 'acct_other_tenant_scope',
+        boundBy: 'user_approver',
+      }),
+    ).rejects.toThrow(/DESTINATION_NOT_FOUND/u);
+    await expect(
+      bindPortableImportDestination({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        portableId: 'provider_stripe',
+        destinationReference: 'sk_live_secret_material',
+        boundBy: 'user_approver',
+      }),
+    ).rejects.toThrow(/REFERENCE_INVALID/u);
+    const binding = await bindPortableImportDestination({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_destination_01',
+      boundBy: 'user_approver',
+      now: new Date('2026-07-12T21:04:00.000Z'),
+    });
+    expect(binding.kind).toBe('provider_account');
+    await expect(
+      bindPortableImportDestination({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        portableId: 'provider_unknown',
+        destinationReference: 'acct_destination_02',
+        boundBy: 'user_approver',
+      }),
+    ).rejects.toThrow(/REBINDING_NOT_REQUIRED/u);
     const concurrentApprovals = await Promise.all(
       Array.from({ length: 4 }, () => approvePortableImport(approvalRequest)),
     );
@@ -344,6 +499,35 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         now: new Date('2026-07-12T21:06:00.000Z'),
       }),
     ).resolves.toEqual(approval);
+    await bindPortableImportDestination({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_destination_changed',
+      boundBy: 'user_approver',
+    });
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: commitConfirmation,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:06:00.000Z'),
+      }),
+    ).rejects.toThrow(/APPROVAL_INPUT_CHANGED/u);
+    await bindPortableImportDestination({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_destination_01',
+      boundBy: 'user_approver',
+    });
     await expect(
       validatePortableImportApproval({
         db,
@@ -469,6 +653,25 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       ).statusCode,
     ).toBe(404);
     activePrincipal = { ...activePrincipal, organizationIds: [organizationId] };
+    activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
+    const rebindingStatus = await app.inject({
+      method: 'GET',
+      url: `/migration-jobs/${job.id}/portable-rebindings`,
+    });
+    expect(rebindingStatus.statusCode, rebindingStatus.body).toBe(200);
+    expect(rebindingStatus.json()).toMatchObject({ complete: true });
+    activePrincipal = { ...activePrincipal, scopes: ['migrations.write'] };
+    const routeRebinding = await app.inject({
+      method: 'PUT',
+      url: `/migration-jobs/${job.id}/portable-rebindings/provider_stripe`,
+      payload: { destinationReference: 'acct_destination_01' },
+    });
+    expect(routeRebinding.statusCode, routeRebinding.body).toBe(200);
+    expect(routeRebinding.json()).toMatchObject({
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_destination_01',
+    });
+    activePrincipal = { ...activePrincipal, scopes: ['migrations.commit'] };
     expect(
       (
         await app.inject({
@@ -547,12 +750,54 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       .where('resource_id', '=', job.id)
       .executeTakeFirstOrThrow();
     expect(Number(auditCount.count)).toBeGreaterThanOrEqual(3);
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'provider_account',
+      resourceId: 'acct_revoked_after_approval',
+      registeredBy: 'system_test',
+    });
+    await bindPortableImportDestination({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      portableId: 'provider_stripe',
+      destinationReference: 'acct_revoked_after_approval',
+      boundBy: 'user_approver',
+    });
+    const destinationRevocationApproval = await approvePortableImport({
+      ...approvalRequest,
+      idempotencyKey: 'portable-approval-destination-revocation',
+      now: new Date('2026-07-12T21:07:00.000Z'),
+    });
+    expect(
+      await repository.revokePortableDestinationResource({
+        tenantId,
+        organizationId,
+        kind: 'provider_account',
+        resourceId: 'acct_revoked_after_approval',
+      }),
+    ).toBe(true);
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: `commit:${job.id}:${destinationRevocationApproval.id}:${destinationRevocationApproval.approval_digest}`,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:08:00.000Z'),
+      }),
+    ).rejects.toThrow(/REBINDING_DESTINATION_NOT_FOUND/u);
     await app.close();
     await truncateAllData(db);
+    await PortableImportRebindingsMigration.down!(db);
     await PortableImportApprovalsMigration.down!(db);
     await PortableImportPreflightsMigration.down!(db);
     await PortableImportPreflightsMigration.up(db);
     await PortableImportApprovalsMigration.up(db);
+    await PortableImportRebindingsMigration.up(db);
     await expect(
       db.selectFrom('portable_import_preflights').selectAll().execute(),
     ).resolves.toEqual([]);

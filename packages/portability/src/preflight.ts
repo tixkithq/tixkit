@@ -201,6 +201,20 @@ export function portableMappingProvenanceSha256(
     .digest('hex');
 }
 
+export function portableRebindingProvenanceSha256(input: {
+  portableId: string;
+  destinationReference: string;
+}): string {
+  return createHash('sha256')
+    .update(
+      `${JSON.stringify({
+        destinationReference: input.destinationReference,
+        portableId: input.portableId,
+      })}\n`,
+    )
+    .digest('hex');
+}
+
 export interface PortableDryRunReceipt {
   operationId: string;
   manifestSha256: string;
@@ -377,14 +391,7 @@ export function validatePortableResume(
   }
   const completedRebindings = new Set<string>();
   for (const rebinding of checkpoint.completedRebindings) {
-    const expectedProvenance = createHash('sha256')
-      .update(
-        `${JSON.stringify({
-          destinationReference: rebinding.destinationReference,
-          portableId: rebinding.portableId,
-        })}\n`,
-      )
-      .digest('hex');
+    const expectedProvenance = portableRebindingProvenanceSha256(rebinding);
     if (
       completedRebindings.has(rebinding.portableId) ||
       !requiredRebindings.includes(rebinding.portableId) ||

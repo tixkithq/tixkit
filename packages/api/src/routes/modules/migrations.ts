@@ -21,7 +21,9 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@
 import {
   approvePortableImport,
   attestPortableDryRun,
+  bindPortableImportDestination,
   portableDryRunAttestationFromEnvironment,
+  portableImportRebindingStatus,
   revokePortableImportApproval,
   stablePortableControlHash,
   validatePortableImportApproval,
@@ -1190,7 +1192,12 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
             error.message === 'PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID')
         )
           throw new ConflictError('A fresh, unrevoked portable import approval is required');
-        if (error instanceof Error && error.message === 'PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED')
+        if (
+          error instanceof Error &&
+          (error.message === 'PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED' ||
+            error.message === 'PORTABLE_IMPORT_REBINDINGS_REQUIRED' ||
+            error.message === 'PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND')
+        )
           throw new ConflictError(
             'Portable import input changed after approval; create a new approval',
           );
@@ -1257,6 +1264,72 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(202).send({ jobId, status: 'committing' });
   });
 
+  app.get('/migration-jobs/:jobId/portable-rebindings', async (request) => {
+    const principal = request.principal!;
+    requireMigrationPermission(principal, 'migrations.read');
+    const { jobId } = request.params as { jobId: string };
+    const repository = repo();
+    const { job, organizationId } = await scopedJob(repository, request, jobId);
+    if (job.source_system !== 'tixkit-portable')
+      throw new ValidationError('Rebinding status is only available for portable imports');
+    return portableImportRebindingStatus({
+      db: app.context.db,
+      tenantId: principal.tenantId,
+      organizationId,
+      jobId,
+    });
+  });
+
+  app.put('/migration-jobs/:jobId/portable-rebindings/:portableId', async (request) => {
+    const principal = request.principal!;
+    requireMigrationPermission(principal, 'migrations.write');
+    const { jobId, portableId } = request.params as { jobId: string; portableId: string };
+    const body = parse(
+      z.object({ destinationReference: z.string().trim().min(1).max(200) }).strict(),
+      request.body,
+    );
+    const repository = repo();
+    const { job, organizationId } = await scopedJob(repository, request, jobId);
+    if (job.source_system !== 'tixkit-portable')
+      throw new ValidationError('Destination rebinding is only available for portable imports');
+    let rebinding;
+    try {
+      rebinding = await bindPortableImportDestination({
+        db: app.context.db,
+        tenantId: principal.tenantId,
+        organizationId,
+        jobId,
+        portableId,
+        destinationReference: body.destinationReference,
+        boundBy: principal.id,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === 'PORTABLE_IMPORT_REBINDING_REFERENCE_INVALID' ||
+          error.message === 'PORTABLE_IMPORT_REBINDING_NOT_REQUIRED' ||
+          error.message === 'PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND')
+      )
+        throw new ValidationError('Invalid or unrequested portable destination rebinding');
+      if (error instanceof Error && error.message === 'PORTABLE_IMPORT_REBINDING_JOB_NOT_READY')
+        throw new ConflictError('Portable destination rebindings require a ready dry-run');
+      throw error;
+    }
+    await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_rebound', {
+      portableId,
+      kind: rebinding.kind,
+      destinationReference: rebinding.destination_reference,
+      provenanceSha256: rebinding.provenance_sha256,
+    });
+    return {
+      portableId: rebinding.portable_id,
+      kind: rebinding.kind,
+      destinationReference: rebinding.destination_reference,
+      provenanceSha256: rebinding.provenance_sha256,
+      updatedAt: rebinding.updated_at,
+    };
+  });
+
   app.post('/migration-jobs/:jobId/portable-approval', async (request, reply) => {
     const principal = request.principal!;
     requireMigrationPermission(principal, 'migrations.commit');
@@ -1293,6 +1366,8 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         error instanceof Error &&
         (error.message === 'PORTABLE_IMPORT_APPROVAL_JOB_NOT_READY' ||
           error.message === 'PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED' ||
+          error.message === 'PORTABLE_IMPORT_REBINDINGS_REQUIRED' ||
+          error.message === 'PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND' ||
           error.message === 'PORTABLE_IMPORT_APPROVAL_IDEMPOTENCY_CONFLICT')
       )
         throw new ConflictError('Portable approval request conflicts with current job state');

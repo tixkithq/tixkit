@@ -5,6 +5,7 @@ import {
   createPortableDryRunReceipt,
   parsePortableJson,
   portableManifestSha256,
+  portableRebindingProvenanceSha256,
   verifyPortableDryRunReceipt,
   type PortableBundleManifest,
   type PortableDryRunReceipt,
@@ -105,6 +106,209 @@ async function portableImportCurrentInputHashFromDatabase(input: {
       normalized: stablePortableControlHash(parsedJson(row.normalized_data)),
     })),
   });
+}
+
+async function portableImportRebindingsHash(input: {
+  repository: ImportRepository;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+}): Promise<string> {
+  const preflight = await input.repository.findPortablePreflight(
+    input.tenantId,
+    input.organizationId,
+    input.jobId,
+  );
+  if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
+  const requiredValue = parsedJson(preflight.required_rebindings);
+  if (!Array.isArray(requiredValue)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+  const requiredIds = requiredValue.map((value) => {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      typeof (value as { portableId?: unknown }).portableId !== 'string'
+    )
+      throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+    return (value as { portableId: string }).portableId;
+  });
+  const rebindings = await input.repository.listPortableImportRebindings(
+    input.tenantId,
+    input.organizationId,
+    input.jobId,
+  );
+  if (
+    rebindings.length !== requiredIds.length ||
+    requiredIds.some((portableId) => !rebindings.some((row) => row.portable_id === portableId))
+  )
+    throw new Error('PORTABLE_IMPORT_REBINDINGS_REQUIRED');
+  for (const rebinding of rebindings) {
+    if (
+      rebinding.provenance_sha256 !==
+      portableRebindingProvenanceSha256({
+        portableId: rebinding.portable_id,
+        destinationReference: rebinding.destination_reference,
+      })
+    )
+      throw new Error('PORTABLE_IMPORT_REBINDING_EVIDENCE_INVALID');
+    const destination = await input.repository.findPortableDestinationResource({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      kind: rebinding.kind,
+      resourceId: rebinding.destination_reference,
+      lockForAuthorization: true,
+    });
+    if (!destination) throw new Error('PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND');
+  }
+  return stablePortableControlHash(
+    rebindings.map((rebinding) => ({
+      portableId: rebinding.portable_id,
+      kind: rebinding.kind,
+      destinationReference: rebinding.destination_reference,
+      provenanceSha256: rebinding.provenance_sha256,
+    })),
+  );
+}
+
+const PORTABLE_REBINDING_KINDS = new Set([
+  'custom_domain',
+  'provider_account',
+  'tax_registration',
+  'sending_identity',
+  'wallet_credential',
+  'oauth_redirect_origin',
+  'webhook_endpoint',
+]);
+
+function isSecretLikeDestinationReference(value: string): boolean {
+  return (
+    /(?:^|[._-])(?:sk|rk)_(?:live|test)_/iu.test(value) ||
+    /(?:password|passwd|secret|token|private[_-]?key|bearer)/iu.test(value) ||
+    /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(value)
+  );
+}
+
+export async function bindPortableImportDestination(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  portableId: string;
+  destinationReference: string;
+  boundBy: string;
+  now?: Date;
+}) {
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/u.test(input.portableId) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/u.test(input.destinationReference) ||
+    input.destinationReference.includes('://') ||
+    isSecretLikeDestinationReference(input.destinationReference)
+  )
+    throw new Error('PORTABLE_IMPORT_REBINDING_REFERENCE_INVALID');
+  const repository = new ImportRepository(input.db);
+  const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
+  if (!job || job.source_system !== 'tixkit-portable' || job.status !== 'ready')
+    throw new Error('PORTABLE_IMPORT_REBINDING_JOB_NOT_READY');
+  const preflight = await repository.findPortablePreflight(
+    input.tenantId,
+    input.organizationId,
+    input.jobId,
+  );
+  if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
+  const required = parsedJson(preflight.required_rebindings);
+  if (!Array.isArray(required)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+  const rebinding = required.find(
+    (candidate): candidate is { portableId: string; kind: string; required: boolean } =>
+      !!candidate &&
+      typeof candidate === 'object' &&
+      (candidate as { portableId?: unknown }).portableId === input.portableId &&
+      typeof (candidate as { kind?: unknown }).kind === 'string' &&
+      typeof (candidate as { required?: unknown }).required === 'boolean',
+  );
+  if (!rebinding || !PORTABLE_REBINDING_KINDS.has(rebinding.kind))
+    throw new Error('PORTABLE_IMPORT_REBINDING_NOT_REQUIRED');
+  const destination = await repository.findPortableDestinationResource({
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    kind: rebinding.kind,
+    resourceId: input.destinationReference,
+  });
+  if (!destination) throw new Error('PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND');
+  const provenanceSha256 = portableRebindingProvenanceSha256({
+    portableId: input.portableId,
+    destinationReference: destination.resource_id,
+  });
+  return repository.upsertPortableImportRebinding({
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    jobId: input.jobId,
+    portableId: input.portableId,
+    kind: rebinding.kind,
+    destinationReference: destination.resource_id,
+    provenanceSha256,
+    boundBy: input.boundBy,
+    now: input.now,
+  });
+}
+
+export async function portableImportRebindingStatus(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+}) {
+  const repository = new ImportRepository(input.db);
+  const preflight = await repository.findPortablePreflight(
+    input.tenantId,
+    input.organizationId,
+    input.jobId,
+  );
+  if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
+  const required = parsedJson(preflight.required_rebindings);
+  if (!Array.isArray(required)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+  const completed = await repository.listPortableImportRebindings(
+    input.tenantId,
+    input.organizationId,
+    input.jobId,
+  );
+  const activeDestinationIds = new Set(
+    (
+      await Promise.all(
+        completed.map(async (rebinding) =>
+          (await repository.findPortableDestinationResource({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            kind: rebinding.kind,
+            resourceId: rebinding.destination_reference,
+          }))
+            ? rebinding.portable_id
+            : null,
+        ),
+      )
+    ).filter((portableId): portableId is string => portableId !== null),
+  );
+  return {
+    required,
+    completed: completed.map((rebinding) => ({
+      portableId: rebinding.portable_id,
+      kind: rebinding.kind,
+      destinationReference: rebinding.destination_reference,
+      provenanceSha256: rebinding.provenance_sha256,
+      boundBy: rebinding.bound_by,
+      updatedAt: rebinding.updated_at,
+    })),
+    complete:
+      completed.length === required.length &&
+      activeDestinationIds.size === completed.length &&
+      required.every(
+        (candidate) =>
+          !!candidate &&
+          typeof candidate === 'object' &&
+          completed.some(
+            (rebinding) =>
+              rebinding.portable_id === (candidate as { portableId?: unknown }).portableId,
+          ),
+      ),
+  };
 }
 
 export async function portableImportCurrentInputHash(input: {
@@ -288,6 +492,7 @@ function portableApprovalDigest(input: {
   artifactSha256: string;
   inputSha256: string;
   receiptSha256: string;
+  rebindingsSha256: string;
   approvedBy: string;
   approvedAt: string;
   expiresAt: string;
@@ -363,6 +568,12 @@ export async function approvePortableImport(input: {
             attestation: input.attestation,
           });
           const typedReceipt = receipt as PortableDryRunReceipt;
+          const rebindingsSha256 = await portableImportRebindingsHash({
+            repository,
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+          });
           idempotencyKeySha256 = createHash('sha256').update(input.idempotencyKey).digest('hex');
           requestFingerprint = createHash('sha256')
             .update(
@@ -371,6 +582,7 @@ export async function approvePortableImport(input: {
                 approvedBy: input.approvedBy,
                 jobId: input.jobId,
                 receiptSha256: storedReceipt.receipt_sha256,
+                rebindingsSha256,
               }),
             )
             .digest('hex');
@@ -397,6 +609,7 @@ export async function approvePortableImport(input: {
             artifactSha256: typedReceipt.artifactSha256,
             inputSha256: typedReceipt.inputSha256,
             receiptSha256: storedReceipt.receipt_sha256,
+            rebindingsSha256,
             approvedBy: input.approvedBy,
             approvedAt: now.toISOString(),
             expiresAt: expiresAt.toISOString(),
@@ -410,6 +623,7 @@ export async function approvePortableImport(input: {
             artifactSha256: typedReceipt.artifactSha256,
             inputSha256: typedReceipt.inputSha256,
             receiptSha256: storedReceipt.receipt_sha256,
+            rebindingsSha256,
             approvalDigest,
             approvedBy: input.approvedBy,
             idempotencyKeySha256,
@@ -530,6 +744,7 @@ export async function validatePortableImportApproval(input: {
         artifactSha256: approval.artifact_sha256,
         inputSha256: approval.input_sha256,
         receiptSha256: approval.receipt_sha256,
+        rebindingsSha256: approval.rebindings_sha256,
         approvedBy: approval.approved_by,
         approvedAt: new Date(approval.created_at).toISOString(),
         expiresAt: new Date(approval.expires_at).toISOString(),
@@ -553,10 +768,17 @@ export async function validatePortableImportApproval(input: {
         jobId: input.jobId,
         sourceSystem: job.source_system,
       });
+      const currentRebindingsSha256 = await portableImportRebindingsHash({
+        repository,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+      });
       if (
         summary?.accepted !== true ||
         summary.inputHash !== currentInputSha256 ||
-        approval.input_sha256 !== currentInputSha256
+        approval.input_sha256 !== currentInputSha256 ||
+        approval.rebindings_sha256 !== currentRebindingsSha256
       )
         throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
       return approval;

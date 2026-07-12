@@ -20989,6 +20989,232 @@ export const apiReferenceOperations = [
     }
   },
   {
+    "method": "GET",
+    "path": "/migration-jobs/{jobId}/portable-rebindings",
+    "operationId": "getPortableMigrationRebindings",
+    "tags": [
+      "Migrations"
+    ],
+    "summary": "List required and completed portable destination rebindings",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.read"
+    ],
+    "parameters": [
+      {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": null,
+    "responses": {
+      "200": {
+        "description": "Portable destination rebinding status",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PortableImportRebindingStatus"
+            },
+            "example": {
+              "required": [
+                {}
+              ],
+              "completed": [
+                {
+                  "portableId": "portable_example",
+                  "kind": "custom_domain",
+                  "destinationReference": "destinationReference example",
+                  "provenanceSha256": "provenanceSha256 example",
+                  "updatedAt": "2026-07-10T12:00:00.000Z"
+                }
+              ],
+              "complete": true
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Job is not a portable import",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Migration job or preflight not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/migration-jobs/{jobId}/portable-rebindings/{portableId}",
+    "operationId": "bindPortableMigrationDestination",
+    "tags": [
+      "Migrations"
+    ],
+    "summary": "Bind a required portable source reference to an existing destination resource",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.write"
+    ],
+    "parameters": [
+      {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "portableId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "destinationReference"
+            ],
+            "properties": {
+              "destinationReference": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            }
+          },
+          "example": {
+            "destinationReference": "destinationReference example"
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Destination rebinding evidence",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PortableImportRebinding"
+            },
+            "example": {
+              "portableId": "portable_example",
+              "kind": "custom_domain",
+              "destinationReference": "destinationReference example",
+              "provenanceSha256": "provenanceSha256 example",
+              "updatedAt": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Invalid, secret-bearing, or unrequested destination reference",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Migration job not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Portable dry-run is not ready for rebinding",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "method": "POST",
     "path": "/migration-jobs/{jobId}/portable-approval",
     "operationId": "approvePortableMigrationJob",
@@ -23334,6 +23560,41 @@ export const apiReferenceSchemas = [
       "approvalDigest",
       "expiresAt",
       "commitConfirmation"
+    ]
+  },
+  {
+    "name": "PortableImportRebinding",
+    "type": "object",
+    "description": "",
+    "required": [
+      "portableId",
+      "kind",
+      "destinationReference",
+      "provenanceSha256",
+      "updatedAt"
+    ],
+    "properties": [
+      "portableId",
+      "kind",
+      "destinationReference",
+      "boundBy",
+      "provenanceSha256",
+      "updatedAt"
+    ]
+  },
+  {
+    "name": "PortableImportRebindingStatus",
+    "type": "object",
+    "description": "",
+    "required": [
+      "required",
+      "completed",
+      "complete"
+    ],
+    "properties": [
+      "required",
+      "completed",
+      "complete"
     ]
   },
   {
