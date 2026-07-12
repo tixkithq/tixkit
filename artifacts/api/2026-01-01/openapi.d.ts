@@ -5754,6 +5754,11 @@ export interface paths {
                         "application/json": components["schemas"]["ApiError"];
                     };
                 };
+                "503": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
             };
         };
     };
@@ -11747,6 +11752,11 @@ export type operations = {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            "503": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
     prepareMigrationJob: {
@@ -12391,7 +12401,34 @@ export interface components {
             [key: string]: unknown;
         };
         MigrationReport: {
+            job?: {
+                [key: string]: unknown;
+            };
+            report?: {
+                [key: string]: unknown;
+            };
+            conflicts?: Array<{
+                [key: string]: unknown;
+            }>;
+            correctivePlans?: Array<{
+                [key: string]: unknown;
+            }>;
+            portableDryRunReceipt?: components["schemas"]["PortableDryRunReceipt"];
             [key: string]: unknown;
+        };
+        PortableDryRunReceipt: {
+            operationId: string;
+            manifestSha256: string;
+            destinationId: string;
+            sourceChangeCursor: string;
+            inputSha256: string;
+            artifactSha256: string;
+            checkedAt: string;
+            compatible: true;
+            requiredRebindings: Array<string>;
+            sha256: string;
+            attestationKeyId: string;
+            signature: string;
         };
         MigrationAdapterCatalogEntry: {
             id: "generic-csv" | "pretix" | "hi-events" | "eventbrite" | "ticket-tailor";
@@ -12453,6 +12490,8 @@ export interface components {
             status: "ready" | "failed";
             report: components["schemas"]["MigrationReport"];
             domainWrites: 0;
+            portableDryRunReceipt?: components["schemas"]["PortableDryRunReceipt"];
+            portableDryRunReceiptSha256?: string;
         };
         MigrationRollbackAssessment: {
             eligible: boolean;

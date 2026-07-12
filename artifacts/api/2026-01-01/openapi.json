@@ -593,7 +593,98 @@
       },
       "MigrationReport": {
         "type": "object",
-        "additionalProperties": true
+        "additionalProperties": true,
+        "properties": {
+          "job": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "report": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "correctivePlans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "portableDryRunReceipt": {
+            "$ref": "#/components/schemas/PortableDryRunReceipt"
+          }
+        }
+      },
+      "PortableDryRunReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operationId",
+          "manifestSha256",
+          "destinationId",
+          "sourceChangeCursor",
+          "inputSha256",
+          "artifactSha256",
+          "checkedAt",
+          "compatible",
+          "requiredRebindings",
+          "sha256",
+          "attestationKeyId",
+          "signature"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string"
+          },
+          "manifestSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "destinationId": {
+            "type": "string"
+          },
+          "sourceChangeCursor": {
+            "type": "string"
+          },
+          "inputSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "artifactSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "compatible": {
+            "const": true
+          },
+          "requiredRebindings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "attestationKeyId": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
       },
       "MigrationAdapterCatalogEntry": {
         "type": "object",
@@ -853,6 +944,13 @@
           },
           "domainWrites": {
             "const": 0
+          },
+          "portableDryRunReceipt": {
+            "$ref": "#/components/schemas/PortableDryRunReceipt"
+          },
+          "portableDryRunReceiptSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
           }
         }
       },
@@ -28986,7 +29084,16 @@
                 },
                 "example": {
                   "status": "ready",
-                  "report": {},
+                  "report": {
+                    "job": {},
+                    "report": {},
+                    "conflicts": [
+                      {}
+                    ],
+                    "correctivePlans": [
+                      {}
+                    ]
+                  },
                   "domainWrites": 0
                 }
               }
@@ -28994,6 +29101,23 @@
           },
           "409": {
             "description": "Migration status conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Portable dry-run attestation is unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -29121,7 +29245,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/MigrationReport"
                 },
-                "example": {}
+                "example": {
+                  "job": {},
+                  "report": {},
+                  "conflicts": [
+                    {}
+                  ],
+                  "correctivePlans": [
+                    {}
+                  ]
+                }
               }
             }
           }
@@ -29164,7 +29297,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/MigrationReport"
                 },
-                "example": {}
+                "example": {
+                  "job": {},
+                  "report": {},
+                  "conflicts": [
+                    {}
+                  ],
+                  "correctivePlans": [
+                    {}
+                  ]
+                }
               }
             }
           }
