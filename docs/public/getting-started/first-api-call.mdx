@@ -10,6 +10,7 @@ owner: developer-platform
 last_verified: 2026-07-10
 prerequisites:
   - Developer permission in a Tixkit workspace
+  - An exact API origin assigned to the target environment
   - A server runtime or terminal that will not expose environment variables to a browser bundle
 related:
   - /developers/api-fundamentals/authentication
@@ -27,19 +28,25 @@ Tixkit API keys are secrets for server-side use. Do not paste a secret into brow
 Open **Developer → API keys** in the admin dashboard. Create a key with only the read scope needed to list events. Copy the secret from the one-time display directly into your server secret manager or current shell, then dismiss it. Tixkit does not display the secret again.
 
 ```bash
-export TIXKIT_API_KEY='paste-the-one-time-secret-in-your-shell'
-export TIXKIT_API_BASE_URL='http://localhost:4000/v1'
+export TIXKIT_API_BASE_URL='paste-the-exact-assigned-api-origin-with-v1'
+printf 'Tixkit API key: ' >&2
+IFS= read -r -s TIXKIT_API_KEY
+export TIXKIT_API_KEY
+printf '\n'
 ```
 
-Do not add these values to shell history, committed `.env` files, or client-visible `NEXT_PUBLIC_` variables.
+Paste the secret only at the silent prompt; the value is not part of the recorded command. Clear the variable with `unset TIXKIT_API_KEY` when the session ends. Do not add it to shell history, committed `.env` files, command arguments, or client-visible `NEXT_PUBLIC_` variables.
 
 ## List events safely
 
 ```bash
-curl --fail-with-body \
-  --header "Authorization: Bearer $TIXKIT_API_KEY" \
-  "$TIXKIT_API_BASE_URL/events"
+curl --fail-with-body --config - <<EOF
+header = "Authorization: Bearer $TIXKIT_API_KEY"
+url = "$TIXKIT_API_BASE_URL/events"
+EOF
 ```
+
+`--config -` reads the expanded header from standard input, so the secret is not placed in curl's process arguments or a temporary file.
 
 A successful response is JSON containing the events visible to the key's tenant and scope. An empty list is a valid result.
 
@@ -47,7 +54,7 @@ A successful response is JSON containing the events visible to the key's tenant 
 
 - **401 Unauthorized:** the header is missing, malformed, expired, revoked, or contains the wrong key.
 - **403 Forbidden:** authentication succeeded but the key lacks the required scope or tenant access.
-- **404 Not Found:** verify the `/v1` base path and environment.
-- **Connection refused:** confirm the API health endpoint and base URL before rotating the key.
+- **404 Not Found:** verify the assigned origin, `/v1` base path, and environment.
+- **Connection failure:** confirm the assigned API origin and environment status before rotating the key.
 
 Rotate or revoke the key immediately if it was copied into a browser, URL, log, screenshot, or committed file. Continue with [webhook signature verification](/developers/webhooks/verify-signatures), [authentication and key handling](/developers/api-fundamentals/authentication), or the [generated API reference](/reference/api).

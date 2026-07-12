@@ -72,7 +72,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   "/developers/api-fundamentals": {
     sourcePath: "docs/public/developers/api-fundamentals/index.mdx",
     frontmatter: {"title":"API fundamentals","description":"Use Tixkit's versioned JSON API with explicit authentication, scopes, pagination, errors, and idempotency.","audience":["developer"],"product_area":"api","content_type":"overview","status":"beta","owner":"developer-platform","last_verified":"2026-07-10","prerequisites":["A server runtime for authenticated integrations"],"related":["/getting-started/first-api-call","/reference/api"]},
-    headings: [{"id":"request-model","text":"Request model","level":2},{"id":"integration-rules","text":"Integration rules","level":2},{"id":"contract-source","text":"Contract source","level":2}],
+    headings: [{"id":"request-model","text":"Request model","level":2},{"id":"integration-rules","text":"Integration rules","level":2},{"id":"contract-source","text":"Contract source","level":2},{"id":"next-step","text":"Next step","level":2}],
     load: () => import("../../../../docs/public/developers/api-fundamentals/index.mdx"),
   },
   "/developers/api-fundamentals/pagination": {
@@ -125,13 +125,13 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/getting-started/first-api-call": {
     sourcePath: "docs/public/getting-started/first-api-call.mdx",
-    frontmatter: {"title":"Make the first API call","description":"Create a narrowly scoped server-only key and use it for a non-destructive request.","audience":["developer"],"product_area":"api","content_type":"quickstart","status":"beta","owner":"developer-platform","last_verified":"2026-07-10","prerequisites":["Developer permission in a Tixkit workspace","A server runtime or terminal that will not expose environment variables to a browser bundle"],"related":["/developers/api-fundamentals/authentication","/reference/api"],"keywords":["API key","curl","first request"]},
+    frontmatter: {"title":"Make the first API call","description":"Create a narrowly scoped server-only key and use it for a non-destructive request.","audience":["developer"],"product_area":"api","content_type":"quickstart","status":"beta","owner":"developer-platform","last_verified":"2026-07-10","prerequisites":["Developer permission in a Tixkit workspace","An exact API origin assigned to the target environment","A server runtime or terminal that will not expose environment variables to a browser bundle"],"related":["/developers/api-fundamentals/authentication","/reference/api"],"keywords":["API key","curl","first request"]},
     headings: [{"id":"create-a-scoped-key","text":"Create a scoped key","level":2},{"id":"list-events-safely","text":"List events safely","level":2},{"id":"diagnose-failures","text":"Diagnose failures","level":2}],
     load: () => import("../../../../docs/public/getting-started/first-api-call.mdx"),
   },
   "/getting-started/first-event": {
     sourcePath: "docs/public/getting-started/first-event.mdx",
-    frontmatter: {"title":"Create and publish the first event","description":"Configure an event, schedule, sellable inventory, checkout form, preview, and publication state.","audience":["operator"],"product_area":"events","content_type":"tutorial","status":"beta","owner":"product-ui","last_verified":"2026-07-10","prerequisites":["A running local stack or authorized self-hosted environment","Permission to create events and ticket inventory"],"related":["/operators/events/tickets-and-products","/getting-started/test-checkout"],"keywords":["first event","publish","ticket inventory"]},
+    frontmatter: {"title":"Create and publish the first event","description":"Configure an event, schedule, sellable inventory, checkout form, preview, and publication state.","audience":["operator"],"product_area":"events","content_type":"tutorial","status":"beta","owner":"product-ui","last_verified":"2026-07-10","prerequisites":["Access to an authorized Tixkit workspace","Permission to create events and ticket inventory"],"related":["/operators/events/tickets-and-products","/getting-started/test-checkout"],"keywords":["first event","publish","ticket inventory"]},
     headings: [{"id":"create-the-event","text":"Create the event","level":2},{"id":"configure-schedule-and-inventory","text":"Configure schedule and inventory","level":2},{"id":"review-checkout-behavior","text":"Review checkout behavior","level":2},{"id":"preview-before-publishing","text":"Preview before publishing","level":2},{"id":"verify-publication","text":"Verify publication","level":2},{"id":"next-step","text":"Next step","level":2}],
     load: () => import("../../../../docs/public/getting-started/first-event.mdx"),
   },

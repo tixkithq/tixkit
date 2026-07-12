@@ -21,13 +21,11 @@ keywords:
   - payment capture
 ---
 
-Use test-only attendee and buyer data. Never place a real payment credential into a local capture-mode form or repository fixture.
+Use test-only attendee and buyer data. Never place a real payment credential into a test environment or documentation example.
 
 ## Confirm the payment mode
 
-In local capture mode, checkout records the platform flow without contacting a payment provider. A successful capture-mode order proves inventory, forms, pricing, and order creation—not Stripe or another external provider.
-
-For provider-backed testing, use the provider's test mode and credentials documented for your environment. Confirm the payment-account status in workspace settings before checkout.
+Use only the test-payment mode assigned to the environment. Confirm the payment-account status in workspace settings before checkout. A successful test order proves the configured test journey; it does not by itself prove that live payments, settlement, disputes, or refunds are ready.
 
 ## Complete the purchase
 
@@ -41,8 +39,8 @@ Do not refresh or submit repeatedly while confirmation is pending. The flow uses
 
 ## Verify the order
 
-Return to **Orders** in the admin dashboard. Find the new order and confirm its payment/order state, line items, attendee records, and total. If checkout showed success but no order appears, preserve the non-secret order/session identifier and inspect API and worker logs.
+Return to **Orders** in the admin dashboard. Find the new order and confirm its payment/order state, line items, attendee records, and total. If checkout showed success but no order appears, preserve the non-secret order/session identifier and use the environment's authorized diagnostics or support channel.
 
 ## Prepare downstream operations
 
-Use the test order to practice [refund handling](/operators/orders/refunds) and [check-in](/operators/check-in). Provider-backed refunds may have external side effects; use capture mode or provider test mode for rehearsal.
+Use the test order to practice [refund handling](/operators/orders/refunds) and [check-in](/operators/check-in). Refunds may have external side effects; use only the environment's documented test mode for rehearsal.

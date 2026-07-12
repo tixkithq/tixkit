@@ -61,4 +61,34 @@ describe('adoption-path information architecture', () => {
       expect(source).toMatch(/not generally available/i);
     }
   });
+
+  it('keeps infrastructure language out of the first shared Sell and Platform tasks', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../../..');
+    for (const path of [
+      'docs/public/getting-started/first-event.mdx',
+      'docs/public/getting-started/test-checkout.mdx',
+      'docs/public/developers/api-fundamentals/index.mdx',
+      'docs/public/getting-started/first-api-call.mdx',
+    ]) {
+      const source = readFileSync(resolve(repositoryRoot, path), 'utf8');
+      expect(source).not.toMatch(
+        /\b(?:Kubernetes|Helm|database|Redis|Temporal|object storage|deployment topology|self-host|localhost)\b/i,
+      );
+    }
+  });
+
+  it('never demonstrates a literal Tixkit API secret assignment', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../../..');
+    for (const path of [
+      'docs/public/platform/quickstart.mdx',
+      'docs/public/getting-started/first-api-call.mdx',
+    ]) {
+      const source = readFileSync(resolve(repositoryRoot, path), 'utf8');
+      expect(source).not.toMatch(/(?:export\s+)?TIXKIT_API_KEY\s*=\s*['"][^$]/);
+      expect(source).not.toMatch(/(?:--header|-H)\s+['"][^'"\n]*\$TIXKIT_API_KEY/);
+      expect(source).toContain('IFS= read -r -s TIXKIT_API_KEY');
+      expect(source).toContain('unset TIXKIT_API_KEY');
+      expect(source).toContain('curl --fail-with-body --config - <<EOF');
+    }
+  });
 });

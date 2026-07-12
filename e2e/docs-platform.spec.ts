@@ -76,6 +76,67 @@ for (const [legacyRoute, canonicalRoute, heading] of [
   });
 }
 
+test('Sell path reaches event creation and checkout without infrastructure detours', async ({
+  page,
+}) => {
+  await page.goto('/sell');
+  await page.locator('.prose').getByRole('link', { name: 'Cloud organizer quickstart' }).click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Start selling with Tixkit Cloud' }),
+  ).toBeVisible();
+  await page
+    .locator('.prose')
+    .getByRole('link', { name: 'Create and publish the first event' })
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Create and publish the first event' }),
+  ).toBeVisible();
+  await page
+    .locator('.prose')
+    .getByRole('link', { name: 'Complete a test checkout' })
+    .last()
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Complete a test checkout' }),
+  ).toBeVisible();
+});
+
+test('Platform path reaches a scoped request and verified webhooks', async ({ page }) => {
+  await page.goto('/platform');
+  await page
+    .locator('.prose')
+    .getByRole('link', { name: 'hosted Platform API quickstart' })
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Start with the hosted Platform API' }),
+  ).toBeVisible();
+  await page.locator('.prose').getByRole('link', { name: 'API fundamentals' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'API fundamentals' })).toBeVisible();
+  await page.locator('.prose').getByRole('link', { name: 'Make the first API call' }).click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Make the first API call' }),
+  ).toBeVisible();
+  await page
+    .locator('.prose')
+    .getByRole('link', { name: 'webhook signature verification' })
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Verify webhook signatures' }),
+  ).toBeVisible();
+});
+
+test('Self-Hosted path reaches a profile and its recovery contract', async ({ page }) => {
+  await page.goto('/self-hosted');
+  await page.locator('.prose').getByRole('link', { name: 'Production runbook' }).click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Run the Production profile' }),
+  ).toBeVisible();
+  await page.locator('.prose').getByRole('link', { name: 'backup and restore runbook' }).click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Back up and restore Tixkit' }),
+  ).toBeVisible();
+});
+
 test('task guide has complete navigation and no accessibility violations', async ({
   page,
 }, testInfo) => {

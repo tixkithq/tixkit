@@ -15,7 +15,7 @@ related:
   - /reference/api
 ---
 
-The local API base URL is `http://localhost:4000/v1`. A self-hosted production deployment uses its configured HTTPS API origin with the same version prefix.
+Use the exact HTTPS API origin assigned to your environment, followed by the documented `/v1` prefix. Hosted private-beta invitations supply this origin; public documentation intentionally provides no default hosted hostname.
 
 ## Request model
 
@@ -34,3 +34,7 @@ Every authenticated resource read is still tenant-, organization-, brand-, or ev
 ## Contract source
 
 The [API reference](/reference/api) is generated from `packages/openapi`. Conceptual guides explain safe usage; they do not duplicate an endpoint inventory.
+
+## Next step
+
+[Make the first API call](/getting-started/first-api-call), then configure [webhook signature verification](/developers/webhooks/verify-signatures).

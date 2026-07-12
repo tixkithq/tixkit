@@ -37,16 +37,24 @@ Set the exact origin from the invitation; this guide intentionally provides no d
 
 ```bash
 export TIXKIT_API_BASE_URL='paste-the-exact-invited-api-origin'
-export TIXKIT_API_KEY='paste-the-one-time-server-secret'
+printf 'Tixkit API key: ' >&2
+IFS= read -r -s TIXKIT_API_KEY
+export TIXKIT_API_KEY
+printf '\n'
 ```
+
+Paste the secret only at the silent prompt, then run `unset TIXKIT_API_KEY` when the session ends. The secret must never appear in shell history, command arguments, or a committed environment file.
 
 ## Make a read-only request
 
 ```bash
-curl --fail-with-body \
-  --header "Authorization: Bearer $TIXKIT_API_KEY" \
-  "$TIXKIT_API_BASE_URL/v1/events"
+curl --fail-with-body --config - <<EOF
+header = "Authorization: Bearer $TIXKIT_API_KEY"
+url = "$TIXKIT_API_BASE_URL/v1/events"
+EOF
 ```
+
+`--config -` reads the expanded header from standard input, so the secret is not placed in curl's process arguments or a temporary file.
 
 An empty event list is valid. Treat `401` as a credential problem, `403` as a permission or tenant-scope denial, `404` as an environment or path mismatch, and `429` as a signal to honor the supplied retry policy. Do not broaden scopes to bypass a denial.
 
