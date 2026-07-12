@@ -208,6 +208,200 @@ export class ImportRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  async createPortableImportApproval(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    operationId: string;
+    manifestSha256: string;
+    artifactSha256: string;
+    inputSha256: string;
+    receiptSha256: string;
+    approvalDigest: string;
+    approvedBy: string;
+    idempotencyKeySha256: string;
+    requestFingerprint: string;
+    expiresAt: Date;
+    now: Date;
+  }) {
+    if (
+      !input.tenantId.trim() ||
+      !input.organizationId.trim() ||
+      !input.jobId.trim() ||
+      !input.operationId.trim() ||
+      !/^[a-f0-9]{64}$/u.test(input.manifestSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.artifactSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.inputSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.receiptSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.approvalDigest) ||
+      !input.approvedBy.trim() ||
+      !/^[a-f0-9]{64}$/u.test(input.idempotencyKeySha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.requestFingerprint) ||
+      !Number.isFinite(input.now.getTime()) ||
+      !Number.isFinite(input.expiresAt.getTime()) ||
+      input.expiresAt <= input.now ||
+      input.expiresAt.getTime() - input.now.getTime() > 15 * 60 * 1000
+    )
+      throw new Error('PORTABLE_IMPORT_APPROVAL_INVALID');
+    const values = {
+      id: this.generateId('pia'),
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      import_job_id: input.jobId,
+      operation_id: input.operationId,
+      manifest_sha256: input.manifestSha256,
+      artifact_sha256: input.artifactSha256,
+      input_sha256: input.inputSha256,
+      receipt_sha256: input.receiptSha256,
+      approval_digest: input.approvalDigest,
+      approved_by: input.approvedBy,
+      idempotency_key_sha256: input.idempotencyKeySha256,
+      request_fingerprint: input.requestFingerprint,
+      expires_at: input.expiresAt,
+      created_at: input.now,
+    };
+    await this.db.insertInto('portable_import_approvals').values(values).execute();
+    return this.db
+      .selectFrom('portable_import_approvals')
+      .selectAll()
+      .where('id', '=', values.id)
+      .executeTakeFirstOrThrow();
+  }
+
+  findPortableImportApprovalByDigest(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    approvalDigest: string;
+  }) {
+    return this.db
+      .selectFrom('portable_import_approvals')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('approval_digest', '=', input.approvalDigest)
+      .executeTakeFirst();
+  }
+
+  findPortableImportApproval(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    approvalId: string;
+  }) {
+    return this.db
+      .selectFrom('portable_import_approvals')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('id', '=', input.approvalId)
+      .executeTakeFirst();
+  }
+
+  findPortableImportApprovalByIdempotency(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    idempotencyKeySha256: string;
+  }) {
+    return this.db
+      .selectFrom('portable_import_approvals')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('idempotency_key_sha256', '=', input.idempotencyKeySha256)
+      .executeTakeFirst();
+  }
+
+  findActivePortableImportApproval(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    now: Date;
+  }) {
+    return this.db
+      .selectFrom('portable_import_approvals as approval')
+      .leftJoin('portable_import_approval_revocations as revocation', (join) =>
+        join
+          .onRef('revocation.tenant_id', '=', 'approval.tenant_id')
+          .onRef('revocation.organization_id', '=', 'approval.organization_id')
+          .onRef('revocation.approval_id', '=', 'approval.id'),
+      )
+      .selectAll('approval')
+      .where('approval.tenant_id', '=', input.tenantId)
+      .where('approval.organization_id', '=', input.organizationId)
+      .where('approval.import_job_id', '=', input.jobId)
+      .where('approval.expires_at', '>', input.now)
+      .where('revocation.id', 'is', null)
+      .orderBy('approval.created_at', 'desc')
+      .executeTakeFirst();
+  }
+
+  findPortableImportApprovalRevocation(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    approvalId: string;
+  }) {
+    return this.db
+      .selectFrom('portable_import_approval_revocations')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('approval_id', '=', input.approvalId)
+      .executeTakeFirst();
+  }
+
+  async revokePortableImportApproval(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    approvalId: string;
+    revokedBy: string;
+    reason?: string;
+    now: Date;
+  }) {
+    if (
+      !input.revokedBy.trim() ||
+      (input.reason !== undefined &&
+        (input.reason !== input.reason.trim() || input.reason.length > 500)) ||
+      !Number.isFinite(input.now.getTime())
+    )
+      throw new Error('PORTABLE_IMPORT_APPROVAL_REVOCATION_INVALID');
+    const approval = await this.findPortableImportApproval(input);
+    if (!approval) throw new Error('PORTABLE_IMPORT_APPROVAL_NOT_FOUND');
+    const values = {
+      id: this.generateId('pir'),
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      import_job_id: input.jobId,
+      approval_id: input.approvalId,
+      revoked_by: input.revokedBy,
+      reason: input.reason ?? null,
+      created_at: input.now,
+    };
+    try {
+      await this.db.insertInto('portable_import_approval_revocations').values(values).execute();
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const existing = await this.findPortableImportApprovalRevocation(input);
+      if (
+        !existing ||
+        existing.revoked_by !== input.revokedBy ||
+        existing.reason !== (input.reason ?? null)
+      )
+        throw new Error('PORTABLE_IMPORT_APPROVAL_REVOCATION_CONFLICT', { cause: error });
+    }
+    return this.findPortableImportApprovalRevocation(input).then((revocation) => {
+      if (!revocation) throw new Error('PORTABLE_IMPORT_APPROVAL_REVOCATION_NOT_FOUND');
+      return revocation;
+    });
+  }
+
   async preparationProgress(
     tenantId: string,
     organizationId: string,
@@ -671,6 +865,7 @@ export class ImportRepository extends BaseRepository {
       .where('organization_id', '=', organizationId)
       .where('import_job_id', '=', jobId)
       .orderBy('created_at', 'asc')
+      .orderBy('id', 'asc')
       .execute();
   }
 
@@ -697,7 +892,7 @@ export class ImportRepository extends BaseRepository {
     let query = this.db.selectFrom('import_mappings').selectAll().where('tenant_id', '=', tenantId);
     query = query.where('organization_id', '=', organizationId);
     if (sourceSystem) query = query.where('source_system', '=', sourceSystem);
-    return query.orderBy('updated_at', 'desc').execute();
+    return query.orderBy('updated_at', 'desc').orderBy('id', 'asc').execute();
   }
 
   saveMapping(input: {
@@ -904,6 +1099,7 @@ export class ImportRepository extends BaseRepository {
     if (input.statuses?.length) query = query.where('status', 'in', input.statuses);
     return query
       .orderBy('row_number', 'asc')
+      .orderBy('id', 'asc')
       .limit(Math.min(Math.max(input.limit ?? 500, 1), 5_000))
       .offset(Math.max(input.offset ?? 0, 0))
       .execute();

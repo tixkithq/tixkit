@@ -1865,6 +1865,14 @@ export const apiReferenceOperations = [
         }
       },
       {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
         "name": "brandId",
         "in": "query",
         "required": true,
@@ -20990,6 +20998,280 @@ export const apiReferenceOperations = [
   },
   {
     "method": "POST",
+    "path": "/migration-jobs/{jobId}/portable-approval",
+    "operationId": "approvePortableMigrationJob",
+    "tags": [
+      "Migrations"
+    ],
+    "summary": "Approve the exact immutable portable dry-run receipt for commit",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.commit"
+    ],
+    "parameters": [
+      {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      {
+        "name": "x-tixkit-confirmation",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^approve:.+$"
+        }
+      }
+    ],
+    "requestBody": null,
+    "responses": {
+      "201": {
+        "description": "Fresh digest-bound portable import approval",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PortableImportApproval"
+            },
+            "example": {
+              "approvalId": "approval_example",
+              "approvalDigest": "approvalDigest example",
+              "expiresAt": "2026-07-10T12:00:00.000Z",
+              "commitConfirmation": "commitConfirmation example"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Malformed confirmation, idempotency key, or request body",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Job state or idempotency conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "Receipt integrity or attestation trust unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/migration-jobs/{jobId}/portable-approvals/{approvalId}/revoke",
+    "operationId": "revokePortableMigrationApproval",
+    "tags": [
+      "Migrations"
+    ],
+    "summary": "Irreversibly revoke a portable import approval",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.commit"
+    ],
+    "parameters": [
+      {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "approvalId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      {
+        "name": "x-tixkit-confirmation",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^revoke:.+$"
+        }
+      }
+    ],
+    "requestBody": {
+      "required": false,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            }
+          },
+          "example": {
+            "reason": "reason example"
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Approval revocation evidence",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PortableImportApprovalRevocation"
+            },
+            "example": {
+              "approvalId": "approval_example",
+              "revoked": true,
+              "revokedAt": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "Malformed confirmation or revocation body",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Approval not found in the scoped job",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Approval is already revoked with conflicting evidence",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "Approval evidence persistence is unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
     "path": "/migration-jobs/{jobId}/commit",
     "operationId": "commitMigrationJob",
     "tags": [
@@ -21045,6 +21327,23 @@ export const apiReferenceOperations = [
       },
       "409": {
         "description": "Migration status conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "Portable approval integrity or trust validation is unavailable",
         "content": {
           "application/json": {
             "schema": {
@@ -23026,6 +23325,38 @@ export const apiReferenceSchemas = [
     "properties": [
       "jobId",
       "status"
+    ]
+  },
+  {
+    "name": "PortableImportApproval",
+    "type": "object",
+    "description": "",
+    "required": [
+      "approvalId",
+      "approvalDigest",
+      "expiresAt",
+      "commitConfirmation"
+    ],
+    "properties": [
+      "approvalId",
+      "approvalDigest",
+      "expiresAt",
+      "commitConfirmation"
+    ]
+  },
+  {
+    "name": "PortableImportApprovalRevocation",
+    "type": "object",
+    "description": "",
+    "required": [
+      "approvalId",
+      "revoked",
+      "revokedAt"
+    ],
+    "properties": [
+      "approvalId",
+      "revoked",
+      "revokedAt"
     ]
   },
   {

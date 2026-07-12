@@ -17,10 +17,14 @@ import {
 } from '@tixkit/migration-core';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
-import { ConflictError, NotFoundError, ValidationError } from '@tixkit/domain';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
 import {
+  approvePortableImport,
   attestPortableDryRun,
   portableDryRunAttestationFromEnvironment,
+  revokePortableImportApproval,
+  stablePortableControlHash,
+  validatePortableImportApproval,
 } from '../../services/portable-import-control.js';
 
 class PortableDryRunAttestationUnavailableError extends Error {
@@ -35,6 +39,7 @@ class PortableDryRunAttestationUnavailableError extends Error {
 
 const id = z.string().trim().min(1).max(128);
 const organizationIdSchema = id;
+const emptyBodySchema = z.object({}).strict();
 const createJobSchema = z
   .object({
     organizationId: organizationIdSchema,
@@ -216,18 +221,7 @@ export function redactMigrationReportValue(value: unknown): unknown {
 }
 
 function stableHash(value: unknown): string {
-  const canonicalize = (input: unknown): unknown => {
-    if (Array.isArray(input)) return input.map(canonicalize);
-    if (!input || typeof input !== 'object') return input;
-    return Object.fromEntries(
-      Object.entries(input as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, canonicalize(nested)]),
-    );
-  };
-  return createHash('sha256')
-    .update(JSON.stringify(canonicalize(value)))
-    .digest('hex');
+  return stablePortableControlHash(value);
 }
 
 function serializeMigrationFile(file: Record<string, unknown>) {
@@ -319,7 +313,7 @@ function requireMigrationPermission(
 ) {
   ClerkAuthService.requirePermission(principal, permission);
   if (principal.brandIds?.length || principal.eventIds?.length) {
-    throw new ValidationError('Migration jobs require organization-wide access');
+    throw new ForbiddenError('Migration jobs require organization-wide access');
   }
 }
 
@@ -395,6 +389,8 @@ function normalizedEntity(value: string | null): NormalizedMigrationEntity | und
 
 export const migrationRoutes: FastifyPluginAsync = async (app) => {
   const repo = () => new ImportRepository(app.context.db);
+  const portableAttestation = () =>
+    app.context.portableDryRunAttestation ?? portableDryRunAttestationFromEnvironment();
 
   app.get('/migration-adapters', async (request) => {
     requireMigrationPermission(request.principal!, 'migrations.read');
@@ -1045,7 +1041,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
           jobId,
           inputSha256: inputHash,
           createdBy: principal.id,
-          attestation: portableDryRunAttestationFromEnvironment(),
+          attestation: portableAttestation(),
         });
         portableDryRunReceipt = attested.receipt;
         portableDryRunReceiptSha256 = attested.receiptSha256;
@@ -1178,8 +1174,31 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const repository = repo();
     const { job, organizationId } = await scopedJob(repository, request, jobId);
     if (job.source_system === 'tixkit-portable') {
+      try {
+        await validatePortableImportApproval({
+          db: app.context.db,
+          tenantId: principal.tenantId,
+          organizationId,
+          jobId,
+          confirmation: String(request.headers['x-tixkit-confirmation'] ?? ''),
+          attestation: portableAttestation(),
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message === 'PORTABLE_IMPORT_APPROVAL_REQUIRED' ||
+            error.message === 'PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID')
+        )
+          throw new ConflictError('A fresh, unrevoked portable import approval is required');
+        if (error instanceof Error && error.message === 'PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED')
+          throw new ConflictError(
+            'Portable import input changed after approval; create a new approval',
+          );
+        request.log.error({ err: error, jobId }, 'Portable import approval validation failed');
+        throw new PortableDryRunAttestationUnavailableError();
+      }
       throw new ConflictError(
-        'Portable migration commit is unavailable until cutover, rebinding, and reconciliation gates pass',
+        'Portable import approval is valid; required destination rebindings must complete before commit',
       );
     }
     if (job.mode !== 'commit' || job.status !== 'ready') {
@@ -1236,6 +1255,105 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     });
     await auditMutation(app, request, organizationId, jobId, 'migration_job.commit_requested');
     return reply.status(202).send({ jobId, status: 'committing' });
+  });
+
+  app.post('/migration-jobs/:jobId/portable-approval', async (request, reply) => {
+    const principal = request.principal!;
+    requireMigrationPermission(principal, 'migrations.commit');
+    const { jobId } = request.params as { jobId: string };
+    parse(emptyBodySchema, request.body ?? {});
+    const repository = repo();
+    const { job, organizationId } = await scopedJob(repository, request, jobId);
+    if (job.source_system !== 'tixkit-portable')
+      throw new ValidationError('Portable approval is only available for portable imports');
+    const idempotencyKey = request.headers['idempotency-key'];
+    const confirmation = request.headers['x-tixkit-confirmation'];
+    if (typeof idempotencyKey !== 'string' || typeof confirmation !== 'string')
+      throw new ValidationError('Idempotency-Key and x-tixkit-confirmation are required');
+    let approval;
+    try {
+      approval = await approvePortableImport({
+        db: app.context.db,
+        tenantId: principal.tenantId,
+        organizationId,
+        jobId,
+        approvedBy: principal.id,
+        idempotencyKey,
+        confirmation,
+        attestation: portableAttestation(),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === 'PORTABLE_IMPORT_APPROVAL_CONFIRMATION_INVALID' ||
+          error.message === 'PORTABLE_IMPORT_APPROVAL_IDEMPOTENCY_INVALID')
+      )
+        throw new ValidationError('Portable approval confirmation or idempotency key is invalid');
+      if (
+        error instanceof Error &&
+        (error.message === 'PORTABLE_IMPORT_APPROVAL_JOB_NOT_READY' ||
+          error.message === 'PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED' ||
+          error.message === 'PORTABLE_IMPORT_APPROVAL_IDEMPOTENCY_CONFLICT')
+      )
+        throw new ConflictError('Portable approval request conflicts with current job state');
+      request.log.error({ err: error, jobId }, 'Portable import approval failed');
+      throw new PortableDryRunAttestationUnavailableError();
+    }
+    await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_approved', {
+      approvalId: approval.id,
+      approvalDigest: approval.approval_digest,
+      expiresAt: approval.expires_at,
+    });
+    return reply.status(201).send({
+      approvalId: approval.id,
+      approvalDigest: approval.approval_digest,
+      expiresAt: approval.expires_at,
+      commitConfirmation: `commit:${jobId}:${approval.id}:${approval.approval_digest}`,
+    });
+  });
+
+  app.post('/migration-jobs/:jobId/portable-approvals/:approvalId/revoke', async (request) => {
+    const principal = request.principal!;
+    requireMigrationPermission(principal, 'migrations.commit');
+    const { jobId, approvalId } = request.params as { jobId: string; approvalId: string };
+    const body = parse(
+      z.object({ reason: z.string().trim().min(1).max(500).optional() }).strict(),
+      request.body ?? {},
+    );
+    const repository = repo();
+    const { job, organizationId } = await scopedJob(repository, request, jobId);
+    if (job.source_system !== 'tixkit-portable')
+      throw new ValidationError('Portable revocation is only available for portable imports');
+    if (request.headers['x-tixkit-confirmation'] !== `revoke:${approvalId}`)
+      throw new ValidationError(`x-tixkit-confirmation must equal revoke:${approvalId}`);
+    let revocation;
+    try {
+      revocation = await revokePortableImportApproval({
+        db: app.context.db,
+        tenantId: principal.tenantId,
+        organizationId,
+        jobId,
+        approvalId,
+        revokedBy: principal.id,
+        reason: body.reason,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'PORTABLE_IMPORT_APPROVAL_NOT_FOUND')
+        throw new NotFoundError('PortableImportApproval', approvalId);
+      if (
+        error instanceof Error &&
+        error.message === 'PORTABLE_IMPORT_APPROVAL_REVOCATION_CONFLICT'
+      )
+        throw new ConflictError('Portable approval was already revoked with different evidence');
+      request.log.error({ err: error, jobId, approvalId }, 'Portable approval revocation failed');
+      throw new PortableDryRunAttestationUnavailableError();
+    }
+    await auditMutation(app, request, organizationId, jobId, 'migration_job.portable_revoked', {
+      approvalId,
+      revocationId: revocation.id,
+      reason: body.reason,
+    });
+    return { approvalId, revoked: true, revokedAt: revocation.created_at };
   });
 
   for (const action of ['pause', 'resume', 'cancel', 'rollback'] as const) {

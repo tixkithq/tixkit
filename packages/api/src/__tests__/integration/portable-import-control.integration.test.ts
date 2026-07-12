@@ -1,5 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
+import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { Principal } from '@tixkit/domain';
 import {
   createDb,
   ImportRepository,
@@ -10,6 +12,7 @@ import {
   type Database,
 } from '@tixkit/db';
 import { PortableImportPreflightsMigration } from '@tixkit/db/migrations';
+import { PortableImportApprovalsMigration } from '@tixkit/db/migrations';
 import {
   buildPortableLogicalExport,
   canonicalPortableJson,
@@ -17,7 +20,16 @@ import {
   portableManifestSha256,
   verifyAndPreflightPortableImport,
 } from '@tixkit/portability';
-import { attestPortableDryRun } from '../../services/portable-import-control.js';
+import {
+  approvePortableImport,
+  attestPortableDryRun,
+  createLocalPortableDryRunAttestation,
+  portableImportCurrentInputHash,
+  revokePortableImportApproval,
+  validatePortableImportApproval,
+} from '../../services/portable-import-control.js';
+import { registerErrorHandler } from '../../app.js';
+import { migrationRoutes } from '../../routes/modules/migrations.js';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
@@ -174,18 +186,25 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       expectedAssets: canonicalPortableJson([]),
       requiredRebindings: canonicalPortableJson(preflight.requiredRebindings),
     });
+    const currentInputSha256 = await portableImportCurrentInputHash({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      sourceSystem: 'tixkit-portable',
+    });
     const request = {
       db,
       tenantId,
       organizationId,
       jobId: job.id,
-      inputSha256: 'c'.repeat(64),
+      inputSha256: currentInputSha256,
       createdBy: 'user_control',
-      attestation: {
+      attestation: createLocalPortableDryRunAttestation({
         keyId: 'dry_run_key_01',
         privateKey: dryRunKeys.privateKey,
         trustedPublicKeys: new Map([['dry_run_key_01', dryRunKeys.publicKey]]),
-      },
+      }),
       checkedAt: '2026-07-12T21:00:00.000Z',
     };
     const concurrent = await Promise.all(
@@ -206,24 +225,24 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     await expect(
       attestPortableDryRun({
         ...request,
-        attestation: {
+        attestation: createLocalPortableDryRunAttestation({
           keyId: 'dry_run_key_02',
           privateKey: rotatedKeys.privateKey,
           trustedPublicKeys: new Map([
             ['dry_run_key_01', dryRunKeys.publicKey],
             ['dry_run_key_02', rotatedKeys.publicKey],
           ]),
-        },
+        }),
       }),
     ).resolves.toEqual(first);
     await expect(
       attestPortableDryRun({
         ...request,
-        attestation: {
+        attestation: createLocalPortableDryRunAttestation({
           keyId: 'dry_run_key_02',
           privateKey: rotatedKeys.privateKey,
           trustedPublicKeys: new Map([['dry_run_key_02', rotatedKeys.publicKey]]),
-        },
+        }),
       }),
     ).rejects.toThrow(/RECEIPT_INVALID/u);
     expect(first.receipt).toMatchObject({
@@ -259,9 +278,281 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         .where('import_job_id', '=', job.id)
         .execute(),
     ).rejects.toThrow(/immutable/u);
+    await repository.transitionJob({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      from: ['pending'],
+      to: 'ready',
+      summary: { accepted: true, inputHash: request.inputSha256 },
+    });
+    const approvalRequest = {
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      approvedBy: 'user_approver',
+      idempotencyKey: 'portable-approval-01',
+      confirmation: `approve:${job.id}:${first.receiptSha256}`,
+      attestation: request.attestation,
+      now: new Date('2026-07-12T21:05:00.000Z'),
+    };
+    await db
+      .updateTable('import_jobs')
+      .set({ configuration: JSON.stringify({ changed: true }) })
+      .where('id', '=', job.id)
+      .execute();
+    await expect(approvePortableImport(approvalRequest)).rejects.toThrow(/APPROVAL_INPUT_CHANGED/u);
+    await db
+      .updateTable('import_jobs')
+      .set({ configuration: job.configuration })
+      .where('id', '=', job.id)
+      .execute();
+    const concurrentApprovals = await Promise.all(
+      Array.from({ length: 4 }, () => approvePortableImport(approvalRequest)),
+    );
+    const approval = concurrentApprovals[0]!;
+    expect(concurrentApprovals.every((candidate) => candidate.id === approval.id)).toBe(true);
+    await expect(
+      approvePortableImport({
+        ...approvalRequest,
+        now: new Date('2026-07-12T21:06:00.000Z'),
+      }),
+    ).resolves.toEqual(approval);
+    await expect(
+      approvePortableImport({ ...approvalRequest, approvedBy: 'user_other' }),
+    ).rejects.toThrow(/IDEMPOTENCY_CONFLICT/u);
+    const concurrentDifferentKeys = await Promise.all(
+      ['portable-approval-parallel-a', 'portable-approval-parallel-b'].map((idempotencyKey) =>
+        approvePortableImport({
+          ...approvalRequest,
+          idempotencyKey,
+          now: new Date('2026-07-12T21:05:30.000Z'),
+        }),
+      ),
+    );
+    expect(concurrentDifferentKeys[0]!.id).toBe(concurrentDifferentKeys[1]!.id);
+    const commitConfirmation = `commit:${job.id}:${approval.id}:${approval.approval_digest}`;
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: commitConfirmation,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:06:00.000Z'),
+      }),
+    ).resolves.toEqual(approval);
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: 'commit:substituted',
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:06:00.000Z'),
+      }),
+    ).rejects.toThrow(/CONFIRMATION_INVALID/u);
+    await revokePortableImportApproval({
+      db,
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      approvalId: approval.id,
+      revokedBy: 'user_approver',
+      reason: 'Operator cancelled cutover',
+      now: new Date('2026-07-12T21:06:00.000Z'),
+    });
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: commitConfirmation,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:07:00.000Z'),
+      }),
+    ).rejects.toThrow(/APPROVAL_REQUIRED/u);
+    const renewed = await approvePortableImport({
+      ...approvalRequest,
+      idempotencyKey: 'portable-approval-02',
+      now: new Date('2026-07-12T21:07:00.000Z'),
+    });
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: `commit:${job.id}:${renewed.id}:${renewed.approval_digest}`,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:18:00.000Z'),
+      }),
+    ).rejects.toThrow(/APPROVAL_REQUIRED/u);
+    await expect(
+      db
+        .updateTable('portable_import_approvals')
+        .set({ approval_digest: 'f'.repeat(64) })
+        .where('id', '=', approval.id)
+        .execute(),
+    ).rejects.toThrow(/immutable/u);
+    await expect(
+      db
+        .deleteFrom('portable_import_approval_revocations')
+        .where('approval_id', '=', approval.id)
+        .execute(),
+    ).rejects.toThrow(/immutable/u);
+    let activePrincipal: Principal = {
+      type: 'user',
+      id: 'user_route_approver',
+      tenantId,
+      organizationIds: [organizationId],
+      scopes: ['migrations.commit'],
+    };
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      portableDryRunAttestation: request.attestation,
+      temporalClient: {},
+    } as never);
+    app.addHook('preHandler', async (fastifyRequest) => {
+      fastifyRequest.principal = activePrincipal;
+    });
+    registerErrorHandler(app);
+    await app.register(migrationRoutes);
+    const routeHeaders = {
+      'idempotency-key': 'portable-approval-route-01',
+      'x-tixkit-confirmation': `approve:${job.id}:${first.receiptSha256}`,
+    };
+    activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/portable-approval`,
+          headers: routeHeaders,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(403);
+    activePrincipal = {
+      ...activePrincipal,
+      scopes: ['migrations.commit'],
+      eventIds: ['event_scoped_route_01'],
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/portable-approval`,
+          headers: routeHeaders,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(403);
+    activePrincipal = {
+      ...activePrincipal,
+      eventIds: undefined,
+      organizationIds: ['organization_outside_scope'],
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/portable-approval`,
+          headers: routeHeaders,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(404);
+    activePrincipal = { ...activePrincipal, organizationIds: [organizationId] };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/portable-approval`,
+          headers: routeHeaders,
+          payload: [],
+        })
+      ).statusCode,
+    ).toBe(400);
+    const approvedResponse = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/portable-approval`,
+      headers: routeHeaders,
+      payload: {},
+    });
+    expect(approvedResponse.statusCode, approvedResponse.body).toBe(201);
+    const approvedBody = approvedResponse.json<{
+      approvalId: string;
+      approvalDigest: string;
+      commitConfirmation: string;
+    }>();
+    const replayResponse = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/portable-approval`,
+      headers: routeHeaders,
+      payload: {},
+    });
+    expect(replayResponse.statusCode).toBe(201);
+    expect(replayResponse.json()).toEqual(approvedResponse.json());
+    const untrustedRouteKeys = generateKeyPairSync('ed25519');
+    app.context.portableDryRunAttestation = createLocalPortableDryRunAttestation({
+      keyId: 'route_untrusted_key',
+      privateKey: untrustedRouteKeys.privateKey,
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/commit`,
+          headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+        })
+      ).statusCode,
+    ).toBe(503);
+    app.context.portableDryRunAttestation = request.attestation;
+    const validCommit = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/commit`,
+      headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+    });
+    expect(validCommit.statusCode, validCommit.body).toBe(409);
+    expect(validCommit.json()).toMatchObject({
+      error: { message: expect.stringMatching(/rebindings/u) },
+    });
+    const revokeResponse = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/portable-approvals/${approvedBody.approvalId}/revoke`,
+      headers: { 'x-tixkit-confirmation': `revoke:${approvedBody.approvalId}` },
+      payload: { reason: 'Route lifecycle proof' },
+    });
+    expect(revokeResponse.statusCode, revokeResponse.body).toBe(200);
+    const revokedCommit = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/commit`,
+      headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+    });
+    expect(revokedCommit.statusCode).toBe(409);
+    expect(revokedCommit.json()).toMatchObject({
+      error: { message: expect.stringMatching(/fresh, unrevoked/u) },
+    });
+    const auditCount = await db
+      .selectFrom('audit_logs')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('resource_id', '=', job.id)
+      .executeTakeFirstOrThrow();
+    expect(Number(auditCount.count)).toBeGreaterThanOrEqual(3);
+    await app.close();
     await truncateAllData(db);
+    await PortableImportApprovalsMigration.down!(db);
     await PortableImportPreflightsMigration.down!(db);
     await PortableImportPreflightsMigration.up(db);
+    await PortableImportApprovalsMigration.up(db);
     await expect(
       db.selectFrom('portable_import_preflights').selectAll().execute(),
     ).resolves.toEqual([]);

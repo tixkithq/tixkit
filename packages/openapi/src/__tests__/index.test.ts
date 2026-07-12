@@ -1968,6 +1968,25 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.PortableDryRunReceipt.required).toEqual(
       expect.arrayContaining(['inputSha256', 'artifactSha256', 'signature']),
     );
+    const portableApproval = openApiSpec.paths['/migration-jobs/{jobId}/portable-approval'].post;
+    expect(portableApproval).toMatchObject({
+      operationId: 'approvePortableMigrationJob',
+      'x-required-permissions': ['migrations.commit'],
+    });
+    expect(Object.keys(portableApproval.responses)).toEqual(
+      expect.arrayContaining(['201', '400', '409', '503']),
+    );
+    expect(
+      openApiSpec.paths['/migration-jobs/{jobId}/portable-approvals/{approvalId}/revoke'].post,
+    ).toMatchObject({
+      operationId: 'revokePortableMigrationApproval',
+      'x-required-permissions': ['migrations.commit'],
+    });
+    const portableCommit = openApiSpec.paths['/migration-jobs/{jobId}/commit'].post;
+    expect(portableCommit.parameters).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'jobId', in: 'path' })]),
+    );
+    expect(portableCommit.responses).toHaveProperty('503');
   });
 
   it('gives every body-bearing successful migration response a JSON schema', () => {

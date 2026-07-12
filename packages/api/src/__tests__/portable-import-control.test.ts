@@ -15,10 +15,10 @@ describe('portable dry-run attestation custody', () => {
       PORTABILITY_DRY_RUN_SIGNING_KEY_ID: 'dry_run_key_01',
       PORTABILITY_DRY_RUN_SIGNING_PRIVATE_KEY_BASE64: encodedPrivateKey(),
     };
-    expect(portableDryRunAttestationFromEnvironment(environment)).toMatchObject({
-      keyId: 'dry_run_key_01',
-      privateKey: { asymmetricKeyType: 'ed25519' },
-    });
+    const authority = portableDryRunAttestationFromEnvironment(environment);
+    expect(authority.keyId).toBe('dry_run_key_01');
+    expect(authority.trustedPublicKeys.get('dry_run_key_01')?.asymmetricKeyType).toBe('ed25519');
+    expect(authority.createReceipt).toBeTypeOf('function');
     expect(() =>
       portableDryRunAttestationFromEnvironment({
         ...environment,

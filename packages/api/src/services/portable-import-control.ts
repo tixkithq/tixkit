@@ -13,8 +13,116 @@ import {
 
 export interface PortableDryRunAttestationConfiguration {
   keyId: string;
-  privateKey: KeyObject;
   trustedPublicKeys: ReadonlyMap<string, KeyObject>;
+  createReceipt(input: {
+    preflight: PortabilityPreflightResult;
+    manifest: PortableBundleManifest;
+    destinationId: string;
+    inputSha256: string;
+    artifactSha256: string;
+    checkedAt: string;
+  }): Promise<PortableDryRunReceipt>;
+}
+
+export function createLocalPortableDryRunAttestation(input: {
+  keyId: string;
+  privateKey: KeyObject;
+  trustedPublicKeys?: ReadonlyMap<string, KeyObject>;
+}): PortableDryRunAttestationConfiguration {
+  const trustedPublicKeys = new Map(input.trustedPublicKeys ?? []);
+  if (!trustedPublicKeys.has(input.keyId))
+    trustedPublicKeys.set(input.keyId, createPublicKey(input.privateKey));
+  return {
+    keyId: input.keyId,
+    trustedPublicKeys,
+    async createReceipt(receiptInput) {
+      return createPortableDryRunReceipt(
+        receiptInput.preflight,
+        receiptInput.manifest,
+        receiptInput.destinationId,
+        receiptInput.inputSha256,
+        receiptInput.artifactSha256,
+        receiptInput.checkedAt,
+        input.keyId,
+        input.privateKey,
+      );
+    },
+  };
+}
+
+function parsedJson(value: string | null): unknown {
+  return value === null ? null : JSON.parse(value);
+}
+
+export function stablePortableControlHash(value: unknown): string {
+  return createHash('sha256').update(canonicalPortableJson(value)).digest('hex');
+}
+
+async function portableImportCurrentInputHashFromDatabase(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  sourceSystem: string;
+}): Promise<string> {
+  const repository = new ImportRepository(input.db);
+  const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
+  if (!job || job.source_system !== input.sourceSystem)
+    throw new Error('PORTABLE_IMPORT_JOB_EVIDENCE_INVALID');
+  const rows = [];
+  for (let offset = 0; ; offset += 5_000) {
+    const page = await repository.listRows({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      limit: 5_000,
+      offset,
+    });
+    rows.push(...page);
+    if (page.length < 5_000) break;
+  }
+  const files = await repository.listFiles(input.tenantId, input.organizationId, input.jobId);
+  const mappings = await repository.listMappings(
+    input.tenantId,
+    input.organizationId,
+    input.sourceSystem,
+  );
+  return stablePortableControlHash({
+    configuration: parsedJson(job.configuration),
+    files: files.map((file) => ({
+      id: file.id,
+      sha256: file.sha256,
+      byteSize: String(file.byte_size),
+    })),
+    mappings: mappings.map((mapping) => ({
+      id: mapping.id,
+      version: mapping.version,
+      mapping: stablePortableControlHash(parsedJson(mapping.mapping)),
+    })),
+    rows: rows.map((row) => ({
+      id: row.id,
+      source: stablePortableControlHash(parsedJson(row.source_data)),
+      normalized: stablePortableControlHash(parsedJson(row.normalized_data)),
+    })),
+  });
+}
+
+export async function portableImportCurrentInputHash(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  sourceSystem: string;
+}): Promise<string> {
+  return input.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute((transaction) =>
+      portableImportCurrentInputHashFromDatabase({
+        ...input,
+        db: transaction as Database,
+      }),
+    );
 }
 
 export function portableDryRunAttestationFromEnvironment(
@@ -48,6 +156,7 @@ export function portableDryRunAttestationFromEnvironment(
       for (const [trustedKeyId, pem] of Object.entries(parsed)) {
         if (!/^[A-Za-z0-9_-]{1,128}$/u.test(trustedKeyId) || typeof pem !== 'string')
           throw new Error('invalid trust entry');
+        if (trustedKeyId === keyId) throw new Error('active key id cannot be overridden');
         const publicKey = createPublicKey(pem);
         if (publicKey.asymmetricKeyType !== 'ed25519') throw new Error('invalid trust key');
         trustedPublicKeys.set(trustedKeyId, publicKey);
@@ -56,7 +165,7 @@ export function portableDryRunAttestationFromEnvironment(
       throw new Error('PORTABLE_DRY_RUN_ATTESTATION_TRUST_INVALID');
     }
   }
-  return { keyId, privateKey, trustedPublicKeys };
+  return createLocalPortableDryRunAttestation({ keyId, privateKey, trustedPublicKeys });
 }
 
 export async function attestPortableDryRun(input: {
@@ -140,16 +249,14 @@ export async function attestPortableDryRun(input: {
     input.jobId,
   );
   if (existingReceipt) return validateReceipt(existingReceipt);
-  const receipt = createPortableDryRunReceipt(
+  const receipt = await input.attestation.createReceipt({
     preflight,
     manifest,
-    evidence.destination_id,
-    input.inputSha256,
-    evidence.artifact_sha256,
-    input.checkedAt ?? new Date(evidence.created_at).toISOString(),
-    input.attestation.keyId,
-    input.attestation.privateKey,
-  );
+    destinationId: evidence.destination_id,
+    inputSha256: input.inputSha256,
+    artifactSha256: evidence.artifact_sha256,
+    checkedAt: input.checkedAt ?? new Date(evidence.created_at).toISOString(),
+  });
   const receiptJson = canonicalPortableJson(receipt);
   const receiptSha256 = createHash('sha256').update(receiptJson).digest('hex');
   await repository.recordPortableDryRunReceipt({
@@ -170,4 +277,309 @@ export async function attestPortableDryRun(input: {
   );
   if (!persisted) throw new Error('PORTABLE_IMPORT_DRY_RUN_RECEIPT_NOT_FOUND');
   return validateReceipt(persisted);
+}
+
+function portableApprovalDigest(input: {
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  operationId: string;
+  manifestSha256: string;
+  artifactSha256: string;
+  inputSha256: string;
+  receiptSha256: string;
+  approvedBy: string;
+  approvedAt: string;
+  expiresAt: string;
+}): string {
+  return createHash('sha256')
+    .update(canonicalPortableJson({ action: 'portable-import.commit', ...input }))
+    .digest('hex');
+}
+
+export async function approvePortableImport(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  approvedBy: string;
+  idempotencyKey: string;
+  confirmation: string;
+  attestation: PortableDryRunAttestationConfiguration;
+  now?: Date;
+}) {
+  if (
+    !input.idempotencyKey ||
+    input.idempotencyKey !== input.idempotencyKey.trim() ||
+    input.idempotencyKey.length > 255
+  )
+    throw new Error('PORTABLE_IMPORT_APPROVAL_IDEMPOTENCY_INVALID');
+  let idempotencyKeySha256 = '';
+  let requestFingerprint = '';
+  let approvalDigest = '';
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await input.db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (transaction) => {
+          const transactionDatabase = transaction as Database;
+          const repository = new ImportRepository(transactionDatabase);
+          const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
+          if (!job || job.source_system !== 'tixkit-portable' || job.status !== 'ready')
+            throw new Error('PORTABLE_IMPORT_APPROVAL_JOB_NOT_READY');
+          const storedReceipt = await repository.findPortableDryRunReceipt(
+            input.tenantId,
+            input.organizationId,
+            input.jobId,
+          );
+          if (!storedReceipt) throw new Error('PORTABLE_IMPORT_DRY_RUN_RECEIPT_NOT_FOUND');
+          const currentInputSha256 = await portableImportCurrentInputHashFromDatabase({
+            db: transactionDatabase,
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            sourceSystem: job.source_system,
+          });
+          const summary = parsedJson(job.summary) as {
+            accepted?: boolean;
+            inputHash?: string;
+          } | null;
+          if (
+            summary?.accepted !== true ||
+            summary.inputHash !== currentInputSha256 ||
+            storedReceipt.input_sha256 !== currentInputSha256
+          )
+            throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
+          if (input.confirmation !== `approve:${input.jobId}:${storedReceipt.receipt_sha256}`)
+            throw new Error('PORTABLE_IMPORT_APPROVAL_CONFIRMATION_INVALID');
+          const { receipt } = await attestPortableDryRun({
+            db: transactionDatabase,
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            inputSha256: storedReceipt.input_sha256,
+            createdBy: input.approvedBy,
+            attestation: input.attestation,
+          });
+          const typedReceipt = receipt as PortableDryRunReceipt;
+          idempotencyKeySha256 = createHash('sha256').update(input.idempotencyKey).digest('hex');
+          requestFingerprint = createHash('sha256')
+            .update(
+              canonicalPortableJson({
+                action: 'portable-import.approve',
+                approvedBy: input.approvedBy,
+                jobId: input.jobId,
+                receiptSha256: storedReceipt.receipt_sha256,
+              }),
+            )
+            .digest('hex');
+          const replay = await repository.findPortableImportApprovalByIdempotency({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            idempotencyKeySha256,
+          });
+          if (replay) {
+            if (replay.request_fingerprint !== requestFingerprint)
+              throw new Error('PORTABLE_IMPORT_APPROVAL_IDEMPOTENCY_CONFLICT');
+            return replay;
+          }
+          const requestedNow = input.now ?? new Date();
+          const now = new Date(Math.floor(requestedNow.getTime() / 1000) * 1000);
+          const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+          approvalDigest = portableApprovalDigest({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            operationId: typedReceipt.operationId,
+            manifestSha256: typedReceipt.manifestSha256,
+            artifactSha256: typedReceipt.artifactSha256,
+            inputSha256: typedReceipt.inputSha256,
+            receiptSha256: storedReceipt.receipt_sha256,
+            approvedBy: input.approvedBy,
+            approvedAt: now.toISOString(),
+            expiresAt: expiresAt.toISOString(),
+          });
+          return repository.createPortableImportApproval({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            operationId: typedReceipt.operationId,
+            manifestSha256: typedReceipt.manifestSha256,
+            artifactSha256: typedReceipt.artifactSha256,
+            inputSha256: typedReceipt.inputSha256,
+            receiptSha256: storedReceipt.receipt_sha256,
+            approvalDigest,
+            approvedBy: input.approvedBy,
+            idempotencyKeySha256,
+            requestFingerprint,
+            expiresAt,
+            now,
+          });
+        });
+    } catch (error) {
+      const repository = new ImportRepository(input.db);
+      if (idempotencyKeySha256) {
+        const replay = await repository.findPortableImportApprovalByIdempotency({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          idempotencyKeySha256,
+        });
+        if (replay) {
+          if (replay.request_fingerprint !== requestFingerprint)
+            throw new Error('PORTABLE_IMPORT_APPROVAL_IDEMPOTENCY_CONFLICT', { cause: error });
+          return replay;
+        }
+      }
+      if (approvalDigest) {
+        const replay = await repository.findPortableImportApprovalByDigest({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          approvalDigest,
+        });
+        if (replay && replay.request_fingerprint === requestFingerprint) return replay;
+      }
+      const databaseError = error as {
+        code?: string;
+        number?: number;
+        errno?: number;
+        cause?: { code?: string; number?: number; errno?: number };
+      };
+      const code = databaseError.code ?? databaseError.cause?.code;
+      const number = databaseError.number ?? databaseError.cause?.number;
+      const errno = databaseError.errno ?? databaseError.cause?.errno;
+      const retryable =
+        code === '23505' ||
+        code === 'ER_DUP_ENTRY' ||
+        number === 2601 ||
+        number === 2627 ||
+        code === '40001' ||
+        code === '40P01' ||
+        code === 'ER_LOCK_DEADLOCK' ||
+        errno === 1213;
+      if (!retryable || attempt === 4) throw error;
+    }
+  }
+  throw new Error('PORTABLE_IMPORT_APPROVAL_RETRY_EXHAUSTED');
+}
+
+export async function validatePortableImportApproval(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  confirmation: string;
+  attestation: PortableDryRunAttestationConfiguration;
+  now?: Date;
+}) {
+  return input.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute(async (transaction) => {
+      const transactionDatabase = transaction as Database;
+      const repository = new ImportRepository(transactionDatabase);
+      const now = input.now ?? new Date();
+      const prefix = `commit:${input.jobId}:`;
+      const confirmationParts = input.confirmation.startsWith(prefix)
+        ? input.confirmation.slice(prefix.length).split(':')
+        : [];
+      if (
+        confirmationParts.length !== 2 ||
+        !confirmationParts[0] ||
+        !/^[a-f0-9]{64}$/u.test(confirmationParts[1] ?? '')
+      )
+        throw new Error('PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID');
+      const approval = await repository.findPortableImportApproval({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        approvalId: confirmationParts[0]!,
+      });
+      if (
+        !approval ||
+        new Date(approval.expires_at) <= now ||
+        (await repository.findPortableImportApprovalRevocation({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          approvalId: confirmationParts[0]!,
+        }))
+      )
+        throw new Error('PORTABLE_IMPORT_APPROVAL_REQUIRED');
+      if (input.confirmation !== `commit:${input.jobId}:${approval.id}:${approval.approval_digest}`)
+        throw new Error('PORTABLE_IMPORT_COMMIT_CONFIRMATION_INVALID');
+      const { receipt } = await attestPortableDryRun({
+        db: transactionDatabase,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        inputSha256: approval.input_sha256,
+        createdBy: approval.approved_by,
+        attestation: input.attestation,
+      });
+      const typedReceipt = receipt as PortableDryRunReceipt;
+      const expectedDigest = portableApprovalDigest({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        operationId: approval.operation_id,
+        manifestSha256: approval.manifest_sha256,
+        artifactSha256: approval.artifact_sha256,
+        inputSha256: approval.input_sha256,
+        receiptSha256: approval.receipt_sha256,
+        approvedBy: approval.approved_by,
+        approvedAt: new Date(approval.created_at).toISOString(),
+        expiresAt: new Date(approval.expires_at).toISOString(),
+      });
+      if (
+        expectedDigest !== approval.approval_digest ||
+        typedReceipt.operationId !== approval.operation_id ||
+        typedReceipt.manifestSha256 !== approval.manifest_sha256 ||
+        typedReceipt.artifactSha256 !== approval.artifact_sha256 ||
+        typedReceipt.inputSha256 !== approval.input_sha256
+      )
+        throw new Error('PORTABLE_IMPORT_APPROVAL_EVIDENCE_INVALID');
+      const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
+      if (!job || job.source_system !== 'tixkit-portable' || job.status !== 'ready')
+        throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
+      const summary = parsedJson(job.summary) as { accepted?: boolean; inputHash?: string } | null;
+      const currentInputSha256 = await portableImportCurrentInputHashFromDatabase({
+        db: transactionDatabase,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        sourceSystem: job.source_system,
+      });
+      if (
+        summary?.accepted !== true ||
+        summary.inputHash !== currentInputSha256 ||
+        approval.input_sha256 !== currentInputSha256
+      )
+        throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
+      return approval;
+    });
+}
+
+export async function revokePortableImportApproval(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  jobId: string;
+  approvalId: string;
+  revokedBy: string;
+  reason?: string;
+  now?: Date;
+}) {
+  return new ImportRepository(input.db).revokePortableImportApproval({
+    tenantId: input.tenantId,
+    organizationId: input.organizationId,
+    jobId: input.jobId,
+    approvalId: input.approvalId,
+    revokedBy: input.revokedBy,
+    reason: input.reason,
+    now: input.now ?? new Date(),
+  });
 }

@@ -82,7 +82,9 @@ Configure `TIXKIT_PORTABILITY_IMPORT_TRUST` on workers with the destination comp
 
 The current importer stages only logical sections with production migration committers. Unsupported configuration sections and owned media fail before extraction instead of being silently omitted. Keep C-127 open until the exporter, owned-media transfer, destination rebinding, reconciliation, and all three operating-model round trips are proven.
 
-Portable jobs are currently dry-run-only. The API rejects `mode: "commit"` until final-cutover freshness, required destination rebindings, and portability reconciliation are bound to commit authorization. Do not treat a successful staged dry run as permission to activate imported data.
+Portable jobs remain domain-commit-disabled until required destination rebindings and reconciliation are complete. A successful dry run now produces an immutable signed receipt bound to the exact staged input and source artifact. Self-Hosted deployments configure `PORTABILITY_DRY_RUN_SIGNING_KEY_ID`, `PORTABILITY_DRY_RUN_SIGNING_PRIVATE_KEY_BASE64`, and an overlapping `PORTABILITY_DRY_RUN_TRUSTED_PUBLIC_KEYS` keyring during rotation. Managed Cloud supplies the same public authority interface through managed key custody; public code does not require or expose Cloud private keys.
+
+An operator with `migrations.commit` must approve that exact receipt with `Idempotency-Key` and `x-tixkit-confirmation: approve:<jobId>:<receiptSha256>`. The returned commit confirmation binds the principal, tenant, organization, job, operation, manifest, artifact, staged input, receipt, issue time, and ten-minute expiry. Approval is immutable and revocable. Material staging changes require a new migration job, expired or revoked approvals fail closed, and the commit endpoint still refuses domain writes until rebinding and reconciliation gates pass.
 
 ## CLI workflow
 

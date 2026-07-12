@@ -888,6 +888,27 @@ const rawOpenApiSpec = {
         required: ['jobId', 'status'],
         properties: { jobId: { type: 'string' }, status: { type: 'string' } },
       },
+      PortableImportApproval: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['approvalId', 'approvalDigest', 'expiresAt', 'commitConfirmation'],
+        properties: {
+          approvalId: { type: 'string' },
+          approvalDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          commitConfirmation: { type: 'string', pattern: '^commit:.+$' },
+        },
+      },
+      PortableImportApprovalRevocation: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['approvalId', 'revoked', 'revokedAt'],
+        properties: {
+          approvalId: { type: 'string' },
+          revoked: { const: true },
+          revokedAt: { type: 'string', format: 'date-time' },
+        },
+      },
       MigrationActionAccepted: {
         type: 'object',
         additionalProperties: false,
@@ -5516,6 +5537,12 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['events.read'],
         parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'brandId',
             in: 'query',
@@ -13529,6 +13556,126 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/migration-jobs/{jobId}/portable-approval': {
+      post: {
+        operationId: 'approvePortableMigrationJob',
+        summary: 'Approve the exact immutable portable dry-run receipt for commit',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.commit'],
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 255 },
+          },
+          {
+            name: 'x-tixkit-confirmation',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', pattern: '^approve:.+$' },
+          },
+        ],
+        responses: {
+          '201': {
+            description: 'Fresh digest-bound portable import approval',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PortableImportApproval' },
+              },
+            },
+          },
+          '400': {
+            description: 'Malformed confirmation, idempotency key, or request body',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Job state or idempotency conflict',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '503': {
+            description: 'Receipt integrity or attestation trust unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
+    '/migration-jobs/{jobId}/portable-approvals/{approvalId}/revoke': {
+      post: {
+        operationId: 'revokePortableMigrationApproval',
+        summary: 'Irreversibly revoke a portable import approval',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.commit'],
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'approvalId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'x-tixkit-confirmation',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', pattern: '^revoke:.+$' },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Approval revocation evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PortableImportApprovalRevocation' },
+              },
+            },
+          },
+          '400': {
+            description: 'Malformed confirmation or revocation body',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Approval not found in the scoped job',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Approval is already revoked with conflicting evidence',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '503': {
+            description: 'Approval evidence persistence is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
     '/migration-jobs/{jobId}/commit': {
       post: {
         operationId: 'commitMigrationJob',
@@ -13536,6 +13683,12 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
         parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'x-tixkit-confirmation',
             in: 'header',
@@ -13558,6 +13711,12 @@ const rawOpenApiSpec = {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },
               },
+            },
+          },
+          '503': {
+            description: 'Portable approval integrity or trust validation is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
             },
           },
         },

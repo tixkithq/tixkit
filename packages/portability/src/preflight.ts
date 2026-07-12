@@ -216,7 +216,7 @@ export interface PortableDryRunReceipt {
   signature: string;
 }
 
-function dryRunReceiptPayload(
+export function portableDryRunReceiptPayload(
   receipt: Omit<PortableDryRunReceipt, 'sha256' | 'attestationKeyId' | 'signature'>,
 ): string {
   return `${JSON.stringify({
@@ -268,11 +268,13 @@ export function createPortableDryRunReceipt(
   };
   return {
     ...payload,
-    sha256: createHash('sha256').update(dryRunReceiptPayload(payload)).digest('hex'),
+    sha256: createHash('sha256').update(portableDryRunReceiptPayload(payload)).digest('hex'),
     attestationKeyId,
-    signature: cryptoSign(null, Buffer.from(dryRunReceiptPayload(payload)), privateKey).toString(
-      'base64',
-    ),
+    signature: cryptoSign(
+      null,
+      Buffer.from(portableDryRunReceiptPayload(payload)),
+      privateKey,
+    ).toString('base64'),
   };
 }
 
@@ -292,7 +294,7 @@ export function verifyPortableDryRunReceipt(
       compatible: receipt.compatible,
       requiredRebindings: receipt.requiredRebindings,
     };
-    const encoded = dryRunReceiptPayload(payload);
+    const encoded = portableDryRunReceiptPayload(payload);
     return (
       receipt.compatible === true &&
       new Date(receipt.checkedAt).toISOString() === receipt.checkedAt &&
@@ -329,7 +331,7 @@ export function validatePortableResume(
     dryRunReceipt.sha256 !==
       createHash('sha256')
         .update(
-          dryRunReceiptPayload({
+          portableDryRunReceiptPayload({
             operationId: dryRunReceipt.operationId,
             manifestSha256: dryRunReceipt.manifestSha256,
             destinationId: dryRunReceipt.destinationId,
@@ -352,7 +354,7 @@ export function validatePortableResume(
     !cryptoVerify(
       null,
       Buffer.from(
-        dryRunReceiptPayload({
+        portableDryRunReceiptPayload({
           operationId: dryRunReceipt.operationId,
           manifestSha256: dryRunReceipt.manifestSha256,
           destinationId: dryRunReceipt.destinationId,

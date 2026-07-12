@@ -16,6 +16,7 @@ import { PricingEngine } from './services/pricing.js';
 import { InventoryService } from './services/inventory.js';
 import { QrService } from './services/qr.js';
 import { TemporalClient } from './services/temporal.js';
+import type { PortableDryRunAttestationConfiguration } from './services/portable-import-control.js';
 import { tenantRoutes } from './routes/modules/tenant.js';
 import { eventRoutes } from './routes/modules/events.js';
 import { readinessRoutes } from './routes/modules/readiness.js';
@@ -70,6 +71,7 @@ export type AppContext = {
   smsTransport: SmsTransport;
   stripe?: Stripe;
   readinessServiceFactory?: (db: Database) => ReadinessService;
+  portableDryRunAttestation?: PortableDryRunAttestationConfiguration;
   eventDuplicationCheckpoint?: (input: {
     stage: 'after_children_copied';
     sourceEventId: string;

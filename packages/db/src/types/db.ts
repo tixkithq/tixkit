@@ -1872,6 +1872,35 @@ export interface PortableImportDryRunReceiptTable {
   created_at: Timestamp;
 }
 
+export interface PortableImportApprovalTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  operation_id: string;
+  manifest_sha256: string;
+  artifact_sha256: string;
+  input_sha256: string;
+  receipt_sha256: string;
+  approval_digest: string;
+  approved_by: string;
+  idempotency_key_sha256: string;
+  request_fingerprint: string;
+  expires_at: Timestamp;
+  created_at: Timestamp;
+}
+
+export interface PortableImportApprovalRevocationTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  approval_id: string;
+  revoked_by: string;
+  reason: string | null;
+  created_at: Timestamp;
+}
+
 export interface DB {
   agent_principals: AgentPrincipalTable;
   agent_delegations: AgentDelegationTable;
@@ -1991,4 +2020,6 @@ export interface DB {
   portable_export_events: PortableExportEventTable;
   portable_import_preflights: PortableImportPreflightTable;
   portable_import_dry_run_receipts: PortableImportDryRunReceiptTable;
+  portable_import_approvals: PortableImportApprovalTable;
+  portable_import_approval_revocations: PortableImportApprovalRevocationTable;
 }
