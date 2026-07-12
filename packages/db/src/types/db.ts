@@ -1812,7 +1812,9 @@ export interface PortableExportJobTable {
   mode: string;
   status: string;
   bundle_id: string;
-  source_change_cursor: string;
+  source_change_cursor: string | null;
+  build_owner_sha256: string | null;
+  build_lease_expires_at: Timestamp | null;
   manifest_sha256: string | null;
   artifact_sha256: string | null;
   artifact_bytes: number | string | bigint | null;
@@ -1829,6 +1831,9 @@ export interface PortableExportEventTable {
   tenant_id: string;
   organization_id: string;
   export_job_id: string;
+  bundle_id: string;
+  export_sequence: number | string | bigint;
+  source_change_cursor: string;
   manifest_sha256: string;
   artifact_sha256: string;
   artifact_bytes: number | string | bigint;

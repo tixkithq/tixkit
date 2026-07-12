@@ -117,7 +117,6 @@ export class PortableExportRepository extends BaseRepository {
           const now = new Date();
           const id = this.generateId('pex');
           const bundleId = `bundle_${id.slice(4)}`;
-          const sourceChangeCursor = `full:${sequence}`;
           await transaction
             .insertInto('portable_export_jobs')
             .values({
@@ -128,7 +127,9 @@ export class PortableExportRepository extends BaseRepository {
               mode: 'configuration',
               status: 'building',
               bundle_id: bundleId,
-              source_change_cursor: sourceChangeCursor,
+              source_change_cursor: null,
+              build_owner_sha256: null,
+              build_lease_expires_at: null,
               manifest_sha256: null,
               artifact_sha256: null,
               artifact_bytes: null,
@@ -156,6 +157,69 @@ export class PortableExportRepository extends BaseRepository {
     throw new Error('PORTABLE_EXPORT_SEQUENCE_CONTENTION');
   }
 
+  async claimBuild(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    ownerSha256: string;
+    now: Date;
+    leaseExpiresAt: Date;
+  }): Promise<boolean> {
+    if (
+      !/^[a-f0-9]{64}$/u.test(input.ownerSha256) ||
+      !Number.isFinite(input.now.getTime()) ||
+      !Number.isFinite(input.leaseExpiresAt.getTime()) ||
+      input.leaseExpiresAt <= input.now
+    )
+      throw new Error('PORTABLE_EXPORT_BUILD_CLAIM_INVALID');
+    const result = await this.db
+      .updateTable('portable_export_jobs')
+      .set({
+        build_owner_sha256: input.ownerSha256,
+        build_lease_expires_at: input.leaseExpiresAt,
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.jobId)
+      .where('status', '=', 'building')
+      .where((expression) =>
+        expression.or([
+          expression('build_owner_sha256', 'is', null),
+          expression('build_owner_sha256', '=', input.ownerSha256),
+          expression('build_lease_expires_at', '<=', input.now),
+        ]),
+      )
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) === 1;
+  }
+
+  async recordSnapshotCursor(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    ownerSha256: string;
+    sourceChangeCursor: string;
+    now: Date;
+  }): Promise<void> {
+    if (
+      !/^[a-f0-9]{64}$/u.test(input.ownerSha256) ||
+      !/^snapshot-sha256:[a-f0-9]{64}$/u.test(input.sourceChangeCursor) ||
+      !Number.isFinite(input.now.getTime())
+    )
+      throw new Error('PORTABLE_EXPORT_SNAPSHOT_CURSOR_INVALID');
+    const result = await this.db
+      .updateTable('portable_export_jobs')
+      .set({ source_change_cursor: input.sourceChangeCursor })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('id', '=', input.jobId)
+      .where('status', '=', 'building')
+      .where('build_owner_sha256', '=', input.ownerSha256)
+      .where('build_lease_expires_at', '>', input.now)
+      .executeTakeFirst();
+    if (Number(result.numUpdatedRows) !== 1) throw new Error('PORTABLE_EXPORT_BUILD_LEASE_LOST');
+  }
+
   async complete(input: {
     tenantId: string;
     organizationId: string;
@@ -163,10 +227,12 @@ export class PortableExportRepository extends BaseRepository {
     manifestSha256: string;
     artifactSha256: string;
     artifactBytes: number;
+    ownerSha256: string;
   }): Promise<void> {
     if (
       !/^[a-f0-9]{64}$/u.test(input.manifestSha256) ||
       !/^[a-f0-9]{64}$/u.test(input.artifactSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.ownerSha256) ||
       !Number.isSafeInteger(input.artifactBytes) ||
       input.artifactBytes < 1 ||
       input.artifactBytes > 50 * 1024 * 1024
@@ -174,6 +240,17 @@ export class PortableExportRepository extends BaseRepository {
       throw new Error('PORTABLE_EXPORT_COMPLETION_INVALID');
     const completed = await this.db.transaction().execute(async (transaction) => {
       const now = new Date();
+      const job = await transaction
+        .selectFrom('portable_export_jobs')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('id', '=', input.jobId)
+        .where('status', '=', 'building')
+        .where('build_owner_sha256', '=', input.ownerSha256)
+        .where('build_lease_expires_at', '>', now)
+        .executeTakeFirst();
+      if (!job?.source_change_cursor) return false;
       const result = await transaction
         .updateTable('portable_export_jobs')
         .set({
@@ -188,6 +265,8 @@ export class PortableExportRepository extends BaseRepository {
         .where('organization_id', '=', input.organizationId)
         .where('id', '=', input.jobId)
         .where('status', '=', 'building')
+        .where('build_owner_sha256', '=', input.ownerSha256)
+        .where('build_lease_expires_at', '>', now)
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) !== 1) return false;
       await transaction
@@ -197,6 +276,9 @@ export class PortableExportRepository extends BaseRepository {
           tenant_id: input.tenantId,
           organization_id: input.organizationId,
           export_job_id: input.jobId,
+          bundle_id: job.bundle_id,
+          export_sequence: job.export_sequence,
+          source_change_cursor: job.source_change_cursor,
           manifest_sha256: input.manifestSha256,
           artifact_sha256: input.artifactSha256,
           artifact_bytes: input.artifactBytes,
@@ -218,8 +300,24 @@ export class PortableExportRepository extends BaseRepository {
       existing.manifest_sha256 === input.manifestSha256 &&
       existing.artifact_sha256 === input.artifactSha256 &&
       Number(existing.artifact_bytes) === input.artifactBytes
-    )
-      return;
+    ) {
+      const event = await this.db
+        .selectFrom('portable_export_events')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('export_job_id', '=', input.jobId)
+        .executeTakeFirst();
+      if (
+        event?.bundle_id === existing.bundle_id &&
+        Number(event.export_sequence) === Number(existing.export_sequence) &&
+        event.source_change_cursor === existing.source_change_cursor &&
+        event.manifest_sha256 === input.manifestSha256 &&
+        event.artifact_sha256 === input.artifactSha256 &&
+        Number(event.artifact_bytes) === input.artifactBytes
+      )
+        return;
+    }
     throw new Error('PORTABLE_EXPORT_COMPLETION_CONFLICT');
   }
 
@@ -234,7 +332,11 @@ export class PortableExportRepository extends BaseRepository {
     }
     await this.db
       .updateTable('portable_export_jobs')
-      .set({ status: 'failed', error_code: input.errorCode, completed_at: new Date() })
+      .set({
+        status: 'failed',
+        error_code: input.errorCode,
+        completed_at: new Date(),
+      })
       .where('tenant_id', '=', input.tenantId)
       .where('organization_id', '=', input.organizationId)
       .where('id', '=', input.jobId)

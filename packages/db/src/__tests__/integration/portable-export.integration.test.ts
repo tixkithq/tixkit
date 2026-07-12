@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../../client.js';
 import { dropAllTables, runMigrations, truncateAllData } from '../../migrate.js';
+import { PortableExportBuildLeasesMigration } from '../../migrations/0069_portable_export_build_leases.js';
 import {
   OrganizationRepository,
   PortableExportRepository,
@@ -28,7 +29,11 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
     await runMigrations(url);
     db = createDb(url);
     await truncateAllData(db);
-    tenantId = (await new TenantRepository(db).create({ name: `Portable export ${driver}` })).id;
+    tenantId = (
+      await new TenantRepository(db).create({
+        name: `Portable export ${driver}`,
+      })
+    ).id;
     organizationId = (
       await new OrganizationRepository(db).create({
         tenantId,
@@ -73,6 +78,26 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
   it('records immutable exact artifact evidence and rejects conflicting completion', async () => {
     const repository = new PortableExportRepository(db);
     const job = await repository.begin(input('complete-request'));
+    const ownerSha256 = 'd'.repeat(64);
+    const now = new Date();
+    await expect(
+      repository.claimBuild({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        ownerSha256,
+        now,
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+      }),
+    ).resolves.toBe(true);
+    await repository.recordSnapshotCursor({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      ownerSha256,
+      sourceChangeCursor: `snapshot-sha256:${'e'.repeat(64)}`,
+      now,
+    });
     const completion = {
       tenantId,
       organizationId,
@@ -80,6 +105,7 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
       manifestSha256: 'a'.repeat(64),
       artifactSha256: 'b'.repeat(64),
       artifactBytes: 1234,
+      ownerSha256,
     };
     await repository.complete(completion);
     await expect(repository.complete(completion)).resolves.toBeUndefined();
@@ -120,11 +146,87 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
       /COMPLETION_INVALID/u,
     );
     await expect(
-      repository.complete({ ...completion, artifactBytes: 50 * 1024 * 1024 + 1 }),
+      repository.complete({
+        ...completion,
+        artifactBytes: 50 * 1024 * 1024 + 1,
+      }),
     ).rejects.toThrow(/COMPLETION_INVALID/u);
     await expect(
       repository.complete({ ...completion, manifestSha256: 'not-a-digest' }),
     ).rejects.toThrow(/COMPLETION_INVALID/u);
+  });
+
+  it('fences concurrent and expired build owners from snapshot and completion evidence', async () => {
+    const repository = new PortableExportRepository(db);
+    const job = await repository.begin(input('lease-fencing-request'));
+    const firstOwner = '1'.repeat(64);
+    const secondOwner = '2'.repeat(64);
+    const now = new Date();
+    await expect(
+      repository.claimBuild({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        ownerSha256: firstOwner,
+        now,
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      repository.claimBuild({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        ownerSha256: secondOwner,
+        now,
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+      }),
+    ).resolves.toBe(false);
+    await repository.recordSnapshotCursor({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      ownerSha256: firstOwner,
+      sourceChangeCursor: `snapshot-sha256:${'3'.repeat(64)}`,
+      now,
+    });
+    await db
+      .updateTable('portable_export_jobs')
+      .set({ build_lease_expires_at: new Date(0) })
+      .where('id', '=', job.id)
+      .execute();
+    await expect(
+      repository.claimBuild({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        ownerSha256: secondOwner,
+        now: new Date(),
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      }),
+    ).resolves.toBe(true);
+    const completion = {
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      manifestSha256: '4'.repeat(64),
+      artifactSha256: '5'.repeat(64),
+      artifactBytes: 42,
+    };
+    await expect(repository.complete({ ...completion, ownerSha256: firstOwner })).rejects.toThrow(
+      /COMPLETION_CONFLICT/u,
+    );
+    await repository.recordSnapshotCursor({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      ownerSha256: secondOwner,
+      sourceChangeCursor: `snapshot-sha256:${'6'.repeat(64)}`,
+      now: new Date(),
+    });
+    await expect(
+      repository.complete({ ...completion, ownerSha256: secondOwner }),
+    ).resolves.toBeUndefined();
   });
 
   it('fails closed on malformed requests and scopes sequences by organization', async () => {
@@ -140,7 +242,9 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
       organizationId: otherOrganization.id,
     });
     expect(Number(other.export_sequence)).toBe(1);
-    const otherTenant = await new TenantRepository(db).create({ name: `Other tenant ${driver}` });
+    const otherTenant = await new TenantRepository(db).create({
+      name: `Other tenant ${driver}`,
+    });
     await expect(
       db
         .insertInto('portable_export_sequences')
@@ -152,6 +256,29 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
         })
         .execute(),
     ).rejects.toThrow();
+  });
+
+  it('rolls 0069 down to the seeded 0068 shape and reapplies it without losing evidence', async () => {
+    const before = await db
+      .selectFrom('portable_export_events')
+      .select(['export_job_id', 'artifact_sha256'])
+      .execute();
+    await PortableExportBuildLeasesMigration.down!(db);
+    await expect(
+      db.selectFrom('portable_export_jobs').select('build_owner_sha256').limit(1).execute(),
+    ).rejects.toThrow();
+    await PortableExportBuildLeasesMigration.down!(db);
+    await PortableExportBuildLeasesMigration.up(db);
+    await PortableExportBuildLeasesMigration.up(db);
+    const after = await db
+      .selectFrom('portable_export_events')
+      .select(['export_job_id', 'artifact_sha256', 'bundle_id', 'source_change_cursor'])
+      .execute();
+    expect(
+      after.map(({ export_job_id: jobId, artifact_sha256: digest }) => [jobId, digest]),
+    ).toEqual(before.map(({ export_job_id: jobId, artifact_sha256: digest }) => [jobId, digest]));
+    expect(after.every(({ bundle_id: bundleId }) => Boolean(bundleId))).toBe(true);
+    expect(after.every(({ source_change_cursor: cursor }) => Boolean(cursor))).toBe(true);
   });
 
   it('can reset and migrate PostgreSQL repeatedly without leaked trigger functions', async () => {

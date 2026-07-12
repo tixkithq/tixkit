@@ -4979,14 +4979,22 @@ const rawOpenApiSpec = {
         summary: 'List reusable organization venues',
         security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'organizationId', in: 'query', required: true, schema: { type: 'string' } },
+          {
+            name: 'organizationId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
             description: 'Saved venues',
             content: {
               'application/json': {
-                schema: { type: 'array', items: { $ref: '#/components/schemas/SavedVenue' } },
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/SavedVenue' },
+                },
               },
             },
           },
@@ -5018,7 +5026,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Saved venue',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/SavedVenue' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SavedVenue' },
+              },
             },
           },
         },
@@ -5029,7 +5039,14 @@ const rawOpenApiSpec = {
         operationId: 'updateSavedVenue',
         summary: 'Update a reusable organization venue',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'venueId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'venueId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -5050,7 +5067,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Updated saved venue',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/SavedVenue' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SavedVenue' },
+              },
             },
           },
         },
@@ -5059,12 +5078,23 @@ const rawOpenApiSpec = {
         operationId: 'deleteSavedVenue',
         summary: 'Delete an unused reusable organization venue',
         security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'venueId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'venueId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '204': { description: 'Saved venue deleted' },
           '409': {
             description: 'Venue is an event or workspace default',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -5495,7 +5525,10 @@ const rawOpenApiSpec = {
                   ],
                   properties: {
                     eventId: { type: 'string' },
-                    organizationFailedWebhookDeliveries: { type: 'integer', minimum: 0 },
+                    organizationFailedWebhookDeliveries: {
+                      type: 'integer',
+                      minimum: 0,
+                    },
                     failedExports: { type: 'integer', minimum: 0 },
                     checkedAt: { type: 'string', format: 'date-time' },
                   },
@@ -12647,6 +12680,98 @@ const rawOpenApiSpec = {
         responses: { '204': { description: 'Migration credential revoked' } },
       },
     },
+    '/portable-exports': {
+      post: {
+        operationId: 'createPortableExport',
+        summary: 'Create or replay a signed Tixkit configuration export',
+        description:
+          'Self-Hosted export endpoint. Returns immutable bytes for the same principal, organization, request, and idempotency key.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 255 },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['organizationId'],
+                properties: {
+                  organizationId: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 32,
+                  },
+                  mode: { const: 'configuration', default: 'configuration' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signed, checksummed Tixkit portable bundle',
+            headers: {
+              'X-Tixkit-Portable-Job-Id': { schema: { type: 'string' } },
+              'Content-Disposition': { schema: { type: 'string' } },
+            },
+            content: {
+              'application/vnd.tixkit.portable+json': {
+                schema: { type: 'string', format: 'binary' },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid export request',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Insufficient permission or invalid principal scope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '409': {
+            description: 'Idempotency conflict or export already in progress',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '503': {
+            description: 'Export signing or immutable storage is unavailable',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/portable-migration-jobs': {
       post: {
         operationId: 'createPortableMigrationJob',
@@ -12670,7 +12795,11 @@ const rawOpenApiSpec = {
                 additionalProperties: false,
                 required: ['organizationId', 'sourceSystem', 'adapterVersion', 'configuration'],
                 properties: {
-                  organizationId: { type: 'string', minLength: 1, maxLength: 128 },
+                  organizationId: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
+                  },
                   sourceSystem: { const: 'tixkit-portable' },
                   adapterVersion: { const: 'tixkit-portable-bundle-v1' },
                   mode: { const: 'dry-run', default: 'dry-run' },
@@ -12685,7 +12814,10 @@ const rawOpenApiSpec = {
                         type: 'array',
                         minItems: 1,
                         maxItems: 1,
-                        items: { type: 'string', pattern: '^upl_[A-Za-z0-9_-]{8,128}$' },
+                        items: {
+                          type: 'string',
+                          pattern: '^upl_[A-Za-z0-9_-]{8,128}$',
+                        },
                       },
                     },
                   },
@@ -12698,7 +12830,9 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Portable migration job',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MigrationJob' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MigrationJob' },
+              },
             },
           },
         },

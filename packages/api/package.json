@@ -33,6 +33,7 @@
     "@tixkit/db": "workspace:*",
     "@tixkit/domain": "workspace:*",
     "@tixkit/migration-core": "workspace:*",
+    "@tixkit/portability": "workspace:*",
     "@tixkit/email-transport": "workspace:*",
     "@tixkit/shared": "workspace:*",
     "@tixkit/workflows": "workspace:*",

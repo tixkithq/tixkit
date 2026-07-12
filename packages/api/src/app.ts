@@ -42,6 +42,7 @@ import { authRoutes } from './routes/modules/auth.js';
 import { publicUploadRoutes, uploadRoutes } from './routes/modules/uploads.js';
 import { publicWaitlistRoutes, waitlistRoutes } from './routes/modules/waitlist.js';
 import { migrationRoutes } from './routes/modules/migrations.js';
+import { portabilityRoutes } from './routes/modules/portability.js';
 import {
   createApiObservability,
   registerMetricsRoute,
@@ -454,6 +455,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await authenticated.register(uploadRoutes, { prefix: '/v1' });
     await authenticated.register(waitlistRoutes, { prefix: '/v1' });
     await authenticated.register(migrationRoutes, { prefix: '/v1' });
+    await authenticated.register(portabilityRoutes, { prefix: '/v1' });
   });
 
   return app;

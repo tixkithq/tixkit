@@ -69,6 +69,7 @@ import { AgentExecutionMigration } from './migrations/0065_agent_execution.js';
 import { AgentIdentityMigration } from './migrations/0066_agent_identity.js';
 import { AgentMemoryMigration } from './migrations/0067_agent_memory.js';
 import { PortableExportsMigration } from './migrations/0068_portable_exports.js';
+import { PortableExportBuildLeasesMigration } from './migrations/0069_portable_export_build_leases.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -291,6 +292,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0066_agent_identity': AgentIdentityMigration,
       '0067_agent_memory': AgentMemoryMigration,
       '0068_portable_exports': PortableExportsMigration,
+      '0069_portable_export_build_leases': PortableExportBuildLeasesMigration,
     };
   }
 }
