@@ -47,6 +47,9 @@ export const productAreas = [
 ] as const;
 export type ProductArea = (typeof productAreas)[number];
 
+export const adoptionPaths = ['sell', 'platform', 'self-hosted'] as const;
+export type AdoptionPath = (typeof adoptionPaths)[number];
+
 export interface PublicDocFrontmatter {
   title: string;
   description: string;
@@ -59,6 +62,7 @@ export interface PublicDocFrontmatter {
   prerequisites: readonly string[];
   related: readonly string[];
   keywords?: readonly string[];
+  adoption_paths?: readonly AdoptionPath[];
   hidden?: boolean;
 }
 
@@ -76,4 +80,8 @@ export function isContentStatus(value: string): value is ContentStatus {
 
 export function isProductArea(value: string): value is ProductArea {
   return (productAreas as readonly string[]).includes(value);
+}
+
+export function isAdoptionPath(value: string): value is AdoptionPath {
+  return (adoptionPaths as readonly string[]).includes(value);
 }

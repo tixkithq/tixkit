@@ -17,6 +17,8 @@ keywords:
   - platform api
   - ticketing api
   - sdk
+adoption_paths:
+  - platform
 ---
 
 The Tixkit Platform API is the developer-facing capability inside Tixkit Cloud. It shares the same event, inventory, checkout, order, attendee, webhook, workflow, migration, OpenAPI, and SDK contracts as the rest of Tixkit.
@@ -25,11 +27,12 @@ The Tixkit Platform API is the developer-facing capability inside Tixkit Cloud. 
 
 ## Make a safe first integration
 
-1. Read the [API fundamentals](/developers/api-fundamentals), including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries.
-2. [Make the first API call](/getting-started/first-api-call) with the narrowest useful credential scope.
-3. Choose a [supported SDK](/sdks/javascript) or use the generated OpenAPI contract directly.
-4. [Configure webhooks](/developers/webhooks/setup), verify every signature, and make consumers idempotent.
-5. Add the [embedded widget](/developers/widget/embedding) only after the server-side contract and failure behavior are understood.
+1. Follow the [hosted Platform API quickstart](/platform/quickstart) if you have a private-beta invitation, or read it to understand the intended credential and environment flow.
+2. Read the [API fundamentals](/developers/api-fundamentals), including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries.
+3. [Make the first API call](/getting-started/first-api-call) with the narrowest useful credential scope.
+4. Choose a [supported SDK](/sdks/javascript) or use the generated OpenAPI contract directly.
+5. [Configure webhooks](/developers/webhooks/setup), verify every signature, and make consumers idempotent.
+6. Add the [embedded widget](/developers/widget/embedding) only after the server-side contract and failure behavior are understood.
 
 ## Agent connections
 

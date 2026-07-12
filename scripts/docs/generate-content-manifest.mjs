@@ -79,6 +79,7 @@ const searchRecords = expandedDocuments.map((document) => ({
   contentType: document.frontmatter.content_type,
   status: document.frontmatter.status,
   keywords: document.frontmatter.keywords ?? [],
+  adoptionPaths: document.frontmatter.adoption_paths ?? [],
 }));
 mkdirSync(dirname(searchOutput), { recursive: true });
 writeFileSync(searchOutput, `${JSON.stringify(searchRecords, null, 2)}\n`, 'utf8');

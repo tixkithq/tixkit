@@ -44,13 +44,17 @@ test('homepage exposes the three accepted adoption paths accessibly', async ({ p
 
 for (const [name, route] of [
   ['Sell tickets with Tixkit', '/sell'],
+  ['Start selling with Tixkit Cloud', '/sell/quickstart'],
   ['Add ticketing to my product', '/platform'],
+  ['Start with the hosted Platform API', '/platform/quickstart'],
   ['Run Tixkit on my infrastructure', '/self-hosted'],
 ] as const) {
   test(`${name} has an honest, accessible entry page`, async ({ page }) => {
     await page.goto(route);
     await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
-    await expect(page.locator('.prose')).toContainText(/Availability|Self-Hosted is public/);
+    await expect(page.locator('.prose')).toContainText(
+      /Availability|Experimental private beta|Self-Hosted is public/,
+    );
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
   });
@@ -89,6 +93,12 @@ test('local search supports keyboard use and audience filtering', async ({ page 
   });
   await expect(input).toBeFocused();
   await page.getByLabel('Audience').selectOption('developer');
+  await page.getByLabel('Adoption path').selectOption('platform');
+  await input.fill('hosted platform api');
+  await expect(
+    page.getByRole('link', { name: /Start with the hosted Platform API/ }),
+  ).toBeVisible();
+  await page.getByLabel('Adoption path').selectOption('');
   await input.fill('webhook signature');
   await expect(page.getByRole('link', { name: /Verify webhook signatures/ }).first()).toBeVisible();
   await input.fill('android troubleshoot');
@@ -96,6 +106,9 @@ test('local search supports keyboard use and audience filtering', async ({ page 
     'href',
     '/sdks/android#troubleshoot',
   );
+  await page.getByLabel('Adoption path').selectOption('sell');
+  await input.fill('hosted platform api');
+  await expect(page.getByText('No matching documentation. Try a task or symptom.')).toBeVisible();
   await page.getByRole('button', { name: 'Close search' }).click();
   await expect(page.getByRole('button', { name: /Search documentation/ })).toBeFocused();
 });

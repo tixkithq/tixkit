@@ -17,7 +17,8 @@
     "productArea": "contributing",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/contributing/add-an-sdk-operation",
@@ -31,7 +32,8 @@
     "productArea": "contributing",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/contributing/add-documentation",
@@ -61,7 +63,8 @@
     "productArea": "contributing",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/contributing/architecture",
@@ -96,7 +99,8 @@
     "productArea": "contributing",
     "contentType": "concept",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/contributing/repository-setup",
@@ -116,7 +120,8 @@
     "productArea": "contributing",
     "contentType": "quickstart",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/contributing/testing",
@@ -130,7 +135,8 @@
     "productArea": "contributing",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/api-fundamentals/authentication",
@@ -160,7 +166,8 @@
     "productArea": "api",
     "contentType": "concept",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/api-fundamentals/errors",
@@ -185,7 +192,8 @@
     "productArea": "api",
     "contentType": "concept",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/api-fundamentals/idempotency",
@@ -199,7 +207,8 @@
     "productArea": "api",
     "contentType": "concept",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/api-fundamentals",
@@ -229,7 +238,8 @@
     "productArea": "api",
     "contentType": "overview",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/api-fundamentals/pagination",
@@ -249,7 +259,8 @@
     "productArea": "api",
     "contentType": "concept",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/api-fundamentals/permissions",
@@ -274,7 +285,8 @@
     "productArea": "api",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/webhooks/setup",
@@ -304,7 +316,8 @@
     "productArea": "webhooks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/webhooks/testing",
@@ -329,7 +342,8 @@
     "productArea": "webhooks",
     "contentType": "tutorial",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/webhooks/troubleshooting",
@@ -364,7 +378,8 @@
     "productArea": "webhooks",
     "contentType": "troubleshooting",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/webhooks/verify-signatures",
@@ -389,7 +404,8 @@
     "productArea": "webhooks",
     "contentType": "how-to",
     "status": "stable",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/developers/widget/embedding",
@@ -414,7 +430,8 @@
     "productArea": "widget",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/getting-started/deployment-model",
@@ -454,7 +471,8 @@
       "deployment",
       "local",
       "self-hosted"
-    ]
+    ],
+    "adoptionPaths": []
   },
   {
     "url": "/getting-started/first-api-call",
@@ -488,7 +506,8 @@
       "API key",
       "curl",
       "first request"
-    ]
+    ],
+    "adoptionPaths": []
   },
   {
     "url": "/getting-started/first-event",
@@ -537,7 +556,8 @@
       "first event",
       "publish",
       "ticket inventory"
-    ]
+    ],
+    "adoptionPaths": []
   },
   {
     "url": "/getting-started/local-quickstart",
@@ -583,7 +603,8 @@
       "quickstart",
       "docker compose",
       "setup check"
-    ]
+    ],
+    "adoptionPaths": []
   },
   {
     "url": "/getting-started/platform-overview",
@@ -625,7 +646,8 @@
       "headless ticketing",
       "event commerce",
       "architecture"
-    ]
+    ],
+    "adoptionPaths": []
   },
   {
     "url": "/getting-started/test-checkout",
@@ -665,7 +687,8 @@
       "test checkout",
       "order",
       "payment capture"
-    ]
+    ],
+    "adoptionPaths": []
   },
   {
     "url": "/operations/incidents",
@@ -705,7 +728,8 @@
     "productArea": "operations",
     "contentType": "runbook",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operations/temporal",
@@ -735,7 +759,8 @@
     "productArea": "operations",
     "contentType": "runbook",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/attendees",
@@ -765,7 +790,8 @@
     "productArea": "attendees",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/box-office",
@@ -795,7 +821,8 @@
     "productArea": "box-office",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/brands",
@@ -825,7 +852,8 @@
     "productArea": "brands",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/check-in",
@@ -855,7 +883,8 @@
     "productArea": "check-in",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/events",
@@ -885,7 +914,8 @@
     "productArea": "events",
     "contentType": "overview",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/events/checkout-forms",
@@ -915,7 +945,8 @@
     "productArea": "checkout",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/events/schedules",
@@ -945,7 +976,8 @@
     "productArea": "events",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/events/tickets-and-products",
@@ -975,7 +1007,8 @@
     "productArea": "inventory",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/messaging",
@@ -1005,7 +1038,8 @@
     "productArea": "messaging",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/migration-operations",
@@ -1071,7 +1105,8 @@
     "productArea": "platform",
     "contentType": "runbook",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/migrations/bespoke-adapters",
@@ -1085,7 +1120,8 @@
     "productArea": "platform",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/migrations/eventbrite",
@@ -1100,7 +1136,8 @@
     "productArea": "platform",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/migrations/generic-csv",
@@ -1115,7 +1152,8 @@
     "productArea": "platform",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/migrations/hi-events",
@@ -1130,7 +1168,8 @@
     "productArea": "platform",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/migrations/pretix",
@@ -1145,7 +1184,8 @@
     "productArea": "platform",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/migrations/ticket-tailor",
@@ -1160,7 +1200,8 @@
     "productArea": "platform",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/orders",
@@ -1190,7 +1231,8 @@
     "productArea": "orders",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/orders/refunds",
@@ -1220,7 +1262,8 @@
     "productArea": "orders",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/reports-and-exports",
@@ -1250,7 +1293,8 @@
     "productArea": "reports",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/sandbox-operations",
@@ -1265,7 +1309,8 @@
     "productArea": "platform",
     "contentType": "runbook",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/team-and-permissions",
@@ -1295,7 +1340,8 @@
     "productArea": "team",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/operators/workspace",
@@ -1325,7 +1371,8 @@
     "productArea": "workspace",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/platform",
@@ -1348,7 +1395,7 @@
         "level": 2
       }
     ],
-    "body": "The Tixkit Platform API is the developer facing capability inside Tixkit Cloud. It shares the same event, inventory, checkout, order, attendee, webhook, workflow, migration, OpenAPI, and SDK contracts as the rest of Tixkit. Availability: hosted Platform API access is planned for an experimental private beta. Public API contracts and SDK source are available for evaluation, but production Cloud credentials and support terms are not generally available. Make a safe first integration 1. Read the API fundamentals /developers/api fundamentals , including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries. 2. Make the first API call /getting started/first api call with the narrowest useful credential scope. 3. Choose a supported SDK /sdks/javascript or use the generated OpenAPI contract directly. 4. Configure webhooks /developers/webhooks/setup , verify every signature, and make consumers idempotent. 5. Add the embedded widget /developers/widget/embedding only after the server side contract and failure behavior are understood. Agent connections Third party agents will connect through the same Platform API. The shared protocol will require explicit agent principals, bounded delegation, typed actions, dry run plans, digest bound approval, audit, revocation, and scoped memory. Those contracts are not yet advertised as production ready. Continue Make the first API call /getting started/first api call , browse the API reference /reference/api , or choose an SDK guide /sdks/javascript .",
+    "body": "The Tixkit Platform API is the developer facing capability inside Tixkit Cloud. It shares the same event, inventory, checkout, order, attendee, webhook, workflow, migration, OpenAPI, and SDK contracts as the rest of Tixkit. Availability: hosted Platform API access is planned for an experimental private beta. Public API contracts and SDK source are available for evaluation, but production Cloud credentials and support terms are not generally available. Make a safe first integration 1. Follow the hosted Platform API quickstart /platform/quickstart if you have a private beta invitation, or read it to understand the intended credential and environment flow. 2. Read the API fundamentals /developers/api fundamentals , including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries. 3. Make the first API call /getting started/first api call with the narrowest useful credential scope. 4. Choose a supported SDK /sdks/javascript or use the generated OpenAPI contract directly. 5. Configure webhooks /developers/webhooks/setup , verify every signature, and make consumers idempotent. 6. Add the embedded widget /developers/widget/embedding only after the server side contract and failure behavior are understood. Agent connections Third party agents will connect through the same Platform API. The shared protocol will require explicit agent principals, bounded delegation, typed actions, dry run plans, digest bound approval, audit, revocation, and scoped memory. Those contracts are not yet advertised as production ready. Continue Make the first API call /getting started/first api call , browse the API reference /reference/api , or choose an SDK guide /sdks/javascript .",
     "audience": [
       "developer"
     ],
@@ -1359,6 +1406,56 @@
       "platform api",
       "ticketing api",
       "sdk"
+    ],
+    "adoptionPaths": [
+      "platform"
+    ]
+  },
+  {
+    "url": "/platform/quickstart",
+    "title": "Start with the hosted Platform API",
+    "description": "Use an invited Cloud environment and scoped credential for a safe first API request.",
+    "headings": [
+      {
+        "id": "confirm-the-invited-environment",
+        "text": "Confirm the invited environment",
+        "level": 2
+      },
+      {
+        "id": "create-a-read-only-credential",
+        "text": "Create a read-only credential",
+        "level": 2
+      },
+      {
+        "id": "make-a-read-only-request",
+        "text": "Make a read-only request",
+        "level": 2
+      },
+      {
+        "id": "add-webhook-verification",
+        "text": "Add webhook verification",
+        "level": 2
+      },
+      {
+        "id": "continue",
+        "text": "Continue",
+        "level": 2
+      }
+    ],
+    "body": "Experimental private beta: hosted Platform API access is not generally available. Use only the environment identifier, API origin, credential flow, and support channel supplied in an invitation. Public examples do not grant access. Confirm the invited environment Sign in through the invitation and verify the expected organization, environment, region, and permissions. Keep sandbox and production credentials separate. If any identifier differs from the invitation, stop before creating a key. Create a read only credential Create a server side credential with the narrowest scope needed to list events. Copy its secret once into a secret manager or an ephemeral shell. Never place it in browser code, URLs, screenshots, analytics, support messages, or client visible environment variables. Set the exact origin from the invitation; this guide intentionally provides no default hosted origin: Make a read only request An empty event list is valid. Treat 401 as a credential problem, 403 as a permission or tenant scope denial, 404 as an environment or path mismatch, and 429 as a signal to honor the supplied retry policy. Do not broaden scopes to bypass a denial. Add webhook verification Create a test endpoint, store its signing secret separately from the API key, verify signatures before parsing /developers/webhooks/verify signatures , reject stale timestamps, and make processing idempotent. Revoke the credential immediately if it appeared in client code or logs. Continue Review API fundamentals /developers/api fundamentals , the generated reference /reference/api , and the SDK guides /sdks/javascript . Third party agent access remains pending the shared principal, delegation, approval, audit, revocation, and memory protocol.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "quickstart",
+    "status": "experimental",
+    "keywords": [
+      "hosted platform api",
+      "private beta",
+      "first request"
+    ],
+    "adoptionPaths": [
+      "platform"
     ]
   },
   {
@@ -1375,7 +1472,8 @@
     "productArea": "platform",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/reference/api-release-train",
@@ -1395,7 +1493,8 @@
     "productArea": "api",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/reference/api-versions",
@@ -1409,7 +1508,8 @@
     "productArea": "api",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/reference/api",
@@ -1426,7 +1526,8 @@
     "keywords": [
       "endpoint reference",
       "OpenAPI"
-    ]
+    ],
+    "adoptionPaths": []
   },
   {
     "url": "/reference/api/schemas",
@@ -1440,7 +1541,8 @@
     "productArea": "api",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/reference/performance",
@@ -1456,7 +1558,8 @@
     "productArea": "platform",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/reference/privacy-and-retention",
@@ -1472,7 +1575,8 @@
     "productArea": "platform",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/reference/webhook-events",
@@ -1486,7 +1590,8 @@
     "productArea": "webhooks",
     "contentType": "reference",
     "status": "stable",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/android",
@@ -1526,7 +1631,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/astro",
@@ -1566,7 +1672,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/flutter",
@@ -1606,7 +1713,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/go",
@@ -1646,7 +1754,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/ios",
@@ -1686,7 +1795,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/javascript",
@@ -1726,7 +1836,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/nextjs",
@@ -1766,7 +1877,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/react-native",
@@ -1806,7 +1918,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/remix",
@@ -1846,7 +1959,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/rust",
@@ -1886,7 +2000,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/sveltekit",
@@ -1926,7 +2041,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sdks/vue-and-nuxt",
@@ -1966,7 +2082,8 @@
     "productArea": "sdks",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosted",
@@ -2000,6 +2117,9 @@
       "self-hosted",
       "compact",
       "kubernetes"
+    ],
+    "adoptionPaths": [
+      "self-hosted"
     ]
   },
   {
@@ -2025,7 +2145,8 @@
     "productArea": "self-hosting",
     "contentType": "concept",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/authentication",
@@ -2050,7 +2171,8 @@
     "productArea": "self-hosting",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/backups-and-restore",
@@ -2090,7 +2212,8 @@
     "productArea": "self-hosting",
     "contentType": "runbook",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/compact",
@@ -2130,7 +2253,8 @@
     "productArea": "self-hosting",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/configuration",
@@ -2160,7 +2284,8 @@
     "productArea": "self-hosting",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/databases",
@@ -2190,7 +2315,8 @@
     "productArea": "self-hosting",
     "contentType": "reference",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/deployment",
@@ -2220,7 +2346,8 @@
     "productArea": "self-hosting",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/object-storage",
@@ -2234,7 +2361,8 @@
     "productArea": "self-hosting",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/observability",
@@ -2264,7 +2392,8 @@
     "productArea": "self-hosting",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/production",
@@ -2294,7 +2423,8 @@
     "productArea": "self-hosting",
     "contentType": "how-to",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/self-hosting/upgrades",
@@ -2319,7 +2449,8 @@
     "productArea": "self-hosting",
     "contentType": "runbook",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   },
   {
     "url": "/sell",
@@ -2342,7 +2473,7 @@
         "level": 2
       }
     ],
-    "body": "Tixkit gives organizers one workflow for event setup, ticket inventory, checkout, orders, attendees, messaging, reporting, and event day operations. Availability: the managed Tixkit Cloud organizer experience is planned for an experimental private beta. It is not generally available, and this documentation does not promise hosted access, support terms, or a launch date. Start with a complete test event 1. Create your first event /getting started/first event , including ticket types and availability. 2. Complete a test checkout /getting started/test checkout before publishing or accepting live payments. 3. Review orders and fulfillment /operators/orders , attendee records /operators/attendees , and refund behavior /operators/orders/refunds . 4. Prepare check in /operators/check in , box office /operators/box office , team permissions, and incident ownership before event day. Operate the event Use the organizer dashboard for event configuration, schedules, ticket products, checkout forms, orders, attendees, messaging, and reports. Each operational guide identifies current stability and any provider dependent proof that remains. Managed organizer agents are also planned for an experimental private beta. Their initial scope is read, recommend, prepare, and execute only after approval; buyer purchasing and unrestricted delegated autonomy are outside that release. Continue Create the first event /getting started/first event or review the organizer workflow guides /operators/events .",
+    "body": "Tixkit gives organizers one workflow for event setup, ticket inventory, checkout, orders, attendees, messaging, reporting, and event day operations. Availability: the managed Tixkit Cloud organizer experience is planned for an experimental private beta. It is not generally available, and this documentation does not promise hosted access, support terms, or a launch date. Start with a complete test event 1. Follow the Cloud organizer quickstart /sell/quickstart if you have a private beta invitation, or read it to understand the intended hosted journey. 2. Create your first event /getting started/first event , including ticket types and availability. 3. Complete a test checkout /getting started/test checkout before publishing or accepting live payments. 4. Review orders and fulfillment /operators/orders , attendee records /operators/attendees , and refund behavior /operators/orders/refunds . 5. Prepare check in /operators/check in , box office /operators/box office , team permissions, and incident ownership before event day. Operate the event Use the organizer dashboard for event configuration, schedules, ticket products, checkout forms, orders, attendees, messaging, and reports. Each operational guide identifies current stability and any provider dependent proof that remains. Managed organizer agents are also planned for an experimental private beta. Their initial scope is read, recommend, prepare, and execute only after approval; buyer purchasing and unrestricted delegated autonomy are outside that release. Continue Create the first event /getting started/first event or review the organizer workflow guides /operators/events .",
     "audience": [
       "operator"
     ],
@@ -2353,6 +2484,56 @@
       "sell tickets",
       "organizer",
       "event operations"
+    ],
+    "adoptionPaths": [
+      "sell"
+    ]
+  },
+  {
+    "url": "/sell/quickstart",
+    "title": "Start selling with Tixkit Cloud",
+    "description": "Follow the organizer-first hosted journey from an invited workspace to a test order.",
+    "headings": [
+      {
+        "id": "accept-the-invited-workspace",
+        "text": "Accept the invited workspace",
+        "level": 2
+      },
+      {
+        "id": "create-a-test-event",
+        "text": "Create a test event",
+        "level": 2
+      },
+      {
+        "id": "complete-a-test-order",
+        "text": "Complete a test order",
+        "level": 2
+      },
+      {
+        "id": "prepare-event-day",
+        "text": "Prepare event day",
+        "level": 2
+      },
+      {
+        "id": "continue",
+        "text": "Continue",
+        "level": 2
+      }
+    ],
+    "body": "Experimental private beta: Tixkit Cloud organizer access is not generally available. An invitation provides the sign in address, workspace, region, test payment policy, and support channel. Do not infer availability or create credentials from examples in public documentation. Accept the invited workspace Open the exact invitation link and confirm the expected workspace and organization before accepting. Use your own named identity; do not share an account. If the workspace, region, or role is unexpected, stop and contact the invitation's support channel. Create a test event Open Events , choose Create event , and use test safe content. Add a future occurrence, one ticket type with available inventory, a sales window that includes the current time, and the required checkout fields. Preview the buyer page before publishing. Follow Create and publish the first event /getting started/first event for the complete readiness checks. The dashboard must show the event as ready; do not repeatedly publish around an unresolved schedule, inventory, permission, or checkout form error. Complete a test order Use the payment mode assigned to the invited test environment. Never enter a live card or personal buyer data unless the invitation explicitly identifies an authorized production environment. Complete the test checkout journey /getting started/test checkout , then confirm the order, attendee, inventory change, and receipt state in the organizer dashboard. Prepare event day Review team permissions, refund policy, check in devices, connectivity fallback, incident ownership, and a representative test scan. Managed organizer agents remain a separate planned private beta and are not required for this journey. Continue Review orders /operators/orders , attendees /operators/attendees , check in /operators/check in , and reports /operators/reports and exports .",
+    "audience": [
+      "operator"
+    ],
+    "productArea": "sell",
+    "contentType": "quickstart",
+    "status": "experimental",
+    "keywords": [
+      "cloud organizer quickstart",
+      "first event",
+      "test order"
+    ],
+    "adoptionPaths": [
+      "sell"
     ]
   },
   {
@@ -2370,6 +2551,7 @@
     "productArea": "platform",
     "contentType": "overview",
     "status": "beta",
-    "keywords": []
+    "keywords": [],
+    "adoptionPaths": []
   }
 ]

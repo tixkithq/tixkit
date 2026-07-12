@@ -1,0 +1,59 @@
+---
+title: Start with the hosted Platform API
+description: Use an invited Cloud environment and scoped credential for a safe first API request.
+audience:
+  - developer
+product_area: platform
+content_type: quickstart
+status: experimental
+owner: developer-experience
+last_verified: 2026-07-12
+prerequisites:
+  - A private-beta invitation containing an exact API origin and environment identifier
+  - Permission to create a scoped server-side credential
+related:
+  - /platform
+  - /developers/api-fundamentals/authentication
+  - /reference/api
+keywords:
+  - hosted platform api
+  - private beta
+  - first request
+adoption_paths:
+  - platform
+---
+
+> **Experimental private beta:** hosted Platform API access is not generally available. Use only the environment identifier, API origin, credential flow, and support channel supplied in an invitation. Public examples do not grant access.
+
+## Confirm the invited environment
+
+Sign in through the invitation and verify the expected organization, environment, region, and permissions. Keep sandbox and production credentials separate. If any identifier differs from the invitation, stop before creating a key.
+
+## Create a read-only credential
+
+Create a server-side credential with the narrowest scope needed to list events. Copy its secret once into a secret manager or an ephemeral shell. Never place it in browser code, URLs, screenshots, analytics, support messages, or client-visible environment variables.
+
+Set the exact origin from the invitation; this guide intentionally provides no default hosted origin:
+
+```bash
+export TIXKIT_API_BASE_URL='paste-the-exact-invited-api-origin'
+export TIXKIT_API_KEY='paste-the-one-time-server-secret'
+```
+
+## Make a read-only request
+
+```bash
+curl --fail-with-body \
+  --header "Authorization: Bearer $TIXKIT_API_KEY" \
+  "$TIXKIT_API_BASE_URL/v1/events"
+```
+
+An empty event list is valid. Treat `401` as a credential problem, `403` as a permission or tenant-scope denial, `404` as an environment or path mismatch, and `429` as a signal to honor the supplied retry policy. Do not broaden scopes to bypass a denial.
+
+## Add webhook verification
+
+Create a test endpoint, store its signing secret separately from the API key, [verify signatures before parsing](/developers/webhooks/verify-signatures), reject stale timestamps, and make processing idempotent. Revoke the credential immediately if it appeared in client code or logs.
+
+## Continue
+
+Review [API fundamentals](/developers/api-fundamentals), the [generated reference](/reference/api), and the [SDK guides](/sdks/javascript). Third-party agent access remains pending the shared principal, delegation, approval, audit, revocation, and memory protocol.

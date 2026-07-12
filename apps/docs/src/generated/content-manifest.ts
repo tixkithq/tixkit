@@ -299,9 +299,15 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/platform": {
     sourcePath: "docs/public/platform/index.mdx",
-    frontmatter: {"title":"Add ticketing to my product","description":"Integrate ticketing through the Tixkit Platform API, SDKs, webhooks, and embeds.","audience":["developer"],"product_area":"platform","content_type":"overview","status":"experimental","owner":"developer-experience","last_verified":"2026-07-12","prerequisites":[],"related":["/getting-started/first-api-call","/developers/api-fundamentals","/developers/webhooks/setup"],"keywords":["platform api","ticketing api","sdk"]},
+    frontmatter: {"title":"Add ticketing to my product","description":"Integrate ticketing through the Tixkit Platform API, SDKs, webhooks, and embeds.","audience":["developer"],"product_area":"platform","content_type":"overview","status":"experimental","owner":"developer-experience","last_verified":"2026-07-12","prerequisites":[],"related":["/getting-started/first-api-call","/developers/api-fundamentals","/developers/webhooks/setup"],"keywords":["platform api","ticketing api","sdk"],"adoption_paths":["platform"]},
     headings: [{"id":"make-a-safe-first-integration","text":"Make a safe first integration","level":2},{"id":"agent-connections","text":"Agent connections","level":2},{"id":"continue","text":"Continue","level":2}],
     load: () => import("../../../../docs/public/platform/index.mdx"),
+  },
+  "/platform/quickstart": {
+    sourcePath: "docs/public/platform/quickstart.mdx",
+    frontmatter: {"title":"Start with the hosted Platform API","description":"Use an invited Cloud environment and scoped credential for a safe first API request.","audience":["developer"],"product_area":"platform","content_type":"quickstart","status":"experimental","owner":"developer-experience","last_verified":"2026-07-12","prerequisites":["A private-beta invitation containing an exact API origin and environment identifier","Permission to create a scoped server-side credential"],"related":["/platform","/developers/api-fundamentals/authentication","/reference/api"],"keywords":["hosted platform api","private beta","first request"],"adoption_paths":["platform"]},
+    headings: [{"id":"confirm-the-invited-environment","text":"Confirm the invited environment","level":2},{"id":"create-a-read-only-credential","text":"Create a read-only credential","level":2},{"id":"make-a-read-only-request","text":"Make a read-only request","level":2},{"id":"add-webhook-verification","text":"Add webhook verification","level":2},{"id":"continue","text":"Continue","level":2}],
+    load: () => import("../../../../docs/public/platform/quickstart.mdx"),
   },
   "/reference/accessibility": {
     sourcePath: "docs/public/reference/accessibility.mdx",
@@ -425,7 +431,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosted": {
     sourcePath: "docs/public/self-hosted/index.mdx",
-    frontmatter: {"title":"Run Tixkit on my infrastructure","description":"Choose, install, and operate a complete Tixkit Self-Hosted profile.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"overview","status":"beta","owner":"platform-operations","last_verified":"2026-07-12","prerequisites":["Ownership of the infrastructure and operational lifecycle"],"related":["/self-hosting/compact","/self-hosting/production","/self-hosting/architecture"],"keywords":["self-hosted","compact","kubernetes"]},
+    frontmatter: {"title":"Run Tixkit on my infrastructure","description":"Choose, install, and operate a complete Tixkit Self-Hosted profile.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"overview","status":"beta","owner":"platform-operations","last_verified":"2026-07-12","prerequisites":["Ownership of the infrastructure and operational lifecycle"],"related":["/self-hosting/compact","/self-hosting/production","/self-hosting/architecture"],"keywords":["self-hosted","compact","kubernetes"],"adoption_paths":["self-hosted"]},
     headings: [{"id":"choose-a-profile","text":"Choose a profile","level":2},{"id":"understand-the-operating-boundary","text":"Understand the operating boundary","level":2},{"id":"continue","text":"Continue","level":2}],
     load: () => import("../../../../docs/public/self-hosted/index.mdx"),
   },
@@ -497,9 +503,15 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/sell": {
     sourcePath: "docs/public/sell/index.mdx",
-    frontmatter: {"title":"Sell tickets with Tixkit","description":"Create, publish, and operate an event with Tixkit's organizer tools.","audience":["operator"],"product_area":"sell","content_type":"overview","status":"experimental","owner":"organizer-experience","last_verified":"2026-07-12","prerequisites":[],"related":["/getting-started/first-event","/getting-started/test-checkout","/operators/check-in"],"keywords":["sell tickets","organizer","event operations"]},
+    frontmatter: {"title":"Sell tickets with Tixkit","description":"Create, publish, and operate an event with Tixkit's organizer tools.","audience":["operator"],"product_area":"sell","content_type":"overview","status":"experimental","owner":"organizer-experience","last_verified":"2026-07-12","prerequisites":[],"related":["/getting-started/first-event","/getting-started/test-checkout","/operators/check-in"],"keywords":["sell tickets","organizer","event operations"],"adoption_paths":["sell"]},
     headings: [{"id":"start-with-a-complete-test-event","text":"Start with a complete test event","level":2},{"id":"operate-the-event","text":"Operate the event","level":2},{"id":"continue","text":"Continue","level":2}],
     load: () => import("../../../../docs/public/sell/index.mdx"),
+  },
+  "/sell/quickstart": {
+    sourcePath: "docs/public/sell/quickstart.mdx",
+    frontmatter: {"title":"Start selling with Tixkit Cloud","description":"Follow the organizer-first hosted journey from an invited workspace to a test order.","audience":["operator"],"product_area":"sell","content_type":"quickstart","status":"experimental","owner":"organizer-experience","last_verified":"2026-07-12","prerequisites":["A private-beta invitation to a Tixkit Cloud workspace","Permission to create test events and inventory"],"related":["/sell","/getting-started/first-event","/getting-started/test-checkout"],"keywords":["cloud organizer quickstart","first event","test order"],"adoption_paths":["sell"]},
+    headings: [{"id":"accept-the-invited-workspace","text":"Accept the invited workspace","level":2},{"id":"create-a-test-event","text":"Create a test event","level":2},{"id":"complete-a-test-order","text":"Complete a test order","level":2},{"id":"prepare-event-day","text":"Prepare event day","level":2},{"id":"continue","text":"Continue","level":2}],
+    load: () => import("../../../../docs/public/sell/quickstart.mdx"),
   },
   "/support": {
     sourcePath: "docs/public/support.mdx",

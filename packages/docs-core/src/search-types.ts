@@ -1,4 +1,10 @@
-import type { Audience, ContentStatus, ContentType, ProductArea } from './content-schema.js';
+import type {
+  AdoptionPath,
+  Audience,
+  ContentStatus,
+  ContentType,
+  ProductArea,
+} from './content-schema.js';
 
 export interface DocsSearchHeading {
   id: string;
@@ -17,11 +23,13 @@ export interface DocsSearchRecord {
   contentType: ContentType;
   status: Exclude<ContentStatus, 'internal'>;
   keywords: readonly string[];
+  adoptionPaths: readonly AdoptionPath[];
 }
 
 export interface DocsSearchFilters {
   audience?: Audience;
   productArea?: ProductArea;
+  adoptionPath?: AdoptionPath;
 }
 
 export interface DocsSearchResult {

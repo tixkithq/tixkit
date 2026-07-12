@@ -1,8 +1,8 @@
 'use client';
 
-import type { Audience, DocsSearchRecord, ProductArea } from '@tixkit/docs-core';
+import type { AdoptionPath, Audience, DocsSearchRecord, ProductArea } from '@tixkit/docs-core';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { searchAudiences, searchDocs, searchProductAreas } from '@/lib/search';
+import { searchAdoptionPaths, searchAudiences, searchDocs, searchProductAreas } from '@/lib/search';
 
 export function SearchDialog() {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -12,8 +12,9 @@ export function SearchDialog() {
   const [query, setQuery] = useState('');
   const [audience, setAudience] = useState<Audience | undefined>();
   const [productArea, setProductArea] = useState<ProductArea | undefined>();
+  const [adoptionPath, setAdoptionPath] = useState<AdoptionPath | undefined>();
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
-  const results = searchDocs(records, query, { audience, productArea });
+  const results = searchDocs(records, query, { audience, productArea, adoptionPath });
 
   const openSearch = useCallback(async () => {
     dialogRef.current?.showModal();
@@ -102,6 +103,20 @@ export function SearchDialog() {
             {searchAudiences.map((value) => (
               <option key={value} value={value}>
                 {value}
+              </option>
+            ))}
+          </select>
+          <select
+            value={adoptionPath ?? ''}
+            onChange={(event) =>
+              setAdoptionPath((event.target.value || undefined) as AdoptionPath | undefined)
+            }
+            aria-label="Adoption path"
+          >
+            <option value="">All adoption paths</option>
+            {searchAdoptionPaths.map((value) => (
+              <option key={value} value={value}>
+                {value === 'self-hosted' ? 'Run on my infrastructure' : value}
               </option>
             ))}
           </select>

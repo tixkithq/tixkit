@@ -26,6 +26,7 @@ const validFrontmatter = {
   last_verified: '2026-07-10',
   prerequisites: [],
   related: [],
+  adoption_paths: ['platform'],
 };
 
 function withRoot(callback) {
@@ -71,11 +72,14 @@ test('frontmatter checks fail on missing files and seeded invalid metadata', () 
         ...validFrontmatter,
         audience: ['unknown'],
         status: 'internal',
+        adoption_paths: ['platform', 'platform', 'unknown'],
       }),
     );
     const errors = checkFrontmatter(root);
     assert.ok(errors.some((error) => error.includes('invalid audience unknown')));
     assert.ok(errors.some((error) => error.includes('public content cannot use status internal')));
+    assert.ok(errors.some((error) => error.includes('must not contain duplicates')));
+    assert.ok(errors.some((error) => error.includes('invalid adoption path unknown')));
   });
 });
 

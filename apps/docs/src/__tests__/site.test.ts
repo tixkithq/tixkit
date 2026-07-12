@@ -49,4 +49,16 @@ describe('adoption-path information architecture', () => {
       );
     }
   });
+
+  it('keeps infrastructure language out of both hosted quickstarts', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../../..');
+    for (const path of ['docs/public/sell/quickstart.mdx', 'docs/public/platform/quickstart.mdx']) {
+      const source = readFileSync(resolve(repositoryRoot, path), 'utf8');
+      expect(source).not.toMatch(
+        /\b(?:Kubernetes|Helm|database|Redis|Temporal|object storage|deployment topology|self-host)\b/i,
+      );
+      expect(source).toMatch(/experimental private beta/i);
+      expect(source).toMatch(/not generally available/i);
+    }
+  });
 });

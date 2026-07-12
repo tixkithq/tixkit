@@ -14,6 +14,7 @@ const records: DocsSearchRecord[] = [
     contentType: 'how-to',
     status: 'stable',
     keywords: ['callback', 'security'],
+    adoptionPaths: ['platform'],
   },
   {
     url: '/operators/check-in',
@@ -26,6 +27,7 @@ const records: DocsSearchRecord[] = [
     contentType: 'how-to',
     status: 'stable',
     keywords: ['scanner'],
+    adoptionPaths: ['sell'],
   },
 ];
 
@@ -51,6 +53,10 @@ describe('documentation search', () => {
       '/developers/webhooks',
     );
     expect(searchDocs(records, 'callback', { audience: 'operator' })).toEqual([]);
+    expect(searchDocs(records, 'callback', { adoptionPath: 'platform' })[0]?.url).toContain(
+      '/developers/webhooks',
+    );
+    expect(searchDocs(records, 'callback', { adoptionPath: 'sell' })).toEqual([]);
   });
 
   it('returns no results for an empty query', () => {

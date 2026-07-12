@@ -11,7 +11,9 @@ export const documentationNavigation = [
     label: 'Getting Started',
     children: [
       { label: 'Sell tickets with Tixkit', routeId: 'sellTickets' },
+      { label: 'Cloud organizer quickstart', routeId: 'sellQuickstart' },
       { label: 'Add ticketing to my product', routeId: 'platformApi' },
+      { label: 'Platform API quickstart', routeId: 'platformQuickstart' },
       { label: 'Run Tixkit on my infrastructure', routeId: 'selfHosted' },
       { label: 'Platform overview', routeId: 'platformOverview' },
       { label: 'Choose a deployment model', routeId: 'deploymentModel' },

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
+  adoptionPaths,
   audiences,
   contentStatuses,
   contentTypes,
@@ -133,6 +134,18 @@ export function validateFrontmatter(data, path) {
     errors.push(`${path}: frontmatter.related must be a string array`);
   if (data.keywords !== undefined && !stringArray(data.keywords))
     errors.push(`${path}: frontmatter.keywords must be a string array when present`);
+  if (data.adoption_paths !== undefined) {
+    if (!stringArray(data.adoption_paths) || data.adoption_paths.length === 0)
+      errors.push(
+        `${path}: frontmatter.adoption_paths must be a non-empty string array when present`,
+      );
+    else {
+      if (new Set(data.adoption_paths).size !== data.adoption_paths.length)
+        errors.push(`${path}: frontmatter.adoption_paths must not contain duplicates`);
+      for (const value of data.adoption_paths)
+        if (!adoptionPaths.includes(value)) errors.push(`${path}: invalid adoption path ${value}`);
+    }
+  }
   if (data.hidden !== undefined && typeof data.hidden !== 'boolean')
     errors.push(`${path}: frontmatter.hidden must be boolean when present`);
   return errors;

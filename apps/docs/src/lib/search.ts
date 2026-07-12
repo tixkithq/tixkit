@@ -1,4 +1,5 @@
 import type {
+  AdoptionPath,
   Audience,
   DocsSearchFilters,
   DocsSearchRecord,
@@ -55,6 +56,7 @@ export function searchDocs(
   for (const record of records) {
     if (filters.audience && !record.audience.includes(filters.audience)) continue;
     if (filters.productArea && record.productArea !== filters.productArea) continue;
+    if (filters.adoptionPath && !record.adoptionPaths.includes(filters.adoptionPath)) continue;
     const titleWords = tokenize(record.title);
     const descriptionWords = tokenize(record.description);
     const keywordWords = tokenize(record.keywords.join(' '));
@@ -133,3 +135,5 @@ export const searchProductAreas: readonly ProductArea[] = [
   'operations',
   'contributing',
 ];
+
+export const searchAdoptionPaths: readonly AdoptionPath[] = ['sell', 'platform', 'self-hosted'];
