@@ -351,6 +351,7 @@ export * from './adapters/eventbrite/index.js';
 export * from './adapters/ticket-tailor/index.js';
 export * from './adapters/bespoke/index.js';
 export * from './adapters/registry.js';
+export * from './adapters/tixkit-portable/index.js';
 export { SANITIZED_PRETIX_OFFICIAL_API_FIXTURE } from './adapters/pretix/fixtures.js';
 export { SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE } from './adapters/hi-events/fixtures.js';
 export { eventbriteApiV3Fixture } from './adapters/eventbrite/fixture.js';

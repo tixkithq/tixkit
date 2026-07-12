@@ -542,6 +542,9 @@
     "packages/migration-core": {
       "name": "@tixkit/migration-core",
       "version": "0.1.0",
+      "dependencies": {
+        "@tixkit/portability": "workspace:*",
+      },
       "devDependencies": {
         "typescript": "7.0.2",
         "vitest": "^4.1.0",

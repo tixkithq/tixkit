@@ -44,7 +44,9 @@
     "prepack": "bun run build",
     "clean": "rm -rf dist"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@tixkit/portability": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "7.0.2",
     "vitest": "^4.1.0"
