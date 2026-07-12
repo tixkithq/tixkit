@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import {
+  auditRepositoryCredentialHistory,
   auditRepositoryHistory,
   highConfidenceSecretKinds,
   parseRawHistory,
@@ -49,6 +50,23 @@ test('parses old and new blobs from NUL-delimited raw history', () => {
   assert.deepEqual([...parsed.get(newId)], ['README.md']);
 });
 
+test('audits deleted private-history blobs and commit metadata without a public manifest', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'tixkit-private-history-audit-'));
+  try {
+    git(root, ['init', '-q']);
+    writeFileSync(resolve(root, 'cloud.ts'), `export const secret = 'npm_${'J'.repeat(24)}';\n`);
+    commit(root, 'private secret');
+    writeFileSync(resolve(root, 'cloud.ts'), 'export const clean = true;\n');
+    commit(root, `remove secret github_pat_${'K'.repeat(24)}`);
+    const result = auditRepositoryCredentialHistory(root);
+    assert.equal(result.status, 'fail');
+    assert.ok(result.findings.some(({ secretKinds }) => secretKinds.includes('npm-token')));
+    assert.deepEqual(result.metadataSecretKinds, ['github-token']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('detects high-confidence secrets without returning values and allows fixed fixtures', () => {
   const credentials = [
     [`ASIA${'A'.repeat(16)}`, 'aws-access-key'],
@@ -61,7 +79,10 @@ test('detects high-confidence secrets without returning values and allows fixed 
   ];
   for (const [credential, kind] of credentials)
     assert.deepEqual(highConfidenceSecretKinds(Buffer.from(`token ${credential}`)), [kind]);
-  assert.deepEqual(highConfidenceSecretKinds(Buffer.from('tk_test_1234567890abcdef')), []);
+  assert.deepEqual(
+    highConfidenceSecretKinds(Buffer.from(['tk_test_', '1234567890abcdef'].join(''))),
+    [],
+  );
 });
 
 test('audits every historical blob and fails on a secret removed from HEAD', () => {

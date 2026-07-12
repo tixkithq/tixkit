@@ -144,6 +144,31 @@ function readBlobBatch(root, metadata) {
   return parseBatchContent(output, metadata);
 }
 
+function historyBlobInventory(root, refs = publicationRefs(root)) {
+  const scopeObjectIds = [...new Set(refs.map(({ objectId }) => objectId))];
+  const raw = git(root, [
+    'log',
+    ...scopeObjectIds,
+    '--root',
+    '--raw',
+    '--diff-merges=separate',
+    '--no-abbrev',
+    '--no-renames',
+    '--format=',
+    '-z',
+  ]);
+  const paths = parseRawHistory(raw);
+  const metadata = blobMetadata(root, [...paths.keys()].sort());
+  const contents = new Map();
+  for (const batch of batches(metadata))
+    for (const [objectId, content] of readBlobBatch(root, batch)) contents.set(objectId, content);
+  return { refs, paths, metadata, contents };
+}
+
+export function readRepositoryHistoryBlobs(root) {
+  return historyBlobInventory(root);
+}
+
 export function highConfidenceSecretKinds(content) {
   const text = content.toString('utf8');
   const kinds = new Set();
@@ -189,7 +214,7 @@ function batches(metadata, maximumBytes = 32 * 1024 * 1024) {
   return output;
 }
 
-export function auditRepositoryHistory(root, manifest) {
+export function auditRepositoryHistory(root, manifest, options = {}) {
   if (manifest.classification.historyValidation !== 'full')
     throw new Error('repository history audit requires full history validation mode');
   if (manifest.classification.historyScope !== 'head-and-tags')
@@ -201,26 +226,12 @@ export function auditRepositoryHistory(root, manifest) {
 
   const refs = publicationRefs(root);
   const scopeObjectIds = [...new Set(refs.map(({ objectId }) => objectId))];
-  const raw = git(root, [
-    'log',
-    ...scopeObjectIds,
-    '--root',
-    '--raw',
-    '--diff-merges=separate',
-    '--no-abbrev',
-    '--no-renames',
-    '--format=',
-    '-z',
-  ]);
-  const blobPaths = parseRawHistory(raw);
-  const objectIds = [...blobPaths.keys()].sort();
-  const metadata = blobMetadata(root, objectIds);
+  const { paths: blobPaths, metadata, contents } = historyBlobInventory(root, refs);
   const findings = [];
   const classificationCounts = {};
   let scannedBytes = 0;
 
   for (const batch of batches(metadata)) {
-    const contents = readBlobBatch(root, batch);
     for (const entry of batch) {
       const content = contents.get(entry.objectId);
       scannedBytes += content.length;
@@ -233,11 +244,13 @@ export function auditRepositoryHistory(root, manifest) {
         classificationCounts[classification ?? 'unclassified'] =
           (classificationCounts[classification ?? 'unclassified'] ?? 0) + 1;
       const secretKinds = highConfidenceSecretKinds(content);
-      if (classifications.includes(undefined) || secretKinds.length > 0)
+      const contentKinds = options.additionalContentKinds?.(content) ?? [];
+      if (classifications.includes(undefined) || secretKinds.length > 0 || contentKinds.length > 0)
         findings.push({
           objectId: entry.objectId,
           classifications: classifications.map((value) => value ?? 'unclassified'),
           secretKinds,
+          contentKinds,
           pathCount: blobPaths.get(entry.objectId).size,
         });
     }
@@ -249,8 +262,8 @@ export function auditRepositoryHistory(root, manifest) {
   );
   const result = {
     schemaVersion: 1,
-    auditKind: 'classified-history-and-high-confidence-credentials',
-    scopeLimitations: [
+    auditKind: options.auditKind ?? 'classified-history-and-high-confidence-credentials',
+    scopeLimitations: options.scopeLimitations ?? [
       'Customer-data and proprietary-content review requires separate rewritten-public-history proof.',
     ],
     status: findings.length === 0 ? 'pass' : 'fail',
@@ -265,6 +278,49 @@ export function auditRepositoryHistory(root, manifest) {
     scannedBytes,
     classificationCounts: canonical(classificationCounts),
     findings,
+  };
+  return { ...result, auditDigest: sha256(JSON.stringify(canonical(result))) };
+}
+
+export function auditRepositoryCredentialHistory(root) {
+  const shallow = git(root, ['rev-parse', '--is-shallow-repository']).trim();
+  if (shallow !== 'false') throw new Error('credential history audit requires complete ancestry');
+  if (git(root, ['status', '--porcelain=v1', '--untracked-files=all']) !== '')
+    throw new Error('credential history audit requires a clean worktree');
+  const { refs, metadata, contents } = historyBlobInventory(root);
+  const findings = [];
+  let scannedBytes = 0;
+  for (const entry of metadata) {
+    const content = contents.get(entry.objectId);
+    scannedBytes += content.length;
+    const secretKinds = highConfidenceSecretKinds(content);
+    if (secretKinds.length > 0) findings.push({ objectId: entry.objectId, secretKinds });
+  }
+  const scopeObjectIds = [...new Set(refs.map(({ objectId }) => objectId))];
+  const metadataContent = git(root, [
+    'log',
+    ...scopeObjectIds,
+    '--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x00',
+    '-z',
+  ]);
+  const tagMetadataContent = git(root, [
+    'for-each-ref',
+    '--format=%(objectname)%00%(taggername)%00%(taggeremail)%00%(contents)%00',
+    'refs/tags',
+  ]);
+  const metadataSecretKinds = highConfidenceSecretKinds(
+    Buffer.from(`${metadataContent}\0${tagMetadataContent}`),
+  );
+  const result = {
+    schemaVersion: 1,
+    auditKind: 'high-confidence-credential-history',
+    status: findings.length === 0 && metadataSecretKinds.length === 0 ? 'pass' : 'fail',
+    publicationRefs: refs,
+    publicationRefDigest: sha256(JSON.stringify(canonical(refs))),
+    uniqueBlobCount: metadata.length,
+    scannedBytes,
+    findings,
+    metadataSecretKinds,
   };
   return { ...result, auditDigest: sha256(JSON.stringify(canonical(result))) };
 }

@@ -130,7 +130,7 @@ function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
 }
 
-function normalizedSource(content) {
+export function normalizedSource(content) {
   return content
     .toString('utf8')
     .replace(/\/\*[\s\S]*?\*\//gu, '')
@@ -155,7 +155,7 @@ function publicTrackedSourceFiles(paths) {
   return cachedTrackedPublicSources;
 }
 
-function sourceShingles(content) {
+export function sourceShingles(content) {
   const tokens = content
     .toString('utf8')
     .replace(/\/\*[\s\S]*?\*\//gu, '')
@@ -167,7 +167,7 @@ function sourceShingles(content) {
   return shingles;
 }
 
-function shingleSignature(shingles) {
+export function shingleSignature(shingles) {
   return [...shingles]
     .map((shingle) => {
       let hash = 2166136261;
