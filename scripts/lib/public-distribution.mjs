@@ -140,6 +140,97 @@ function trackedInventory(root) {
   }
 }
 
+function assertCompleteAncestry(root, mode) {
+  const shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  if (shallow !== 'false') throw new Error(`${mode} history validation requires complete ancestry`);
+}
+
+function historicalInventory(root) {
+  assertCompleteAncestry(root, 'full');
+  const output = execFileSync('git', ['log', 'HEAD', '--tags', '--name-only', '--format=', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return [...new Set(output.split('\0').filter(Boolean))].sort();
+}
+
+function pathMatchesRoot(path, root) {
+  return path === root || path.startsWith(`${root}/`);
+}
+
+export function historicalClassificationViolations(manifest, root) {
+  const violations = [];
+  const historical = manifest.classification.historical;
+  const exceptions = Object.values(historical).flat();
+  for (const duplicate of duplicateValues(exceptions)) {
+    violations.push(`historical path has multiple classifications: ${duplicate}`);
+  }
+  for (const path of exceptions) {
+    if (!isInsideRoot(root, path))
+      violations.push(`historical classification contains unsafe path ${path}`);
+  }
+
+  if (manifest.classification.historyValidation === 'snapshot') {
+    if (exceptions.length > 0)
+      violations.push('snapshot history classification must not contain historical paths');
+    assertCompleteAncestry(root, 'snapshot');
+    const commitCount = Number.parseInt(
+      execFileSync('git', ['rev-list', '--all', '--count'], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim(),
+      10,
+    );
+    if (commitCount !== 1)
+      violations.push(
+        `snapshot history must contain exactly one reachable commit, found ${commitCount}`,
+      );
+    return violations;
+  }
+
+  const current = trackedInventory(root);
+  if (current) {
+    const currentFiles = new Set(
+      execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .split('\0')
+        .filter(Boolean),
+    );
+    for (const path of exceptions) {
+      if (currentFiles.has(path))
+        violations.push(`historical classification is still present: ${path}`);
+    }
+  }
+
+  const inventory = historicalInventory(root);
+  const topLevelRoots = Object.values(manifest.classification.topLevel).flat();
+  const docsRoots = Object.values(manifest.classification.docs).flat();
+  const generatedRoots = manifest.classification.generatedRoots;
+  const exceptionSet = new Set(exceptions);
+  for (const path of inventory) {
+    const classified = path.startsWith('docs/')
+      ? docsRoots.some((entry) => pathMatchesRoot(path, entry))
+      : [...topLevelRoots, ...generatedRoots].some((entry) => pathMatchesRoot(path, entry));
+    if (!classified && !exceptionSet.has(path)) {
+      violations.push(`unclassified historical path: ${path}`);
+    }
+  }
+  for (const path of exceptionSet) {
+    if (!inventory.includes(path)) violations.push(`stale historical classification: ${path}`);
+  }
+  return violations;
+}
+
 function classifyCoverage(actual, groups, label, violations) {
   const classified = groups.flatMap((group) => group ?? []);
   for (const duplicate of duplicateValues(classified)) {
@@ -503,6 +594,7 @@ export function validatePublicDistribution(manifest, root, schema) {
       violations,
     );
   }
+  violations.push(...historicalClassificationViolations(manifest, root));
   if (inventory) {
     for (const path of [
       ...Object.values(manifest.classification.topLevel).flat(),
@@ -554,7 +646,9 @@ export function validatePublicDistribution(manifest, root, schema) {
   for (const entry of releaseEntries) {
     if (!sourcePackages.has(entry.path))
       violations.push(`release package is not a public source package: ${entry.path}`);
-    validateExistingPath(root, entry.path, 'release.packages', violations, { kind: 'directory' });
+    validateExistingPath(root, entry.path, 'release.packages', violations, {
+      kind: 'directory',
+    });
     if (entry.ecosystem === 'npm' || entry.ecosystem === 'npm-and-cdn') {
       validateNpmReleaseMetadata(entry, manifest, root, violations);
       const packageManifest = JSON.parse(
@@ -583,7 +677,9 @@ export function validatePublicDistribution(manifest, root, schema) {
     .filter((name) => /^Dockerfile\.[a-z0-9-]+$/u.test(name))
     .sort();
   for (const image of manifest.release.images)
-    validateExistingPath(root, image.dockerfile, 'release.images', violations, { kind: 'file' });
+    validateExistingPath(root, image.dockerfile, 'release.images', violations, {
+      kind: 'file',
+    });
   for (const dockerfile of repositoryDockerfiles)
     if (!declaredDockerfiles.has(dockerfile))
       violations.push(`unclassified release image Dockerfile: ${dockerfile}`);

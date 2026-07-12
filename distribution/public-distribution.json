@@ -205,7 +205,49 @@
       "apps/docs/src/generated",
       "artifacts/api",
       "graphify-out"
-    ]
+    ],
+    "historyValidation": "full",
+    "historyScope": "head-and-tags",
+    "historical": {
+      "public": [
+        ".prettierrc",
+        "docs/admin-dashboard-user-guide.md",
+        "docs/api-reference.md",
+        "docs/ci/self-hosted-epyc-arc-kata.md",
+        "docs/clerk-setup-guide.md",
+        "docs/deploy-guide.md",
+        "docs/incident-runbooks.md",
+        "docs/managed-database-compatibility.md",
+        "docs/pluggable-auth-guide.md",
+        "docs/production-deployment-guide.md",
+        "docs/sdk-guides/README.md",
+        "docs/sdk-guides/android.md",
+        "docs/sdk-guides/flutter.md",
+        "docs/sdk-guides/go.md",
+        "docs/sdk-guides/ios.md",
+        "docs/sdk-guides/javascript.md",
+        "docs/sdk-guides/nextjs.md",
+        "docs/sdk-guides/react-native.md",
+        "docs/sdk-guides/rust.md",
+        "docs/sdk-guides/sveltekit.md",
+        "docs/temporal-operations-guide.md",
+        "docs/webhook-guide.md",
+        "docs/widget-embed-guide.md"
+      ],
+      "privateCloud": [],
+      "internalPlanning": [
+        "docs/admin-live-api-wiring-audit.md",
+        "docs/admin-ui-rebuild-plan.md",
+        "docs/documentation-platform-rebuild-plan.md",
+        "docs/email-editor-resend-parity-plan.md",
+        "docs/event-page-editor-parity-plan.md",
+        "docs/implementation-completion-task-contract.md",
+        "docs/openstatus-data-table-filters-implementation-plan.md",
+        "docs/openstatus-data-table-filters-implementation-prompt.md",
+        "docs/tooling/graphify-serena-standard.md",
+        "fix-bubble-focus-prompt.md"
+      ]
+    }
   },
   "release": {
     "packages": [

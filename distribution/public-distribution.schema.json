@@ -56,7 +56,14 @@
     },
     "classification": {
       "type": "object",
-      "required": ["topLevel", "docs", "generatedRoots"],
+      "required": [
+        "topLevel",
+        "docs",
+        "generatedRoots",
+        "historyValidation",
+        "historyScope",
+        "historical"
+      ],
       "properties": {
         "topLevel": {
           "type": "object",
@@ -78,7 +85,19 @@
           },
           "additionalProperties": false
         },
-        "generatedRoots": { "$ref": "#/$defs/pathArray" }
+        "generatedRoots": { "$ref": "#/$defs/pathArray" },
+        "historyValidation": { "type": "string", "enum": ["full", "snapshot"] },
+        "historyScope": { "type": "string", "const": "head-and-tags" },
+        "historical": {
+          "type": "object",
+          "required": ["public", "privateCloud", "internalPlanning"],
+          "properties": {
+            "public": { "$ref": "#/$defs/pathArrayAllowEmpty" },
+            "privateCloud": { "$ref": "#/$defs/pathArrayAllowEmpty" },
+            "internalPlanning": { "$ref": "#/$defs/pathArrayAllowEmpty" }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
@@ -134,7 +153,11 @@
     }
   },
   "$defs": {
-    "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
     "pathArray": {
       "type": "array",
       "minItems": 1,

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -6,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   publicDependencyBoundaryViolations,
+  historicalClassificationViolations,
   sdkReleaseWorkflowViolations,
   validatePublicDistribution,
 } from '../lib/public-distribution.mjs';
@@ -68,6 +70,87 @@ test('rejects incomplete repository classification and malformed schema fields',
   );
 });
 
+test('classifies deleted historical paths exactly once', () => {
+  assert.deepEqual(historicalClassificationViolations(manifest, root), []);
+
+  const missing = structuredClone(manifest);
+  missing.classification.historical.public = missing.classification.historical.public.filter(
+    (path) => path !== '.prettierrc',
+  );
+  assert.deepEqual(historicalClassificationViolations(missing, root), [
+    'unclassified historical path: .prettierrc',
+  ]);
+
+  const duplicate = structuredClone(manifest);
+  duplicate.classification.historical.privateCloud = ['.prettierrc'];
+  assert.deepEqual(historicalClassificationViolations(duplicate, root), [
+    'historical path has multiple classifications: .prettierrc',
+  ]);
+
+  const present = structuredClone(manifest);
+  present.classification.historical.public.push('README.md');
+  assert.deepEqual(historicalClassificationViolations(present, root), [
+    'historical classification is still present: README.md',
+  ]);
+});
+
+test('distinguishes snapshot validation from complete ancestry proof', () => {
+  const repository = mkdtempSync(resolve(tmpdir(), 'tixkit-shallow-history-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: repository });
+    writeFileSync(resolve(repository, 'README.md'), '# Fixture\n');
+    execFileSync('git', ['add', 'README.md'], { cwd: repository });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=Test', '-c', 'user.email=test@invalid', 'commit', '-qm', 'fixture'],
+      { cwd: repository },
+    );
+    const snapshot = structuredClone(manifest);
+    snapshot.classification.historyValidation = 'snapshot';
+    snapshot.classification.historical = { public: [], privateCloud: [], internalPlanning: [] };
+    assert.deepEqual(historicalClassificationViolations(snapshot, repository), []);
+    snapshot.classification.historical.public = ['deleted.md'];
+    assert.deepEqual(historicalClassificationViolations(snapshot, repository), [
+      'snapshot history classification must not contain historical paths',
+    ]);
+    snapshot.classification.historical.public = [];
+    writeFileSync(resolve(repository, 'SECOND.md'), '# Second\n');
+    execFileSync('git', ['add', 'SECOND.md'], { cwd: repository });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=Test', '-c', 'user.email=test@invalid', 'commit', '-qm', 'second'],
+      { cwd: repository },
+    );
+    assert.deepEqual(historicalClassificationViolations(snapshot, repository), [
+      'snapshot history must contain exactly one reachable commit, found 2',
+    ]);
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(resolve(repository, '.git/shallow'), `${commit}\n`);
+    assert.throws(
+      () => historicalClassificationViolations(snapshot, repository),
+      /snapshot history validation requires complete ancestry/u,
+    );
+    const full = {
+      classification: {
+        historyValidation: 'full',
+        historical: { public: [], privateCloud: [], internalPlanning: [] },
+        topLevel: { public: ['README.md'], privateCloud: [], internalPlanning: [], mixed: [] },
+        docs: { public: [], internalPlanning: [] },
+        generatedRoots: [],
+      },
+    };
+    assert.throws(
+      () => historicalClassificationViolations(full, repository),
+      /full history validation requires complete ancestry/u,
+    );
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 test('rejects unsafe release paths and omitted publishable packages', () => {
   const traversal = structuredClone(manifest);
   traversal.release.contracts.push('../../etc/passwd');
@@ -126,7 +209,9 @@ test('scans workflow and script references throughout the public boundary', () =
     );
     writeFileSync(
       resolve(fixtureRoot, 'scripts/tsconfig.json'),
-      JSON.stringify({ compilerOptions: { paths: { '@private/*': ['managed/*'] } } }),
+      JSON.stringify({
+        compilerOptions: { paths: { '@private/*': ['managed/*'] } },
+      }),
     );
     symlinkSync(
       resolve(fixtureRoot, 'scripts/build.mjs'),
