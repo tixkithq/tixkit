@@ -144,6 +144,78 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
         imageUrl: `https://unsafe.example/${suffix}-social.jpg`,
       }),
     });
+    const mediaUploadId = `upl_dup_${suffix}`;
+    const mediaAssetId = `ema_dup_${suffix}`;
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: mediaUploadId,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: brandId,
+        event_id: source.id,
+        created_by_user_id: null,
+        purpose: 'event_cover',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: 'clean',
+        bucket: 'media',
+        object_key: `event-media/${source.id}/original.jpg`,
+        file_name: 'original.jpg',
+        content_type: 'image/jpeg',
+        size_bytes: 100,
+        checksum_sha256: 'a'.repeat(64),
+        client_token_hash: null,
+        metadata: JSON.stringify({ image: { width: 10, height: 10, format: 'jpeg' } }),
+        consumed_by_checkout_session_id: null,
+        consumed_at: null,
+        completion_owner_token: null,
+        completion_started_at: null,
+        expires_at: new Date('2028-01-01T00:00:00Z'),
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('event_media_assets')
+      .values({
+        id: mediaAssetId,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: brandId,
+        event_id: source.id,
+        upload_artifact_id: mediaUploadId,
+        role: 'cover',
+        width: 10,
+        height: 10,
+        format: 'jpeg',
+        checksum_sha256: 'a'.repeat(64),
+        size_bytes: 100,
+        focal_x: '0.5',
+        focal_y: '0.5',
+        alt_text: 'Source cover',
+        created_by: 'usr_dup',
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('event_media_renditions')
+      .values({
+        id: `emr_dup_${suffix}`,
+        asset_id: mediaAssetId,
+        variant: 'page',
+        width: 1600,
+        height: 900,
+        format: 'webp',
+        content_type: 'image/webp',
+        bucket: 'media',
+        object_key: `event-media/${source.id}/page.webp`,
+        checksum_sha256: 'b'.repeat(64),
+        size_bytes: 80,
+        created_at: now,
+      })
+      .execute();
     await db
       .insertInto('questions')
       .values({
@@ -258,6 +330,34 @@ describeWithIntegrationDatabase('transactional event duplication', () => {
       .where('id', '=', duplicate.id)
       .executeTakeFirstOrThrow();
     expect(duplicatedEvent.cover_image_url).toBeNull();
+    const duplicatedMedia = await db
+      .selectFrom('event_media_assets')
+      .selectAll()
+      .where('event_id', '=', duplicate.id)
+      .executeTakeFirstOrThrow();
+    expect(duplicatedMedia).toMatchObject({
+      role: 'cover',
+      alt_text: 'Source cover',
+      event_id: duplicate.id,
+    });
+    expect(duplicatedMedia.id).not.toBe(`ema_dup_${suffix}`);
+    const duplicatedUpload = await db
+      .selectFrom('upload_artifacts')
+      .selectAll()
+      .where('id', '=', duplicatedMedia.upload_artifact_id)
+      .executeTakeFirstOrThrow();
+    expect(duplicatedUpload).toMatchObject({
+      event_id: duplicate.id,
+      object_key: expect.any(String),
+    });
+    expect(duplicatedUpload.id).not.toBe(`upl_dup_${suffix}`);
+    await expect(
+      db
+        .selectFrom('event_media_renditions')
+        .selectAll()
+        .where('asset_id', '=', duplicatedMedia.id)
+        .execute(),
+    ).resolves.toMatchObject([{ object_key: `event-media/${sourceEventId}/page.webp` }]);
     const tickets = await db
       .selectFrom('ticket_types')
       .selectAll()

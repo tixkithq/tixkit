@@ -144,13 +144,6 @@ export async function attachEventMedia(input: {
     .where('event_id', '=', input.eventId)
     .where('role', '=', input.role)
     .executeTakeFirst();
-  const previousRenditions = existing
-    ? await input.db
-        .selectFrom('event_media_renditions')
-        .select(['bucket', 'object_key'])
-        .where('asset_id', '=', existing.id)
-        .execute()
-    : [];
   const assetId = existing?.id ?? id('ema');
   const renditions: Array<{
     id: string;
@@ -271,11 +264,6 @@ export async function attachEventMedia(input: {
     );
     throw error;
   }
-  await Promise.all(
-    previousRenditions.map((rendition) =>
-      deleteEventMediaRendition(rendition.bucket, rendition.object_key),
-    ),
-  );
   return {
     id: assetId,
     role: input.role,

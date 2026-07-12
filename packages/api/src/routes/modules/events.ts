@@ -118,6 +118,7 @@ const duplicateEventSchema = z
         eventPageContent: z.boolean().default(true),
         lifecycleContent: z.boolean().default(true),
         marketingIntegrations: z.boolean().default(true),
+        mediaAssets: z.boolean().default(true),
       })
       .strict(),
   })
@@ -1721,6 +1722,77 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
                 })
                 .where('id', '=', documentId)
                 .execute();
+            }
+          }
+          if (body.copy.mediaAssets) {
+            const mediaAssets = await trx
+              .selectFrom('event_media_assets')
+              .selectAll()
+              .where('tenant_id', '=', source.tenant_id)
+              .where('organization_id', '=', source.organization_id)
+              .where('brand_id', '=', source.brand_id)
+              .where('event_id', '=', eventId)
+              .execute();
+            for (const mediaAsset of mediaAssets) {
+              const sourceUpload = await trx
+                .selectFrom('upload_artifacts')
+                .selectAll()
+                .where('id', '=', mediaAsset.upload_artifact_id)
+                .where('tenant_id', '=', source.tenant_id)
+                .where('organization_id', '=', source.organization_id)
+                .where('brand_id', '=', source.brand_id)
+                .where('event_id', '=', eventId)
+                .executeTakeFirstOrThrow();
+              const uploadArtifactId = `upl_${ulid()}`;
+              await trx
+                .insertInto('upload_artifacts')
+                .values({
+                  ...sourceUpload,
+                  id: uploadArtifactId,
+                  event_id: created.id,
+                  client_token_hash: null,
+                  consumed_by_checkout_session_id: null,
+                  consumed_at: null,
+                  completion_owner_token: null,
+                  completion_started_at: null,
+                  metadata:
+                    typeof sourceUpload.metadata === 'string'
+                      ? sourceUpload.metadata
+                      : JSON.stringify(sourceUpload.metadata),
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+              const assetId = `ema_${ulid()}`;
+              await trx
+                .insertInto('event_media_assets')
+                .values({
+                  ...mediaAsset,
+                  id: assetId,
+                  event_id: created.id,
+                  upload_artifact_id: uploadArtifactId,
+                  created_by: principal.id,
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+              const renditions = await trx
+                .selectFrom('event_media_renditions')
+                .selectAll()
+                .where('asset_id', '=', mediaAsset.id)
+                .execute();
+              if (renditions.length > 0)
+                await trx
+                  .insertInto('event_media_renditions')
+                  .values(
+                    renditions.map((rendition) => ({
+                      ...rendition,
+                      id: `emr_${ulid()}`,
+                      asset_id: assetId,
+                      created_at: now,
+                    })),
+                  )
+                  .execute();
             }
           }
           const result = (await events.findById(created.id))!;

@@ -416,6 +416,7 @@ export async function cleanupExpiredUploadArtifacts(
       'object_key',
       'purpose',
       'event_id',
+      'checksum_sha256',
       'updated_at',
     ])
     .where((eb) =>
@@ -423,7 +424,7 @@ export async function cleanupExpiredUploadArtifacts(
         eb('status', 'in', ['pending', 'rejected']),
         eb.and([
           eb('status', '=', 'uploaded'),
-          eb('purpose', 'in', ['event_cover', 'event_seo_image']),
+          eb('purpose', 'in', ['event_poster', 'event_cover', 'event_social', 'event_seo_image']),
         ]),
         eb.and([
           eb('status', '=', 'cleanup_pending'),
@@ -442,9 +443,18 @@ export async function cleanupExpiredUploadArtifacts(
   const cleaned = await Promise.all(
     rows.map(async (row) => {
       if (row.status === 'uploaded') {
-        if (!row.event_id || (row.purpose !== 'event_cover' && row.purpose !== 'event_seo_image')) {
+        if (!row.event_id || !EVENT_MEDIA_PURPOSES.has(row.purpose as UploadPurpose)) {
           return false;
         }
+        const structuredReference = await db
+          .selectFrom('event_media_assets')
+          .select('id')
+          .where('upload_artifact_id', '=', row.id)
+          .where('tenant_id', '=', row.tenant_id)
+          .where('organization_id', '=', row.organization_id!)
+          .where('brand_id', '=', row.brand_id!)
+          .where('event_id', '=', row.event_id)
+          .executeTakeFirst();
         const event = await db
           .selectFrom('events')
           .select(['cover_image_url', 'seo'])
@@ -456,7 +466,7 @@ export async function cleanupExpiredUploadArtifacts(
         const referenced =
           event?.cover_image_url?.includes(row.id) === true ||
           (typeof event?.seo === 'string' && event.seo.includes(row.id));
-        if (referenced) {
+        if (structuredReference || referenced) {
           await db
             .updateTable('upload_artifacts')
             .set({
@@ -480,6 +490,15 @@ export async function cleanupExpiredUploadArtifacts(
       if (Number(claim.numUpdatedRows) !== 1) return false;
 
       if (row.status === 'uploaded' && row.event_id) {
+        const structuredReference = await db
+          .selectFrom('event_media_assets')
+          .select('id')
+          .where('upload_artifact_id', '=', row.id)
+          .where('tenant_id', '=', row.tenant_id)
+          .where('organization_id', '=', row.organization_id!)
+          .where('brand_id', '=', row.brand_id!)
+          .where('event_id', '=', row.event_id)
+          .executeTakeFirst();
         const attached = await db
           .selectFrom('events')
           .select(['cover_image_url', 'seo'])
@@ -489,6 +508,7 @@ export async function cleanupExpiredUploadArtifacts(
           .where('brand_id', '=', row.brand_id!)
           .executeTakeFirst();
         if (
+          structuredReference ||
           attached?.cover_image_url?.includes(row.id) === true ||
           (typeof attached?.seo === 'string' && attached.seo.includes(row.id))
         ) {
@@ -505,7 +525,34 @@ export async function cleanupExpiredUploadArtifacts(
           return false;
         }
       }
-      if (!(await tryDeleteUploadObject(s3, row.bucket, row.object_key))) {
+      const sharedArtifacts = await db
+        .selectFrom('upload_artifacts')
+        .select('id')
+        .where('bucket', '=', row.bucket)
+        .where('object_key', '=', row.object_key)
+        .where('status', '=', 'uploaded')
+        .execute();
+      const sharedArtifactIds = sharedArtifacts
+        .map((artifact) => artifact.id)
+        .filter((artifactId) => artifactId !== row.id);
+      const sharedAttachment =
+        sharedArtifactIds.length > 0
+          ? await db
+              .selectFrom('event_media_assets')
+              .select('id')
+              .where('upload_artifact_id', 'in', sharedArtifactIds)
+              .executeTakeFirst()
+          : undefined;
+      const retainEventMediaObject =
+        EVENT_MEDIA_PURPOSES.has(row.purpose as UploadPurpose) &&
+        Boolean(row.checksum_sha256) &&
+        (row.object_key.includes('/final/') || row.object_key.includes('.final/')) &&
+        row.object_key.endsWith(`/${row.checksum_sha256}`);
+      if (
+        !retainEventMediaObject &&
+        !sharedAttachment &&
+        !(await tryDeleteUploadObject(s3, row.bucket, row.object_key))
+      ) {
         await db
           .updateTable('upload_artifacts')
           .set({

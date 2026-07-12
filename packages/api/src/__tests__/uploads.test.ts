@@ -539,6 +539,29 @@ describe('upload artifact service', () => {
     });
   });
 
+  it('retains immutable completed event media when recovering an aged cleanup claim', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_media_stale_claim',
+          status: 'cleanup_pending',
+          scan_status: 'clean',
+          purpose: 'event_social',
+          checksum_sha256: 'a'.repeat(64),
+          bucket: 'tixkit',
+          object_key: `uploads/tnt_1/event-social/final/upl_media.webp/${'a'.repeat(64)}`,
+          expires_at: new Date(now.getTime() - 60_000),
+          updated_at: new Date(now.getTime() - 16 * 60_000),
+        },
+      ],
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(1);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]?.status).toBe('cleanup_complete');
+  });
+
   it('renews referenced event media and never deletes it', async () => {
     const now = new Date();
     const { db, tables } = createMockDb({
@@ -575,6 +598,94 @@ describe('upload artifact service', () => {
     expect(new Date(tables.upload_artifacts[0]?.expires_at as Date).getTime()).toBeGreaterThan(
       now.getTime(),
     );
+  });
+
+  it('renews structured poster media attachments without relying on legacy event URLs', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_poster',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'event_poster',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/shared-original.jpg',
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+      event_media_assets: [
+        {
+          id: 'ema_poster',
+          upload_artifact_id: 'upl_poster',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+        },
+      ],
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]?.status).toBe('uploaded');
+    expect(new Date(tables.upload_artifacts[0]?.expires_at as Date).getTime()).toBeGreaterThan(
+      now.getTime(),
+    );
+  });
+
+  it('does not delete a shared original while another event media asset references it', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_unattached',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/shared-original.jpg',
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+        {
+          id: 'upl_attached_copy',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_2',
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/shared-original.jpg',
+          expires_at: new Date(now.getTime() + 60_000),
+        },
+      ],
+      event_media_assets: [{ id: 'ema_copy', upload_artifact_id: 'upl_attached_copy' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          cover_image_url: null,
+          seo: '{}',
+        },
+      ],
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(1);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]?.status).toBe('cleanup_complete');
+    expect(tables.upload_artifacts[1]?.status).toBe('uploaded');
   });
 
   it('restores the prior status when object deletion fails', async () => {

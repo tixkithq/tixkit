@@ -1545,6 +1545,7 @@ export type DuplicateEventInput = {
     eventPageContent: boolean;
     lifecycleContent: boolean;
     marketingIntegrations: boolean;
+    mediaAssets?: boolean;
   };
 };
 

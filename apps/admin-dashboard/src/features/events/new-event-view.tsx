@@ -23,6 +23,7 @@ type DuplicateCopyOptions = {
   eventPageContent: boolean;
   lifecycleContent: boolean;
   marketingIntegrations: boolean;
+  mediaAssets: boolean;
 };
 const duplicateCopyLabels: Array<[keyof DuplicateCopyOptions, string]> = [
   ['basicsVenue', 'Basics, venue, and schedule'],
@@ -33,6 +34,7 @@ const duplicateCopyLabels: Array<[keyof DuplicateCopyOptions, string]> = [
   ['eventPageContent', 'Event-page content'],
   ['lifecycleContent', 'Lifecycle messages'],
   ['marketingIntegrations', 'Marketing integrations'],
+  ['mediaAssets', 'Poster, cover, and social media'],
 ];
 
 const startingPoints: Array<{
@@ -115,6 +117,7 @@ export function NewEventView() {
     eventPageContent: true,
     lifecycleContent: true,
     marketingIntegrations: true,
+    mediaAssets: true,
   });
   const [title, setTitle] = React.useState('');
   const [startsAt, setStartsAt] = React.useState(defaultStart);
