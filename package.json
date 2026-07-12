@@ -62,6 +62,7 @@
     "validate:public-distribution": "node scripts/validate-public-distribution.mjs",
     "validate:public-repository": "node scripts/rehearse-public-repository.mjs",
     "rehearse:repository-cutover": "node scripts/rehearse-repository-cutover.mjs",
+    "audit:repository-history": "node scripts/audit-repository-history.mjs",
     "validate:cloud-core-consumer": "node scripts/validate-cloud-core-consumer.mjs",
     "verify:cloud-core-install": "node scripts/verify-cloud-core-install.mjs",
     "build:public-release-manifest": "node scripts/build-public-release-manifest.mjs",
