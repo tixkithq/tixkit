@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -7,6 +6,12 @@ import { generateOpenApiTypes, openApiSpec } from '../packages/openapi/src/index
 import { WEBHOOK_EVENT_CATALOG } from '../packages/domain/src/developer/index.js';
 import { compareOpenApi } from './lib/openapi-compatibility.js';
 import { assertPublicArtifactSafe } from './lib/public-artifact-safety.js';
+import {
+  API_PROVENANCE_EXCLUSIONS,
+  canonicalJson,
+  collectApiReleaseProvenance,
+  sha256,
+} from './lib/api-release-provenance.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -14,32 +19,23 @@ const root = resolve(import.meta.dirname, '..');
 const version = openApiSpec.info.version;
 const releaseRoot = resolve(root, 'artifacts/api');
 const output = join(releaseRoot, version);
-const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
-  cwd: root,
-  encoding: 'utf8',
-}).trim();
-const headTimestamp = execFileSync('git', ['show', '-s', '--format=%cI', 'HEAD'], {
-  cwd: root,
-  encoding: 'utf8',
-}).trim();
-const headTreeHash = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
-  cwd: root,
-  encoding: 'utf8',
-}).trim();
+const provenance = await collectApiReleaseProvenance(root);
+const { headCommit, headTimestamp, headTreeHash, sourceTreeHash, inputCount, worktreeState } =
+  provenance;
 
-const canonical = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
-const sha256 = (value: Uint8Array | string): string =>
-  createHash('sha256').update(value).digest('hex');
+const canonical = canonicalJson;
 
 async function previousSpec(): Promise<{ version: string; spec: JsonObject } | undefined> {
   try {
     const committed = execFileSync('git', ['show', `HEAD:artifacts/api/${version}/openapi.json`], {
       cwd: root,
       encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     return { version, spec: JSON.parse(committed) };
-  } catch {
+  } catch (error) {
+    if ((error as { status?: number }).status !== 128) throw error;
     // A new version has no committed same-version baseline.
   }
   try {
@@ -73,41 +69,6 @@ async function previousSpec(): Promise<{ version: string; spec: JsonObject } | u
 
 const previous = await previousSpec();
 const json = canonical(openApiSpec);
-const provenanceExclusions = [
-  'apps/docs/public/contracts/',
-  'apps/docs/public/openapi.json',
-  'apps/docs/src/generated/',
-  'artifacts/api/',
-  'graphify-out/',
-] as const;
-const isProvenanceOutput = (name: string): boolean =>
-  provenanceExclusions.some((excluded) =>
-    excluded.endsWith('/') ? name.startsWith(excluded) : name === excluded,
-  );
-const provenanceInputs = execFileSync('git', ['ls-files', '-z'], {
-  cwd: root,
-  encoding: 'utf8',
-})
-  .split('\0')
-  .filter((name) => name && !isProvenanceOutput(name))
-  .sort();
-const sourceInputHashes = await Promise.all(
-  provenanceInputs.map(async (name) => {
-    try {
-      return { name, sha256: sha256(await readFile(resolve(root, name))) };
-    } catch {
-      return { name, sha256: sha256('<deleted>') };
-    }
-  }),
-);
-let worktreeState: 'clean' | 'modified' = 'clean';
-try {
-  execFileSync('git', ['diff', '--quiet', 'HEAD', '--'], { cwd: root });
-} catch {
-  worktreeState = 'modified';
-}
-const sourceTreeHash =
-  worktreeState === 'clean' ? headTreeHash : sha256(canonical(sourceInputHashes));
 const commit = worktreeState === 'clean' ? headCommit : null;
 const timestamp = worktreeState === 'clean' ? headTimestamp : null;
 const declaration = generateOpenApiTypes(openApiSpec, {
@@ -231,8 +192,8 @@ const manifest = canonical({
     sourceCommit: headCommit,
     headTreeHash,
     sourceTreeHash,
-    trackedFileCount: sourceInputHashes.length,
-    excludedGeneratedPaths: provenanceExclusions,
+    trackedFileCount: inputCount,
+    excludedGeneratedPaths: API_PROVENANCE_EXCLUSIONS,
     worktreeState,
     reproducible: true,
     publishable: worktreeState === 'clean',

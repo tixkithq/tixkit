@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  publicRepositoryValidationCommands,
+  rehearsePublicRepository,
+} from '../rehearse-public-repository.mjs';
+
+test('defines the complete independent public repository validation sequence', () => {
+  const commonTail = [
+    ['node', ['scripts/validate-public-distribution.mjs']],
+    ['bun', ['install', '--frozen-lockfile']],
+    ['bun', ['run', 'format:check']],
+    ['bun', ['run', 'lint', '--force']],
+    ['bun', ['run', 'typecheck', '--force']],
+    ['bun', ['run', 'test:unit']],
+    ['bun', ['scripts/validate-api-release-provenance.ts']],
+    ['git', ['restore', '--worktree', '--', 'artifacts/api', 'apps/docs/public/contracts']],
+    ['bun', ['run', 'build']],
+    ['node', ['packages/cli/dist/index.js', '--help']],
+    ['git', ['diff', '--exit-code', 'HEAD', '--']],
+    ['git', ['diff', '--cached', '--exit-code', 'HEAD', '--']],
+  ];
+  assert.deepEqual(publicRepositoryValidationCommands({ createSnapshot: true }), [
+    ['git', ['init', '-q']],
+    ['git', ['add', '-A']],
+    [
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Public Rehearsal',
+        '-c',
+        'user.email=public-rehearsal@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Public repository rehearsal snapshot',
+      ],
+    ],
+    ...commonTail,
+  ]);
+  assert.deepEqual(publicRepositoryValidationCommands(), [
+    ['git', ['rev-parse', '--verify', 'HEAD']],
+    ['git', ['diff', '--quiet', 'HEAD', '--']],
+    ['git', ['diff', '--cached', '--quiet', 'HEAD', '--']],
+    ...commonTail,
+  ]);
+});
+
+test('requires one explicit repository source', async () => {
+  await assert.rejects(rehearsePublicRepository([]), /Use --export <path>/u);
+  await assert.rejects(
+    rehearsePublicRepository(['--export', '/tmp/export', '--repository', '/tmp/repository']),
+    /either --export or --repository/u,
+  );
+});

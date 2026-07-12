@@ -48,25 +48,8 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
-      - name: Generate sanitized public export
-        run: bun run export:oss -- --out /tmp/tixkit-oss-export
-      - name: Validate exported tree
-        working-directory: /tmp/tixkit-oss-export
-        run: |
-          bun install --frozen-lockfile
-          bun run format:check
-          bun run lint
-          bun run typecheck
-          bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
-          env -u DATABASE_URL -u DATABASE_URL_MYSQL bun run test:unit
-          bun run build
-          node packages/cli/dist/index.js --help
-          mkdir -p /tmp/tixkit-cli-pack
-          (cd packages/cli && bun pm pack --destination /tmp/tixkit-cli-pack)
-          test -f /tmp/tixkit-cli-pack/tixkit-0.1.0.tgz
-          git init -q
-          git add .
-          git diff --cached --check
+      - name: Rehearse an independent public repository
+        run: bun run validate:public-repository -- --export /tmp/tixkit-oss-export
 
   unit-tests:
     name: Unit Tests

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -63,18 +63,21 @@ test('uses the checked-in same-version baseline instead of a mutable generated a
       responses: { 204: { description: 'Fixture' } },
     },
   };
-  writeFileSync(path, `${JSON.stringify(baseline, null, 2)}\n`);
-  assert.doesNotThrow(() =>
+  try {
+    writeFileSync(path, `${JSON.stringify(baseline, null, 2)}\n`);
+    assert.doesNotThrow(() =>
+      execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+        cwd: root,
+        stdio: 'pipe',
+      }),
+    );
+  } finally {
+    writeFileSync(path, original);
     execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
       cwd: root,
       stdio: 'pipe',
-    }),
-  );
-  writeFileSync(path, original);
-  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-    cwd: root,
-    stdio: 'pipe',
-  });
+    });
+  }
 });
 
 test('rebuilds identical artifacts and never reuses stale provenance', () => {
@@ -144,5 +147,74 @@ test('provenance closes over generated-type and compatibility implementation inp
     const restored = JSON.parse(readFileSync(manifestPath, 'utf8'));
     assert.equal(restored.provenance.sourceTreeHash, priorHash);
     priorHash = restored.provenance.sourceTreeHash;
+  }
+});
+
+test('untracked source inputs make release provenance non-publishable and enter its hash', () => {
+  const manifestPath = resolve(root, 'artifacts/api/2026-01-01/release-manifest.json');
+  const input = resolve(root, 'packages/openapi/src/__untracked_provenance_fixture.ts');
+  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], { cwd: root, stdio: 'pipe' });
+  const cleanHash = JSON.parse(readFileSync(manifestPath, 'utf8')).provenance.sourceTreeHash;
+  try {
+    writeFileSync(input, 'export const untrackedProvenanceFixture = true;\n');
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], { cwd: root, stdio: 'pipe' });
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    assert.equal(manifest.provenance.worktreeState, 'modified');
+    assert.equal(manifest.provenance.publishable, false);
+    assert.equal(manifest.commit, null);
+    assert.notEqual(manifest.provenance.sourceTreeHash, cleanHash);
+  } finally {
+    rmSync(input, { force: true });
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], { cwd: root, stdio: 'pipe' });
+  }
+});
+
+test('provenance validation rejects an invented source hash and manifest version drift', () => {
+  const directory = resolve(root, 'artifacts/api/2026-01-01');
+  const manifestPath = resolve(directory, 'release-manifest.json');
+  const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+  const distributionPath = resolve(root, `artifacts/api-distribution-drift-${process.pid}.json`);
+  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], { cwd: root, stdio: 'pipe' });
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.provenance.sourceTreeHash = 'a'.repeat(64);
+    const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+    writeFileSync(manifestPath, serialized);
+    const manifestDigest = createHash('sha256').update(serialized).digest('hex');
+    writeFileSync(
+      checksumsPath,
+      readFileSync(checksumsPath, 'utf8').replace(
+        /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+        manifestDigest,
+      ),
+    );
+    assert.throws(
+      () =>
+        execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
+          cwd: root,
+          stdio: 'pipe',
+        }),
+      /sourceTreeHash does not match repository inputs/u,
+    );
+
+    const distribution = JSON.parse(
+      readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
+    );
+    distribution.release.contracts = distribution.release.contracts.map((path) =>
+      path.startsWith('artifacts/api/') ? 'artifacts/api/1999-01-01' : path,
+    );
+    writeFileSync(distributionPath, `${JSON.stringify(distribution, null, 2)}\n`);
+    assert.throws(
+      () =>
+        execFileSync(
+          'bun',
+          ['scripts/validate-api-release-provenance.ts', '--distribution', distributionPath],
+          { cwd: root, stdio: 'pipe' },
+        ),
+      /active API contract is not manifest-declared/u,
+    );
+  } finally {
+    rmSync(distributionPath, { force: true });
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], { cwd: root, stdio: 'pipe' });
   }
 });

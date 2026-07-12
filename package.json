@@ -52,6 +52,7 @@
     "validate:high-care-ledger": "node scripts/validate-high-care-ledger.mjs",
     "validate:public-remote-guardrails": "PUBLIC_EXPORT_GITHUB_APP_ID=12345 node scripts/public-remote-guardrails.mjs --print > /tmp/tixkit-public-remote-ruleset.json && node scripts/public-remote-guardrails.mjs --check /tmp/tixkit-public-remote-ruleset.json --workflow .github/workflows/ci.yml --workflow .github/workflows/sdk-release-dry-run.yml --workflow .github/workflows/release-dry-run.yml",
     "validate:public-distribution": "node scripts/validate-public-distribution.mjs",
+    "validate:public-repository": "node scripts/rehearse-public-repository.mjs",
     "release:public:npm:dry-run": "node scripts/public-npm-release-dry-run.mjs",
     "validate:typescript-version": "node scripts/validate-typescript-version.mjs",
     "validate:user-story-matrix": "node scripts/validate-user-story-matrix.mjs",

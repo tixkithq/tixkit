@@ -35,10 +35,10 @@ test('rejects a newly unclassified package and public/private overlap', () => {
   );
 
   const overlap = structuredClone(manifest);
-  overlap.source.rootDirectories.push('managed');
+  overlap.classification.topLevel.privateCloud = ['scripts'];
   assert.throws(
     () => validatePublicDistribution(overlap, root),
-    /private Cloud root is included publicly: managed/u,
+    /private Cloud root is included publicly: scripts/u,
   );
 });
 
@@ -52,13 +52,12 @@ test('rejects incomplete repository classification and malformed schema fields',
   );
 
   const unclassifiedDocs = structuredClone(manifest);
-  unclassifiedDocs.classification.docs.internalPlanning =
-    unclassifiedDocs.classification.docs.internalPlanning.filter(
-      (path) => path !== 'docs/completion',
-    );
+  unclassifiedDocs.classification.docs.public = unclassifiedDocs.classification.docs.public.filter(
+    (path) => path !== 'docs/public',
+  );
   assert.throws(
     () => validatePublicDistribution(unclassifiedDocs, root),
-    /unclassified docs path: docs\/completion/u,
+    /unclassified docs path: docs\/public/u,
   );
 
   const malformed = structuredClone(manifest);
