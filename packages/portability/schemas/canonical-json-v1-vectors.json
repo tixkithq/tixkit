@@ -1,0 +1,25 @@
+{
+  "format": "tixkit-canonical-json-v1-test-vectors",
+  "vectors": [
+    {
+      "name": "unicode-key-order-and-signature",
+      "input": { "z": 1, "a": { "é": 2, "a": 3 }, "arr": [{ "b": 2, "a": 1 }] },
+      "canonical": "{\"a\":{\"a\":3,\"é\":2},\"arr\":[{\"a\":1,\"b\":2}],\"z\":1}\n",
+      "sha256": "3ab4b26ea46eeb12ef5debfe28a6d54434ccc0431daf721dde35ba374fd5b82a",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAAwRCBhQjBigCze+iksQhGqOxUIn4iR1CRwfi5mV2DN8=\n-----END PUBLIC KEY-----\n",
+      "signature": "N1qkgeuEp3SzPjEEilLKt/AOapTMkkE4f5PBkkKiVh+0pylHXs1ta/O5XBch/JYAILHgLrQMJF9xWNm/rcG9AQ=="
+    },
+    {
+      "name": "escaping-and-unicode-value",
+      "input": { "unicode": "雪", "escaped": "line\nquote\"slash\\" },
+      "canonical": "{\"escaped\":\"line\\nquote\\\"slash\\\\\",\"unicode\":\"雪\"}\n",
+      "sha256": "d687284515e18effcd1f65b89ac19bfdbf3b27d85a3bbd1e717fa0ab8200fe68"
+    },
+    {
+      "name": "arrays-and-safe-integer-boundary",
+      "input": { "zero": 0, "maxSafeInteger": 9007199254740991, "array": [3, 2, 1] },
+      "canonical": "{\"array\":[3,2,1],\"maxSafeInteger\":9007199254740991,\"zero\":0}\n",
+      "sha256": "25eee5ea480e7e5a7b898f1bdf4364510215076b2fae1b73aaf102ac4204007a"
+    }
+  ]
+}
