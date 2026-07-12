@@ -1,13 +1,13 @@
 {
   "releaseVersion": "2026-01-01",
   "apiVersion": "2026-01-01",
-  "commit": "8b487eb57b034a2071097603ad0f832e04b8c4f4",
-  "timestamp": "2026-07-12T17:42:04-05:00",
+  "commit": "0095b1bfd8f66d82fd14922d6398a71f58d0dc2a",
+  "timestamp": "2026-07-12T18:03:11-05:00",
   "provenance": {
-    "sourceCommit": "8b487eb57b034a2071097603ad0f832e04b8c4f4",
-    "headTreeHash": "5d114663f60e3940fa5406ad6b4ea5301422958e",
-    "sourceTreeHash": "216abcd2691abc0478f171e4e78ecd094442c0089c8f926f68dfe0f32bde050a",
-    "trackedFileCount": 1810,
+    "sourceCommit": "0095b1bfd8f66d82fd14922d6398a71f58d0dc2a",
+    "headTreeHash": "9f4278eab9bd8de7022b70f2e6d7640b4dbd7cdc",
+    "sourceTreeHash": "7c32d25a204b74a3b80e7b5b3e5f4b6dbc6bd93749e57abcb2652b4dd7fd8c9a",
+    "trackedFileCount": 1811,
     "excludedGeneratedPaths": [
       "apps/docs/public/contracts/",
       "apps/docs/public/openapi.json",
@@ -47,12 +47,12 @@
     },
     {
       "name": "api-diff.json",
-      "sha256": "0a405cf8fef29570c1e892278dddd483143e6a7066a71f7d356b6e4d25de402f",
-      "size": 562
+      "sha256": "7f66e9cc5642df1a84d9c390b21daab81978fdd180f91d4885230b3e70bcd8d6",
+      "size": 173
     },
     {
       "name": "CHANGELOG.md",
-      "sha256": "f657c745ab88c85f8cd20cb12ff909341276df532c942f1752426f3ad1c14238",
+      "sha256": "4a4994cd9651ecf4984051b05f271a6f1d7810538e4de245e8c19d37418b07cd",
       "size": 253
     }
   ],

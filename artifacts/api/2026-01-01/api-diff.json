@@ -5,20 +5,7 @@
   "breaking": false,
   "summary": {
     "breaking": 0,
-    "compatible": 2
+    "compatible": 0
   },
-  "changes": [
-    {
-      "severity": "compatible",
-      "category": "operation-added",
-      "path": "GET /migration-jobs/{jobId}/portable-rebindings",
-      "message": "Operation was added."
-    },
-    {
-      "severity": "compatible",
-      "category": "operation-added",
-      "path": "PUT /migration-jobs/{jobId}/portable-rebindings/{portableId}",
-      "message": "Operation was added."
-    }
-  ]
+  "changes": []
 }
