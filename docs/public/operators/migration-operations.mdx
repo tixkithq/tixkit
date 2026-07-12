@@ -8,7 +8,7 @@ product_area: platform
 content_type: runbook
 status: beta
 owner: developer-platform
-last_verified: 2026-07-10
+last_verified: 2026-07-12
 prerequisites:
   - A tenant-scoped Tixkit API key, a secret-manager reference for the source credential, and immutable source exports
 related:
@@ -59,6 +59,30 @@ const report = await client.migrations.downloadReport(job.id);
 ```
 
 The typed mapping methods are `createMapping` and `mappings`; report retrieval is available as both `report` and `downloadReport`. SDK methods apply the same tenant permissions, confirmation headers, and server-side validation as direct HTTP calls.
+
+## Tixkit portable bundle imports
+
+Use the `tixkit-portable` adapter for the signed logical-bundle transport. A portable job accepts exactly one clean `migration_import` artifact and does not use a source credential. The artifact is a strict JSON object containing the signed `envelope` and a `payloads` object whose keys are manifest paths and whose values are canonical base64. The worker verifies the outer upload checksum, manifest signature, payload/media attestations, exact decoded bytes, compatibility, destination scope, counts, and canonical entity shape before staging any row.
+
+```ts
+const job = await client.migrations.createPortable({
+  organizationId: 'org_01JEXAMPLE',
+  sourceSystem: 'tixkit-portable',
+  adapterVersion: 'tixkit-portable-bundle-v1',
+  idempotencyKey: 'portable-import-bundle-01JEXAMPLE',
+  configuration: {
+    sourceMode: 'official-export',
+    sourceSystem: 'tixkit-portable',
+    artifactIds: ['upl_01JEXAMPLE'],
+  },
+});
+```
+
+Configure `TIXKIT_PORTABILITY_IMPORT_TRUST` on workers with the destination compatibility contract, Ed25519 public verification keys, and exact payload/media policy identities. The registry is closed and fail-closed: unknown fields, private-key algorithms, string-shaped allowlists, duplicate allowlist entries, unbound policy keys, and malformed versions are rejected at worker startup/use. Rotate verification keys by overlapping trusted public keys; every resumed chunk reloads trust and re-verifies the immutable artifact.
+
+The current importer stages only logical sections with production migration committers. Unsupported configuration sections and owned media fail before extraction instead of being silently omitted. Keep C-127 open until the exporter, owned-media transfer, destination rebinding, reconciliation, and all three operating-model round trips are proven.
+
+Portable jobs are currently dry-run-only. The API rejects `mode: "commit"` until final-cutover freshness, required destination rebindings, and portability reconciliation are bound to commit authorization. Do not treat a successful staged dry run as permission to activate imported data.
 
 ## CLI workflow
 

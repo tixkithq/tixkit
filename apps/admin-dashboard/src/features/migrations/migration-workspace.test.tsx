@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GENERIC_CSV_LIMITS } from '@tixkit/migration-core';
+import { GENERIC_CSV_LIMITS } from '@tixkit/migration-core/generic-csv';
 import { MigrationWorkspace } from './migration-workspace';
 
 const api = vi.hoisted(() => ({

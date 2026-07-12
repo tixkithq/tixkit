@@ -2375,6 +2375,16 @@ export type CreateMigrationJobInput = MigrationPreparationConfiguration extends 
           : { credentialId?: never })
     : never
   : never;
+export type CreatePortableMigrationJobInput = CreateMigrationJobBase & {
+  sourceSystem: 'tixkit-portable';
+  configuration: {
+    sourceMode: 'official-export';
+    sourceSystem: 'tixkit-portable';
+    artifactIds: readonly [string];
+  };
+  credentialId?: never;
+  mode?: 'dry-run';
+};
 export type CreateMigrationCredentialInput = {
   organizationId: string;
   sourceSystem: string;
@@ -4083,6 +4093,13 @@ class MigrationResource {
   create(input: CreateMigrationJobInput): Promise<MigrationJob> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/migration-jobs', {
+      body,
+      idempotencyKey,
+    });
+  }
+  createPortable(input: CreatePortableMigrationJobInput): Promise<MigrationJob> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/portable-migration-jobs', {
       body,
       idempotencyKey,
     });

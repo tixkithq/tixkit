@@ -9,7 +9,7 @@ import {
   previewGenericCsv,
   type GenericCsvEntityType,
   type GenericCsvPreview,
-} from '@tixkit/migration-core';
+} from '@tixkit/migration-core/generic-csv';
 import { AlertCircle, Download, FileUp, LoaderCircle, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

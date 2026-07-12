@@ -12647,6 +12647,63 @@ const rawOpenApiSpec = {
         responses: { '204': { description: 'Migration credential revoked' } },
       },
     },
+    '/portable-migration-jobs': {
+      post: {
+        operationId: 'createPortableMigrationJob',
+        summary: 'Create an idempotent signed Tixkit portability import job',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 255 },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['organizationId', 'sourceSystem', 'adapterVersion', 'configuration'],
+                properties: {
+                  organizationId: { type: 'string', minLength: 1, maxLength: 128 },
+                  sourceSystem: { const: 'tixkit-portable' },
+                  adapterVersion: { const: 'tixkit-portable-bundle-v1' },
+                  mode: { const: 'dry-run', default: 'dry-run' },
+                  configuration: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['sourceMode', 'sourceSystem', 'artifactIds'],
+                    properties: {
+                      sourceMode: { const: 'official-export' },
+                      sourceSystem: { const: 'tixkit-portable' },
+                      artifactIds: {
+                        type: 'array',
+                        minItems: 1,
+                        maxItems: 1,
+                        items: { type: 'string', pattern: '^upl_[A-Za-z0-9_-]{8,128}$' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Portable migration job',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/MigrationJob' } },
+            },
+          },
+        },
+      },
+    },
     '/migration-jobs': {
       get: {
         operationId: 'listMigrationJobs',

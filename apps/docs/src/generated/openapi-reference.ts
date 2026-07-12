@@ -19224,6 +19224,136 @@ export const apiReferenceOperations = [
     }
   },
   {
+    "method": "POST",
+    "path": "/portable-migration-jobs",
+    "operationId": "createPortableMigrationJob",
+    "tags": [
+      "Platform"
+    ],
+    "summary": "Create an idempotent signed Tixkit portability import job",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      },
+      {
+        "ApiKey": []
+      }
+    ],
+    "requiredPermissions": [
+      "migrations.write"
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      }
+    ],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "sourceSystem",
+              "adapterVersion",
+              "configuration"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "sourceSystem": {
+                "const": "tixkit-portable"
+              },
+              "adapterVersion": {
+                "const": "tixkit-portable-bundle-v1"
+              },
+              "mode": {
+                "const": "dry-run",
+                "default": "dry-run"
+              },
+              "configuration": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sourceMode",
+                  "sourceSystem",
+                  "artifactIds"
+                ],
+                "properties": {
+                  "sourceMode": {
+                    "const": "official-export"
+                  },
+                  "sourceSystem": {
+                    "const": "tixkit-portable"
+                  },
+                  "artifactIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^upl_[A-Za-z0-9_-]{8,128}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "example": {
+            "organizationId": "organization_example",
+            "sourceSystem": "tixkit-portable",
+            "adapterVersion": "tixkit-portable-bundle-v1",
+            "configuration": {
+              "sourceMode": "official-export",
+              "sourceSystem": "tixkit-portable",
+              "artifactIds": [
+                "artifact_example"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "201": {
+        "description": "Portable migration job",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MigrationJob"
+            },
+            "example": {
+              "id": "resource_example",
+              "tenant_id": "tenant__example",
+              "organization_id": "organization__example",
+              "source_system": "source_system example",
+              "adapter_version": "adapter_version example",
+              "mode": "dry-run",
+              "status": "status example",
+              "configurationHash": "configurationHash example",
+              "credentialConfigured": true,
+              "created_at": "2026-07-10T12:00:00.000Z",
+              "updated_at": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "method": "GET",
     "path": "/migration-jobs",
     "operationId": "listMigrationJobs",

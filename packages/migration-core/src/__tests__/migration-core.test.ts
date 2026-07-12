@@ -43,6 +43,17 @@ describe('migration core', () => {
     });
     expect(
       parseMigrationPreparationConfiguration({
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: ['upl_portable1'],
+      }),
+    ).toEqual({
+      sourceMode: 'official-export',
+      sourceSystem: 'tixkit-portable',
+      artifactIds: ['upl_portable1'],
+    });
+    expect(
+      parseMigrationPreparationConfiguration({
         sourceMode: 'official-api',
         sourceSystem: 'pretix',
         organizerSlug: 'tickets',
@@ -51,6 +62,11 @@ describe('migration core', () => {
       }),
     ).toMatchObject({ baseUrl: 'https://tickets.example.com' });
     for (const invalid of [
+      {
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: ['upl_portable1', 'upl_portable2'],
+      },
       {
         sourceMode: 'official-api',
         sourceSystem: 'generic-csv',

@@ -12,16 +12,22 @@ export type SupportedMigrationSource =
   | 'pretix'
   | 'hi-events'
   | 'eventbrite'
-  | 'ticket-tailor';
+  | 'ticket-tailor'
+  | 'tixkit-portable';
 
 type ExportPreparationBySource = {
-  [Source in SupportedMigrationSource]: ExportPreparation & {
+  [Source in Exclude<SupportedMigrationSource, 'tixkit-portable'>]: ExportPreparation & {
     sourceSystem: Source;
   };
-}[SupportedMigrationSource];
+}[Exclude<SupportedMigrationSource, 'tixkit-portable'>];
 
 export type MigrationPreparationConfiguration =
   | ExportPreparationBySource
+  | {
+      sourceMode: 'official-export';
+      sourceSystem: 'tixkit-portable';
+      artifactIds: readonly [string];
+    }
   | {
       sourceMode: 'official-api';
       sourceSystem: 'pretix';
@@ -106,7 +112,16 @@ export function parseMigrationPreparationConfiguration(
   const sourceSystem = requiredIdentifier(input.sourceSystem, 'sourceSystem');
   if (expectedSourceSystem && sourceSystem !== expectedSourceSystem)
     throw new TypeError('configuration sourceSystem does not match the migration job');
-  if (!['generic-csv', 'pretix', 'hi-events', 'eventbrite', 'ticket-tailor'].includes(sourceSystem))
+  if (
+    ![
+      'generic-csv',
+      'pretix',
+      'hi-events',
+      'eventbrite',
+      'ticket-tailor',
+      'tixkit-portable',
+    ].includes(sourceSystem)
+  )
     throw new TypeError(`Unsupported migration sourceSystem: ${sourceSystem}`);
   if (input.sourceMode === 'official-export') {
     exactKeys(input, ['sourceMode', 'sourceSystem', 'artifactIds']);
@@ -116,6 +131,9 @@ export function parseMigrationPreparationConfiguration(
       input.artifactIds.length > 100
     )
       throw new TypeError('artifactIds must contain between 1 and 100 upload artifact identifiers');
+    if (sourceSystem === 'tixkit-portable' && input.artifactIds.length !== 1) {
+      throw new TypeError('tixkit-portable requires exactly one upload artifact identifier');
+    }
     const artifactIds = input.artifactIds.map((value) => {
       if (typeof value !== 'string' || !artifactId.test(value))
         throw new TypeError('artifactIds contains an invalid upload artifact identifier');
@@ -127,11 +145,11 @@ export function parseMigrationPreparationConfiguration(
       sourceMode: 'official-export',
       sourceSystem: sourceSystem as SupportedMigrationSource,
       artifactIds,
-    };
+    } as MigrationPreparationConfiguration;
   }
   if (input.sourceMode !== 'official-api') throw new TypeError('sourceMode is unsupported');
-  if (sourceSystem === 'generic-csv')
-    throw new TypeError('generic-csv supports official-export only');
+  if (sourceSystem === 'generic-csv' || sourceSystem === 'tixkit-portable')
+    throw new TypeError(`${sourceSystem} supports official-export only`);
   if (sourceSystem === 'pretix') {
     exactKeys(input, ['sourceMode', 'sourceSystem', 'organizerSlug', 'eventSlugs', 'baseUrl']);
     const eventSlugs = identifiers(input.eventSlugs, 'eventSlugs');

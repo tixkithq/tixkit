@@ -9,6 +9,7 @@ import { runMigrationAdapterConformance } from '../../../conformance.js';
 import type { ExtractedMigrationRow } from '../../../index.js';
 import {
   prepareTixkitPortableMigration,
+  prepareTixkitPortableUpload,
   TixkitPortableMigrationAdapter,
   type TixkitPortableAdapterConfiguration,
 } from '../index.js';
@@ -29,7 +30,7 @@ function fixture(
             currency: 'USD',
             occurredAt: '2026-07-01T00:00:00.000Z',
             provenance: {
-              sourceSystem: 'tixkit-portable-v1',
+              sourceSystem: 'tixkit-portable',
               sourceExternalId: 'payment_1',
               importedAt: '2026-07-12T00:00:00.000Z',
             },
@@ -227,6 +228,53 @@ describe('TixkitPortableMigrationAdapter', () => {
     expect(result.firstCommit.dispositions).toEqual(['create', 'create']);
     expect(result.unchangedReimport.dispositions).toEqual(['skip', 'skip']);
     expect(result.dryRun.domainWrites).toBe(0);
+  });
+
+  it('prepares the single-artifact transport without weakening exact-byte verification', async () => {
+    const value = fixture();
+    const configuration = prepareTixkitPortableUpload(
+      Buffer.from(
+        JSON.stringify({
+          envelope: value.envelope,
+          payloads: { 'data/events.jsonl': value.bytes.toString('base64') },
+        }),
+      ),
+      {
+        destination: {
+          deploymentId: 'deployment_destination',
+          apiVersion: '2026-01-01',
+          dataSchemaVersion: '0064',
+          capabilities: ['portable-bundle-v1'],
+          entitlements: [],
+          availableStorageBytes: 1024,
+          acceptedSourceOperatingModels: ['self-hosted'],
+        },
+        trustedBundleKeys: new Map([['key_bundle_01', value.bundleKeys.publicKey]]),
+        trustedPayloadKeys: new Map([['key_payload_01', value.payloadKeys.publicKey]]),
+        trustedPayloadPolicies: new Map([
+          [
+            'events',
+            {
+              schemaId: value.receipt.schemaId,
+              schemaSha256: value.receipt.schemaSha256,
+              policySha256: value.receipt.policySha256,
+              scannerId: value.receipt.scannerId,
+              keyId: value.receipt.keyId,
+            },
+          ],
+        ]),
+        trustedMediaKeys: new Map(),
+        trustedMediaPolicies: new Map(),
+        destinationTenantId: 'tenant_primary',
+        destinationOrganizationId: 'organization_primary',
+      },
+    );
+    await expect(
+      new TixkitPortableMigrationAdapter().discover(configuration, {
+        tenantId: 'tenant_primary',
+        organizationId: 'organization_primary',
+      }),
+    ).resolves.toMatchObject({ source: { sourceSystem: 'tixkit-portable' } });
   });
 
   it('rejects payload byte drift before migration discovery', () => {

@@ -1,13 +1,59 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   assertMigrationMappingSafe,
+  assertPortableMigrationIdempotency,
   assertMigrationConfigurationSecretFree,
   redactMigrationReportValue,
   sanitizeDryRunReport,
   unresolvedMigrationDependencies,
+  portableMigrationRequestFingerprint,
 } from '../routes/modules/migrations.js';
 
 describe('migration security boundaries', () => {
+  it('namespaces portable idempotency and rejects changed or ordinary job identities', () => {
+    const configuration = {
+      sourceMode: 'official-export',
+      sourceSystem: 'tixkit-portable',
+      artifactIds: ['upl_portable1'],
+    };
+    const expected = portableMigrationRequestFingerprint({
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v1',
+      mode: 'dry-run',
+      configuration,
+    });
+    expect(() =>
+      assertPortableMigrationIdempotency(
+        {
+          sourceSystem: 'tixkit-portable',
+          adapterVersion: 'tixkit-portable-bundle-v1',
+          mode: 'dry-run',
+          configuration: structuredClone(configuration),
+        },
+        expected,
+      ),
+    ).not.toThrow();
+    for (const identity of [
+      { sourceSystem: 'generic-csv', adapterVersion: 'rfc4180-v1', mode: 'dry-run', configuration },
+      {
+        sourceSystem: 'tixkit-portable',
+        adapterVersion: 'tixkit-portable-bundle-v1',
+        mode: 'dry-run',
+        configuration: { ...configuration, artifactIds: ['upl_portable2'] },
+      },
+      {
+        sourceSystem: 'tixkit-portable',
+        adapterVersion: 'tixkit-portable-bundle-v1',
+        mode: 'commit',
+        configuration,
+      },
+    ]) {
+      expect(() => assertPortableMigrationIdempotency(identity, expected)).toThrow(
+        /different portable import/u,
+      );
+    }
+  });
+
   it('resolves dependencies by exact current-job or scoped external identity', async () => {
     const entity = {
       entityType: 'ticket-type' as const,

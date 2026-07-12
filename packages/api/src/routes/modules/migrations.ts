@@ -7,6 +7,7 @@ import {
   buildDryRunReport,
   canCommitDryRun,
   canonicalMigrationContentFingerprint,
+  migrationAdapter,
   migrationAdapterCatalog,
   parseMigrationPreparationConfiguration,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
@@ -34,6 +35,35 @@ const createJobSchema = z
       .optional(),
   })
   .strict();
+
+export type PortableMigrationIdempotencyIdentity = {
+  sourceSystem: string;
+  adapterVersion: string;
+  mode: string;
+  configuration: unknown;
+};
+
+export function portableMigrationRequestFingerprint(
+  identity: PortableMigrationIdempotencyIdentity,
+): string {
+  return canonicalMigrationContentFingerprint({
+    attributes: {
+      sourceSystem: identity.sourceSystem,
+      adapterVersion: identity.adapterVersion,
+      mode: identity.mode,
+      configuration: identity.configuration,
+    },
+  });
+}
+
+export function assertPortableMigrationIdempotency(
+  existing: PortableMigrationIdempotencyIdentity,
+  expectedFingerprint: string,
+): void {
+  if (portableMigrationRequestFingerprint(existing) !== expectedFingerprint) {
+    throw new ConflictError('Idempotency-Key was already used for a different portable import');
+  }
+}
 const fileSchema = z
   .object({
     uploadArtifactId: z.string().trim().min(1).max(128),
@@ -470,6 +500,98 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     await auditMutation(app, request, body.organizationId, job.id, 'migration_job.created', {
       sourceSystem: body.sourceSystem,
       mode: body.mode,
+    });
+    return reply.status(201).send(serializeJob(job as unknown as Record<string, unknown>));
+  });
+
+  app.post('/portable-migration-jobs', async (request, reply) => {
+    const principal = request.principal!;
+    requireMigrationPermission(principal, 'migrations.write');
+    const body = parse(createJobSchema, request.body);
+    if (body.sourceSystem !== 'tixkit-portable') {
+      throw new ValidationError('Portable migration sourceSystem must be tixkit-portable');
+    }
+    assertMigrationConfigurationSecretFree(body.configuration);
+    let configuration;
+    try {
+      configuration = parseMigrationPreparationConfiguration(body.configuration, 'tixkit-portable');
+    } catch (error) {
+      throw new ValidationError(
+        error instanceof Error ? error.message : 'Invalid portable migration configuration',
+      );
+    }
+    if (
+      configuration.sourceMode !== 'official-export' ||
+      configuration.sourceSystem !== 'tixkit-portable'
+    ) {
+      throw new ValidationError('Portable migrations require one official-export artifact');
+    }
+    if (body.credentialId) {
+      throw new ValidationError('Portable migrations do not accept source credentials');
+    }
+    if (body.mode !== 'dry-run') {
+      throw new ValidationError(
+        'Portable migration commit is unavailable until cutover, rebinding, and reconciliation gates pass',
+      );
+    }
+    const adapter = migrationAdapter('tixkit-portable');
+    if (!adapter.supportedVersions.includes(body.adapterVersion)) {
+      throw new ValidationError(
+        `Unsupported tixkit-portable adapter version: ${body.adapterVersion}`,
+      );
+    }
+    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+    const key = String(request.headers['idempotency-key'] ?? '').trim();
+    if (!key || key.length > 255) {
+      throw new ValidationError('A valid Idempotency-Key header is required');
+    }
+    const repository = repo();
+    const operationKey = `portable:${createHash('sha256').update(key).digest('hex')}`;
+    const expectedFingerprint = portableMigrationRequestFingerprint({
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: body.adapterVersion,
+      mode: 'dry-run',
+      configuration,
+    });
+    const existing = await repository.findJobByIdempotencyKey(
+      principal.tenantId,
+      body.organizationId,
+      operationKey,
+    );
+    if (existing) {
+      assertPortableMigrationIdempotency(
+        {
+          sourceSystem: existing.source_system,
+          adapterVersion: existing.adapter_version,
+          mode: existing.mode,
+          configuration: existing.configuration ? JSON.parse(existing.configuration) : null,
+        },
+        expectedFingerprint,
+      );
+      return reply.status(201).send(serializeJob(existing as unknown as Record<string, unknown>));
+    }
+    const job = await repository.createJob({
+      tenantId: principal.tenantId,
+      organizationId: body.organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: body.adapterVersion,
+      mode: 'dry-run',
+      idempotencyKey: operationKey,
+      requestedBy: principal.id,
+      configuration,
+    });
+    assertPortableMigrationIdempotency(
+      {
+        sourceSystem: job.source_system,
+        adapterVersion: job.adapter_version,
+        mode: job.mode,
+        configuration: job.configuration ? JSON.parse(job.configuration) : null,
+      },
+      expectedFingerprint,
+    );
+    await auditMutation(app, request, body.organizationId, job.id, 'migration_job.created', {
+      sourceSystem: 'tixkit-portable',
+      mode: 'dry-run',
     });
     return reply.status(201).send(serializeJob(job as unknown as Record<string, unknown>));
   });
@@ -1003,6 +1125,11 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const { jobId } = request.params as { jobId: string };
     const repository = repo();
     const { job, organizationId } = await scopedJob(repository, request, jobId);
+    if (job.source_system === 'tixkit-portable') {
+      throw new ConflictError(
+        'Portable migration commit is unavailable until cutover, rebinding, and reconciliation gates pass',
+      );
+    }
     if (job.mode !== 'commit' || job.status !== 'ready') {
       throw new ConflictError('Only a ready commit-mode migration can be committed');
     }

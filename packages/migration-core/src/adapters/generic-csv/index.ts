@@ -1,12 +1,12 @@
-import {
-  validateCanonicalMigrationEntity,
-  type AdapterContext,
-  type ExtractedMigrationRow,
-  type MigrationAdapter,
-  type MigrationDiscovery,
-  type MigrationEntityType,
-  type MigrationIssue,
-  type NormalizedMigrationEntity,
+import { validateCanonicalMigrationEntity } from '../../canonical.js';
+import type {
+  AdapterContext,
+  ExtractedMigrationRow,
+  MigrationAdapter,
+  MigrationDiscovery,
+  MigrationEntityType,
+  MigrationIssue,
+  NormalizedMigrationEntity,
 } from '../../index.js';
 import { GENERIC_CSV_LIMITS, parseCsv, csvSyntaxIssue } from './parser.js';
 import {

@@ -31,6 +31,7 @@ import { BindingRegistryMigrationCredentialResolver } from './activities/migrati
 import {
   createMigrationPreparationService,
   migrationCursorKeyringFromEnvironment,
+  portableImportTrustFromEnvironment,
   registerMigrationPreparationService,
 } from './activities/migration-preparation.js';
 
@@ -187,6 +188,7 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
           ]),
         ),
       },
+      portableTrust: (scope) => portableImportTrustFromEnvironment(scope),
     }),
   );
   const connection = await NativeConnection.connect(

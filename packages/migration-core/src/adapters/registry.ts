@@ -17,6 +17,7 @@ import {
 } from './hi-events/index.js';
 import { EVENTBRITE_ADAPTER_METADATA, eventbriteAdapter } from './eventbrite/index.js';
 import { TICKET_TAILOR_ADAPTER_METADATA, ticketTailorAdapter } from './ticket-tailor/index.js';
+import { tixkitPortableMigrationAdapter } from './tixkit-portable/index.js';
 
 export const MIGRATION_IMPORTER_ORDER = [
   'generic-csv',
@@ -26,10 +27,10 @@ export const MIGRATION_IMPORTER_ORDER = [
   'ticket-tailor',
 ] as const;
 
-export type MigrationImporterId = (typeof MIGRATION_IMPORTER_ORDER)[number];
+export type MigrationImporterId = (typeof MIGRATION_IMPORTER_ORDER)[number] | 'tixkit-portable';
 
 export type MigrationAdapterCatalogEntry = {
-  id: MigrationImporterId;
+  id: (typeof MIGRATION_IMPORTER_ORDER)[number];
   displayName: string;
   supportedVersions: readonly string[];
   featureMapping: Readonly<Record<string, unknown>>;
@@ -102,6 +103,8 @@ export function migrationAdapter(id: MigrationImporterId): RegisteredAdapter {
       return eventbriteAdapter as RegisteredAdapter;
     case 'ticket-tailor':
       return ticketTailorAdapter as RegisteredAdapter;
+    case 'tixkit-portable':
+      return tixkitPortableMigrationAdapter as RegisteredAdapter;
   }
 }
 

@@ -716,6 +716,7 @@
         "@tixkit/domain": "workspace:*",
         "@tixkit/email-transport": "workspace:*",
         "@tixkit/migration-core": "workspace:*",
+        "@tixkit/portability": "workspace:*",
         "@tixkit/shared": "workspace:*",
         "ioredis": "^5.11.0",
         "passkit-generator": "^3.5.6",

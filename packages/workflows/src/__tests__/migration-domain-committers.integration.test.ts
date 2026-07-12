@@ -1,3 +1,4 @@
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createDb,
@@ -22,6 +23,11 @@ import {
   type MigrationEntityType,
   type NormalizedMigrationEntity,
 } from '@tixkit/migration-core';
+import {
+  scanPortablePayload,
+  signPortableManifest,
+  type PortableBundleManifest,
+} from '@tixkit/portability';
 import { MIGRATION_COMMIT_STAGES, MIGRATION_SIDE_EFFECT_POLICY } from '../activities/migration.js';
 import { createProductionMigrationCommitters } from '../activities/migration-domain-committers.js';
 import { createRepositoryMigrationActivityService } from '../activities/migration-repository-service.js';
@@ -1017,4 +1023,258 @@ describeDatabase('production migration committers', () => {
     },
     30_000,
   );
+
+  it('persists a trusted portable upload once and resumes from the durable completed checkpoint', async () => {
+    const repository = new ImportRepository(db);
+    const payload = Buffer.from(
+      [
+        JSON.stringify({
+          portableId: 'organization-portable-1',
+          attributes: { name: 'Portable organization 1' },
+        }),
+        JSON.stringify({
+          portableId: 'organization-portable-2',
+          attributes: { name: 'Portable organization 2' },
+        }),
+        '',
+      ].join('\n'),
+    );
+    const file = {
+      path: 'data/organizations.jsonl',
+      section: 'organizations' as const,
+      sha256: createHash('sha256').update(payload).digest('hex'),
+      bytes: payload.byteLength,
+      records: 2,
+      contentType: 'application/jsonl' as const,
+    };
+    const payloadKeys = generateKeyPairSync('ed25519');
+    const receipt = scanPortablePayload(
+      file,
+      payload,
+      {
+        schemaId: 'organizations_schema_01',
+        schemaSha256: '1'.repeat(64),
+        policySha256: '2'.repeat(64),
+        scannerId: 'payload_scanner_01',
+        validateRecord: (section, record) =>
+          section === 'organizations' && Boolean(record && typeof record === 'object'),
+      },
+      'payload_key_01',
+      payloadKeys.privateKey,
+    );
+    const manifest: PortableBundleManifest = {
+      schemaVersion: 1,
+      format: 'tixkit-portable-bundle-v1',
+      bundleId: 'bundle_workflow_integration_01',
+      mode: 'configuration',
+      source: {
+        operatingModel: 'self-hosted',
+        deploymentId: 'deployment_source',
+        tenantId,
+        exportSequence: 1,
+        changeCursor: 'cursor_01',
+      },
+      apiVersion: '2026-01-01',
+      dataSchemaVersion: '0067',
+      exportedAt: '2026-07-12T18:00:00.000Z',
+      lineage: { kind: 'full', toChangeCursor: 'cursor_01' },
+      compatibility: {
+        minimumApiVersion: '2026-01-01',
+        maximumApiVersion: '2026-12-31',
+        minimumDataSchemaVersion: '0064',
+        maximumDataSchemaVersion: '0069',
+        requiredCapabilities: ['portable-bundle-v1'],
+        requiredEntitlements: [],
+      },
+      entityCounts: { organizations: 2 },
+      files: [file],
+      payloadSafety: {
+        policyVersion: 'tixkit-portable-secret-policy-v1',
+        scannedFiles: [receipt],
+        findings: 0,
+      },
+      assetSafety: {
+        policyVersion: 'tixkit-portable-media-policy-v1',
+        scannedFiles: [],
+        findings: 0,
+      },
+      assets: [],
+      identity: { namespace: tenantId, preserveSafeIds: true, mappingRequired: true },
+      dependencies: [{ section: 'organizations', dependsOn: [] }],
+      rebindings: [],
+    };
+    const bundleKeys = generateKeyPairSync('ed25519');
+    const rogueBundleKeys = generateKeyPairSync('ed25519');
+    let activeBundlePublicKey = bundleKeys.publicKey;
+    const envelope = {
+      manifest,
+      signature: signPortableManifest(manifest, 'bundle_key_01', bundleKeys.privateKey),
+    };
+    const upload = Buffer.from(
+      JSON.stringify({
+        envelope,
+        payloads: { [file.path]: payload.toString('base64') },
+      }),
+    );
+    const artifactId = `upl_portable_${Date.now()}`;
+    const objectKey = `uploads/${tenantId}/${artifactId}.json`;
+    const checksum = createHash('sha256').update(upload).digest('hex');
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: artifactId,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: null,
+        event_id: null,
+        created_by_user_id: null,
+        purpose: 'migration_import',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: null,
+        bucket: 'tixkit',
+        object_key: objectKey,
+        file_name: 'portable-bundle.json',
+        content_type: 'application/json',
+        size_bytes: upload.byteLength,
+        checksum_sha256: checksum,
+        client_token_hash: null,
+        metadata: '{}',
+        consumed_by_checkout_session_id: null,
+        consumed_at: null,
+        expires_at: new Date(Date.now() + 60_000),
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+    const job = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v1',
+      mode: 'dry-run',
+      idempotencyKey: 'portable-workflow-integration',
+      requestedBy: 'test-user',
+      configuration: {
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: [artifactId],
+      },
+    });
+    await repository.addFile({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      objectKey,
+      originalName: 'portable-bundle.json',
+      mediaType: 'application/json',
+      byteSize: upload.byteLength,
+      sha256: checksum,
+    });
+    const service = createMigrationPreparationService(
+      db,
+      { resolve: vi.fn() },
+      {
+        signal: new AbortController().signal,
+        heartbeat: vi.fn(),
+        cursorEncryptionKey: Buffer.alloc(32, 7).toString('base64'),
+        createS3Client: () =>
+          ({
+            send: vi.fn(async () => ({
+              Body: (async function* () {
+                yield upload;
+              })(),
+            })),
+          }) as never,
+        portableTrust: ({
+          tenantId: destinationTenantId,
+          organizationId: destinationOrganizationId,
+        }) => ({
+          destination: {
+            deploymentId: 'deployment_destination',
+            apiVersion: '2026-01-01',
+            dataSchemaVersion: '0067',
+            capabilities: ['portable-bundle-v1'],
+            entitlements: [],
+            availableStorageBytes: 1024 * 1024,
+            acceptedSourceOperatingModels: ['self-hosted'],
+          },
+          trustedBundleKeys: new Map([['bundle_key_01', activeBundlePublicKey]]),
+          trustedPayloadKeys: new Map([['payload_key_01', payloadKeys.publicKey]]),
+          trustedPayloadPolicies: new Map([
+            [
+              'organizations',
+              {
+                schemaId: receipt.schemaId,
+                schemaSha256: receipt.schemaSha256,
+                policySha256: receipt.policySha256,
+                scannerId: receipt.scannerId,
+                keyId: receipt.keyId,
+              },
+            ],
+          ]),
+          trustedMediaKeys: new Map(),
+          trustedMediaPolicies: new Map(),
+          destinationTenantId,
+          destinationOrganizationId,
+        }),
+      },
+    );
+    await expect(
+      service.prepare({ tenantId, organizationId, jobId: job.id, chunkSize: 1 }),
+    ).resolves.toEqual({ processed: 1, completed: false });
+    activeBundlePublicKey = rogueBundleKeys.publicKey;
+    await expect(
+      service.prepare({ tenantId, organizationId, jobId: job.id, chunkSize: 1 }),
+    ).rejects.toThrow(/signature/u);
+    activeBundlePublicKey = bundleKeys.publicKey;
+    await expect(
+      service.prepare({ tenantId, organizationId, jobId: job.id, chunkSize: 1 }),
+    ).resolves.toEqual({ processed: 1, completed: true });
+    await expect(
+      service.prepare({ tenantId, organizationId, jobId: job.id, chunkSize: 1 }),
+    ).resolves.toEqual({ processed: 0, completed: true });
+    const rows = await repository.listRows({ tenantId, organizationId, jobId: job.id, limit: 10 });
+    expect(rows).toHaveLength(2);
+    expect(JSON.parse(rows[0]!.normalized_data!)).toMatchObject({
+      entityType: 'organization',
+      externalId: 'organization-portable-1',
+      attributes: { name: 'Portable organization 1' },
+    });
+    expect(rows[0]?.status).toBe('validated');
+
+    const unauthorizedCommitJob = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v1',
+      mode: 'commit',
+      idempotencyKey: 'portable-unauthorized-commit-integration',
+      requestedBy: 'test-user',
+      configuration: {
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: [artifactId],
+      },
+    });
+    await expect(
+      service.prepare({
+        tenantId,
+        organizationId,
+        jobId: unauthorizedCommitJob.id,
+        chunkSize: 1,
+      }),
+    ).rejects.toThrow('PORTABILITY_COMMIT_AUTHORIZATION_UNAVAILABLE');
+    await expect(
+      createRepositoryMigrationActivityService(
+        db,
+        createProductionMigrationCommitters(db),
+      ).beginCommit({
+        tenantId,
+        organizationId,
+        jobId: unauthorizedCommitJob.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow('PORTABILITY_COMMIT_AUTHORIZATION_UNAVAILABLE');
+  });
 });

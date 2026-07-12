@@ -1919,6 +1919,10 @@ describe('openApiSpec', () => {
 
   it('publishes reusable typed migration schemas and complete mapping contracts', () => {
     expect(openApiSpec.components.schemas.MigrationPreparationConfiguration.oneOf).toHaveLength(5);
+    expect(
+      openApiSpec.components.schemas.MigrationPreparationConfiguration.oneOf[0].properties
+        .sourceSystem.enum,
+    ).not.toContain('tixkit-portable');
     expect(openApiSpec.components.schemas.MigrationJob).toMatchObject({
       type: 'object',
     });
@@ -1933,6 +1937,22 @@ describe('openApiSpec', () => {
         }),
       ]),
     );
+    expect(openApiSpec.paths['/portable-migration-jobs'].post).toMatchObject({
+      operationId: 'createPortableMigrationJob',
+      'x-required-permissions': ['migrations.write'],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              properties: {
+                sourceSystem: { const: 'tixkit-portable' },
+                configuration: { properties: { artifactIds: { minItems: 1, maxItems: 1 } } },
+              },
+            },
+          },
+        },
+      },
+    });
     const mappingPost = openApiSpec.paths['/migration-mappings'].post;
     expect(mappingPost.requestBody.content['application/json'].schema).toMatchObject({
       required: ['organizationId', 'sourceSystem', 'name', 'entityType', 'mapping'],

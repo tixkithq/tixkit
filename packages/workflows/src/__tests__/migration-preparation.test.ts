@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE,
@@ -23,12 +24,105 @@ import {
   isBlockedMigrationAddress,
   migrationAuthorizationHeader,
   migrationPaginationCursor,
+  portableImportTrustFromEnvironment,
   migrationCursorKeyringFromEnvironment,
   readMigrationArtifactBody,
   readMigrationJsonResponse,
 } from '../activities/migration-preparation.js';
 
 describe('migration source origin policy', () => {
+  it('loads portability trust as public keys and binds destination scope at runtime', () => {
+    const bundle = generateKeyPairSync('ed25519');
+    const payload = generateKeyPairSync('ed25519');
+    const trust = portableImportTrustFromEnvironment(
+      { tenantId: 'tenant_1', organizationId: 'organization_1' },
+      {
+        TIXKIT_PORTABILITY_IMPORT_TRUST: JSON.stringify({
+          destination: {
+            deploymentId: 'deployment_1',
+            apiVersion: '2026-01-01',
+            dataSchemaVersion: '0067',
+            capabilities: ['portable-bundle-v1'],
+            entitlements: [],
+            availableStorageBytes: 1024,
+            acceptedSourceOperatingModels: ['cloud', 'self-hosted'],
+          },
+          bundleKeys: {
+            bundle_key: bundle.publicKey.export({ type: 'spki', format: 'pem' }),
+          },
+          payloadKeys: {
+            payload_key: payload.publicKey.export({ type: 'spki', format: 'pem' }),
+          },
+          payloadPolicies: {},
+          mediaKeys: {},
+          mediaPolicies: {},
+        }),
+      },
+    );
+    expect(trust.destinationTenantId).toBe('tenant_1');
+    expect(trust.destinationOrganizationId).toBe('organization_1');
+    expect(trust.trustedBundleKeys.has('bundle_key')).toBe(true);
+    expect(trust.trustedPayloadKeys.has('payload_key')).toBe(true);
+  });
+
+  it('fails closed when portability trust is absent or malformed', () => {
+    const scope = { tenantId: 'tenant_1', organizationId: 'organization_1' };
+    expect(() => portableImportTrustFromEnvironment(scope, {})).toThrow(
+      'PORTABILITY_IMPORT_TRUST_UNAVAILABLE',
+    );
+    expect(() =>
+      portableImportTrustFromEnvironment(scope, { TIXKIT_PORTABILITY_IMPORT_TRUST: '{}' }),
+    ).toThrow('PORTABILITY_IMPORT_TRUST_INVALID');
+  });
+
+  it('rejects string allowlists and malformed nested portability policies', () => {
+    const publicKey = generateKeyPairSync('ed25519').publicKey.export({
+      type: 'spki',
+      format: 'pem',
+    });
+    const base = {
+      destination: {
+        deploymentId: 'deployment_1',
+        apiVersion: '2026-01-01',
+        dataSchemaVersion: '0067',
+        capabilities: ['portable-bundle-v1'],
+        entitlements: [],
+        availableStorageBytes: 1024,
+        acceptedSourceOperatingModels: ['self-hosted'],
+      },
+      bundleKeys: { bundle_key: publicKey },
+      payloadKeys: { payload_key: publicKey },
+      payloadPolicies: {},
+      mediaKeys: {},
+      mediaPolicies: {},
+    };
+    const parse = (value: unknown) =>
+      portableImportTrustFromEnvironment(
+        { tenantId: 'tenant_1', organizationId: 'organization_1' },
+        { TIXKIT_PORTABILITY_IMPORT_TRUST: JSON.stringify(value) },
+      );
+    expect(() =>
+      parse({
+        ...base,
+        destination: { ...base.destination, capabilities: 'portable-bundle-v1-extra' },
+      }),
+    ).toThrow('PORTABILITY_IMPORT_TRUST_INVALID');
+    expect(() =>
+      parse({
+        ...base,
+        payloadPolicies: {
+          events: {
+            schemaId: 'events_schema',
+            schemaSha256: '1'.repeat(64),
+            policySha256: '2'.repeat(64),
+            scannerId: 'scanner_1',
+            keyId: 'untrusted_key',
+          },
+        },
+      }),
+    ).toThrow('PORTABILITY_IMPORT_TRUST_INVALID');
+  });
+
   it('fails closed for local, credential-bearing, insecure, and nonstandard-port origins', async () => {
     await expect(assertSafeMigrationOrigin('http://example.com')).rejects.toThrow(
       'MIGRATION_SOURCE_ORIGIN_REJECTED',

@@ -114,6 +114,9 @@ export function createRepositoryMigrationActivityService(
         context.jobId,
       );
       if (!pendingJob) throw new Error('MIGRATION_JOB_NOT_FOUND');
+      if (pendingJob.source_system === 'tixkit-portable') {
+        throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_UNAVAILABLE');
+      }
       const configuration = pendingJob.configuration
         ? (JSON.parse(pendingJob.configuration) as Record<string, unknown>)
         : {};

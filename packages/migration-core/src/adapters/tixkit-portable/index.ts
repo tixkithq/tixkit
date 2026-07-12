@@ -41,6 +41,18 @@ export interface TixkitPortableAdapterConfiguration {
   readonly [verifiedConfiguration]: true;
 }
 
+export type TixkitPortableImportTrust = Pick<
+  Parameters<typeof prepareTixkitPortableMigration>[0],
+  | 'destination'
+  | 'trustedBundleKeys'
+  | 'trustedPayloadKeys'
+  | 'trustedPayloadPolicies'
+  | 'trustedMediaKeys'
+  | 'trustedMediaPolicies'
+  | 'destinationTenantId'
+  | 'destinationOrganizationId'
+>;
+
 interface VerifiedPortableMigrationState {
   manifest: PortableBundleManifest;
   payloads: ReadonlyMap<string, Uint8Array>;
@@ -166,6 +178,53 @@ export function prepareTixkitPortableMigration(input: {
   return configuration;
 }
 
+export function prepareTixkitPortableUpload(
+  bytes: Uint8Array,
+  trust: TixkitPortableImportTrust,
+): TixkitPortableAdapterConfiguration {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  const parsed = parsePortableJson(text);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('portable migration upload must be an object');
+  }
+  const upload = parsed as { envelope?: unknown; payloads?: unknown };
+  if (
+    Object.keys(upload).some((key) => key !== 'envelope' && key !== 'payloads') ||
+    !upload.envelope ||
+    typeof upload.envelope !== 'object' ||
+    Array.isArray(upload.envelope) ||
+    !upload.payloads ||
+    typeof upload.payloads !== 'object' ||
+    Array.isArray(upload.payloads)
+  ) {
+    throw new Error('portable migration upload shape is invalid');
+  }
+  const payloads = new Map<string, Uint8Array>();
+  let decodedBytes = 0;
+  for (const [path, encoded] of Object.entries(upload.payloads)) {
+    if (
+      typeof encoded !== 'string' ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)
+    ) {
+      throw new Error(`portable migration payload encoding is invalid: ${path}`);
+    }
+    const decoded = Buffer.from(encoded, 'base64');
+    if (decoded.toString('base64') !== encoded) {
+      throw new Error(`portable migration payload encoding is not canonical: ${path}`);
+    }
+    decodedBytes += decoded.byteLength;
+    if (!Number.isSafeInteger(decodedBytes) || decodedBytes > 50 * 1024 * 1024) {
+      throw new Error('portable migration decoded payloads exceed the import limit');
+    }
+    payloads.set(path, decoded);
+  }
+  return prepareTixkitPortableMigration({
+    ...trust,
+    envelope: upload.envelope as SignedPortableBundle,
+    payloads,
+  });
+}
+
 interface PortableMigrationRecord {
   portableId: string;
   attributes: Readonly<Record<string, unknown>>;
@@ -220,7 +279,7 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
   TixkitPortableAdapterConfiguration,
   string
 > {
-  readonly id = 'tixkit-portable-v1';
+  readonly id = 'tixkit-portable';
   readonly supportedVersions = ['tixkit-portable-bundle-v1'];
 
   async discover(
@@ -391,3 +450,5 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
     return issues;
   }
 }
+
+export const tixkitPortableMigrationAdapter = new TixkitPortableMigrationAdapter();

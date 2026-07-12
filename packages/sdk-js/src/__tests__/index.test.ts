@@ -165,6 +165,31 @@ describe('TixkitClient', () => {
     ]);
   });
 
+  it('creates signed portability jobs through the additive dedicated endpoint', async () => {
+    const fetchMock = mockFetch(201, { id: 'job_portable_1' });
+    const client = new TixkitClient({
+      apiKey: 'tk_test',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.migrations.createPortable({
+      organizationId: 'org_1',
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v1',
+      idempotencyKey: 'portable-job-1',
+      configuration: {
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: ['upl_12345678'],
+      },
+    });
+    expect(getCall(fetchMock)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/portable-migration-jobs',
+      headers: { 'Idempotency-Key': 'portable-job-1' },
+    });
+  });
+
   it('correlates migration job source systems with their preparation selectors', () => {
     const input: CreateMigrationJobInput = {
       organizationId: 'org_1',

@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createPublicKey,
+  randomBytes,
+} from 'node:crypto';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { request as httpsRequest } from 'node:https';
@@ -11,11 +17,13 @@ import {
   PRETIX_API_RESOURCE_PLAN,
   migrationAdapter,
   parseMigrationPreparationConfiguration,
+  prepareTixkitPortableUpload,
   type MigrationAdapter,
   type MigrationCredentialResolver,
   type MigrationIssue,
   type MigrationPreparationConfiguration,
   type NormalizedMigrationEntity,
+  type TixkitPortableImportTrust,
 } from '@tixkit/migration-core';
 
 export type MigrationPreparationInput = {
@@ -24,6 +32,191 @@ export type MigrationPreparationInput = {
   jobId: string;
   chunkSize: number;
 };
+
+type PortableTrustScope = Pick<MigrationPreparationInput, 'tenantId' | 'organizationId'>;
+type PayloadTrustPolicy =
+  TixkitPortableImportTrust['trustedPayloadPolicies'] extends ReadonlyMap<string, infer Policy>
+    ? Policy
+    : never;
+type MediaTrustPolicy =
+  TixkitPortableImportTrust['trustedMediaPolicies'] extends ReadonlyMap<string, infer Policy>
+    ? Policy
+    : never;
+
+function portabilityTrustRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+  }
+  return value as Record<string, unknown>;
+}
+
+function portabilityTrustExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): void {
+  if (
+    Object.keys(value).length !== expected.length ||
+    Object.keys(value).some((key) => !expected.includes(key))
+  ) {
+    throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+  }
+}
+
+function portabilityTrustStringArray(value: unknown, allowed?: ReadonlySet<string>): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+  }
+  const result = value as string[];
+  if (
+    new Set(result).size !== result.length ||
+    (allowed && result.some((item) => !allowed.has(item)))
+  ) {
+    throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+  }
+  return [...result];
+}
+
+export function portableImportTrustFromEnvironment(
+  scope: PortableTrustScope,
+  environment: NodeJS.ProcessEnv = process.env,
+): TixkitPortableImportTrust {
+  const serialized = environment.TIXKIT_PORTABILITY_IMPORT_TRUST;
+  if (!serialized) throw new Error('PORTABILITY_IMPORT_TRUST_UNAVAILABLE');
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch {
+    throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+  }
+  const trust = portabilityTrustRecord(value);
+  portabilityTrustExactKeys(trust, [
+    'destination',
+    'bundleKeys',
+    'payloadKeys',
+    'payloadPolicies',
+    'mediaKeys',
+    'mediaPolicies',
+  ]);
+  const keyMap = (
+    candidate: unknown,
+    required: boolean,
+  ): Map<string, ReturnType<typeof createPublicKey>> => {
+    const entries = Object.entries(portabilityTrustRecord(candidate));
+    if (required && entries.length === 0) throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+    return new Map(
+      entries.map(([keyId, pem]) => {
+        if (!/^[A-Za-z0-9_-]{1,128}$/u.test(keyId) || typeof pem !== 'string') {
+          throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+        }
+        try {
+          const key = createPublicKey(pem);
+          if (key.asymmetricKeyType !== 'ed25519') {
+            throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+          }
+          return [keyId, key];
+        } catch {
+          throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+        }
+      }),
+    );
+  };
+  const bundleKeys = keyMap(trust.bundleKeys, true);
+  const payloadKeys = keyMap(trust.payloadKeys, true);
+  const mediaKeys = keyMap(trust.mediaKeys, false);
+  const identifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
+  const sha256 = /^[a-f0-9]{64}$/u;
+  const payloadPolicies = new Map<string, PayloadTrustPolicy>();
+  for (const [section, candidate] of Object.entries(
+    portabilityTrustRecord(trust.payloadPolicies),
+  )) {
+    const policy = portabilityTrustRecord(candidate);
+    portabilityTrustExactKeys(policy, [
+      'schemaId',
+      'schemaSha256',
+      'policySha256',
+      'scannerId',
+      'keyId',
+    ]);
+    if (
+      !identifier.test(section) ||
+      typeof policy.schemaId !== 'string' ||
+      !identifier.test(policy.schemaId) ||
+      typeof policy.schemaSha256 !== 'string' ||
+      !sha256.test(policy.schemaSha256) ||
+      typeof policy.policySha256 !== 'string' ||
+      !sha256.test(policy.policySha256) ||
+      typeof policy.scannerId !== 'string' ||
+      !identifier.test(policy.scannerId) ||
+      typeof policy.keyId !== 'string' ||
+      !payloadKeys.has(policy.keyId)
+    ) {
+      throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+    }
+    payloadPolicies.set(section, policy as unknown as PayloadTrustPolicy);
+  }
+  const mediaPolicies = new Map<string, MediaTrustPolicy>();
+  for (const [scannerId, candidate] of Object.entries(
+    portabilityTrustRecord(trust.mediaPolicies),
+  )) {
+    const policy = portabilityTrustRecord(candidate);
+    portabilityTrustExactKeys(policy, ['policySha256', 'keyId', 'detectedMediaTypes']);
+    if (
+      !identifier.test(scannerId) ||
+      typeof policy.policySha256 !== 'string' ||
+      !sha256.test(policy.policySha256) ||
+      typeof policy.keyId !== 'string' ||
+      !mediaKeys.has(policy.keyId)
+    ) {
+      throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+    }
+    const detectedMediaTypes = portabilityTrustStringArray(policy.detectedMediaTypes);
+    mediaPolicies.set(scannerId, { ...policy, detectedMediaTypes } as unknown as MediaTrustPolicy);
+  }
+  const destination = portabilityTrustRecord(trust.destination);
+  portabilityTrustExactKeys(destination, [
+    'deploymentId',
+    'apiVersion',
+    'dataSchemaVersion',
+    'capabilities',
+    'entitlements',
+    'availableStorageBytes',
+    'acceptedSourceOperatingModels',
+  ]);
+  if (
+    typeof destination.deploymentId !== 'string' ||
+    !identifier.test(destination.deploymentId) ||
+    typeof destination.apiVersion !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(destination.apiVersion) ||
+    typeof destination.dataSchemaVersion !== 'string' ||
+    !/^\d{4}$/u.test(destination.dataSchemaVersion) ||
+    !Number.isSafeInteger(destination.availableStorageBytes) ||
+    (destination.availableStorageBytes as number) < 0
+  ) {
+    throw new Error('PORTABILITY_IMPORT_TRUST_INVALID');
+  }
+  const parsedDestination: TixkitPortableImportTrust['destination'] = {
+    deploymentId: destination.deploymentId,
+    apiVersion: destination.apiVersion,
+    dataSchemaVersion: destination.dataSchemaVersion,
+    capabilities: portabilityTrustStringArray(destination.capabilities),
+    entitlements: portabilityTrustStringArray(destination.entitlements),
+    availableStorageBytes: destination.availableStorageBytes as number,
+    acceptedSourceOperatingModels: portabilityTrustStringArray(
+      destination.acceptedSourceOperatingModels,
+      new Set(['cloud', 'self-hosted']),
+    ) as Array<'cloud' | 'self-hosted'>,
+  };
+  return {
+    destination: parsedDestination,
+    trustedBundleKeys: bundleKeys,
+    trustedPayloadKeys: payloadKeys,
+    trustedPayloadPolicies: payloadPolicies,
+    trustedMediaKeys: mediaKeys,
+    trustedMediaPolicies: mediaPolicies,
+    destinationTenantId: scope.tenantId,
+    destinationOrganizationId: scope.organizationId,
+  };
+}
 
 export type MigrationPreparationChunk = {
   processed: number;
@@ -892,6 +1085,7 @@ export function createMigrationPreparationService(
       currentKeyId: string;
       keys: Readonly<Record<string, string>>;
     };
+    portableTrust?: (scope: PortableTrustScope) => TixkitPortableImportTrust;
   } = {},
 ): MigrationPreparationService {
   const repository = new ImportRepository(db);
@@ -901,6 +1095,9 @@ export function createMigrationPreparationService(
         throw new Error('MIGRATION_PREPARATION_CHUNK_SIZE_INVALID');
       const job = await repository.findJob(input.tenantId, input.organizationId, input.jobId);
       if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
+      if (job.source_system === 'tixkit-portable' && job.mode !== 'dry-run') {
+        throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_UNAVAILABLE');
+      }
       if (job.status === 'prepared') return { processed: 0, completed: true };
       if (['pending', 'failed', 'paused'].includes(job.status)) {
         const changed = await repository.transitionJob({
@@ -1086,7 +1283,18 @@ export function createMigrationPreparationService(
               },
             ],
           };
-        else transient = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+        else if (job.source_system === 'tixkit-portable') {
+          if (configuration.artifactIds.length !== 1) {
+            throw new Error('PORTABILITY_IMPORT_REQUIRES_SINGLE_ARTIFACT');
+          }
+          transient = prepareTixkitPortableUpload(
+            bytes,
+            (runtime.portableTrust ?? portableImportTrustFromEnvironment)({
+              tenantId: input.tenantId,
+              organizationId: input.organizationId,
+            }),
+          );
+        } else transient = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
         cursorKey = artifact.checksum_sha256;
       }
       const context = {
