@@ -2,30 +2,23 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from '
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const root = resolve(
+  process.env.TIXKIT_DOCUMENTATION_INVENTORY_ROOT ??
+    resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'),
+);
 const outputPath = 'docs/internal/documentation-inventory.csv';
 const verifiedDate = '2026-07-10';
 
 const publicDocs = [
   'docs/accessibility-conformance-statement.md',
-  'docs/api-reference.md',
-  'docs/clerk-setup-guide.md',
   'docs/email-sms-deliverability-runbook.md',
   'docs/embed-generator.html',
-  'docs/incident-runbooks.md',
-  'docs/managed-database-compatibility.md',
   'docs/mssql-roadmap.md',
-  'docs/pluggable-auth-guide.md',
   'docs/performance.md',
   'docs/privacy-retention-policy.md',
-  'docs/production-deployment-guide.md',
   'docs/production-validation-harness.md',
-  'docs/sdk-guides',
   'docs/security-tenant-isolation-audit.md',
   'docs/telnyx-sms-local.md',
-  'docs/temporal-operations-guide.md',
-  'docs/webhook-guide.md',
-  'docs/widget-embed-guide.md',
 ];
 
 const publicPackageDirectories = [
@@ -60,9 +53,6 @@ const publicPackageDirectories = [
 const exactTargets = new Map([
   ['README.md', 'README.md'],
   ['docs/accessibility-conformance-statement.md', 'docs/public/reference/accessibility.mdx'],
-  ['docs/admin-dashboard-user-guide.md', 'docs/public/operators/'],
-  ['docs/api-reference.md', 'docs/public/developers/api-fundamentals/'],
-  ['docs/clerk-setup-guide.md', 'docs/public/self-hosting/authentication/clerk.mdx'],
   [
     'docs/email-sms-deliverability-runbook.md',
     'docs/public/operations/messaging/deliverability.mdx',
@@ -72,13 +62,9 @@ const exactTargets = new Map([
     'docs/public/operators/messages/email-template-lifecycle.mdx',
   ],
   ['docs/embed-generator.html', 'docs/public/developers/widget/embed-generator.html'],
-  ['docs/incident-runbooks.md', 'docs/public/operations/incidents/'],
-  ['docs/managed-database-compatibility.md', 'docs/public/self-hosting/databases.mdx'],
   ['docs/mssql-roadmap.md', 'docs/public/self-hosting/databases/mssql-status.mdx'],
   ['docs/performance.md', 'docs/public/reference/performance.mdx'],
-  ['docs/pluggable-auth-guide.md', 'docs/public/self-hosting/authentication/'],
   ['docs/privacy-retention-policy.md', 'docs/public/reference/privacy-and-retention.mdx'],
-  ['docs/production-deployment-guide.md', 'docs/public/self-hosting/deployment/'],
   [
     'docs/production-validation-harness.md',
     'docs/public/contributing/validation/production-harness.mdx',
@@ -89,10 +75,7 @@ const exactTargets = new Map([
     'docs/internal/audits/security-tenant-isolation-audit.md',
   ],
   ['docs/telnyx-sms-local.md', 'docs/public/developers/messaging/telnyx-local.mdx'],
-  ['docs/temporal-operations-guide.md', 'docs/public/operations/temporal/'],
   ['docs/testing-coverage.md', 'docs/public/contributing/testing.mdx'],
-  ['docs/webhook-guide.md', 'docs/public/developers/webhooks/'],
-  ['docs/widget-embed-guide.md', 'docs/public/developers/widget/'],
 ]);
 
 const textExtensions = new Set([
@@ -133,6 +116,7 @@ function walk(directory) {
             'dist',
             'graphify-out',
             'node_modules',
+            'out',
             'playwright-report',
             'target',
             'test-results',
@@ -178,10 +162,6 @@ function proposedPath(path) {
   }
   if (/^docs\/.*(?:audit|evidence).*\.md$/.test(path)) {
     return path.replace('docs/', 'docs/internal/audits/');
-  }
-  if (path.startsWith('docs/sdk-guides/')) {
-    const name = path.slice('docs/sdk-guides/'.length).replace(/\.md$/, '.mdx');
-    return `docs/public/sdks/${name}`;
   }
   if (path.startsWith('docs/brand/')) return path.replace('docs/brand/', 'docs/assets/brand/');
   if (path.startsWith('docs/internal/')) return path;
@@ -235,16 +215,8 @@ function action(path) {
   const target = proposedPath(path);
   if (path.startsWith('docs/brand/')) return 'move';
   if (target.startsWith('docs/internal/') && target !== path) return 'move';
-  if (
-    target.endsWith('/') ||
-    /admin-dashboard-user-guide|webhook-guide|production-deployment-guide|temporal-operations-guide|incident-runbooks/.test(
-      path,
-    )
-  ) {
-    return 'split';
-  }
-  if (path === 'README.md' || /packages\/.*README|apps\/sdk-.*README|docs\/sdk-guides/.test(path))
-    return 'rewrite';
+  if (target.endsWith('/')) return 'split';
+  if (path === 'README.md' || /packages\/.*README|apps\/sdk-.*README/.test(path)) return 'rewrite';
   if (/apps\/admin-dashboard|packages\/cli\/src/.test(path)) return 'rewrite';
   return target === path ? 'keep' : 'rewrite';
 }
@@ -309,6 +281,7 @@ const searchableFiles = [
   'package.json',
 ]
   .filter((path, index, values) => values.indexOf(path) === index)
+  .filter((path) => path !== outputPath)
   .filter((path) => textExtensions.has(extname(path)) && existsSync(join(root, path)))
   .filter((path) => statSync(join(root, path)).size <= 2_000_000);
 

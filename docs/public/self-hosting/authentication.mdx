@@ -15,14 +15,75 @@ related:
   - /operators/team-and-permissions
 ---
 
-The repository supports its documented local development principal and provider-backed authentication paths. Local authentication is for controlled development; do not expose it as a production login mechanism.
+Tixkit supports `clerk`, `oidc`, and the development-only `dev` provider. Product authorization always comes from Tixkit tenant memberships and permission grants; an identity-provider role or metadata value never grants product access by itself.
 
-## Provider setup
+## Select a provider
 
-Configure the provider's public browser key and server secret in their correct runtime boundaries. Set the matching `AUTH_PROVIDER` and browser provider selection values, then restart API and admin applications.
+| `AUTH_PROVIDER` | Intended use                                       | Production behavior                                                  |
+| --------------- | -------------------------------------------------- | -------------------------------------------------------------------- |
+| `clerk`         | Clerk sessions for the organizer dashboard and API | Requires all Clerk keys and a verified identity-sync webhook.        |
+| `oidc`          | Bearer JWTs from a standard OIDC issuer            | Requires an HTTPS issuer, audience, and pre-linked Tixkit profiles.  |
+| `dev`           | Deterministic local development principal          | Refuses to start outside development and is forbidden in production. |
 
-Provider organization identity must resolve to Tixkit tenant/organization context. Test suspended users, missing organization membership, multi-tenant selection, expired sessions, and forbidden actions.
+Development defaults to `dev` when `AUTH_PROVIDER` is unset. Other environments default to `clerk`. Set `NEXT_PUBLIC_AUTH_PROVIDER` to the same value anywhere the admin browser bundle is deployed; never let the browser and API select different providers.
 
-## Safe migration
+## Configure Clerk
 
-Follow the provider migration procedure for identity mapping and rollback. Never silently create cross-tenant memberships from an unverified email match. Keep the prior path available until login, logout, session refresh, organization selection, and API authorization pass in the target environment.
+Provide server secrets only to the API and worker. The publishable key is safe for the admin browser bundle.
+
+```bash
+AUTH_PROVIDER=clerk
+NEXT_PUBLIC_AUTH_PROVIDER=clerk
+CLERK_SECRET_KEY=<server-secret>
+CLERK_PUBLISHABLE_KEY=<publishable-key>
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=<publishable-key>
+CLERK_WEBHOOK_SECRET=<svix-signing-secret>
+```
+
+Create a Clerk webhook endpoint at `POST https://api.example.com/v1/webhooks/clerk` and subscribe it to:
+
+- `user.created`
+- `user.updated`
+- `user.deleted`
+- `organization.created`
+- `organization.updated`
+
+The route requires `svix-id`, `svix-timestamp`, and `svix-signature`, verifies the raw request body with `CLERK_WEBHOOK_SECRET`, rejects timestamps outside the replay window, and deduplicates the Svix message ID before starting the identity-sync workflow. A missing webhook secret returns `503 WEBHOOK_NOT_CONFIGURED`; unsigned identity updates are never accepted.
+
+Clerk organizations map to Tixkit organizations. Clerk users map to `user_profiles`, while active organization memberships and `permission_grants` remain authoritative. Missing or suspended profiles fail closed. If a user spans tenants, the active Clerk organization or an explicitly authorized tenant selection must disambiguate the request.
+
+## Configure OIDC
+
+OIDC mode verifies API bearer JWTs against the issuer JWKS and the configured audience:
+
+```bash
+AUTH_PROVIDER=oidc
+NEXT_PUBLIC_AUTH_PROVIDER=oidc
+OIDC_ISSUER_URL=https://id.example.com
+OIDC_AUDIENCE=tixkit-api
+```
+
+The token must contain a stable `sub`. Tixkit looks up the external identity as `oidc:<issuer-without-trailing-slash>:<sub>` in `user_profiles.clerk_user_id`; create that mapping through an authorized provisioning process before cutover. `email` is useful for audit display but is never a safe identity join key.
+
+The optional `org_id` or `organization_id` claim must match an accepted Tixkit organization membership. When one subject has profiles in multiple tenants and no organization claim selects one, the caller must send `X-Tenant-Id`; otherwise authentication fails as ambiguous. Suspended profiles, absent mappings, invalid issuer/audience, unaccepted memberships, and missing permission grants fail closed. The optional `tenant_id` claim is only a hint and does not override database grants.
+
+OIDC mode supplies API authentication. Before using it for the organizer dashboard, verify that your deployment's browser sign-in integration obtains and forwards the expected bearer token; the repository does not infer a browser session from an arbitrary issuer.
+
+## Rotate credentials safely
+
+For Clerk server and publishable keys:
+
+1. Create the replacement keys in Clerk.
+2. Deploy the new `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` together.
+3. Verify a fresh login, session refresh, `GET /v1/me`, tenant selection, and a permission denial.
+4. Revoke the old keys only after every API, worker, and admin instance uses the replacement.
+
+For the Clerk webhook secret, create or rotate the endpoint secret, deploy the new `CLERK_WEBHOOK_SECRET`, send a signed test delivery, and confirm identity sync before retiring the old endpoint. The verifier accepts one active secret, so use a second endpoint or a coordinated delivery pause when overlap is required; do not revoke the old secret before the new deployment is ready.
+
+For OIDC signing keys, rely on the issuer's JWKS overlap and cache window. Test tokens signed by the replacement key before the issuer removes the old key. Changing `OIDC_ISSUER_URL` changes the external subject key and therefore requires an explicit profile-mapping migration.
+
+## Cut over and roll back
+
+Stage mappings before changing provider selection. Never create cross-tenant memberships from an email match. In a production-like environment, prove login or bearer authentication, logout/session expiry where applicable, profile suspension, organization selection, multi-tenant ambiguity rejection, permission denial, and audit attribution.
+
+Keep the prior provider configuration recoverable until those checks pass. To roll back, restore both `AUTH_PROVIDER` and `NEXT_PUBLIC_AUTH_PROVIDER`, restore the matching secrets, restart the API/admin/worker, and repeat the denial and tenant-selection checks. Do not delete old identity mappings until the retention and rollback window closes.

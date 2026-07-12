@@ -14,6 +14,7 @@ import {
   validatePackageReadmes,
   validateRedirects,
 } from '../docs/lib/content.mjs';
+import { LEGACY_DOCUMENTATION_REDIRECTS } from '../docs/lib/legacy-references.mjs';
 
 const validFrontmatter = {
   title: 'Test page',
@@ -176,6 +177,43 @@ test('redirect validation rejects chains, duplicate targets, and missing anchors
   assert.ok(errors.some((error) => error.includes('duplicate destination')));
 });
 
+test('redirect checks require every removed legacy guide to retain its canonical URL', () => {
+  const redirects = JSON.parse(readFileSync('docs/redirects.json', 'utf8'));
+  for (const [source, destination] of Object.entries(LEGACY_DOCUMENTATION_REDIRECTS)) {
+    assert.equal(redirects[source], destination, `${source} must redirect to ${destination}`);
+  }
+});
+
+test('documentation inventory ignores static export output', () => {
+  withRoot((root) => {
+    write(root, 'README.md', '# Fixture\n');
+    write(root, 'docs/internal/seed.md', '# Seed\n');
+    write(root, 'docs/internal/documentation-inventory.csv', '');
+    const environment = { ...process.env, TIXKIT_DOCUMENTATION_INVENTORY_ROOT: root };
+    execFileSync('node', ['scripts/docs/generate-documentation-inventory.mjs'], {
+      cwd: process.cwd(),
+      env: environment,
+      stdio: 'pipe',
+    });
+    const cleanInventory = readFileSync(
+      join(root, 'docs/internal/documentation-inventory.csv'),
+      'utf8',
+    );
+    write(root, 'apps/docs/out/generated.html', 'docs/internal/seed.md');
+    execFileSync('node', ['scripts/docs/generate-documentation-inventory.mjs'], {
+      cwd: process.cwd(),
+      env: environment,
+      stdio: 'pipe',
+    });
+    const builtInventory = readFileSync(
+      join(root, 'docs/internal/documentation-inventory.csv'),
+      'utf8',
+    );
+    assert.equal(builtInventory, cleanInventory);
+    assert.doesNotMatch(builtInventory, /apps\/docs\/out/);
+  });
+});
+
 test('SDK guide sections stay synchronized in manifest and local search', () => {
   execFileSync('node', ['scripts/docs/generate-content-manifest.mjs'], {
     stdio: 'pipe',
@@ -199,4 +237,34 @@ test('documentation workflows trigger for executable SDK demo changes', () => {
     assert.match(workflow, /- ["']apps\/sdk-\*-demo\/\*\*["']/);
     assert.match(workflow, /bun run sdk:demos:check/);
   }
+});
+
+test('self-hosted authentication guide preserves the deployable provider contract', () => {
+  const guide = readFileSync('docs/public/self-hosting/authentication.mdx', 'utf8');
+  for (const required of [
+    'AUTH_PROVIDER=clerk',
+    'NEXT_PUBLIC_AUTH_PROVIDER=clerk',
+    'CLERK_SECRET_KEY',
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+    'CLERK_WEBHOOK_SECRET',
+    'AUTH_PROVIDER=oidc',
+    'NEXT_PUBLIC_AUTH_PROVIDER=oidc',
+    'OIDC_ISSUER_URL',
+    'OIDC_AUDIENCE',
+    'user.created',
+    'user.updated',
+    'user.deleted',
+    'organization.created',
+    'organization.updated',
+    '/v1/webhooks/clerk',
+    'svix-signature',
+    'X-Tenant-Id',
+    'fail closed',
+    'Rotate credentials safely',
+  ]) {
+    assert.ok(guide.includes(required), `authentication guide must document ${required}`);
+  }
+  assert.match(guide, /never.*email match/is);
+  assert.match(guide, /verifier accepts one active secret/is);
+  assert.match(guide, /AUTH_PROVIDER.*NEXT_PUBLIC_AUTH_PROVIDER/is);
 });

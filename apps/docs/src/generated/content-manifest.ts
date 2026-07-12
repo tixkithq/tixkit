@@ -444,7 +444,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   "/self-hosting/authentication": {
     sourcePath: "docs/public/self-hosting/authentication.mdx",
     frontmatter: {"title":"Configure authentication","description":"Choose and validate the supported authentication provider without weakening tenant or session boundaries.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"security","last_verified":"2026-07-10","prerequisites":["A supported authentication provider configuration"],"related":["/self-hosting/configuration","/operators/team-and-permissions"]},
-    headings: [{"id":"provider-setup","text":"Provider setup","level":2},{"id":"safe-migration","text":"Safe migration","level":2}],
+    headings: [{"id":"select-a-provider","text":"Select a provider","level":2},{"id":"configure-clerk","text":"Configure Clerk","level":2},{"id":"configure-oidc","text":"Configure OIDC","level":2},{"id":"rotate-credentials-safely","text":"Rotate credentials safely","level":2},{"id":"cut-over-and-roll-back","text":"Cut over and roll back","level":2}],
     load: () => import("../../../../docs/public/self-hosting/authentication.mdx"),
   },
   "/self-hosting/backups-and-restore": {

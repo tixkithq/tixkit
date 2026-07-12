@@ -12,6 +12,29 @@ export const LEGACY_DOCUMENTATION_REFERENCES = [
   'docs/sdk-guides/',
 ];
 
+export const LEGACY_DOCUMENTATION_REDIRECTS = Object.freeze({
+  '/docs/admin-dashboard-user-guide': '/operators/events',
+  '/docs/api-reference': '/developers/api-fundamentals',
+  '/docs/clerk-setup-guide': '/self-hosting/authentication',
+  '/docs/incident-runbooks': '/operations/incidents',
+  '/docs/managed-database-compatibility': '/self-hosting/databases',
+  '/docs/pluggable-auth-guide': '/self-hosting/authentication',
+  '/docs/production-deployment-guide': '/self-hosting/deployment',
+  '/docs/sdk-guides': '/sdks/javascript',
+  '/docs/sdk-guides/android': '/sdks/android',
+  '/docs/sdk-guides/flutter': '/sdks/flutter',
+  '/docs/sdk-guides/go': '/sdks/go',
+  '/docs/sdk-guides/ios': '/sdks/ios',
+  '/docs/sdk-guides/javascript': '/sdks/javascript',
+  '/docs/sdk-guides/nextjs': '/sdks/nextjs',
+  '/docs/sdk-guides/react-native': '/sdks/react-native',
+  '/docs/sdk-guides/rust': '/sdks/rust',
+  '/docs/sdk-guides/sveltekit': '/sdks/sveltekit',
+  '/docs/temporal-operations-guide': '/operations/temporal',
+  '/docs/webhook-guide': '/developers/webhooks/setup',
+  '/docs/widget-embed-guide': '/developers/widget/embedding',
+});
+
 const HISTORICAL_EVIDENCE_SCRIPTS = [
   'scripts/validate-completion-backlog.mjs',
   'scripts/validate-final-evidence-checklist.mjs',

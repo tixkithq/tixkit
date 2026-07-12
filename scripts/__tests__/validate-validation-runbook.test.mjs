@@ -56,7 +56,7 @@ Hosted CI proof:
 - Branch protection for \`refs/heads/main\` requires pull-request and required-status-check rules for the documented check names.
 - The hosted \`Provider Tests (Stripe)\` job runs (does not skip) with \`STRIPE_SECRET_KEY\`, \`STRIPE_WEBHOOK_SECRET\`, \`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY\`, and \`STRIPE_CONNECT_CLIENT_ID\`.
 - \`.github/workflows/release-dry-run.yml\` runs green on hosted CI.
-- Managed DR proof covers Managed Postgres backup, managed Postgres restore, managed MySQL backup, managed MySQL restore, restore-based rollback, RPO/RTO, \`docs/production-deployment-guide.md\`, and \`docs/incident-runbooks.md\`.
+- Managed DR proof covers Managed Postgres backup, managed Postgres restore, managed MySQL backup, managed MySQL restore, restore-based rollback, RPO/RTO, \`docs/public/self-hosting/deployment.mdx\`, and \`docs/public/operations/incidents.mdx\`.
 - Deferred 2026-06-30 PayPal product decision remains documented.
 - C-082 closes only after fresh hosted CI validates the committed suite, \`docs/completion/user-story-test-matrix.md\`, \`Validated 146 user-story rows\`, and \`133 evidence paths\` without cached Turbo-only proof.
 

@@ -35,7 +35,10 @@ function immediateDirectories(root, parent) {
 
 function walkFiles(directory, symlinks) {
   const files = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  for (const entry of entries) {
     if (
       [
         '.astro',
@@ -189,7 +192,10 @@ function publicScanEntries(manifest, root) {
       files.add(absolute);
     }
   }
-  return { files: [...files], symlinks };
+  return {
+    files: [...files].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)),
+    symlinks: symlinks.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)),
+  };
 }
 
 export function publicDependencyBoundaryViolations(manifest, root) {
