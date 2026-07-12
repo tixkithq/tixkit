@@ -244,7 +244,11 @@ export function auditRepositoryHistory(root, manifest, options = {}) {
         classificationCounts[classification ?? 'unclassified'] =
           (classificationCounts[classification ?? 'unclassified'] ?? 0) + 1;
       const secretKinds = highConfidenceSecretKinds(content);
-      const contentKinds = options.additionalContentKinds?.(content) ?? [];
+      const contentKinds =
+        options.additionalContentKinds?.(content, {
+          objectId: entry.objectId,
+          paths: [...blobPaths.get(entry.objectId)].sort(),
+        }) ?? [];
       if (classifications.includes(undefined) || secretKinds.length > 0 || contentKinds.length > 0)
         findings.push({
           objectId: entry.objectId,
