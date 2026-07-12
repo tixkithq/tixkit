@@ -143,7 +143,7 @@ test('requires a new mode-0600 report under the system temporary directory', () 
       resolve(realpathSync(root), 'audit.json'),
     );
     assert.throws(
-      () => safeHistoryAuditOutput(resolve(process.cwd(), 'audit.json')),
+      () => safeHistoryAuditOutput(resolve(realpathSync(tmpdir()), '..', 'audit.json')),
       /system temporary directory/u,
     );
   } finally {
