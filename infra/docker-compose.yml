@@ -17,6 +17,7 @@ services:
 
   mysql:
     image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
+    command: ['--log-bin-trust-function-creators=1']
     environment:
       MYSQL_ROOT_PASSWORD: tixkit
       MYSQL_DATABASE: tixkit

@@ -3,6 +3,63 @@ import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface AgentApprovalTable {
+  id: string;
+  tenant_id: string;
+  action_digest: string;
+  plan_sha256: string | null;
+  approver_principal_id: string;
+  approver_permission_snapshot: string;
+  policy_version: number | string | bigint;
+  approved_at: Timestamp;
+  expires_at: Timestamp;
+  revoked_at: Timestamp | null;
+  consumed_at: Timestamp | null;
+  consumed_execution_id: string | null;
+}
+
+export interface AgentExecutionTable {
+  id: string;
+  tenant_id: string;
+  action_id: string;
+  action_digest: string;
+  agent_principal_id: string;
+  sponsor_principal_id: string;
+  delegation_grant_id: string;
+  approval_id: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  state: string;
+  resource_version: number | string | bigint;
+  policy_version: number | string | bigint;
+  fence_token: number | string | bigint;
+  lease_owner: string | null;
+  lease_expires_at: Timestamp | null;
+  result: string | null;
+  failure_code: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface AgentAuditEventTable {
+  id: string;
+  tenant_id: string;
+  execution_id: string;
+  agent_principal_id: string;
+  sponsor_principal_id: string;
+  delegation_grant_id: string;
+  action_id: string;
+  action_digest: string;
+  plan_sha256: string | null;
+  approval_id: string | null;
+  phase: string;
+  idempotency_key: string;
+  resource_version: number | string | bigint;
+  occurred_at: Timestamp;
+  reason_codes: string;
+  immutable: boolean | number;
+}
+
 export type OrganizationBoxOfficeSettings = {
   enabled: boolean;
   allowedTenderTypes: BoxOfficeTenderType[];
@@ -1631,6 +1688,9 @@ export interface HistoricalCheckInTable {
 }
 
 export interface DB {
+  agent_approvals: AgentApprovalTable;
+  agent_executions: AgentExecutionTable;
+  agent_audit_events: AgentAuditEventTable;
   tenants: TenantTable;
   organizations: OrganizationTable;
   brands: BrandTable;

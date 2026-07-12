@@ -65,6 +65,7 @@ import { MigrationPermissionsMigration } from './migrations/0060_migration_permi
 import { MigrationPreparationCursorMigration } from './migrations/0062_migration_preparation_cursor.js';
 import { EventCheckoutConfigurationRevisionMigration } from './migrations/0063_event_checkout_configuration_revision.js';
 import { OrganizationEventDefaultsMigration } from './migrations/0064_organization_event_defaults.js';
+import { AgentExecutionMigration } from './migrations/0065_agent_execution.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -181,6 +182,9 @@ const ALL_SCHEMA_TABLES = [
   'import_job_files',
   'import_jobs',
   'migration_credentials',
+  'agent_audit_events',
+  'agent_executions',
+  'agent_approvals',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -270,6 +274,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0062_migration_preparation_cursor': MigrationPreparationCursorMigration,
       '0063_event_checkout_configuration_revision': EventCheckoutConfigurationRevisionMigration,
       '0064_organization_event_defaults': OrganizationEventDefaultsMigration,
+      '0065_agent_execution': AgentExecutionMigration,
     };
   }
 }

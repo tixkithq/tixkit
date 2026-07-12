@@ -71,3 +71,4 @@ export { EventReadinessAcknowledgementRepository, type ReadinessScope } from './
 export { executeTableQuery, assertServerField } from './table-query.js';
 export type { TableQueryConfig } from './table-query.js';
 export { ImportRepository, type ImportJobStatus, type RollbackEligibility } from './import.js';
+export { AgentExecutionRepository } from './agent.js';

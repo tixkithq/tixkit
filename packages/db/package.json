@@ -60,6 +60,7 @@
   },
   "dependencies": {
     "@tixkit/admin-table-core": "workspace:*",
+    "@tixkit/agent-protocol": "workspace:*",
     "@tixkit/content-core": "workspace:*",
     "@tixkit/domain": "workspace:*",
     "kysely": "^0.29.0",

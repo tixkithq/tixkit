@@ -117,6 +117,9 @@ export function createDb(dbUrl?: string, options: CreateDbOptions = {}): Kysely<
           user: decodeURIComponent(parsed.username),
           password: decodeURIComponent(parsed.password),
           database: parsed.pathname.replace(/^\//, ''),
+          // Tixkit persists protocol and lease timestamps in UTC. MySQL DATETIME has no zone,
+          // so pin mysql2's Date serialization/parsing instead of inheriting the host timezone.
+          timezone: 'Z',
           ...(poolConfig.min !== undefined ? { min: poolConfig.min } : {}),
           ...(poolConfig.max !== undefined ? { connectionLimit: poolConfig.max } : {}),
           ...(poolConfig.idleTimeoutMillis !== undefined
