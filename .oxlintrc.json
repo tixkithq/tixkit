@@ -16,6 +16,15 @@
     "typescript/no-unused-vars": "warn",
     "typescript/no-explicit-any": "warn",
     "typescript/no-empty-object-type": "off",
+    "no-await-in-loop": "off",
+    "no-shadow": "off",
+    "no-underscore-dangle": "off",
+    "no-unmodified-loop-condition": "off",
+    "no-useless-constructor": "off",
+    "typescript/no-extraneous-class": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-array-sort": "off",
+    "oxc/no-map-spread": "off",
     "react/react-in-jsx-scope": "off",
     "react/no-unstable-nested-components": "off",
     "react/no-array-index-key": "off",
@@ -29,6 +38,11 @@
     "**/coverage/**",
     "**/graphify-out/**",
     "**/.turbo/**",
+    "artifacts/api/**",
+    "apps/docs/public/contracts/**",
+    "apps/docs/public/openapi.json",
+    "apps/docs/public/search-index.json",
+    "apps/docs/src/generated/**",
     "**/*.config.{js,mjs,ts,cjs}"
   ]
 }

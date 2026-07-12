@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { CalendarDays, Gift, HeartHandshake, Layers3, Ticket, Copy } from 'lucide-react';
-import { adminApi } from '@/lib/api';
+import { adminApi, type AdminSavedVenue } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import { timezoneDatetimeInputToIso } from '@/lib/datetime';
 import { useBootstrap } from '@/context/bootstrap-provider';
@@ -96,7 +96,13 @@ function browserTimezone(): string {
 
 export function NewEventView() {
   const router = useRouter();
-  const { organizationId, brandId, brands, loading: bootstrapLoading } = useBootstrap();
+  const {
+    organizations = [],
+    organizationId,
+    brandId,
+    brands,
+    loading: bootstrapLoading,
+  } = useBootstrap();
   const { can, loading: permissionsLoading } = usePermissions();
   const [startingPoint, setStartingPoint] = React.useState<StartingPoint>('blank');
   const [sourceEventId, setSourceEventId] = React.useState('');
@@ -116,9 +122,14 @@ export function NewEventView() {
   const [timezone, setTimezone] = React.useState('UTC');
   const [currency, setCurrency] = React.useState('USD');
   const [venueName, setVenueName] = React.useState('');
+  const [country, setCountry] = React.useState('');
+  const [venueId, setVenueId] = React.useState('');
+  const [savedVenues, setSavedVenues] = React.useState<AdminSavedVenue[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const [errorField, setErrorField] = React.useState<string>();
+  const creationIdempotencyKey = React.useRef<string | undefined>(undefined);
+  const recoveryPending = React.useRef(false);
   const fieldRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
   const { events: sourceEvents } = useAllEvents({
     organizationId,
@@ -126,9 +137,32 @@ export function NewEventView() {
     enabled: Boolean(organizationId && brandId),
   });
 
-  React.useEffect(() => setTimezone(browserTimezone()), []);
+  React.useEffect(() => {
+    const defaults = organizations.find(
+      (organization) => organization.id === organizationId,
+    )?.eventDefaults;
+    setTimezone(defaults?.timezone || browserTimezone());
+    setCurrency(defaults?.currency || 'USD');
+    setVenueId(defaults?.defaultVenueId || '');
+    setCountry(defaults?.country || '');
+    setVenueName('');
+    void adminApi.reportOnboardingEvent({ stage: 'onboarding_started', outcome: 'started' });
+  }, [organizationId, organizations]);
+  React.useEffect(() => {
+    if (!organizationId) return;
+    void adminApi.listSavedVenues(organizationId).then((result) => {
+      if (!result.ok) return;
+      setSavedVenues(result.data);
+      const selected = result.data.find((venue) => venue.id === venueId);
+      if (selected) setVenueName(selected.name);
+    });
+  }, [organizationId, venueId]);
   React.useEffect(() => {
     const selectedBrand = brands.find((brand) => brand.id === brandId);
+    const organizationDefaults = organizations.find(
+      (organization) => organization.id === organizationId,
+    )?.eventDefaults;
+    if (organizationDefaults?.currency) return;
     if (!organizationId || !selectedBrand?.paymentAccountId) return;
     let cancelled = false;
     void adminApi.listPaymentAccounts(organizationId).then((result) => {
@@ -139,7 +173,7 @@ export function NewEventView() {
     return () => {
       cancelled = true;
     };
-  }, [brandId, brands, organizationId]);
+  }, [brandId, brands, organizationId, organizations]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -188,16 +222,24 @@ export function NewEventView() {
       return;
     }
     setSubmitting(true);
-    let createdEventId: string | undefined;
+    creationIdempotencyKey.current ??= window.crypto.randomUUID();
+    const recovering = recoveryPending.current;
+    if (recovering) {
+      void adminApi.reportOnboardingEvent({ stage: 'recovery', outcome: 'attempted' });
+    }
     try {
       if (startingPoint === 'duplicate') {
         if (!sourceEventId) throw new Error('Choose an existing event to duplicate.');
         const duplicated = await adminApi.duplicateEvent(sourceEventId, {
+          idempotencyKey: creationIdempotencyKey.current,
           startsAt: startIso,
           title: title.trim(),
           copy: duplicateCopy,
         });
         if (!duplicated.ok) throw new Error(duplicated.error.message);
+        if (recovering) {
+          void adminApi.reportOnboardingEvent({ stage: 'recovery', outcome: 'completed' });
+        }
         router.push(routes.eventDetail(duplicated.data.id));
         return;
       }
@@ -205,71 +247,25 @@ export function NewEventView() {
         organizationId,
         brandId,
         title: title.trim(),
+        description: organizations.find((organization) => organization.id === organizationId)
+          ?.eventDefaults?.eventDescription,
         startsAt: startIso,
         endsAt: endIso ?? null,
         timezone,
         currency: currency.toUpperCase(),
-        venue: venueName.trim() ? { name: venueName.trim() } : null,
+        venue: venueName.trim() || country ? { name: venueName.trim(), country } : null,
+        venueId: venueId || null,
+        startingPoint,
+        idempotencyKey: creationIdempotencyKey.current,
       });
       if (!created.ok) throw new Error(created.error.message);
-      createdEventId = created.data.id;
-
-      if (startingPoint === 'free' || startingPoint === 'paid' || startingPoint === 'donation') {
-        const priceCents = startingPoint === 'paid' ? 2500 : 0;
-        const inventory = await adminApi.createInventoryPool(created.data.id, {
-          name: 'Admission inventory',
-          totalCapacity: 100,
-          holdTtlSeconds: 900,
-        });
-        if (!inventory.ok)
-          throw new Error(
-            `Draft created, but its inventory preset failed: ${inventory.error.message}`,
-          );
-        const ticket = await adminApi.createTicketType(created.data.id, {
-          name:
-            startingPoint === 'free'
-              ? 'RSVP'
-              : startingPoint === 'paid'
-                ? 'General admission'
-                : 'Donation',
-          kind: startingPoint,
-          priceCents,
-          minimumPriceCents: startingPoint === 'donation' ? 0 : null,
-          currency: currency.toUpperCase(),
-          quantityTotal: 100,
-          inventoryPoolId: inventory.data.id,
-          minPerOrder: 1,
-          maxPerOrder: 10,
-          requiresAccessCode: false,
-        });
-        if (!ticket.ok)
-          throw new Error(`Draft created, but its ticket preset failed: ${ticket.error.message}`);
-      }
-
-      if (startingPoint === 'multiple') {
-        const occurrenceEnd =
-          endIso ?? new Date(new Date(startIso).getTime() + 2 * 60 * 60 * 1000).toISOString();
-        const occurrence = await adminApi.createEventOccurrence(created.data.id, {
-          title: title.trim(),
-          startsAt: startIso,
-          endsAt: occurrenceEnd,
-          timezone,
-          status: 'scheduled',
-        });
-        if (!occurrence.ok)
-          throw new Error(
-            `Draft created, but its first occurrence failed: ${occurrence.error.message}`,
-          );
+      if (recovering) {
+        void adminApi.reportOnboardingEvent({ stage: 'recovery', outcome: 'completed' });
       }
       router.push(routes.eventDetail(created.data.id));
     } catch (cause) {
+      recoveryPending.current = true;
       const message = cause instanceof Error ? cause.message : 'Unable to create the event draft.';
-      if (createdEventId) {
-        router.push(
-          `${routes.eventDetail(createdEventId)}?setupWarning=${encodeURIComponent(message)}`,
-        );
-        return;
-      }
       setError(message);
     } finally {
       setSubmitting(false);
@@ -312,7 +308,13 @@ export function NewEventView() {
                   name="startingPoint"
                   value={point.id}
                   checked={startingPoint === point.id}
-                  onChange={() => setStartingPoint(point.id)}
+                  onChange={() => {
+                    setStartingPoint(point.id);
+                    void adminApi.reportOnboardingEvent({
+                      stage: 'starting_point_selected',
+                      outcome: point.id,
+                    });
+                  }}
                 />
                 <point.icon className="mb-3 size-5" aria-hidden="true" />
                 <span className="block font-medium">{point.title}</span>
@@ -424,6 +426,41 @@ export function NewEventView() {
                 onChange={(e) => setVenueName(e.target.value)}
               />
             </label>
+            <label className="space-y-2" htmlFor="new-event-country">
+              <span className="text-sm font-medium">Venue country</span>
+              <Input
+                id="new-event-country"
+                maxLength={2}
+                value={country}
+                onChange={(change) => setCountry(change.target.value.toUpperCase())}
+              />
+            </label>
+            {savedVenues.length ? (
+              <label className="space-y-2 sm:col-span-2" htmlFor="new-event-saved-venue">
+                <span className="text-sm font-medium">Saved venue</span>
+                <select
+                  className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                  id="new-event-saved-venue"
+                  value={venueId}
+                  onChange={(change) => {
+                    const nextId = change.target.value;
+                    setVenueId(nextId);
+                    const selected = savedVenues.find((venue) => venue.id === nextId);
+                    if (selected) {
+                      setVenueName(selected.name);
+                      if (selected.timezone) setTimezone(selected.timezone);
+                    }
+                  }}
+                >
+                  <option value="">Use a one-time venue</option>
+                  {savedVenues.map((venue) => (
+                    <option key={venue.id} value={venue.id}>
+                      {venue.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {startingPoint === 'duplicate' ? (
               <div className="space-y-4 sm:col-span-2">
                 <label className="space-y-2" htmlFor="new-event-source">

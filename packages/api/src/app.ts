@@ -70,9 +70,14 @@ export type AppContext = {
   stripe?: Stripe;
   readinessServiceFactory?: (db: Database) => ReadinessService;
   eventDuplicationCheckpoint?: (input: {
-    stage: 'after_event_created';
+    stage: 'after_children_copied';
     sourceEventId: string;
     duplicatedEventId: string;
+  }) => void | Promise<void>;
+  eventPresetCheckpoint?: (input: {
+    stage: 'after_preset_applied';
+    eventId: string;
+    startingPoint: 'free' | 'paid' | 'donation' | 'multiple';
   }) => void | Promise<void>;
 };
 

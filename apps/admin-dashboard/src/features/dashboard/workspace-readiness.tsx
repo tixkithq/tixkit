@@ -107,10 +107,10 @@ function ReadinessStepRow({ step }: { step: AdminReadinessStep }) {
         aria-hidden="true"
       />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{stepLabels[step.id] ?? step.id.replaceAll('_', ' ')}</p>
+        <p className="text-sm font-medium">{stepLabels[step.id] ?? 'Workspace readiness step'}</p>
         <p className="text-xs text-muted-foreground">
           {step.reasonCodes
-            .map((code) => reasonLabels[code] ?? code.replaceAll('_', ' '))
+            .map((code) => reasonLabels[code] ?? 'Review this workspace setting before continuing.')
             .join(' ')}
         </p>
       </div>
@@ -140,8 +140,9 @@ function ScopedWorkspaceReadiness({
   );
 
   React.useEffect(() => {
-    setCollapsed(window.localStorage.getItem(collapseStorageKey) === 'true');
-  }, []);
+    const saved = window.localStorage.getItem(collapseStorageKey);
+    setCollapsed(saved === null ? Boolean(data?.complete) : saved === 'true');
+  }, [data?.complete]);
 
   function toggleCollapsed() {
     setCollapsed((current) => {
@@ -156,40 +157,16 @@ function ScopedWorkspaceReadiness({
   if (!data) return null;
   const view = workspaceReadinessViewModel(data);
 
-  if (data.complete) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Check className="size-4 text-emerald-600" aria-hidden="true" />
-            Workspace setup complete
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            Continue monitoring event, payment, webhook, inventory, export, and check-in readiness.
-          </p>
-          <div className="flex gap-3">
-            <Link className="text-sm font-medium text-primary" href={routes.events}>
-              View events
-            </Link>
-            <a
-              className="text-sm font-medium text-primary"
-              href={dashboardDocUrl('platformOverview')}
-            >
-              Read operations guide
-            </a>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card>
       <CardHeader className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-base">Finish workspace setup</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base">
+            {data.complete ? (
+              <Check className="size-4 text-emerald-600" aria-hidden="true" />
+            ) : null}
+            {data.complete ? 'Workspace setup complete' : 'Finish workspace setup'}
+          </CardTitle>
           <Button
             type="button"
             variant="ghost"

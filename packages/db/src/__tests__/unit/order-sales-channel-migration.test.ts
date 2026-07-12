@@ -30,6 +30,8 @@ import { ImportPlatformMigration } from '../../migrations/0058_import_platform.j
 import { MigrationDomainSupportMigration } from '../../migrations/0059_migration_domain_support.js';
 import { MigrationPermissionsMigration } from '../../migrations/0060_migration_permissions.js';
 import { EventOnboardingReadinessMigration } from '../../migrations/0057_event_onboarding_readiness.js';
+import { EventCheckoutConfigurationRevisionMigration } from '../../migrations/0063_event_checkout_configuration_revision.js';
+import { OrganizationEventDefaultsMigration } from '../../migrations/0064_organization_event_defaults.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -200,7 +202,11 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0062_migration_preparation_cursor');
+    expect(Object.keys(migrations).at(-1)).toBe('0064_organization_event_defaults');
+    expect(migrations['0064_organization_event_defaults']).toBe(OrganizationEventDefaultsMigration);
+    expect(migrations['0063_event_checkout_configuration_revision']).toBe(
+      EventCheckoutConfigurationRevisionMigration,
+    );
     expect(migrations['0059_import_platform']).toBe(ImportPlatformMigration);
     expect(migrations['0060_migration_domain_support']).toBe(MigrationDomainSupportMigration);
     expect(migrations['0061_migration_permissions']).toBe(MigrationPermissionsMigration);

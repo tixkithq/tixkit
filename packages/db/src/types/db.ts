@@ -26,6 +26,7 @@ export interface OrganizationTable {
   slug: string;
   clerk_organization_id: string | null;
   box_office_settings: OrganizationBoxOfficeSettings | string;
+  event_defaults: Generated<string>;
   status: string;
   created_at: Timestamp;
   updated_at: Timestamp;
@@ -219,6 +220,7 @@ export interface EventTable {
   pass_fees_to_buyer: Generated<boolean>;
   code_format: string | null;
   public_revision: Timestamp | null;
+  checkout_configuration_updated_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

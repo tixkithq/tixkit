@@ -1,6 +1,6 @@
 ---
 title: Choose a deployment model
-description: Decide between local evaluation and a self-hosted deployment without overstating managed-service availability.
+description: Choose between Tixkit Cloud, its hosted Platform API capability, local evaluation, and Self-Hosted operation.
 audience:
   - operator
   - self-hoster
@@ -8,7 +8,7 @@ product_area: self-hosting
 content_type: concept
 status: beta
 owner: platform-operations
-last_verified: 2026-07-10
+last_verified: 2026-07-11
 prerequisites:
   - A clear evaluation or production objective
 related:
@@ -20,7 +20,11 @@ keywords:
   - self-hosted
 ---
 
-The repository supports local development and self-hosted operation. This documentation does not promise a managed Tixkit service or hosted control plane.
+Tixkit's accepted product model includes Tixkit Cloud, the hosted Platform API capability inside Cloud, and Tixkit Self-Hosted over one shared product. Cloud and the managed agent layer remain experimental/private-beta plans until their provisioning, operations, support, security, and release gates are complete; this page does not claim general availability before then.
+
+## Tixkit Cloud
+
+Choose Cloud when Tixkit should operate upgrades, workflows, storage, monitoring, backups, security maintenance, hosted admin, event pages, checkout, and delivery. Platform API customers use this same hosted backend with more control through APIs, SDKs, widgets, headless checkout, OAuth, scoped keys, webhooks, and custom product UI.
 
 ## Local evaluation
 

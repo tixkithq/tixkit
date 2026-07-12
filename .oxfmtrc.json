@@ -7,8 +7,13 @@
   "sortPackageJson": false,
   "ignorePatterns": [
     "infra/helm/tixkit/templates/**",
+    "**/next-env.d.ts",
+    "artifacts/api/**",
+    "apps/docs/public/contracts/**",
     "apps/docs/public/openapi.json",
     "apps/docs/public/search-index.json",
-    "apps/docs/src/generated/**"
+    "apps/docs/src/generated/**",
+    "e2e/fixtures/embed-framer.html",
+    "e2e/fixtures/embed-webflow.html"
   ]
 }

@@ -1,32 +1,23 @@
-import assert from "node:assert/strict";
-import {
-  chmodSync,
-  cpSync,
-  mkdtempSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { delimiter, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import { chmodSync, cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
 
-const root = resolve(import.meta.dirname, "../..");
-const verifier = resolve(root, "scripts/verify-public-api-release.mjs");
-const immutableFixtureRoot = mkdtempSync(
-  resolve(tmpdir(), "tixkit-verifier-contracts-"),
-);
-const contracts = resolve(immutableFixtureRoot, "2026-01-01");
-cpSync(resolve(root, "artifacts/api/2026-01-01"), contracts, {
+const root = resolve(import.meta.dirname, '../..');
+const verifier = resolve(root, 'scripts/verify-public-api-release.mjs');
+const immutableFixtureRoot = mkdtempSync(resolve(tmpdir(), 'tixkit-verifier-contracts-'));
+const contracts = resolve(immutableFixtureRoot, '2026-01-01');
+cpSync(resolve(root, 'artifacts/api/2026-01-01'), contracts, {
   recursive: true,
 });
 
 function runVerifier(mode) {
-  const fixture = mkdtempSync(resolve(tmpdir(), "tixkit-verifier-test-"));
-  const bin = resolve(fixture, "bin");
+  const fixture = mkdtempSync(resolve(tmpdir(), 'tixkit-verifier-test-'));
+  const bin = resolve(fixture, 'bin');
   mkdirSync(bin);
-  const preload = resolve(fixture, "preload.mjs");
+  const preload = resolve(fixture, 'preload.mjs');
   writeFileSync(
     preload,
     `import { readFile } from 'node:fs/promises';
@@ -40,13 +31,10 @@ globalThis.fetch = async (url) => {
 };
 `,
   );
-  const gh = resolve(bin, "gh");
-  writeFileSync(
-    gh,
-    '#!/bin/sh\n[ "$VERIFIER_MODE" = "attestation" ] && exit 17\nexit 0\n',
-  );
+  const gh = resolve(bin, 'gh');
+  writeFileSync(gh, '#!/bin/sh\n[ "$VERIFIER_MODE" = "attestation" ] && exit 17\nexit 0\n');
   chmodSync(gh, 0o755);
-  const npm = resolve(bin, "npm");
+  const npm = resolve(bin, 'npm');
   writeFileSync(
     npm,
     `#!/bin/sh
@@ -81,32 +69,29 @@ esac
 `,
   );
   chmodSync(npm, 0o755);
-  const node = resolve(bin, "node");
-  writeFileSync(
-    node,
-    '#!/bin/sh\n[ "$VERIFIER_MODE" = "consumer" ] && exit 29\nexit 0\n',
-  );
+  const node = resolve(bin, 'node');
+  writeFileSync(node, '#!/bin/sh\n[ "$VERIFIER_MODE" = "consumer" ] && exit 29\nexit 0\n');
   chmodSync(node, 0o755);
   const result = spawnSync(
     process.execPath,
     [
-      "--import",
+      '--import',
       preload,
       verifier,
-      "--contracts-url",
-      "https://contracts.example.test/2026-01-01/",
-      "--sdk-spec",
-      "@tixkit/js@1.2.3",
-      "--contract-tests-spec",
-      "@tixkit/contract-tests@1.2.3",
-      "--trusted-contracts-root",
+      '--contracts-url',
+      'https://contracts.example.test/2026-01-01/',
+      '--sdk-spec',
+      '@tixkit/js@1.2.3',
+      '--contract-tests-spec',
+      '@tixkit/contract-tests@1.2.3',
+      '--trusted-contracts-root',
       immutableFixtureRoot,
-      "--repository",
-      "tixkit/tixkit",
+      '--repository',
+      'tixkit/tixkit',
     ],
     {
       cwd: root,
-      encoding: "utf8",
+      encoding: 'utf8',
       env: {
         ...process.env,
         PATH: `${bin}${delimiter}${process.env.PATH}`,
@@ -119,38 +104,38 @@ esac
   return result;
 }
 
-test("fails when a public trust root file differs from the protected tag", () => {
-  const result = runVerifier("trusted-mismatch");
+test('fails when a public trust root file differs from the protected tag', () => {
+  const result = runVerifier('trusted-mismatch');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /does not match the protected tag/u);
 });
 
-test("fails when a manifest artifact is absent", () => {
-  const result = runVerifier("missing");
+test('fails when a manifest artifact is absent', () => {
+  const result = runVerifier('missing');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Unable to download openapi\.json: HTTP 404/u);
 });
 
-test("fails when provenance attestation verification fails", () => {
-  const result = runVerifier("attestation");
+test('fails when provenance attestation verification fails', () => {
+  const result = runVerifier('attestation');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Command failed/u);
 });
 
-test("fails when registry pack integrity differs from registry metadata", () => {
-  const result = runVerifier("registry-integrity");
+test('fails when registry pack integrity differs from registry metadata', () => {
+  const result = runVerifier('registry-integrity');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /integrity does not match/u);
 });
 
-test("fails when npm registry signature verification fails", () => {
-  const result = runVerifier("signature");
+test('fails when npm registry signature verification fails', () => {
+  const result = runVerifier('signature');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Command failed/u);
 });
 
-test("fails when the packed SDK consumer contract process detects a mismatch", () => {
-  const result = runVerifier("consumer");
+test('fails when the packed SDK consumer contract process detects a mismatch', () => {
+  const result = runVerifier('consumer');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Command failed/u);
 });

@@ -60,3 +60,5 @@ export { ImportPlatformMigration } from './0058_import_platform.js';
 export { MigrationDomainSupportMigration } from './0059_migration_domain_support.js';
 export { MigrationPermissionsMigration } from './0060_migration_permissions.js';
 export { MigrationPreparationCursorMigration } from './0062_migration_preparation_cursor.js';
+export { EventCheckoutConfigurationRevisionMigration } from './0063_event_checkout_configuration_revision.js';
+export { OrganizationEventDefaultsMigration } from './0064_organization_event_defaults.js';

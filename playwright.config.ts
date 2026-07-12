@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,6 +42,10 @@ const reuseDefaultServer = !isCI && !useLiveClerk;
 const reuseServerWithoutGeneratedEnv = reuseDefaultServer && !useWalletPasses;
 const defaultDatabaseUrl = ['postgres://tixkit', ':', 'tixkit', '@localhost:5432/tixkit'].join('');
 const databaseUrl = process.env.DATABASE_URL ?? defaultDatabaseUrl;
+const migrationCursorKeyId = `e2e-${playwrightRunId}`.replaceAll(/[^A-Za-z0-9_-]/gu, '_');
+const migrationCursorKeys = JSON.stringify({
+  [migrationCursorKeyId]: randomBytes(32).toString('base64'),
+});
 process.env.ADMIN_DASHBOARD_URL ??= adminUrl;
 process.env.TIXKIT_API_URL ??= apiUrl;
 process.env.CHECKOUT_URL ??= checkoutUrl;
@@ -88,6 +92,8 @@ const localApiEnv = {
     process.env.OFFLINE_MANIFEST_SIGNING_KEY ?? 'ci-offline-manifest-signing-key',
   OFFLINE_MANIFEST_KEY_ID: process.env.OFFLINE_MANIFEST_KEY_ID ?? 'manifest:ci',
   TIXKIT_PREVIEW_TOKEN_SECRET: process.env.TIXKIT_PREVIEW_TOKEN_SECRET ?? 'ci-preview-token-secret',
+  TIXKIT_MIGRATION_CURSOR_ACTIVE_KEY_ID: migrationCursorKeyId,
+  TIXKIT_MIGRATION_CURSOR_KEYS: migrationCursorKeys,
   PUBLIC_CHECKOUT_URL: checkoutUrl,
   CHECKOUT_PUBLIC_URL: checkoutUrl,
   ...s3Env,
@@ -113,6 +119,8 @@ const localWorkerEnv = {
   STRIPE_SECRET_KEY: stripeSecretKey,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: stripePublishableKey,
   QR_SIGNING_SECRET: process.env.QR_SIGNING_SECRET ?? 'ci-qr-signing-secret',
+  TIXKIT_MIGRATION_CURSOR_ACTIVE_KEY_ID: migrationCursorKeyId,
+  TIXKIT_MIGRATION_CURSOR_KEYS: migrationCursorKeys,
   ...(process.env.E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE === '1'
     ? {
         E2E_FAIL_TICKET_ISSUE_ACTIVITY_ONCE: '1',

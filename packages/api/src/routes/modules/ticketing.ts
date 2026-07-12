@@ -1,5 +1,5 @@
-import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { ClerkAuthService } from "../../auth/clerk.js";
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { ClerkAuthService } from '../../auth/clerk.js';
 import {
   AccessRuleRepository,
   AttendeeRepository,
@@ -13,7 +13,7 @@ import {
   ProductCategoryRepository,
   ProductRepository,
   type Database,
-} from "@tixkit/db";
+} from '@tixkit/db';
 import {
   NotFoundError,
   ResaleError,
@@ -22,9 +22,9 @@ import {
   validateResalePrice,
   evaluateDateOfBirthEligibility,
   requiresDateOfBirthVerification,
-} from "@tixkit/domain";
-import { withIdempotency, hashRequest } from "../../services/idempotency.js";
-import { ulid } from "ulid";
+} from '@tixkit/domain';
+import { withIdempotency, hashRequest } from '../../services/idempotency.js';
+import { ulid } from 'ulid';
 import {
   pageEnvelope,
   parsePagination,
@@ -37,7 +37,7 @@ import {
   serializeProduct,
   serializeProductCategory,
   serializeTicketType,
-} from "../../http/contracts.js";
+} from '../../http/contracts.js';
 import {
   createAccessRuleSchema,
   createTicketTypeBatchSchema,
@@ -52,11 +52,11 @@ import {
   createResaleListingSchema,
   completeResaleListingSchema,
   parseBody,
-} from "../../http/schemas.js";
+} from '../../http/schemas.js';
 
-type Principal = NonNullable<FastifyRequest["principal"]>;
+type Principal = NonNullable<FastifyRequest['principal']>;
 type AccessRuleInput = {
-  type: "code" | "email_domain";
+  type: 'code' | 'email_domain';
   value: string;
   maxUses?: number | null;
   expiresAt?: string | null;
@@ -65,43 +65,31 @@ type NormalizedAccessRule = AccessRuleInput & { value: string };
 
 function accessRuleKey(rule: { type: string; value: string }): string {
   const value =
-    rule.type === "email_domain"
+    rule.type === 'email_domain'
       ? normalizeEmailDomainAccessRuleValue(rule.value)
       : rule.value.trim().toLowerCase();
   return `${rule.type}:${value}`;
 }
 
-function requireEventAccess(
-  principal: Principal,
-  event: Record<string, unknown>,
-  eventId: string,
-) {
-  ClerkAuthService.requireResourceTenant(principal, event, "Event", eventId);
-  ClerkAuthService.requireOrganizationScope(
-    principal,
-    event.organization_id as string | undefined,
-  );
-  ClerkAuthService.requireBrandScope(
-    principal,
-    event.brand_id as string | undefined,
-  );
+function requireEventAccess(principal: Principal, event: Record<string, unknown>, eventId: string) {
+  ClerkAuthService.requireResourceTenant(principal, event, 'Event', eventId);
+  ClerkAuthService.requireOrganizationScope(principal, event.organization_id as string | undefined);
+  ClerkAuthService.requireBrandScope(principal, event.brand_id as string | undefined);
   ClerkAuthService.requireEventScope(principal, eventId);
 }
 
-function normalizeAccessRules(
-  rules: AccessRuleInput[] = [],
-): NormalizedAccessRule[] {
+function normalizeAccessRules(rules: AccessRuleInput[] = []): NormalizedAccessRule[] {
   const normalized = rules.map((rule) => ({
     ...rule,
     value:
-      rule.type === "email_domain"
+      rule.type === 'email_domain'
         ? normalizeEmailDomainAccessRuleValue(rule.value)
         : rule.value.trim(),
   }));
   const keys = new Set<string>();
   for (const rule of normalized) {
     if (!rule.value) {
-      throw new ValidationError("Access rule value is required");
+      throw new ValidationError('Access rule value is required');
     }
     const key = accessRuleKey(rule);
     if (keys.has(key)) {
@@ -120,9 +108,7 @@ async function assertNoExistingAccessRuleDuplicates(
   if (rules.length === 0) return;
   const existing = await accessRuleRepo.findByTicketType(ticketTypeId);
   const existingKeys = new Set(
-    existing.map((rule) =>
-      accessRuleKey({ type: String(rule.type), value: String(rule.value) }),
-    ),
+    existing.map((rule) => accessRuleKey({ type: String(rule.type), value: String(rule.value) })),
   );
   const duplicate = rules.find((rule) => existingKeys.has(accessRuleKey(rule)));
   if (duplicate) {
@@ -139,7 +125,7 @@ async function assertInventoryPoolReassignmentAllowed(
   },
 ) {
   if (
-    typeof input.nextInventoryPoolId !== "string" ||
+    typeof input.nextInventoryPoolId !== 'string' ||
     input.nextInventoryPoolId === input.currentInventoryPoolId
   ) {
     return;
@@ -147,35 +133,35 @@ async function assertInventoryPoolReassignmentAllowed(
 
   const [hold, orderLineItem, ticket, waitlistEntry] = await Promise.all([
     db
-      .selectFrom("checkout_holds")
-      .select("id")
-      .where("ticket_type_id", "=", input.ticketTypeId)
+      .selectFrom('checkout_holds')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
       .limit(1)
       .executeTakeFirst(),
     db
-      .selectFrom("order_line_items")
-      .select("id")
-      .where("ticket_type_id", "=", input.ticketTypeId)
+      .selectFrom('order_line_items')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
       .limit(1)
       .executeTakeFirst(),
     db
-      .selectFrom("tickets")
-      .select("id")
-      .where("ticket_type_id", "=", input.ticketTypeId)
+      .selectFrom('tickets')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
       .limit(1)
       .executeTakeFirst(),
     db
-      .selectFrom("waitlist_entries")
-      .select("id")
-      .where("ticket_type_id", "=", input.ticketTypeId)
-      .where("status", "in", ["joined", "offered"])
+      .selectFrom('waitlist_entries')
+      .select('id')
+      .where('ticket_type_id', '=', input.ticketTypeId)
+      .where('status', 'in', ['joined', 'offered'])
       .limit(1)
       .executeTakeFirst(),
   ]);
 
   if (hold || orderLineItem || ticket || waitlistEntry) {
     throw new ValidationError(
-      "Inventory pool cannot be changed after holds, orders, tickets, or active waitlist entries exist for this ticket type",
+      'Inventory pool cannot be changed after holds, orders, tickets, or active waitlist entries exist for this ticket type',
     );
   }
 }
@@ -187,11 +173,11 @@ function isUniqueViolation(error: unknown): boolean {
     message?: unknown;
   };
   return (
-    record.code === "23505" ||
-    record.code === "ER_DUP_ENTRY" ||
+    record.code === '23505' ||
+    record.code === 'ER_DUP_ENTRY' ||
     record.errno === 1062 ||
-    record.errno === "1062" ||
-    /duplicate|unique/i.test(String(record.message ?? ""))
+    record.errno === '1062' ||
+    /duplicate|unique/i.test(String(record.message ?? ''))
   );
 }
 
@@ -202,15 +188,10 @@ function toResaleValidationError(error: unknown): never {
   throw error;
 }
 
-function requireIdempotencyKey(
-  request: FastifyRequest,
-  action: string,
-): string {
-  const key = request.headers["idempotency-key"];
-  if (typeof key !== "string" || key.trim() === "") {
-    throw new ValidationError(
-      `Idempotency-Key header is required for ${action}`,
-    );
+function requireIdempotencyKey(request: FastifyRequest, action: string): string {
+  const key = request.headers['idempotency-key'];
+  if (typeof key !== 'string' || key.trim() === '') {
+    throw new ValidationError(`Idempotency-Key header is required for ${action}`);
   }
   return key.trim();
 }
@@ -222,35 +203,30 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
   const loadEvent = async (eventId: string) => {
     const eventRepo = new EventRepository(db);
     const event = await eventRepo.findById(eventId);
-    if (!event) throw new NotFoundError("Event", eventId);
+    if (!event) throw new NotFoundError('Event', eventId);
     return event;
   };
 
-  const validateEventOccurrence = async (
-    eventId: string,
-    occurrenceId?: string | null,
-  ) => {
+  const validateEventOccurrence = async (eventId: string, occurrenceId?: string | null) => {
     if (!occurrenceId) return;
-    const occurrence = await new EventOccurrenceRepository(db).findById(
-      occurrenceId,
-    );
+    const occurrence = await new EventOccurrenceRepository(db).findById(occurrenceId);
     if (!occurrence || occurrence.event_id !== eventId) {
-      throw new NotFoundError("EventOccurrence", occurrenceId);
+      throw new NotFoundError('EventOccurrence', occurrenceId);
     }
   };
 
-  app.get("/events/:eventId/resale-policy", async (request) => {
+  app.get('/events/:eventId/resale-policy', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
     return serializeResalePolicy(event);
   });
 
-  app.put("/events/:eventId/resale-policy", async (request) => {
+  app.put('/events/:eventId/resale-policy', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(resalePolicySchema, request.body);
 
@@ -265,9 +241,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return serializeResalePolicy(updated);
   });
 
-  app.get("/events/:eventId/resale-listings", async (request) => {
+  app.get('/events/:eventId/resale-listings', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
     const event = await loadEvent(eventId);
@@ -280,35 +256,28 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return pageEnvelope(listings.map(serializeTicketListing), pagination.limit);
   });
 
-  app.post("/tickets/:ticketId/resale-listings", async (request, reply) => {
+  app.post('/tickets/:ticketId/resale-listings', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketId } = request.params as { ticketId: string };
     const body = parseBody(createResaleListingSchema, request.body);
-    const idempotencyKey = requireIdempotencyKey(request, "resale listings");
+    const idempotencyKey = requireIdempotencyKey(request, 'resale listings');
 
     const ticketRepo = new TicketRepository(db);
     const ticket = await ticketRepo.findById(ticketId);
-    if (!ticket) throw new NotFoundError("Ticket", ticketId);
-    if (ticket.tenant_id !== principal.tenantId)
-      throw new NotFoundError("Ticket", ticketId);
+    if (!ticket) throw new NotFoundError('Ticket', ticketId);
+    if (ticket.tenant_id !== principal.tenantId) throw new NotFoundError('Ticket', ticketId);
     const event = await loadEvent(ticket.event_id as string);
     requireEventAccess(principal, event, ticket.event_id as string);
-    if (ticket.status !== "valid") {
-      throw new ValidationError(
-        `Ticket status is ${ticket.status}, cannot list for resale`,
-      );
+    if (ticket.status !== 'valid') {
+      throw new ValidationError(`Ticket status is ${ticket.status}, cannot list for resale`);
     }
     if (!ticket.order_id) {
-      throw new ValidationError(
-        `Ticket ${ticketId} is not attached to an order`,
-      );
+      throw new ValidationError(`Ticket ${ticketId} is not attached to an order`);
     }
-    const ticketType = await new TicketTypeRepository(db).findById(
-      ticket.ticket_type_id as string,
-    );
+    const ticketType = await new TicketTypeRepository(db).findById(ticket.ticket_type_id as string);
     if (!ticketType || ticketType.event_id !== ticket.event_id) {
-      throw new NotFoundError("TicketType", ticket.ticket_type_id as string);
+      throw new NotFoundError('TicketType', ticket.ticket_type_id as string);
     }
 
     const tenantId = principal.tenantId;
@@ -325,17 +294,11 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         const listingRepo = new TicketListingRepository(db);
         const active = await listingRepo.findActiveByTicket(tenantId, ticketId);
         if (active) {
-          throw new ValidationError(
-            `Ticket ${ticketId} already has an active resale listing`,
-          );
+          throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
         }
         const faceValueCents = Number(ticketType.price_cents);
         try {
-          validateResalePrice(
-            body.priceCents,
-            faceValueCents,
-            serializeResalePolicy(event),
-          );
+          validateResalePrice(body.priceCents, faceValueCents, serializeResalePolicy(event));
         } catch (error) {
           toResaleValidationError(error);
         }
@@ -353,9 +316,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           return { status: 201, body: serializeTicketListing(listing) };
         } catch (error) {
           if (isUniqueViolation(error)) {
-            throw new ValidationError(
-              `Ticket ${ticketId} already has an active resale listing`,
-            );
+            throw new ValidationError(`Ticket ${ticketId} already has an active resale listing`);
           }
           throw error;
         }
@@ -364,17 +325,17 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(result.status).send(result.body);
   });
 
-  app.post("/ticket-listings/:listingId/delist", async (request, reply) => {
+  app.post('/ticket-listings/:listingId/delist', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { listingId } = request.params as { listingId: string };
-    const idempotencyKey = requireIdempotencyKey(request, "resale delisting");
+    const idempotencyKey = requireIdempotencyKey(request, 'resale delisting');
 
     const listingRepo = new TicketListingRepository(db);
     const listing = await listingRepo.findById(listingId);
-    if (!listing) throw new NotFoundError("TicketListing", listingId);
+    if (!listing) throw new NotFoundError('TicketListing', listingId);
     if (listing.tenant_id !== principal.tenantId) {
-      throw new NotFoundError("TicketListing", listingId);
+      throw new NotFoundError('TicketListing', listingId);
     }
     const event = await loadEvent(listing.event_id as string);
     requireEventAccess(principal, event, listing.event_id as string);
@@ -384,7 +345,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       {
         key: idempotencyKey,
         tenantId: principal.tenantId,
-        requestHash: hashRequest({ listingId, action: "delist" }),
+        requestHash: hashRequest({ listingId, action: 'delist' }),
       },
       async () => {
         try {
@@ -392,9 +353,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           return { status: 200, body: serializeTicketListing(delisted) };
         } catch (error) {
           if (error instanceof Error && /not listed/i.test(error.message)) {
-            throw new ValidationError(
-              `Ticket listing ${listingId} is not listed`,
-            );
+            throw new ValidationError(`Ticket listing ${listingId} is not listed`);
           }
           throw error;
         }
@@ -403,24 +362,22 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(result.status).send(result.body);
   });
 
-  app.post("/ticket-listings/:listingId/complete", async (request, reply) => {
+  app.post('/ticket-listings/:listingId/complete', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { listingId } = request.params as { listingId: string };
     const body = parseBody(completeResaleListingSchema, request.body);
-    const idempotencyKey = requireIdempotencyKey(request, "resale completion");
+    const idempotencyKey = requireIdempotencyKey(request, 'resale completion');
 
     const listingRepo = new TicketListingRepository(db);
     const listing = await listingRepo.findById(listingId);
-    if (!listing) throw new NotFoundError("TicketListing", listingId);
+    if (!listing) throw new NotFoundError('TicketListing', listingId);
     if (listing.tenant_id !== principal.tenantId) {
-      throw new NotFoundError("TicketListing", listingId);
+      throw new NotFoundError('TicketListing', listingId);
     }
     const event = await loadEvent(listing.event_id as string);
     requireEventAccess(principal, event, listing.event_id as string);
-    const requiresDateOfBirth = requiresDateOfBirthVerification(
-      event.minimum_age,
-    );
+    const requiresDateOfBirth = requiresDateOfBirthVerification(event.minimum_age);
 
     const requestHash = hashRequest({
       listingId,
@@ -446,34 +403,24 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
           const now = new Date();
 
           const currentListing = await txListingRepo.findById(listingId);
-          if (
-            !currentListing ||
-            currentListing.tenant_id !== principal.tenantId
-          ) {
-            throw new NotFoundError("TicketListing", listingId);
+          if (!currentListing || currentListing.tenant_id !== principal.tenantId) {
+            throw new NotFoundError('TicketListing', listingId);
           }
-          if (currentListing.status !== "listed") {
-            throw new ValidationError(
-              `Ticket listing ${listingId} is not listed`,
-            );
+          if (currentListing.status !== 'listed') {
+            throw new ValidationError(`Ticket listing ${listingId} is not listed`);
           }
           if (
             currentListing.expires_at &&
-            new Date(currentListing.expires_at as Date | string).getTime() <=
-              now.getTime()
+            new Date(currentListing.expires_at as Date | string).getTime() <= now.getTime()
           ) {
             await txListingRepo.expire(listingId);
             return { expired: true as const };
           }
           if (currentListing.seller_id === body.buyerId) {
-            throw new ValidationError(
-              "Buyer cannot be the resale listing seller",
-            );
+            throw new ValidationError('Buyer cannot be the resale listing seller');
           }
 
-          const sellerTicket = await txTicketRepo.findById(
-            currentListing.ticket_id as string,
-          );
+          const sellerTicket = await txTicketRepo.findById(currentListing.ticket_id as string);
           if (
             !sellerTicket ||
             sellerTicket.tenant_id !== principal.tenantId ||
@@ -483,15 +430,13 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
               `Ticket listing ${listingId} is not attached to a valid ticket`,
             );
           }
-          if (sellerTicket.status !== "valid") {
+          if (sellerTicket.status !== 'valid') {
             throw new ValidationError(
               `Ticket status is ${sellerTicket.status}, cannot complete resale`,
             );
           }
           const occurrence = sellerTicket.event_occurrence_id
-            ? await new EventOccurrenceRepository(txDb).findById(
-                sellerTicket.event_occurrence_id,
-              )
+            ? await new EventOccurrenceRepository(txDb).findById(sellerTicket.event_occurrence_id)
             : undefined;
           if (requiresDateOfBirth) {
             const eligibility = evaluateDateOfBirthEligibility({
@@ -501,19 +446,14 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
               timezone: occurrence?.timezone ?? event.timezone,
             });
             if (!eligibility.eligible) {
-              throw new ValidationError(
-                `Resale buyer: ${eligibility.message}`,
-                {
-                  code: eligibility.code,
-                  field: "buyerDateOfBirth",
-                },
-              );
+              throw new ValidationError(`Resale buyer: ${eligibility.message}`, {
+                code: eligibility.code,
+                field: 'buyerDateOfBirth',
+              });
             }
           }
 
-          const sellerAttendee = await txAttendeeRepo.findById(
-            sellerTicket.attendee_id as string,
-          );
+          const sellerAttendee = await txAttendeeRepo.findById(sellerTicket.attendee_id as string);
           if (
             !sellerAttendee ||
             sellerAttendee.tenant_id !== principal.tenantId ||
@@ -529,15 +469,12 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             orderId: sellerTicket.order_id as string,
             eventId: sellerTicket.event_id as string,
             ticketTypeId: sellerTicket.ticket_type_id as string,
-            eventOccurrenceId:
-              (sellerTicket.event_occurrence_id as string | null) ?? undefined,
+            eventOccurrenceId: (sellerTicket.event_occurrence_id as string | null) ?? undefined,
             email: body.buyerEmail,
             firstName: body.buyerFirstName ?? undefined,
             lastName: body.buyerLastName ?? undefined,
             phone: body.buyerPhone ?? undefined,
-            dateOfBirth: requiresDateOfBirth
-              ? body.buyerDateOfBirth
-              : undefined,
+            dateOfBirth: requiresDateOfBirth ? body.buyerDateOfBirth : undefined,
             customAnswers: {
               resaleListingId: listingId,
               resaleSellerAttendeeId: sellerAttendee.id,
@@ -554,19 +491,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             attendeeId: buyerAttendee.id as string,
             eventId: sellerTicket.event_id as string,
             ticketTypeId: sellerTicket.ticket_type_id as string,
-            eventOccurrenceId:
-              (sellerTicket.event_occurrence_id as string | null) ?? undefined,
+            eventOccurrenceId: (sellerTicket.event_occurrence_id as string | null) ?? undefined,
             code: qr.code,
             qrPayload: qr.payload,
             qrHash: qr.hash,
           });
-          const confirmedBuyerAttendee = await txAttendeeRepo.update(
-            buyerAttendee.id as string,
-            {
-              ticket_id: buyerTicket.id,
-              status: "confirmed",
-            },
-          );
+          const confirmedBuyerAttendee = await txAttendeeRepo.update(buyerAttendee.id as string, {
+            ticket_id: buyerTicket.id,
+            status: 'confirmed',
+          });
 
           const sellerTransferred = await txTicketRepo.transferIfValid(
             sellerTicket.id as string,
@@ -574,31 +507,24 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             now,
           );
           if (!sellerTransferred) {
-            const currentSellerTicket = await txTicketRepo.findById(
-              sellerTicket.id as string,
-            );
+            const currentSellerTicket = await txTicketRepo.findById(sellerTicket.id as string);
             throw new ValidationError(
               `Ticket status is ${currentSellerTicket?.status ?? sellerTicket.status}, cannot complete resale`,
             );
           }
 
           await txDb
-            .updateTable("wallet_passes")
-            .set({ status: "revoked", revoked_at: now, updated_at: now })
-            .where("ticket_id", "=", sellerTicket.id as string)
-            .where("status", "=", "active")
+            .updateTable('wallet_passes')
+            .set({ status: 'revoked', revoked_at: now, updated_at: now })
+            .where('ticket_id', '=', sellerTicket.id as string)
+            .where('status', '=', 'active')
             .execute();
 
-          const transferredSellerTicket = await txTicketRepo.findById(
-            sellerTicket.id as string,
-          );
-          const soldListing = await txListingRepo.markSold(
-            listingId,
-            body.buyerId,
-          );
+          const transferredSellerTicket = await txTicketRepo.findById(sellerTicket.id as string);
+          const soldListing = await txListingRepo.markSold(listingId, body.buyerId);
           await txOrderRepo.addTimelineEvent(
             sellerTicket.order_id as string,
-            "ticket.resale_completed",
+            'ticket.resale_completed',
             `Ticket ${sellerTicket.id} resold to ${body.buyerEmail}`,
             {
               listingId,
@@ -618,7 +544,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
             buyerAttendee: confirmedBuyerAttendee,
           };
         });
-        if ("expired" in completed) {
+        if ('expired' in completed) {
           throw new ValidationError(`Ticket listing ${listingId} has expired`);
         }
         return {
@@ -631,9 +557,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(result.status).send(result.body);
   });
 
-  app.post("/events/:eventId/ticket-types", async (request, reply) => {
+  app.post('/events/:eventId/ticket-types', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(createTicketTypeSchema, request.body);
 
@@ -641,17 +567,15 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
 
     const repo = new TicketTypeRepository(db);
-    const pool = await new InventoryPoolRepository(db).findById(
-      body.inventoryPoolId,
-    );
+    const pool = await new InventoryPoolRepository(db).findById(body.inventoryPoolId);
     if (!pool || pool.event_id !== eventId) {
-      throw new NotFoundError("InventoryPool", body.inventoryPoolId);
+      throw new NotFoundError('InventoryPool', body.inventoryPoolId);
     }
     await validateEventOccurrence(eventId, body.eventOccurrenceId);
     const priorTicketCount = await db
-      .selectFrom("ticket_types")
-      .select(({ fn }) => fn.countAll<number>().as("count"))
-      .where("event_id", "=", eventId)
+      .selectFrom('ticket_types')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('event_id', '=', eventId)
       .executeTakeFirst();
     const ticketType = await repo.create({
       eventId,
@@ -673,12 +597,12 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     });
     if (Number(priorTicketCount?.count ?? 0) === 0) {
       app.observability?.metrics.metrics.onboardingEvents?.inc({
-        stage: "first_ticket",
-        outcome: "completed",
-        reason_code: "none",
+        stage: 'first_ticket',
+        outcome: 'completed',
+        reason_code: 'none',
       });
       app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
-        { milestone: "first_ticket" },
+        { milestone: 'first_ticket' },
         Math.max(0, (Date.now() - new Date(event.created_at).getTime()) / 1000),
       );
     }
@@ -686,9 +610,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send(serializeTicketType(ticketType));
   });
 
-  app.post("/events/:eventId/ticket-types/batch", async (request, reply) => {
+  app.post('/events/:eventId/ticket-types/batch', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(createTicketTypeBatchSchema, request.body);
     const accessRules = normalizeAccessRules(body.accessRules);
@@ -697,14 +621,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
 
     if (body.ticketType.inventoryPoolId) {
-      const pool = await new InventoryPoolRepository(db).findById(
-        body.ticketType.inventoryPoolId,
-      );
+      const pool = await new InventoryPoolRepository(db).findById(body.ticketType.inventoryPoolId);
       if (!pool || pool.event_id !== eventId) {
-        throw new NotFoundError(
-          "InventoryPool",
-          body.ticketType.inventoryPoolId,
-        );
+        throw new NotFoundError('InventoryPool', body.ticketType.inventoryPoolId);
       }
     }
 
@@ -723,7 +642,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       }
 
       if (!inventoryPoolId) {
-        throw new ValidationError("Provide inventoryPoolId or inventoryPool");
+        throw new ValidationError('Provide inventoryPoolId or inventoryPool');
       }
       await validateEventOccurrence(eventId, body.ticketType.eventOccurrenceId);
 
@@ -740,9 +659,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         salesStartAt: body.ticketType.salesStartAt
           ? new Date(body.ticketType.salesStartAt)
           : undefined,
-        salesEndAt: body.ticketType.salesEndAt
-          ? new Date(body.ticketType.salesEndAt)
-          : undefined,
+        salesEndAt: body.ticketType.salesEndAt ? new Date(body.ticketType.salesEndAt) : undefined,
         minPerOrder: body.ticketType.minPerOrder,
         maxPerOrder: body.ticketType.maxPerOrder,
         requiresAccessCode: body.ticketType.requiresAccessCode,
@@ -773,49 +690,49 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  app.patch("/ticket-types/:ticketTypeId", async (request) => {
+  app.patch('/ticket-types/:ticketTypeId', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketTypeId } = request.params as { ticketTypeId: string };
     const body = parseBody(updateTicketTypeSchema, request.body);
     const repo = new TicketTypeRepository(db);
     const existing = await repo.findById(ticketTypeId);
-    if (!existing) throw new NotFoundError("TicketType", ticketTypeId);
+    if (!existing) throw new NotFoundError('TicketType', ticketTypeId);
     const event = await loadEvent(existing.event_id);
     requireEventAccess(principal, event, existing.event_id);
     const updateData = pickAllowedFields(
       body,
       [
-        "name",
-        "description",
-        "kind",
-        "status",
-        "visibility",
-        "currency",
-        "priceCents",
-        "minimumPriceCents",
-        "salesStartAt",
-        "salesEndAt",
-        "minPerOrder",
-        "maxPerOrder",
-        "inventoryPoolId",
-        "eventOccurrenceId",
-        "requiresAccessCode",
-        "accessCodeHint",
-        "sortOrder",
+        'name',
+        'description',
+        'kind',
+        'status',
+        'visibility',
+        'currency',
+        'priceCents',
+        'minimumPriceCents',
+        'salesStartAt',
+        'salesEndAt',
+        'minPerOrder',
+        'maxPerOrder',
+        'inventoryPoolId',
+        'eventOccurrenceId',
+        'requiresAccessCode',
+        'accessCodeHint',
+        'sortOrder',
       ],
       {
-        priceCents: "price_cents",
-        minimumPriceCents: "minimum_price_cents",
-        salesStartAt: "sales_start_at",
-        salesEndAt: "sales_end_at",
-        minPerOrder: "min_per_order",
-        maxPerOrder: "max_per_order",
-        inventoryPoolId: "inventory_pool_id",
-        eventOccurrenceId: "event_occurrence_id",
-        requiresAccessCode: "requires_access_code",
-        accessCodeHint: "access_code_hint",
-        sortOrder: "sort_order",
+        priceCents: 'price_cents',
+        minimumPriceCents: 'minimum_price_cents',
+        salesStartAt: 'sales_start_at',
+        salesEndAt: 'sales_end_at',
+        minPerOrder: 'min_per_order',
+        maxPerOrder: 'max_per_order',
+        inventoryPoolId: 'inventory_pool_id',
+        eventOccurrenceId: 'event_occurrence_id',
+        requiresAccessCode: 'requires_access_code',
+        accessCodeHint: 'access_code_hint',
+        sortOrder: 'sort_order',
       },
     );
     if (updateData.sales_start_at)
@@ -827,10 +744,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         updateData.inventory_pool_id as string,
       );
       if (!pool || pool.event_id !== existing.event_id) {
-        throw new NotFoundError(
-          "InventoryPool",
-          updateData.inventory_pool_id as string,
-        );
+        throw new NotFoundError('InventoryPool', updateData.inventory_pool_id as string);
       }
       await assertInventoryPoolReassignmentAllowed(db, {
         ticketTypeId,
@@ -838,7 +752,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         nextInventoryPoolId: updateData.inventory_pool_id,
       });
     }
-    if ("event_occurrence_id" in updateData) {
+    if ('event_occurrence_id' in updateData) {
       await validateEventOccurrence(
         existing.event_id,
         updateData.event_occurrence_id as string | null,
@@ -847,27 +761,22 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return serializeTicketType(await repo.update(ticketTypeId, updateData));
   });
 
-  app.patch("/ticket-types/:ticketTypeId/batch", async (request) => {
+  app.patch('/ticket-types/:ticketTypeId/batch', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { ticketTypeId } = request.params as { ticketTypeId: string };
     const body = parseBody(updateTicketTypeBatchSchema, request.body);
     const accessRules = normalizeAccessRules(body.accessRules);
     const repo = new TicketTypeRepository(db);
     const existing = await repo.findById(ticketTypeId);
-    if (!existing) throw new NotFoundError("TicketType", ticketTypeId);
+    if (!existing) throw new NotFoundError('TicketType', ticketTypeId);
     const event = await loadEvent(existing.event_id);
     requireEventAccess(principal, event, existing.event_id);
 
     if (body.ticketType.inventoryPoolId) {
-      const pool = await new InventoryPoolRepository(db).findById(
-        body.ticketType.inventoryPoolId,
-      );
+      const pool = await new InventoryPoolRepository(db).findById(body.ticketType.inventoryPoolId);
       if (!pool || pool.event_id !== existing.event_id) {
-        throw new NotFoundError(
-          "InventoryPool",
-          body.ticketType.inventoryPoolId,
-        );
+        throw new NotFoundError('InventoryPool', body.ticketType.inventoryPoolId);
       }
       await assertInventoryPoolReassignmentAllowed(db, {
         ticketTypeId,
@@ -875,62 +784,53 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
         nextInventoryPoolId: body.ticketType.inventoryPoolId,
       });
     }
-    await validateEventOccurrence(
-      existing.event_id,
-      body.ticketType.eventOccurrenceId,
-    );
+    await validateEventOccurrence(existing.event_id, body.ticketType.eventOccurrenceId);
 
     const result = await db.transaction().execute(async (trx) => {
       const txDb = trx as typeof db;
       const accessRuleRepo = new AccessRuleRepository(txDb);
-      await assertNoExistingAccessRuleDuplicates(
-        ticketTypeId,
-        accessRules,
-        accessRuleRepo,
-      );
+      await assertNoExistingAccessRuleDuplicates(ticketTypeId, accessRules, accessRuleRepo);
 
       const updateData = pickAllowedFields(
         body.ticketType,
         [
-          "name",
-          "description",
-          "kind",
-          "status",
-          "visibility",
-          "currency",
-          "priceCents",
-          "minimumPriceCents",
-          "salesStartAt",
-          "salesEndAt",
-          "minPerOrder",
-          "maxPerOrder",
-          "inventoryPoolId",
-          "eventOccurrenceId",
-          "requiresAccessCode",
-          "accessCodeHint",
-          "sortOrder",
+          'name',
+          'description',
+          'kind',
+          'status',
+          'visibility',
+          'currency',
+          'priceCents',
+          'minimumPriceCents',
+          'salesStartAt',
+          'salesEndAt',
+          'minPerOrder',
+          'maxPerOrder',
+          'inventoryPoolId',
+          'eventOccurrenceId',
+          'requiresAccessCode',
+          'accessCodeHint',
+          'sortOrder',
         ],
         {
-          priceCents: "price_cents",
-          minimumPriceCents: "minimum_price_cents",
-          salesStartAt: "sales_start_at",
-          salesEndAt: "sales_end_at",
-          minPerOrder: "min_per_order",
-          maxPerOrder: "max_per_order",
-          inventoryPoolId: "inventory_pool_id",
-          eventOccurrenceId: "event_occurrence_id",
-          requiresAccessCode: "requires_access_code",
-          accessCodeHint: "access_code_hint",
-          sortOrder: "sort_order",
+          priceCents: 'price_cents',
+          minimumPriceCents: 'minimum_price_cents',
+          salesStartAt: 'sales_start_at',
+          salesEndAt: 'sales_end_at',
+          minPerOrder: 'min_per_order',
+          maxPerOrder: 'max_per_order',
+          inventoryPoolId: 'inventory_pool_id',
+          eventOccurrenceId: 'event_occurrence_id',
+          requiresAccessCode: 'requires_access_code',
+          accessCodeHint: 'access_code_hint',
+          sortOrder: 'sort_order',
         },
       );
       if (updateData.sales_start_at)
-        updateData.sales_start_at = new Date(
-          updateData.sales_start_at as string,
-        );
+        updateData.sales_start_at = new Date(updateData.sales_start_at as string);
       if (updateData.sales_end_at)
         updateData.sales_end_at = new Date(updateData.sales_end_at as string);
-      if ("event_occurrence_id" in updateData) {
+      if ('event_occurrence_id' in updateData) {
         await validateEventOccurrence(
           existing.event_id,
           updateData.event_occurrence_id as string | null,
@@ -939,10 +839,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
       const ticketType =
         Object.keys(updateData).length > 0
-          ? await new TicketTypeRepository(txDb).update(
-              ticketTypeId,
-              updateData,
-            )
+          ? await new TicketTypeRepository(txDb).update(ticketTypeId, updateData)
           : existing;
       for (const rule of accessRules) {
         // eslint-disable-next-line no-await-in-loop -- access-rule additions stay sequential in the same update transaction.
@@ -964,38 +861,32 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.get("/events/:eventId/ticket-types", async (request) => {
+  app.get('/events/:eventId/ticket-types', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
     const repo = new TicketTypeRepository(db);
-    const rows = await repo.findByEvent(
-      eventId,
-      pagination.limit + 1,
-      pagination.cursor,
-    );
+    const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
     return pageEnvelope(
       rows.map((row) => serializeTicketType(row)),
       pagination.limit,
     );
   });
 
-  app.get("/ticket-types/:ticketTypeId/access-rules", async (request) => {
+  app.get('/ticket-types/:ticketTypeId/access-rules', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { ticketTypeId } = request.params as { ticketTypeId: string };
     const repo = new TicketTypeRepository(db);
     const ticketType = await repo.findById(ticketTypeId);
-    if (!ticketType) throw new NotFoundError("TicketType", ticketTypeId);
+    if (!ticketType) throw new NotFoundError('TicketType', ticketTypeId);
     const event = await loadEvent(ticketType.event_id);
     requireEventAccess(principal, event, ticketType.event_id);
 
-    const rows = await new AccessRuleRepository(db).findByTicketType(
-      ticketTypeId,
-    );
+    const rows = await new AccessRuleRepository(db).findByTicketType(ticketTypeId);
     return {
       items: rows.map((row) => serializeAccessRule(row)),
       nextCursor: null,
@@ -1003,48 +894,39 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.post(
-    "/ticket-types/:ticketTypeId/access-rules",
-    async (request, reply) => {
-      const principal = request.principal!;
-      ClerkAuthService.requirePermission(principal, "tickets.write");
-      const { ticketTypeId } = request.params as { ticketTypeId: string };
-      const body = parseBody(createAccessRuleSchema, request.body);
-      const [accessRuleInput] = normalizeAccessRules([body]);
-      const repo = new TicketTypeRepository(db);
-      const ticketType = await repo.findById(ticketTypeId);
-      if (!ticketType) throw new NotFoundError("TicketType", ticketTypeId);
-      const event = await loadEvent(ticketType.event_id);
-      requireEventAccess(principal, event, ticketType.event_id);
-
-      const accessRule = await new AccessRuleRepository(db).create({
-        ticketTypeId,
-        type: accessRuleInput.type,
-        value: accessRuleInput.value,
-        maxUses: accessRuleInput.maxUses ?? undefined,
-        expiresAt: accessRuleInput.expiresAt
-          ? new Date(accessRuleInput.expiresAt)
-          : undefined,
-      });
-      return reply.status(201).send(serializeAccessRule(accessRule));
-    },
-  );
-
-  app.delete("/access-rules/:accessRuleId", async (request, reply) => {
+  app.post('/ticket-types/:ticketTypeId/access-rules', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
+    const { ticketTypeId } = request.params as { ticketTypeId: string };
+    const body = parseBody(createAccessRuleSchema, request.body);
+    const [accessRuleInput] = normalizeAccessRules([body]);
+    const repo = new TicketTypeRepository(db);
+    const ticketType = await repo.findById(ticketTypeId);
+    if (!ticketType) throw new NotFoundError('TicketType', ticketTypeId);
+    const event = await loadEvent(ticketType.event_id);
+    requireEventAccess(principal, event, ticketType.event_id);
+
+    const accessRule = await new AccessRuleRepository(db).create({
+      ticketTypeId,
+      type: accessRuleInput.type,
+      value: accessRuleInput.value,
+      maxUses: accessRuleInput.maxUses ?? undefined,
+      expiresAt: accessRuleInput.expiresAt ? new Date(accessRuleInput.expiresAt) : undefined,
+    });
+    return reply.status(201).send(serializeAccessRule(accessRule));
+  });
+
+  app.delete('/access-rules/:accessRuleId', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { accessRuleId } = request.params as { accessRuleId: string };
     const rule = await db
-      .selectFrom("access_rules")
-      .innerJoin(
-        "ticket_types",
-        "ticket_types.id",
-        "access_rules.ticket_type_id",
-      )
-      .select(["access_rules.id as id", "ticket_types.event_id as event_id"])
-      .where("access_rules.id", "=", accessRuleId)
+      .selectFrom('access_rules')
+      .innerJoin('ticket_types', 'ticket_types.id', 'access_rules.ticket_type_id')
+      .select(['access_rules.id as id', 'ticket_types.event_id as event_id'])
+      .where('access_rules.id', '=', accessRuleId)
       .executeTakeFirst();
-    if (!rule) throw new NotFoundError("AccessRule", accessRuleId);
+    if (!rule) throw new NotFoundError('AccessRule', accessRuleId);
     const event = await loadEvent(rule.event_id);
     requireEventAccess(principal, event, rule.event_id);
 
@@ -1052,9 +934,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(204).send();
   });
 
-  app.post("/events/:eventId/inventory-pools", async (request, reply) => {
+  app.post('/events/:eventId/inventory-pools', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(createInventoryPoolSchema, request.body);
 
@@ -1072,9 +954,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send(serializeInventoryPool(pool));
   });
 
-  app.get("/events/:eventId/inventory-pools", async (request) => {
+  app.get('/events/:eventId/inventory-pools', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
 
@@ -1082,20 +964,16 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
 
     const repo = new InventoryPoolRepository(db);
-    const rows = await repo.findByEvent(
-      eventId,
-      pagination.limit + 1,
-      pagination.cursor,
-    );
+    const rows = await repo.findByEvent(eventId, pagination.limit + 1, pagination.cursor);
     return pageEnvelope(
       rows.map((row) => serializeInventoryPool(row)),
       pagination.limit,
     );
   });
 
-  app.get("/events/:eventId/product-categories", async (request) => {
+  app.get('/events/:eventId/product-categories', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
 
@@ -1113,9 +991,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     );
   });
 
-  app.post("/events/:eventId/product-categories", async (request, reply) => {
+  app.post('/events/:eventId/product-categories', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(createProductCategorySchema, request.body);
 
@@ -1131,9 +1009,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send(serializeProductCategory(category));
   });
 
-  app.get("/events/:eventId/products", async (request) => {
+  app.get('/events/:eventId/products', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const pagination = parsePagination(request.query);
 
@@ -1151,9 +1029,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     );
   });
 
-  app.post("/events/:eventId/products", async (request, reply) => {
+  app.post('/events/:eventId/products', async (request, reply) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { eventId } = request.params as { eventId: string };
     const body = parseBody(createProductSchema, request.body);
 
@@ -1161,11 +1039,9 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     requireEventAccess(principal, event, eventId);
 
     if (body.categoryId) {
-      const category = await new ProductCategoryRepository(db).findById(
-        body.categoryId,
-      );
+      const category = await new ProductCategoryRepository(db).findById(body.categoryId);
       if (!category || category.event_id !== eventId) {
-        throw new NotFoundError("ProductCategory", body.categoryId);
+        throw new NotFoundError('ProductCategory', body.categoryId);
       }
     }
 
@@ -1177,12 +1053,8 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
       currency: body.currency,
       categoryId: body.categoryId,
       maxPerOrder: body.maxPerOrder,
-      availableFrom: body.availableFrom
-        ? new Date(body.availableFrom)
-        : undefined,
-      availableUntil: body.availableUntil
-        ? new Date(body.availableUntil)
-        : undefined,
+      availableFrom: body.availableFrom ? new Date(body.availableFrom) : undefined,
+      availableUntil: body.availableUntil ? new Date(body.availableUntil) : undefined,
       status: body.status,
       sortOrder: body.sortOrder,
     });
@@ -1190,63 +1062,59 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send(serializeProduct(product));
   });
 
-  app.patch("/products/:productId", async (request) => {
+  app.patch('/products/:productId', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "tickets.write");
+    ClerkAuthService.requirePermission(principal, 'tickets.write');
     const { productId } = request.params as { productId: string };
     const body = parseBody(updateProductSchema, request.body);
     const repo = new ProductRepository(db);
     const existing = await repo.findById(productId);
-    if (!existing) throw new NotFoundError("Product", productId);
+    if (!existing) throw new NotFoundError('Product', productId);
 
     const event = await loadEvent(existing.event_id);
     requireEventAccess(principal, event, existing.event_id);
 
     if (body.categoryId) {
-      const category = await new ProductCategoryRepository(db).findById(
-        body.categoryId,
-      );
+      const category = await new ProductCategoryRepository(db).findById(body.categoryId);
       if (!category || category.event_id !== existing.event_id) {
-        throw new NotFoundError("ProductCategory", body.categoryId);
+        throw new NotFoundError('ProductCategory', body.categoryId);
       }
     }
 
     const updateData = pickAllowedFields(
       body,
       [
-        "name",
-        "description",
-        "priceCents",
-        "currency",
-        "categoryId",
-        "maxPerOrder",
-        "availableFrom",
-        "availableUntil",
-        "status",
-        "sortOrder",
+        'name',
+        'description',
+        'priceCents',
+        'currency',
+        'categoryId',
+        'maxPerOrder',
+        'availableFrom',
+        'availableUntil',
+        'status',
+        'sortOrder',
       ],
       {
-        priceCents: "price_cents",
-        categoryId: "category_id",
-        maxPerOrder: "max_per_order",
-        availableFrom: "available_from",
-        availableUntil: "available_until",
-        sortOrder: "sort_order",
+        priceCents: 'price_cents',
+        categoryId: 'category_id',
+        maxPerOrder: 'max_per_order',
+        availableFrom: 'available_from',
+        availableUntil: 'available_until',
+        sortOrder: 'sort_order',
       },
     );
     if (updateData.available_from)
       updateData.available_from = new Date(updateData.available_from as string);
     if (updateData.available_until)
-      updateData.available_until = new Date(
-        updateData.available_until as string,
-      );
+      updateData.available_until = new Date(updateData.available_until as string);
 
     return serializeProduct(await repo.update(productId, updateData));
   });
 
-  app.get("/events/:eventId/availability", async (request) => {
+  app.get('/events/:eventId/availability', async (request) => {
     const principal = request.principal!;
-    ClerkAuthService.requirePermission(principal, "events.read");
+    ClerkAuthService.requirePermission(principal, 'events.read');
     const { eventId } = request.params as { eventId: string };
     const event = await loadEvent(eventId);
     requireEventAccess(principal, event, eventId);
@@ -1256,9 +1124,7 @@ export const ticketingRoutes: FastifyPluginAsync = async (app) => {
 
     const results = await Promise.all(
       ticketTypes.map(async (tt) => {
-        const availability = await inventoryService.getAvailability(
-          tt.inventory_pool_id,
-        );
+        const availability = await inventoryService.getAvailability(tt.inventory_pool_id);
         return {
           ticketTypeId: tt.id,
           eventOccurrenceId: tt.event_occurrence_id ?? undefined,

@@ -80,6 +80,8 @@ It uses a local search index by default and does not require a hosted search ser
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing contracts or public behavior. Use [SUPPORT.md](SUPPORT.md) for support routing, [SECURITY.md](SECURITY.md) for vulnerability reporting, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. Product direction is summarized in [ROADMAP.md](ROADMAP.md).
 
-## License and public export
+## License and repository transition
 
-This private development tree is marked `UNLICENSED`; possession of it does not grant redistribution rights. `bun run export:oss` creates a sanitized public source tree, excludes private/internal material, rewrites the exported root package metadata, and writes the MIT `LICENSE` that governs that exported tree. The private tree and a generated OSS export therefore have intentionally different license boundaries.
+This repository is currently in a transitional private-first layout and is marked `UNLICENSED`; possession of it does not grant redistribution rights. The accepted target is an authoritative public `tixkit/tixkit` repository containing the complete Self-Hosted runtime and integration packages under the intended MIT license, subject to legal review, plus a separate proprietary `tixkit/tixkit-cloud` repository that consumes immutable public releases.
+
+Until that cutover is complete, `bun run export:oss` remains a temporary safety and extraction tool. After cutover, public releases will be built directly from public commits and the exporter will be reduced to any still-useful boundary and secret validation.

@@ -10,7 +10,5 @@ const forbiddenPatterns = [
 
 export function assertPublicArtifactSafe(name: string, contents: string): void {
   if (forbiddenPatterns.some((pattern) => pattern.test(contents)))
-    throw new Error(
-      `Public API artifact ${name} contains a credential or non-placeholder PII.`,
-    );
+    throw new Error(`Public API artifact ${name} contains a credential or non-placeholder PII.`);
 }

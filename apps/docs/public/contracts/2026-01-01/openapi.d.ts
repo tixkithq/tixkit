@@ -57,6 +57,7 @@ export interface paths {
                         slug: string;
                         clerkOrganizationId?: string;
                         boxOfficeSettings?: components["schemas"]["BoxOfficeSettings"];
+                        eventDefaults?: components["schemas"]["EventDefaults"];
                     };
                 };
             };
@@ -190,6 +191,97 @@ export interface paths {
             };
         };
     };
+    "/venues": {
+        get: {
+            parameters: {
+                query: {
+                    organizationId: string;
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": Array<components["schemas"]["SavedVenue"]>;
+                    };
+                };
+            };
+        };
+        post: {
+            requestBody: {
+                content: {
+                    "application/json": {
+                        organizationId: string;
+                        name: string;
+                        address: Record<string, unknown>;
+                        timezone?: string;
+                    };
+                };
+            };
+            responses: {
+                "201": {
+                    content: {
+                        "application/json": components["schemas"]["SavedVenue"];
+                    };
+                };
+            };
+        };
+    };
+    "/venues/{venueId}": {
+        delete: {
+            parameters: {
+                path: {
+                    venueId: string;
+                };
+            };
+            responses: {
+                "204": Record<string, never>;
+                "409": {
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+            };
+        };
+        patch: {
+            parameters: {
+                path: {
+                    venueId: string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        address?: Record<string, unknown>;
+                        timezone?: string;
+                    };
+                };
+            };
+            responses: {
+                "200": {
+                    content: {
+                        "application/json": components["schemas"]["SavedVenue"];
+                    };
+                };
+            };
+        };
+    };
+    "/onboarding-events": {
+        post: {
+            requestBody: {
+                content: {
+                    "application/json": {
+                        stage: "onboarding_started" | "starting_point_selected" | "recovery" | "autosave_failure" | "stale_version_conflict";
+                        outcome: "started" | "blank" | "free" | "paid" | "donation" | "multiple" | "duplicate" | "attempted" | "completed" | "failed";
+                        reasonCode?: "none" | "request_failed" | "stale_event_version";
+                    };
+                };
+            };
+            responses: {
+                "204": Record<string, never>;
+            };
+        };
+    };
     "/events": {
         get: {
             parameters: {
@@ -217,6 +309,11 @@ export interface paths {
             };
         };
         post: {
+            parameters: {
+                header?: {
+                    "Idempotency-Key"?: string;
+                };
+            };
             requestBody: {
                 content: {
                     "application/json": {
@@ -230,6 +327,7 @@ export interface paths {
                         startsAt: string;
                         endsAt?: string;
                         venue?: Record<string, unknown>;
+                        venueId?: string | null;
                         visibility?: "public" | "unlisted" | "private";
                         seo?: {
                             title?: string;
@@ -238,6 +336,7 @@ export interface paths {
                         capacity?: number;
                         minimumAge?: number | null;
                         externalUrl?: string;
+                        startingPoint?: "blank" | "free" | "paid" | "donation" | "multiple";
                     };
                 };
             };
@@ -317,6 +416,9 @@ export interface paths {
             parameters: {
                 path: {
                     eventId: string;
+                };
+                header?: {
+                    "Idempotency-Key"?: string;
                 };
             };
             requestBody: {
@@ -6204,6 +6306,7 @@ export type operations = {
                     slug: string;
                     clerkOrganizationId?: string;
                     boxOfficeSettings?: components["schemas"]["BoxOfficeSettings"];
+                    eventDefaults?: components["schemas"]["EventDefaults"];
                 };
             };
         };
@@ -6328,6 +6431,91 @@ export type operations = {
             };
         };
     };
+    listSavedVenues: {
+        parameters: {
+            query: {
+                organizationId: string;
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": Array<components["schemas"]["SavedVenue"]>;
+                };
+            };
+        };
+    };
+    createSavedVenue: {
+        requestBody: {
+            content: {
+                "application/json": {
+                    organizationId: string;
+                    name: string;
+                    address: Record<string, unknown>;
+                    timezone?: string;
+                };
+            };
+        };
+        responses: {
+            "201": {
+                content: {
+                    "application/json": components["schemas"]["SavedVenue"];
+                };
+            };
+        };
+    };
+    deleteSavedVenue: {
+        parameters: {
+            path: {
+                venueId: string;
+            };
+        };
+        responses: {
+            "204": Record<string, never>;
+            "409": {
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    updateSavedVenue: {
+        parameters: {
+            path: {
+                venueId: string;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    address?: Record<string, unknown>;
+                    timezone?: string;
+                };
+            };
+        };
+        responses: {
+            "200": {
+                content: {
+                    "application/json": components["schemas"]["SavedVenue"];
+                };
+            };
+        };
+    };
+    reportOnboardingEvent: {
+        requestBody: {
+            content: {
+                "application/json": {
+                    stage: "onboarding_started" | "starting_point_selected" | "recovery" | "autosave_failure" | "stale_version_conflict";
+                    outcome: "started" | "blank" | "free" | "paid" | "donation" | "multiple" | "duplicate" | "attempted" | "completed" | "failed";
+                    reasonCode?: "none" | "request_failed" | "stale_event_version";
+                };
+            };
+        };
+        responses: {
+            "204": Record<string, never>;
+        };
+    };
     getEvents: {
         parameters: {
             query?: {
@@ -6354,6 +6542,11 @@ export type operations = {
         };
     };
     postEvents: {
+        parameters: {
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+        };
         requestBody: {
             content: {
                 "application/json": {
@@ -6367,6 +6560,7 @@ export type operations = {
                     startsAt: string;
                     endsAt?: string;
                     venue?: Record<string, unknown>;
+                    venueId?: string | null;
                     visibility?: "public" | "unlisted" | "private";
                     seo?: {
                         title?: string;
@@ -6375,6 +6569,7 @@ export type operations = {
                     capacity?: number;
                     minimumAge?: number | null;
                     externalUrl?: string;
+                    startingPoint?: "blank" | "free" | "paid" | "donation" | "multiple";
                 };
             };
         };
@@ -6450,6 +6645,9 @@ export type operations = {
         parameters: {
             path: {
                 eventId: string;
+            };
+            header?: {
+                "Idempotency-Key"?: string;
             };
         };
         requestBody: {
@@ -13246,9 +13444,26 @@ export interface components {
             slug: string;
             clerkOrganizationId?: string;
             boxOfficeSettings: components["schemas"]["BoxOfficeSettings"];
+            eventDefaults?: components["schemas"]["EventDefaults"];
             status: string;
             createdAt?: string;
             updatedAt?: string;
+        };
+        EventDefaults: {
+            timezone?: string;
+            currency?: string;
+            country?: string;
+            defaultVenueId?: string | null;
+            eventDescription?: string;
+        };
+        SavedVenue: {
+            id: string;
+            organizationId: string;
+            name: string;
+            address: Record<string, unknown>;
+            timezone?: string;
+            createdAt: string;
+            updatedAt: string;
         };
         BoxOfficeSettings: {
             enabled: boolean;
@@ -13278,6 +13493,7 @@ export interface components {
             slug: string;
             status: string;
             boxOfficeSettings?: components["schemas"]["BoxOfficeSettings"];
+            eventDefaults?: components["schemas"]["EventDefaults"];
         };
         BootstrapBrand: {
             id: string;

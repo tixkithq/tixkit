@@ -226,6 +226,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           {can('events.write') && event.status !== 'published' && event.status !== 'archived' ? (
             <Button
+              className="disabled:bg-slate-700 disabled:text-white disabled:opacity-100"
               disabled={readinessLoading || Boolean(readinessError) || !launchReadiness}
               onClick={() => setPreflightOpen(true)}
             >
@@ -253,6 +254,9 @@ export function EventDetailView({ eventId }: { eventId: string }) {
               <Button variant="outline" onClick={copyShareUrl}>
                 <Copy className="size-4" />
                 Copy link
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href={routes.eventPreview(eventId)}>Run another test checkout</Link>
               </Button>
             </>
           ) : (
@@ -289,9 +293,9 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             </CardHeader>
             <CardContent>
               {ticketsLoading || messagesLoading ? (
-                <p role="status" className="mb-3 text-sm text-muted-foreground">
+                <output className="mb-3 block text-sm text-muted-foreground">
                   Checking inventory and messaging health…
-                </p>
+                </output>
               ) : null}
               {ticketsError || messagesError ? (
                 <div

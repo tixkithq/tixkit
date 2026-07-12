@@ -91,7 +91,7 @@ describeWithIntegrationDatabase('test-order reporting exclusion', () => {
           brand_id: brand.id,
           event_id: event.id,
           checkout_session_id: sessionId,
-          order_number: `TK-REPORT-${index}`,
+          order_number: `TK-REPORT-${suffix}-${index}`,
           status: 'paid',
           currency: 'USD',
           subtotal_cents: isTest ? 90_000 : 10_000,

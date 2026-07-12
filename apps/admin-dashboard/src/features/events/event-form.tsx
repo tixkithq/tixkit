@@ -265,12 +265,18 @@ export function EventForm({
     'idle' | 'saving' | 'saved' | 'offline' | 'conflict'
   >('idle');
   const [scheduleMode, setScheduleMode] = React.useState<ScheduleMode>('one-time');
+  const [selectedVenueId, setSelectedVenueId] = React.useState('');
   const { organizationId, brandId, loading: bootstrapLoading } = useBootstrap();
   const createDisabled = !event && (bootstrapLoading || !organizationId || !brandId);
   const { data: existingOccurrences } = useAdminQuery(
     ['listEventOccurrences', event?.id ?? 'none', 'form-schedule-mode'],
     () => adminApi.listEventOccurrences(event!.id),
     { enabled: Boolean(event?.id) },
+  );
+  const { data: savedVenues, refetch: refetchSavedVenues } = useAdminQuery(
+    ['listSavedVenues', organizationId ?? 'none'],
+    () => adminApi.listSavedVenues(organizationId!),
+    { enabled: Boolean(organizationId) },
   );
 
   React.useEffect(() => {
@@ -418,6 +424,10 @@ export function EventForm({
       const updateInput = event
         ? buildEventUpdatePayload(values, dirtyFields as EventFormDirtyFields, initialValues)
         : null;
+      if (selectedVenueId) {
+        createInput.venueId = selectedVenueId;
+        if (updateInput) updateInput.venueId = selectedVenueId;
+      }
       if (event && !updateInput) {
         toast.error('Start date must be a valid date and time');
         return;
@@ -434,7 +444,22 @@ export function EventForm({
         toast.success(event ? 'Event updated' : 'Event created');
         onSuccess?.(result.data);
       } else {
-        setSaveState(result.error.code === 'stale_event_version' ? 'conflict' : 'idle');
+        const stale = result.error.code === 'stale_event_version';
+        setSaveState(stale ? 'conflict' : 'idle');
+        if (stale) {
+          void adminApi.reportOnboardingEvent({
+            stage: 'stale_version_conflict',
+            outcome: 'failed',
+            reasonCode: 'stale_event_version',
+          });
+        }
+        if (autosave) {
+          void adminApi.reportOnboardingEvent({
+            stage: 'autosave_failure',
+            outcome: 'failed',
+            reasonCode: stale ? 'stale_event_version' : 'request_failed',
+          });
+        }
         toast.error(result.error.message);
       }
     } finally {
@@ -832,6 +857,91 @@ export function EventForm({
               )}
             </div>
             <div id="schedule-venue" className="scroll-mt-6 grid gap-4 sm:grid-cols-2">
+              {(savedVenues?.length ?? 0) > 0 ? (
+                <div className="space-y-2 sm:col-span-2">
+                  <label className="text-sm font-medium" htmlFor="event-saved-venue">
+                    Saved venue
+                  </label>
+                  <select
+                    id="event-saved-venue"
+                    className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                    value={selectedVenueId}
+                    onChange={(change) => {
+                      const venueId = change.target.value;
+                      setSelectedVenueId(venueId);
+                      const venue = savedVenues?.find((candidate) => candidate.id === venueId);
+                      if (!venue) return;
+                      form.setValue('venueName', venue.name, { shouldDirty: true });
+                      form.setValue('address', venue.address.address ?? '', { shouldDirty: true });
+                      form.setValue('city', venue.address.city ?? '', { shouldDirty: true });
+                      form.setValue('region', venue.address.region ?? '', { shouldDirty: true });
+                      form.setValue('postalCode', venue.address.postalCode ?? '', {
+                        shouldDirty: true,
+                      });
+                      form.setValue('country', venue.address.country ?? '', { shouldDirty: true });
+                      if (venue.timezone)
+                        form.setValue('timezone', venue.timezone, { shouldDirty: true });
+                    }}
+                  >
+                    <option value="">Use inline venue details</option>
+                    {savedVenues?.map((venue) => (
+                      <option key={venue.id} value={venue.id}>
+                        {venue.name}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedVenueId ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          const values = form.getValues();
+                          const result = await adminApi.updateSavedVenue(selectedVenueId, {
+                            name: values.venueName || 'Venue',
+                            address: {
+                              address: values.address,
+                              city: values.city,
+                              region: values.region,
+                              postalCode: values.postalCode,
+                              country: values.country,
+                            },
+                            timezone: values.timezone,
+                          });
+                          if (result.ok) {
+                            toast.success('Saved venue updated');
+                            await refetchSavedVenues();
+                          } else toast.error(result.error.message);
+                        }}
+                      >
+                        Save venue changes
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              'Delete this saved venue? Events already using it must be changed first.',
+                            )
+                          )
+                            return;
+                          const result = await adminApi.deleteSavedVenue(selectedVenueId);
+                          if (result.ok) {
+                            setSelectedVenueId('');
+                            toast.success('Saved venue deleted');
+                            await refetchSavedVenues();
+                          } else toast.error(result.error.message);
+                        }}
+                      >
+                        Delete saved venue
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <FormField
                 control={form.control}
                 name="venueName"
@@ -924,6 +1034,39 @@ export function EventForm({
                 </FormItem>
               )}
             />
+            {!selectedVenueId && organizationId ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const values = form.getValues();
+                  if (!values.venueName?.trim()) {
+                    toast.error('Enter a venue name before saving it');
+                    return;
+                  }
+                  const result = await adminApi.createSavedVenue({
+                    organizationId,
+                    name: values.venueName.trim(),
+                    address: {
+                      address: values.address,
+                      city: values.city,
+                      region: values.region,
+                      postalCode: values.postalCode,
+                      country: values.country,
+                    },
+                    timezone: values.timezone,
+                  });
+                  if (result.ok) {
+                    setSelectedVenueId(result.data.id);
+                    toast.success('Venue saved for reuse');
+                    await refetchSavedVenues();
+                  } else toast.error(result.error.message);
+                }}
+              >
+                Save as reusable venue
+              </Button>
+            ) : null}
           </>
         ) : null}
         {section === 'all' || section === 'marketing' ? (
@@ -1011,7 +1154,7 @@ export function EventForm({
         <div className="flex justify-end gap-2 pt-2">
           {autosave && event ? (
             <div className="flex items-center gap-2">
-              <span role="status" className="self-center text-sm text-muted-foreground">
+              <output className="self-center text-sm text-muted-foreground">
                 {saveState === 'saving'
                   ? 'Saving…'
                   : saveState === 'saved'
@@ -1023,7 +1166,7 @@ export function EventForm({
                         : form.formState.isDirty
                           ? 'Unsaved changes'
                           : ''}
-              </span>
+              </output>
               {saveState === 'conflict' ? (
                 <Button type="button" variant="outline" onClick={reloadLatestPreservingEdits}>
                   Reload latest and keep my edits

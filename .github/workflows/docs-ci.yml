@@ -4,46 +4,46 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "apps/docs/**"
-      - "apps/admin-dashboard/**"
-      - "apps/checkout/**"
-      - "apps/sdk-*-demo/**"
-      - "docs/**"
-      - "packages/api/**"
-      - "packages/cli/**"
-      - "packages/docs-core/**"
-      - "packages/domain/**"
-      - "packages/db/**"
-      - "packages/openapi/**"
-      - "packages/sdk-*/**"
-      - "packages/shared/**"
-      - "packages/widget/**"
-      - "packages/workflows/**"
-      - "packages/**/README.md"
-      - "scripts/docs/**"
-      - "scripts/__tests__/docs-validation.test.mjs"
-      - "scripts/__tests__/export-oss.test.mjs"
-      - "scripts/__tests__/legacy-documentation-references.test.mjs"
-      - "scripts/__tests__/sdk-parity.test.mjs"
-      - "scripts/export-oss.mjs"
-      - "scripts/lib/sdk-parity.mjs"
-      - "scripts/sdk-demo-matrix.mjs"
-      - "scripts/sdk-parity-matrix.mjs"
-      - "e2e/docs-platform.spec.ts"
-      - "e2e/admin-documentation-platform.spec.ts"
-      - "playwright.docs.config.ts"
-      - "playwright.config.ts"
-      - "package.json"
-      - "bun.lock"
-      - "turbo.json"
-      - ".env.example"
-      - ".env.local.example"
-      - "*.md"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
-      - ".github/workflows/docs-ci.yml"
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/release-dry-run.yml"
+      - 'apps/docs/**'
+      - 'apps/admin-dashboard/**'
+      - 'apps/checkout/**'
+      - 'apps/sdk-*-demo/**'
+      - 'docs/**'
+      - 'packages/api/**'
+      - 'packages/cli/**'
+      - 'packages/docs-core/**'
+      - 'packages/domain/**'
+      - 'packages/db/**'
+      - 'packages/openapi/**'
+      - 'packages/sdk-*/**'
+      - 'packages/shared/**'
+      - 'packages/widget/**'
+      - 'packages/workflows/**'
+      - 'packages/**/README.md'
+      - 'scripts/docs/**'
+      - 'scripts/__tests__/docs-validation.test.mjs'
+      - 'scripts/__tests__/export-oss.test.mjs'
+      - 'scripts/__tests__/legacy-documentation-references.test.mjs'
+      - 'scripts/__tests__/sdk-parity.test.mjs'
+      - 'scripts/export-oss.mjs'
+      - 'scripts/lib/sdk-parity.mjs'
+      - 'scripts/sdk-demo-matrix.mjs'
+      - 'scripts/sdk-parity-matrix.mjs'
+      - 'e2e/docs-platform.spec.ts'
+      - 'e2e/admin-documentation-platform.spec.ts'
+      - 'playwright.docs.config.ts'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - 'turbo.json'
+      - '.env.example'
+      - '.env.local.example'
+      - '*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/workflows/docs-ci.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release-dry-run.yml'
   workflow_dispatch:
 
 permissions:
@@ -88,13 +88,13 @@ jobs:
       matrix:
         browser: [chromium, firefox, webkit]
     env:
-      CI: "true"
+      CI: 'true'
       DOCS_URL: http://127.0.0.1:3002
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
         with:
-          playwright-cache: "true"
+          playwright-cache: 'true'
       - run: bun install --frozen-lockfile
       - name: Install Playwright browser
         run: bunx playwright install --with-deps ${{ matrix.browser }}
@@ -124,13 +124,13 @@ jobs:
       matrix:
         browser: [chromium, firefox, webkit]
     env:
-      CI: "true"
+      CI: 'true'
       TEMPORAL_TASK_QUEUE: tixkit-docs-e2e-${{ matrix.browser }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
         with:
-          playwright-cache: "true"
+          playwright-cache: 'true'
       - run: bun install --frozen-lockfile
       - name: Start dashboard test infrastructure
         run: docker compose -f infra/docker-compose.yml up -d --wait postgres redis temporal temporal-postgresql minio

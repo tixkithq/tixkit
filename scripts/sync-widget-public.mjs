@@ -10,10 +10,7 @@ const check = process.argv.includes('--check');
 const packageJson = JSON.parse(
   await readFile(resolve(root, 'packages/widget/package.json'), 'utf8'),
 );
-const targetMap = resolve(
-  root,
-  `apps/checkout/public/tixkit-widget-${packageJson.version}.js.map`,
-);
+const targetMap = resolve(root, `apps/checkout/public/tixkit-widget-${packageJson.version}.js.map`);
 const temporary = await mkdtemp(resolve(tmpdir(), 'tixkit-widget-public-'));
 
 try {

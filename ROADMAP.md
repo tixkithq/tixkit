@@ -4,11 +4,15 @@ This roadmap describes direction, not a release promise. Priorities can change a
 
 ## Current priorities
 
+- Complete one shared product across three operating paths: Tixkit Cloud, the hosted Platform API capability, and Tixkit Self-Hosted.
+- Keep Cloud and self-hosted behavior aligned through the same API, OpenAPI, checkout, webhook, workflow, migration, and SDK contracts.
 - Keep checkout, inventory, ticket delivery, check-in, exports, and provider workflows durable and tenant-safe.
 - Maintain synchronized API, OpenAPI, SDK, dashboard, example, and documentation contracts.
 - Make the operator, integrator, self-hoster, and contributor golden paths reproducible from a clean environment.
 - Strengthen accessibility, browser coverage, observability, recovery, and deterministic release validation.
-- Keep the sanitized OSS export useful on its own without exposing private implementation material.
+- Make the authoritative public repository independently buildable, releasable and operable without private-repository access.
+
+The accepted operating model and remaining completion work are defined in [the open-core product and completion plan](docs/completion/open-core-platform-plan.md). Cloud is the default organizer path, Platform API is a capability of Cloud rather than a separate deployment, and Self-Hosted is the infrastructure-control path. The authoritative public repository contains the shared product and complete Self-Hosted runtime; a separate private Cloud repository consumes immutable public releases. Availability claims remain subject to release and operational proof.
 
 ## How work is accepted
 

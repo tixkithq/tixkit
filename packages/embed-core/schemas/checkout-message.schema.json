@@ -58,7 +58,21 @@
         },
         "sessionId": { "type": "string" },
         "orderId": { "type": "string" },
-        "errorCode": { "enum": ["invalid-config", "invalid-origin", "invalid-message", "unsupported-contract-version", "handshake-timeout", "checkout-unreachable", "checkout-offline", "unsupported-browser", "session-expired", "checkout-rejected", "internal-error"] },
+        "errorCode": {
+          "enum": [
+            "invalid-config",
+            "invalid-origin",
+            "invalid-message",
+            "unsupported-contract-version",
+            "handshake-timeout",
+            "checkout-unreachable",
+            "checkout-offline",
+            "unsupported-browser",
+            "session-expired",
+            "checkout-rejected",
+            "internal-error"
+          ]
+        },
         "message": { "type": "string", "maxLength": 240 },
         "retryable": { "type": "boolean" }
       },
@@ -73,14 +87,35 @@
         },
         {
           "if": { "properties": { "lifecycle": { "enum": ["recoverable-error", "fatal-error"] } } },
-          "then": { "required": ["errorCode", "message", "retryable"], "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }] } }
+          "then": {
+            "required": ["errorCode", "message", "retryable"],
+            "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }] }
+          }
         },
         {
-          "if": { "properties": { "lifecycle": { "enum": ["checkout-started", "checkout-session-created", "order-completed"] } } },
-          "then": { "not": { "anyOf": [{ "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+          "if": {
+            "properties": {
+              "lifecycle": {
+                "enum": ["checkout-started", "checkout-session-created", "order-completed"]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["errorCode"] },
+                { "required": ["message"] },
+                { "required": ["retryable"] }
+              ]
+            }
+          }
         },
         {
-          "if": { "properties": { "lifecycle": { "enum": ["checkout-started", "checkout-session-created"] } } },
+          "if": {
+            "properties": {
+              "lifecycle": { "enum": ["checkout-started", "checkout-session-created"] }
+            }
+          },
           "then": { "not": { "required": ["orderId"] } }
         }
       ]

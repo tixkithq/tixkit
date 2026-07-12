@@ -6,6 +6,54 @@ function timestampType(): ColumnDataType {
   return process.env.DB_DRIVER === 'mysql' ? 'datetime' : 'timestamptz';
 }
 
+async function dropConstraintIfPresent(
+  db: Parameters<NonNullable<Migration['down']>>[0],
+  table: string,
+  constraint: string,
+): Promise<void> {
+  if (!/^[a-z0-9_]+$/.test(table) || !/^[a-z0-9_]+$/.test(constraint)) {
+    throw new Error('Unsafe migration constraint identifier');
+  }
+  if (process.env.DB_DRIVER === 'mysql') {
+    const existing = await sql<{ count: number }>`
+      select count(*) as count
+      from information_schema.table_constraints
+      where constraint_schema = database()
+        and table_name = ${table}
+        and constraint_name = ${constraint}
+    `.execute(db);
+    if (Number(existing.rows[0]?.count ?? 0) === 0) return;
+  } else if (process.env.DB_DRIVER !== 'mssql') {
+    await sql.raw(`alter table "${table}" drop constraint if exists "${constraint}"`).execute(db);
+    return;
+  }
+  await db.schema.alterTable(table).dropConstraint(constraint).execute();
+}
+
+async function dropColumnIfPresent(
+  db: Parameters<NonNullable<Migration['down']>>[0],
+  table: string,
+  column: string,
+): Promise<void> {
+  if (!/^[a-z0-9_]+$/.test(table) || !/^[a-z0-9_]+$/.test(column)) {
+    throw new Error('Unsafe migration column identifier');
+  }
+  if (process.env.DB_DRIVER === 'mysql') {
+    const existing = await sql<{ count: number }>`
+      select count(*) as count
+      from information_schema.columns
+      where table_schema = database()
+        and table_name = ${table}
+        and column_name = ${column}
+    `.execute(db);
+    if (Number(existing.rows[0]?.count ?? 0) === 0) return;
+  } else if (process.env.DB_DRIVER !== 'mssql') {
+    await sql.raw(`alter table "${table}" drop column if exists "${column}"`).execute(db);
+    return;
+  }
+  await db.schema.alterTable(table).dropColumn(column).execute();
+}
+
 export const MigrationDomainSupportMigration: Migration = {
   async up(db) {
     await db.schema
@@ -145,13 +193,10 @@ export const MigrationDomainSupportMigration: Migration = {
       .execute();
   },
   async down(db) {
-    await db.schema
-      .alterTable('event_occurrences')
-      .dropConstraint('occurrences_venue_fk')
-      .execute();
-    await db.schema.alterTable('events').dropConstraint('events_venue_fk').execute();
-    await db.schema.alterTable('event_occurrences').dropColumn('venue_id').execute();
-    await db.schema.alterTable('events').dropColumn('venue_id').execute();
+    await dropConstraintIfPresent(db, 'event_occurrences', 'occurrences_venue_fk');
+    await dropConstraintIfPresent(db, 'events', 'events_venue_fk');
+    await dropColumnIfPresent(db, 'event_occurrences', 'venue_id');
+    await dropColumnIfPresent(db, 'events', 'venue_id');
     if (process.env.DB_DRIVER === 'mysql') {
       await sql`alter table attendees modify column order_id varchar(64) not null`.execute(db);
     } else {
@@ -168,10 +213,7 @@ export const MigrationDomainSupportMigration: Migration = {
     ] as const) {
       await db.schema.dropTable(table).ifExists().execute();
     }
-    await db.schema
-      .alterTable('tickets')
-      .dropConstraint('tickets_migration_tenant_scope_unique')
-      .execute();
-    await db.schema.alterTable('orders').dropConstraint('orders_migration_scope_unique').execute();
+    await dropConstraintIfPresent(db, 'tickets', 'tickets_migration_tenant_scope_unique');
+    await dropConstraintIfPresent(db, 'orders', 'orders_migration_scope_unique');
   },
 };

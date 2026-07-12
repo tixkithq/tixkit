@@ -2,26 +2,26 @@ import {
   apiReferenceOperations,
   apiReferenceSchemas,
   apiReferenceVersion,
-} from "@/generated/openapi-reference";
-import { apiReleaseVersions } from "@/generated/api-release-index";
-import { VersionedOpenApiReference } from "./versioned-openapi-reference";
+} from '@/generated/openapi-reference';
+import { apiReleaseVersions } from '@/generated/api-release-index';
+import { VersionedOpenApiReference } from './versioned-openapi-reference';
 
 function sandboxOrigins(value: string | undefined): string[] {
   if (!value) return [];
   return [
     ...new Set(
-      value.split(",").map((candidate) => {
+      value.split(',').map((candidate) => {
         const url = new URL(candidate.trim());
         if (
-          url.protocol !== "https:" ||
+          url.protocol !== 'https:' ||
           url.username ||
           url.password ||
-          url.pathname !== "/" ||
+          url.pathname !== '/' ||
           url.search ||
           url.hash
         )
           throw new Error(
-            "NEXT_PUBLIC_TIXKIT_SANDBOX_API_ORIGINS must contain exact HTTPS origins.",
+            'NEXT_PUBLIC_TIXKIT_SANDBOX_API_ORIGINS must contain exact HTTPS origins.',
           );
         return url.origin;
       }),
@@ -30,9 +30,7 @@ function sandboxOrigins(value: string | undefined): string[] {
 }
 
 export function OpenApiReference() {
-  const allowedOrigins = sandboxOrigins(
-    process.env.NEXT_PUBLIC_TIXKIT_SANDBOX_API_ORIGINS,
-  );
+  const allowedOrigins = sandboxOrigins(process.env.NEXT_PUBLIC_TIXKIT_SANDBOX_API_ORIGINS);
   return (
     <VersionedOpenApiReference
       versions={apiReleaseVersions}
@@ -47,9 +45,8 @@ export function OpenApiSchemaReference() {
   return (
     <div className="schema-reference">
       <p>
-        {apiReferenceSchemas.length} schemas are generated from OpenAPI version{" "}
-        {apiReferenceVersion}. Operation request and response links use these
-        canonical names.
+        {apiReferenceSchemas.length} schemas are generated from OpenAPI version{' '}
+        {apiReferenceVersion}. Operation request and response links use these canonical names.
       </p>
       <ul>
         {apiReferenceSchemas.map((schema) => (
@@ -76,8 +73,8 @@ export function OpenApiSchemaReference() {
                     <li key={property}>
                       <code>{property}</code>
                       {(schema.required as readonly string[]).includes(property)
-                        ? " — required"
-                        : ""}
+                        ? ' — required'
+                        : ''}
                     </li>
                   ))}
                 </ul>

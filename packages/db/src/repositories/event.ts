@@ -146,12 +146,17 @@ export class EventRepository extends BaseRepository {
 
   async updateIfVersion(id: string, expectedVersion: number, input: Record<string, unknown>) {
     const now = new Date();
-    const result = await this.db.updateTable('events').set({
-      ...input,
-      version: sql`version + 1`,
-      public_revision: now,
-      updated_at: now,
-    }).where('id', '=', id).where('version', '=', expectedVersion).executeTakeFirst();
+    const result = await this.db
+      .updateTable('events')
+      .set({
+        ...input,
+        version: sql`version + 1`,
+        public_revision: now,
+        updated_at: now,
+      })
+      .where('id', '=', id)
+      .where('version', '=', expectedVersion)
+      .executeTakeFirst();
     if (Number(result.numUpdatedRows) === 0) return undefined;
     return this.findById(id);
   }

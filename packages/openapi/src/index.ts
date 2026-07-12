@@ -3502,11 +3502,36 @@ const rawOpenApiSpec = {
           slug: { type: 'string' },
           clerkOrganizationId: { type: 'string' },
           boxOfficeSettings: { $ref: '#/components/schemas/BoxOfficeSettings' },
+          eventDefaults: { $ref: '#/components/schemas/EventDefaults' },
           status: { type: 'string' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
         required: ['id', 'tenantId', 'name', 'slug', 'boxOfficeSettings', 'status'],
+      },
+      EventDefaults: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          timezone: { type: 'string' },
+          currency: { type: 'string', minLength: 3, maxLength: 3 },
+          country: { type: 'string', minLength: 2, maxLength: 2 },
+          defaultVenueId: { type: 'string', nullable: true },
+          eventDescription: { type: 'string', maxLength: 10000 },
+        },
+      },
+      SavedVenue: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          organizationId: { type: 'string' },
+          name: { type: 'string' },
+          address: { type: 'object' },
+          timezone: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'organizationId', 'name', 'address', 'createdAt', 'updatedAt'],
       },
       BoxOfficeSettings: {
         type: 'object',
@@ -3556,6 +3581,7 @@ const rawOpenApiSpec = {
           slug: { type: 'string' },
           status: { type: 'string' },
           boxOfficeSettings: { $ref: '#/components/schemas/BoxOfficeSettings' },
+          eventDefaults: { $ref: '#/components/schemas/EventDefaults' },
         },
         required: ['id', 'tenantId', 'name', 'slug', 'status'],
       },
@@ -4742,6 +4768,7 @@ const rawOpenApiSpec = {
                   boxOfficeSettings: {
                     $ref: '#/components/schemas/BoxOfficeSettings',
                   },
+                  eventDefaults: { $ref: '#/components/schemas/EventDefaults' },
                 },
                 required: ['name', 'slug'],
               },
@@ -4946,6 +4973,154 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/venues': {
+      get: {
+        operationId: 'listSavedVenues',
+        summary: 'List reusable organization venues',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'organizationId', in: 'query', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Saved venues',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/SavedVenue' } },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        operationId: 'createSavedVenue',
+        summary: 'Create a reusable organization venue',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['organizationId', 'name', 'address'],
+                properties: {
+                  organizationId: { type: 'string' },
+                  name: { type: 'string' },
+                  address: { type: 'object' },
+                  timezone: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Saved venue',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SavedVenue' } },
+            },
+          },
+        },
+      },
+    },
+    '/venues/{venueId}': {
+      patch: {
+        operationId: 'updateSavedVenue',
+        summary: 'Update a reusable organization venue',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'venueId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string' },
+                  address: { type: 'object' },
+                  timezone: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated saved venue',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/SavedVenue' } },
+            },
+          },
+        },
+      },
+      delete: {
+        operationId: 'deleteSavedVenue',
+        summary: 'Delete an unused reusable organization venue',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'venueId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '204': { description: 'Saved venue deleted' },
+          '409': {
+            description: 'Venue is an event or workspace default',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+    },
+    '/onboarding-events': {
+      post: {
+        operationId: 'reportOnboardingEvent',
+        summary: 'Report a privacy-safe onboarding milestone',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['stage', 'outcome'],
+                properties: {
+                  stage: {
+                    type: 'string',
+                    enum: [
+                      'onboarding_started',
+                      'starting_point_selected',
+                      'recovery',
+                      'autosave_failure',
+                      'stale_version_conflict',
+                    ],
+                  },
+                  outcome: {
+                    type: 'string',
+                    enum: [
+                      'started',
+                      'blank',
+                      'free',
+                      'paid',
+                      'donation',
+                      'multiple',
+                      'duplicate',
+                      'attempted',
+                      'completed',
+                      'failed',
+                    ],
+                  },
+                  reasonCode: {
+                    type: 'string',
+                    enum: ['none', 'request_failed', 'stale_event_version'],
+                    default: 'none',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: { '204': { description: 'Onboarding milestone recorded' } },
+      },
+    },
     '/events': {
       get: {
         summary: 'List events',
@@ -4997,6 +5172,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Create event',
         security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }],
         requestBody: {
           required: true,
           content: {
@@ -5014,6 +5190,7 @@ const rawOpenApiSpec = {
                   startsAt: { type: 'string', format: 'date-time' },
                   endsAt: { type: 'string', format: 'date-time' },
                   venue: { type: 'object' },
+                  venueId: { type: 'string', nullable: true },
                   visibility: {
                     type: 'string',
                     enum: ['public', 'unlisted', 'private'],
@@ -5033,6 +5210,13 @@ const rawOpenApiSpec = {
                     maximum: 120,
                   },
                   externalUrl: { type: 'string', format: 'uri' },
+                  startingPoint: {
+                    type: 'string',
+                    enum: ['blank', 'free', 'paid', 'donation', 'multiple'],
+                    default: 'blank',
+                    description:
+                      'Atomically creates the selected initial ticket inventory or occurrence with the draft.',
+                  },
                 },
                 required: [
                   'organizationId',
@@ -5167,6 +5351,12 @@ const rawOpenApiSpec = {
             in: 'path',
             required: true,
             schema: { type: 'string' },
+          },
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: false,
+            schema: { type: 'string', minLength: 1, maxLength: 255 },
           },
         ],
         requestBody: {

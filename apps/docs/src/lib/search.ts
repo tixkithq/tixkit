@@ -49,7 +49,9 @@ export function searchDocs(
 ): DocsSearchResult[] {
   const tokens = expandedTokens(query);
   if (tokens.length === 0) return [];
-  const results: DocsSearchResult[] = [];
+  const boundedLimit = Math.max(0, Math.trunc(limit));
+  if (boundedLimit === 0) return [];
+  const ranked: DocsSearchResult[] = [];
   for (const record of records) {
     if (filters.audience && !record.audience.includes(filters.audience)) continue;
     if (filters.productArea && record.productArea !== filters.productArea) continue;
@@ -79,26 +81,27 @@ export function searchDocs(
     }
     score += headingScore;
     if (score > 0) {
-      results.push({
+      const result: DocsSearchResult = {
         url: bestHeading ? `${record.url}#${bestHeading.id}` : record.url,
         title: record.title,
         description: record.description,
         ...(bestHeading ? { heading: bestHeading } : {}),
         score,
-      });
+      };
+      const insertionIndex = ranked.findIndex(
+        (candidate) =>
+          result.score > candidate.score ||
+          (result.score === candidate.score && result.title.localeCompare(candidate.title) < 0),
+      );
+      if (insertionIndex === -1) {
+        if (ranked.length < boundedLimit) ranked.push(result);
+      } else {
+        ranked.splice(insertionIndex, 0, result);
+        if (ranked.length > boundedLimit) ranked.pop();
+      }
     }
   }
-  const ranked: DocsSearchResult[] = [];
-  for (const result of results) {
-    const insertionIndex = ranked.findIndex(
-      (candidate) =>
-        result.score > candidate.score ||
-        (result.score === candidate.score && result.title.localeCompare(candidate.title) < 0),
-    );
-    if (insertionIndex === -1) ranked.push(result);
-    else ranked.splice(insertionIndex, 0, result);
-  }
-  return ranked.slice(0, limit);
+  return ranked;
 }
 
 export const searchAudiences: readonly Audience[] = [

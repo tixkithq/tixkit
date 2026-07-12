@@ -107,12 +107,16 @@ export const EventOnboardingReadinessMigration: Migration = {
         if ((error as { code?: string }).code !== 'ER_CANT_DROP_FIELD_OR_KEY') throw error;
       }
     } else if (process.env.DB_DRIVER === 'mssql') {
-      await sql`if col_length('orders', 'is_test') is not null alter table orders drop column is_test`.execute(db);
+      await sql`if col_length('orders', 'is_test') is not null alter table orders drop column is_test`.execute(
+        db,
+      );
     } else {
       await sql`alter table orders drop column if exists is_test`.execute(db);
     }
     if (process.env.DB_DRIVER === 'mssql') {
-      await sql`if col_length('checkout_sessions', 'is_test') is not null alter table checkout_sessions drop column is_test`.execute(db);
+      await sql`if col_length('checkout_sessions', 'is_test') is not null alter table checkout_sessions drop column is_test`.execute(
+        db,
+      );
     } else if (process.env.DB_DRIVER === 'mysql') {
       try {
         await sql`alter table checkout_sessions drop column is_test`.execute(db);
@@ -122,7 +126,12 @@ export const EventOnboardingReadinessMigration: Migration = {
     } else {
       await sql`alter table checkout_sessions drop column if exists is_test`.execute(db);
     }
-    for (const column of ['seo_use_cover_image', 'cover_image_alt', 'last_setup_section', 'version']) {
+    for (const column of [
+      'seo_use_cover_image',
+      'cover_image_alt',
+      'last_setup_section',
+      'version',
+    ]) {
       try {
         await db.schema.alterTable('events').dropColumn(column).execute();
       } catch (error) {

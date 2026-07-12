@@ -2,6 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Migrator } from 'kysely/migration';
 import { createDb, type Database } from '../../client.js';
 import { TixkitMigrationProvider } from '../../migrate.js';
+import {
+  BrandRepository,
+  EventRepository,
+  OrganizationRepository,
+  TenantRepository,
+} from '../../repositories/index.js';
 
 const driver = process.env.DB_INTEGRATION_DRIVER;
 const url =
@@ -25,6 +31,89 @@ const enabled = Boolean(url);
   afterAll(async () => {
     await db?.destroy();
   });
+
+  it('backfills existing rows when 0063 and 0064 are rolled down and reapplied', async () => {
+    const suffix = `${driver}_${Date.now()}`;
+    const tenant = await new TenantRepository(db).create({ name: `Migration ${suffix}` });
+    const organization = await new OrganizationRepository(db).create({
+      tenantId: tenant.id,
+      name: `Migration ${suffix}`,
+      slug: `migration-${suffix}`,
+    });
+    const brand = await new BrandRepository(db).create({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      name: `Migration ${suffix}`,
+      slug: `migration-${suffix}`,
+    });
+    const event = await new EventRepository(db).create({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      slug: `migration-${suffix}`,
+      title: 'Migration compatibility event',
+      currency: 'USD',
+      timezone: 'UTC',
+      startsAt: new Date('2027-01-01T18:00:00.000Z'),
+    });
+
+    let migrationsDown = 0;
+    try {
+      for (const expectedName of [
+        '0064_organization_event_defaults',
+        '0063_event_checkout_configuration_revision',
+      ]) {
+        const down = await migrator.migrateDown();
+        expect(down.error).toBeUndefined();
+        expect(down.results?.at(-1)).toMatchObject({
+          migrationName: expectedName,
+          status: 'Success',
+          direction: 'Down',
+        });
+        migrationsDown += 1;
+      }
+
+      const downTables = await db.introspection.getTables();
+      expect(
+        downTables.find((table) => table.name === 'organizations')?.columns.map((c) => c.name),
+      ).not.toContain('event_defaults');
+      expect(
+        downTables.find((table) => table.name === 'events')?.columns.map((c) => c.name),
+      ).not.toContain('checkout_configuration_updated_at');
+
+      for (const expectedName of [
+        '0063_event_checkout_configuration_revision',
+        '0064_organization_event_defaults',
+      ]) {
+        const up = await migrator.migrateUp();
+        expect(up.error).toBeUndefined();
+        expect(up.results?.at(-1)).toMatchObject({
+          migrationName: expectedName,
+          status: 'Success',
+          direction: 'Up',
+        });
+        migrationsDown -= 1;
+      }
+
+      const restoredOrganization = await db
+        .selectFrom('organizations')
+        .select('event_defaults')
+        .where('id', '=', organization.id)
+        .executeTakeFirstOrThrow();
+      const restoredEvent = await db
+        .selectFrom('events')
+        .select('checkout_configuration_updated_at')
+        .where('id', '=', event.id)
+        .executeTakeFirstOrThrow();
+      expect(JSON.parse(restoredOrganization.event_defaults)).toEqual({});
+      expect(restoredEvent.checkout_configuration_updated_at).toBeNull();
+    } finally {
+      while (migrationsDown > 0) {
+        await migrator.migrateUp();
+        migrationsDown -= 1;
+      }
+    }
+  }, 120_000);
 
   it('removes and restores every readiness schema surface', async () => {
     let migrationsDown = 0;

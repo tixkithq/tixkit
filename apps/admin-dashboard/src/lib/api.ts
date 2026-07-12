@@ -189,6 +189,7 @@ export type AdminEventListItem = {
   timezone: string;
   venueName?: string;
   venue?: AdminEventVenue | null;
+  venueId?: string | null;
   city?: string;
   description?: string;
   visibility: EventVisibility;
@@ -202,6 +203,16 @@ export type AdminEventListItem = {
   externalUrl?: string | null;
   resalePolicy: AdminResalePolicy;
   checkIns: number;
+  updatedAt: string;
+};
+
+export type AdminSavedVenue = {
+  id: string;
+  organizationId: string;
+  name: string;
+  address: Omit<AdminEventVenue, 'name'>;
+  timezone?: string;
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -1269,6 +1280,13 @@ export type AdminOrganization = {
   status: 'active' | 'suspended';
   clerkOrganizationId?: string;
   boxOfficeSettings: AdminBoxOfficeSettings;
+  eventDefaults?: {
+    timezone?: string;
+    currency?: string;
+    country?: string;
+    defaultVenueId?: string | null;
+    eventDescription?: string;
+  };
   createdAt?: string;
   updatedAt?: string;
 };
@@ -1492,6 +1510,7 @@ export type CreateEventInput = {
   endsAt?: string | null;
   timezone: string;
   venue?: AdminEventVenue | null;
+  venueId?: string | null;
   venueName?: string;
   address?: string;
   visibility?: EventVisibility;
@@ -1500,6 +1519,8 @@ export type CreateEventInput = {
   minimumAge?: number | null;
   externalUrl?: string | null;
   currency: string;
+  startingPoint?: 'blank' | 'free' | 'paid' | 'donation' | 'multiple';
+  idempotencyKey?: string;
 };
 
 export type UpdateEventInput = Partial<CreateEventInput> & {
@@ -1512,6 +1533,7 @@ export type UpdateEventInput = Partial<CreateEventInput> & {
 };
 
 export type DuplicateEventInput = {
+  idempotencyKey?: string;
   startsAt: string;
   title?: string;
   copy: {
@@ -1756,6 +1778,7 @@ export type UpdateOrganizationInput = {
   slug?: string;
   clerkOrganizationId?: string | null;
   boxOfficeSettings?: AdminBoxOfficeSettings;
+  eventDefaults?: AdminOrganization['eventDefaults'];
 };
 
 export type UpdateBrandInput = {
@@ -2068,6 +2091,35 @@ export type AdminApi = {
     stepId: AdminReadinessAcknowledgement['stepId'],
   ): Promise<ApiResult<void>>;
   createEvent(input: CreateEventInput): Promise<ApiResult<AdminEventDetail>>;
+  listSavedVenues(organizationId: string): Promise<ApiResult<AdminSavedVenue[]>>;
+  createSavedVenue(
+    input: Omit<AdminSavedVenue, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<ApiResult<AdminSavedVenue>>;
+  updateSavedVenue(
+    venueId: string,
+    input: Partial<Pick<AdminSavedVenue, 'name' | 'address' | 'timezone'>>,
+  ): Promise<ApiResult<AdminSavedVenue>>;
+  deleteSavedVenue(venueId: string): Promise<ApiResult<void>>;
+  reportOnboardingEvent(input: {
+    stage:
+      | 'onboarding_started'
+      | 'starting_point_selected'
+      | 'recovery'
+      | 'autosave_failure'
+      | 'stale_version_conflict';
+    outcome:
+      | 'started'
+      | 'blank'
+      | 'free'
+      | 'paid'
+      | 'donation'
+      | 'multiple'
+      | 'duplicate'
+      | 'attempted'
+      | 'completed'
+      | 'failed';
+    reasonCode?: 'none' | 'request_failed' | 'stale_event_version';
+  }): Promise<ApiResult<void>>;
   duplicateEvent(eventId: string, input: DuplicateEventInput): Promise<ApiResult<AdminEventDetail>>;
   updateEvent(eventId: string, input: UpdateEventInput): Promise<ApiResult<AdminEventDetail>>;
   publishEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
@@ -2616,6 +2668,7 @@ function normalizeOrganization(value: Record<string, unknown>): AdminOrganizatio
     boxOfficeSettings: normalizeBoxOfficeSettings(
       value.boxOfficeSettings ?? value.box_office_settings,
     ),
+    eventDefaults: asRecord(value.eventDefaults ?? value.event_defaults),
     createdAt: stringValue(value.createdAt ?? value.created_at, undefined),
     updatedAt: stringValue(value.updatedAt ?? value.updated_at, undefined),
   };
@@ -5190,6 +5243,7 @@ export const adminApi: AdminApi = {
         };
         const result = await request<AdminEventDetail>('/v1/events', {
           method: 'POST',
+          headers: input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : undefined,
           body: JSON.stringify({
             organizationId,
             brandId,
@@ -5206,10 +5260,12 @@ export const adminApi: AdminApi = {
             startsAt: input.startsAt,
             endsAt: input.endsAt ?? undefined,
             venue: Object.values(venue).some(Boolean) ? venue : undefined,
+            venueId: input.venueId,
             visibility: input.visibility,
             seo: input.seo,
             capacity: input.capacity,
             externalUrl: input.externalUrl,
+            startingPoint: input.startingPoint,
           }),
         });
         return result.ok ? ok(normalizeEvent(result.data)) : result;
@@ -5250,12 +5306,55 @@ export const adminApi: AdminApi = {
     );
   },
 
+  async listSavedVenues(organizationId) {
+    return withFixture(
+      () =>
+        request<AdminSavedVenue[]>(
+          `/v1/venues?organizationId=${encodeURIComponent(organizationId)}`,
+        ),
+      () => ok([]),
+    );
+  },
+
+  async createSavedVenue(input) {
+    return withFixture(
+      () => request<AdminSavedVenue>('/v1/venues', { method: 'POST', body: JSON.stringify(input) }),
+      () => err(apiError('fixture_unavailable', 'Saved venues require the live API', 400)),
+    );
+  },
+
+  async updateSavedVenue(venueId, input) {
+    return withFixture(
+      () =>
+        request<AdminSavedVenue>(`/v1/venues/${venueId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(input),
+        }),
+      () => err(apiError('fixture_unavailable', 'Saved venues require the live API', 400)),
+    );
+  },
+
+  async deleteSavedVenue(venueId) {
+    return withFixture(
+      () => request<void>(`/v1/venues/${venueId}`, { method: 'DELETE' }),
+      () => err(apiError('fixture_unavailable', 'Saved venues require the live API', 400)),
+    );
+  },
+
+  async reportOnboardingEvent(input) {
+    return withFixture(
+      () => request<void>('/v1/onboarding-events', { method: 'POST', body: JSON.stringify(input) }),
+      () => ok(undefined),
+    );
+  },
+
   async duplicateEvent(eventId, input) {
     return withFixture(
       async () => {
         const result = await request<AdminEventDetail>(`/v1/events/${eventId}/duplicate`, {
           method: 'POST',
-          body: JSON.stringify(input),
+          headers: input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : undefined,
+          body: JSON.stringify({ ...input, idempotencyKey: undefined }),
         });
         return result.ok ? ok(normalizeEvent(result.data)) : result;
       },

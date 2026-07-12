@@ -23,17 +23,51 @@ const stepLabels: Record<string, string> = {
   publication_status: 'Publication',
 };
 
-const reasonCopy: Record<string, string> = {
+export const eventReadinessReasonCopy: Readonly<Record<string, string>> = {
+  event_title_missing:
+    'Guests cannot identify this event. Add a clear event title in event settings.',
+  event_schedule_invalid:
+    'The event cannot be published with this schedule. Set an end time after the start time.',
+  event_start_invalid:
+    'The event start is missing, invalid, or too close to safely launch. Choose a valid future start time.',
+  event_timezone_missing:
+    'Times cannot be shown reliably without a timezone. Choose the event timezone in settings.',
   sellable_ticket_missing: 'Add at least one active ticket with available inventory.',
   ticket_inventory_unavailable: 'Increase inventory or reopen the ticket sales window.',
+  inventory_invalid:
+    'Ticket capacity or occurrence scope is inconsistent. Repair the linked inventory in Tickets.',
+  sales_window_invalid:
+    'Guests cannot buy during the configured window. Set sales dates in order and around the event schedule.',
+  ticket_currency_mismatch:
+    'Ticket prices use a different currency from the event. Update ticket or event currency before launch.',
+  product_currency_mismatch:
+    'An add-on uses a different currency from the event. Update the product currency before launch.',
+  pricing_invalid:
+    'Buyer totals or fee handling are inconsistent. Review ticket prices and the event fee policy.',
   payment_capture_mode_paid_unsupported:
     'Paid events cannot launch while payments are in capture-only mode.',
   payment_path_missing: 'Connect a payment account for paid or donation tickets.',
+  payment_account_inactive:
+    'Paid checkout cannot settle funds because the connected account is inactive. Reconnect or activate it.',
   payment_charges_disabled: 'Resolve the payment provider restriction before launching.',
+  payment_currency_mismatch:
+    'The connected payment account cannot accept this event currency. Change the currency or payment account.',
   public_content_missing: 'Publish event-page content so guests have a complete public experience.',
   confirmation_content_missing: 'Publish an order-confirmation email for attendees.',
   checkout_review_required: 'Review the real checkout questions and consent language.',
   preview_review_required: 'Open the authenticated preview and explicitly mark it reviewed.',
+  test_order_recommended:
+    'Checkout has not been proven for this configuration. Run a safe test order before publishing.',
+  test_order_stale:
+    'Tickets, pricing, checkout, or payments changed after the last test. Run another safe test order.',
+  check_in_configuration_missing:
+    'Door staff do not yet have a usable check-in setup. Configure check-in lists and access.',
+  required_steps_incomplete:
+    'Publishing is blocked until every required launch check is complete. Continue with the next action above.',
+  event_unpublished:
+    'The event is still a draft. Complete the launch checks and run publish preflight.',
+  acknowledgement_stale:
+    'Configuration changed after this review. Review the updated preview or checkout and acknowledge it again.',
   permission_required: 'A teammate with the required permission must complete this step.',
 };
 
@@ -175,7 +209,8 @@ export function EventLaunchPanel({
                         {step.reasonCodes
                           .map(
                             (reason) =>
-                              reasonCopy[reason] ?? `This step needs attention (${reason}).`,
+                              eventReadinessReasonCopy[reason] ??
+                              'This launch check needs attention. Open its settings to review and correct the current configuration.',
                           )
                           .join(' ')}
                       </p>

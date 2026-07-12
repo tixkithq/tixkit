@@ -1,7 +1,7 @@
-import type { PublicDocFrontmatter } from "@tixkit/docs-core";
-import Link from "next/link";
-import type { ReactNode } from "react";
-import { contentManifest } from "@/generated/content-manifest";
+import type { PublicDocFrontmatter } from '@tixkit/docs-core';
+import Link from 'next/link';
+import type { ReactNode } from 'react';
+import { contentManifest } from '@/generated/content-manifest';
 
 interface Heading {
   id: string;
@@ -10,11 +10,11 @@ interface Heading {
 }
 
 function breadcrumbs(route: string, canonicalRoutes: ReadonlySet<string>) {
-  const segments = route.split("/").filter(Boolean);
+  const segments = route.split('/').filter(Boolean);
   return segments.map((segment, index) => ({
-    label: segment.replaceAll("-", " "),
-    href: canonicalRoutes.has(`/${segments.slice(0, index + 1).join("/")}`)
-      ? `/${segments.slice(0, index + 1).join("/")}`
+    label: segment.replaceAll('-', ' '),
+    href: canonicalRoutes.has(`/${segments.slice(0, index + 1).join('/')}`)
+      ? `/${segments.slice(0, index + 1).join('/')}`
       : undefined,
   }));
 }
@@ -38,18 +38,16 @@ export function DocPage({
   const canonicalRoutes = new Set(routes);
   const index = routes.indexOf(route);
   const previous =
-    index > 0
-      ? contentManifest[routes[index - 1] as keyof typeof contentManifest]
-      : undefined;
+    index > 0 ? contentManifest[routes[index - 1] as keyof typeof contentManifest] : undefined;
   const next =
     index >= 0 && index < routes.length - 1
       ? contentManifest[routes[index + 1] as keyof typeof contentManifest]
       : undefined;
   const editUrl = `${repositoryUrl}/edit/main/${sourcePath}`;
   const issue = new URL(`${repositoryUrl}/issues/new`);
-  issue.searchParams.set("title", `Documentation: ${frontmatter.title}`);
+  issue.searchParams.set('title', `Documentation: ${frontmatter.title}`);
   issue.searchParams.set(
-    "body",
+    'body',
     `Page: ${route}\nSource: ${sourcePath}\n\nWhat is incorrect, missing, or unclear?\n`,
   );
 
@@ -106,11 +104,9 @@ export function DocPage({
           <div className="prose">{children}</div>
           <footer className="doc-footer">
             <p>
-              Last verified{" "}
-              <time dateTime={frontmatter.last_verified}>
-                {frontmatter.last_verified}
-              </time>{" "}
-              · Owned by {frontmatter.owner}
+              Last verified{' '}
+              <time dateTime={frontmatter.last_verified}>{frontmatter.last_verified}</time> · Owned
+              by {frontmatter.owner}
             </p>
             <div>
               <a href={editUrl}>Edit this page</a>
@@ -123,8 +119,8 @@ export function DocPage({
                   {frontmatter.related.map((path) => (
                     <li key={path}>
                       <Link href={path} prefetch={false}>
-                        {contentManifest[path as keyof typeof contentManifest]
-                          ?.frontmatter.title ?? path}
+                        {contentManifest[path as keyof typeof contentManifest]?.frontmatter.title ??
+                          path}
                       </Link>
                     </li>
                   ))}
@@ -132,10 +128,7 @@ export function DocPage({
               </section>
             ) : null}
           </footer>
-          <nav
-            className="previous-next"
-            aria-label="Previous and next documentation"
-          >
+          <nav className="previous-next" aria-label="Previous and next documentation">
             {previous ? (
               <Link href={routes[index - 1]!} prefetch={false}>
                 ← {previous.frontmatter.title}

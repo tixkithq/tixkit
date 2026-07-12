@@ -35,8 +35,8 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/contributing/architecture": {
     sourcePath: "docs/public/contributing/architecture.mdx",
-    frontmatter: {"title":"Monorepo architecture","description":"Locate applications, packages, contract sources, durable workflows, and public export boundaries.","audience":["contributor"],"product_area":"contributing","content_type":"concept","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-10","prerequisites":["A source checkout"],"related":["/getting-started/platform-overview","/contributing/add-an-api-route"]},
-    headings: [{"id":"runtime-applications","text":"Runtime applications","level":2},{"id":"backend-boundaries","text":"Backend boundaries","level":2},{"id":"frontend-and-integration-packages","text":"Frontend and integration packages","level":2},{"id":"export-boundary","text":"Export boundary","level":2}],
+    frontmatter: {"title":"Monorepo architecture","description":"Locate applications, packages, contract sources, durable workflows, and the public/private repository boundary.","audience":["contributor"],"product_area":"contributing","content_type":"concept","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-11","prerequisites":["A source checkout"],"related":["/getting-started/platform-overview","/contributing/add-an-api-route"]},
+    headings: [{"id":"runtime-applications","text":"Runtime applications","level":2},{"id":"backend-boundaries","text":"Backend boundaries","level":2},{"id":"frontend-and-integration-packages","text":"Frontend and integration packages","level":2},{"id":"repository-boundary","text":"Repository boundary","level":2}],
     load: () => import("../../../../docs/public/contributing/architecture.mdx"),
   },
   "/contributing/repository-setup": {
@@ -119,8 +119,8 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/getting-started/deployment-model": {
     sourcePath: "docs/public/getting-started/deployment-model.mdx",
-    frontmatter: {"title":"Choose a deployment model","description":"Decide between local evaluation and a self-hosted deployment without overstating managed-service availability.","audience":["operator","self-hoster"],"product_area":"self-hosting","content_type":"concept","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["A clear evaluation or production objective"],"related":["/getting-started/local-quickstart","/self-hosting/deployment"],"keywords":["deployment","local","self-hosted"]},
-    headings: [{"id":"local-evaluation","text":"Local evaluation","level":2},{"id":"self-hosted-operation","text":"Self-hosted operation","level":2},{"id":"decision-check","text":"Decision check","level":2}],
+    frontmatter: {"title":"Choose a deployment model","description":"Choose between Tixkit Cloud, its hosted Platform API capability, local evaluation, and Self-Hosted operation.","audience":["operator","self-hoster"],"product_area":"self-hosting","content_type":"concept","status":"beta","owner":"platform-operations","last_verified":"2026-07-11","prerequisites":["A clear evaluation or production objective"],"related":["/getting-started/local-quickstart","/self-hosting/deployment"],"keywords":["deployment","local","self-hosted"]},
+    headings: [{"id":"tixkit-cloud","text":"Tixkit Cloud","level":2},{"id":"local-evaluation","text":"Local evaluation","level":2},{"id":"self-hosted-operation","text":"Self-hosted operation","level":2},{"id":"decision-check","text":"Decision check","level":2}],
     load: () => import("../../../../docs/public/getting-started/deployment-model.mdx"),
   },
   "/getting-started/first-api-call": {

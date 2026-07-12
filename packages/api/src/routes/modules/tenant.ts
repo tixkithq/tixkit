@@ -482,15 +482,39 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     await requireUniqueClerkOrganizationId(db, body.clerkOrganizationId, organizationId);
     let updated;
     try {
-      updated = await new OrganizationRepository(db).update(organizationId, {
-        ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
-        ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
-        ...(body.clerkOrganizationId !== undefined
-          ? { clerk_organization_id: body.clerkOrganizationId }
-          : {}),
-        ...(body.boxOfficeSettings !== undefined
-          ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
-          : {}),
+      updated = await db.transaction().execute(async (trx) => {
+        await trx
+          .selectFrom('organizations')
+          .select('id')
+          .where('id', '=', organizationId)
+          .where('tenant_id', '=', principal.tenantId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        if (body.eventDefaults?.defaultVenueId) {
+          const defaultVenue = await trx
+            .selectFrom('venues')
+            .select('id')
+            .where('id', '=', body.eventDefaults.defaultVenueId)
+            .where('tenant_id', '=', principal.tenantId)
+            .where('organization_id', '=', organizationId)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!defaultVenue)
+            throw new ValidationError('Default venue must belong to this workspace');
+        }
+        return new OrganizationRepository(trx as typeof db).update(organizationId, {
+          ...(typeof body.name === 'string' ? { name: body.name.trim() } : {}),
+          ...(typeof body.slug === 'string' ? { slug: body.slug.trim() } : {}),
+          ...(body.clerkOrganizationId !== undefined
+            ? { clerk_organization_id: body.clerkOrganizationId }
+            : {}),
+          ...(body.boxOfficeSettings !== undefined
+            ? { box_office_settings: JSON.stringify(body.boxOfficeSettings) }
+            : {}),
+          ...(body.eventDefaults !== undefined
+            ? { event_defaults: JSON.stringify(body.eventDefaults) }
+            : {}),
+        });
       });
     } catch (err) {
       if (isDuplicateInsert(err)) {
@@ -514,6 +538,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         ...(body.boxOfficeSettings !== undefined
           ? { boxOfficeSettings: body.boxOfficeSettings }
           : {}),
+        ...(body.eventDefaults !== undefined ? { eventDefaults: body.eventDefaults } : {}),
       },
     });
     return serializeOrganization(updated);

@@ -66,7 +66,7 @@
   {
     "url": "/contributing/architecture",
     "title": "Monorepo architecture",
-    "description": "Locate applications, packages, contract sources, durable workflows, and public export boundaries.",
+    "description": "Locate applications, packages, contract sources, durable workflows, and the public/private repository boundary.",
     "headings": [
       {
         "id": "runtime-applications",
@@ -84,12 +84,12 @@
         "level": 2
       },
       {
-        "id": "export-boundary",
-        "text": "Export boundary",
+        "id": "repository-boundary",
+        "text": "Repository boundary",
         "level": 2
       }
     ],
-    "body": "The Bun/Turbo workspace contains runtime applications under apps/ and reusable or service packages under packages/ . Runtime applications apps/admin dashboard is the authenticated operator UI. apps/checkout is buyer facing checkout/public event behavior. apps/docs builds this documentation. SDK demo apps are executable contract fixtures. Backend boundaries packages/domain owns pure rules and types. packages/db owns Kysely repositories/migrations. packages/api owns Fastify routes, auth, permissions, and serialization. packages/workflows owns Temporal workflows/activities. packages/openapi owns the public HTTP schema. Frontend and integration packages Content packages own shared editors/rendering; admin table core owns reusable table behavior; SDK and widget packages expose public integration surfaces. packages/docs core owns documentation route/help/readiness/search contracts without importing applications. Export boundary The private development tree is not identical to the sanitized OSS export. scripts/export oss.mjs explicitly includes public apps/packages/content/governance and excludes internal plans, evidence, managed only material, and secret like content.",
+    "body": "The Bun/Turbo workspace contains runtime applications under apps/ and reusable or service packages under packages/ . Runtime applications apps/admin dashboard is the authenticated operator UI. apps/checkout is buyer facing checkout/public event behavior. apps/docs builds this documentation. SDK demo apps are executable contract fixtures. Backend boundaries packages/domain owns pure rules and types. packages/db owns Kysely repositories/migrations. packages/api owns Fastify routes, auth, permissions, and serialization. packages/workflows owns Temporal workflows/activities. packages/openapi owns the public HTTP schema. Frontend and integration packages Content packages own shared editors/rendering; admin table core owns reusable table behavior; SDK and widget packages expose public integration surfaces. packages/docs core owns documentation route/help/readiness/search contracts without importing applications. Repository boundary The accepted target makes the public tixkit/tixkit repository authoritative for shared product code, public integrations, documentation, and the complete Self Hosted runtime. The private tixkit/tixkit cloud repository consumes immutable public releases and contains proprietary Cloud operations, managed integrations, and natural language agent orchestration. Public source and CI never depend on private source. During the C 130 cutover, scripts/export oss.mjs remains a temporary extraction and leak validation tool. It is not the long term publication architecture.",
     "audience": [
       "contributor"
     ],
@@ -419,8 +419,13 @@
   {
     "url": "/getting-started/deployment-model",
     "title": "Choose a deployment model",
-    "description": "Decide between local evaluation and a self-hosted deployment without overstating managed-service availability.",
+    "description": "Choose between Tixkit Cloud, its hosted Platform API capability, local evaluation, and Self-Hosted operation.",
     "headings": [
+      {
+        "id": "tixkit-cloud",
+        "text": "Tixkit Cloud",
+        "level": 2
+      },
       {
         "id": "local-evaluation",
         "text": "Local evaluation",
@@ -437,7 +442,7 @@
         "level": 2
       }
     ],
-    "body": "The repository supports local development and self hosted operation. This documentation does not promise a managed Tixkit service or hosted control plane. Local evaluation Choose the local stack when you need to evaluate workflows, develop an integration, or contribute. Docker Compose starts PostgreSQL, MySQL, Redis, Temporal, and MinIO. The CLI then runs migrations and starts the API, worker, checkout, admin, and documentation applications. Local capture mode payments record platform behavior without contacting a payment provider. They are not a substitute for provider validation. Self hosted operation Choose self hosting when your team can operate: a supported relational database configuration; Redis, Temporal, and object storage; API and worker processes with health monitoring; public admin, checkout, and documentation applications; TLS, secrets, backups, restore rehearsals, upgrades, and incident response. Provider backed payments, messaging, and authentication require their documented credentials and provider side setup. Do not copy local example values into production. Decision check Use local evaluation until you can complete a test event, test checkout, API request, webhook verification, backup, and restore rehearsal. Move to a production topology only after the deployment guide /self hosting/deployment and incident runbooks /operations/incidents match your environment.",
+    "body": "Tixkit's accepted product model includes Tixkit Cloud, the hosted Platform API capability inside Cloud, and Tixkit Self Hosted over one shared product. Cloud and the managed agent layer remain experimental/private beta plans until their provisioning, operations, support, security, and release gates are complete; this page does not claim general availability before then. Tixkit Cloud Choose Cloud when Tixkit should operate upgrades, workflows, storage, monitoring, backups, security maintenance, hosted admin, event pages, checkout, and delivery. Platform API customers use this same hosted backend with more control through APIs, SDKs, widgets, headless checkout, OAuth, scoped keys, webhooks, and custom product UI. Local evaluation Choose the local stack when you need to evaluate workflows, develop an integration, or contribute. Docker Compose starts PostgreSQL, MySQL, Redis, Temporal, and MinIO. The CLI then runs migrations and starts the API, worker, checkout, admin, and documentation applications. Local capture mode payments record platform behavior without contacting a payment provider. They are not a substitute for provider validation. Self hosted operation Choose self hosting when your team can operate: a supported relational database configuration; Redis, Temporal, and object storage; API and worker processes with health monitoring; public admin, checkout, and documentation applications; TLS, secrets, backups, restore rehearsals, upgrades, and incident response. Provider backed payments, messaging, and authentication require their documented credentials and provider side setup. Do not copy local example values into production. Decision check Use local evaluation until you can complete a test event, test checkout, API request, webhook verification, backup, and restore rehearsal. Move to a production topology only after the deployment guide /self hosting/deployment and incident runbooks /operations/incidents match your environment.",
     "audience": [
       "operator",
       "self-hoster"

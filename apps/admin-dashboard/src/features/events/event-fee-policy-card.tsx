@@ -1,19 +1,19 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Trash2 } from "lucide-react";
-import { z } from "zod";
+import * as React from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Plus, Trash2 } from 'lucide-react';
+import { z } from 'zod';
 import {
   type AdminFeePolicy,
   type AdminTicketType,
   type UpdateEventFeePolicyInput,
   adminApi,
-} from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+} from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Form,
   FormControl,
@@ -22,17 +22,17 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -40,10 +40,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { useAdminQuery } from "@/hooks/use-admin-table-data";
-import { formatCurrency } from "@/lib/format";
-import { toast } from "sonner";
+} from '@/components/ui/table';
+import { useAdminQuery } from '@/hooks/use-admin-table-data';
+import { formatCurrency } from '@/lib/format';
+import { toast } from 'sonner';
 
 export const feePolicyFormSchema = z
   .object({
@@ -53,29 +53,29 @@ export const feePolicyFormSchema = z
         z
           .object({
             id: z.string().optional(),
-            name: z.string().trim().min(1, "Name is required").max(80),
-            type: z.enum(["percentage", "fixed"]),
+            name: z.string().trim().min(1, 'Name is required').max(80),
+            type: z.enum(['percentage', 'fixed']),
             value: z.number().int().min(0),
-            appliedTo: z.enum(["per_ticket", "per_order"]),
+            appliedTo: z.enum(['per_ticket', 'per_order']),
           })
           .superRefine((rule, ctx) => {
-            if (rule.type === "percentage" && rule.value > 10_000) {
+            if (rule.type === 'percentage' && rule.value > 10_000) {
               ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                path: ["value"],
-                message: "Percentage fees cannot exceed 100%",
+                path: ['value'],
+                message: 'Percentage fees cannot exceed 100%',
               });
             }
-            if (rule.type === "fixed" && rule.value > 100_000_000) {
+            if (rule.type === 'fixed' && rule.value > 100_000_000) {
               ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                path: ["value"],
-                message: "Fixed fees cannot exceed 1,000,000.00",
+                path: ['value'],
+                message: 'Fixed fees cannot exceed 1,000,000.00',
               });
             }
           }),
       )
-      .max(5, "Use five or fewer fee rules"),
+      .max(5, 'Use five or fewer fee rules'),
   })
   .strict();
 
@@ -91,8 +91,7 @@ export const DEFAULT_PLATFORM_FEE_FIXED_CENTS = 30;
 export function computePlatformFeeCents(priceCents: number): number {
   if (priceCents <= 0) return 0;
   return (
-    Math.round((priceCents * DEFAULT_PLATFORM_FEE_BPS) / 10_000) +
-    DEFAULT_PLATFORM_FEE_FIXED_CENTS
+    Math.round((priceCents * DEFAULT_PLATFORM_FEE_BPS) / 10_000) + DEFAULT_PLATFORM_FEE_FIXED_CENTS
   );
 }
 
@@ -110,9 +109,7 @@ export type FeePolicyExample = {
   organizerNetCents: number;
 };
 
-export function feePolicyToValues(
-  policy?: AdminFeePolicy,
-): FeePolicyFormValues {
+export function feePolicyToValues(policy?: AdminFeePolicy): FeePolicyFormValues {
   return {
     passFeesToBuyer: policy?.passFeesToBuyer ?? false,
     rules:
@@ -150,7 +147,7 @@ export function buildFeePolicyExamples(
   return ticketTypes.map((ticket) => {
     const serviceFeeCents = values.rules.reduce((sum, rule) => {
       const fee =
-        rule.type === "percentage"
+        rule.type === 'percentage'
           ? Math.round((ticket.priceCents * rule.value) / 10_000)
           : rule.value;
       return sum + fee;
@@ -158,9 +155,7 @@ export function buildFeePolicyExamples(
     const platformFeeCents = computePlatformFeeCents(ticket.priceCents);
     const totalFeeCents = serviceFeeCents + platformFeeCents;
     const buyerFeeCents = values.passFeesToBuyer ? totalFeeCents : 0;
-    const organizerAbsorbedFeeCents = values.passFeesToBuyer
-      ? 0
-      : totalFeeCents;
+    const organizerAbsorbedFeeCents = values.passFeesToBuyer ? 0 : totalFeeCents;
     return {
       ticketTypeId: ticket.id,
       ticketName: ticket.name,
@@ -189,9 +184,7 @@ export function EventFeePolicyCard({
     loading,
     error,
     refetch,
-  } = useAdminQuery(["getEventFeePolicy", eventId], () =>
-    adminApi.getEventFeePolicy(eventId),
-  );
+  } = useAdminQuery(['getEventFeePolicy', eventId], () => adminApi.getEventFeePolicy(eventId));
   const [saving, setSaving] = React.useState(false);
   const [conflict, setConflict] = React.useState(false);
   const [offline, setOffline] = React.useState(false);
@@ -204,10 +197,7 @@ export function EventFeePolicyCard({
   });
 
   const serializeValues = React.useCallback((values: FeePolicyFormValues) => {
-    return (
-      JSON.stringify(feePolicyValuesToInput(values, 1).rules) +
-      String(values.passFeesToBuyer)
-    );
+    return JSON.stringify(feePolicyValuesToInput(values, 1).rules) + String(values.passFeesToBuyer);
   }, []);
 
   React.useEffect(() => {
@@ -219,8 +209,8 @@ export function EventFeePolicyCard({
     }
   }, [feePolicy, form, serializeValues]);
 
-  const rules = form.watch("rules");
-  const passFeesToBuyer = form.watch("passFeesToBuyer");
+  const rules = form.watch('rules');
+  const passFeesToBuyer = form.watch('passFeesToBuyer');
   const examples = buildFeePolicyExamples(ticketTypes, {
     passFeesToBuyer,
     rules,
@@ -228,14 +218,14 @@ export function EventFeePolicyCard({
 
   const addRule = () => {
     form.setValue(
-      "rules",
+      'rules',
       [
         ...rules,
         {
-          name: "Service fee",
-          type: "percentage",
+          name: 'Service fee',
+          type: 'percentage',
           value: 500,
-          appliedTo: "per_ticket",
+          appliedTo: 'per_ticket',
         },
       ],
       { shouldDirty: true, shouldValidate: true },
@@ -244,7 +234,7 @@ export function EventFeePolicyCard({
 
   const removeRule = (index: number) => {
     form.setValue(
-      "rules",
+      'rules',
       rules.filter((_, ruleIndex) => ruleIndex !== index),
       { shouldDirty: true, shouldValidate: true },
     );
@@ -257,10 +247,7 @@ export function EventFeePolicyCard({
         return;
       }
       setOffline(false);
-      const input = feePolicyValuesToInput(
-        values,
-        feePolicy?.eventVersion ?? 1,
-      );
+      const input = feePolicyValuesToInput(values, feePolicy?.eventVersion ?? 1);
       const policyKey = serializeValues(values);
       if (lastSavedPolicyRef.current === policyKey) {
         return;
@@ -279,7 +266,7 @@ export function EventFeePolicyCard({
           return;
         }
         failedPolicyRef.current = policyKey;
-        if (result.error.code === "stale_event_version") setConflict(true);
+        if (result.error.code === 'stale_event_version') setConflict(true);
         toast.error(result.error.message);
         return;
       }
@@ -303,8 +290,8 @@ export function EventFeePolicyCard({
       const parsed = feePolicyFormSchema.safeParse(form.getValues());
       if (parsed.success) void savePolicy(parsed.data);
     };
-    window.addEventListener("online", retryWhenOnline);
-    return () => window.removeEventListener("online", retryWhenOnline);
+    window.addEventListener('online', retryWhenOnline);
+    return () => window.removeEventListener('online', retryWhenOnline);
   }, [form, savePolicy]);
 
   React.useEffect(() => {
@@ -342,12 +329,12 @@ export function EventFeePolicyCard({
             <CardTitle>Ticket Fees</CardTitle>
             <p className="text-sm text-muted-foreground">
               {passFeesToBuyer
-                ? "Buyers cover Stripe processing and your service fees at checkout"
-                : "You absorb Stripe processing and service fees from your proceeds"}
+                ? 'Buyers cover Stripe processing and your service fees at checkout'
+                : 'You absorb Stripe processing and service fees from your proceeds'}
             </p>
           </div>
-          <Badge variant={passFeesToBuyer ? "default" : "secondary"}>
-            {passFeesToBuyer ? "Buyer pays" : "Organizer absorbs"}
+          <Badge variant={passFeesToBuyer ? 'default' : 'secondary'}>
+            {passFeesToBuyer ? 'Buyer pays' : 'Organizer absorbs'}
           </Badge>
         </div>
       </CardHeader>
@@ -366,9 +353,9 @@ export function EventFeePolicyCard({
                 </div>
               )}
               {offline ? (
-                <p role="status" className="rounded-md border p-3 text-sm">
+                <output className="block rounded-md border p-3 text-sm">
                   Offline — fee policy changes remain unsaved.
-                </p>
+                </output>
               ) : null}
               {conflict ? (
                 <div
@@ -376,8 +363,8 @@ export function EventFeePolicyCard({
                   className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 p-3 text-sm"
                 >
                   <span>
-                    This fee policy changed in another session. Reload it before
-                    applying your edits.
+                    This fee policy changed in another session. Reload it before applying your
+                    edits.
                   </span>
                   <Button
                     type="button"
@@ -398,13 +385,11 @@ export function EventFeePolicyCard({
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between rounded-md border p-3">
                     <div className="space-y-1">
-                      <FormLabel htmlFor="fee-pass-to-buyers">
-                        Pass fees to buyers
-                      </FormLabel>
+                      <FormLabel htmlFor="fee-pass-to-buyers">Pass fees to buyers</FormLabel>
                       <FormDescription>
-                        When enabled, checkout totals add the Stripe processing
-                        fee and your service fees on top of the ticket price.
-                        When disabled, they are deducted from your proceeds.
+                        When enabled, checkout totals add the Stripe processing fee and your service
+                        fees on top of the ticket price. When disabled, they are deducted from your
+                        proceeds.
                       </FormDescription>
                     </div>
                     <FormControl>
@@ -425,10 +410,7 @@ export function EventFeePolicyCard({
               ) : (
                 <div className="space-y-3">
                   {rules.map((rule, index) => (
-                    <div
-                      key={`${rule.id ?? "new"}-${index}`}
-                      className="rounded-md border p-3"
-                    >
+                    <div key={`${rule.id ?? 'new'}-${index}`} className="rounded-md border p-3">
                       <div className="grid gap-3 lg:grid-cols-[1.2fr_140px_140px_120px_40px] lg:items-start">
                         <FormField
                           control={form.control}
@@ -449,19 +431,14 @@ export function EventFeePolicyCard({
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Type</FormLabel>
-                              <Select
-                                onValueChange={field.onChange}
-                                value={field.value}
-                              >
+                              <Select onValueChange={field.onChange} value={field.value}>
                                 <FormControl>
                                   <SelectTrigger>
                                     <SelectValue />
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value="percentage">
-                                    Percent
-                                  </SelectItem>
+                                  <SelectItem value="percentage">Percent</SelectItem>
                                   <SelectItem value="fixed">Fixed</SelectItem>
                                 </SelectContent>
                               </Select>
@@ -475,22 +452,15 @@ export function EventFeePolicyCard({
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Applies</FormLabel>
-                              <Select
-                                onValueChange={field.onChange}
-                                value={field.value}
-                              >
+                              <Select onValueChange={field.onChange} value={field.value}>
                                 <FormControl>
                                   <SelectTrigger>
                                     <SelectValue />
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value="per_ticket">
-                                    Per ticket
-                                  </SelectItem>
-                                  <SelectItem value="per_order">
-                                    Per order
-                                  </SelectItem>
+                                  <SelectItem value="per_ticket">Per ticket</SelectItem>
+                                  <SelectItem value="per_order">Per order</SelectItem>
                                 </SelectContent>
                               </Select>
                               <FormMessage />
@@ -503,9 +473,7 @@ export function EventFeePolicyCard({
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>
-                                {rule.type === "percentage"
-                                  ? "Rate (%)"
-                                  : "Amount ($)"}
+                                {rule.type === 'percentage' ? 'Rate (%)' : 'Amount ($)'}
                               </FormLabel>
                               <FormControl>
                                 <Input
@@ -515,10 +483,7 @@ export function EventFeePolicyCard({
                                   value={field.value / 100}
                                   onChange={(event) =>
                                     field.onChange(
-                                      Math.round(
-                                        Number(event.currentTarget.value || 0) *
-                                          100,
-                                      ),
+                                      Math.round(Number(event.currentTarget.value || 0) * 100),
                                     )
                                   }
                                 />
@@ -528,10 +493,7 @@ export function EventFeePolicyCard({
                           )}
                         />
                         <div className="flex flex-col gap-2">
-                          <div
-                            className="hidden h-[14px] lg:block"
-                            aria-hidden="true"
-                          />
+                          <div className="hidden h-[14px] lg:block" aria-hidden="true" />
                           <Button
                             type="button"
                             variant="outline"
@@ -549,10 +511,7 @@ export function EventFeePolicyCard({
                 </div>
               )}
 
-              <FeePolicyExplanation
-                examples={examples}
-                passFeesToBuyer={passFeesToBuyer}
-              />
+              <FeePolicyExplanation examples={examples} passFeesToBuyer={passFeesToBuyer} />
 
               <div className="flex flex-wrap justify-between gap-3">
                 <Button
@@ -591,10 +550,10 @@ function FeePolicyExplanation({
   return (
     <div className="space-y-2">
       <div className="text-sm text-muted-foreground">
-        Every paid ticket includes the Stripe processing fee (2.9% + $0.30).{" "}
+        Every paid ticket includes the Stripe processing fee (2.9% + $0.30).{' '}
         {passFeesToBuyer
-          ? "With pass-through on, buyers pay this plus your service fees on top of the ticket price, so you keep the full face value."
-          : "With pass-through off, buyers pay face value and these fees are deducted from your proceeds."}
+          ? 'With pass-through on, buyers pay this plus your service fees on top of the ticket price, so you keep the full face value.'
+          : 'With pass-through off, buyers pay face value and these fees are deducted from your proceeds.'}
       </div>
       <div className="rounded-md border">
         <Table>
@@ -611,24 +570,12 @@ function FeePolicyExplanation({
           <TableBody>
             {examples.map((example) => (
               <TableRow key={example.ticketTypeId}>
-                <TableCell className="font-medium">
-                  {example.ticketName}
-                </TableCell>
-                <TableCell>
-                  {formatCurrency(example.priceCents, example.currency)}
-                </TableCell>
-                <TableCell>
-                  {formatCurrency(example.platformFeeCents, example.currency)}
-                </TableCell>
-                <TableCell>
-                  {formatCurrency(example.serviceFeeCents, example.currency)}
-                </TableCell>
-                <TableCell>
-                  {formatCurrency(example.buyerTotalCents, example.currency)}
-                </TableCell>
-                <TableCell>
-                  {formatCurrency(example.organizerNetCents, example.currency)}
-                </TableCell>
+                <TableCell className="font-medium">{example.ticketName}</TableCell>
+                <TableCell>{formatCurrency(example.priceCents, example.currency)}</TableCell>
+                <TableCell>{formatCurrency(example.platformFeeCents, example.currency)}</TableCell>
+                <TableCell>{formatCurrency(example.serviceFeeCents, example.currency)}</TableCell>
+                <TableCell>{formatCurrency(example.buyerTotalCents, example.currency)}</TableCell>
+                <TableCell>{formatCurrency(example.organizerNetCents, example.currency)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

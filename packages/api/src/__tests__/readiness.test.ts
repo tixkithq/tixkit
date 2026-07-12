@@ -210,6 +210,72 @@ describe('readiness service invariants', () => {
     expect(evaluateSellableTickets(tickets, new Date('2026-01-01'))).toMatchObject({ reasonCode });
   });
 
+  it('accepts a later occurrence sales window relative to that occurrence', () => {
+    expect(
+      evaluateSellableTickets(
+        [
+          {
+            status: 'active',
+            totalCapacity: 10,
+            reservedCount: 0,
+            soldCount: 0,
+            salesStartAt: '2026-06-01T00:00:00.000Z',
+            salesEndAt: '2026-06-30T00:00:00.000Z',
+            eventOccurrenceId: 'occ_2',
+            occurrenceEventId: 'evt_1',
+            occurrenceStartsAt: '2026-07-15T00:00:00.000Z',
+            occurrenceStatus: 'scheduled',
+          },
+        ],
+        new Date('2026-05-01T00:00:00.000Z'),
+        '2026-07-01T00:00:00.000Z',
+      ),
+    ).toMatchObject({ status: 'complete', reasonCode: 'sellable_ticket_available' });
+  });
+
+  it.each([
+    [
+      {
+        occurrenceEventId: null,
+        occurrenceStatus: 'scheduled',
+        occurrenceStartsAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
+    [
+      {
+        occurrenceEventId: 'evt_1',
+        occurrenceStatus: 'cancelled',
+        occurrenceStartsAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
+    [
+      {
+        occurrenceEventId: 'evt_1',
+        occurrenceStatus: 'scheduled',
+        occurrenceStartsAt: '2026-04-01T00:00:00.000Z',
+      },
+    ],
+  ])('rejects an unusable occurrence scope %#', (occurrence) => {
+    expect(
+      evaluateSellableTickets(
+        [
+          {
+            status: 'active',
+            totalCapacity: 10,
+            reservedCount: 0,
+            soldCount: 0,
+            salesStartAt: null,
+            salesEndAt: null,
+            eventOccurrenceId: 'occ_2',
+            ...occurrence,
+          },
+        ],
+        new Date('2026-05-01T00:00:00.000Z'),
+        '2026-07-01T00:00:00.000Z',
+      ),
+    ).toMatchObject({ status: 'incomplete', reasonCode: 'inventory_invalid' });
+  });
+
   it('requires published document and version status and supports brand confirmation fallback', () => {
     const base = {
       channel: 'email',

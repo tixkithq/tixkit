@@ -2,6 +2,10 @@
 
 This file is the concise map for contributors. The canonical detailed views are [contributor architecture](docs/public/contributing/architecture.mdx) and [self-hosting architecture](docs/public/self-hosting/architecture.mdx).
 
+## Repository boundary
+
+The accepted target has an authoritative public `tixkit/tixkit` repository for shared product code, contracts, integration packages and the complete Self-Hosted runtime. Proprietary Cloud operations, managed integrations and natural-language agent orchestration live in a separate private `tixkit/tixkit-cloud` repository that consumes immutable public releases. Public code and CI must never depend on private source.
+
 ## Runtime applications and services
 
 - `apps/admin-dashboard`: authenticated Next.js operator experience.
@@ -57,6 +61,6 @@ Payment, messaging, authentication, storage, and other integrations sit behind p
 
 The API, workers, workflows, and provider adapters emit structured logs, metrics, and traces with correlation context. Sensitive values and payloads are redacted. Operational guidance lives under `docs/public/operations` and `docs/public/self-hosting`.
 
-## Public and private source boundary
+## Transitional source boundary
 
-The development repository is private and `UNLICENSED`. `scripts/export-oss.mjs` copies an explicit allowlist into a clean directory, excludes internal plans/evidence and private adapters, scans for forbidden paths/content/secrets, rewrites public package metadata, and creates an MIT license for the exported tree. Code must not infer that a path is public merely because it exists in the development repository.
+Until C-130 completes, this development tree remains private and `UNLICENSED`, and `scripts/export-oss.mjs` remains a temporary extraction and leak-validation tool. The accepted target is direct publication from the authoritative public repository; the private Cloud repository consumes immutable public artifacts. New shared work must be designed for the target boundary rather than adding new same-repository managed dependencies.

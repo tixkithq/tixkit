@@ -31,6 +31,7 @@ const testState = vi.hoisted(() => {
 
 const apiMock = vi.hoisted(() => ({
   updateOrganization: vi.fn(),
+  listSavedVenues: vi.fn().mockResolvedValue({ ok: true, data: [] }),
 }));
 
 const toastMock = vi.hoisted(() => ({
@@ -111,6 +112,7 @@ describe('WorkspacePage', () => {
         requireBuyerEmail: true,
         receiptMode: 'email',
       },
+      eventDefaults: {},
     });
     expect(toastMock.success).toHaveBeenCalledWith('Workspace settings saved');
   });

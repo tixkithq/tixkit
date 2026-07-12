@@ -13,13 +13,39 @@ vi.mock('@/features/content-editor/event-page-persisted-editor-view', async () =
     },
   };
 });
-vi.mock('@/lib/api', () => ({ adminApi: { getEvent: vi.fn(), listTicketTypes: vi.fn(), listProducts: vi.fn(), listCheckoutQuestions: vi.fn(), acknowledgeReadinessStep: acknowledge } }));
-vi.mock('@/hooks/use-admin-table-data', () => ({ useAdminQuery: (key: string[]) => {
-  if (key[0] === 'getEvent') return { data: { id: 'evt_1', title: 'Preview event', status: 'draft', startsAt: '2027-01-01T18:00:00Z', timezone: 'UTC', currency: 'USD', description: 'Description' }, loading: false };
-  if (key[0] === 'listTicketTypes') return { data: [{ id: 'tt_1', name: 'GA', kind: 'paid', priceCents: 2500, currency: 'USD' }], loading: false };
-  if (key[0] === 'listProducts') return { data: [], loading: false };
-  return { data: [{ id: 'q_1', label: 'Name', required: true }], loading: false };
-} }));
+vi.mock('@/lib/api', () => ({
+  adminApi: {
+    getEvent: vi.fn(),
+    listTicketTypes: vi.fn(),
+    listProducts: vi.fn(),
+    listCheckoutQuestions: vi.fn(),
+    acknowledgeReadinessStep: acknowledge,
+  },
+}));
+vi.mock('@/hooks/use-admin-table-data', () => ({
+  useAdminQuery: (key: string[]) => {
+    if (key[0] === 'getEvent')
+      return {
+        data: {
+          id: 'evt_1',
+          title: 'Preview event',
+          status: 'draft',
+          startsAt: '2027-01-01T18:00:00Z',
+          timezone: 'UTC',
+          currency: 'USD',
+          description: 'Description',
+        },
+        loading: false,
+      };
+    if (key[0] === 'listTicketTypes')
+      return {
+        data: [{ id: 'tt_1', name: 'GA', kind: 'paid', priceCents: 2500, currency: 'USD' }],
+        loading: false,
+      };
+    if (key[0] === 'listProducts') return { data: [], loading: false };
+    return { data: [{ id: 'q_1', label: 'Name', required: true }], loading: false };
+  },
+}));
 
 describe('EventPreviewView', () => {
   it('marks preview clearly, supports mobile presentation, and explicitly acknowledges review', async () => {

@@ -434,23 +434,21 @@ export function EventPreviewView({ eventId }: { eventId: string }) {
           />
         </section>
       </div>
-      {previewLoading ? <p role="status">Loading ticket, product, and checkout behavior…</p> : null}
+      {previewLoading ? <output>Loading ticket, product, and checkout behavior…</output> : null}
       {previewError ? (
         <p role="alert" className="text-sm text-destructive">
           Preview behavior could not be loaded: {previewError.message}
         </p>
       ) : null}
       {!rendererReady && !rendererError ? (
-        <p role="status">Loading the authenticated event-page renderer…</p>
+        <output>Loading the authenticated event-page renderer…</output>
       ) : null}
       {rendererError ? (
         <p role="alert" className="text-sm text-destructive">
           Rendered event-page preview failed: {rendererError}
         </p>
       ) : null}
-      {readinessLoading ? (
-        <p role="status">Checking whether safe test checkout is available…</p>
-      ) : null}
+      {readinessLoading ? <output>Checking whether safe test checkout is available…</output> : null}
       {readinessError ? (
         <p role="alert" className="text-sm text-destructive">
           Test checkout availability could not be loaded: {readinessError.message}

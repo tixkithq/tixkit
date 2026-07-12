@@ -4,9 +4,9 @@
   "commit": null,
   "timestamp": null,
   "provenance": {
-    "sourceCommit": "b611a0d7fbd56863550d79b9240eda049a91992d",
-    "headTreeHash": "ded7cc7034ac72a85daf8957a2f7a34370a6b985",
-    "sourceTreeHash": "881357226e39fd4766f0f89a03fd2e300506cd6232b2dddd2d6b747be1ad6ba5",
+    "sourceCommit": "8d0cea95e89a5f23c3f031c7514896a727a396cf",
+    "headTreeHash": "9b167180bfa5df1c90a60cb75eb45ade57ce5deb",
+    "sourceTreeHash": "35e18fbcb6f80b0563822ac0b286c28674de15993da53789983fbad9b1a043ad",
     "trackedFileCount": 1650,
     "excludedGeneratedPaths": [
       "apps/docs/public/contracts/",
@@ -22,18 +22,18 @@
   "artifacts": [
     {
       "name": "openapi.json",
-      "sha256": "d9a191dadd3cc1d7b997d17c933e7346df84be8487f9c165c7c3d8a2d54a1f59",
-      "size": 841841
+      "sha256": "e0dc2e7c6ea137a2715be140efed98952026d7a75b30e7757aec05501833d123",
+      "size": 852912
     },
     {
       "name": "openapi.yaml",
-      "sha256": "444040073794c63a4128fe8dc394ad50a34288c9d43e3f32f03f2322a07b2c87",
-      "size": 577286
+      "sha256": "ae636c4dcb5093f5cc22dd364805383a6e5bce6cef0de227c3143b64008058a4",
+      "size": 584971
     },
     {
       "name": "openapi.d.ts",
-      "sha256": "dc9a7d55bef26cf68f0ef4334233015413842dd54d1acc3be6a0b38cb6908869",
-      "size": 426186
+      "sha256": "59a89b46bf471d24c950dfbe7819f78313353903b7a51d7edc4a6d64cd451c5e",
+      "size": 432842
     },
     {
       "name": "webhook-events.json",
@@ -47,13 +47,13 @@
     },
     {
       "name": "api-diff.json",
-      "sha256": "7f66e9cc5642df1a84d9c390b21daab81978fdd180f91d4885230b3e70bcd8d6",
-      "size": 173
+      "sha256": "e485174bc589daa6ee7c1c51fc6d6c2e25d34462bdd7957760f5513378d690c8",
+      "size": 2084
     },
     {
       "name": "CHANGELOG.md",
-      "sha256": "4a4994cd9651ecf4984051b05f271a6f1d7810538e4de245e8c19d37418b07cd",
-      "size": 253
+      "sha256": "ca919aec0980268998b5c9be7203da0221cbdcc7b76d15f096175fa828512083",
+      "size": 254
     }
   ],
   "breaking": false,

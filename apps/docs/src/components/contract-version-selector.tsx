@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 export function ContractVersionSelector({
   versions,
@@ -28,15 +28,15 @@ export function ContractVersionSelector({
       </label>
       <ul>
         {[
-          ["OpenAPI JSON", "openapi.json"],
-          ["OpenAPI YAML", "openapi.yaml"],
-          ["TypeScript declarations", "openapi.d.ts"],
-          ["Webhook catalog", "webhook-events.json"],
-          ["Examples", "examples.json"],
-          ["API diff", "api-diff.json"],
-          ["Changelog", "CHANGELOG.md"],
-          ["Release manifest", "release-manifest.json"],
-          ["Checksums", "CHECKSUMS.sha256"],
+          ['OpenAPI JSON', 'openapi.json'],
+          ['OpenAPI YAML', 'openapi.yaml'],
+          ['TypeScript declarations', 'openapi.d.ts'],
+          ['Webhook catalog', 'webhook-events.json'],
+          ['Examples', 'examples.json'],
+          ['API diff', 'api-diff.json'],
+          ['Changelog', 'CHANGELOG.md'],
+          ['Release manifest', 'release-manifest.json'],
+          ['Checksums', 'CHECKSUMS.sha256'],
         ].map(([label, file]) => (
           <li key={file}>
             <a href={`${base}/${file}`} download>

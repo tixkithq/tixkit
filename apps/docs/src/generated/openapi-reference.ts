@@ -246,6 +246,9 @@ export const apiReferenceOperations = [
               },
               "boxOfficeSettings": {
                 "$ref": "#/components/schemas/BoxOfficeSettings"
+              },
+              "eventDefaults": {
+                "$ref": "#/components/schemas/EventDefaults"
               }
             },
             "required": [
@@ -700,6 +703,329 @@ export const apiReferenceOperations = [
   },
   {
     "method": "GET",
+    "path": "/venues",
+    "operationId": "listSavedVenues",
+    "tags": [
+      "Platform"
+    ],
+    "summary": "List reusable organization venues",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      }
+    ],
+    "requiredPermissions": null,
+    "parameters": [
+      {
+        "name": "organizationId",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": null,
+    "responses": {
+      "200": {
+        "description": "Saved venues",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/SavedVenue"
+              }
+            },
+            "example": [
+              {
+                "id": "resource_example",
+                "organizationId": "organization_example",
+                "name": "name example",
+                "address": {},
+                "createdAt": "2026-07-10T12:00:00.000Z",
+                "updatedAt": "2026-07-10T12:00:00.000Z"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/venues",
+    "operationId": "createSavedVenue",
+    "tags": [
+      "Platform"
+    ],
+    "summary": "Create a reusable organization venue",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      }
+    ],
+    "requiredPermissions": null,
+    "parameters": [],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "name",
+              "address"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "address": {
+                "type": "object"
+              },
+              "timezone": {
+                "type": "string"
+              }
+            }
+          },
+          "example": {
+            "organizationId": "organization_example",
+            "name": "name example",
+            "address": {}
+          }
+        }
+      }
+    },
+    "responses": {
+      "201": {
+        "description": "Saved venue",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SavedVenue"
+            },
+            "example": {
+              "id": "resource_example",
+              "organizationId": "organization_example",
+              "name": "name example",
+              "address": {},
+              "createdAt": "2026-07-10T12:00:00.000Z",
+              "updatedAt": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/venues/{venueId}",
+    "operationId": "updateSavedVenue",
+    "tags": [
+      "Platform"
+    ],
+    "summary": "Update a reusable organization venue",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      }
+    ],
+    "requiredPermissions": null,
+    "parameters": [
+      {
+        "name": "venueId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "address": {
+                "type": "object"
+              },
+              "timezone": {
+                "type": "string"
+              }
+            }
+          },
+          "example": {
+            "name": "name example",
+            "address": {},
+            "timezone": "timezone example"
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Updated saved venue",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SavedVenue"
+            },
+            "example": {
+              "id": "resource_example",
+              "organizationId": "organization_example",
+              "name": "name example",
+              "address": {},
+              "createdAt": "2026-07-10T12:00:00.000Z",
+              "updatedAt": "2026-07-10T12:00:00.000Z"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "DELETE",
+    "path": "/venues/{venueId}",
+    "operationId": "deleteSavedVenue",
+    "tags": [
+      "Platform"
+    ],
+    "summary": "Delete an unused reusable organization venue",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      }
+    ],
+    "requiredPermissions": null,
+    "parameters": [
+      {
+        "name": "venueId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    ],
+    "requestBody": null,
+    "responses": {
+      "204": {
+        "description": "Saved venue deleted"
+      },
+      "409": {
+        "description": "Venue is an event or workspace default",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/onboarding-events",
+    "operationId": "reportOnboardingEvent",
+    "tags": [
+      "Platform"
+    ],
+    "summary": "Report a privacy-safe onboarding milestone",
+    "description": "",
+    "security": [
+      {
+        "BearerAuth": []
+      }
+    ],
+    "requiredPermissions": null,
+    "parameters": [],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "outcome"
+            ],
+            "properties": {
+              "stage": {
+                "type": "string",
+                "enum": [
+                  "onboarding_started",
+                  "starting_point_selected",
+                  "recovery",
+                  "autosave_failure",
+                  "stale_version_conflict"
+                ]
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "started",
+                  "blank",
+                  "free",
+                  "paid",
+                  "donation",
+                  "multiple",
+                  "duplicate",
+                  "attempted",
+                  "completed",
+                  "failed"
+                ]
+              },
+              "reasonCode": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "request_failed",
+                  "stale_event_version"
+                ],
+                "default": "none"
+              }
+            }
+          },
+          "example": {
+            "stage": "onboarding_started",
+            "outcome": "started"
+          }
+        }
+      }
+    },
+    "responses": {
+      "204": {
+        "description": "Onboarding milestone recorded"
+      }
+    }
+  },
+  {
+    "method": "GET",
     "path": "/events",
     "operationId": "getEvents",
     "tags": [
@@ -836,7 +1162,11 @@ export const apiReferenceOperations = [
       }
     ],
     "requiredPermissions": null,
-    "parameters": [],
+    "parameters": [
+      {
+        "$ref": "#/components/parameters/IdempotencyKey"
+      }
+    ],
     "requestBody": {
       "required": true,
       "content": {
@@ -878,6 +1208,10 @@ export const apiReferenceOperations = [
               "venue": {
                 "type": "object"
               },
+              "venueId": {
+                "type": "string",
+                "nullable": true
+              },
               "visibility": {
                 "type": "string",
                 "enum": [
@@ -914,6 +1248,18 @@ export const apiReferenceOperations = [
               "externalUrl": {
                 "type": "string",
                 "format": "uri"
+              },
+              "startingPoint": {
+                "type": "string",
+                "enum": [
+                  "blank",
+                  "free",
+                  "paid",
+                  "donation",
+                  "multiple"
+                ],
+                "default": "blank",
+                "description": "Atomically creates the selected initial ticket inventory or occurrence with the draft."
               }
             },
             "required": [
@@ -1257,6 +1603,16 @@ export const apiReferenceOperations = [
         "required": true,
         "schema": {
           "type": "string"
+        }
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
         }
       }
     ],
@@ -24354,7 +24710,43 @@ export const apiReferenceSchemas = [
       "slug",
       "clerkOrganizationId",
       "boxOfficeSettings",
+      "eventDefaults",
       "status",
+      "createdAt",
+      "updatedAt"
+    ]
+  },
+  {
+    "name": "EventDefaults",
+    "type": "object",
+    "description": "",
+    "required": [],
+    "properties": [
+      "timezone",
+      "currency",
+      "country",
+      "defaultVenueId",
+      "eventDescription"
+    ]
+  },
+  {
+    "name": "SavedVenue",
+    "type": "object",
+    "description": "",
+    "required": [
+      "id",
+      "organizationId",
+      "name",
+      "address",
+      "createdAt",
+      "updatedAt"
+    ],
+    "properties": [
+      "id",
+      "organizationId",
+      "name",
+      "address",
+      "timezone",
       "createdAt",
       "updatedAt"
     ]
@@ -24421,7 +24813,8 @@ export const apiReferenceSchemas = [
       "name",
       "slug",
       "status",
-      "boxOfficeSettings"
+      "boxOfficeSettings",
+      "eventDefaults"
     ]
   },
   {

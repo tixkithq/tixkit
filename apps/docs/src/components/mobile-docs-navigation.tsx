@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { usePathname } from "next/navigation";
-import { useEffect, useRef } from "react";
-import { DocsNavigation } from "./docs-navigation";
+import { usePathname } from 'next/navigation';
+import { useEffect, useRef } from 'react';
+import { DocsNavigation } from './docs-navigation';
 
 export function MobileDocsNavigation() {
   const pathname = usePathname();
@@ -17,22 +17,25 @@ export function MobileDocsNavigation() {
   useEffect(() => {
     if (previousPathname.current !== pathname) {
       close();
-      document.querySelector<HTMLElement>("main")?.focus();
+      document.querySelector<HTMLElement>('main')?.focus();
       previousPathname.current = pathname;
     }
   }, [pathname]);
 
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !detailsRef.current?.open) return;
+      event.preventDefault();
+      close();
+      summaryRef.current?.focus();
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, []);
+
   return (
-    <details
-      ref={detailsRef}
-      className="mobile-navigation"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        close();
-        summaryRef.current?.focus();
-      }}
-    >
+    <details ref={detailsRef} className="mobile-navigation">
       <summary ref={summaryRef}>Menu</summary>
       <nav aria-label="Mobile documentation">
         <DocsNavigation onNavigate={close} />

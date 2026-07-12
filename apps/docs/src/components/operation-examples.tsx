@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { buildOperationExamples } from "./operation-example-builder";
+import { useState } from 'react';
+import { buildOperationExamples } from './operation-example-builder';
 
 export function OperationExamples(props: {
   method: string;
@@ -12,14 +12,12 @@ export function OperationExamples(props: {
   requestBody: unknown;
   security: readonly Record<string, readonly string[]>[];
 }) {
-  const [language, setLanguage] = useState<
-    "curl" | "javascript" | "typescript"
-  >("curl");
+  const [language, setLanguage] = useState<'curl' | 'javascript' | 'typescript'>('curl');
   const examples = buildOperationExamples(props);
   return (
     <div>
       <div role="tablist" aria-label={`${props.operationId} SDK examples`}>
-        {(["curl", "javascript", "typescript"] as const).map((candidate) => (
+        {(['curl', 'javascript', 'typescript'] as const).map((candidate) => (
           <button
             type="button"
             role="tab"
@@ -27,11 +25,11 @@ export function OperationExamples(props: {
             key={candidate}
             onClick={() => setLanguage(candidate)}
           >
-            {candidate === "curl"
-              ? "cURL"
-              : candidate === "javascript"
-                ? "JavaScript"
-                : "TypeScript"}
+            {candidate === 'curl'
+              ? 'cURL'
+              : candidate === 'javascript'
+                ? 'JavaScript'
+                : 'TypeScript'}
           </button>
         ))}
       </div>

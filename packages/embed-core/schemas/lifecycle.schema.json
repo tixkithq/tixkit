@@ -27,7 +27,21 @@
     "sessionId": { "type": "string" },
     "orderId": { "type": "string" },
     "reason": { "enum": ["host", "buyer", "navigation", "disconnected", "unknown"] },
-    "errorCode": { "enum": ["invalid-config", "invalid-origin", "invalid-message", "unsupported-contract-version", "handshake-timeout", "checkout-unreachable", "checkout-offline", "unsupported-browser", "session-expired", "checkout-rejected", "internal-error"] },
+    "errorCode": {
+      "enum": [
+        "invalid-config",
+        "invalid-origin",
+        "invalid-message",
+        "unsupported-contract-version",
+        "handshake-timeout",
+        "checkout-unreachable",
+        "checkout-offline",
+        "unsupported-browser",
+        "session-expired",
+        "checkout-rejected",
+        "internal-error"
+      ]
+    },
     "message": { "type": "string", "maxLength": 240 },
     "retryable": { "type": "boolean" }
   },
@@ -46,22 +60,67 @@
     },
     {
       "if": { "properties": { "name": { "enum": ["recoverable-error", "fatal-error"] } } },
-      "then": { "required": ["errorCode", "message", "retryable"], "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }, { "required": ["reason"] }] } }
+      "then": {
+        "required": ["errorCode", "message", "retryable"],
+        "not": {
+          "anyOf": [
+            { "required": ["sessionId"] },
+            { "required": ["orderId"] },
+            { "required": ["reason"] }
+          ]
+        }
+      }
     },
     {
       "if": { "properties": { "name": { "enum": ["loading", "ready", "opened"] } } },
-      "then": { "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }, { "required": ["reason"] }, { "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["sessionId"] },
+            { "required": ["orderId"] },
+            { "required": ["reason"] },
+            { "required": ["errorCode"] },
+            { "required": ["message"] },
+            { "required": ["retryable"] }
+          ]
+        }
+      }
     },
     {
       "if": { "properties": { "name": { "const": "closed" } } },
-      "then": { "not": { "anyOf": [{ "required": ["sessionId"] }, { "required": ["orderId"] }, { "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["sessionId"] },
+            { "required": ["orderId"] },
+            { "required": ["errorCode"] },
+            { "required": ["message"] },
+            { "required": ["retryable"] }
+          ]
+        }
+      }
     },
     {
-      "if": { "properties": { "name": { "enum": ["checkout-started", "checkout-session-created", "order-completed"] } } },
-      "then": { "not": { "anyOf": [{ "required": ["reason"] }, { "required": ["errorCode"] }, { "required": ["message"] }, { "required": ["retryable"] }] } }
+      "if": {
+        "properties": {
+          "name": { "enum": ["checkout-started", "checkout-session-created", "order-completed"] }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["reason"] },
+            { "required": ["errorCode"] },
+            { "required": ["message"] },
+            { "required": ["retryable"] }
+          ]
+        }
+      }
     },
     {
-      "if": { "properties": { "name": { "enum": ["checkout-started", "checkout-session-created"] } } },
+      "if": {
+        "properties": { "name": { "enum": ["checkout-started", "checkout-session-created"] } }
+      },
       "then": { "not": { "required": ["orderId"] } }
     }
   ]

@@ -282,7 +282,8 @@ export const publicUploadRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/public/event-media/:purpose/:artifactId', async (request, reply) => {
     const { purpose, artifactId } = request.params as { purpose: string; artifactId: string };
-    if (purpose !== 'event_cover' && purpose !== 'event_seo_image') throw new NotFoundError('UploadArtifact', artifactId);
+    if (purpose !== 'event_cover' && purpose !== 'event_seo_image')
+      throw new NotFoundError('UploadArtifact', artifactId);
     const { stream, contentType, fileName } = await streamEventMedia(db, artifactId, purpose);
     reply.header('Content-Type', contentType);
     reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
@@ -346,8 +347,11 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
       ClerkAuthService.requireBrandScope(principal, event.brand_id);
       ClerkAuthService.requireEventScope(principal, eventId);
-      if (brandId && brandId !== event.brand_id) throw new ValidationError('brandId must match the event brand');
-      tenantId = event.tenant_id; organizationId = event.organization_id; brandId = event.brand_id;
+      if (brandId && brandId !== event.brand_id)
+        throw new ValidationError('brandId must match the event brand');
+      tenantId = event.tenant_id;
+      organizationId = event.organization_id;
+      brandId = event.brand_id;
     } else if (
       body.purpose === 'content_email_image' ||
       body.purpose === 'content_event_page_image'
@@ -461,7 +465,10 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       };
     }
     if (artifact.purpose === 'event_cover' || artifact.purpose === 'event_seo_image') {
-      return { downloadUrl: `/v1/public/event-media/${artifact.purpose}/${artifactId}`, durable: true };
+      return {
+        downloadUrl: `/v1/public/event-media/${artifact.purpose}/${artifactId}`,
+        durable: true,
+      };
     }
 
     const downloadUrl = await getUploadArtifactDownloadUrl(db, artifactId);

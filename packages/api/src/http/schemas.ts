@@ -1,10 +1,10 @@
-import { z } from "zod";
+import { z } from 'zod';
 import {
   createExportRequestSchema,
   isLocalKioskReturnTo,
   ValidationError,
   WEBHOOK_EVENT_TYPES,
-} from "@tixkit/domain";
+} from '@tixkit/domain';
 
 // Reusable primitives
 const ulidSchema = z.string().min(1);
@@ -12,7 +12,7 @@ const currencySchema = z.string().length(3);
 const iso8601Schema = z.string().datetime();
 const dateOfBirthSchema = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Date of birth must use YYYY-MM-DD format");
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date of birth must use YYYY-MM-DD format');
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const OFFLINE_SYNC_JSON_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 export const MAX_BULK_OFFLINE_SYNC_CHUNKS = 1_000;
@@ -28,7 +28,7 @@ export const MAX_MESSAGE_OPT_OUT_TOKEN_LENGTH = 256;
 const eventSlugSchema = z
   .string()
   .min(1)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug must be URL-safe lowercase text");
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be URL-safe lowercase text');
 const hostnameLabelSchema = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const urlSchema = z
   .string()
@@ -37,14 +37,14 @@ const urlSchema = z
     (val) => {
       try {
         const url = new URL(val);
-        return url.protocol === "https:" || url.protocol === "http:";
+        return url.protocol === 'https:' || url.protocol === 'http:';
       } catch {
         return false;
       }
     },
     {
       message:
-        "URL must use http or https scheme; javascript:, data:, and file: schemes are not allowed",
+        'URL must use http or https scheme; javascript:, data:, and file: schemes are not allowed',
     },
   );
 const brandLegalUrlsSchema = z
@@ -56,20 +56,16 @@ const brandLegalUrlsSchema = z
   .strict();
 
 function jsonByteLength(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value), "utf8");
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
 }
 
 function jsonDepth(value: unknown): number {
-  if (value === null || typeof value !== "object") return 0;
+  if (value === null || typeof value !== 'object') return 0;
   if (Array.isArray(value)) {
-    return value.length === 0
-      ? 1
-      : 1 + Math.max(...value.map((item) => jsonDepth(item)));
+    return value.length === 0 ? 1 : 1 + Math.max(...value.map((item) => jsonDepth(item)));
   }
   const entries = Object.values(value as Record<string, unknown>);
-  return entries.length === 0
-    ? 1
-    : 1 + Math.max(...entries.map((item) => jsonDepth(item)));
+  return entries.length === 0 ? 1 : 1 + Math.max(...entries.map((item) => jsonDepth(item)));
 }
 
 const messageTemplateKeySchema = z
@@ -79,7 +75,7 @@ const messageTemplateKeySchema = z
   .max(MAX_MESSAGE_TEMPLATE_KEY_LENGTH)
   .regex(
     /^[A-Za-z0-9][A-Za-z0-9._:-]*$/,
-    "Template keys may contain only letters, numbers, dots, underscores, colons, and hyphens",
+    'Template keys may contain only letters, numbers, dots, underscores, colons, and hyphens',
   );
 
 const boundedMessageRecordSchema = z
@@ -92,24 +88,22 @@ const boundedMessageRecordSchema = z
   });
 
 function isDevelopmentLike(): boolean {
-  return (
-    process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
-  );
+  return process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 }
 
 function isLocalhost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   return (
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host === "[::1]"
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]'
   );
 }
 
 function isPrivateIpv4(hostname: string): boolean {
-  const parts = hostname.split(".").map((part) => Number(part));
+  const parts = hostname.split('.').map((part) => Number(part));
   if (
     parts.length !== 4 ||
     parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
@@ -130,17 +124,17 @@ function isPrivateIpv4(hostname: string): boolean {
 }
 
 function isPrivateHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   return (
     isLocalhost(host) ||
     isPrivateIpv4(host) ||
-    host === "::1" ||
-    host.startsWith("fc") ||
-    host.startsWith("fd") ||
-    host.startsWith("fe80") ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal") ||
-    !host.includes(".")
+    host === '::1' ||
+    host.startsWith('fc') ||
+    host.startsWith('fd') ||
+    host.startsWith('fe80') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    !host.includes('.')
   );
 }
 
@@ -148,20 +142,17 @@ function normalizeCustomDomain(value: string): string | null {
   const trimmed = value.trim();
   if (
     !trimmed ||
-    trimmed.includes("://") ||
+    trimmed.includes('://') ||
     /[\s,/?#:[\]]/.test(trimmed) ||
-    trimmed.startsWith(".") ||
-    trimmed.includes("..")
+    trimmed.startsWith('.') ||
+    trimmed.includes('..')
   ) {
     return null;
   }
 
-  const hostname = trimmed.toLowerCase().replace(/\.$/, "");
-  const labels = hostname.split(".");
-  if (
-    labels.length < 2 ||
-    labels.some((label) => !hostnameLabelSchema.test(label))
-  ) {
+  const hostname = trimmed.toLowerCase().replace(/\.$/, '');
+  const labels = hostname.split('.');
+  if (labels.length < 2 || labels.some((label) => !hostnameLabelSchema.test(label))) {
     return null;
   }
   if (isPrivateHostname(hostname)) return null;
@@ -172,9 +163,8 @@ const customDomainSchema = z.string().transform((value, ctx) => {
   const normalized = normalizeCustomDomain(value);
   if (!normalized) {
     ctx.addIssue({
-      code: "custom",
-      message:
-        "Domain must be a public hostname without scheme, port, path, query, or fragment",
+      code: 'custom',
+      message: 'Domain must be a public hostname without scheme, port, path, query, or fragment',
     });
     return z.NEVER;
   }
@@ -188,14 +178,14 @@ const webhookUrlSchema = z
     (val) => {
       try {
         const url = new URL(val);
-        return url.protocol === "https:" && !isPrivateHostname(url.hostname);
+        return url.protocol === 'https:' && !isPrivateHostname(url.hostname);
       } catch {
         return false;
       }
     },
     {
       message:
-        "Webhook URL must use https and must not target localhost, private, or internal hosts",
+        'Webhook URL must use https and must not target localhost, private, or internal hosts',
     },
   );
 
@@ -206,19 +196,14 @@ export const oauthRedirectUrlSchema = z
     (val) => {
       try {
         const url = new URL(val);
-        if (url.protocol === "https:") return true;
-        return (
-          isDevelopmentLike() &&
-          url.protocol === "http:" &&
-          isLocalhost(url.hostname)
-        );
+        if (url.protocol === 'https:') return true;
+        return isDevelopmentLike() && url.protocol === 'http:' && isLocalhost(url.hostname);
       } catch {
         return false;
       }
     },
     {
-      message:
-        "OAuth redirect URI must use https, except localhost http in development/test",
+      message: 'OAuth redirect URI must use https, except localhost http in development/test',
     },
   );
 
@@ -231,9 +216,8 @@ export function safeRedirectUrl(devMode: boolean): z.ZodString {
     (val) => {
       try {
         const url = new URL(val);
-        if (url.protocol === "https:") return true;
-        if (devMode && url.protocol === "http:" && isLocalhost(url.hostname))
-          return true;
+        if (url.protocol === 'https:') return true;
+        if (devMode && url.protocol === 'http:' && isLocalhost(url.hostname)) return true;
         return false;
       } catch {
         return false;
@@ -241,7 +225,7 @@ export function safeRedirectUrl(devMode: boolean): z.ZodString {
     },
     {
       message:
-        "URL must use https scheme (or http in development); javascript:, data:, and file: schemes are not allowed",
+        'URL must use https scheme (or http in development); javascript:, data:, and file: schemes are not allowed',
     },
   );
 }
@@ -261,46 +245,28 @@ export const createCheckoutSessionSchema = (devMode: boolean) =>
               resaleListingId: ulidSchema.optional(),
               quantity: z.number().int().min(1),
               unitAmountCents: z.number().int().min(0).optional(),
-              attendeeFields: z
-                .array(z.record(z.string(), z.unknown()))
-                .optional(),
+              attendeeFields: z.array(z.record(z.string(), z.unknown())).optional(),
             })
             .refine(
               (item) =>
-                [
-                  item.ticketTypeId,
-                  item.productId,
-                  item.resaleListingId,
-                ].filter(Boolean).length === 1,
+                [item.ticketTypeId, item.productId, item.resaleListingId].filter(Boolean).length ===
+                1,
               {
                 message:
-                  "Each checkout item must include exactly one of ticketTypeId, productId, or resaleListingId",
+                  'Each checkout item must include exactly one of ticketTypeId, productId, or resaleListingId',
               },
             )
-            .refine(
-              (item) =>
-                Boolean(item.ticketTypeId) ||
-                item.unitAmountCents === undefined,
-              {
-                message: "unitAmountCents is only accepted for ticket items",
-              },
-            )
-            .refine(
-              (item) =>
-                Boolean(item.ticketTypeId) || item.attendeeFields === undefined,
-              {
-                message: "attendeeFields are only accepted for ticket items",
-              },
-            )
-            .refine(
-              (item) =>
-                Boolean(item.ticketTypeId) || item.occurrenceId === undefined,
-              {
-                message: "occurrenceId is only accepted for ticket items",
-              },
-            )
+            .refine((item) => Boolean(item.ticketTypeId) || item.unitAmountCents === undefined, {
+              message: 'unitAmountCents is only accepted for ticket items',
+            })
+            .refine((item) => Boolean(item.ticketTypeId) || item.attendeeFields === undefined, {
+              message: 'attendeeFields are only accepted for ticket items',
+            })
+            .refine((item) => Boolean(item.ticketTypeId) || item.occurrenceId === undefined, {
+              message: 'occurrenceId is only accepted for ticket items',
+            })
             .refine((item) => !item.resaleListingId || item.quantity === 1, {
-              message: "Resale listing checkout items must have quantity 1",
+              message: 'Resale listing checkout items must have quantity 1',
             }),
         )
         .min(1),
@@ -349,7 +315,7 @@ export const confirmCheckoutSchema = z
 
 export const createBoxOfficeOrderSchema = z
   .object({
-    tenderType: z.enum(["comp", "cash", "manual_card"]),
+    tenderType: z.enum(['comp', 'cash', 'manual_card']),
     amountCents: z.number().int().min(0),
     items: z
       .array(
@@ -358,9 +324,7 @@ export const createBoxOfficeOrderSchema = z
             ticketTypeId: ulidSchema,
             occurrenceId: ulidSchema.optional(),
             quantity: z.number().int().min(1),
-            attendeeFields: z
-              .array(z.record(z.string(), z.unknown()))
-              .optional(),
+            attendeeFields: z.array(z.record(z.string(), z.unknown())).optional(),
           })
           .strict(),
       )
@@ -412,11 +376,13 @@ export const createEventSchema = z
     startsAt: iso8601Schema,
     endsAt: iso8601Schema.optional(),
     venue: z.record(z.string(), z.unknown()).optional(),
-    visibility: z.enum(["public", "unlisted", "private"]).optional(),
+    venueId: ulidSchema.nullable().optional(),
+    visibility: z.enum(['public', 'unlisted', 'private']).optional(),
     seo: createEventSeoSchema.optional(),
     capacity: z.number().int().positive().optional(),
     minimumAge: z.number().int().min(0).max(120).nullable().optional(),
     externalUrl: urlSchema.optional(),
+    startingPoint: z.enum(['blank', 'free', 'paid', 'donation', 'multiple']).default('blank'),
   })
   .strict();
 
@@ -430,7 +396,8 @@ export const updateEventSchema = z
     startsAt: iso8601Schema.optional(),
     endsAt: iso8601Schema.nullable().optional(),
     venue: z.record(z.string(), z.unknown()).nullable().optional(),
-    visibility: z.enum(["public", "unlisted", "private"]).optional(),
+    venueId: ulidSchema.nullable().optional(),
+    visibility: z.enum(['public', 'unlisted', 'private']).optional(),
     seo: updateEventSeoSchema.optional(),
     capacity: z.number().int().positive().nullable().optional(),
     minimumAge: z.number().int().min(0).max(120).nullable().optional(),
@@ -440,27 +407,27 @@ export const updateEventSchema = z
     seoUseCoverImage: z.boolean().optional(),
     lastSetupSection: z.string().max(100).nullable().optional(),
     expectedVersion: z.number().int().positive(),
-    status: z.enum(["draft", "published", "paused", "archived"]).optional(),
+    status: z.enum(['draft', 'published', 'paused', 'archived']).optional(),
   })
   .strict();
 
-const eventFeePolicyRuleSchema = z.discriminatedUnion("type", [
+const eventFeePolicyRuleSchema = z.discriminatedUnion('type', [
   z
     .object({
       id: ulidSchema.optional(),
       name: z.string().trim().min(1).max(80),
-      type: z.literal("percentage"),
+      type: z.literal('percentage'),
       value: z.number().int().min(0).max(10_000),
-      appliedTo: z.enum(["per_ticket", "per_order"]),
+      appliedTo: z.enum(['per_ticket', 'per_order']),
     })
     .strict(),
   z
     .object({
       id: ulidSchema.optional(),
       name: z.string().trim().min(1).max(80),
-      type: z.literal("fixed"),
+      type: z.literal('fixed'),
       value: z.number().int().min(0).max(100_000_000),
-      appliedTo: z.enum(["per_ticket", "per_order"]),
+      appliedTo: z.enum(['per_ticket', 'per_order']),
     })
     .strict(),
 ]);
@@ -482,22 +449,20 @@ export const createEventOccurrenceSchema = z
     venue: z.record(z.string(), z.unknown()).nullable().optional(),
     capacity: z.number().int().positive().nullable().optional(),
     sortOrder: z.number().int().min(0).optional(),
-    status: z.enum(["scheduled", "cancelled", "completed"]).optional(),
+    status: z.enum(['scheduled', 'cancelled', 'completed']).optional(),
   })
   .strict();
 
-export const updateEventOccurrenceSchema = createEventOccurrenceSchema
-  .partial()
-  .strict();
+export const updateEventOccurrenceSchema = createEventOccurrenceSchema.partial().strict();
 
 // Tenant schemas
-const boxOfficeTenderTypes = ["cash", "manual_card", "comp"] as const;
-const boxOfficeReceiptModes = ["print", "email", "both"] as const;
+const boxOfficeTenderTypes = ['cash', 'manual_card', 'comp'] as const;
+const boxOfficeReceiptModes = ['print', 'email', 'both'] as const;
 const defaultBoxOfficeSettings = {
   enabled: true,
   allowedTenderTypes: [...boxOfficeTenderTypes],
   requireBuyerEmail: false,
-  receiptMode: "email" as const,
+  receiptMode: 'email' as const,
 };
 
 export const boxOfficeSettingsSchema = z
@@ -508,7 +473,7 @@ export const boxOfficeSettingsSchema = z
       .min(1)
       .max(boxOfficeTenderTypes.length)
       .refine((values) => new Set(values).size === values.length, {
-        message: "Box-office tender types must be unique",
+        message: 'Box-office tender types must be unique',
       }),
     requireBuyerEmail: z.boolean(),
     receiptMode: z.enum(boxOfficeReceiptModes),
@@ -520,9 +485,7 @@ export const createOrganizationSchema = z
     name: z.string().trim().min(1),
     slug: z.string().trim().min(1),
     clerkOrganizationId: z.string().optional(),
-    boxOfficeSettings: boxOfficeSettingsSchema
-      .optional()
-      .default(defaultBoxOfficeSettings),
+    boxOfficeSettings: boxOfficeSettingsSchema.optional().default(defaultBoxOfficeSettings),
   })
   .strict();
 
@@ -532,6 +495,16 @@ export const updateOrganizationSchema = z
     slug: z.string().trim().min(1).optional(),
     clerkOrganizationId: z.string().nullable().optional(),
     boxOfficeSettings: boxOfficeSettingsSchema.optional(),
+    eventDefaults: z
+      .object({
+        timezone: z.string().min(1).optional(),
+        currency: currencySchema.optional(),
+        country: z.string().length(2).optional(),
+        defaultVenueId: ulidSchema.nullable().optional(),
+        eventDescription: z.string().max(10000).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -539,9 +512,9 @@ export const createOrganizationInvitationSchema = z
   .object({
     email: z.string().trim().toLowerCase().email(),
     role: z
-      .enum(["admin", "organizer", "viewer", "door_staff", "door_staff_sales"])
+      .enum(['admin', 'organizer', 'viewer', 'door_staff', 'door_staff_sales'])
       .optional()
-      .default("viewer"),
+      .default('viewer'),
     brandIds: z.array(ulidSchema).max(50).optional(),
     eventIds: z.array(ulidSchema).max(100).optional(),
     returnTo: z
@@ -549,7 +522,7 @@ export const createOrganizationInvitationSchema = z
       .trim()
       .max(500)
       .refine((value) => isLocalKioskReturnTo(value), {
-        message: "returnTo must be a local kiosk URL",
+        message: 'returnTo must be a local kiosk URL',
       })
       .optional(),
   })
@@ -558,8 +531,8 @@ export const createOrganizationInvitationSchema = z
     if (value.brandIds?.length && value.eventIds?.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide brandIds or eventIds, not both",
-        path: ["brandIds"],
+        message: 'Provide brandIds or eventIds, not both',
+        path: ['brandIds'],
       });
     }
   });
@@ -567,13 +540,7 @@ export const createOrganizationInvitationSchema = z
 /** PATCH body for updating an existing organization member's role / scope. */
 export const updateOrganizationMemberSchema = z
   .object({
-    role: z.enum([
-      "admin",
-      "organizer",
-      "viewer",
-      "door_staff",
-      "door_staff_sales",
-    ]),
+    role: z.enum(['admin', 'organizer', 'viewer', 'door_staff', 'door_staff_sales']),
     brandIds: z.array(ulidSchema).max(50).optional(),
     eventIds: z.array(ulidSchema).max(100).optional(),
   })
@@ -582,8 +549,8 @@ export const updateOrganizationMemberSchema = z
     if (value.brandIds?.length && value.eventIds?.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide brandIds or eventIds, not both",
-        path: ["brandIds"],
+        message: 'Provide brandIds or eventIds, not both',
+        path: ['brandIds'],
       });
     }
   });
@@ -602,7 +569,7 @@ export const updateBrandSchema = z
   .object({
     name: z.string().min(1).optional(),
     slug: z.string().min(1).optional(),
-    status: z.enum(["draft", "active", "suspended"]).optional(),
+    status: z.enum(['draft', 'active', 'suspended']).optional(),
     theme: z.record(z.string(), z.unknown()).optional(),
     supportUrl: urlSchema.optional(),
     legalUrls: brandLegalUrlsSchema.optional(),
@@ -623,8 +590,8 @@ export const createTicketTypeSchema = z
   .object({
     name: z.string().min(1),
     description: z.string().optional(),
-    kind: z.enum(["free", "paid", "donation"]),
-    visibility: z.enum(["public", "hidden", "locked"]).optional(),
+    kind: z.enum(['free', 'paid', 'donation']),
+    visibility: z.enum(['public', 'hidden', 'locked']).optional(),
     currency: currencySchema,
     priceCents: z.number().int().min(0),
     minimumPriceCents: z.number().int().min(0).nullable().optional(),
@@ -643,11 +610,9 @@ export const updateTicketTypeSchema = z
   .object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
-    kind: z.enum(["free", "paid", "donation"]).optional(),
-    status: z
-      .enum(["draft", "active", "paused", "sold_out", "ended"])
-      .optional(),
-    visibility: z.enum(["public", "hidden", "locked"]).optional(),
+    kind: z.enum(['free', 'paid', 'donation']).optional(),
+    status: z.enum(['draft', 'active', 'paused', 'sold_out', 'ended']).optional(),
+    visibility: z.enum(['public', 'hidden', 'locked']).optional(),
     currency: currencySchema.optional(),
     priceCents: z.number().int().min(0).optional(),
     minimumPriceCents: z.number().int().min(0).nullable().optional(),
@@ -665,7 +630,7 @@ export const updateTicketTypeSchema = z
 
 export const createAccessRuleSchema = z
   .object({
-    type: z.enum(["code", "email_domain"]),
+    type: z.enum(['code', 'email_domain']),
     value: z.string().min(1),
     maxUses: z.number().int().positive().nullable().optional(),
     expiresAt: iso8601Schema.nullable().optional(),
@@ -693,8 +658,8 @@ export const createTicketTypeBatchSchema = z
     if (!data.ticketType.inventoryPoolId && !data.inventoryPool) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["inventoryPoolId"],
-        message: "Provide inventoryPoolId or inventoryPool",
+        path: ['inventoryPoolId'],
+        message: 'Provide inventoryPoolId or inventoryPool',
       });
     }
   });
@@ -723,7 +688,7 @@ export const createProductSchema = z
     maxPerOrder: z.number().int().min(1).optional(),
     availableFrom: iso8601Schema.optional(),
     availableUntil: iso8601Schema.optional(),
-    status: z.enum(["active", "inactive"]).optional(),
+    status: z.enum(['active', 'inactive']).optional(),
     sortOrder: z.number().int().optional(),
   })
   .strict();
@@ -738,7 +703,7 @@ export const updateProductSchema = z
     maxPerOrder: z.number().int().min(1).optional(),
     availableFrom: iso8601Schema.nullable().optional(),
     availableUntil: iso8601Schema.nullable().optional(),
-    status: z.enum(["active", "inactive"]).optional(),
+    status: z.enum(['active', 'inactive']).optional(),
     sortOrder: z.number().int().optional(),
   })
   .strict();
@@ -761,7 +726,7 @@ export const createScannerDeviceSchema = z
     name: z.string().min(1),
     eventIds: z.array(ulidSchema).optional(),
     scopes: z
-      .array(z.enum(["checkins.read", "checkins.write"]))
+      .array(z.enum(['checkins.read', 'checkins.write']))
       .min(1)
       .optional(),
   })
@@ -780,7 +745,7 @@ const webhookEndpointEventsSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [index],
-          message: "Webhook endpoint events must be unique",
+          message: 'Webhook endpoint events must be unique',
         });
       }
       seen.add(event);
@@ -800,7 +765,7 @@ export const updateWebhookEndpointSchema = z
   .object({
     url: webhookUrlSchema.optional(),
     events: webhookEndpointEventsSchema.optional(),
-    status: z.enum(["active", "disabled"]).optional(),
+    status: z.enum(['active', 'disabled']).optional(),
     description: z.string().nullable().optional(),
   })
   .strict();
@@ -811,21 +776,18 @@ export const sendMessageSchema = z
     eventId: ulidSchema.optional(),
     emailTemplateKey: messageTemplateKeySchema.optional(),
     smsTemplateKey: messageTemplateKeySchema.optional(),
-    audience: z.enum(["all", "checked_in", "not_checked_in", "specific"]),
+    audience: z.enum(['all', 'checked_in', 'not_checked_in', 'specific']),
     attendeeIds: z.array(ulidSchema).max(5_000).optional(),
     scheduledAt: iso8601Schema.optional(),
     variables: boundedMessageRecordSchema.optional(),
-    channel: z.enum(["email", "sms", "both"]),
+    channel: z.enum(['email', 'sms', 'both']),
   })
   .strict();
 
 export const renderMessagePreviewSchema = z
   .object({
-    channel: z.enum(["email", "sms"]).optional(),
-    subjectTemplate: z
-      .string()
-      .max(MAX_MESSAGE_TEMPLATE_SUBJECT_LENGTH)
-      .optional(),
+    channel: z.enum(['email', 'sms']).optional(),
+    subjectTemplate: z.string().max(MAX_MESSAGE_TEMPLATE_SUBJECT_LENGTH).optional(),
     htmlTemplate: z.string().max(MAX_MESSAGE_TEMPLATE_HTML_LENGTH).optional(),
     textTemplate: z.string().max(MAX_MESSAGE_TEMPLATE_TEXT_LENGTH).optional(),
     context: boundedMessageRecordSchema.optional(),
@@ -865,12 +827,7 @@ export const createBulkSyncJobSchema = z
     checkInListId: ulidSchema,
     deviceId: z.string().optional(),
     totalChunks: z.number().int().min(1).max(MAX_BULK_OFFLINE_SYNC_CHUNKS),
-    totalScans: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS)
-      .optional(),
+    totalScans: z.number().int().min(1).max(MAX_BULK_OFFLINE_SYNC_TOTAL_SCANS).optional(),
   })
   .strict();
 
@@ -902,9 +859,7 @@ export const updateAttendeeSchema = z
     lastName: z.string().nullable().optional(),
     email: z.string().email().optional(),
     phone: z.string().nullable().optional(),
-    status: z
-      .enum(["pending", "confirmed", "cancelled", "refunded", "checked_in"])
-      .optional(),
+    status: z.enum(['pending', 'confirmed', 'cancelled', 'refunded', 'checked_in']).optional(),
   })
   .strict();
 
@@ -939,13 +894,7 @@ export const completeResaleListingSchema = z
     buyerLastName: z.string().trim().min(1).nullable().optional(),
     buyerPhone: z.string().trim().min(1).nullable().optional(),
     buyerDateOfBirth: dateOfBirthSchema.optional(),
-    externalPaymentReference: z
-      .string()
-      .trim()
-      .min(1)
-      .max(256)
-      .nullable()
-      .optional(),
+    externalPaymentReference: z.string().trim().min(1).max(256).nullable().optional(),
   })
   .strict();
 
@@ -954,21 +903,21 @@ export const createExportSchema = createExportRequestSchema;
 
 // Question schemas
 const questionTypeSchema = z.enum([
-  "text",
-  "textarea",
-  "email",
-  "phone",
-  "select",
-  "multiselect",
-  "checkbox",
-  "date",
-  "file",
-  "waiver",
+  'text',
+  'textarea',
+  'email',
+  'phone',
+  'select',
+  'multiselect',
+  'checkbox',
+  'date',
+  'file',
+  'waiver',
 ]);
 const questionOptionsSchema = z.array(z.string().min(1)).max(100);
 const questionConditionSchema = z.object({
   field: z.string().min(1),
-  operator: z.enum(["equals", "not_equals", "contains"]),
+  operator: z.enum(['equals', 'not_equals', 'contains']),
   value: z.string(),
 });
 
@@ -979,7 +928,7 @@ export const createQuestionSchema = z
     label: z.string().min(1),
     description: z.string().optional(),
     required: z.boolean().optional(),
-    appliesTo: z.enum(["buyer", "attendee", "both"]).optional(),
+    appliesTo: z.enum(['buyer', 'attendee', 'both']).optional(),
     options: questionOptionsSchema.optional(),
     placeholder: z.string().optional(),
     validationPattern: z.string().optional(),
@@ -1009,7 +958,7 @@ export const updateQuestionSchema = z
     label: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
     required: z.boolean().optional(),
-    appliesTo: z.enum(["buyer", "attendee", "both"]).optional(),
+    appliesTo: z.enum(['buyer', 'attendee', 'both']).optional(),
     options: questionOptionsSchema.nullable().optional(),
     placeholder: z.string().nullable().optional(),
     validationPattern: z.string().nullable().optional(),
@@ -1041,14 +990,13 @@ export const reorderQuestionsSchema = z
  */
 export function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   // Apply .strict() to ZodObject schemas to reject unknown fields.
-  const strictSchema =
-    schema instanceof z.ZodObject ? (schema.strict() as z.ZodType<T>) : schema;
+  const strictSchema = schema instanceof z.ZodObject ? (schema.strict() as z.ZodType<T>) : schema;
   const result = strictSchema.safeParse(body);
   if (!result.success) {
     const firstError = result.error.issues[0];
     const message = firstError
-      ? `${firstError.path.join(".")}: ${firstError.message}`
-      : "Request body validation failed";
+      ? `${firstError.path.join('.')}: ${firstError.message}`
+      : 'Request body validation failed';
     throw new ValidationError(message, { issues: result.error.issues });
   }
   return result.data;

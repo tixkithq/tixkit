@@ -822,6 +822,28 @@ describe('withIdempotency', () => {
     expect(records).toHaveLength(0);
   });
 
+  it('replays a response completed transactionally before a later 5xx', async () => {
+    const { db, records } = createMockDb();
+    const requestHash = hashRequest({ preset: 'free' });
+    const result = await withIdempotency(
+      db,
+      { key: 'idem-transactional-completion', tenantId: 'tnt_1', requestHash },
+      async () => {
+        Object.assign(records[0]!, {
+          status: 'completed',
+          response_status: 201,
+          response_body: JSON.stringify({ id: 'evt_1' }),
+        });
+        const error = new Error('response transport failed') as Error & { statusCode: number };
+        error.statusCode = 500;
+        throw error;
+      },
+    );
+
+    expect(result).toEqual({ status: 201, body: { id: 'evt_1' } });
+    expect(records).toHaveLength(1);
+  });
+
   it('does not persist returned 5xx responses', async () => {
     const { db, records } = createMockDb();
     const handler = vi.fn(async () => ({

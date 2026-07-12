@@ -618,6 +618,7 @@ export function serializeOrganization(row: Record<string, unknown>) {
     slug: row.slug,
     clerkOrganizationId: row.clerk_organization_id ?? undefined,
     boxOfficeSettings: parseBoxOfficeSettings(row.box_office_settings),
+    eventDefaults: parseJsonValue<Record<string, unknown>>(row.event_defaults, {}),
     status: row.status,
     createdAt: toIso(row.created_at as Date | string),
     updatedAt: toIso(row.updated_at as Date | string),

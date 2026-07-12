@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 :root {
   color-scheme: light;
@@ -19,11 +19,11 @@
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
-    "Segoe UI",
+    'Segoe UI',
     sans-serif;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   color-scheme: dark;
   --background: #111311;
   --surface: #191c19;
@@ -197,12 +197,12 @@ summary {
 }
 .mobile-navigation a:hover,
 .desktop-sidebar a:hover,
-.mobile-navigation a[aria-current="page"],
-.desktop-sidebar a[aria-current="page"] {
+.mobile-navigation a[aria-current='page'],
+.desktop-sidebar a[aria-current='page'] {
   background: var(--surface-muted);
 }
-.mobile-navigation a[aria-current="page"],
-.desktop-sidebar a[aria-current="page"] {
+.mobile-navigation a[aria-current='page'],
+.desktop-sidebar a[aria-current='page'] {
   border-left: 3px solid var(--accent);
   font-weight: 700;
   text-decoration: underline;
@@ -316,7 +316,7 @@ main {
   padding: 0;
 }
 .breadcrumbs li + li::before {
-  content: "/";
+  content: '/';
   margin-right: 0.5rem;
   color: var(--line);
 }
@@ -420,7 +420,7 @@ h3:hover .heading-anchor,
 .table-of-contents li {
   margin: 0.4rem 0;
 }
-.table-of-contents li[data-level="3"] {
+.table-of-contents li[data-level='3'] {
   padding-left: 0.8rem;
 }
 .table-of-contents a {
@@ -443,7 +443,7 @@ h3:hover .heading-anchor,
   margin-bottom: 0;
   padding-left: 1.25rem;
 }
-.mobile-table-of-contents li[data-level="3"] {
+.mobile-table-of-contents li[data-level='3'] {
   margin-left: 0.75rem;
 }
 .doc-footer {
@@ -490,22 +490,22 @@ h3:hover .heading-anchor,
   padding: 1.1rem;
 }
 .code-block code {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   font-size: 0.88rem;
 }
-.framework-tabs [role="tablist"] {
+.framework-tabs [role='tablist'] {
   display: flex;
   gap: 0.25rem;
   border-bottom: 1px solid var(--line);
 }
-.framework-tabs [role="tab"] {
+.framework-tabs [role='tab'] {
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
   color: var(--muted);
   padding: 0.55rem 0.75rem;
 }
-.framework-tabs [role="tab"][aria-selected="true"] {
+.framework-tabs [role='tab'][aria-selected='true'] {
   border-color: var(--accent);
   color: var(--text);
 }

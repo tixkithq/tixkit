@@ -1,5 +1,7 @@
 # Security Policy
 
+The authoritative public product must be buildable, testable and securable without access to the private Cloud repository. Vulnerabilities in shared domain, API, checkout, workflow, SDK or Self-Hosted behavior are fixed in the public product first and consumed by Cloud through an immutable version update; private patches must not become a long-lived fork.
+
 ## Report a vulnerability privately
 
 Do not open a public issue for a suspected vulnerability. Use the repository's **Security** tab and choose **Report a vulnerability** to create a private vulnerability report. Include:

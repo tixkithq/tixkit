@@ -62,6 +62,29 @@ test.describe('State-driven event onboarding', () => {
     );
   });
 
+  test('selects a reusable saved venue and applies its timezone', async ({ page }, testInfo) => {
+    const name = `Saved venue ${testInfo.project.name} ${Date.now()}`;
+    await page.goto(`${adminBaseUrl}/events/new`);
+    const created = await page.evaluate(async (venueName) => {
+      const response = await fetch('http://localhost:4200/v1/venues', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId: 'org_dev_local',
+          name: venueName,
+          address: { city: 'Austin', region: 'TX', country: 'US' },
+          timezone: 'America/Chicago',
+        }),
+      });
+      return { ok: response.ok, body: await response.text() };
+    }, name);
+    expect(created.ok, created.body).toBe(true);
+    await page.reload();
+    await page.getByLabel('Saved venue').selectOption({ label: name });
+    await expect(page.getByLabel(/Venue name/)).toHaveValue(name);
+    await expect(page.getByRole('combobox', { name: 'Timezone' })).toHaveValue('America/Chicago');
+  });
+
   test('completes free ticket, preview review, safe test order, preflight, and publish', async ({
     page,
   }, testInfo) => {

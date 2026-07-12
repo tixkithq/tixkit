@@ -184,5 +184,4 @@ export function emitEmbedLifecycle(
     if (!message) return;
     target.postMessage(message, context.hostOrigin);
   }
-
 }

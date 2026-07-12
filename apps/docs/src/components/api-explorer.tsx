@@ -131,7 +131,7 @@ export function ApiExplorer({
           </select>
         </label>
       ) : (
-        <p role="status">Sandbox execution is unavailable in this deployment.</p>
+        <output>Sandbox execution is unavailable in this deployment.</output>
       )}
       <label>
         Sandbox API key
@@ -189,9 +189,9 @@ export function ApiExplorer({
           Only an expiring <code>tk_sandbox_</code> credential is accepted.
         </p>
       ) : null}
-      <p role="status" aria-live="polite" aria-busy={running}>
+      <output aria-live="polite" aria-busy={running}>
         {status}
-      </p>
+      </output>
       {failure ? <p role="alert">{failure}</p> : null}
       <details>
         <summary>cURL</summary>
@@ -199,9 +199,7 @@ export function ApiExplorer({
           <code>{curl}</code>
         </pre>
       </details>
-      <pre tabIndex={0} aria-label="Sandbox response body">
-        {result}
-      </pre>
+      <pre aria-label="Sandbox response body">{result}</pre>
     </section>
   );
 }

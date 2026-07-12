@@ -5,7 +5,68 @@
   "breaking": false,
   "summary": {
     "breaking": 0,
-    "compatible": 0
+    "compatible": 10
   },
-  "changes": []
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "POST /organizations.requestBody.content.application/json.schema.properties.eventDefaults",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "POST /events.requestBody.content.application/json.schema.properties.venueId",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "POST /events.requestBody.content.application/json.schema.properties.startingPoint",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /venues",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /venues",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "PATCH /venues/{venueId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "DELETE /venues/{venueId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /onboarding-events",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.Organization.properties.eventDefaults",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.BootstrapOrganization.properties.eventDefaults",
+      "message": "An optional property was added."
+    }
+  ]
 }

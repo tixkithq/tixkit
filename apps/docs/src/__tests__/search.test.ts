@@ -56,6 +56,12 @@ describe('documentation search', () => {
   it('returns no results for an empty query', () => {
     expect(searchDocs(records, '   ')).toEqual([]);
   });
+
+  it('normalizes non-integer and non-positive result limits', () => {
+    expect(searchDocs(records, 'scan', {}, 0)).toEqual([]);
+    expect(searchDocs(records, 'scan', {}, -1)).toEqual([]);
+    expect(searchDocs(records, 'webhook', {}, 1.9)).toHaveLength(1);
+  });
 });
 
 describe('search performance budget', () => {

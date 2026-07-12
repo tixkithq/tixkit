@@ -127,8 +127,13 @@ export function evaluateSellableTickets(
     soldCount: number;
     salesStartAt: Date | string | null;
     salesEndAt: Date | string | null;
+    eventOccurrenceId?: string | null;
+    occurrenceEventId?: string | null;
+    occurrenceStartsAt?: Date | string | null;
+    occurrenceStatus?: string | null;
   }>,
   now = new Date(),
+  eventStartsAt?: Date | string,
 ): { status: 'complete' | 'incomplete'; reasonCode: ReadinessReasonCode } {
   const active = tickets.filter((ticket) => ticket.status === 'active');
   if (active.length === 0) {
@@ -148,12 +153,32 @@ export function evaluateSellableTickets(
   if (
     active.some(
       (ticket) =>
+        ticket.eventOccurrenceId != null &&
+        (ticket.occurrenceEventId === null ||
+          ticket.occurrenceStatus !== 'scheduled' ||
+          ticket.occurrenceStartsAt == null ||
+          new Date(ticket.occurrenceStartsAt) <= now),
+    )
+  ) {
+    return { status: 'incomplete', reasonCode: 'inventory_invalid' };
+  }
+  if (
+    active.some((ticket) => {
+      const scopeStartsAt = ticket.occurrenceStartsAt ?? eventStartsAt;
+      return (
         (ticket.salesStartAt !== null && Number.isNaN(new Date(ticket.salesStartAt).getTime())) ||
         (ticket.salesEndAt !== null && Number.isNaN(new Date(ticket.salesEndAt).getTime())) ||
         (ticket.salesStartAt !== null &&
           ticket.salesEndAt !== null &&
-          new Date(ticket.salesEndAt) <= new Date(ticket.salesStartAt)),
-    )
+          new Date(ticket.salesEndAt) <= new Date(ticket.salesStartAt)) ||
+        (scopeStartsAt !== undefined &&
+          ticket.salesStartAt !== null &&
+          new Date(ticket.salesStartAt) >= new Date(scopeStartsAt)) ||
+        (scopeStartsAt !== undefined &&
+          ticket.salesEndAt !== null &&
+          new Date(ticket.salesEndAt) > new Date(scopeStartsAt))
+      );
+    })
   ) {
     return { status: 'incomplete', reasonCode: 'sales_window_invalid' };
   }
@@ -227,6 +252,64 @@ function jsonRecord(value: string | null): Record<string, unknown> {
 
 function fingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function previewSubjectFingerprint(input: {
+  event: {
+    title: string;
+    description: string | null;
+    currency: string;
+    timezone: string;
+    starts_at: Date | string;
+    ends_at: Date | string | null;
+    venue: unknown;
+    visibility: string;
+    seo: unknown;
+    cover_image_url: string | null;
+    cover_image_alt: string | null;
+    seo_use_cover_image: boolean;
+  };
+  tickets: ReadonlyArray<Record<string, unknown> & { status: string; visibility: string }>;
+  products: ReadonlyArray<Record<string, unknown> & { status: string }>;
+  content: ReadonlyArray<{
+    id: string;
+    event_id: string | null;
+    status: string;
+    published_version_id: string | null;
+    published_version_status: string | null;
+  }>;
+}): string {
+  return fingerprint({
+    event: {
+      title: input.event.title,
+      description: input.event.description,
+      currency: input.event.currency,
+      timezone: input.event.timezone,
+      startsAt: iso(input.event.starts_at),
+      endsAt: iso(input.event.ends_at),
+      venue: input.event.venue,
+      visibility: input.event.visibility,
+      seo: input.event.seo,
+      coverImageUrl: input.event.cover_image_url,
+      coverImageAlt: input.event.cover_image_alt,
+      seoUseCoverImage: input.event.seo_use_cover_image,
+    },
+    tickets: input.tickets
+      .filter((ticket) => ticket.status === 'active' && ticket.visibility === 'public')
+      .map(({ updated_at: _updatedAt, ...ticket }) => ticket),
+    products: input.products
+      .filter((product) => product.status === 'active')
+      .map(({ updated_at: _updatedAt, ...product }) => product),
+    content: input.content
+      .filter((document) => document.published_version_id !== null)
+      .map((document) => [
+        document.id,
+        document.event_id,
+        document.status,
+        document.published_version_id,
+        document.published_version_status,
+      ]),
+  });
 }
 
 function actionStep<StepId extends string>(
@@ -443,6 +526,7 @@ export class ReadinessService {
         .selectFrom('ticket_types')
         .innerJoin('events', 'events.id', 'ticket_types.event_id')
         .innerJoin('inventory_pools', 'inventory_pools.id', 'ticket_types.inventory_pool_id')
+        .leftJoin('event_occurrences', 'event_occurrences.id', 'ticket_types.event_occurrence_id')
         .select([
           'ticket_types.id',
           'ticket_types.kind',
@@ -456,6 +540,10 @@ export class ReadinessService {
           'ticket_types.min_per_order',
           'ticket_types.max_per_order',
           'ticket_types.inventory_pool_id',
+          'ticket_types.event_occurrence_id',
+          'event_occurrences.event_id as occurrence_event_id',
+          'event_occurrences.starts_at as occurrence_starts_at',
+          'event_occurrences.status as occurrence_status',
           'ticket_types.updated_at',
           'inventory_pools.total_capacity',
           'inventory_pools.reserved_count',
@@ -585,12 +673,16 @@ export class ReadinessService {
           .executeTakeFirstOrThrow(),
         this.db
           .selectFrom('orders')
-          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .select(({ fn }) => [
+            fn.countAll<number>().as('count'),
+            fn.max('created_at').as('latest_created_at'),
+          ])
           .where('tenant_id', '=', input.tenantId)
           .where('organization_id', '=', input.organizationId)
           .where('brand_id', '=', input.brandId)
           .where('event_id', '=', input.eventId)
           .where('is_test', '=', true)
+          .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
           .executeTakeFirstOrThrow(),
         this.db
           .selectFrom('event_pages')
@@ -615,7 +707,18 @@ export class ReadinessService {
         soldCount: Number(ticket.sold_count),
         salesStartAt: ticket.sales_start_at,
         salesEndAt: ticket.sales_end_at,
+        eventOccurrenceId: ticket.event_occurrence_id,
+        occurrenceEventId:
+          ticket.event_occurrence_id === null
+            ? undefined
+            : ticket.occurrence_event_id === input.eventId
+              ? input.eventId
+              : null,
+        occurrenceStartsAt: ticket.occurrence_starts_at,
+        occurrenceStatus: ticket.occurrence_status,
       })),
+      new Date(),
+      event?.starts_at,
     );
     const ticketCurrencyCoherent = activeTickets.every(
       (ticket) => ticket.currency === event.currency,
@@ -659,6 +762,18 @@ export class ReadinessService {
       eventCurrency: event.currency,
     });
     const [checkInCount, testOrderCount, legacyPageCount] = operational;
+    const latestCheckoutConfigurationAt = latestIso([
+      event.checkout_configuration_updated_at,
+      ...tickets.map((ticket) => ticket.updated_at),
+      ...products.map((product) => product.updated_at),
+      ...questions.map((question) => question.updated_at),
+      ...feeRules.map((rule) => rule.updated_at),
+      paymentAccount?.updated_at,
+    ]);
+    const testOrderCurrent =
+      Number(testOrderCount.count) > 0 &&
+      new Date(testOrderCount.latest_created_at as Date | string).getTime() >=
+        new Date(latestCheckoutConfigurationAt ?? 0).getTime();
     const lifecycleContent = evaluateLifecycleContent(
       contentDocuments.map((document) => ({
         eventId: document.event_id,
@@ -672,12 +787,13 @@ export class ReadinessService {
     );
     const publicContent = Number(legacyPageCount.count) > 0 || lifecycleContent.publicContent;
     const confirmationContent = lifecycleContent.confirmationContent;
+    const startTime = new Date(event.starts_at).getTime();
+    const startValid = Number.isFinite(startTime) && startTime >= Date.now() + 15 * 60 * 1000;
     const basicsValid =
       event.title.trim().length > 0 &&
       event.timezone.trim().length > 0 &&
-      new Date(event.starts_at).getTime() > 0 &&
+      startValid &&
       (event.ends_at === null || new Date(event.ends_at) > new Date(event.starts_at));
-    const startValid = new Date(event.starts_at).getTime() > 0;
     const checkoutFingerprint = fingerprint(
       questions.map((question) => ({
         id: question.id,
@@ -690,31 +806,11 @@ export class ReadinessService {
         hidden: question.is_hidden,
       })),
     );
-    const previewFingerprint = fingerprint({
-      event: {
-        title: event.title,
-        description: event.description,
-        currency: event.currency,
-        timezone: event.timezone,
-        startsAt: iso(event.starts_at),
-        endsAt: iso(event.ends_at),
-        venue: event.venue,
-        visibility: event.visibility,
-        seo: event.seo,
-        coverImageUrl: event.cover_image_url,
-        coverImageAlt: event.cover_image_alt,
-        seoUseCoverImage: event.seo_use_cover_image,
-      },
-      tickets: tickets.map(({ updated_at: _updatedAt, ...ticket }) => ticket),
-      products: products.map(({ updated_at: _updatedAt, ...product }) => product),
-      content: contentDocuments.map((document) => [
-        document.id,
-        document.event_id,
-        document.status,
-        document.current_draft_version_id,
-        document.published_version_id,
-        document.published_version_status,
-      ]),
+    const previewFingerprint = previewSubjectFingerprint({
+      event,
+      tickets,
+      products,
+      content: contentDocuments,
     });
     const ackByStep = new Map(acknowledgements.map((ack) => [ack.step_id, ack]));
     const acknowledgementState = (
@@ -864,16 +960,18 @@ export class ReadinessService {
         status:
           this.paymentMode === 'provider'
             ? 'not_applicable'
-            : Number(testOrderCount.count) > 0
+            : testOrderCurrent
               ? 'complete'
               : 'incomplete',
         priority: 'recommended',
         reasonCodes: [
           this.paymentMode === 'provider'
             ? 'test_order_not_applicable'
-            : Number(testOrderCount.count) > 0
+            : testOrderCurrent
               ? 'test_order_complete'
-              : 'test_order_recommended',
+              : Number(testOrderCount.count) > 0
+                ? 'test_order_stale'
+                : 'test_order_recommended',
         ],
         actionId: 'run_test_order',
         requiredPermission: 'orders.write',
@@ -1004,6 +1102,7 @@ export class ReadinessService {
         .selectFrom('ticket_types')
         .innerJoin('events', 'events.id', 'ticket_types.event_id')
         .innerJoin('inventory_pools', 'inventory_pools.id', 'ticket_types.inventory_pool_id')
+        .leftJoin('event_occurrences', 'event_occurrences.id', 'ticket_types.event_occurrence_id')
         .select([
           'ticket_types.id',
           'ticket_types.kind',
@@ -1017,6 +1116,10 @@ export class ReadinessService {
           'ticket_types.min_per_order',
           'ticket_types.max_per_order',
           'ticket_types.inventory_pool_id',
+          'ticket_types.event_occurrence_id',
+          'event_occurrences.event_id as occurrence_event_id',
+          'event_occurrences.starts_at as occurrence_starts_at',
+          'event_occurrences.status as occurrence_status',
           'inventory_pools.total_capacity',
           'inventory_pools.reserved_count',
           'inventory_pools.sold_count',
@@ -1073,31 +1176,6 @@ export class ReadinessService {
         .orderBy('content_documents.id')
         .execute(),
     ]);
-    return fingerprint({
-      event: {
-        title: event.title,
-        description: event.description,
-        currency: event.currency,
-        timezone: event.timezone,
-        startsAt: iso(event.starts_at),
-        endsAt: iso(event.ends_at),
-        venue: event.venue,
-        visibility: event.visibility,
-        seo: event.seo,
-        coverImageUrl: event.cover_image_url,
-        coverImageAlt: event.cover_image_alt,
-        seoUseCoverImage: event.seo_use_cover_image,
-      },
-      tickets,
-      products,
-      content: content.map((row) => [
-        row.id,
-        row.event_id,
-        row.status,
-        row.current_draft_version_id,
-        row.published_version_id,
-        row.published_version_status,
-      ]),
-    });
+    return previewSubjectFingerprint({ event, tickets, products, content });
   }
 }

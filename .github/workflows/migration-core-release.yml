@@ -3,10 +3,10 @@ name: Migration Core Release Candidate
 on:
   pull_request:
     paths:
-      - "packages/migration-core/**"
-      - "packages/workflows/src/activities/migration-**"
-      - "docs/public/operators/migrations/**"
-      - ".github/workflows/migration-core-release.yml"
+      - 'packages/migration-core/**'
+      - 'packages/workflows/src/activities/migration-**'
+      - 'docs/public/operators/migrations/**'
+      - '.github/workflows/migration-core-release.yml'
   workflow_dispatch:
     inputs:
       registry_preflight:

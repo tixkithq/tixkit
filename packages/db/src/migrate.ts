@@ -63,6 +63,8 @@ import { ImportPlatformMigration } from './migrations/0058_import_platform.js';
 import { MigrationDomainSupportMigration } from './migrations/0059_migration_domain_support.js';
 import { MigrationPermissionsMigration } from './migrations/0060_migration_permissions.js';
 import { MigrationPreparationCursorMigration } from './migrations/0062_migration_preparation_cursor.js';
+import { EventCheckoutConfigurationRevisionMigration } from './migrations/0063_event_checkout_configuration_revision.js';
+import { OrganizationEventDefaultsMigration } from './migrations/0064_organization_event_defaults.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -266,6 +268,8 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0060_migration_domain_support': MigrationDomainSupportMigration,
       '0061_migration_permissions': MigrationPermissionsMigration,
       '0062_migration_preparation_cursor': MigrationPreparationCursorMigration,
+      '0063_event_checkout_configuration_revision': EventCheckoutConfigurationRevisionMigration,
+      '0064_organization_event_defaults': OrganizationEventDefaultsMigration,
     };
   }
 }

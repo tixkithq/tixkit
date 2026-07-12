@@ -193,10 +193,9 @@ describe('MigrationWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load report' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Report service unavailable');
-    expect(screen.getByRole('heading', { name: 'Migration workspace' }).closest('[aria-busy]')).toHaveAttribute(
-      'aria-busy',
-      'false',
-    );
+    expect(
+      screen.getByRole('heading', { name: 'Migration workspace' }).closest('[aria-busy]'),
+    ).toHaveAttribute('aria-busy', 'false');
     expect(screen.getByRole('button', { name: 'Load report' })).toBeEnabled();
   });
 

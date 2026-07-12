@@ -153,6 +153,16 @@ export async function withIdempotency(
       code?: string;
     };
     if ((error.statusCode ?? 500) >= 500) {
+      const transactionallyCompleted = await findRecord(db, input.key, input.tenantId);
+      if (
+        transactionallyCompleted?.status === 'completed' &&
+        transactionallyCompleted.request_hash === input.requestHash
+      ) {
+        return {
+          status: transactionallyCompleted.response_status,
+          body: JSON.parse(transactionallyCompleted.response_body),
+        };
+      }
       await deleteRecord(db, recordId);
       throw err;
     }

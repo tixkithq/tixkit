@@ -66,6 +66,10 @@ function WorkspacePageContent() {
   const [slug, setSlug] = React.useState('');
   const [boxOfficeSettings, setBoxOfficeSettings] =
     React.useState<AdminBoxOfficeSettings>(defaultBoxOfficeSettings);
+  const [eventDefaults, setEventDefaults] = React.useState<
+    NonNullable<AdminOrganization['eventDefaults']>
+  >({});
+  const [savedVenues, setSavedVenues] = React.useState<Array<{ id: string; name: string }>>([]);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -87,7 +91,15 @@ function WorkspacePageContent() {
     setName(selectedOrganization?.name ?? '');
     setSlug(selectedOrganization?.slug ?? '');
     setBoxOfficeSettings(cloneBoxOfficeSettings(selectedOrganization?.boxOfficeSettings));
+    setEventDefaults(selectedOrganization?.eventDefaults ?? {});
   }, [bootstrapError, bootstrapLoading, organizationId, organizations]);
+
+  React.useEffect(() => {
+    if (!organizationId) return;
+    void adminApi.listSavedVenues(organizationId).then((result) => {
+      if (result.ok) setSavedVenues(result.data);
+    });
+  }, [organizationId]);
 
   const updateBoxOfficeSettings = (changes: Partial<AdminBoxOfficeSettings>) => {
     setBoxOfficeSettings((current) => ({
@@ -132,6 +144,7 @@ function WorkspacePageContent() {
       name: name.trim(),
       slug: slug.trim(),
       boxOfficeSettings,
+      eventDefaults,
     });
     setSaving(false);
 
@@ -259,6 +272,93 @@ function WorkspacePageContent() {
                 />
                 <span>Require buyer email for at-door orders</span>
               </Label>
+            </div>
+
+            <div className="space-y-4 rounded-md border p-4">
+              <div>
+                <Label>New event defaults</Label>
+                <p className="text-sm text-muted-foreground">
+                  Applied to new drafts before browser or payment-account fallbacks.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="event-default-timezone">Timezone</Label>
+                  <Input
+                    id="event-default-timezone"
+                    value={eventDefaults.timezone ?? ''}
+                    onChange={(change) =>
+                      setEventDefaults((current) => ({
+                        ...current,
+                        timezone: change.target.value || undefined,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="event-default-currency">Currency</Label>
+                  <Input
+                    id="event-default-currency"
+                    maxLength={3}
+                    value={eventDefaults.currency ?? ''}
+                    onChange={(change) =>
+                      setEventDefaults((current) => ({
+                        ...current,
+                        currency: change.target.value.toUpperCase() || undefined,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="event-default-country">Country</Label>
+                  <Input
+                    id="event-default-country"
+                    maxLength={2}
+                    value={eventDefaults.country ?? ''}
+                    onChange={(change) =>
+                      setEventDefaults((current) => ({
+                        ...current,
+                        country: change.target.value.toUpperCase() || undefined,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="event-default-venue">Default saved venue</Label>
+                <select
+                  id="event-default-venue"
+                  className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                  value={eventDefaults.defaultVenueId ?? ''}
+                  onChange={(change) =>
+                    setEventDefaults((current) => ({
+                      ...current,
+                      defaultVenueId: change.target.value || null,
+                    }))
+                  }
+                >
+                  <option value="">No default venue</option>
+                  {savedVenues.map((venue) => (
+                    <option key={venue.id} value={venue.id}>
+                      {venue.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="event-default-description">Default event description</Label>
+                <textarea
+                  id="event-default-description"
+                  className="min-h-24 w-full rounded-md border bg-transparent p-3 text-sm"
+                  value={eventDefaults.eventDescription ?? ''}
+                  onChange={(change) =>
+                    setEventDefaults((current) => ({
+                      ...current,
+                      eventDescription: change.target.value || undefined,
+                    }))
+                  }
+                />
+              </div>
             </div>
 
             <Button onClick={handleSave} disabled={saving}>

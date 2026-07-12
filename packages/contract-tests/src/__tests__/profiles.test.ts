@@ -20,6 +20,7 @@ describe('third-party contract profiles', () => {
         csp: "default-src 'none'; script-src https://cdn.example; connect-src https://checkout.example; frame-src https://checkout.example",
         expectedOrigin: 'https://checkout.example',
         lifecycleEvents: EMBED_LIFECYCLE_NAMES.map((name) => `tixkit:v1:${name}`),
+        // eslint-disable-next-line oxc/no-map-spread -- Each discriminated lifecycle fixture requires its own immutable shape.
         lifecycleDetails: EMBED_LIFECYCLE_NAMES.map((name) => ({
           contractVersion: '1.0',
           name,
@@ -81,7 +82,7 @@ describe('third-party contract profiles', () => {
                 widgetId: 'widget_1',
                 eventId: 'evt_1',
                 nonce: '0123456789abcdef0123456789abcdef',
-                ...(override.data ?? {}),
+                ...override.data,
               },
               ...override,
             } as MessageEvent,

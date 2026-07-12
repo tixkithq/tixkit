@@ -6,6 +6,8 @@ import {
   BrandRepository,
   EventRepository,
   EventOccurrenceRepository,
+  InventoryPoolRepository,
+  TicketTypeRepository,
   FeeRuleRepository,
   AuditLogRepository,
   executeTableQuery,
@@ -35,8 +37,68 @@ import {
   updateEventSchema,
 } from '../../http/schemas.js';
 import { ReadinessService, resolvePaymentMode } from '../../services/readiness.js';
+import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 
 const marketingIntegrationStatusSchema = z.enum(['active', 'disabled']).default('active');
+const onboardingTelemetrySchema = z
+  .object({
+    stage: z.enum([
+      'onboarding_started',
+      'starting_point_selected',
+      'recovery',
+      'autosave_failure',
+      'stale_version_conflict',
+    ]),
+    outcome: z.enum([
+      'started',
+      'blank',
+      'free',
+      'paid',
+      'donation',
+      'multiple',
+      'duplicate',
+      'attempted',
+      'completed',
+      'failed',
+    ]),
+    reasonCode: z.enum(['none', 'request_failed', 'stale_event_version']).default('none'),
+  })
+  .strict();
+const venueInputSchema = z
+  .object({
+    organizationId: z.string().min(1),
+    name: z.string().trim().min(1).max(255),
+    address: z
+      .object({
+        address: z.string().max(500).optional(),
+        city: z.string().max(255).optional(),
+        region: z.string().max(255).optional(),
+        postalCode: z.string().max(40).optional(),
+        country: z.string().length(2).optional(),
+      })
+      .strict(),
+    timezone: z.string().min(1).max(100).optional(),
+  })
+  .strict();
+const venueUpdateSchema = venueInputSchema.omit({ organizationId: true }).partial().strict();
+
+function serializeVenue(row: Record<string, unknown>) {
+  let address: unknown = {};
+  try {
+    address = typeof row.address === 'string' ? JSON.parse(row.address) : (row.address ?? {});
+  } catch {
+    address = {};
+  }
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    address,
+    timezone: row.timezone ?? undefined,
+    createdAt: new Date(row.created_at as Date | string).toISOString(),
+    updatedAt: new Date(row.updated_at as Date | string).toISOString(),
+  };
+}
 const setupSectionSchema = z
   .object({
     section: z.enum(['basics', 'schedule', 'sales', 'media', 'marketing-fields']),
@@ -115,6 +177,32 @@ function getErrorNumber(value: unknown): number | undefined {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   const parsed = Number(value);
   return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+export function isVenueForeignKeyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as {
+    code?: string;
+    number?: string | number;
+    originalError?: { number?: string | number };
+    cause?: {
+      code?: string;
+      number?: string | number;
+      originalError?: { number?: string | number };
+    };
+  };
+  const code = record.code ?? record.cause?.code;
+  const number =
+    getErrorNumber(record.number) ??
+    getErrorNumber(record.originalError?.number) ??
+    getErrorNumber(record.cause?.number) ??
+    getErrorNumber(record.cause?.originalError?.number);
+  return (
+    code === '23503' ||
+    code === 'ER_ROW_IS_REFERENCED_2' ||
+    code === 'ER_NO_REFERENCED_ROW_2' ||
+    number === 547
+  );
 }
 
 function isMarketingIntegrationEventProviderDuplicateInsert(error: unknown): boolean {
@@ -375,6 +463,150 @@ function serializeFeePolicy(eventId: string, event: EventFeePolicyRow, rows: Fee
 }
 
 export const eventRoutes: FastifyPluginAsync = async (app) => {
+  app.post('/onboarding-events', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const body = parseBody(onboardingTelemetrySchema, request.body);
+    app.observability?.metrics.metrics.onboardingEvents?.inc({
+      stage: body.stage,
+      outcome: body.outcome,
+      reason_code: body.reasonCode,
+    });
+    return reply.status(204).send();
+  });
+
+  app.get('/venues', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const organizationId = String(
+      (request.query as { organizationId?: string }).organizationId ?? '',
+    );
+    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    const rows = await app.context.db
+      .selectFrom('venues')
+      .selectAll()
+      .where('tenant_id', '=', principal.tenantId)
+      .where('organization_id', '=', organizationId)
+      .orderBy('name')
+      .execute();
+    return rows.map((row) => serializeVenue(row as unknown as Record<string, unknown>));
+  });
+
+  app.post('/venues', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const body = parseBody(venueInputSchema, request.body);
+    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+    const now = new Date();
+    const values = {
+      id: `ven_${ulid()}`,
+      tenant_id: principal.tenantId,
+      organization_id: body.organizationId,
+      name: body.name,
+      address: JSON.stringify(body.address),
+      timezone: body.timezone ?? null,
+      created_at: now,
+      updated_at: now,
+    };
+    await app.context.db.insertInto('venues').values(values).execute();
+    return reply.status(201).send(serializeVenue(values));
+  });
+
+  app.patch('/venues/:venueId', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { venueId } = request.params as { venueId: string };
+    const body = parseBody(venueUpdateSchema, request.body);
+    const existing = await app.context.db
+      .selectFrom('venues')
+      .selectAll()
+      .where('id', '=', venueId)
+      .where('tenant_id', '=', principal.tenantId)
+      .executeTakeFirst();
+    if (!existing) throw new NotFoundError('Venue', venueId);
+    ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
+    const updated = {
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.address !== undefined ? { address: JSON.stringify(body.address) } : {}),
+      ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+      updated_at: new Date(),
+    };
+    await app.context.db
+      .updateTable('venues')
+      .set(updated)
+      .where('id', '=', venueId)
+      .where('tenant_id', '=', principal.tenantId)
+      .where('organization_id', '=', existing.organization_id)
+      .execute();
+    return serializeVenue({ ...existing, ...updated });
+  });
+
+  app.delete('/venues/:venueId', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { venueId } = request.params as { venueId: string };
+    const venue = await app.context.db
+      .selectFrom('venues')
+      .selectAll()
+      .where('id', '=', venueId)
+      .where('tenant_id', '=', principal.tenantId)
+      .executeTakeFirst();
+    if (!venue) throw new NotFoundError('Venue', venueId);
+    ClerkAuthService.requireOrganizationScope(principal, venue.organization_id);
+    try {
+      const deleted = await app.context.db.transaction().execute(async (trx) => {
+        const organization = await trx
+          .selectFrom('organizations')
+          .select('event_defaults')
+          .where('id', '=', venue.organization_id)
+          .where('tenant_id', '=', principal.tenantId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        const lockedVenue = await trx
+          .selectFrom('venues')
+          .select('id')
+          .where('id', '=', venueId)
+          .where('tenant_id', '=', principal.tenantId)
+          .where('organization_id', '=', venue.organization_id)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!lockedVenue) return false;
+        const [eventReference, occurrenceReference] = await Promise.all([
+          trx.selectFrom('events').select('id').where('venue_id', '=', venueId).executeTakeFirst(),
+          trx
+            .selectFrom('event_occurrences')
+            .select('id')
+            .where('venue_id', '=', venueId)
+            .executeTakeFirst(),
+        ]);
+        let defaultVenueId: string | undefined;
+        try {
+          defaultVenueId = JSON.parse(organization.event_defaults ?? '{}').defaultVenueId;
+        } catch {
+          defaultVenueId = undefined;
+        }
+        if (eventReference || occurrenceReference || defaultVenueId === venueId) return false;
+        await trx
+          .deleteFrom('venues')
+          .where('id', '=', venueId)
+          .where('tenant_id', '=', principal.tenantId)
+          .where('organization_id', '=', venue.organization_id)
+          .execute();
+        return true;
+      });
+      if (deleted) return reply.status(204).send();
+    } catch (error) {
+      if (!isVenueForeignKeyError(error)) throw error;
+    }
+    return reply.status(409).send({
+      error: {
+        code: 'venue_in_use',
+        message: 'Remove this venue from event drafts and workspace defaults before deleting it',
+        requestId: request.id,
+      },
+    });
+  });
+
   const db = app.context.db;
   const audit = () => new AuditLogRepository(db);
   const createReadinessService =
@@ -395,49 +627,176 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (brand.organization_id !== body.organizationId) {
       throw new NotFoundError('Brand', body.brandId);
     }
+    const savedVenue = body.venueId
+      ? await db
+          .selectFrom('venues')
+          .selectAll()
+          .where('id', '=', body.venueId)
+          .where('tenant_id', '=', principal.tenantId)
+          .where('organization_id', '=', body.organizationId)
+          .executeTakeFirst()
+      : undefined;
+    if (body.venueId && !savedVenue) throw new NotFoundError('Venue', body.venueId);
+    const venueSnapshot = savedVenue
+      ? { name: savedVenue.name, ...JSON.parse(savedVenue.address ?? '{}') }
+      : body.venue;
 
-    const repo = new EventRepository(db);
-    if (!(await repo.isSlugAvailable(body.brandId, body.slug))) {
-      throw new ValidationError('Event slug is already in use');
+    const rawIdempotencyKey = request.headers['idempotency-key'];
+    const idempotencyKey =
+      typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : undefined;
+    if (body.startingPoint !== 'blank' && !idempotencyKey) {
+      throw new ValidationError('Idempotency-Key header is required for preset event creation');
     }
-    const event = await repo.create({
-      tenantId: principal.tenantId,
-      organizationId: body.organizationId,
-      brandId: body.brandId,
-      slug: body.slug,
-      title: body.title,
-      description: body.description,
-      currency: body.currency,
-      timezone: body.timezone,
-      startsAt: new Date(body.startsAt),
-      endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
-      venue: body.venue as Record<string, unknown> | undefined,
-      visibility: body.visibility,
-      seo: body.seo as Record<string, unknown> | undefined,
-      capacity: body.capacity,
-      minimumAge: body.minimumAge,
-      externalUrl: body.externalUrl,
-    });
+    const createEvent = async () => {
+      const repo = new EventRepository(db);
+      if (!(await repo.isSlugAvailable(body.brandId, body.slug))) {
+        throw new ValidationError('Event slug is already in use');
+      }
+      const event = await db.transaction().execute(async (trx) => {
+        const txDb = trx as typeof db;
+        const created = await new EventRepository(txDb).create({
+          tenantId: principal.tenantId,
+          organizationId: body.organizationId,
+          brandId: body.brandId,
+          slug: body.slug,
+          title: body.title,
+          description: body.description,
+          currency: body.currency,
+          timezone: body.timezone,
+          startsAt: new Date(body.startsAt),
+          endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
+          venue: venueSnapshot as Record<string, unknown> | undefined,
+          visibility: body.visibility,
+          seo: body.seo as Record<string, unknown> | undefined,
+          capacity: body.capacity,
+          minimumAge: body.minimumAge,
+          externalUrl: body.externalUrl,
+        });
+        if (savedVenue) {
+          await txDb
+            .updateTable('events')
+            .set({ venue_id: savedVenue.id })
+            .where('id', '=', created.id)
+            .execute();
+        }
+        if (body.startingPoint === 'multiple') {
+          const startsAt = new Date(body.startsAt);
+          await new EventOccurrenceRepository(txDb).create({
+            eventId: created.id,
+            title: body.title,
+            startsAt,
+            endsAt: body.endsAt ? new Date(body.endsAt) : new Date(startsAt.getTime() + 7_200_000),
+            timezone: body.timezone,
+            venue: venueSnapshot as Record<string, unknown> | undefined,
+            capacity: body.capacity,
+          });
+        } else if (body.startingPoint !== 'blank') {
+          const pool = await new InventoryPoolRepository(txDb).create({
+            eventId: created.id,
+            name: 'Admission inventory',
+            totalCapacity: body.capacity ?? 100,
+            holdTtlSeconds: 900,
+          });
+          await new TicketTypeRepository(txDb).create({
+            eventId: created.id,
+            name:
+              body.startingPoint === 'free'
+                ? 'RSVP'
+                : body.startingPoint === 'paid'
+                  ? 'General admission'
+                  : 'Donation',
+            kind: body.startingPoint,
+            currency: body.currency,
+            priceCents: body.startingPoint === 'paid' ? 2500 : 0,
+            minimumPriceCents: body.startingPoint === 'donation' ? 0 : undefined,
+            inventoryPoolId: pool.id,
+            minPerOrder: 1,
+            maxPerOrder: 10,
+          });
+        }
+        if (body.startingPoint !== 'blank') {
+          await app.context.eventPresetCheckpoint?.({
+            stage: 'after_preset_applied',
+            eventId: created.id,
+            startingPoint: body.startingPoint,
+          });
+        }
+        await writeAuditLog(new AuditLogRepository(txDb), request, principal, {
+          action: 'event.created',
+          organizationId: body.organizationId,
+          brandId: body.brandId,
+          resourceType: 'Event',
+          resourceId: created.id,
+          diffSummary: { slug: body.slug, title: body.title },
+        });
+        if (idempotencyKey) {
+          await txDb
+            .updateTable('idempotency_records')
+            .set({
+              response_status: 201,
+              response_body: JSON.stringify(serializeEvent(created)),
+              status: 'completed',
+            })
+            .where('key', '=', idempotencyKey)
+            .where('tenant_id', '=', principal.tenantId)
+            .execute();
+        }
+        return created;
+      });
+      app.observability?.metrics.metrics.onboardingEvents?.inc({
+        stage: 'first_draft',
+        outcome: 'completed',
+        reason_code: 'none',
+      });
+      if (body.startingPoint !== 'blank') {
+        app.observability?.metrics.metrics.onboardingEvents?.inc({
+          stage: 'starting_point_applied',
+          outcome: 'completed',
+          reason_code: 'none',
+        });
+      }
+      if (['free', 'paid', 'donation'].includes(body.startingPoint)) {
+        app.observability?.metrics.metrics.onboardingEvents?.inc({
+          stage: 'first_ticket',
+          outcome: 'completed',
+          reason_code: 'none',
+        });
+        app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
+          { milestone: 'first_ticket' },
+          Math.max(0, (performance.now() - creationStartedAt) / 1000),
+        );
+      }
+      app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
+        { milestone: 'first_draft' },
+        Math.max(0, (performance.now() - creationStartedAt) / 1000),
+      );
+      return { status: 201, body: serializeEvent(event) };
+    };
 
-    await writeAuditLog(audit(), request, principal, {
-      action: 'event.created',
-      organizationId: body.organizationId,
-      brandId: body.brandId,
-      resourceType: 'Event',
-      resourceId: event.id,
-      diffSummary: { slug: body.slug, title: body.title },
-    });
-    app.observability?.metrics.metrics.onboardingEvents?.inc({
-      stage: 'first_draft',
-      outcome: 'completed',
-      reason_code: 'none',
-    });
-    app.observability?.metrics.metrics.onboardingMilestoneDuration?.observe(
-      { milestone: 'first_draft' },
-      Math.max(0, (performance.now() - creationStartedAt) / 1000),
-    );
-
-    return reply.status(201).send(serializeEvent(event));
+    let result;
+    try {
+      result = idempotencyKey
+        ? await withIdempotency(
+            db,
+            {
+              key: idempotencyKey,
+              tenantId: principal.tenantId,
+              requestHash: hashRequest({
+                organizationId: body.organizationId,
+                brandId: body.brandId,
+                body,
+              }),
+            },
+            createEvent,
+          )
+        : await createEvent();
+    } catch (error) {
+      if (body.venueId && isVenueForeignKeyError(error)) {
+        throw new NotFoundError('Venue', body.venueId);
+      }
+      throw error;
+    }
+    return reply.status(result.status).send(result.body);
   });
 
   app.get('/events', async (request) => {
@@ -719,10 +1078,32 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       updateData.slug = body.slug;
     }
     if (body.description !== undefined) updateData.description = body.description;
-    if (body.currency !== undefined) updateData.currency = body.currency;
+    if (body.currency !== undefined) {
+      updateData.currency = body.currency;
+      updateData.checkout_configuration_updated_at = new Date();
+    }
     if (body.timezone !== undefined) updateData.timezone = body.timezone;
     if (body.startsAt !== undefined) updateData.starts_at = new Date(body.startsAt);
     if (body.endsAt !== undefined) updateData.ends_at = body.endsAt ? new Date(body.endsAt) : null;
+    if (body.venueId !== undefined) {
+      if (body.venueId === null) {
+        updateData.venue_id = null;
+      } else {
+        const savedVenue = await db
+          .selectFrom('venues')
+          .selectAll()
+          .where('id', '=', body.venueId)
+          .where('tenant_id', '=', principal.tenantId)
+          .where('organization_id', '=', existing.organization_id)
+          .executeTakeFirst();
+        if (!savedVenue) throw new NotFoundError('Venue', body.venueId);
+        updateData.venue_id = savedVenue.id;
+        updateData.venue = JSON.stringify({
+          name: savedVenue.name,
+          ...JSON.parse(savedVenue.address ?? '{}'),
+        });
+      }
+    }
     if (body.venue !== undefined) updateData.venue = body.venue ? JSON.stringify(body.venue) : null;
     if (body.visibility !== undefined) updateData.visibility = body.visibility;
     if (body.seo !== undefined) {
@@ -755,7 +1136,15 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     if (body.seoUseCoverImage !== undefined) updateData.seo_use_cover_image = body.seoUseCoverImage;
     if (body.lastSetupSection !== undefined) updateData.last_setup_section = body.lastSetupSection;
 
-    const updated = await repo.updateIfVersion(eventId, body.expectedVersion, updateData);
+    let updated;
+    try {
+      updated = await repo.updateIfVersion(eventId, body.expectedVersion, updateData);
+    } catch (error) {
+      if (body.venueId && isVenueForeignKeyError(error)) {
+        throw new NotFoundError('Venue', body.venueId);
+      }
+      throw error;
+    }
     if (!updated) {
       const current = await repo.findById(eventId);
       return reply.status(409).send({
@@ -806,7 +1195,10 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       const updated = await transactionEventRepository.updateIfVersion(
         eventId,
         body.expectedVersion,
-        { pass_fees_to_buyer: body.passFeesToBuyer } as Record<string, unknown>,
+        {
+          pass_fees_to_buyer: body.passFeesToBuyer,
+          checkout_configuration_updated_at: new Date(),
+        } as Record<string, unknown>,
       );
       if (!updated) return null;
       await trx.deleteFrom('fee_rules').where('event_id', '=', eventId).execute();
@@ -1020,327 +1412,355 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, authorizedSource.organization_id);
     ClerkAuthService.requireBrandScope(principal, authorizedSource.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
+    const rawIdempotencyKey = request.headers['idempotency-key'];
+    const idempotencyKey =
+      typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : undefined;
+    if (!idempotencyKey) {
+      throw new ValidationError('Idempotency-Key header is required for event duplication');
+    }
     const requestedStart = new Date(body.startsAt);
-    const duplicated = await db
-      .transaction()
-      .setIsolationLevel('repeatable read')
-      .execute(async (trx) => {
-        const events = new EventRepository(trx as typeof db);
-        const source = await events.findById(eventId);
-        if (!source) throw new NotFoundError('Event', eventId);
-        const shiftMs = requestedStart.getTime() - new Date(source.starts_at).getTime();
-        const shifted = (value: Date | string | null) =>
-          value === null ? null : new Date(new Date(value).getTime() + shiftMs);
-        const created = await events.create({
-          tenantId: source.tenant_id,
-          organizationId: source.organization_id,
-          brandId: source.brand_id,
-          slug: `${source.slug}-copy-${ulid().slice(-8).toLowerCase()}`,
-          title: body.title?.trim() || `${source.title} copy`,
-          description: body.copy.basicsVenue ? (source.description ?? undefined) : undefined,
-          currency: source.currency,
-          timezone: source.timezone,
-          startsAt: requestedStart,
-          endsAt: shifted(source.ends_at) ?? undefined,
-          venue:
-            body.copy.basicsVenue && source.venue
-              ? typeof source.venue === 'string'
-                ? JSON.parse(source.venue)
-                : source.venue
-              : undefined,
-          visibility: source.visibility,
-          capacity: body.copy.basicsVenue ? (source.capacity ?? undefined) : undefined,
-          minimumAge: body.copy.basicsVenue ? (source.minimum_age ?? undefined) : undefined,
-        });
-        if (process.env.NODE_ENV === 'test') {
-          await app.context.eventDuplicationCheckpoint?.({
-            stage: 'after_event_created',
-            sourceEventId: eventId,
-            duplicatedEventId: created.id,
+    const duplicateEvent = async () => {
+      const duplicated = await db
+        .transaction()
+        .setIsolationLevel('repeatable read')
+        .execute(async (trx) => {
+          const events = new EventRepository(trx as typeof db);
+          const source = await events.findById(eventId);
+          if (!source) throw new NotFoundError('Event', eventId);
+          const shiftMs = requestedStart.getTime() - new Date(source.starts_at).getTime();
+          const shifted = (value: Date | string | null) =>
+            value === null ? null : new Date(new Date(value).getTime() + shiftMs);
+          const created = await events.create({
+            tenantId: source.tenant_id,
+            organizationId: source.organization_id,
+            brandId: source.brand_id,
+            slug: `${source.slug}-copy-${ulid().slice(-8).toLowerCase()}`,
+            title: body.title?.trim() || `${source.title} copy`,
+            description: body.copy.basicsVenue ? (source.description ?? undefined) : undefined,
+            currency: source.currency,
+            timezone: source.timezone,
+            startsAt: requestedStart,
+            endsAt: shifted(source.ends_at) ?? undefined,
+            venue:
+              body.copy.basicsVenue && source.venue
+                ? typeof source.venue === 'string'
+                  ? JSON.parse(source.venue)
+                  : source.venue
+                : undefined,
+            visibility: source.visibility,
+            capacity: body.copy.basicsVenue ? (source.capacity ?? undefined) : undefined,
+            minimumAge: body.copy.basicsVenue ? (source.minimum_age ?? undefined) : undefined,
           });
-        }
-        if (body.copy.basicsVenue || body.copy.feeResalePolicies) {
-          await events.update(created.id, {
-            cover_image_alt: null,
-            seo_use_cover_image: false,
-            pass_fees_to_buyer: body.copy.feeResalePolicies ? source.pass_fees_to_buyer : false,
-            resale_enabled: body.copy.feeResalePolicies ? source.resale_enabled : false,
-            resale_max_multiplier: body.copy.feeResalePolicies ? source.resale_max_multiplier : 1,
-            resale_max_absolute_cents: body.copy.feeResalePolicies
-              ? source.resale_max_absolute_cents
-              : null,
-          });
-        }
-        const now = new Date();
-        const occurrenceMap = new Map<string, string>();
-        if (body.copy.basicsVenue) {
-          const occurrences = await trx
-            .selectFrom('event_occurrences')
-            .selectAll()
-            .where('event_id', '=', eventId)
-            .execute();
-          for (const occurrence of occurrences) {
-            const id = `occ_${ulid()}`;
-            occurrenceMap.set(occurrence.id, id);
-            await trx
-              .insertInto('event_occurrences')
-              .values({
-                ...occurrence,
-                id,
-                event_id: created.id,
-                starts_at: shifted(occurrence.starts_at)!,
-                ends_at: shifted(occurrence.ends_at)!,
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
+          if (body.copy.basicsVenue || body.copy.feeResalePolicies) {
+            await events.update(created.id, {
+              cover_image_alt: null,
+              seo_use_cover_image: false,
+              pass_fees_to_buyer: body.copy.feeResalePolicies ? source.pass_fees_to_buyer : false,
+              resale_enabled: body.copy.feeResalePolicies ? source.resale_enabled : false,
+              resale_max_multiplier: body.copy.feeResalePolicies ? source.resale_max_multiplier : 1,
+              resale_max_absolute_cents: body.copy.feeResalePolicies
+                ? source.resale_max_absolute_cents
+                : null,
+            });
           }
-        }
-        const ticketMap = new Map<string, string>();
-        if (body.copy.ticketTypes) {
-          const pools = await trx
-            .selectFrom('inventory_pools')
-            .selectAll()
-            .where('event_id', '=', eventId)
-            .execute();
-          const poolMap = new Map<string, string>();
-          for (const pool of pools) {
-            const id = `inv_${ulid()}`;
-            poolMap.set(pool.id, id);
-            await trx
-              .insertInto('inventory_pools')
-              .values({
-                id,
-                event_id: created.id,
-                name: pool.name,
-                total_capacity: pool.total_capacity,
-                hold_ttl_seconds: pool.hold_ttl_seconds,
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-          }
-          const tickets = await trx
-            .selectFrom('ticket_types')
-            .selectAll()
-            .where('event_id', '=', eventId)
-            .execute();
-          for (const ticket of tickets) {
-            const id = `tt_${ulid()}`;
-            ticketMap.set(ticket.id, id);
-            await trx
-              .insertInto('ticket_types')
-              .values({
-                ...ticket,
-                id,
-                event_id: created.id,
-                status: ticket.status === 'draft' ? 'draft' : 'active',
-                requires_access_code: false,
-                access_code_hint: null,
-                inventory_pool_id: poolMap.get(ticket.inventory_pool_id)!,
-                event_occurrence_id: ticket.event_occurrence_id
-                  ? (occurrenceMap.get(ticket.event_occurrence_id) ?? null)
-                  : null,
-                sales_start_at: shifted(ticket.sales_start_at),
-                sales_end_at: shifted(ticket.sales_end_at),
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-          }
-        }
-        if (body.copy.products) {
-          const categories = await trx
-            .selectFrom('product_categories')
-            .selectAll()
-            .where('event_id', '=', eventId)
-            .execute();
-          const categoryMap = new Map<string, string>();
-          for (const category of categories) {
-            const id = `pcat_${ulid()}`;
-            categoryMap.set(category.id, id);
-            await trx
-              .insertInto('product_categories')
-              .values({
-                ...category,
-                id,
-                event_id: created.id,
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-          }
-          const products = await trx
-            .selectFrom('products')
-            .selectAll()
-            .where('event_id', '=', eventId)
-            .execute();
-          for (const product of products)
-            await trx
-              .insertInto('products')
-              .values({
-                ...product,
-                id: `prod_${ulid()}`,
-                event_id: created.id,
-                category_id: product.category_id
-                  ? (categoryMap.get(product.category_id) ?? null)
-                  : null,
-                available_from: shifted(product.available_from),
-                available_until: shifted(product.available_until),
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-        }
-        if (body.copy.checkoutQuestions) {
-          const questions = await trx
-            .selectFrom('questions')
-            .selectAll()
-            .where('event_id', '=', eventId)
-            .execute();
-          for (const question of questions)
-            await trx
-              .insertInto('questions')
-              .values({
-                ...question,
-                id: `q_${ulid()}`,
-                event_id: created.id,
-                ticket_type_id: question.ticket_type_id
-                  ? (ticketMap.get(question.ticket_type_id) ?? null)
-                  : null,
-                status: question.status,
-                is_hidden: question.is_hidden,
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-        }
-        if (body.copy.feeResalePolicies) {
-          const rules = await trx
-            .selectFrom('fee_rules')
-            .selectAll()
-            .where('event_id', '=', eventId)
-            .execute();
-          for (const rule of rules)
-            await trx
-              .insertInto('fee_rules')
-              .values({
-                ...rule,
-                id: `fee_${ulid()}`,
-                event_id: created.id,
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-        }
-        if (body.copy.marketingIntegrations) {
-          const integrations = await trx
-            .selectFrom('marketing_integrations')
-            .selectAll()
-            .where('tenant_id', '=', source.tenant_id)
-            .where('organization_id', '=', source.organization_id)
-            .where('brand_id', '=', source.brand_id)
-            .where('event_id', '=', eventId)
-            .execute();
-          for (const integration of integrations) {
-            let config: unknown = {};
-            try {
-              config = duplicatedIntegrationConfig(
-                integration.provider,
-                JSON.parse(integration.config),
-              );
-            } catch {
-              config = {};
-            }
-            await trx
-              .insertInto('marketing_integrations')
-              .values({
-                ...integration,
-                id: `mkt_${ulid()}`,
-                event_id: created.id,
-                config: JSON.stringify(config),
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-          }
-        }
-        if (body.copy.eventPageContent || body.copy.lifecycleContent) {
-          const documents = await trx
-            .selectFrom('content_documents')
-            .selectAll()
-            .where('tenant_id', '=', source.tenant_id)
-            .where('organization_id', '=', source.organization_id)
-            .where('brand_id', '=', source.brand_id)
-            .where('event_id', '=', eventId)
-            .execute();
-          for (const document of documents.filter((item) =>
-            item.channel === 'event_page' ? body.copy.eventPageContent : body.copy.lifecycleContent,
-          )) {
-            const documentId = `cdoc_${ulid()}`;
-            await trx
-              .insertInto('content_documents')
-              .values({
-                ...document,
-                id: documentId,
-                event_id: created.id,
-                status: 'draft',
-                current_draft_version_id: null,
-                published_version_id: null,
-                created_at: now,
-                updated_at: now,
-              })
-              .execute();
-            const versions = await trx
-              .selectFrom('content_document_versions')
+          const now = new Date();
+          const occurrenceMap = new Map<string, string>();
+          if (body.copy.basicsVenue) {
+            const occurrences = await trx
+              .selectFrom('event_occurrences')
               .selectAll()
-              .where('document_id', '=', document.id)
-              .orderBy('version_number')
+              .where('event_id', '=', eventId)
               .execute();
-            const sourceVersion =
-              versions.find((version) => version.id === document.current_draft_version_id) ??
-              versions.find((version) => version.id === document.published_version_id) ??
-              versions.at(-1);
-            let draftVersionId: string | null = null;
-            if (sourceVersion) {
-              const id = `cver_${ulid()}`;
-              draftVersionId = id;
+            for (const occurrence of occurrences) {
+              const id = `occ_${ulid()}`;
+              occurrenceMap.set(occurrence.id, id);
               await trx
-                .insertInto('content_document_versions')
+                .insertInto('event_occurrences')
                 .values({
-                  ...sourceVersion,
+                  ...occurrence,
                   id,
-                  document_id: documentId,
-                  version_number: 1,
-                  status: 'draft',
-                  created_by: principal.id,
+                  event_id: created.id,
+                  starts_at: shifted(occurrence.starts_at)!,
+                  ends_at: shifted(occurrence.ends_at)!,
                   created_at: now,
-                  published_at: null,
+                  updated_at: now,
                 })
                 .execute();
             }
-            await trx
-              .updateTable('content_documents')
-              .set({
-                current_draft_version_id: draftVersionId,
-                published_version_id: null,
-              })
-              .where('id', '=', documentId)
-              .execute();
           }
-        }
-        const result = (await events.findById(created.id))!;
-        await writeAuditLog(new AuditLogRepository(trx as typeof db), request, principal, {
-          action: 'event.duplicated',
-          organizationId: source.organization_id,
-          brandId: source.brand_id,
-          resourceType: 'Event',
-          resourceId: result.id,
-          diffSummary: { sourceEventId: eventId, copied: body.copy },
+          const ticketMap = new Map<string, string>();
+          if (body.copy.ticketTypes) {
+            const pools = await trx
+              .selectFrom('inventory_pools')
+              .selectAll()
+              .where('event_id', '=', eventId)
+              .execute();
+            const poolMap = new Map<string, string>();
+            for (const pool of pools) {
+              const id = `inv_${ulid()}`;
+              poolMap.set(pool.id, id);
+              await trx
+                .insertInto('inventory_pools')
+                .values({
+                  id,
+                  event_id: created.id,
+                  name: pool.name,
+                  total_capacity: pool.total_capacity,
+                  hold_ttl_seconds: pool.hold_ttl_seconds,
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+            }
+            const tickets = await trx
+              .selectFrom('ticket_types')
+              .selectAll()
+              .where('event_id', '=', eventId)
+              .execute();
+            for (const ticket of tickets) {
+              const id = `tt_${ulid()}`;
+              ticketMap.set(ticket.id, id);
+              await trx
+                .insertInto('ticket_types')
+                .values({
+                  ...ticket,
+                  id,
+                  event_id: created.id,
+                  status: ticket.status === 'draft' ? 'draft' : 'active',
+                  requires_access_code: false,
+                  access_code_hint: null,
+                  inventory_pool_id: poolMap.get(ticket.inventory_pool_id)!,
+                  event_occurrence_id: ticket.event_occurrence_id
+                    ? (occurrenceMap.get(ticket.event_occurrence_id) ?? null)
+                    : null,
+                  sales_start_at: shifted(ticket.sales_start_at),
+                  sales_end_at: shifted(ticket.sales_end_at),
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+            }
+          }
+          if (body.copy.products) {
+            const categories = await trx
+              .selectFrom('product_categories')
+              .selectAll()
+              .where('event_id', '=', eventId)
+              .execute();
+            const categoryMap = new Map<string, string>();
+            for (const category of categories) {
+              const id = `pcat_${ulid()}`;
+              categoryMap.set(category.id, id);
+              await trx
+                .insertInto('product_categories')
+                .values({
+                  ...category,
+                  id,
+                  event_id: created.id,
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+            }
+            const products = await trx
+              .selectFrom('products')
+              .selectAll()
+              .where('event_id', '=', eventId)
+              .execute();
+            for (const product of products)
+              await trx
+                .insertInto('products')
+                .values({
+                  ...product,
+                  id: `prod_${ulid()}`,
+                  event_id: created.id,
+                  category_id: product.category_id
+                    ? (categoryMap.get(product.category_id) ?? null)
+                    : null,
+                  available_from: shifted(product.available_from),
+                  available_until: shifted(product.available_until),
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+          }
+          if (body.copy.checkoutQuestions) {
+            const questions = await trx
+              .selectFrom('questions')
+              .selectAll()
+              .where('event_id', '=', eventId)
+              .execute();
+            for (const question of questions)
+              await trx
+                .insertInto('questions')
+                .values({
+                  ...question,
+                  id: `q_${ulid()}`,
+                  event_id: created.id,
+                  ticket_type_id: question.ticket_type_id
+                    ? (ticketMap.get(question.ticket_type_id) ?? null)
+                    : null,
+                  status: question.status,
+                  is_hidden: question.is_hidden,
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+          }
+          if (body.copy.feeResalePolicies) {
+            const rules = await trx
+              .selectFrom('fee_rules')
+              .selectAll()
+              .where('event_id', '=', eventId)
+              .execute();
+            for (const rule of rules)
+              await trx
+                .insertInto('fee_rules')
+                .values({
+                  ...rule,
+                  id: `fee_${ulid()}`,
+                  event_id: created.id,
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+          }
+          if (body.copy.marketingIntegrations) {
+            const integrations = await trx
+              .selectFrom('marketing_integrations')
+              .selectAll()
+              .where('tenant_id', '=', source.tenant_id)
+              .where('organization_id', '=', source.organization_id)
+              .where('brand_id', '=', source.brand_id)
+              .where('event_id', '=', eventId)
+              .execute();
+            for (const integration of integrations) {
+              let config: unknown = {};
+              try {
+                config = duplicatedIntegrationConfig(
+                  integration.provider,
+                  JSON.parse(integration.config),
+                );
+              } catch {
+                config = {};
+              }
+              await trx
+                .insertInto('marketing_integrations')
+                .values({
+                  ...integration,
+                  id: `mkt_${ulid()}`,
+                  event_id: created.id,
+                  config: JSON.stringify(config),
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+            }
+          }
+          if (body.copy.eventPageContent || body.copy.lifecycleContent) {
+            const documents = await trx
+              .selectFrom('content_documents')
+              .selectAll()
+              .where('tenant_id', '=', source.tenant_id)
+              .where('organization_id', '=', source.organization_id)
+              .where('brand_id', '=', source.brand_id)
+              .where('event_id', '=', eventId)
+              .execute();
+            for (const document of documents.filter((item) =>
+              item.channel === 'event_page'
+                ? body.copy.eventPageContent
+                : body.copy.lifecycleContent,
+            )) {
+              const documentId = `cdoc_${ulid()}`;
+              await trx
+                .insertInto('content_documents')
+                .values({
+                  ...document,
+                  id: documentId,
+                  event_id: created.id,
+                  status: 'draft',
+                  current_draft_version_id: null,
+                  published_version_id: null,
+                  created_at: now,
+                  updated_at: now,
+                })
+                .execute();
+              const versions = await trx
+                .selectFrom('content_document_versions')
+                .selectAll()
+                .where('document_id', '=', document.id)
+                .orderBy('version_number')
+                .execute();
+              const sourceVersion =
+                versions.find((version) => version.id === document.current_draft_version_id) ??
+                versions.find((version) => version.id === document.published_version_id) ??
+                versions.at(-1);
+              let draftVersionId: string | null = null;
+              if (sourceVersion) {
+                const id = `cver_${ulid()}`;
+                draftVersionId = id;
+                await trx
+                  .insertInto('content_document_versions')
+                  .values({
+                    ...sourceVersion,
+                    id,
+                    document_id: documentId,
+                    version_number: 1,
+                    status: 'draft',
+                    created_by: principal.id,
+                    created_at: now,
+                    published_at: null,
+                  })
+                  .execute();
+              }
+              await trx
+                .updateTable('content_documents')
+                .set({
+                  current_draft_version_id: draftVersionId,
+                  published_version_id: null,
+                })
+                .where('id', '=', documentId)
+                .execute();
+            }
+          }
+          const result = (await events.findById(created.id))!;
+          await writeAuditLog(new AuditLogRepository(trx as typeof db), request, principal, {
+            action: 'event.duplicated',
+            organizationId: source.organization_id,
+            brandId: source.brand_id,
+            resourceType: 'Event',
+            resourceId: result.id,
+            diffSummary: { sourceEventId: eventId, copied: body.copy },
+          });
+          await app.context.eventDuplicationCheckpoint?.({
+            stage: 'after_children_copied',
+            sourceEventId: eventId,
+            duplicatedEventId: created.id,
+          });
+          await trx
+            .updateTable('idempotency_records')
+            .set({
+              response_status: 201,
+              response_body: JSON.stringify(serializeEvent(result)),
+              status: 'completed',
+            })
+            .where('key', '=', idempotencyKey)
+            .where('tenant_id', '=', principal.tenantId)
+            .execute();
+          return result;
         });
-        return result;
-      });
-    return reply.status(201).send(serializeEvent(duplicated));
+      return { status: 201, body: serializeEvent(duplicated) };
+    };
+    const result = await withIdempotency(
+      db,
+      {
+        key: idempotencyKey,
+        tenantId: principal.tenantId,
+        requestHash: hashRequest({ sourceEventId: eventId, body }),
+      },
+      duplicateEvent,
+    );
+    return reply.status(result.status).send(result.body);
   });
 
   app.post('/events/:eventId/publish', async (request, reply) => {
@@ -1354,6 +1774,11 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, existing.organization_id);
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
+    app.observability?.metrics.metrics.onboardingEvents?.inc({
+      stage: 'publish',
+      outcome: 'attempted',
+      reason_code: 'none',
+    });
     if (existing.status === 'published') return serializeEvent(existing);
     if (existing.status === 'archived') {
       return reply.status(409).send({

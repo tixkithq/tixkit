@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createDb,
   BrandRepository,
@@ -8,7 +8,7 @@ import {
   TenantRepository,
   truncateAllData,
   type Database,
-} from "@tixkit/db";
+} from '@tixkit/db';
 import {
   eventbriteApiV3Fixture,
   GenericCsvMigrationAdapter,
@@ -21,74 +21,68 @@ import {
   type MigrationAdapter,
   type MigrationEntityType,
   type NormalizedMigrationEntity,
-} from "@tixkit/migration-core";
-import {
-  MIGRATION_COMMIT_STAGES,
-  MIGRATION_SIDE_EFFECT_POLICY,
-} from "../activities/migration.js";
-import { createProductionMigrationCommitters } from "../activities/migration-domain-committers.js";
-import { createRepositoryMigrationActivityService } from "../activities/migration-repository-service.js";
-import { createMigrationPreparationService } from "../activities/migration-preparation.js";
+} from '@tixkit/migration-core';
+import { MIGRATION_COMMIT_STAGES, MIGRATION_SIDE_EFFECT_POLICY } from '../activities/migration.js';
+import { createProductionMigrationCommitters } from '../activities/migration-domain-committers.js';
+import { createRepositoryMigrationActivityService } from '../activities/migration-repository-service.js';
+import { createMigrationPreparationService } from '../activities/migration-preparation.js';
 
-const url = process.env.DATABASE_URL ?? "";
+const url = process.env.DATABASE_URL ?? '';
 const describeDatabase = url ? describe.sequential : describe.skip;
 
 const attributes: Record<MigrationEntityType, Record<string, unknown>> = {
-  organization: { name: "Imported organization" },
-  brand: { name: "Imported brand" },
-  venue: { name: "Imported venue" },
+  organization: { name: 'Imported organization' },
+  brand: { name: 'Imported brand' },
+  venue: { name: 'Imported venue' },
   event: {
-    title: "Imported event",
-    currency: "USD",
-    timezone: "America/Chicago",
+    title: 'Imported event',
+    currency: 'USD',
+    timezone: 'America/Chicago',
   },
   occurrence: {
-    startsAt: "2026-10-01T18:00:00Z",
-    endsAt: "2026-10-01T20:00:00Z",
-    timezone: "America/Chicago",
+    startsAt: '2026-10-01T18:00:00Z',
+    endsAt: '2026-10-01T20:00:00Z',
+    timezone: 'America/Chicago',
   },
-  "inventory-pool": { name: "General", totalCapacity: 100 },
-  "ticket-type": {
-    name: "General admission",
-    currency: "USD",
+  'inventory-pool': { name: 'General', totalCapacity: 100 },
+  'ticket-type': {
+    name: 'General admission',
+    currency: 'USD',
     priceMinor: 2500,
   },
-  product: { name: "Poster", currency: "USD", priceMinor: 1000 },
-  question: { label: "Dietary requirements", type: "text" },
-  discount: { code: "SAVE10", type: "percentage", value: 10 },
-  "access-code": { code: "LOCKED" },
-  buyer: { email: "buyer@example.test" },
-  attendee: { email: "attendee@example.test" },
-  "historical-order": {
-    orderNumber: "OLD-1",
-    currency: "USD",
+  product: { name: 'Poster', currency: 'USD', priceMinor: 1000 },
+  question: { label: 'Dietary requirements', type: 'text' },
+  discount: { code: 'SAVE10', type: 'percentage', value: 10 },
+  'access-code': { code: 'LOCKED' },
+  buyer: { email: 'buyer@example.test' },
+  attendee: { email: 'attendee@example.test' },
+  'historical-order': {
+    orderNumber: 'OLD-1',
+    currency: 'USD',
     totalMinor: 2500,
-    buyerEmail: "buyer@example.test",
+    buyerEmail: 'buyer@example.test',
   },
-  ticket: { code: "OLD-TICKET-1" },
-  "historical-payment": {},
-  "historical-refund": {},
-  "check-in": { occurredAt: "2026-10-01T18:30:00Z" },
+  ticket: { code: 'OLD-TICKET-1' },
+  'historical-payment': {},
+  'historical-refund': {},
+  'check-in': { occurredAt: '2026-10-01T18:30:00Z' },
 };
 
-function entity(
-  type: MigrationEntityType,
-  index: number,
-): NormalizedMigrationEntity {
+function entity(type: MigrationEntityType, index: number): NormalizedMigrationEntity {
   const financialSnapshot =
-    type === "historical-payment" || type === "historical-refund"
+    type === 'historical-payment' || type === 'historical-refund'
       ? {
           kind: type,
-          amountMinor: type === "historical-payment" ? 2500 : 500,
-          currency: "USD",
-          occurredAt: "2026-10-01T18:00:00Z",
+          amountMinor: type === 'historical-payment' ? 2500 : 500,
+          currency: 'USD',
+          occurredAt: '2026-10-01T18:00:00Z',
           provenance: {
-            sourceSystem: "generic-csv",
+            sourceSystem: 'generic-csv',
             sourceExternalId: `${type}-1`,
-            importedAt: "2026-10-02T00:00:00Z",
+            importedAt: '2026-10-02T00:00:00Z',
           },
-          reconciliationStatus: "unreconciled" as const,
-          sideEffects: "suppressed" as const,
+          reconciliationStatus: 'unreconciled' as const,
+          sideEffects: 'suppressed' as const,
         }
       : undefined;
   return {
@@ -96,46 +90,43 @@ function entity(
     externalId: `${type}-1`,
     sourcePosition: `fixture:${index + 1}`,
     attributes: attributes[type],
-    dependencies: MIGRATION_ENTITY_DEPENDENCY_ORDER.slice(0, index).map(
-      (entityType) => ({
-        entityType,
-        externalId: `${entityType}-1`,
-      }),
-    ),
+    dependencies: MIGRATION_ENTITY_DEPENDENCY_ORDER.slice(0, index).map((entityType) => ({
+      entityType,
+      externalId: `${entityType}-1`,
+    })),
     ...(financialSnapshot ? { financialSnapshot } : {}),
   };
 }
 
-describeDatabase("production migration committers", () => {
+describeDatabase('production migration committers', () => {
   let db: Database;
   let tenantId: string;
   let organizationId: string;
   let brandId: string;
 
   beforeAll(async () => {
-    process.env.DB_DRIVER =
-      process.env.DB_INTEGRATION_DRIVER === "mysql" ? "mysql" : "postgres";
+    process.env.DB_DRIVER = process.env.DB_INTEGRATION_DRIVER === 'mysql' ? 'mysql' : 'postgres';
     await runMigrations(url);
     db = createDb(url);
     await truncateAllData(db);
     tenantId = (
       await new TenantRepository(db).create({
-        name: "Migration committer test",
+        name: 'Migration committer test',
       })
     ).id;
     organizationId = (
       await new OrganizationRepository(db).create({
         tenantId,
-        name: "Migration organization",
-        slug: "migration-organization",
+        name: 'Migration organization',
+        slug: 'migration-organization',
       })
     ).id;
     brandId = (
       await new BrandRepository(db).create({
         tenantId,
         organizationId,
-        name: "Existing migration target brand",
-        slug: "existing-migration-target-brand",
+        name: 'Existing migration target brand',
+        slug: 'existing-migration-target-brand',
       })
     ).id;
   });
@@ -147,11 +138,11 @@ describeDatabase("production migration committers", () => {
     const job = await repository.createJob({
       tenantId,
       organizationId,
-      sourceSystem: "generic-csv",
-      adapterVersion: "1.0.0",
-      mode: "commit",
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
       idempotencyKey,
-      requestedBy: "test-user",
+      requestedBy: 'test-user',
     });
     const entities = MIGRATION_ENTITY_DEPENDENCY_ORDER.map(entity);
     await repository.addRows(
@@ -164,15 +155,15 @@ describeDatabase("production migration committers", () => {
         rowNumber: index + 1,
         sourceData: normalized.attributes,
         normalizedData: normalized,
-        status: "validated",
+        status: 'validated',
       })),
     );
     await repository.transitionJob({
       tenantId,
       organizationId,
       jobId: job.id,
-      from: ["pending"],
-      to: "ready",
+      from: ['pending'],
+      to: 'ready',
     });
     const service = createRepositoryMigrationActivityService(
       db,
@@ -210,53 +201,49 @@ describeDatabase("production migration committers", () => {
     return job;
   }
 
-  it("imports the canonical dependency chain idempotently without commerce side effects", async () => {
-    const firstJob = await importChain("chain:first");
+  it('imports the canonical dependency chain idempotently without commerce side effects', async () => {
+    const firstJob = await importChain('chain:first');
     const imports = new ImportRepository(db);
     const eventReference = await imports.findExternalReference({
       tenantId,
       organizationId,
-      sourceSystem: "generic-csv",
-      entityType: "event",
-      externalId: "event-1",
+      sourceSystem: 'generic-csv',
+      entityType: 'event',
+      externalId: 'event-1',
     });
     const eventBefore = await db
-      .selectFrom("events")
-      .select(["updated_at"])
-      .where("id", "=", eventReference!.tixkit_id)
+      .selectFrom('events')
+      .select(['updated_at'])
+      .where('id', '=', eventReference!.tixkit_id)
       .executeTakeFirstOrThrow();
-    await importChain("chain:reimport");
-    const lifecycleEvents = await imports.listEvents(
-      tenantId,
-      organizationId,
-      firstJob.id,
-    );
+    await importChain('chain:reimport');
+    const lifecycleEvents = await imports.listEvents(tenantId, organizationId, firstJob.id);
     expect(lifecycleEvents.map((event) => event.sequence)).toEqual(
       lifecycleEvents.map((_event, index) => index + 1),
     );
     expect(lifecycleEvents.map((event) => event.type)).toEqual(
       expect.arrayContaining([
-        "commit.begin",
-        "commit.progress",
-        "commit.reconciled",
-        "commit.completed",
+        'commit.begin',
+        'commit.progress',
+        'commit.reconciled',
+        'commit.completed',
       ]),
     );
     const eventAfter = await db
-      .selectFrom("events")
-      .select(["updated_at"])
-      .where("id", "=", eventReference!.tixkit_id)
+      .selectFrom('events')
+      .select(['updated_at'])
+      .where('id', '=', eventReference!.tixkit_id)
       .executeTakeFirstOrThrow();
     expect(new Date(eventAfter.updated_at).toISOString()).toBe(
       new Date(eventBefore.updated_at).toISOString(),
     );
     await db
-      .updateTable("events")
-      .set({ title: "Edited after import", updated_at: eventAfter.updated_at })
-      .where("id", "=", eventReference!.tixkit_id)
+      .updateTable('events')
+      .set({ title: 'Edited after import', updated_at: eventAfter.updated_at })
+      .where('id', '=', eventReference!.tixkit_id)
       .execute();
     await expect(
-      createProductionMigrationCommitters(db).get("event")!.deleteUntouched({
+      createProductionMigrationCommitters(db).get('event')!.deleteUntouched({
         tenantId,
         organizationId,
         jobId: firstJob.id,
@@ -268,32 +255,31 @@ describeDatabase("production migration committers", () => {
       Number(
         (
           await db
-            .selectFrom("imported_domain_entities")
-            .select(({ fn }) => fn.countAll<number>().as("count"))
-            .where("tenant_id", "=", tenantId)
+            .selectFrom('imported_domain_entities')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
+            .where('tenant_id', '=', tenantId)
             .executeTakeFirstOrThrow()
         ).count,
       ),
     ).toBe(18);
     const snapshots = await db
-      .selectFrom("imported_domain_entities")
-      .select(["entity_type", "side_effects_suppressed", "financial_snapshot"])
-      .where("tenant_id", "=", tenantId)
-      .where("entity_type", "in", ["historical-payment", "historical-refund"])
+      .selectFrom('imported_domain_entities')
+      .select(['entity_type', 'side_effects_suppressed', 'financial_snapshot'])
+      .where('tenant_id', '=', tenantId)
+      .where('entity_type', 'in', ['historical-payment', 'historical-refund'])
       .execute();
     expect(snapshots).toHaveLength(2);
     expect(
       snapshots.every(
-        (snapshot) =>
-          snapshot.side_effects_suppressed && snapshot.financial_snapshot,
+        (snapshot) => snapshot.side_effects_suppressed && snapshot.financial_snapshot,
       ),
     ).toBe(true);
     expect(
       Number(
         (
           await db
-            .selectFrom("payment_events")
-            .select(({ fn }) => fn.countAll<number>().as("count"))
+            .selectFrom('payment_events')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
             .executeTakeFirstOrThrow()
         ).count,
       ),
@@ -302,8 +288,8 @@ describeDatabase("production migration committers", () => {
       Number(
         (
           await db
-            .selectFrom("webhook_deliveries")
-            .select(({ fn }) => fn.countAll<number>().as("count"))
+            .selectFrom('webhook_deliveries')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
             .executeTakeFirstOrThrow()
         ).count,
       ),
@@ -312,26 +298,26 @@ describeDatabase("production migration committers", () => {
     const ticketReference = await imports.findExternalReference({
       tenantId,
       organizationId,
-      sourceSystem: "generic-csv",
-      entityType: "ticket",
-      externalId: "ticket-1",
+      sourceSystem: 'generic-csv',
+      entityType: 'ticket',
+      externalId: 'ticket-1',
     });
     expect(ticketReference).toBeDefined();
     const ticketBeforeEdit = await db
-      .selectFrom("tickets")
-      .select(["updated_at"])
-      .where("id", "=", ticketReference!.tixkit_id)
+      .selectFrom('tickets')
+      .select(['updated_at'])
+      .where('id', '=', ticketReference!.tixkit_id)
       .executeTakeFirstOrThrow();
     await db
-      .updateTable("tickets")
+      .updateTable('tickets')
       .set({
-        code: "same-timestamp-edit",
+        code: 'same-timestamp-edit',
         updated_at: ticketBeforeEdit.updated_at,
       })
-      .where("id", "=", ticketReference!.tixkit_id)
+      .where('id', '=', ticketReference!.tixkit_id)
       .execute();
     await expect(
-      createProductionMigrationCommitters(db).get("ticket")!.assessUntouched({
+      createProductionMigrationCommitters(db).get('ticket')!.assessUntouched({
         tenantId,
         organizationId,
         jobId: firstJob.id,
@@ -339,23 +325,19 @@ describeDatabase("production migration committers", () => {
       }),
     ).resolves.toMatchObject({
       eligible: false,
-      reason: "Authoritative domain activity or canonical edit detected",
+      reason: 'Authoritative domain activity or canonical edit detected',
     });
     await imports.markRollbackBlocked({
       tenantId,
       organizationId,
-      entityType: "ticket",
+      entityType: 'ticket',
       tixkitId: ticketReference!.tixkit_id,
-      reason: "scan recorded after import",
+      reason: 'scan recorded after import',
     });
-    const eligibility = await imports.getRollbackEligibility(
-      tenantId,
-      organizationId,
-      firstJob.id,
-    );
+    const eligibility = await imports.getRollbackEligibility(tenantId, organizationId, firstJob.id);
     expect(eligibility).toMatchObject({
       eligible: false,
-      mode: "corrective-plan",
+      mode: 'corrective-plan',
     });
     const rollbackService = createRepositoryMigrationActivityService(
       db,
@@ -369,20 +351,16 @@ describeDatabase("production migration committers", () => {
     });
     expect(assessment).toMatchObject({
       eligible: false,
-      mode: "corrective_plan",
+      mode: 'corrective_plan',
     });
-    const correctivePlan = (
-      await imports.listEvents(tenantId, organizationId, firstJob.id)
-    ).find((event) => event.type === "rollback.corrective-plan");
-    expect(correctivePlan?.id).toBe(
-      assessment.eligible ? undefined : assessment.correctivePlanId,
+    const correctivePlan = (await imports.listEvents(tenantId, organizationId, firstJob.id)).find(
+      (event) => event.type === 'rollback.corrective-plan',
     );
+    expect(correctivePlan?.id).toBe(assessment.eligible ? undefined : assessment.correctivePlanId);
     expect(JSON.parse(correctivePlan!.data!)).toMatchObject({
       immutable: true,
-      blockers: [{ reason: "scan recorded after import" }],
-      safeActions: expect.arrayContaining([
-        expect.stringContaining("corrective"),
-      ]),
+      blockers: [{ reason: 'scan recorded after import' }],
+      safeActions: expect.arrayContaining([expect.stringContaining('corrective')]),
     });
     const replayedAssessment = await rollbackService.assessRollback({
       tenantId,
@@ -395,106 +373,100 @@ describeDatabase("production migration committers", () => {
     const changedSnapshotJob = await imports.createJob({
       tenantId,
       organizationId,
-      sourceSystem: "generic-csv",
-      adapterVersion: "1.0.0",
-      mode: "commit",
-      idempotencyKey: "financial:changed",
-      requestedBy: "test-user",
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: 'financial:changed',
+      requestedBy: 'test-user',
     });
     const changedPayment = entity(
-      "historical-payment",
-      MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf("historical-payment"),
+      'historical-payment',
+      MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf('historical-payment'),
     );
     changedPayment.financialSnapshot = {
       ...changedPayment.financialSnapshot!,
       amountMinor: changedPayment.financialSnapshot!.amountMinor + 1,
     };
     await expect(
-      createProductionMigrationCommitters(db)
-        .get("historical-payment")!
-        .commit({
-          tenantId,
-          organizationId,
-          jobId: changedSnapshotJob.id,
-          entity: changedPayment,
-          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
-        }),
-    ).resolves.toMatchObject({ disposition: "conflict" });
+      createProductionMigrationCommitters(db).get('historical-payment')!.commit({
+        tenantId,
+        organizationId,
+        jobId: changedSnapshotJob.id,
+        entity: changedPayment,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toMatchObject({ disposition: 'conflict' });
   });
 
-  it("cannot resolve dependencies from another organization in the same tenant", async () => {
-    await importChain("org-isolation:source");
+  it('cannot resolve dependencies from another organization in the same tenant', async () => {
+    await importChain('org-isolation:source');
     const otherOrganization = await new OrganizationRepository(db).create({
       tenantId,
-      name: "Other migration organization",
-      slug: "other-migration-organization",
+      name: 'Other migration organization',
+      slug: 'other-migration-organization',
     });
     const imports = new ImportRepository(db);
     const job = await imports.createJob({
       tenantId,
       organizationId: otherOrganization.id,
-      sourceSystem: "generic-csv",
-      adapterVersion: "1",
-      mode: "commit",
-      idempotencyKey: "org-isolation:target",
-      requestedBy: "test",
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1',
+      mode: 'commit',
+      idempotencyKey: 'org-isolation:target',
+      requestedBy: 'test',
     });
-    const brand = createProductionMigrationCommitters(db).get("brand")!;
+    const brand = createProductionMigrationCommitters(db).get('brand')!;
     await expect(
       brand.commit({
         tenantId,
         organizationId: otherOrganization.id,
         jobId: job.id,
         entity: {
-          entityType: "brand",
-          externalId: "cross-org-brand",
-          sourcePosition: "fixture:cross-org",
-          attributes: { name: "Cross org" },
-          dependencies: [
-            { entityType: "organization", externalId: "organization-1" },
-          ],
+          entityType: 'brand',
+          externalId: 'cross-org-brand',
+          sourcePosition: 'fixture:cross-org',
+          attributes: { name: 'Cross org' },
+          dependencies: [{ entityType: 'organization', externalId: 'organization-1' }],
         },
         sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
       }),
-    ).rejects.toThrow(
-      "MIGRATION_DEPENDENCY_UNRESOLVED:organization:organization-1",
-    );
+    ).rejects.toThrow('MIGRATION_DEPENDENCY_UNRESOLVED:organization:organization-1');
   });
 
-  it("resolves a live scoped credential before commit and sanitizes resolver failures", async () => {
+  it('resolves a live scoped credential before commit and sanitizes resolver failures', async () => {
     const imports = new ImportRepository(db);
     const credential = await imports.createCredential({
       tenantId,
       organizationId,
-      sourceSystem: "pretix",
-      secretReference: "vault://migrations/pretix/test",
+      sourceSystem: 'pretix',
+      secretReference: 'vault://migrations/pretix/test',
       expiresAt: new Date(Date.now() + 60_000),
-      createdBy: "test",
+      createdBy: 'test',
     });
     const createJob = async (key: string) => {
       const job = await imports.createJob({
         tenantId,
         organizationId,
-        sourceSystem: "pretix",
-        adapterVersion: "1",
-        mode: "commit",
+        sourceSystem: 'pretix',
+        adapterVersion: '1',
+        mode: 'commit',
         idempotencyKey: key,
-        requestedBy: "test",
+        requestedBy: 'test',
         configuration: { credentialId: credential.id },
       });
       await imports.transitionJob({
         tenantId,
         organizationId,
         jobId: job.id,
-        from: ["pending"],
-        to: "ready",
+        from: ['pending'],
+        to: 'ready',
       });
       return job;
     };
-    const failedJob = await createJob("credential:failure");
+    const failedJob = await createJob('credential:failure');
     const rejectingResolver = {
       resolve: vi.fn(async () => {
-        throw new Error("vault token and secret details");
+        throw new Error('vault token and secret details');
       }),
     };
     const failingService = createRepositoryMigrationActivityService(
@@ -509,15 +481,13 @@ describeDatabase("production migration committers", () => {
         jobId: failedJob.id,
         sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
       }),
-    ).rejects.toThrow("MIGRATION_CREDENTIAL_UNAVAILABLE");
-    expect(
-      (await imports.findJob(tenantId, organizationId, failedJob.id))?.status,
-    ).toBe("ready");
+    ).rejects.toThrow('MIGRATION_CREDENTIAL_UNAVAILABLE');
+    expect((await imports.findJob(tenantId, organizationId, failedJob.id))?.status).toBe('ready');
 
-    const liveJob = await createJob("credential:success");
+    const liveJob = await createJob('credential:success');
     const liveResolver = {
       resolve: vi.fn(async () => ({
-        material: "ephemeral",
+        material: 'ephemeral',
         expiresAt: new Date(Date.now() + 30_000).toISOString(),
       })),
     };
@@ -536,58 +506,52 @@ describeDatabase("production migration committers", () => {
       expect.objectContaining({
         tenantId,
         organizationId,
-        sourceSystem: "pretix",
-        secretReference: "vault://migrations/pretix/test",
+        sourceSystem: 'pretix',
+        secretReference: 'vault://migrations/pretix/test',
       }),
       {},
     );
-    expect(
-      (await imports.findJob(tenantId, organizationId, liveJob.id))?.status,
-    ).toBe("committing");
+    expect((await imports.findJob(tenantId, organizationId, liveJob.id))?.status).toBe(
+      'committing',
+    );
   });
 
   it.each([
     {
-      sourceSystem: "generic-csv" as const,
+      sourceSystem: 'generic-csv' as const,
       configuration: {
         documents: [
           {
-            name: "events.csv",
+            name: 'events.csv',
             content:
-              "external_id,brand_external_id,name,starts_at,ends_at,timezone,currency\nevent-prod,brand-existing,Production import,2027-07-10T18:00:00Z,2027-07-10T22:00:00Z,UTC,USD\n",
+              'external_id,brand_external_id,name,starts_at,ends_at,timezone,currency\nevent-prod,brand-existing,Production import,2027-07-10T18:00:00Z,2027-07-10T22:00:00Z,UTC,USD\n',
           },
         ],
       },
     },
     {
-      sourceSystem: "pretix" as const,
+      sourceSystem: 'pretix' as const,
       configuration: SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
     },
     {
-      sourceSystem: "hi-events" as const,
+      sourceSystem: 'hi-events' as const,
       configuration: SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE,
     },
     {
-      sourceSystem: "eventbrite" as const,
+      sourceSystem: 'eventbrite' as const,
       configuration: eventbriteApiV3Fixture,
     },
     {
-      sourceSystem: "ticket-tailor" as const,
+      sourceSystem: 'ticket-tailor' as const,
       configuration: ticketTailorApiV1Fixture,
     },
   ])(
-    "persists the $sourceSystem official corpus through durable production rows and resumes at the exact cursor",
+    'persists the $sourceSystem official corpus through durable production rows and resumes at the exact cursor',
     async ({ sourceSystem, configuration }) => {
       const adapter =
-        sourceSystem === "generic-csv"
-          ? (new GenericCsvMigrationAdapter() as MigrationAdapter<
-              unknown,
-              string
-            >)
-          : (migrationAdapter(sourceSystem) as MigrationAdapter<
-              unknown,
-              string
-            >);
+        sourceSystem === 'generic-csv'
+          ? (new GenericCsvMigrationAdapter() as MigrationAdapter<unknown, string>)
+          : (migrationAdapter(sourceSystem) as MigrationAdapter<unknown, string>);
       const context = { tenantId, organizationId };
       const discovery = await adapter.discover(configuration, context);
       const sourceEntities: NormalizedMigrationEntity[] = [];
@@ -600,8 +564,7 @@ describeDatabase("production migration committers", () => {
           limit: 2,
           context,
         });
-        for (const row of page.rows)
-          sourceEntities.push(await adapter.normalize(row, context));
+        for (const row of page.rows) sourceEntities.push(await adapter.normalize(row, context));
         cursor = page.nextCursor;
       } while (cursor);
       expect(sourceEntities.length).toBeGreaterThan(0);
@@ -616,16 +579,16 @@ describeDatabase("production migration committers", () => {
         organizationId,
         sourceSystem,
         adapterVersion: adapter.supportedVersions[0]!,
-        mode: "commit",
+        mode: 'commit',
         idempotencyKey: `production-corpus-${sourceSystem}`,
-        requestedBy: "test-user",
+        requestedBy: 'test-user',
       });
       await repository.transitionJob({
         tenantId,
         organizationId,
         jobId: job.id,
-        from: ["pending"],
-        to: "preparing",
+        from: ['pending'],
+        to: 'preparing',
       });
       const split = Math.max(1, Math.floor(entities.length / 2));
       const persist = async (
@@ -648,9 +611,7 @@ describeDatabase("production migration committers", () => {
               externalId: normalized.externalId,
               sourceData: { sourcePosition: normalized.sourcePosition },
               normalizedData: normalized,
-              issues: sourceKeys.has(
-                `${normalized.entityType}:${normalized.externalId}`,
-              )
+              issues: sourceKeys.has(`${normalized.entityType}:${normalized.externalId}`)
                 ? (await adapter.validate(normalized, context)).map(
                     ({ code, severity, message }) => ({
                       code,
@@ -662,34 +623,15 @@ describeDatabase("production migration committers", () => {
             })),
           ),
         });
-      await persist(
-        entities.slice(0, split),
-        0,
-        `${sourceSystem}:first`,
-        false,
-      );
-      const recovered = await repository.preparationProgress(
-        tenantId,
-        organizationId,
-        job.id,
-      );
+      await persist(entities.slice(0, split), 0, `${sourceSystem}:first`, false);
+      const recovered = await repository.preparationProgress(tenantId, organizationId, job.id);
       expect(recovered).toEqual({
         cursor: `${sourceSystem}:resume:${split}`,
         rowNumber: split,
         completed: false,
       });
-      await persist(
-        entities.slice(split),
-        recovered.rowNumber,
-        `${sourceSystem}:second`,
-        true,
-      );
-      await persist(
-        entities.slice(split),
-        recovered.rowNumber,
-        `${sourceSystem}:second`,
-        true,
-      );
+      await persist(entities.slice(split), recovered.rowNumber, `${sourceSystem}:second`, true);
+      await persist(entities.slice(split), recovered.rowNumber, `${sourceSystem}:second`, true);
       const rows = await repository.listRows({
         tenantId,
         organizationId,
@@ -698,35 +640,28 @@ describeDatabase("production migration committers", () => {
       });
       expect(rows).toHaveLength(entities.length);
       expect(rows.every((row) => row.normalized_data !== null)).toBe(true);
-      expect(
-        (await repository.findJob(tenantId, organizationId, job.id))?.status,
-      ).toBe("prepared");
+      expect((await repository.findJob(tenantId, organizationId, job.id))?.status).toBe('prepared');
       await repository.transitionJob({
         tenantId,
         organizationId,
         jobId: job.id,
-        from: ["prepared"],
-        to: "ready",
+        from: ['prepared'],
+        to: 'ready',
       });
       const committers = createRepositoryMigrationActivityService(
         db,
         createProductionMigrationCommitters(db),
       );
-      const entityKeys = new Set(
-        entities.map((item) => `${item.entityType}:${item.externalId}`),
-      );
+      const entityKeys = new Set(entities.map((item) => `${item.entityType}:${item.externalId}`));
       for (const item of entities) {
         for (const dependency of item.dependencies ?? []) {
-          if (
-            dependency.entityType !== "brand" ||
-            entityKeys.has(`brand:${dependency.externalId}`)
-          )
+          if (dependency.entityType !== 'brand' || entityKeys.has(`brand:${dependency.externalId}`))
             continue;
           await repository.recordExternalReference({
             tenantId,
             organizationId,
             sourceSystem,
-            entityType: "brand",
+            entityType: 'brand',
             externalId: dependency.externalId,
             tixkitId: brandId,
             importJobId: job.id,
@@ -749,7 +684,7 @@ describeDatabase("production migration committers", () => {
             const result = await committers.processStage(scope, {
               stage,
               cursor: stageCursor,
-              claimOwner: `${jobId}:${stage}:${stageCursor ?? "first"}`,
+              claimOwner: `${jobId}:${stage}:${stageCursor ?? 'first'}`,
               chunkSize: 2,
             });
             totals.created += result.created;
@@ -759,22 +694,19 @@ describeDatabase("production migration committers", () => {
             if (result.complete) break;
             stageCursor = result.nextCursor;
           }
-          if (stage === "events_occurrences") {
+          if (stage === 'events_occurrences') {
             const missingPools = new Map<string, string>();
             for (const item of entities) {
               const eventDependency = item.dependencies?.find(
-                ({ entityType }) => entityType === "event",
+                ({ entityType }) => entityType === 'event',
               );
               for (const dependency of item.dependencies ?? []) {
                 if (
-                  dependency.entityType === "inventory-pool" &&
+                  dependency.entityType === 'inventory-pool' &&
                   !entityKeys.has(`inventory-pool:${dependency.externalId}`) &&
                   eventDependency
                 )
-                  missingPools.set(
-                    dependency.externalId,
-                    eventDependency.externalId,
-                  );
+                  missingPools.set(dependency.externalId, eventDependency.externalId);
               }
             }
             for (const [poolExternalId, eventExternalId] of missingPools) {
@@ -782,7 +714,7 @@ describeDatabase("production migration committers", () => {
                 tenantId,
                 organizationId,
                 sourceSystem,
-                entityType: "inventory-pool",
+                entityType: 'inventory-pool',
                 externalId: poolExternalId,
               });
               if (existingPool) continue;
@@ -790,18 +722,17 @@ describeDatabase("production migration committers", () => {
                 tenantId,
                 organizationId,
                 sourceSystem,
-                entityType: "event",
+                entityType: 'event',
                 externalId: eventExternalId,
               });
-              if (!eventReference)
-                throw new Error("TEST_EVENT_MAPPING_REQUIRED");
-              const poolId = `pool_${sourceSystem.replaceAll("-", "_")}_${missingPools.size}`;
+              if (!eventReference) throw new Error('TEST_EVENT_MAPPING_REQUIRED');
+              const poolId = `pool_${sourceSystem.replaceAll('-', '_')}_${missingPools.size}`;
               await db
-                .insertInto("inventory_pools")
+                .insertInto('inventory_pools')
                 .values({
                   id: poolId,
                   event_id: eventReference.tixkit_id,
-                  name: "Existing mapped capacity",
+                  name: 'Existing mapped capacity',
                   total_capacity: 10_000,
                   reserved_count: 0,
                   sold_count: 0,
@@ -814,7 +745,7 @@ describeDatabase("production migration committers", () => {
                 tenantId,
                 organizationId,
                 sourceSystem,
-                entityType: "inventory-pool",
+                entityType: 'inventory-pool',
                 externalId: poolExternalId,
                 tixkitId: poolId,
                 importJobId: jobId,
@@ -828,25 +759,23 @@ describeDatabase("production migration committers", () => {
       };
       const firstCommit = await commitJob(job.id);
       expect(firstCommit.conflicts).toBe(0);
-      expect(
-        firstCommit.created + firstCommit.updated + firstCommit.skipped,
-      ).toBe(entities.length);
+      expect(firstCommit.created + firstCommit.updated + firstCommit.skipped).toBe(entities.length);
 
       const replay = await repository.createJob({
         tenantId,
         organizationId,
         sourceSystem,
         adapterVersion: adapter.supportedVersions[0]!,
-        mode: "commit",
+        mode: 'commit',
         idempotencyKey: `production-corpus-replay-${sourceSystem}`,
-        requestedBy: "test-user",
+        requestedBy: 'test-user',
       });
       await repository.transitionJob({
         tenantId,
         organizationId,
         jobId: replay.id,
-        from: ["pending"],
-        to: "preparing",
+        from: ['pending'],
+        to: 'preparing',
       });
       await repository.persistPreparationChunk({
         tenantId,
@@ -876,8 +805,8 @@ describeDatabase("production migration committers", () => {
         tenantId,
         organizationId,
         jobId: replay.id,
-        from: ["prepared"],
-        to: "ready",
+        from: ['prepared'],
+        to: 'ready',
       });
       const secondCommit = await commitJob(replay.id);
       expect(secondCommit).toMatchObject({
@@ -892,27 +821,27 @@ describeDatabase("production migration committers", () => {
 
   it.each([
     {
-      sourceSystem: "pretix" as const,
+      sourceSystem: 'pretix' as const,
       configuration: {
-        sourceMode: "official-api" as const,
-        sourceSystem: "pretix" as const,
-        organizerSlug: "sample-organizer",
-        eventSlugs: ["sample-event"],
+        sourceMode: 'official-api' as const,
+        sourceSystem: 'pretix' as const,
+        organizerSlug: 'sample-organizer',
+        eventSlugs: ['sample-event'],
       },
       fixture: SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
     },
     {
-      sourceSystem: "hi-events" as const,
+      sourceSystem: 'hi-events' as const,
       configuration: {
-        sourceMode: "official-api" as const,
-        sourceSystem: "hi-events" as const,
-        accountId: "sample-account",
-        eventIds: ["event-1"],
+        sourceMode: 'official-api' as const,
+        sourceSystem: 'hi-events' as const,
+        accountId: 'sample-account',
+        eventIds: ['event-1'],
       },
       fixture: SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE,
     },
   ])(
-    "acquires native $sourceSystem multi-resource API pages with exact durable resume",
+    'acquires native $sourceSystem multi-resource API pages with exact durable resume',
     async ({ sourceSystem, configuration, fixture }) => {
       const repository = new ImportRepository(db);
       const credential = await repository.createCredential({
@@ -921,7 +850,7 @@ describeDatabase("production migration committers", () => {
         sourceSystem,
         secretReference: `vault://migrations/${sourceSystem}/native-fixture`,
         expiresAt: new Date(Date.now() + 60_000),
-        createdBy: "test-user",
+        createdBy: 'test-user',
       });
       const adapter = migrationAdapter(sourceSystem);
       const job = await repository.createJob({
@@ -929,9 +858,9 @@ describeDatabase("production migration committers", () => {
         organizationId,
         sourceSystem,
         adapterVersion: adapter.supportedVersions[0]!,
-        mode: "commit",
+        mode: 'commit',
         idempotencyKey: `native-api-preparation-${sourceSystem}`,
-        requestedBy: "test-user",
+        requestedBy: 'test-user',
         configuration: { ...configuration, credentialId: credential.id },
       });
       const grouped = new Map<string, Record<string, unknown>[]>();
@@ -948,11 +877,11 @@ describeDatabase("production migration committers", () => {
           grouped.set(key, values);
         }
       }
-      const order = grouped.get("orders")?.[0];
+      const order = grouped.get('orders')?.[0];
       if (order) {
-        order.payments = grouped.get("payments") ?? [];
-        order.refunds = grouped.get("refunds") ?? [];
-        if (sourceSystem === "pretix") {
+        order.payments = grouped.get('payments') ?? [];
+        order.refunds = grouped.get('refunds') ?? [];
+        if (sourceSystem === 'pretix') {
           const positions = order.positions as Array<Record<string, unknown>>;
           for (const position of positions) delete position.checkins;
         }
@@ -962,48 +891,38 @@ describeDatabase("production migration committers", () => {
         const url = new URL(String(input));
         requested.push(url.href);
         let key: string;
-        if (sourceSystem === "pretix") {
+        if (sourceSystem === 'pretix') {
           if (url.pathname.endsWith('/checkinlists/7/positions/')) {
-            const checkins = grouped.get("checkins") ?? [];
-            const continuation = url.searchParams.get("continuation");
+            const checkins = grouped.get('checkins') ?? [];
+            const continuation = url.searchParams.get('continuation');
             return new Response(
               JSON.stringify({
                 results: continuation
                   ? [
                       {
                         id: String(
-                          ((
-                            order?.positions as
-                              Array<Record<string, unknown>> | undefined
-                          )?.[0]?.id as string | number | undefined) ??
-                            "position-100",
+                          ((order?.positions as Array<Record<string, unknown>> | undefined)?.[0]
+                            ?.id as string | number | undefined) ?? 'position-100',
                         ),
                         checkins,
                       },
                     ]
-                  : [{ id: "position-empty", checkins: [] }],
+                  : [{ id: 'position-empty', checkins: [] }],
                 ...(!continuation
-                  ? { pagination: { continuation: "checkin-position-page-2" } }
+                  ? { pagination: { continuation: 'checkin-position-page-2' } }
                   : {}),
               }),
-              { status: 200, headers: { "content-type": "application/json" } },
+              { status: 200, headers: { 'content-type': 'application/json' } },
             );
           }
           if (url.pathname.endsWith('/checkinlists/')) {
-            return new Response(
-              JSON.stringify({ results: [{ id: 7, name: "Default" }] }),
-              {
-                status: 200,
-                headers: { "content-type": "application/json" },
-              },
-            );
+            return new Response(JSON.stringify({ results: [{ id: 7, name: 'Default' }] }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
           }
-          const match = /\/(quotas|items|questions|vouchers|orders)\//u.exec(
-            url.pathname,
-          );
-          key =
-            match?.[1] ??
-            (url.pathname.endsWith("/events/") ? "events" : "organizers");
+          const match = /\/(quotas|items|questions|vouchers|orders)\//u.exec(url.pathname);
+          key = match?.[1] ?? (url.pathname.endsWith('/events/') ? 'events' : 'organizers');
         } else {
           const match =
             /\/(capacity-assignments|products|questions|promo-codes|orders|check-ins)$/u.exec(
@@ -1011,51 +930,42 @@ describeDatabase("production migration committers", () => {
             );
           key =
             match?.[1] ??
-            (url.pathname === "/api/account"
-              ? "accounts"
-              : url.pathname === "/api/venues"
-                ? "venues"
-                : "events");
+            (url.pathname === '/api/account'
+              ? 'accounts'
+              : url.pathname === '/api/venues'
+                ? 'venues'
+                : 'events');
         }
         const bodies = grouped.get(key) ?? [];
-        const continuation = url.searchParams.get("continuation");
-        const paginate =
-          (key === "items" || key === "products") && bodies.length > 1;
+        const continuation = url.searchParams.get('continuation');
+        const paginate = (key === 'items' || key === 'products') && bodies.length > 1;
         const results = paginate
-          ? continuation === "native-page-2"
+          ? continuation === 'native-page-2'
             ? bodies.slice(1)
             : bodies.slice(0, 1)
           : bodies;
         return new Response(
           JSON.stringify({
             results,
-            ...(paginate && !continuation
-              ? { pagination: { continuation: "native-page-2" } }
-              : {}),
+            ...(paginate && !continuation ? { pagination: { continuation: 'native-page-2' } } : {}),
           }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          { status: 200, headers: { 'content-type': 'application/json' } },
         );
       });
       const runtime = {
         fetch: fetcher as typeof fetch,
-        resolveHost: vi.fn(async () => [
-          { address: "8.8.8.8", family: 4 },
-        ]) as never,
+        resolveHost: vi.fn(async () => [{ address: '8.8.8.8', family: 4 }]) as never,
         signal: new AbortController().signal,
         heartbeat: vi.fn(),
-        cursorEncryptionKey: Buffer.alloc(32, 7).toString("base64"),
+        cursorEncryptionKey: Buffer.alloc(32, 7).toString('base64'),
       };
       const resolver = {
         resolve: vi.fn(async () => ({
-          material: "ephemeral-native-fixture-token",
+          material: 'ephemeral-native-fixture-token',
           expiresAt: new Date(Date.now() + 30_000).toISOString(),
         })),
       };
-      const firstWorker = createMigrationPreparationService(
-        db,
-        resolver,
-        runtime,
-      );
+      const firstWorker = createMigrationPreparationService(db, resolver, runtime);
       const first = await firstWorker.prepare({
         tenantId,
         organizationId,
@@ -1063,11 +973,7 @@ describeDatabase("production migration committers", () => {
         chunkSize: 100,
       });
       expect(first.completed).toBe(false);
-      const recoveredWorker = createMigrationPreparationService(
-        db,
-        resolver,
-        runtime,
-      );
+      const recoveredWorker = createMigrationPreparationService(db, resolver, runtime);
       let result = await recoveredWorker.prepare({
         tenantId,
         organizationId,
@@ -1090,27 +996,22 @@ describeDatabase("production migration committers", () => {
       });
       expect(rows).toHaveLength(18);
       const types = new Set(rows.map(({ entity_type }) => entity_type));
-      expect(types.has("historical-payment")).toBe(true);
-      expect(types.has("historical-refund")).toBe(true);
-      expect(types.has("check-in")).toBe(true);
-      expect(
-        requested.some((url) => url.includes("continuation=native-page-2")),
-      ).toBe(true);
-      if (sourceSystem === "pretix") {
-        expect(
-          requested.some((url) => url.includes("/checkinlists/7/positions/")),
-        ).toBe(true);
+      expect(types.has('historical-payment')).toBe(true);
+      expect(types.has('historical-refund')).toBe(true);
+      expect(types.has('check-in')).toBe(true);
+      expect(requested.some((url) => url.includes('continuation=native-page-2'))).toBe(true);
+      if (sourceSystem === 'pretix') {
+        expect(requested.some((url) => url.includes('/checkinlists/7/positions/'))).toBe(true);
         expect(
           requested.some(
             (url) =>
-              url.includes("/checkinlists/7/positions/") &&
-              url.includes("continuation=checkin-position-page-2"),
+              url.includes('/checkinlists/7/positions/') &&
+              url.includes('continuation=checkin-position-page-2'),
           ),
         ).toBe(true);
       }
       expect(
-        (await repository.preparationProgress(tenantId, organizationId, job.id))
-          .completed,
+        (await repository.preparationProgress(tenantId, organizationId, job.id)).completed,
       ).toBe(true);
       expect(resolver.resolve).toHaveBeenCalled();
     },

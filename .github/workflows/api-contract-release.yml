@@ -3,26 +3,26 @@ name: API Contract Release
 on:
   pull_request:
     paths:
-      - "packages/openapi/**"
-      - "packages/api/src/routes/**"
-      - "packages/sdk-*/**"
-      - "packages/domain/**"
-      - "packages/contract-tests/**"
-      - "apps/docs/src/components/**"
-      - "scripts/docs/generate-openapi-reference.mjs"
-      - "scripts/lib/openapi-compatibility.ts"
-      - "scripts/lib/public-artifact-safety.ts"
-      - "scripts/verify-public-api-release.mjs"
-      - "scripts/__tests__/openapi-compatibility.test.ts"
-      - "scripts/__tests__/public-artifact-safety.test.ts"
-      - "artifacts/api/**"
-      - "scripts/build-api-release.ts"
-      - "scripts/__tests__/api-release.test.mjs"
-      - "apps/docs/public/contracts/**"
-      - "apps/docs/src/generated/api-release-index.ts"
-      - "docs/public/reference/migrations/**"
-      - ".github/workflows/api-contract-release.yml"
-      - ".github/workflows/api-post-publication-verify.yml"
+      - 'packages/openapi/**'
+      - 'packages/api/src/routes/**'
+      - 'packages/sdk-*/**'
+      - 'packages/domain/**'
+      - 'packages/contract-tests/**'
+      - 'apps/docs/src/components/**'
+      - 'scripts/docs/generate-openapi-reference.mjs'
+      - 'scripts/lib/openapi-compatibility.ts'
+      - 'scripts/lib/public-artifact-safety.ts'
+      - 'scripts/verify-public-api-release.mjs'
+      - 'scripts/__tests__/openapi-compatibility.test.ts'
+      - 'scripts/__tests__/public-artifact-safety.test.ts'
+      - 'artifacts/api/**'
+      - 'scripts/build-api-release.ts'
+      - 'scripts/__tests__/api-release.test.mjs'
+      - 'apps/docs/public/contracts/**'
+      - 'apps/docs/src/generated/api-release-index.ts'
+      - 'docs/public/reference/migrations/**'
+      - '.github/workflows/api-contract-release.yml'
+      - '.github/workflows/api-post-publication-verify.yml'
   workflow_dispatch:
     inputs:
       approve_breaking:
@@ -100,7 +100,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Rebuild the approved commit with breaking override
         env:
-          ALLOW_BREAKING_API_RELEASE: "1"
+          ALLOW_BREAKING_API_RELEASE: '1'
         run: bun run scripts/build-api-release.ts
       - name: Resolve and verify exact candidate
         id: release

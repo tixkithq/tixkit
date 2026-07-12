@@ -4370,6 +4370,8 @@ components:
           type: string
         boxOfficeSettings:
           $ref: "#/components/schemas/BoxOfficeSettings"
+        eventDefaults:
+          $ref: "#/components/schemas/EventDefaults"
         status:
           type: string
         createdAt:
@@ -4385,6 +4387,52 @@ components:
         - slug
         - boxOfficeSettings
         - status
+    EventDefaults:
+      type: object
+      additionalProperties: false
+      properties:
+        timezone:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+        defaultVenueId:
+          type: string
+          nullable: true
+        eventDescription:
+          type: string
+          maxLength: 10000
+    SavedVenue:
+      type: object
+      properties:
+        id:
+          type: string
+        organizationId:
+          type: string
+        name:
+          type: string
+        address:
+          type: object
+        timezone:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - organizationId
+        - name
+        - address
+        - createdAt
+        - updatedAt
     BoxOfficeSettings:
       type: object
       properties:
@@ -4469,6 +4517,8 @@ components:
           type: string
         boxOfficeSettings:
           $ref: "#/components/schemas/BoxOfficeSettings"
+        eventDefaults:
+          $ref: "#/components/schemas/EventDefaults"
       required:
         - id
         - tenantId
@@ -6350,6 +6400,8 @@ paths:
                   type: string
                 boxOfficeSettings:
                   $ref: "#/components/schemas/BoxOfficeSettings"
+                eventDefaults:
+                  $ref: "#/components/schemas/EventDefaults"
               required:
                 - name
                 - slug
@@ -6633,6 +6685,207 @@ paths:
       operationId: getBrandsByBrandIdEmailSenderIdentities
       tags:
         - Brands
+  /venues:
+    get:
+      operationId: listSavedVenues
+      summary: List reusable organization venues
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: organizationId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Saved venues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SavedVenue"
+              example:
+                - id: resource_example
+                  organizationId: organization_example
+                  name: name example
+                  address: {}
+                  createdAt: 2026-07-10T12:00:00.000Z
+                  updatedAt: 2026-07-10T12:00:00.000Z
+      tags:
+        - Platform
+    post:
+      operationId: createSavedVenue
+      summary: Create a reusable organization venue
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - organizationId
+                - name
+                - address
+              properties:
+                organizationId:
+                  type: string
+                name:
+                  type: string
+                address:
+                  type: object
+                timezone:
+                  type: string
+            example:
+              organizationId: organization_example
+              name: name example
+              address: {}
+      responses:
+        "201":
+          description: Saved venue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedVenue"
+              example:
+                id: resource_example
+                organizationId: organization_example
+                name: name example
+                address: {}
+                createdAt: 2026-07-10T12:00:00.000Z
+                updatedAt: 2026-07-10T12:00:00.000Z
+      tags:
+        - Platform
+  /venues/{venueId}:
+    patch:
+      operationId: updateSavedVenue
+      summary: Update a reusable organization venue
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: venueId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                address:
+                  type: object
+                timezone:
+                  type: string
+            example:
+              name: name example
+              address: {}
+              timezone: timezone example
+      responses:
+        "200":
+          description: Updated saved venue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedVenue"
+              example:
+                id: resource_example
+                organizationId: organization_example
+                name: name example
+                address: {}
+                createdAt: 2026-07-10T12:00:00.000Z
+                updatedAt: 2026-07-10T12:00:00.000Z
+      tags:
+        - Platform
+    delete:
+      operationId: deleteSavedVenue
+      summary: Delete an unused reusable organization venue
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: venueId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Saved venue deleted
+        "409":
+          description: Venue is an event or workspace default
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                error:
+                  code: code example
+                  message: message example
+                  requestId: request_example
+      tags:
+        - Platform
+  /onboarding-events:
+    post:
+      operationId: reportOnboardingEvent
+      summary: Report a privacy-safe onboarding milestone
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - stage
+                - outcome
+              properties:
+                stage:
+                  type: string
+                  enum:
+                    - onboarding_started
+                    - starting_point_selected
+                    - recovery
+                    - autosave_failure
+                    - stale_version_conflict
+                outcome:
+                  type: string
+                  enum:
+                    - started
+                    - blank
+                    - free
+                    - paid
+                    - donation
+                    - multiple
+                    - duplicate
+                    - attempted
+                    - completed
+                    - failed
+                reasonCode:
+                  type: string
+                  enum:
+                    - none
+                    - request_failed
+                    - stale_event_version
+                  default: none
+            example:
+              stage: onboarding_started
+              outcome: started
+      responses:
+        "204":
+          description: Onboarding milestone recorded
+      tags:
+        - Platform
   /events:
     get:
       summary: List events
@@ -6709,6 +6962,8 @@ paths:
       summary: Create event
       security:
         - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -6740,6 +6995,9 @@ paths:
                   format: date-time
                 venue:
                   type: object
+                venueId:
+                  type: string
+                  nullable: true
                 visibility:
                   type: string
                   enum:
@@ -6767,6 +7025,16 @@ paths:
                 externalUrl:
                   type: string
                   format: uri
+                startingPoint:
+                  type: string
+                  enum:
+                    - blank
+                    - free
+                    - paid
+                    - donation
+                    - multiple
+                  default: blank
+                  description: Atomically creates the selected initial ticket inventory or occurrence with the draft.
               required:
                 - organizationId
                 - brandId
@@ -7007,6 +7275,13 @@ paths:
           required: true
           schema:
             type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
       requestBody:
         required: true
         content:
