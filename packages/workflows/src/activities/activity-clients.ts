@@ -3,6 +3,7 @@ import { createDb, EmailJobRepository, type Database } from '@tixkit/db';
 import { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } from '../shared/types.js';
 import { notificationDeliveryWorkflow } from '../workflows/notification.js';
 import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
+import { temporalConnectionOptions } from '../temporal-connection.js';
 
 type TemporalConnection = Awaited<ReturnType<typeof Connection.connect>>;
 
@@ -49,7 +50,7 @@ async function getNotificationTemporalClient(): Promise<Client> {
   if (cachedNotificationClient) return cachedNotificationClient;
   if (notificationClientPromise) return notificationClientPromise;
 
-  notificationClientPromise = Connection.connect({ address: temporalAddress() })
+  notificationClientPromise = Connection.connect(temporalConnectionOptions(temporalAddress()))
     .then((connection) => {
       cachedNotificationConnection = connection;
       cachedNotificationClient = new Client({

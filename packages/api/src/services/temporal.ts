@@ -65,6 +65,7 @@ import {
   type MigrationWorkflowState,
   type MigrationRollbackWorkflowInput,
   type MigrationPreparationWorkflowInput,
+  temporalConnectionOptions,
 } from '@tixkit/workflows';
 import { config } from '../config/index.js';
 
@@ -78,9 +79,7 @@ export class TemporalClient {
   }
 
   static async connect(): Promise<TemporalClient> {
-    const connection = await Connection.connect({
-      address: config.temporalAddress,
-    });
+    const connection = await Connection.connect(temporalConnectionOptions(config.temporalAddress));
     const workflowInterceptors = await createWorkflowClientInterceptors();
     const client = new Client({
       connection,

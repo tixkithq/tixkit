@@ -4,6 +4,8 @@ import { buildWorkerStartupFailureMessage } from '../startup-diagnostics.js';
 
 const originalEnv = {
   DATABASE_URL: process.env.DATABASE_URL,
+  DATABASE_URL_MYSQL: process.env.DATABASE_URL_MYSQL,
+  DB_DRIVER: process.env.DB_DRIVER,
   NODE_ENV: process.env.NODE_ENV,
   REDIS_URL: process.env.REDIS_URL,
   TEMPORAL_ADDRESS: process.env.TEMPORAL_ADDRESS,
@@ -22,6 +24,8 @@ const originalEnv = {
 
 afterEach(() => {
   restoreEnv('DATABASE_URL', originalEnv.DATABASE_URL);
+  restoreEnv('DATABASE_URL_MYSQL', originalEnv.DATABASE_URL_MYSQL);
+  restoreEnv('DB_DRIVER', originalEnv.DB_DRIVER);
   restoreEnv('NODE_ENV', originalEnv.NODE_ENV);
   restoreEnv('REDIS_URL', originalEnv.REDIS_URL);
   restoreEnv('TEMPORAL_ADDRESS', originalEnv.TEMPORAL_ADDRESS);
@@ -145,6 +149,14 @@ describe('worker Temporal config', () => {
 
       expect(() => loadConfig(), key).toThrow(`Production worker config requires ${key}`);
     }
+  });
+
+  it('requires the MySQL URL when the MySQL driver is selected', () => {
+    setValidProductionConfig();
+    process.env.DB_DRIVER = 'mysql';
+    delete process.env.DATABASE_URL_MYSQL;
+
+    expect(() => loadConfig()).toThrow('Production worker config requires DATABASE_URL_MYSQL');
   });
 
   it('rejects local production database and Redis endpoints', () => {

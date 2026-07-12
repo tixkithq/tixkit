@@ -1,0 +1,42 @@
+{{- $root := . -}}
+{{- range $component := list "api" "worker" "checkout" "admin" }}
+{{- if $root.Values.availability.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "tixkit.fullname" $root }}-{{ $component }}
+  labels:
+    {{- include "tixkit.labels" $root | nindent 4 }}
+spec:
+  minAvailable: {{ $root.Values.availability.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "tixkit.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+{{- end }}
+{{- $settings := index $root.Values $component -}}
+{{- if $settings.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "tixkit.fullname" $root }}-{{ $component }}
+  labels:
+    {{- include "tixkit.labels" $root | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "tixkit.fullname" $root }}-{{ $component }}
+  minReplicas: {{ $settings.autoscaling.minReplicas }}
+  maxReplicas: {{ $settings.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $settings.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

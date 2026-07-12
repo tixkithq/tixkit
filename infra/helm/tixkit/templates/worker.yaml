@@ -17,10 +17,28 @@ spec:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
+      {{- include "tixkit.podSecurity" (dict "root" . "component" "worker") | nindent 6 }}
       containers:
         - name: worker
           image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.worker.image "digest" .Values.worker.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.security.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: worker-ready
+              mountPath: /tmp
+          livenessProbe:
+            exec:
+              command: ["node", "packages/workflows/dist/healthcheck.js"]
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 2
+          readinessProbe:
+            exec:
+              command: ["node", "packages/workflows/dist/healthcheck.js"]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 2
           envFrom:
             - configMapRef:
                 name: {{ include "tixkit.fullname" . }}-config
@@ -28,3 +46,7 @@ spec:
                 name: {{ .Values.secrets.name }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+      volumes:
+        - name: worker-ready
+          emptyDir:
+            sizeLimit: 16Mi

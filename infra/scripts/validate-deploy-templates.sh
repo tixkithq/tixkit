@@ -14,6 +14,8 @@ require_file() {
 require_file infra/fly/api.toml
 require_file infra/render.yaml
 require_file infra/helm/tixkit/values.yaml
+require_file infra/helm/tixkit/values-evaluation.yaml
+require_file infra/helm/tixkit/values-production.yaml
 require_file infra/docker-compose.yml
 require_file .github/workflows/release-dry-run.yml
 require_file .github/workflows/trusted-release-dry-run.yml
@@ -177,8 +179,8 @@ validate_frontend_public_api_build_config() {
     fail 'Dockerfile.checkout must reject missing NEXT_PUBLIC_TIXKIT_API_BASE_URL before build'
   grep -Fq 'https://*) ;;' Dockerfile.checkout ||
     fail 'Dockerfile.checkout must require an HTTPS public API origin before build'
-  grep -Fq 'http://localhost*|http://127.*|http://0.0.0.0*' Dockerfile.checkout ||
-    fail 'Dockerfile.checkout must reject local public API origins before build'
+  grep -Fq 'http://localhost:*|http://127.0.0.1:*' Dockerfile.checkout ||
+    fail 'Dockerfile.checkout must constrain explicitly enabled local public API origins before build'
   grep -Fq 'https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*' Dockerfile.checkout ||
     fail 'Dockerfile.checkout must reject example.com placeholder public API origins before build'
 
@@ -192,8 +194,8 @@ validate_frontend_public_api_build_config() {
   done
   grep -Fq 'https://*) ;;' Dockerfile.admin ||
     fail 'Dockerfile.admin must require HTTPS public API origins before build'
-  grep -Fq 'http://localhost*|http://127.*|http://0.0.0.0*' Dockerfile.admin ||
-    fail 'Dockerfile.admin must reject local public API origins before build'
+  grep -Fq 'http://localhost:*|http://127.0.0.1:*' Dockerfile.admin ||
+    fail 'Dockerfile.admin must constrain explicitly enabled local public API origins before build'
   grep -Fq 'https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*' Dockerfile.admin ||
     fail 'Dockerfile.admin must reject example.com placeholder public API origins before build'
 
@@ -441,6 +443,13 @@ require_rendered_frontend_probes() {
   local expected_path="$3"
 
   printf '%s\n' "${rendered_chart}" | awk -v component="${component}" -v expected_path="${expected_path}" '
+    /^---$/ {
+      seen_component = 0
+      in_target = 0
+      in_readiness = 0
+      in_liveness = 0
+      next
+    }
     /^[[:space:]]*app.kubernetes.io\/component:[[:space:]]*/ {
       if ($2 == component) {
         seen_component = 1
@@ -1025,6 +1034,21 @@ awk -v api_origin="${expected_helm_api_origin}" \
 ' infra/helm/tixkit/values.yaml ||
   fail "infra/helm/tixkit/values.yaml must set production API/admin/checkout origins, CORS origins to ${expected_helm_cors_origins}, and customDomainCorsEnabled=true"
 
+command -v helm >/dev/null 2>&1 || fail 'helm is required for deployment template validation'
+helm lint infra/helm/tixkit -f infra/helm/tixkit/values-evaluation.yaml >/dev/null
+helm template tixkit infra/helm/tixkit \
+  -f infra/helm/tixkit/values-production.yaml \
+  --set global.imageRegistry=ghcr.io/tixkit/tixkit \
+  --set secrets.name=tixkit-production-secrets \
+  --set api.imageDigest=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --set worker.imageDigest=sha256:123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0 \
+  --set checkout.imageDigest=sha256:23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01 \
+  --set admin.imageDigest=sha256:3456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012 \
+  --set migrations.imageDigest=sha256:456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123 \
+  --set 'networkPolicy.externalEgressCidrs[0]=192.0.2.0/24' \
+  --set 'networkPolicy.externalEgressCidrs[1]=2001:db8::/32' >/dev/null
+bun test scripts/__tests__/helm-production-profile.test.mjs
+
 if command -v helm >/dev/null 2>&1; then
   rendered_chart="$(helm template tixkit infra/helm/tixkit --namespace tixkit)"
   first_party_images="$(printf '%s\n' "${rendered_chart}" | awk '
@@ -1071,8 +1095,6 @@ if command -v helm >/dev/null 2>&1; then
     fail "rendered Helm ConfigMap must set NEXT_PUBLIC_CHECKOUT_URL to ${expected_helm_checkout_origin}"
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*"tixkit-production"[[:space:]]*$' ||
     fail 'rendered Helm ConfigMap must set TEMPORAL_TASK_QUEUE to tixkit-production'
-else
-  printf '%s\n' 'helm not found; skipped rendered Helm TRUST_PROXY validation' >&2
 fi
 
 printf '%s\n' 'Deploy template validation passed'

@@ -6,6 +6,7 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  type S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ulid } from 'ulid';
@@ -221,15 +222,18 @@ function finalObjectKeyFromStaging(stagingKey: string): string {
 }
 
 function createS3Client(): S3Client {
-  return new S3Client({
+  const options: S3ClientConfig = {
     region: config.s3Region,
-    endpoint: config.s3Endpoint,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
-    credentials: {
+  };
+  if (config.s3Endpoint) options.endpoint = config.s3Endpoint;
+  if (config.s3AccessKeyId && config.s3SecretAccessKey) {
+    options.credentials = {
       accessKeyId: config.s3AccessKeyId,
       secretAccessKey: config.s3SecretAccessKey,
-    },
-  });
+    };
+  }
+  return new S3Client(options);
 }
 
 async function bodyToBuffer(body: unknown): Promise<Buffer> {

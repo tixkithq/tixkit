@@ -15,6 +15,8 @@ const ENV_KEYS = [
   'CORS_ALLOWED_ORIGINS',
   'CUSTOM_DOMAIN_CORS_ENABLED',
   'DATABASE_URL',
+  'DATABASE_URL_MYSQL',
+  'DB_DRIVER',
   'METRICS_BEARER_TOKEN',
   'NODE_ENV',
   'OIDC_AUDIENCE',
@@ -23,6 +25,7 @@ const ENV_KEYS = [
   'RATE_LIMIT_TIME_WINDOW',
   'REDIS_URL',
   'S3_ACCESS_KEY_ID',
+  'S3_AUTH_MODE',
   'S3_BUCKET',
   'S3_ENDPOINT',
   'S3_REGION',
@@ -284,6 +287,35 @@ describe('API exposure config parsing', () => {
     expect(loadConfig().trustProxy).toEqual(['10.0.0.0/8', '192.168.0.0/16']);
   });
 
+  it('selects the MySQL connection URL for the MySQL production driver', () => {
+    setValidProductionConfig();
+    process.env.DB_DRIVER = 'mysql';
+    process.env.DATABASE_URL_MYSQL = 'mysql://tixkit:secret@mysql.example.com:3306/tixkit';
+
+    expect(loadConfig().databaseUrl).toBe('mysql://tixkit:secret@mysql.example.com:3306/tixkit');
+  });
+
+  it('rejects a MySQL production driver without its MySQL URL', () => {
+    setValidProductionConfig();
+    process.env.DB_DRIVER = 'mysql';
+    delete process.env.DATABASE_URL_MYSQL;
+
+    expect(() => loadConfig()).toThrow('Production config requires DATABASE_URL_MYSQL');
+  });
+
+  it('allows production object storage workload identity without static keys or an endpoint', () => {
+    setValidProductionConfig();
+    process.env.S3_AUTH_MODE = 'workload-identity';
+    delete process.env.S3_ACCESS_KEY_ID;
+    delete process.env.S3_SECRET_ACCESS_KEY;
+    delete process.env.S3_ENDPOINT;
+
+    const config = loadConfig();
+    expect(config.s3Endpoint).toBe('');
+    expect(config.s3AccessKeyId).toBe('');
+    expect(config.s3SecretAccessKey).toBe('');
+  });
+
   it('rejects missing production Temporal config', () => {
     setValidProductionConfig();
     delete process.env.TEMPORAL_ADDRESS;
@@ -409,7 +441,6 @@ describe('API exposure config parsing', () => {
       'CORS_ALLOWED_ORIGINS',
       'STRIPE_SECRET_KEY',
       'STRIPE_WEBHOOK_SECRET',
-      'S3_ENDPOINT',
       'S3_BUCKET',
       'S3_ACCESS_KEY_ID',
       'S3_SECRET_ACCESS_KEY',

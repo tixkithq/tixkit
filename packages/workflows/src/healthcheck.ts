@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { NativeConnection } from '@temporalio/worker';
 import { createDb } from '@tixkit/db';
 import { config } from './config.js';
+import { temporalConnectionOptions } from './temporal-connection.js';
 
 async function healthcheck(): Promise<void> {
   const marker = JSON.parse(await readFile('/tmp/tixkit-worker-ready', 'utf8')) as {
@@ -23,7 +24,9 @@ async function healthcheck(): Promise<void> {
   } finally {
     await db.destroy();
   }
-  const connection = await NativeConnection.connect({ address: config.temporalAddress });
+  const connection = await NativeConnection.connect(
+    temporalConnectionOptions(config.temporalAddress),
+  );
   await connection.close();
 }
 

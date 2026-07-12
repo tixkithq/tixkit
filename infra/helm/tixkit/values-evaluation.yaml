@@ -1,0 +1,23 @@
+deploymentProfile: evaluation
+
+secrets:
+  mode: create
+  create: true
+
+postgres:
+  enabled: true
+redis:
+  enabled: true
+temporal:
+  enabled: true
+minio:
+  enabled: true
+
+availability:
+  podDisruptionBudget:
+    enabled: false
+  topologySpread:
+    enabled: false
+
+networkPolicy:
+  enabled: false

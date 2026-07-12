@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { rm, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
+import { temporalConnectionOptions } from './temporal-connection.js';
 import * as allActivities from './activities/index.js';
 import { closeActivityClients } from './activities/activity-clients.js';
 import { holdExpirationWorkflow, providerEventRecoveryWorkflow } from './workflows/index.js';
@@ -120,7 +121,7 @@ async function ensureScheduledWorkflow(
 ): Promise<'started' | 'already_started'> {
   const clientConnection =
     options.connect === undefined
-      ? await Connection.connect({ address: config.temporalAddress })
+      ? await Connection.connect(temporalConnectionOptions(config.temporalAddress))
       : await options.connect();
 
   try {
@@ -187,9 +188,9 @@ export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
       },
     }),
   );
-  const connection = await NativeConnection.connect({
-    address: config.temporalAddress,
-  });
+  const connection = await NativeConnection.connect(
+    temporalConnectionOptions(config.temporalAddress),
+  );
   try {
     const tracingDisabled = process.env.OTEL_SDK_DISABLED === 'true';
     const telemetryResource = tracingDisabled

@@ -17,10 +17,13 @@ spec:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      {{- include "tixkit.podSecurity" (dict "root" . "component" "api") | nindent 6 }}
       containers:
         - name: api
           image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.api.image "digest" .Values.api.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.security.containerSecurityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.api.port }}

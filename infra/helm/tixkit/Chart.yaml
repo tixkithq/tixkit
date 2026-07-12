@@ -1,6 +1,6 @@
 apiVersion: v2
 name: tixkit
-description: Tixkit production deployment chart for API, worker, checkout, admin, and required backing services.
+description: Tixkit Self-Hosted chart with explicit evaluation and production profiles.
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: '0.1.0'

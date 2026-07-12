@@ -17,10 +17,13 @@ spec:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: checkout
     spec:
+      {{- include "tixkit.podSecurity" (dict "root" . "component" "checkout") | nindent 6 }}
       containers:
         - name: checkout
           image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.checkout.image "digest" .Values.checkout.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.security.containerSecurityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.checkout.port }}
@@ -83,10 +86,13 @@ spec:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: admin
     spec:
+      {{- include "tixkit.podSecurity" (dict "root" . "component" "admin") | nindent 6 }}
       containers:
         - name: admin
           image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.admin.image "digest" .Values.admin.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.security.containerSecurityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.admin.port }}

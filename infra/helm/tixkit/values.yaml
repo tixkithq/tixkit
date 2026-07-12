@@ -1,3 +1,5 @@
+deploymentProfile: evaluation
+
 global:
   imageRegistry: ghcr.io/your-org/tixkit
   imagePullPolicy: IfNotPresent
@@ -10,13 +12,26 @@ global:
     - https://admin.tixkit.com
   customDomainCorsEnabled: true
 
+database:
+  driver: postgres
+
 secrets:
+  mode: create
   create: true
   name: tixkit-secrets
+  externalSecret:
+    secretStoreName: ''
+    secretStoreKind: ClusterSecretStore
+    refreshInterval: 1h
+    data: []
   databaseUrl: postgres://tixkit:tixkit@tixkit-postgres:5432/tixkit
   databaseUrlMysql: ''
   redisUrl: redis://tixkit-redis:6379
   temporalAddress: tixkit-temporal:7233
+  temporalApiKey: ''
+  temporalTlsCa: ''
+  temporalTlsCert: ''
+  temporalTlsKey: ''
   temporalNamespace: default
   temporalTaskQueue: tixkit-production
   clerkSecretKey: ''
@@ -36,6 +51,8 @@ secrets:
   s3AccessKeyId: minioadmin
   s3SecretAccessKey: minioadmin
   s3Region: us-east-1
+  s3AuthMode: static
+  s3ForcePathStyle: true
   otelExporterOtlpEndpoint: ''
   prometheusPushgatewayUrl: ''
   metricsBearerToken: ''
@@ -53,6 +70,11 @@ api:
     limits:
       cpu: '1'
       memory: 1Gi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
 
 worker:
   replicas: 2
@@ -65,6 +87,11 @@ worker:
     limits:
       cpu: '1'
       memory: 1Gi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
 
 checkout:
   replicas: 2
@@ -91,6 +118,11 @@ checkout:
     limits:
       cpu: '1'
       memory: 768Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
 
 admin:
   replicas: 2
@@ -117,6 +149,42 @@ admin:
     limits:
       cpu: '1'
       memory: 768Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+availability:
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  topologySpread:
+    enabled: false
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+
+security:
+  serviceAccount:
+    create: true
+    name: ''
+    automountServiceAccountToken: false
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+  terminationGracePeriodSeconds: 60
+
+networkPolicy:
+  enabled: false
+  ingressNamespace: ingress-nginx
+  externalEgressCidrs: []
+  externalEgressPorts: [443, 3306, 4317, 4318, 5432, 6379, 7233]
 
 migrations:
   enabled: true

@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/component: migrate
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: {{ .Values.migrations.backoffLimit }}
@@ -17,15 +18,23 @@ spec:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: migrate
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.security.podSecurityContext | nindent 8 }}
       restartPolicy: Never
       containers:
         - name: migrate
           image: {{ include "tixkit.image" (dict "Values" .Values "image" .Values.migrations.image "digest" .Values.migrations.imageDigest) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           command: ["bun", "run", "db:migrate"]
+          securityContext:
+            {{- toYaml .Values.security.containerSecurityContext | nindent 12 }}
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.global.environment | quote }}
+            - name: DB_DRIVER
+              value: {{ .Values.database.driver | quote }}
           envFrom:
-            - configMapRef:
-                name: {{ include "tixkit.fullname" . }}-config
             - secretRef:
-                name: {{ .Values.secrets.name }}
+                name: {{ ternary (printf "%s-migration" .Values.secrets.name) .Values.secrets.name (eq .Values.secrets.mode "create") }}
 {{- end }}

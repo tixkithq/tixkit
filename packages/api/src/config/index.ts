@@ -37,6 +37,12 @@ export type AppConfig = {
   trustProxy: TrustProxyConfig;
 };
 
+function databaseUrl(): string {
+  return process.env.DB_DRIVER === 'mysql'
+    ? (process.env.DATABASE_URL_MYSQL ?? '')
+    : (process.env.DATABASE_URL ?? '');
+}
+
 export function parseCommaSeparatedList(value: string | undefined): string[] {
   return (value ?? '')
     .split(',')
@@ -136,19 +142,21 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
     throw new Error('AUTH_PROVIDER=dev is not allowed in production.');
   }
 
+  const requiredDatabaseVariable =
+    process.env.DB_DRIVER === 'mysql' ? 'DATABASE_URL_MYSQL' : 'DATABASE_URL';
   const required = [
-    'DATABASE_URL',
+    requiredDatabaseVariable,
     'REDIS_URL',
     'METRICS_BEARER_TOKEN',
     'API_BASE_URL',
     'CORS_ALLOWED_ORIGINS',
     'STRIPE_SECRET_KEY',
     'STRIPE_WEBHOOK_SECRET',
-    'S3_ENDPOINT',
     'S3_BUCKET',
-    'S3_ACCESS_KEY_ID',
-    'S3_SECRET_ACCESS_KEY',
     'S3_REGION',
+    ...(process.env.S3_AUTH_MODE === 'workload-identity'
+      ? []
+      : ['S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY']),
     ...(authProvider === 'clerk'
       ? ['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY', 'CLERK_WEBHOOK_SECRET']
       : ['OIDC_ISSUER_URL', 'OIDC_AUDIENCE']),
@@ -159,7 +167,7 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
   }
 
   const localEndpoints = [
-    ['DATABASE_URL', process.env.DATABASE_URL],
+    [requiredDatabaseVariable, databaseUrl()],
     ['REDIS_URL', process.env.REDIS_URL],
     ['API_BASE_URL', process.env.API_BASE_URL],
     ['S3_ENDPOINT', process.env.S3_ENDPOINT],
@@ -295,7 +303,7 @@ export function loadConfig(): AppConfig {
     port: parseInt(process.env.PORT ?? '4000', 10),
     nodeEnv,
     logLevel: process.env.LOG_LEVEL ?? 'info',
-    databaseUrl: process.env.DATABASE_URL ?? 'postgres://tixkit:tixkit@localhost:5432/tixkit',
+    databaseUrl: databaseUrl() || 'postgres://tixkit:tixkit@localhost:5432/tixkit',
     databaseUrlMysql: process.env.DATABASE_URL_MYSQL,
     redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
     temporalAddress: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
@@ -309,10 +317,12 @@ export function loadConfig(): AppConfig {
     oidcAudience: process.env.OIDC_AUDIENCE ?? '',
     stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? '',
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
-    s3Endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+    s3Endpoint:
+      process.env.S3_ENDPOINT ?? (nodeEnv === 'production' ? '' : 'http://localhost:9000'),
     s3Bucket: process.env.S3_BUCKET ?? 'tixkit',
-    s3AccessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'minioadmin',
-    s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'minioadmin',
+    s3AccessKeyId: process.env.S3_ACCESS_KEY_ID ?? (nodeEnv === 'production' ? '' : 'minioadmin'),
+    s3SecretAccessKey:
+      process.env.S3_SECRET_ACCESS_KEY ?? (nodeEnv === 'production' ? '' : 'minioadmin'),
     s3Region: process.env.S3_REGION ?? 'us-east-1',
     apiBaseUrl: process.env.API_BASE_URL ?? 'http://localhost:4000',
     corsAllowedOrigins: resolveCorsAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS, nodeEnv),

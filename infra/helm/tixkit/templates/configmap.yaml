@@ -1,3 +1,4 @@
+{{- include "tixkit.validate" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,6 +7,7 @@ metadata:
     {{- include "tixkit.labels" . | nindent 4 }}
 data:
   NODE_ENV: {{ .Values.global.environment | quote }}
+  DB_DRIVER: {{ .Values.database.driver | quote }}
   API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
   CORS_ALLOWED_ORIGINS: {{ join "," .Values.global.corsAllowedOrigins | quote }}
   CUSTOM_DOMAIN_CORS_ENABLED: {{ .Values.global.customDomainCorsEnabled | quote }}
@@ -15,7 +17,10 @@ data:
   NEXT_PUBLIC_CHECKOUT_URL: {{ .Values.global.checkoutUrl | quote }}
   TEMPORAL_NAMESPACE: {{ .Values.secrets.temporalNamespace | quote }}
   TEMPORAL_TASK_QUEUE: {{ .Values.secrets.temporalTaskQueue | quote }}
+  TEMPORAL_TLS_ENABLED: {{ .Values.secrets.temporalTlsEnabled | default false | quote }}
   OFFLINE_MANIFEST_KEY_ID: {{ .Values.secrets.offlineManifestKeyId | quote }}
   S3_BUCKET: {{ .Values.secrets.s3Bucket | quote }}
   S3_REGION: {{ .Values.secrets.s3Region | quote }}
+  S3_AUTH_MODE: {{ .Values.secrets.s3AuthMode | quote }}
+  S3_FORCE_PATH_STYLE: {{ .Values.secrets.s3ForcePathStyle | quote }}
   OTEL_SDK_DISABLED: "false"

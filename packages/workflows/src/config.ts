@@ -10,6 +10,12 @@ type WorkflowConfig = {
   redisUrl: string;
 };
 
+function databaseUrl(): string {
+  return process.env.DB_DRIVER === 'mysql'
+    ? (process.env.DATABASE_URL_MYSQL ?? '')
+    : (process.env.DATABASE_URL ?? '');
+}
+
 function envValue(name: string): string | undefined {
   return process.env[name]?.trim();
 }
@@ -73,13 +79,15 @@ function requireProductionTemporalConfig(): void {
 function requireProductionConfig(): void {
   requireProductionTemporalConfig();
 
-  const missing = requireEnvValues(['DATABASE_URL', 'REDIS_URL']);
+  const requiredDatabaseVariable =
+    process.env.DB_DRIVER === 'mysql' ? 'DATABASE_URL_MYSQL' : 'DATABASE_URL';
+  const missing = requireEnvValues([requiredDatabaseVariable, 'REDIS_URL']);
   if (missing.length > 0) {
     throw new Error(`Production worker config requires ${missing.join(', ')}`);
   }
 
   const localEndpoints = [
-    ['DATABASE_URL', process.env.DATABASE_URL],
+    [requiredDatabaseVariable, databaseUrl()],
     ['REDIS_URL', process.env.REDIS_URL],
   ]
     .filter(([, value]) => isLocalEndpoint(value))
@@ -146,7 +154,7 @@ export function loadConfig(): WorkflowConfig {
       'TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS',
       process.env.TEMPORAL_WORKER_MAX_CACHED_WORKFLOWS,
     ),
-    databaseUrl: process.env.DATABASE_URL ?? '',
+    databaseUrl: databaseUrl(),
     redisUrl: process.env.REDIS_URL ?? '',
   };
 }

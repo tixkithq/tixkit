@@ -1,0 +1,44 @@
+deploymentProfile: production
+
+api:
+  imageDigest: ''
+  autoscaling:
+    enabled: true
+worker:
+  imageDigest: ''
+  autoscaling:
+    enabled: true
+checkout:
+  imageDigest: ''
+  autoscaling:
+    enabled: true
+admin:
+  imageDigest: ''
+  autoscaling:
+    enabled: true
+migrations:
+  imageDigest: ''
+
+secrets:
+  mode: existing
+  create: false
+  name: ''
+
+postgres:
+  enabled: false
+redis:
+  enabled: false
+temporal:
+  enabled: false
+minio:
+  enabled: false
+
+availability:
+  podDisruptionBudget:
+    enabled: true
+  topologySpread:
+    enabled: true
+
+networkPolicy:
+  enabled: true
+  externalEgressCidrs: []
