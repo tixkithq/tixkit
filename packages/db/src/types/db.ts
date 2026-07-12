@@ -1797,6 +1797,44 @@ export interface HistoricalCheckInTable {
   created_at: Timestamp;
 }
 
+export interface PortableExportSequenceTable {
+  tenant_id: string;
+  organization_id: string;
+  next_sequence: number | string | bigint;
+  updated_at: Timestamp;
+}
+
+export interface PortableExportJobTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  export_sequence: number | string | bigint;
+  mode: string;
+  status: string;
+  bundle_id: string;
+  source_change_cursor: string;
+  manifest_sha256: string | null;
+  artifact_sha256: string | null;
+  artifact_bytes: number | string | bigint | null;
+  requested_by: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  error_code: string | null;
+  created_at: Timestamp;
+  completed_at: Timestamp | null;
+}
+
+export interface PortableExportEventTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  export_job_id: string;
+  manifest_sha256: string;
+  artifact_sha256: string;
+  artifact_bytes: number | string | bigint;
+  occurred_at: Timestamp;
+}
+
 export interface DB {
   agent_principals: AgentPrincipalTable;
   agent_delegations: AgentDelegationTable;
@@ -1911,4 +1949,7 @@ export interface DB {
   buyers: BuyerTable;
   historical_financial_snapshots: HistoricalFinancialSnapshotTable;
   historical_check_ins: HistoricalCheckInTable;
+  portable_export_sequences: PortableExportSequenceTable;
+  portable_export_jobs: PortableExportJobTable;
+  portable_export_events: PortableExportEventTable;
 }

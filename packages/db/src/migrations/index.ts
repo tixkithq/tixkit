@@ -65,3 +65,4 @@ export { OrganizationEventDefaultsMigration } from './0064_organization_event_de
 export { AgentExecutionMigration } from './0065_agent_execution.js';
 export { AgentIdentityMigration } from './0066_agent_identity.js';
 export { AgentMemoryMigration } from './0067_agent_memory.js';
+export { PortableExportsMigration } from './0068_portable_exports.js';

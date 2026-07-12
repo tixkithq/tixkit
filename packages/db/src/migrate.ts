@@ -68,6 +68,7 @@ import { OrganizationEventDefaultsMigration } from './migrations/0064_organizati
 import { AgentExecutionMigration } from './migrations/0065_agent_execution.js';
 import { AgentIdentityMigration } from './migrations/0066_agent_identity.js';
 import { AgentMemoryMigration } from './migrations/0067_agent_memory.js';
+import { PortableExportsMigration } from './migrations/0068_portable_exports.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -194,6 +195,9 @@ const ALL_SCHEMA_TABLES = [
   'agent_action_policies',
   'agent_memory_events',
   'agent_memory_entries',
+  'portable_export_sequences',
+  'portable_export_jobs',
+  'portable_export_events',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -286,6 +290,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0065_agent_execution': AgentExecutionMigration,
       '0066_agent_identity': AgentIdentityMigration,
       '0067_agent_memory': AgentMemoryMigration,
+      '0068_portable_exports': PortableExportsMigration,
     };
   }
 }
@@ -487,6 +492,18 @@ export async function dropAllTables(db: Database): Promise<void> {
   await sql`DROP TABLE IF EXISTS ${sql.raw(MIGRATION_TABLE)} CASCADE`
     .execute(db)
     .catch(() => undefined);
+  for (const functionName of [
+    'reject_agent_action_effect_mutation',
+    'reject_agent_audit_mutation',
+    'reject_agent_control_mutation',
+    'reject_agent_memory_event_mutation',
+    'reject_portable_export_event_mutation',
+  ]) {
+    // eslint-disable-next-line no-await-in-loop -- PostgreSQL reset removes standalone trigger functions after their tables.
+    await sql`DROP FUNCTION IF EXISTS ${sql.raw(functionName)}() CASCADE`
+      .execute(db)
+      .catch(() => undefined);
+  }
 }
 
 /**
@@ -513,34 +530,53 @@ export async function truncateAllData(db: Database): Promise<void> {
   }
 
   if (driver === 'mssql') {
-    for (const table of ALL_SCHEMA_TABLES) {
-      // eslint-disable-next-line no-await-in-loop -- constraints must be disabled table-by-table before deleting across FK relationships.
-      await sql
-        .raw(`ALTER TABLE ${quoteMssqlIdentifier(table)} NOCHECK CONSTRAINT ALL`)
-        .execute(db)
-        .catch(() => undefined);
-    }
+    await sql
+      .raw(
+        `IF OBJECT_ID(N'portable_export_events', N'U') IS NOT NULL AND OBJECT_ID(N'portable_export_events_immutable', N'TR') IS NOT NULL DISABLE TRIGGER portable_export_events_immutable ON portable_export_events`,
+      )
+      .execute(db);
+    try {
+      for (const table of ALL_SCHEMA_TABLES) {
+        // eslint-disable-next-line no-await-in-loop -- constraints must be disabled table-by-table before deleting across FK relationships.
+        await sql
+          .raw(`ALTER TABLE ${quoteMssqlIdentifier(table)} NOCHECK CONSTRAINT ALL`)
+          .execute(db)
+          .catch(() => undefined);
+      }
 
-    // eslint-disable-next-line unicorn/no-array-reverse -- ES2023 toReversed is not available in this package's TS lib target.
-    for (const table of [...ALL_SCHEMA_TABLES].reverse()) {
-      // eslint-disable-next-line no-await-in-loop -- test cleanup deletes in reverse dependency order for stable diagnostics.
-      await sql
-        .raw(`DELETE FROM ${quoteMssqlIdentifier(table)}`)
-        .execute(db)
-        .catch(() => undefined);
-      // eslint-disable-next-line no-await-in-loop -- not every table has an identity column, so failed reseeds are ignored.
-      await sql
-        .raw(`DBCC CHECKIDENT (${quoteMssqlStringLiteral(table)}, RESEED, 0) WITH NO_INFOMSGS`)
-        .execute(db)
-        .catch(() => undefined);
-    }
+      // eslint-disable-next-line unicorn/no-array-reverse -- ES2023 toReversed is not available in this package's TS lib target.
+      for (const table of [...ALL_SCHEMA_TABLES].reverse()) {
+        // eslint-disable-next-line no-await-in-loop -- test cleanup deletes in reverse dependency order for stable diagnostics.
+        await sql
+          .raw(`DELETE FROM ${quoteMssqlIdentifier(table)}`)
+          .execute(db)
+          .catch(() => undefined);
+        // eslint-disable-next-line no-await-in-loop -- not every table has an identity column, so failed reseeds are ignored.
+        await sql
+          .raw(`DBCC CHECKIDENT (${quoteMssqlStringLiteral(table)}, RESEED, 0) WITH NO_INFOMSGS`)
+          .execute(db)
+          .catch(() => undefined);
+      }
 
-    for (const table of ALL_SCHEMA_TABLES) {
-      // eslint-disable-next-line no-await-in-loop -- constraints are re-enabled after all table deletes complete.
+      const portableEvents = await sql<{
+        count: number;
+      }>`select count(*) as count from portable_export_events`.execute(db);
+      if (Number(portableEvents.rows[0]?.count ?? 0) !== 0)
+        throw new Error('MSSQL portable export event cleanup failed');
+    } finally {
       await sql
-        .raw(`ALTER TABLE ${quoteMssqlIdentifier(table)} WITH CHECK CHECK CONSTRAINT ALL`)
-        .execute(db)
-        .catch(() => undefined);
+        .raw(
+          `IF OBJECT_ID(N'portable_export_events', N'U') IS NOT NULL AND OBJECT_ID(N'portable_export_events_immutable', N'TR') IS NOT NULL ENABLE TRIGGER portable_export_events_immutable ON portable_export_events`,
+        )
+        .execute(db);
+
+      for (const table of ALL_SCHEMA_TABLES) {
+        // eslint-disable-next-line no-await-in-loop -- constraints are re-enabled after cleanup even when an intermediate delete fails.
+        await sql
+          .raw(`ALTER TABLE ${quoteMssqlIdentifier(table)} WITH CHECK CHECK CONSTRAINT ALL`)
+          .execute(db)
+          .catch(() => undefined);
+      }
     }
     return;
   }
