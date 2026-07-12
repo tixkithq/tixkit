@@ -1865,14 +1865,6 @@ export const apiReferenceOperations = [
         }
       },
       {
-        "name": "jobId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string"
-        }
-      },
-      {
         "name": "brandId",
         "in": "query",
         "required": true,
