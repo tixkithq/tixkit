@@ -70,6 +70,7 @@ import { AgentIdentityMigration } from './migrations/0066_agent_identity.js';
 import { AgentMemoryMigration } from './migrations/0067_agent_memory.js';
 import { PortableExportsMigration } from './migrations/0068_portable_exports.js';
 import { PortableExportBuildLeasesMigration } from './migrations/0069_portable_export_build_leases.js';
+import { PortableImportPreflightsMigration } from './migrations/0070_portable_import_preflights.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -199,6 +200,8 @@ const ALL_SCHEMA_TABLES = [
   'portable_export_sequences',
   'portable_export_jobs',
   'portable_export_events',
+  'portable_import_dry_run_receipts',
+  'portable_import_preflights',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -293,6 +296,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0067_agent_memory': AgentMemoryMigration,
       '0068_portable_exports': PortableExportsMigration,
       '0069_portable_export_build_leases': PortableExportBuildLeasesMigration,
+      '0070_portable_import_preflights': PortableImportPreflightsMigration,
     };
   }
 }
@@ -500,6 +504,7 @@ export async function dropAllTables(db: Database): Promise<void> {
     'reject_agent_control_mutation',
     'reject_agent_memory_event_mutation',
     'reject_portable_export_event_mutation',
+    'reject_portable_import_control_mutation',
   ]) {
     // eslint-disable-next-line no-await-in-loop -- PostgreSQL reset removes standalone trigger functions after their tables.
     await sql`DROP FUNCTION IF EXISTS ${sql.raw(functionName)}() CASCADE`
@@ -537,6 +542,13 @@ export async function truncateAllData(db: Database): Promise<void> {
         `IF OBJECT_ID(N'portable_export_events', N'U') IS NOT NULL AND OBJECT_ID(N'portable_export_events_immutable', N'TR') IS NOT NULL DISABLE TRIGGER portable_export_events_immutable ON portable_export_events`,
       )
       .execute(db);
+    for (const table of ['portable_import_preflights', 'portable_import_dry_run_receipts']) {
+      await sql
+        .raw(
+          `IF OBJECT_ID(N'${table}', N'U') IS NOT NULL AND OBJECT_ID(N'${table}_immutable', N'TR') IS NOT NULL DISABLE TRIGGER ${table}_immutable ON ${table}`,
+        )
+        .execute(db);
+    }
     try {
       for (const table of ALL_SCHEMA_TABLES) {
         // eslint-disable-next-line no-await-in-loop -- constraints must be disabled table-by-table before deleting across FK relationships.
@@ -571,6 +583,13 @@ export async function truncateAllData(db: Database): Promise<void> {
           `IF OBJECT_ID(N'portable_export_events', N'U') IS NOT NULL AND OBJECT_ID(N'portable_export_events_immutable', N'TR') IS NOT NULL ENABLE TRIGGER portable_export_events_immutable ON portable_export_events`,
         )
         .execute(db);
+      for (const table of ['portable_import_preflights', 'portable_import_dry_run_receipts']) {
+        await sql
+          .raw(
+            `IF OBJECT_ID(N'${table}', N'U') IS NOT NULL AND OBJECT_ID(N'${table}_immutable', N'TR') IS NOT NULL ENABLE TRIGGER ${table}_immutable ON ${table}`,
+          )
+          .execute(db);
+      }
 
       for (const table of ALL_SCHEMA_TABLES) {
         // eslint-disable-next-line no-await-in-loop -- constraints are re-enabled after cleanup even when an intermediate delete fails.

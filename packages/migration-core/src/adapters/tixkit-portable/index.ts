@@ -5,6 +5,7 @@ import {
   type PortableBundleManifest,
   type PortableBundleFile,
   type PortableSection,
+  type PortabilityPreflightResult,
   type SignedPortableBundle,
 } from '@tixkit/portability';
 import {
@@ -60,6 +61,7 @@ export type TixkitPortableImportTrust = Pick<
 
 interface VerifiedPortableMigrationState {
   manifest: PortableBundleManifest;
+  preflight: PortabilityPreflightResult;
   payloads: ReadonlyMap<string, Uint8Array>;
   destinationTenantId: string;
   destinationOrganizationId: string;
@@ -176,11 +178,33 @@ export function prepareTixkitPortableMigration(input: {
   });
   verifiedStates.set(configuration, {
     manifest: envelope.manifest,
+    preflight,
     payloads,
     destinationTenantId: input.destinationTenantId,
     destinationOrganizationId: input.destinationOrganizationId,
   });
   return configuration;
+}
+
+export interface TixkitPortablePreflightEvidence {
+  manifest: PortableBundleManifest;
+  preflight: PortabilityPreflightResult;
+  destinationTenantId: string;
+  destinationOrganizationId: string;
+}
+
+export function tixkitPortablePreflightEvidence(
+  configuration: TixkitPortableAdapterConfiguration,
+  context: AdapterContext,
+): TixkitPortablePreflightEvidence {
+  const state = verifiedState(configuration);
+  assertContext(state, context);
+  return structuredClone({
+    manifest: state.manifest,
+    preflight: state.preflight,
+    destinationTenantId: state.destinationTenantId,
+    destinationOrganizationId: state.destinationOrganizationId,
+  });
 }
 
 export function prepareTixkitPortableUpload(

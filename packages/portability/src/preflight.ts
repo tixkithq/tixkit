@@ -206,6 +206,8 @@ export interface PortableDryRunReceipt {
   manifestSha256: string;
   destinationId: string;
   sourceChangeCursor: string;
+  inputSha256: string;
+  artifactSha256: string;
   checkedAt: string;
   compatible: true;
   requiredRebindings: string[];
@@ -225,6 +227,8 @@ function dryRunReceiptPayload(
     operationId: receipt.operationId,
     requiredRebindings: [...receipt.requiredRebindings].sort(),
     sourceChangeCursor: receipt.sourceChangeCursor,
+    inputSha256: receipt.inputSha256,
+    artifactSha256: receipt.artifactSha256,
   })}\n`;
 }
 
@@ -232,6 +236,8 @@ export function createPortableDryRunReceipt(
   preflight: PortabilityPreflightResult,
   manifest: PortableBundleManifest,
   destinationId: string,
+  inputSha256: string,
+  artifactSha256: string,
   checkedAt: string,
   attestationKeyId: string,
   privateKey: KeyLike,
@@ -242,7 +248,11 @@ export function createPortableDryRunReceipt(
   ) {
     throw new Error('incompatible or mismatched portable preflight cannot produce a receipt');
   }
-  if (new Date(checkedAt).toISOString() !== checkedAt) {
+  if (
+    new Date(checkedAt).toISOString() !== checkedAt ||
+    !/^[a-f0-9]{64}$/u.test(inputSha256) ||
+    !/^[a-f0-9]{64}$/u.test(artifactSha256)
+  ) {
     throw new Error('portable dry-run receipt timestamp is invalid');
   }
   const payload = {
@@ -250,6 +260,8 @@ export function createPortableDryRunReceipt(
     manifestSha256: portableManifestSha256(manifest),
     destinationId,
     sourceChangeCursor: manifest.lineage.toChangeCursor,
+    inputSha256,
+    artifactSha256,
     checkedAt,
     compatible: true as const,
     requiredRebindings: preflight.requiredRebindings.map(({ portableId }) => portableId),
@@ -262,6 +274,36 @@ export function createPortableDryRunReceipt(
       'base64',
     ),
   };
+}
+
+export function verifyPortableDryRunReceipt(
+  receipt: PortableDryRunReceipt,
+  publicKey: KeyLike,
+): boolean {
+  try {
+    const payload = {
+      operationId: receipt.operationId,
+      manifestSha256: receipt.manifestSha256,
+      destinationId: receipt.destinationId,
+      sourceChangeCursor: receipt.sourceChangeCursor,
+      inputSha256: receipt.inputSha256,
+      artifactSha256: receipt.artifactSha256,
+      checkedAt: receipt.checkedAt,
+      compatible: receipt.compatible,
+      requiredRebindings: receipt.requiredRebindings,
+    };
+    const encoded = dryRunReceiptPayload(payload);
+    return (
+      receipt.compatible === true &&
+      new Date(receipt.checkedAt).toISOString() === receipt.checkedAt &&
+      /^[a-f0-9]{64}$/u.test(receipt.inputSha256) &&
+      /^[a-f0-9]{64}$/u.test(receipt.artifactSha256) &&
+      createHash('sha256').update(encoded).digest('hex') === receipt.sha256 &&
+      cryptoVerify(null, Buffer.from(encoded), publicKey, Buffer.from(receipt.signature, 'base64'))
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function validatePortableResume(
@@ -292,6 +334,8 @@ export function validatePortableResume(
             manifestSha256: dryRunReceipt.manifestSha256,
             destinationId: dryRunReceipt.destinationId,
             sourceChangeCursor: dryRunReceipt.sourceChangeCursor,
+            inputSha256: dryRunReceipt.inputSha256,
+            artifactSha256: dryRunReceipt.artifactSha256,
             checkedAt: dryRunReceipt.checkedAt,
             compatible: dryRunReceipt.compatible,
             requiredRebindings: dryRunReceipt.requiredRebindings,
@@ -313,6 +357,8 @@ export function validatePortableResume(
           manifestSha256: dryRunReceipt.manifestSha256,
           destinationId: dryRunReceipt.destinationId,
           sourceChangeCursor: dryRunReceipt.sourceChangeCursor,
+          inputSha256: dryRunReceipt.inputSha256,
+          artifactSha256: dryRunReceipt.artifactSha256,
           checkedAt: dryRunReceipt.checkedAt,
           compatible: dryRunReceipt.compatible,
           requiredRebindings: dryRunReceipt.requiredRebindings,

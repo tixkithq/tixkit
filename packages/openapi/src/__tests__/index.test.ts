@@ -1964,7 +1964,10 @@ describe('openApiSpec', () => {
       openApiSpec.paths['/migration-jobs/{jobId}/report/download'].get.responses['200'].content[
         'application/json'
       ].schema,
-    ).toEqual({ $ref: '#/components/schemas/MigrationReport' });
+    ).toEqual({ $ref: '#/components/schemas/MigrationReportResponse' });
+    expect(openApiSpec.components.schemas.PortableDryRunReceipt.required).toEqual(
+      expect.arrayContaining(['inputSha256', 'artifactSha256', 'signature']),
+    );
   });
 
   it('gives every body-bearing successful migration response a JSON schema', () => {

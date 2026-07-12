@@ -745,7 +745,57 @@ const rawOpenApiSpec = {
           },
         },
       },
-      MigrationReport: { type: 'object', additionalProperties: true },
+      MigrationReport: {
+        type: 'object',
+        additionalProperties: true,
+      },
+      PortableDryRunReceipt: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'operationId',
+          'manifestSha256',
+          'destinationId',
+          'sourceChangeCursor',
+          'inputSha256',
+          'artifactSha256',
+          'checkedAt',
+          'compatible',
+          'requiredRebindings',
+          'sha256',
+          'attestationKeyId',
+          'signature',
+        ],
+        properties: {
+          operationId: { type: 'string' },
+          manifestSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          destinationId: { type: 'string' },
+          sourceChangeCursor: { type: 'string' },
+          inputSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          artifactSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          checkedAt: { type: 'string', format: 'date-time' },
+          compatible: { const: true },
+          requiredRebindings: { type: 'array', items: { type: 'string' } },
+          sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          attestationKeyId: { type: 'string' },
+          signature: { type: 'string' },
+        },
+      },
+      MigrationReportResponse: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['job', 'report', 'conflicts', 'correctivePlans'],
+        properties: {
+          job: { type: 'object', additionalProperties: true },
+          report: { $ref: '#/components/schemas/MigrationReport' },
+          conflicts: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          correctivePlans: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          portableDryRunReceipt: { $ref: '#/components/schemas/PortableDryRunReceipt' },
+        },
+      },
       MigrationAdapterCatalogEntry: {
         type: 'object',
         additionalProperties: false,
@@ -864,6 +914,8 @@ const rawOpenApiSpec = {
           status: { type: 'string', enum: ['ready', 'failed'] },
           report: { $ref: '#/components/schemas/MigrationReport' },
           domainWrites: { const: 0 },
+          portableDryRunReceipt: { $ref: '#/components/schemas/PortableDryRunReceipt' },
+          portableDryRunReceiptSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
         },
       },
       MigrationRollbackAssessment: {
@@ -13395,6 +13447,12 @@ const rawOpenApiSpec = {
               },
             },
           },
+          '503': {
+            description: 'Portable dry-run attestation is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
         },
       },
     },
@@ -13443,7 +13501,7 @@ const rawOpenApiSpec = {
             description: 'Migration report',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MigrationReport' },
+                schema: { $ref: '#/components/schemas/MigrationReportResponse' },
               },
             },
           },
@@ -13469,7 +13527,7 @@ const rawOpenApiSpec = {
             description: 'Migration report download',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/MigrationReport' },
+                schema: { $ref: '#/components/schemas/MigrationReportResponse' },
               },
             },
           },

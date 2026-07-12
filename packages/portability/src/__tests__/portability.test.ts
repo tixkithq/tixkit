@@ -611,6 +611,8 @@ describe('portable bundle manifest', () => {
       preflight,
       value,
       'deployment_destination',
+      'a'.repeat(64),
+      'b'.repeat(64),
       '2026-07-12T17:01:00.000Z',
       'key_dry_run_01',
       dryRunKeys.privateKey,

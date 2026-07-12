@@ -18,6 +18,7 @@ import {
   migrationAdapter,
   parseMigrationPreparationConfiguration,
   prepareTixkitPortableUpload,
+  tixkitPortablePreflightEvidence,
   type MigrationAdapter,
   type MigrationCredentialResolver,
   type MigrationIssue,
@@ -25,6 +26,7 @@ import {
   type NormalizedMigrationEntity,
   type TixkitPortableImportTrust,
 } from '@tixkit/migration-core';
+import { canonicalPortableJson, portableManifestSha256 } from '@tixkit/portability';
 
 export type MigrationPreparationInput = {
   tenantId: string;
@@ -1287,13 +1289,35 @@ export function createMigrationPreparationService(
           if (configuration.artifactIds.length !== 1) {
             throw new Error('PORTABILITY_IMPORT_REQUIRES_SINGLE_ARTIFACT');
           }
-          transient = prepareTixkitPortableUpload(
-            bytes,
-            (runtime.portableTrust ?? portableImportTrustFromEnvironment)({
-              tenantId: input.tenantId,
-              organizationId: input.organizationId,
-            }),
-          );
+          const trust = (runtime.portableTrust ?? portableImportTrustFromEnvironment)({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+          });
+          const portableConfiguration = prepareTixkitPortableUpload(bytes, trust);
+          transient = portableConfiguration;
+          const evidence = tixkitPortablePreflightEvidence(portableConfiguration, {
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+          });
+          await repository.recordPortablePreflight({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            operationId: evidence.preflight.operationId,
+            bundleId: evidence.manifest.bundleId,
+            manifestSha256: portableManifestSha256(evidence.manifest),
+            artifactSha256: artifact.checksum_sha256,
+            sourceDeploymentId: evidence.manifest.source.deploymentId,
+            sourceChangeCursor: evidence.manifest.lineage.toChangeCursor,
+            destinationId: trust.destination.deploymentId,
+            manifestJson: canonicalPortableJson(evidence.manifest),
+            preflightJson: canonicalPortableJson(evidence.preflight),
+            expectedCounts: canonicalPortableJson(evidence.manifest.entityCounts),
+            expectedAssets: canonicalPortableJson(
+              evidence.manifest.assets.map(({ portableId, sha256 }) => ({ portableId, sha256 })),
+            ),
+            requiredRebindings: canonicalPortableJson(evidence.preflight.requiredRebindings),
+          });
         } else transient = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
         cursorKey = artifact.checksum_sha256;
       }

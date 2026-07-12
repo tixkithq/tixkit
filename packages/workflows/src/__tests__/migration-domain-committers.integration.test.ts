@@ -29,6 +29,7 @@ import {
 import {
   buildPortableLogicalExport,
   createPortableConfigurationPayloadPolicies,
+  portableManifestSha256,
   scanPortablePayload,
   signPortableManifest,
   type PortableBundleManifest,
@@ -1650,6 +1651,19 @@ describeDatabase('production migration committers', () => {
     await expect(
       service.prepare({ tenantId, organizationId, jobId: job.id, chunkSize: 1 }),
     ).resolves.toEqual({ processed: 1, completed: false });
+    await expect(
+      repository.findPortablePreflight(tenantId, organizationId, job.id),
+    ).resolves.toMatchObject({
+      bundle_id: manifest.bundleId,
+      manifest_sha256: portableManifestSha256(manifest),
+      artifact_sha256: checksum,
+      source_deployment_id: manifest.source.deploymentId,
+      source_change_cursor: manifest.lineage.toChangeCursor,
+      destination_id: 'deployment_destination',
+      expected_counts: JSON.stringify(manifest.entityCounts),
+      expected_assets: '[]',
+      required_rebindings: '[]',
+    });
     activeBundlePublicKey = rogueBundleKeys.publicKey;
     await expect(
       service.prepare({ tenantId, organizationId, jobId: job.id, chunkSize: 1 }),

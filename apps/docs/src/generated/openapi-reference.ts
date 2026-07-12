@@ -20786,6 +20786,23 @@ export const apiReferenceOperations = [
             }
           }
         }
+      },
+      "503": {
+        "description": "Portable dry-run attestation is unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "error": {
+                "code": "code example",
+                "message": "message example",
+                "requestId": "request_example"
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -20891,9 +20908,18 @@ export const apiReferenceOperations = [
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/MigrationReport"
+              "$ref": "#/components/schemas/MigrationReportResponse"
             },
-            "example": {}
+            "example": {
+              "job": {},
+              "report": {},
+              "conflicts": [
+                {}
+              ],
+              "correctivePlans": [
+                {}
+              ]
+            }
           }
         }
       }
@@ -20936,9 +20962,18 @@ export const apiReferenceOperations = [
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/MigrationReport"
+              "$ref": "#/components/schemas/MigrationReportResponse"
             },
-            "example": {}
+            "example": {
+              "job": {},
+              "report": {},
+              "conflicts": [
+                {}
+              ],
+              "correctivePlans": [
+                {}
+              ]
+            }
           }
         }
       }
@@ -22826,6 +22861,57 @@ export const apiReferenceSchemas = [
     "properties": []
   },
   {
+    "name": "PortableDryRunReceipt",
+    "type": "object",
+    "description": "",
+    "required": [
+      "operationId",
+      "manifestSha256",
+      "destinationId",
+      "sourceChangeCursor",
+      "inputSha256",
+      "artifactSha256",
+      "checkedAt",
+      "compatible",
+      "requiredRebindings",
+      "sha256",
+      "attestationKeyId",
+      "signature"
+    ],
+    "properties": [
+      "operationId",
+      "manifestSha256",
+      "destinationId",
+      "sourceChangeCursor",
+      "inputSha256",
+      "artifactSha256",
+      "checkedAt",
+      "compatible",
+      "requiredRebindings",
+      "sha256",
+      "attestationKeyId",
+      "signature"
+    ]
+  },
+  {
+    "name": "MigrationReportResponse",
+    "type": "object",
+    "description": "",
+    "required": [
+      "job",
+      "report",
+      "conflicts",
+      "correctivePlans"
+    ],
+    "properties": [
+      "job",
+      "report",
+      "conflicts",
+      "correctivePlans",
+      "portableDryRunReceipt"
+    ]
+  },
+  {
     "name": "MigrationAdapterCatalogEntry",
     "type": "object",
     "description": "",
@@ -22972,7 +23058,9 @@ export const apiReferenceSchemas = [
     "properties": [
       "status",
       "report",
-      "domainWrites"
+      "domainWrites",
+      "portableDryRunReceipt",
+      "portableDryRunReceiptSha256"
     ]
   },
   {

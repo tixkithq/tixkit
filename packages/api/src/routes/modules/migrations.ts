@@ -18,6 +18,20 @@ import {
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
 import { ConflictError, NotFoundError, ValidationError } from '@tixkit/domain';
+import {
+  attestPortableDryRun,
+  portableDryRunAttestationFromEnvironment,
+} from '../../services/portable-import-control.js';
+
+class PortableDryRunAttestationUnavailableError extends Error {
+  readonly code = 'SERVICE_UNAVAILABLE';
+  readonly statusCode = 503;
+  readonly expose = true;
+
+  constructor() {
+    super('Portable dry-run attestation is unavailable');
+  }
+}
 
 const id = z.string().trim().min(1).max(128);
 const organizationIdSchema = id;
@@ -1020,6 +1034,31 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       },
       correlations,
     );
+    let portableDryRunReceipt: unknown;
+    let portableDryRunReceiptSha256: string | undefined;
+    if (accepted && job.source_system === 'tixkit-portable') {
+      try {
+        const attested = await attestPortableDryRun({
+          db: app.context.db,
+          tenantId: principal.tenantId,
+          organizationId,
+          jobId,
+          inputSha256: inputHash,
+          createdBy: principal.id,
+          attestation: portableDryRunAttestationFromEnvironment(),
+        });
+        portableDryRunReceipt = attested.receipt;
+        portableDryRunReceiptSha256 = attested.receiptSha256;
+      } catch (error) {
+        if (error instanceof Error && error.message === 'PORTABLE_IMPORT_DRY_RUN_INPUT_CHANGED') {
+          throw new ConflictError(
+            'Portable migration input changed after its immutable dry-run receipt; create a new migration job',
+          );
+        }
+        request.log.error({ err: error, jobId }, 'Portable dry-run attestation failed');
+        throw new PortableDryRunAttestationUnavailableError();
+      }
+    }
     const changed = await repository.transitionJob({
       tenantId: principal.tenantId,
       organizationId,
@@ -1046,9 +1085,15 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
               ),
             ]
           : [],
+        ...(portableDryRunReceiptSha256 ? { portableDryRunReceiptSha256 } : {}),
       },
     );
-    return { status: accepted ? 'ready' : 'failed', report: summary, domainWrites: 0 };
+    return {
+      status: accepted ? 'ready' : 'failed',
+      report: summary,
+      domainWrites: 0,
+      ...(portableDryRunReceipt ? { portableDryRunReceipt, portableDryRunReceiptSha256 } : {}),
+    };
   });
 
   const report = async (request: FastifyRequest, download: boolean) => {
@@ -1082,6 +1127,10 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       );
       if (page.length < pageSize) break;
     }
+    const portableReceipt =
+      job.source_system === 'tixkit-portable'
+        ? await repository.findPortableDryRunReceipt(principal.tenantId, organizationId, jobId)
+        : undefined;
     const payload = {
       job: {
         id: job.id,
@@ -1094,6 +1143,9 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         updatedAt: job.updated_at,
       },
       report: parseJson(job.summary),
+      ...(portableReceipt
+        ? { portableDryRunReceipt: parseJson(portableReceipt.receipt_json) }
+        : {}),
       conflicts,
       correctivePlans: (await repository.listEvents(principal.tenantId, organizationId, jobId))
         .filter((event) => event.type === 'rollback.corrective-plan')

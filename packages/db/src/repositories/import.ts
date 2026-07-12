@@ -51,6 +51,163 @@ export interface RollbackEligibility {
 }
 
 export class ImportRepository extends BaseRepository {
+  async recordPortablePreflight(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    operationId: string;
+    bundleId: string;
+    manifestSha256: string;
+    artifactSha256: string;
+    sourceDeploymentId: string;
+    sourceChangeCursor: string;
+    destinationId: string;
+    manifestJson: string;
+    preflightJson: string;
+    expectedCounts: string;
+    expectedAssets: string;
+    requiredRebindings: string;
+  }): Promise<void> {
+    if (
+      !input.tenantId.trim() ||
+      !input.organizationId.trim() ||
+      !input.jobId.trim() ||
+      !input.operationId.trim() ||
+      !input.bundleId.trim() ||
+      !/^[a-f0-9]{64}$/u.test(input.manifestSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.artifactSha256) ||
+      !input.sourceDeploymentId.trim() ||
+      !input.sourceChangeCursor.trim() ||
+      !input.destinationId.trim() ||
+      !input.manifestJson.trim() ||
+      !input.preflightJson.trim() ||
+      !input.expectedCounts.trim() ||
+      !input.expectedAssets.trim() ||
+      !input.requiredRebindings.trim()
+    )
+      throw new Error('PORTABLE_IMPORT_PREFLIGHT_INVALID');
+    const values = {
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      import_job_id: input.jobId,
+      operation_id: input.operationId,
+      bundle_id: input.bundleId,
+      manifest_sha256: input.manifestSha256,
+      artifact_sha256: input.artifactSha256,
+      source_deployment_id: input.sourceDeploymentId,
+      source_change_cursor: input.sourceChangeCursor,
+      destination_id: input.destinationId,
+      manifest_json: input.manifestJson,
+      preflight_json: input.preflightJson,
+      expected_counts: input.expectedCounts,
+      expected_assets: input.expectedAssets,
+      required_rebindings: input.requiredRebindings,
+      created_at: new Date(),
+    };
+    try {
+      await this.db.insertInto('portable_import_preflights').values(values).execute();
+      return;
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const existing = await this.findPortablePreflight(
+        input.tenantId,
+        input.organizationId,
+        input.jobId,
+      );
+      if (!existing) throw error;
+      const comparable = { ...values, created_at: existing.created_at };
+      if (
+        Object.entries(comparable).some(
+          ([key, value]) => String(existing[key as keyof typeof existing]) !== String(value),
+        )
+      )
+        throw new Error('PORTABLE_IMPORT_PREFLIGHT_CONFLICT', { cause: error });
+    }
+  }
+
+  findPortablePreflight(tenantId: string, organizationId: string, jobId: string) {
+    return this.db
+      .selectFrom('portable_import_preflights')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('import_job_id', '=', jobId)
+      .executeTakeFirst();
+  }
+
+  async recordPortableDryRunReceipt(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    operationId: string;
+    manifestSha256: string;
+    inputSha256: string;
+    receiptSha256: string;
+    receiptJson: string;
+    createdBy: string;
+  }): Promise<void> {
+    if (
+      !input.tenantId.trim() ||
+      !input.organizationId.trim() ||
+      !input.jobId.trim() ||
+      !input.operationId.trim() ||
+      !/^[a-f0-9]{64}$/u.test(input.manifestSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.inputSha256) ||
+      !/^[a-f0-9]{64}$/u.test(input.receiptSha256) ||
+      !input.receiptJson.trim() ||
+      createHash('sha256').update(input.receiptJson).digest('hex') !== input.receiptSha256 ||
+      !input.createdBy.trim()
+    )
+      throw new Error('PORTABLE_IMPORT_DRY_RUN_RECEIPT_INVALID');
+    const values = {
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      import_job_id: input.jobId,
+      operation_id: input.operationId,
+      manifest_sha256: input.manifestSha256,
+      input_sha256: input.inputSha256,
+      receipt_sha256: input.receiptSha256,
+      receipt_json: input.receiptJson,
+      created_by: input.createdBy,
+      created_at: new Date(),
+    };
+    try {
+      await this.db.insertInto('portable_import_dry_run_receipts').values(values).execute();
+      return;
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const existing = await this.findPortableDryRunReceipt(
+        input.tenantId,
+        input.organizationId,
+        input.jobId,
+      );
+      if (!existing) throw error;
+      const {
+        created_at: _existingCreatedAt,
+        created_by: _existingCreatedBy,
+        ...existingEvidence
+      } = existing;
+      const { created_at: _createdAt, created_by: _createdBy, ...comparable } = values;
+      if (
+        Object.entries(comparable).some(
+          ([key, value]) =>
+            String(existingEvidence[key as keyof typeof existingEvidence]) !== String(value),
+        )
+      )
+        throw new Error('PORTABLE_IMPORT_DRY_RUN_RECEIPT_CONFLICT', { cause: error });
+    }
+  }
+
+  findPortableDryRunReceipt(tenantId: string, organizationId: string, jobId: string) {
+    return this.db
+      .selectFrom('portable_import_dry_run_receipts')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('import_job_id', '=', jobId)
+      .executeTakeFirst();
+  }
+
   async preparationProgress(
     tenantId: string,
     organizationId: string,

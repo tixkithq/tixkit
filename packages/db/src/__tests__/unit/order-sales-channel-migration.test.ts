@@ -37,6 +37,7 @@ import { AgentIdentityMigration } from '../../migrations/0066_agent_identity.js'
 import { AgentMemoryMigration } from '../../migrations/0067_agent_memory.js';
 import { PortableExportsMigration } from '../../migrations/0068_portable_exports.js';
 import { PortableExportBuildLeasesMigration } from '../../migrations/0069_portable_export_build_leases.js';
+import { PortableImportPreflightsMigration } from '../../migrations/0070_portable_import_preflights.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -207,7 +208,8 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0069_portable_export_build_leases');
+    expect(Object.keys(migrations).at(-1)).toBe('0070_portable_import_preflights');
+    expect(migrations['0070_portable_import_preflights']).toBe(PortableImportPreflightsMigration);
     expect(migrations['0069_portable_export_build_leases']).toBe(
       PortableExportBuildLeasesMigration,
     );

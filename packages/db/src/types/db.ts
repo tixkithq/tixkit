@@ -1840,6 +1840,38 @@ export interface PortableExportEventTable {
   occurred_at: Timestamp;
 }
 
+export interface PortableImportPreflightTable {
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  operation_id: string;
+  bundle_id: string;
+  manifest_sha256: string;
+  artifact_sha256: string;
+  source_deployment_id: string;
+  source_change_cursor: string;
+  destination_id: string;
+  manifest_json: string;
+  preflight_json: string;
+  expected_counts: string;
+  expected_assets: string;
+  required_rebindings: string;
+  created_at: Timestamp;
+}
+
+export interface PortableImportDryRunReceiptTable {
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  operation_id: string;
+  manifest_sha256: string;
+  input_sha256: string;
+  receipt_sha256: string;
+  receipt_json: string;
+  created_by: string;
+  created_at: Timestamp;
+}
+
 export interface DB {
   agent_principals: AgentPrincipalTable;
   agent_delegations: AgentDelegationTable;
@@ -1957,4 +1989,6 @@ export interface DB {
   portable_export_sequences: PortableExportSequenceTable;
   portable_export_jobs: PortableExportJobTable;
   portable_export_events: PortableExportEventTable;
+  portable_import_preflights: PortableImportPreflightTable;
+  portable_import_dry_run_receipts: PortableImportDryRunReceiptTable;
 }
