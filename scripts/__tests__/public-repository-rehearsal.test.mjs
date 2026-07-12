@@ -22,6 +22,7 @@ test('defines the complete independent public repository validation sequence', (
   ];
   assert.deepEqual(publicRepositoryValidationCommands({ createSnapshot: true }), [
     ['git', ['init', '-q']],
+    ['git', ['remote', 'add', 'origin', 'https://github.com/tixkit/tixkit.git']],
     ['git', ['add', '-A']],
     [
       'git',

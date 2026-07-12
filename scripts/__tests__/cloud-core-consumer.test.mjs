@@ -34,6 +34,11 @@ const root = resolve(import.meta.dirname, '../..');
 const distribution = JSON.parse(
   readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
 );
+const migrationIds = readdirSync(resolve(root, 'packages/db/src/migrations'))
+  .map((name) => name.match(/^(\d{4}(?:_\d+)?)/u)?.[1])
+  .filter(Boolean)
+  .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
+const currentMigrationRange = { minimum: migrationIds[0], maximum: migrationIds.at(-1) };
 
 function compatibilityManifest() {
   const agentContract = distribution.release.contracts.find((path) =>
@@ -58,7 +63,7 @@ function compatibilityManifest() {
       sourceCommit: 'b'.repeat(40),
       sourceTreeSha256: 'c'.repeat(64),
       apiVersion: '2026-01-01',
-      migrationRange: { minimum: '0001', maximum: '0064' },
+      migrationRange: { ...currentMigrationRange },
       agentProtocol: agentContract
         ? { status: 'supported', version: agentVersion }
         : { status: 'unavailable', version: '' },
@@ -490,7 +495,9 @@ test('fails closed on missing agent support and migration or schema drift', () =
       publicRelease(compatibilityManifest()),
       cloudRoot,
     );
-    assert.ok(semanticViolations.includes('migration maximum must equal 0064'));
+    assert.ok(
+      semanticViolations.includes(`migration maximum must equal ${currentMigrationRange.maximum}`),
+    );
     assert.ok(
       semanticViolations.includes('released agent protocol requires a supported pinned version'),
     );
