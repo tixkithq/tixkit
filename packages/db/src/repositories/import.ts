@@ -52,6 +52,14 @@ export interface RollbackEligibility {
   }>;
 }
 
+type ImportRowCompletionEvent = {
+  eventKey: string;
+  type: string;
+  severity: 'fatal' | 'error' | 'warning' | 'info';
+  message: string;
+  data?: unknown;
+};
+
 export class ImportRepository extends BaseRepository {
   async registerPortableDestinationResource(input: {
     tenantId: string;
@@ -1576,6 +1584,41 @@ export class ImportRepository extends BaseRepository {
     throw new Error('Import event sequence allocation exhausted');
   }
 
+  findEventByKey(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    eventKey: string;
+  }): Promise<Selectable<ImportJobEventTable> | undefined> {
+    return this.db
+      .selectFrom('import_job_events')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('event_key', '=', input.eventKey)
+      .executeTakeFirst();
+  }
+
+  listEventsByKeyPrefix(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    eventKeyPrefix: string;
+  }): Promise<Array<Selectable<ImportJobEventTable>>> {
+    if (!input.eventKeyPrefix || input.eventKeyPrefix.length > 240)
+      throw new Error('Import event key prefix is required');
+    return this.db
+      .selectFrom('import_job_events')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('event_key', 'like', `${input.eventKeyPrefix}%`)
+      .orderBy('sequence', 'asc')
+      .execute();
+  }
+
   async appendIdempotentEventInCurrentTransaction(input: {
     tenantId: string;
     organizationId: string;
@@ -1678,6 +1721,97 @@ export class ImportRepository extends BaseRepository {
       .execute();
   }
 
+  listRowsByIds(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    rowIds: string[];
+  }): Promise<Array<Selectable<ImportJobRowTable>>> {
+    if (input.rowIds.length === 0) return Promise.resolve([]);
+    return this.db
+      .selectFrom('import_job_rows')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('id', 'in', input.rowIds)
+      .orderBy('row_number', 'asc')
+      .orderBy('id', 'asc')
+      .execute();
+  }
+
+  listClaimedRowsByOwner(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    claimedStatus: string;
+    ownerToken: string;
+  }): Promise<Array<Selectable<ImportJobRowTable>>> {
+    return this.db
+      .selectFrom('import_job_rows')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('status', '=', input.claimedStatus)
+      .where('claim_owner', '=', input.ownerToken)
+      .orderBy('row_number', 'asc')
+      .orderBy('id', 'asc')
+      .execute();
+  }
+
+  async releaseExpiredClaimsByOwner(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    claimedStatus: string;
+    returnToStatus: string;
+    ownerToken: string;
+    now: Date;
+  }): Promise<number> {
+    const result = await this.db
+      .updateTable('import_job_rows')
+      .set({
+        status: input.returnToStatus,
+        claim_owner: null,
+        claim_expires_at: null,
+        updated_at: input.now,
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('status', '=', input.claimedStatus)
+      .where('claim_owner', '=', input.ownerToken)
+      .where('claim_expires_at', '<=', input.now)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows);
+  }
+
+  async releaseClaimsByOwner(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    claimedStatus: string;
+    returnToStatus: string;
+    ownerToken: string;
+  }): Promise<number> {
+    const result = await this.db
+      .updateTable('import_job_rows')
+      .set({
+        status: input.returnToStatus,
+        claim_owner: null,
+        claim_expires_at: null,
+        updated_at: new Date(),
+      })
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('import_job_id', '=', input.jobId)
+      .where('status', '=', input.claimedStatus)
+      .where('claim_owner', '=', input.ownerToken)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows);
+  }
+
   async claimRows(input: {
     tenantId: string;
     organizationId: string;
@@ -1747,6 +1881,63 @@ export class ImportRepository extends BaseRepository {
       .execute();
   }
 
+  async claimRowsByIds(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    rowIds: string[];
+    fromStatus: string;
+    claimStatus: string;
+    ownerToken: string;
+    leaseExpiresAt: Date;
+  }): Promise<Array<Selectable<ImportJobRowTable>>> {
+    if (
+      input.rowIds.length === 0 ||
+      new Set(input.rowIds).size !== input.rowIds.length ||
+      !input.ownerToken ||
+      input.ownerToken.length > 255 ||
+      !Number.isFinite(input.leaseExpiresAt.getTime()) ||
+      input.leaseExpiresAt <= new Date()
+    )
+      throw new Error('Import exact row claim is invalid');
+    return this.db.transaction().execute(async (transaction) => {
+      const now = new Date();
+      for (const rowId of input.rowIds) {
+        const result = await transaction
+          .updateTable('import_job_rows')
+          .set((eb) => ({
+            status: input.claimStatus,
+            claim_owner: input.ownerToken,
+            claim_attempt: eb('claim_attempt', '+', 1),
+            claim_expires_at: input.leaseExpiresAt,
+            updated_at: now,
+          }))
+          .where('tenant_id', '=', input.tenantId)
+          .where('organization_id', '=', input.organizationId)
+          .where('import_job_id', '=', input.jobId)
+          .where('id', '=', rowId)
+          .where((eb) =>
+            eb.or([
+              eb('status', '=', input.fromStatus),
+              eb.and([eb('status', '=', input.claimStatus), eb('claim_expires_at', '<=', now)]),
+            ]),
+          )
+          .executeTakeFirst();
+        if (Number(result.numUpdatedRows) !== 1) throw new Error('IMPORT_ROW_EXACT_CLAIM_CONFLICT');
+      }
+      return transaction
+        .selectFrom('import_job_rows')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('import_job_id', '=', input.jobId)
+        .where('id', 'in', input.rowIds)
+        .orderBy('row_number', 'asc')
+        .orderBy('id', 'asc')
+        .execute();
+    });
+  }
+
   async completeRow(input: {
     tenantId: string;
     organizationId: string;
@@ -1759,27 +1950,41 @@ export class ImportRepository extends BaseRepository {
     createdEntity?: boolean;
     severity?: 'fatal' | 'error' | 'warning' | 'info';
     rollbackBlockedReason?: string;
+    completionEvent?: ImportRowCompletionEvent;
   }): Promise<boolean> {
-    const result = await this.db
-      .updateTable('import_job_rows')
-      .set({
-        status: input.outcome,
-        severity: input.severity,
-        tixkit_id: input.tixkitId,
-        created_entity: input.createdEntity,
-        rollback_blocked_reason: input.rollbackBlockedReason,
-        claim_owner: null,
-        claim_expires_at: null,
-        updated_at: new Date(),
-      })
-      .where('tenant_id', '=', input.tenantId)
-      .where('organization_id', '=', input.organizationId)
-      .where('import_job_id', '=', input.jobId)
-      .where('id', '=', input.rowId)
-      .where('status', '=', input.claimedStatus)
-      .where('claim_owner', '=', input.ownerToken)
-      .executeTakeFirst();
-    return Number(result.numUpdatedRows) === 1;
+    return this.db.transaction().execute(async (transaction) => {
+      const now = new Date();
+      const result = await transaction
+        .updateTable('import_job_rows')
+        .set({
+          status: input.outcome,
+          severity: input.severity,
+          tixkit_id: input.tixkitId,
+          created_entity: input.createdEntity,
+          rollback_blocked_reason: input.rollbackBlockedReason,
+          claim_owner: null,
+          claim_expires_at: null,
+          updated_at: now,
+        })
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('import_job_id', '=', input.jobId)
+        .where('id', '=', input.rowId)
+        .where('status', '=', input.claimedStatus)
+        .where('claim_owner', '=', input.ownerToken)
+        .where('claim_expires_at', '>', now)
+        .executeTakeFirst();
+      const completed = Number(result.numUpdatedRows) === 1;
+      if (completed && input.completionEvent) {
+        await new ImportRepository(transaction).appendIdempotentEventInCurrentTransaction({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          ...input.completionEvent,
+        });
+      }
+      return completed;
+    });
   }
 
   async completeRowWithExternalReference(input: {
@@ -1796,6 +2001,7 @@ export class ImportRepository extends BaseRepository {
     tixkitId: string;
     createdEntity: boolean;
     provenance?: unknown;
+    completionEvent?: ImportRowCompletionEvent;
   }): Promise<void> {
     await this.db.transaction().execute(async (transaction) => {
       const tenantIdentity = await transaction
@@ -1865,9 +2071,18 @@ export class ImportRepository extends BaseRepository {
         .where('id', '=', input.rowId)
         .where('status', '=', input.claimedStatus)
         .where('claim_owner', '=', input.ownerToken)
+        .where('claim_expires_at', '>', now)
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) !== 1) {
         throw new Error('Import row claim was lost before completion');
+      }
+      if (input.completionEvent) {
+        await new ImportRepository(transaction).appendIdempotentEventInCurrentTransaction({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          ...input.completionEvent,
+        });
       }
     });
   }

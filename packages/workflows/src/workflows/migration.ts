@@ -14,7 +14,7 @@ import {
   type MigrationWorkflowProgress,
 } from '../activities/migration.js';
 
-const activities = proxyActivities<{
+type MigrationActivities = {
   beginMigrationCommitActivity(input: ScopedInput): Promise<void>;
   processMigrationStageActivity(
     input: ScopedInput & {
@@ -38,7 +38,9 @@ const activities = proxyActivities<{
   ): Promise<{ deleted: number }>;
   completeMigrationCommitActivity(input: ScopedInput): Promise<void>;
   failMigrationCommitActivity(input: ScopedInput & MigrationFailure): Promise<void>;
-}>({
+};
+
+const sharedActivityOptions = {
   startToCloseTimeout: '5 minutes',
   heartbeatTimeout: '30 seconds',
   retry: {
@@ -47,7 +49,19 @@ const activities = proxyActivities<{
     maximumInterval: '1 minute',
     maximumAttempts: 5,
   },
-});
+} as const;
+
+const activities =
+  proxyActivities<Omit<MigrationActivities, 'processMigrationStageActivity'>>(
+    sharedActivityOptions,
+  );
+
+const stageActivities = proxyActivities<Pick<MigrationActivities, 'processMigrationStageActivity'>>(
+  {
+    ...sharedActivityOptions,
+    retry: { ...sharedActivityOptions.retry, maximumAttempts: 20 },
+  },
+);
 
 type ScopedInput = { tenantId: string; organizationId: string; jobId: string };
 
@@ -226,7 +240,7 @@ export async function migrationCommitWorkflow(
           return { status: state.status, progress: state };
         }
 
-        const result = await activities.processMigrationStageActivity({
+        const result = await stageActivities.processMigrationStageActivity({
           ...scope,
           stage,
           cursor,

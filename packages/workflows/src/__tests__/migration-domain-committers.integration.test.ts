@@ -661,11 +661,13 @@ describeDatabase('production migration committers', () => {
     await service.beginCommit(context);
     let processed = 0;
     for (const [stageIndex, stage] of MIGRATION_COMMIT_STAGES.entries()) {
-      const result = await service.processStage(context, {
+      const stageInput = {
         stage,
         claimOwner: `test-owner:${stage}`,
         chunkSize: 100,
-      });
+      };
+      const result = await service.processStage(context, stageInput);
+      await expect(service.processStage(context, stageInput)).resolves.toEqual(result);
       processed += result.processed;
       await service.recordProgress(context, {
         stage,
@@ -683,6 +685,397 @@ describeDatabase('production migration committers', () => {
     await service.completeCommit(context);
     return job;
   }
+
+  let singleOrganizationJobSequence = 0;
+  async function createSingleOrganizationJob(
+    idempotencyKey: string,
+    externalId: string,
+    rowCount = 1,
+  ) {
+    singleOrganizationJobSequence += 1;
+    const scopedTenantId = (
+      await new TenantRepository(db).create({
+        name: `Row ledger tenant ${singleOrganizationJobSequence}`,
+      })
+    ).id;
+    const scopedOrganizationId = (
+      await new OrganizationRepository(db).create({
+        tenantId: scopedTenantId,
+        name: `Row ledger organization ${singleOrganizationJobSequence}`,
+        slug: `row-ledger-${integrationDriver}-${singleOrganizationJobSequence}`,
+      })
+    ).id;
+    const repository = new ImportRepository(db);
+    const job = await repository.createJob({
+      tenantId: scopedTenantId,
+      organizationId: scopedOrganizationId,
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey,
+      requestedBy: 'test-user',
+    });
+    const normalized = Array.from({ length: rowCount }, (_, index) => ({
+      ...entity('organization', index),
+      externalId: `${externalId}-${index + 1}`,
+      dependencies: [],
+      attributes: {
+        ...attributes.organization,
+        name: `Recovered organization ${externalId} ${index + 1}`,
+        slug: `recovered-${externalId}-${index + 1}`,
+      },
+    }));
+    await repository.addRows(
+      scopedTenantId,
+      scopedOrganizationId,
+      job.id,
+      normalized.map((row, index) => ({
+        entityType: row.entityType,
+        externalId: row.externalId,
+        rowNumber: index + 1,
+        sourceData: row.attributes,
+        normalizedData: row,
+        status: 'validated',
+      })),
+    );
+    await repository.transitionJob({
+      tenantId: scopedTenantId,
+      organizationId: scopedOrganizationId,
+      jobId: job.id,
+      from: ['pending'],
+      to: 'ready',
+    });
+    return { job, tenantId: scopedTenantId, organizationId: scopedOrganizationId };
+  }
+
+  it('reconstructs a completed chunk after row persistence but before the chunk checkpoint', async () => {
+    const repository = new ImportRepository(db);
+    const claimOwner = `row-ledger-recovery:${integrationDriver}`;
+    const scoped = await createSingleOrganizationJob(
+      `row-ledger-recovery:${integrationDriver}`,
+      `row-ledger-recovery-${integrationDriver}`,
+    );
+    const context = {
+      tenantId: scoped.tenantId,
+      organizationId: scoped.organizationId,
+      jobId: scoped.job.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    };
+    const stageInput = {
+      stage: MIGRATION_COMMIT_STAGES[0]!,
+      claimOwner,
+      chunkSize: 1,
+    };
+    const crashingService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+      undefined,
+      {
+        afterRowCompletion() {
+          throw new Error('SIMULATED_PROCESS_EXIT_BEFORE_CHUNK_CHECKPOINT');
+        },
+      },
+    );
+    await crashingService.beginCommit(context);
+    await expect(crashingService.processStage(context, stageInput)).rejects.toThrow(
+      'SIMULATED_PROCESS_EXIT_BEFORE_CHUNK_CHECKPOINT',
+    );
+    const beforeRecovery = await repository.listEvents(
+      scoped.tenantId,
+      scoped.organizationId,
+      scoped.job.id,
+    );
+    expect(
+      beforeRecovery.filter((event) => event.type === 'commit.stage.row.completed'),
+    ).toHaveLength(1);
+    expect(beforeRecovery.filter((event) => event.type === 'commit.stage.completed')).toHaveLength(
+      0,
+    );
+
+    const recoveryService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+    );
+    const recovered = await recoveryService.processStage(context, stageInput);
+    expect(recovered).toEqual({
+      processed: 1,
+      created: 0,
+      updated: 1,
+      skipped: 0,
+      conflicts: 0,
+      failed: 0,
+      complete: false,
+      nextCursor: expect.any(String),
+    });
+    const afterRecovery = await repository.listEvents(
+      scoped.tenantId,
+      scoped.organizationId,
+      scoped.job.id,
+    );
+    expect(afterRecovery.filter((event) => event.type === 'commit.stage.completed')).toHaveLength(
+      1,
+    );
+    expect(JSON.stringify(afterRecovery)).not.toContain(claimOwner);
+    const rowLedger = afterRecovery.find((event) => event.type === 'commit.stage.row.completed')!;
+    await expect(
+      repository.appendIdempotentEvent({
+        tenantId: scoped.tenantId,
+        organizationId: scoped.organizationId,
+        jobId: scoped.job.id,
+        eventKey: rowLedger.event_key,
+        type: rowLedger.type,
+        severity: rowLedger.severity as 'info',
+        message: rowLedger.message,
+        data: { tampered: true },
+      }),
+    ).rejects.toThrow('IMPORT_EVENT_IDEMPOTENCY_CONFLICT');
+
+    const secondScope = await createSingleOrganizationJob(
+      `row-ledger-scope:${integrationDriver}`,
+      `row-ledger-scope-${integrationDriver}`,
+    );
+    const secondContext = {
+      ...context,
+      tenantId: secondScope.tenantId,
+      organizationId: secondScope.organizationId,
+      jobId: secondScope.job.id,
+    };
+    await recoveryService.beginCommit(secondContext);
+    await expect(recoveryService.processStage(secondContext, stageInput)).resolves.toMatchObject({
+      processed: 1,
+      updated: 1,
+    });
+  });
+
+  it('does not report a stage complete while the same logical chunk is still active', async () => {
+    const scoped = await createSingleOrganizationJob(
+      `row-ledger-overlap:${integrationDriver}`,
+      `row-ledger-overlap-${integrationDriver}`,
+    );
+    const productionCommitters = createProductionMigrationCommitters(db);
+    const organizationCommitter = productionCommitters.get('organization')!;
+    let releaseCommit!: () => void;
+    let markCommitStarted!: () => void;
+    const commitStarted = new Promise<void>((resolve) => {
+      markCommitStarted = resolve;
+    });
+    const commitReleased = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    const committers = new Map(productionCommitters);
+    committers.set('organization', {
+      assessReconciled: (input) => organizationCommitter.assessReconciled(input),
+      assessUntouched: (input) => organizationCommitter.assessUntouched(input),
+      deleteUntouched: (input) => organizationCommitter.deleteUntouched(input),
+      async commit(input) {
+        markCommitStarted();
+        await commitReleased;
+        return organizationCommitter.commit(input);
+      },
+    });
+    const service = createRepositoryMigrationActivityService(db, committers);
+    const context = {
+      tenantId: scoped.tenantId,
+      organizationId: scoped.organizationId,
+      jobId: scoped.job.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    };
+    const stageInput = {
+      stage: MIGRATION_COMMIT_STAGES[0]!,
+      claimOwner: `row-ledger-overlap:${integrationDriver}`,
+      chunkSize: 1,
+    };
+    await service.beginCommit(context);
+    const first = service.processStage(context, stageInput);
+    await commitStarted;
+    await expect(service.processStage(context, stageInput)).rejects.toThrow(
+      'MIGRATION_STAGE_CLAIM_IN_PROGRESS',
+    );
+    releaseCommit();
+    await expect(first).resolves.toMatchObject({ processed: 1, updated: 1 });
+  });
+
+  it('reclaims an expired chunk when the worker exits before completing its first row', async () => {
+    const scoped = await createSingleOrganizationJob(
+      `row-ledger-before-first:${integrationDriver}`,
+      `row-ledger-before-first-${integrationDriver}`,
+    );
+    const context = {
+      tenantId: scoped.tenantId,
+      organizationId: scoped.organizationId,
+      jobId: scoped.job.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    };
+    const stageInput = {
+      stage: MIGRATION_COMMIT_STAGES[0]!,
+      claimOwner: `row-ledger-before-first:${integrationDriver}`,
+      chunkSize: 1,
+    };
+    const crashingService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+      undefined,
+      {
+        claimLeaseMs: 1_100,
+        afterRowsClaimed() {
+          throw new Error('SIMULATED_PROCESS_EXIT_BEFORE_FIRST_ROW');
+        },
+      },
+    );
+    await crashingService.beginCommit(context);
+    await expect(crashingService.processStage(context, stageInput)).rejects.toThrow(
+      'SIMULATED_PROCESS_EXIT_BEFORE_FIRST_ROW',
+    );
+    await db
+      .updateTable('import_job_rows')
+      .set({ claim_expires_at: new Date(Date.now() - 1_000) })
+      .where('tenant_id', '=', scoped.tenantId)
+      .where('organization_id', '=', scoped.organizationId)
+      .where('import_job_id', '=', scoped.job.id)
+      .where('claim_owner', '=', stageInput.claimOwner)
+      .execute();
+    const recoveryService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+      undefined,
+      { claimLeaseMs: 1_100 },
+    );
+    await expect(recoveryService.processStage(context, stageInput)).resolves.toMatchObject({
+      processed: 1,
+      updated: 1,
+    });
+  });
+
+  it('reconstructs a partial multi-row ledger after the remaining claim expires', async () => {
+    const scoped = await createSingleOrganizationJob(
+      `row-ledger-partial:${integrationDriver}`,
+      `row-ledger-partial-${integrationDriver}`,
+      3,
+    );
+    const context = {
+      tenantId: scoped.tenantId,
+      organizationId: scoped.organizationId,
+      jobId: scoped.job.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    };
+    const stageInput = {
+      stage: MIGRATION_COMMIT_STAGES[0]!,
+      claimOwner: `row-ledger-partial:${integrationDriver}`,
+      chunkSize: 2,
+    };
+    let completedRows = 0;
+    const crashingService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+      undefined,
+      {
+        claimLeaseMs: 1_100,
+        afterRowCompletion() {
+          completedRows += 1;
+          if (completedRows === 1) throw new Error('SIMULATED_PROCESS_EXIT_AFTER_FIRST_ROW');
+        },
+      },
+    );
+    await crashingService.beginCommit(context);
+    await expect(crashingService.processStage(context, stageInput)).rejects.toThrow(
+      'SIMULATED_PROCESS_EXIT_AFTER_FIRST_ROW',
+    );
+    await db
+      .updateTable('import_job_rows')
+      .set({ claim_expires_at: new Date(Date.now() - 1_000) })
+      .where('tenant_id', '=', scoped.tenantId)
+      .where('organization_id', '=', scoped.organizationId)
+      .where('import_job_id', '=', scoped.job.id)
+      .where('claim_owner', '=', stageInput.claimOwner)
+      .execute();
+    const repository = new ImportRepository(db);
+    const rowsBeforeRecovery = await repository.listRows({
+      tenantId: scoped.tenantId,
+      organizationId: scoped.organizationId,
+      jobId: scoped.job.id,
+      limit: 10,
+    });
+    expect(rowsBeforeRecovery.map((row) => row.status)).toEqual([
+      'updated',
+      'committing',
+      'validated',
+    ]);
+    await expect(
+      repository.releaseExpiredClaimsByOwner({
+        tenantId: scoped.tenantId,
+        organizationId: scoped.organizationId,
+        jobId: scoped.job.id,
+        claimedStatus: 'committing',
+        returnToStatus: 'validated',
+        ownerToken: stageInput.claimOwner,
+        now: new Date(),
+      }),
+    ).resolves.toBe(1);
+    await repository.claimRowsByIds({
+      tenantId: scoped.tenantId,
+      organizationId: scoped.organizationId,
+      jobId: scoped.job.id,
+      rowIds: [rowsBeforeRecovery[1]!.id],
+      fromStatus: 'validated',
+      claimStatus: 'committing',
+      ownerToken: `competing-owner:${integrationDriver}`,
+      leaseExpiresAt: new Date(Date.now() + 30_000),
+    });
+    const recoveryService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+      undefined,
+      { claimLeaseMs: 1_100 },
+    );
+    await expect(recoveryService.processStage(context, stageInput)).rejects.toThrow(
+      'MIGRATION_STAGE_CLAIM_IN_PROGRESS',
+    );
+    await expect(
+      repository.claimRowsByIds({
+        tenantId: scoped.tenantId,
+        organizationId: scoped.organizationId,
+        jobId: scoped.job.id,
+        rowIds: [rowsBeforeRecovery[2]!.id, rowsBeforeRecovery[1]!.id],
+        fromStatus: 'validated',
+        claimStatus: 'committing',
+        ownerToken: `rollback-probe:${integrationDriver}`,
+        leaseExpiresAt: new Date(Date.now() + 30_000),
+      }),
+    ).rejects.toThrow('IMPORT_ROW_EXACT_CLAIM_CONFLICT');
+    const rowsAfterConflict = await repository.listRows({
+      tenantId: scoped.tenantId,
+      organizationId: scoped.organizationId,
+      jobId: scoped.job.id,
+      limit: 10,
+    });
+    expect(rowsAfterConflict[1]).toMatchObject({
+      status: 'committing',
+      claim_owner: `competing-owner:${integrationDriver}`,
+    });
+    expect(rowsAfterConflict[2]).toMatchObject({
+      status: 'validated',
+      claim_owner: null,
+      claim_attempt: rowsBeforeRecovery[2]!.claim_attempt,
+    });
+    await db
+      .updateTable('import_job_rows')
+      .set({ claim_expires_at: new Date(Date.now() - 1_000) })
+      .where('tenant_id', '=', scoped.tenantId)
+      .where('organization_id', '=', scoped.organizationId)
+      .where('import_job_id', '=', scoped.job.id)
+      .where('claim_owner', '=', `competing-owner:${integrationDriver}`)
+      .execute();
+    await expect(recoveryService.processStage(context, stageInput)).resolves.toEqual({
+      processed: 2,
+      created: 0,
+      updated: 2,
+      skipped: 0,
+      conflicts: 0,
+      failed: 0,
+      complete: false,
+      nextCursor: expect.any(String),
+    });
+  });
 
   it('imports the canonical dependency chain idempotently without commerce side effects', async () => {
     const firstJob = await importChain('chain:first');
@@ -716,7 +1109,8 @@ describeDatabase('production migration committers', () => {
       unresolvedRows: [],
       committers: createProductionMigrationCommitters(db),
     };
-    await expect(portableReconciliationReport(reportInput)).resolves.toMatchObject({ ready: true });
+    const initialReport = await portableReconciliationReport(reportInput);
+    expect(initialReport, JSON.stringify(initialReport)).toMatchObject({ ready: true });
     const paymentSnapshot = await db
       .selectFrom('historical_financial_snapshots')
       .select(['id', 'amount_minor'])
@@ -792,10 +1186,11 @@ describeDatabase('production migration committers', () => {
             .selectFrom('imported_domain_entities')
             .select(({ fn }) => fn.countAll<number>().as('count'))
             .where('tenant_id', '=', tenantId)
+            .where('created_by_import_job_id', '=', firstJob.id)
             .executeTakeFirstOrThrow()
         ).count,
       ),
-    ).toBe(MIGRATION_ENTITY_DEPENDENCY_ORDER.length + 1); // Includes the portable-media event fixture.
+    ).toBe(MIGRATION_ENTITY_DEPENDENCY_ORDER.length);
     const snapshots = await db
       .selectFrom('imported_domain_entities')
       .select(['entity_type', 'side_effects_suppressed', 'financial_snapshot'])

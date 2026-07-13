@@ -65,6 +65,24 @@ export interface MigrationDomainCommitter {
 
 export type MigrationCommitterRegistry = ReadonlyMap<MigrationEntityType, MigrationDomainCommitter>;
 
+export type MigrationRepositoryActivityHooks = {
+  claimLeaseMs?: number;
+  afterRowsClaimed?(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    stage: MigrationCommitStage;
+    rowIds: string[];
+  }): Promise<void> | void;
+  afterRowCompletion?(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    stage: MigrationCommitStage;
+    rowId: string;
+  }): Promise<void> | void;
+};
+
 const STAGE_ENTITIES: Record<MigrationCommitStage, readonly MigrationEntityType[]> = {
   organizations_brands: ['organization', 'brand'],
   venues: ['venue'],
@@ -99,6 +117,142 @@ function parseEntity(serialized: string | null): NormalizedMigrationEntity {
 
 function summary(progress: MigrationWorkflowProgress): MigrationWorkflowProgress {
   return { ...progress };
+}
+
+function stageCheckpointKey(claimOwner: string): string {
+  return `commit:stage-result:${createHash('sha256').update(claimOwner).digest('hex')}`;
+}
+
+function stageRowEventPrefix(claimOwnerSha256: string): string {
+  return `commit:stage-row:${claimOwnerSha256}:`;
+}
+
+function stageRowEventKey(claimOwnerSha256: string, rowId: string): string {
+  return `${stageRowEventPrefix(claimOwnerSha256)}${createHash('sha256').update(rowId).digest('hex')}`;
+}
+
+type StageRowLedger = {
+  version: 1;
+  stage: MigrationCommitStage;
+  claimOwnerSha256: string;
+  rowId: string;
+  batchRowIds: string[];
+  outcome: 'created' | 'updated' | 'skipped' | 'conflict' | 'failed';
+  complete: boolean;
+  nextCursor?: string;
+};
+
+function parseStageRowLedger(
+  serialized: string | null,
+  expectedStage: MigrationCommitStage,
+  expectedClaimOwnerSha256: string,
+): StageRowLedger {
+  let ledger: Partial<StageRowLedger>;
+  try {
+    ledger = JSON.parse(serialized ?? '') as Partial<StageRowLedger>;
+  } catch (error) {
+    throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID', { cause: error });
+  }
+  const outcomes = new Set(['created', 'updated', 'skipped', 'conflict', 'failed']);
+  if (
+    ledger.version !== 1 ||
+    ledger.stage !== expectedStage ||
+    ledger.claimOwnerSha256 !== expectedClaimOwnerSha256 ||
+    typeof ledger.rowId !== 'string' ||
+    !Array.isArray(ledger.batchRowIds) ||
+    ledger.batchRowIds.length === 0 ||
+    ledger.batchRowIds.some((rowId) => typeof rowId !== 'string') ||
+    new Set(ledger.batchRowIds).size !== ledger.batchRowIds.length ||
+    !ledger.batchRowIds.includes(ledger.rowId) ||
+    typeof ledger.outcome !== 'string' ||
+    !outcomes.has(ledger.outcome) ||
+    typeof ledger.complete !== 'boolean' ||
+    (ledger.nextCursor !== undefined && typeof ledger.nextCursor !== 'string')
+  )
+    throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+  return ledger as StageRowLedger;
+}
+
+function resultFromStageRowLedgers(ledgers: StageRowLedger[]): MigrationStageResult {
+  const first = ledgers[0];
+  if (!first) throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+  const batchIdentity = JSON.stringify({
+    batchRowIds: first.batchRowIds,
+    complete: first.complete,
+    nextCursor: first.nextCursor,
+  });
+  const seenRows = new Set<string>();
+  const result: MigrationStageResult = {
+    processed: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    conflicts: 0,
+    failed: 0,
+    complete: first.complete,
+    ...(first.nextCursor ? { nextCursor: first.nextCursor } : {}),
+  };
+  for (const ledger of ledgers) {
+    if (
+      JSON.stringify({
+        batchRowIds: ledger.batchRowIds,
+        complete: ledger.complete,
+        nextCursor: ledger.nextCursor,
+      }) !== batchIdentity ||
+      seenRows.has(ledger.rowId)
+    )
+      throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+    seenRows.add(ledger.rowId);
+    result.processed += 1;
+    if (ledger.outcome === 'conflict') result.conflicts += 1;
+    else result[ledger.outcome] += 1;
+  }
+  return result;
+}
+
+function parseStageCheckpoint(
+  serialized: string | null,
+  expectedStage: MigrationCommitStage,
+  expectedClaimOwnerSha256: string,
+): MigrationStageResult {
+  let checkpoint: {
+    version?: unknown;
+    stage?: unknown;
+    claimOwnerSha256?: unknown;
+    result?: Record<string, unknown>;
+  };
+  try {
+    checkpoint = JSON.parse(serialized ?? '') as typeof checkpoint;
+  } catch (error) {
+    throw new Error('MIGRATION_STAGE_CHECKPOINT_INVALID', { cause: error });
+  }
+  if (
+    checkpoint.version !== 1 ||
+    checkpoint.stage !== expectedStage ||
+    checkpoint.claimOwnerSha256 !== expectedClaimOwnerSha256 ||
+    !checkpoint.result ||
+    typeof checkpoint.result.complete !== 'boolean'
+  )
+    throw new Error('MIGRATION_STAGE_CHECKPOINT_INVALID');
+  const numericKeys = [
+    'processed',
+    'created',
+    'updated',
+    'skipped',
+    'conflicts',
+    'failed',
+  ] as const;
+  for (const key of numericKeys) {
+    const value = checkpoint.result[key];
+    if (!Number.isInteger(value) || (value as number) < 0)
+      throw new Error('MIGRATION_STAGE_CHECKPOINT_INVALID');
+  }
+  if (
+    checkpoint.result.nextCursor !== undefined &&
+    typeof checkpoint.result.nextCursor !== 'string'
+  )
+    throw new Error('MIGRATION_STAGE_CHECKPOINT_INVALID');
+  return checkpoint.result as MigrationStageResult;
 }
 
 type ImportRow = Awaited<ReturnType<ImportRepository['listRows']>>[number];
@@ -425,10 +579,14 @@ export function createRepositoryMigrationActivityService(
   db: Database,
   committers: MigrationCommitterRegistry,
   credentialResolver?: MigrationCredentialResolver,
+  hooks: MigrationRepositoryActivityHooks = {},
 ): MigrationActivityService {
   assertMigrationCommittersRegistered(committers);
   const repository = new ImportRepository(db);
   const claimedStatus = 'committing';
+  const claimLeaseMs = hooks.claimLeaseMs ?? 10 * 60 * 1000;
+  if (!Number.isSafeInteger(claimLeaseMs) || claimLeaseMs < 10)
+    throw new Error('MIGRATION_CLAIM_LEASE_INVALID');
 
   return {
     async beginCommit(context) {
@@ -649,27 +807,194 @@ export function createRepositoryMigrationActivityService(
       if (job.mode !== 'commit') throw new Error('MIGRATION_DRY_RUN_CANNOT_COMMIT');
       if (job.status !== 'committing')
         throw new Error(`MIGRATION_JOB_NOT_COMMITTING:${job.status}`);
-      const rows = await repository.claimRows({
+      const claimOwnerSha256 = createHash('sha256').update(input.claimOwner).digest('hex');
+      const checkpointKey = stageCheckpointKey(input.claimOwner);
+      const checkpoint = await repository.findEventByKey({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        entityTypes: [...entityTypes],
-        fromStatus: 'validated',
-        claimStatus: claimedStatus,
-        ownerToken: input.claimOwner,
-        leaseExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
-        limit: input.chunkSize,
+        eventKey: checkpointKey,
       });
-      const result: MigrationStageResult = {
-        processed: 0,
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        conflicts: 0,
-        failed: 0,
-        complete: rows.length < input.chunkSize,
-        ...(rows.length === input.chunkSize ? { nextCursor: rows.at(-1)!.id } : {}),
-      };
+      if (checkpoint) {
+        if (checkpoint.type !== 'commit.stage.completed')
+          throw new Error('MIGRATION_STAGE_CHECKPOINT_INVALID');
+        return parseStageCheckpoint(checkpoint.data, input.stage, claimOwnerSha256);
+      }
+      const rowEvents = await repository.listEventsByKeyPrefix({
+        tenantId: context.tenantId,
+        organizationId: context.organizationId,
+        jobId: context.jobId,
+        eventKeyPrefix: stageRowEventPrefix(claimOwnerSha256),
+      });
+      const ledgers = rowEvents.map((event) => {
+        if (event.type !== 'commit.stage.row.completed')
+          throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+        return parseStageRowLedger(event.data, input.stage, claimOwnerSha256);
+      });
+      const activeClaims = await repository.listClaimedRowsByOwner({
+        tenantId: context.tenantId,
+        organizationId: context.organizationId,
+        jobId: context.jobId,
+        claimedStatus,
+        ownerToken: input.claimOwner,
+      });
+      if (activeClaims.length > 0) {
+        const now = new Date();
+        if (
+          activeClaims.some(
+            (row) =>
+              !row.claim_expires_at || new Date(row.claim_expires_at).getTime() > now.getTime(),
+          )
+        )
+          throw new Error('MIGRATION_STAGE_CLAIM_IN_PROGRESS');
+        const released = await repository.releaseExpiredClaimsByOwner({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          claimedStatus,
+          returnToStatus: 'validated',
+          ownerToken: input.claimOwner,
+          now,
+        });
+        if (released !== activeClaims.length) throw new Error('MIGRATION_STAGE_RETRY_REQUIRED');
+      }
+      let rows: ImportRow[];
+      let result: MigrationStageResult;
+      let batchRowIds: string[];
+      if (ledgers.length > 0) {
+        result = resultFromStageRowLedgers(ledgers);
+        batchRowIds = ledgers[0]!.batchRowIds;
+        const durableRows = await repository.listRowsByIds({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          rowIds: batchRowIds,
+        });
+        if (durableRows.length !== batchRowIds.length)
+          throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+        const ledgerByRow = new Map(ledgers.map((ledger) => [ledger.rowId, ledger]));
+        const claimValidationTime = Date.now();
+        for (const row of durableRows) {
+          const ledger = ledgerByRow.get(row.id);
+          const entity = parseEntity(row.normalized_data);
+          if (!STAGE_ENTITIES[input.stage].includes(entity.entityType))
+            throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+          if (ledger) {
+            if (ledger.outcome !== row.status)
+              throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+            continue;
+          }
+          if (row.status === 'validated') continue;
+          if (
+            row.status === claimedStatus &&
+            row.claim_expires_at &&
+            new Date(row.claim_expires_at).getTime() <= claimValidationTime
+          )
+            continue;
+          if (row.status === claimedStatus) throw new Error('MIGRATION_STAGE_CLAIM_IN_PROGRESS');
+          throw new Error('MIGRATION_STAGE_ROW_LEDGER_INVALID');
+        }
+        if (result.failed > 0) throw new Error('MIGRATION_STAGE_ROW_FAILED');
+        if (result.processed === batchRowIds.length) {
+          await repository.appendIdempotentEvent({
+            tenantId: context.tenantId,
+            organizationId: context.organizationId,
+            jobId: context.jobId,
+            eventKey: checkpointKey,
+            type: 'commit.stage.completed',
+            severity: 'info',
+            message: `Migration stage ${input.stage} durably completed a chunk.`,
+            data: { version: 1, stage: input.stage, claimOwnerSha256, result },
+          });
+          return result;
+        }
+        const pendingRowIds = batchRowIds.filter((rowId) => !ledgerByRow.has(rowId));
+        rows = await repository.claimRowsByIds({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          rowIds: pendingRowIds,
+          fromStatus: 'validated',
+          claimStatus: claimedStatus,
+          ownerToken: input.claimOwner,
+          leaseExpiresAt: new Date(Date.now() + claimLeaseMs),
+        });
+      } else {
+        rows = await repository.claimRows({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          entityTypes: [...entityTypes],
+          fromStatus: 'validated',
+          claimStatus: claimedStatus,
+          ownerToken: input.claimOwner,
+          leaseExpiresAt: new Date(Date.now() + claimLeaseMs),
+          limit: input.chunkSize,
+        });
+        batchRowIds = rows.map((row) => row.id);
+        result = {
+          processed: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          conflicts: 0,
+          failed: 0,
+          complete: rows.length < input.chunkSize,
+          ...(rows.length === input.chunkSize ? { nextCursor: rows.at(-1)!.id } : {}),
+        };
+      }
+      if (rows.length === 0 && ledgers.length === 0) {
+        const checkpointAfterClaim = await repository.findEventByKey({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          eventKey: checkpointKey,
+        });
+        if (checkpointAfterClaim) {
+          if (checkpointAfterClaim.type !== 'commit.stage.completed')
+            throw new Error('MIGRATION_STAGE_CHECKPOINT_INVALID');
+          return parseStageCheckpoint(checkpointAfterClaim.data, input.stage, claimOwnerSha256);
+        }
+        const claimsAfterClaim = await repository.listClaimedRowsByOwner({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          claimedStatus,
+          ownerToken: input.claimOwner,
+        });
+        if (claimsAfterClaim.length > 0) throw new Error('MIGRATION_STAGE_CLAIM_IN_PROGRESS');
+        const rowEventsAfterClaim = await repository.listEventsByKeyPrefix({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          eventKeyPrefix: stageRowEventPrefix(claimOwnerSha256),
+        });
+        if (rowEventsAfterClaim.length > 0) throw new Error('MIGRATION_STAGE_RETRY_REQUIRED');
+      }
+      const completionEvent = (rowId: string, outcome: StageRowLedger['outcome']) => ({
+        eventKey: stageRowEventKey(claimOwnerSha256, rowId),
+        type: 'commit.stage.row.completed',
+        severity: 'info' as const,
+        message: `Migration stage ${input.stage} durably completed a row.`,
+        data: {
+          version: 1,
+          stage: input.stage,
+          claimOwnerSha256,
+          rowId,
+          batchRowIds,
+          outcome,
+          complete: result.complete,
+          ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+        } satisfies StageRowLedger,
+      });
+      if (rows.length > 0)
+        await hooks.afterRowsClaimed?.({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          stage: input.stage,
+          rowIds: rows.map((row) => row.id),
+        });
 
       /* eslint-disable no-await-in-loop -- row commits and claim outcomes are intentionally ordered for idempotent recovery. */
       for (const row of rows) {
@@ -709,6 +1034,7 @@ export function createRepositoryMigrationActivityService(
               tixkitId: outcome.tixkitId,
               createdEntity: outcome.disposition === 'created',
               provenance: entity,
+              completionEvent: completionEvent(row.id, outcome.disposition),
             });
             completed = true;
           } else {
@@ -722,9 +1048,17 @@ export function createRepositoryMigrationActivityService(
               outcome: outcome.disposition,
               tixkitId: outcome.tixkitId,
               createdEntity: outcome.disposition === 'created',
+              completionEvent: completionEvent(row.id, outcome.disposition),
             });
           }
           if (!completed) throw new Error(`MIGRATION_ROW_CLAIM_LOST:${row.id}`);
+          await hooks.afterRowCompletion?.({
+            tenantId: context.tenantId,
+            organizationId: context.organizationId,
+            jobId: context.jobId,
+            stage: input.stage,
+            rowId: row.id,
+          });
           if (outcome.disposition === 'conflict') result.conflicts += 1;
           else result[outcome.disposition] += 1;
         } catch (error) {
@@ -739,6 +1073,7 @@ export function createRepositoryMigrationActivityService(
             severity: 'error',
             rollbackBlockedReason:
               error instanceof Error ? error.message.slice(0, 500) : 'Commit failed',
+            completionEvent: completionEvent(row.id, 'failed'),
           });
           result.failed += 1;
           throw error;
@@ -747,6 +1082,23 @@ export function createRepositoryMigrationActivityService(
         }
       }
       /* eslint-enable no-await-in-loop */
+      if (result.processed > 0) {
+        await repository.appendIdempotentEvent({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          eventKey: checkpointKey,
+          type: 'commit.stage.completed',
+          severity: 'info',
+          message: `Migration stage ${input.stage} durably completed a chunk.`,
+          data: {
+            version: 1,
+            stage: input.stage,
+            claimOwnerSha256,
+            result,
+          },
+        });
+      }
       return result;
     },
 
