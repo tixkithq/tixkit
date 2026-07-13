@@ -87,39 +87,58 @@ export async function loadPortableConfigurationRebindings(
       .where('organization_id', '=', input.organizationId)
       .execute()
   ).map(({ id }) => id);
-  const [paymentAccounts, webhooks, oauthApplications, senderIdentities, marketingIntegrations] =
-    await Promise.all([
-      db
-        .selectFrom('payment_accounts')
-        .select(['id', 'status'])
-        .where('tenant_id', '=', input.tenantId)
-        .where('organization_id', '=', input.organizationId)
-        .execute(),
-      db
-        .selectFrom('webhook_endpoints')
-        .select(['id', 'status'])
-        .where('tenant_id', '=', input.tenantId)
-        .where('organization_id', '=', input.organizationId)
-        .execute(),
-      db
-        .selectFrom('oauth_applications')
-        .select(['id', 'status'])
-        .where('tenant_id', '=', input.tenantId)
-        .where('organization_id', '=', input.organizationId)
-        .execute(),
-      db
-        .selectFrom('sender_identities')
-        .select(['id', 'verified'])
-        .where('tenant_id', '=', input.tenantId)
-        .where('organization_id', '=', input.organizationId)
-        .execute(),
-      db
-        .selectFrom('marketing_integrations')
-        .select(['id', 'status'])
-        .where('tenant_id', '=', input.tenantId)
-        .where('organization_id', '=', input.organizationId)
-        .execute(),
-    ]);
+  const [
+    paymentAccounts,
+    webhooks,
+    oauthApplications,
+    senderIdentities,
+    marketingIntegrations,
+    taxRegistrations,
+    walletCredentials,
+  ] = await Promise.all([
+    db
+      .selectFrom('payment_accounts')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute(),
+    db
+      .selectFrom('webhook_endpoints')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute(),
+    db
+      .selectFrom('oauth_applications')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute(),
+    db
+      .selectFrom('sender_identities')
+      .select(['id', 'verified'])
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute(),
+    db
+      .selectFrom('marketing_integrations')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute(),
+    db
+      .selectFrom('tax_registrations')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute(),
+    db
+      .selectFrom('wallet_credentials')
+      .select(['id', 'status'])
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute(),
+  ]);
   const [domains, brandSenders, smsSenders, emailRoutes, smsRoutes] =
     brandIds.length === 0
       ? [[], [], [], [], []]
@@ -175,6 +194,16 @@ export async function loadPortableConfigurationRebindings(
     ...marketingIntegrations.map(({ id, status }) => ({
       kind: 'marketing_integration' as const,
       portableId: `marketing_integration:${id}`,
+      required: status === 'active',
+    })),
+    ...taxRegistrations.map(({ id, status }) => ({
+      kind: 'tax_registration' as const,
+      portableId: `tax_registration:${id}`,
+      required: status === 'active',
+    })),
+    ...walletCredentials.map(({ id, status }) => ({
+      kind: 'wallet_credential' as const,
+      portableId: `wallet_credential:${id}`,
       required: status === 'active',
     })),
     ...domains.map(({ id, is_verified, ssl_status }) => ({

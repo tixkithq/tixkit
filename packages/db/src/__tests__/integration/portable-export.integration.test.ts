@@ -3,11 +3,15 @@ import { createDb, type Database } from '../../client.js';
 import { dropAllTables, runMigrations, truncateAllData } from '../../migrate.js';
 import { PortableExportBuildLeasesMigration } from '../../migrations/0069_portable_export_build_leases.js';
 import { PortableExportAuthorizationsMigration } from '../../migrations/0078_portable_export_authorizations.js';
+import { PortableRebindingAuthoritiesMigration } from '../../migrations/0079_portable_rebinding_authorities.js';
 import {
+  BrandRepository,
   OrganizationRepository,
   PortableExportAuthorizationRepository,
   PortableExportRepository,
+  TaxRegistrationRepository,
   TenantRepository,
+  WalletCredentialRepository,
 } from '../../repositories/index.js';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
@@ -55,6 +59,17 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
     idempotencyKey,
     requestFingerprint,
   });
+
+  const rollbackRebindingAuthorities = () =>
+    db
+      .connection()
+      .execute((connection) =>
+        driver === 'mysql'
+          ? PortableRebindingAuthoritiesMigration.down!(connection)
+          : connection
+              .transaction()
+              .execute((transaction) => PortableRebindingAuthoritiesMigration.down!(transaction)),
+      );
 
   it('allocates monotonic scoped sequences and converges concurrent idempotent starts', async () => {
     const repository = new PortableExportRepository(db);
@@ -580,6 +595,180 @@ describe.sequential.each(cases)('portable export evidence: $driver', ({ driver, 
     await expect(
       db.selectFrom('portable_export_authorizations').select('id').limit(1).execute(),
     ).resolves.toEqual([]);
+  });
+
+  it('scopes rebinding authorities and refuses a destructive rollback', async () => {
+    const authorityTenant = await new TenantRepository(db).create({
+      name: `Rebinding authority ${driver}`,
+    });
+    const authorityOrganization = await new OrganizationRepository(db).create({
+      tenantId: authorityTenant.id,
+      name: `Rebinding authority ${driver}`,
+      slug: `rebinding-authority-${driver}`,
+    });
+    const otherOrganization = await new OrganizationRepository(db).create({
+      tenantId: authorityTenant.id,
+      name: `Other rebinding authority ${driver}`,
+      slug: `other-rebinding-authority-${driver}`,
+    });
+    const isolatedTenant = await new TenantRepository(db).create({
+      name: `Isolated rebinding authority ${driver}`,
+    });
+    const isolatedOrganization = await new OrganizationRepository(db).create({
+      tenantId: isolatedTenant.id,
+      name: `Isolated rebinding authority ${driver}`,
+      slug: `isolated-rebinding-authority-${driver}`,
+    });
+    const brand = await new BrandRepository(db).create({
+      tenantId: authorityTenant.id,
+      organizationId: authorityOrganization.id,
+      name: 'Authority brand',
+      slug: `authority-brand-${driver}`,
+    });
+    const tax = await new TaxRegistrationRepository(db).create({
+      tenantId: authorityTenant.id,
+      organizationId: authorityOrganization.id,
+      provider: 'managed_tax',
+      jurisdictionCode: 'US-IL',
+      registrationType: 'sales_tax',
+      custodyReference: 'secret://tax/registration',
+      status: 'active',
+    });
+    const wallet = await new WalletCredentialRepository(db).create({
+      tenantId: authorityTenant.id,
+      organizationId: authorityOrganization.id,
+      brandId: brand.id,
+      provider: 'apple_wallet',
+      credentialType: 'pass_signing',
+      custodyReference: 'secret://wallet/signing',
+      status: 'active',
+    });
+    expect(
+      await new TaxRegistrationRepository(db).findByOrganization(
+        authorityTenant.id,
+        otherOrganization.id,
+      ),
+    ).toEqual([]);
+    expect(
+      await new TaxRegistrationRepository(db).findByOrganization(
+        authorityTenant.id,
+        authorityOrganization.id,
+      ),
+    ).toEqual([tax]);
+    expect(
+      await new WalletCredentialRepository(db).findByOrganization(
+        authorityTenant.id,
+        authorityOrganization.id,
+      ),
+    ).toEqual([wallet]);
+    expect(
+      await new WalletCredentialRepository(db).findByOrganization(
+        authorityTenant.id,
+        otherOrganization.id,
+      ),
+    ).toEqual([]);
+    expect(
+      await new TaxRegistrationRepository(db).findByOrganization(
+        isolatedTenant.id,
+        isolatedOrganization.id,
+      ),
+    ).toEqual([]);
+    await expect(
+      new TaxRegistrationRepository(db).create({
+        tenantId: authorityTenant.id,
+        organizationId: authorityOrganization.id,
+        provider: 'managed_tax',
+        jurisdictionCode: 'US-WI',
+        registrationType: 'sales_tax',
+        custodyReference: 'plaintext-secret',
+      }),
+    ).rejects.toThrow(/opaque URI/u);
+    await expect(
+      new TaxRegistrationRepository(db).create({
+        tenantId: authorityTenant.id,
+        organizationId: authorityOrganization.id,
+        provider: 'managed_tax',
+        jurisdictionCode: 'US-WI',
+        registrationType: 'sales_tax',
+        custodyReference: 'https://user:password@example.test/registration',
+      }),
+    ).rejects.toThrow(/opaque URI/u);
+    await expect(
+      new WalletCredentialRepository(db).create({
+        tenantId: authorityTenant.id,
+        organizationId: authorityOrganization.id,
+        brandId: brand.id,
+        provider: '   ',
+        credentialType: 'pass_signing',
+        custodyReference: 'secret://wallet/invalid',
+      }),
+    ).rejects.toThrow(/non-empty printable/u);
+    await expect(
+      db
+        .insertInto('tax_registrations')
+        .values({
+          ...tax,
+          id: `txr_blank_${driver}`,
+          provider: ' ',
+          jurisdiction_code: 'US-IN',
+        })
+        .execute(),
+    ).rejects.toThrow();
+    await expect(
+      db
+        .insertInto('tax_registrations')
+        .values({
+          ...tax,
+          id: `txr_cross_tenant_${driver}`,
+          organization_id: isolatedOrganization.id,
+        })
+        .execute(),
+    ).rejects.toThrow();
+    await expect(
+      db
+        .insertInto('wallet_credentials')
+        .values({
+          ...wallet,
+          id: `wcr_invalid_${driver}`,
+          organization_id: otherOrganization.id,
+        })
+        .execute(),
+    ).rejects.toThrow();
+    await expect(rollbackRebindingAuthorities()).rejects.toThrow(/ROLLBACK_UNSAFE/u);
+    await db.deleteFrom('wallet_credentials').execute();
+    await db.deleteFrom('tax_registrations').execute();
+    await PortableRebindingAuthoritiesMigration.up(db);
+    await db.schema.dropTable('wallet_credentials').execute();
+    await PortableRebindingAuthoritiesMigration.up(db);
+    await expect(
+      db.selectFrom('wallet_credentials').select('id').limit(1).execute(),
+    ).resolves.toEqual([]);
+    const [rollbackRace, insertRace] = await Promise.allSettled([
+      rollbackRebindingAuthorities(),
+      new TaxRegistrationRepository(db).create({
+        tenantId: authorityTenant.id,
+        organizationId: authorityOrganization.id,
+        provider: 'managed_tax',
+        jurisdictionCode: 'US-MI',
+        registrationType: 'sales_tax',
+        custodyReference: 'secret://tax/concurrent-rollback',
+      }),
+    ]);
+    expect(
+      rollbackRace.status === 'fulfilled' && insertRace.status === 'fulfilled',
+      'rollback and concurrent authority insert must never both succeed',
+    ).toBe(false);
+    if (insertRace.status === 'fulfilled') {
+      expect(rollbackRace).toMatchObject({ status: 'rejected' });
+      await db.deleteFrom('tax_registrations').execute();
+      await rollbackRebindingAuthorities();
+    } else {
+      expect(rollbackRace).toMatchObject({ status: 'fulfilled' });
+    }
+    await expect(
+      db.selectFrom('tax_registrations').select('id').limit(1).execute(),
+    ).rejects.toThrow();
+    await PortableRebindingAuthoritiesMigration.up(db);
   });
 
   it('can reset and migrate PostgreSQL repeatedly without leaked trigger functions', async () => {

@@ -1454,6 +1454,33 @@ export interface PaymentAccountTable {
   updated_at: Timestamp;
 }
 
+export interface TaxRegistrationTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  provider: string;
+  jurisdiction_code: string;
+  registration_type: string;
+  custody_reference: string;
+  status: 'pending' | 'active' | 'inactive' | 'revoked';
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface WalletCredentialTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  provider: string;
+  credential_type: string;
+  custody_reference: string;
+  status: 'pending' | 'active' | 'inactive' | 'revoked' | 'expired';
+  expires_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface SenderIdentityTable {
   id: string;
   tenant_id: string;
@@ -2121,6 +2148,8 @@ export interface DB {
   export_jobs: ExportJobTable;
   export_job_events: ExportJobEventTable;
   payment_accounts: PaymentAccountTable;
+  tax_registrations: TaxRegistrationTable;
+  wallet_credentials: WalletCredentialTable;
   sender_identities: SenderIdentityTable;
   feature_flags: FeatureFlagTable;
   oauth_applications: OAuthApplicationTable;

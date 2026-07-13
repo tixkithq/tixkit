@@ -7,6 +7,7 @@ import { loadPublicDocuments } from './lib/content.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const output = resolve(root, 'apps/docs/src/generated/content-manifest.ts');
 const searchOutput = resolve(root, 'apps/docs/public/search-index.json');
+const checkOnly = process.argv.includes('--check');
 const sdkGuideSections = JSON.parse(
   readFileSync(resolve(root, 'docs/sdk-guide-sections.json'), 'utf8'),
 );
@@ -28,6 +29,18 @@ function expandedDocument(document) {
 }
 
 const expandedDocuments = documents.map(expandedDocument);
+
+function emitGenerated(path, content) {
+  if (checkOnly) {
+    const current = readFileSync(path, 'utf8');
+    if (current !== content) {
+      throw new Error(`Generated documentation artifact is stale: ${relative(root, path)}`);
+    }
+    return;
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content, 'utf8');
+}
 
 const records = expandedDocuments.map((document) => {
   const importPath = relative(dirname(output), resolve(root, document.path)).split(sep).join('/');
@@ -62,8 +75,7 @@ ${records.join('\n')}
 export type PublicDocRoute = string;
 `;
 
-mkdirSync(dirname(output), { recursive: true });
-writeFileSync(output, source, 'utf8');
+emitGenerated(output, source);
 const searchRecords = expandedDocuments.map((document) => ({
   url: document.route,
   title: document.frontmatter.title,
@@ -82,6 +94,7 @@ const searchRecords = expandedDocuments.map((document) => ({
   keywords: document.frontmatter.keywords ?? [],
   adoptionPaths: adoptionPathsForRoute(document.route, document.frontmatter.adoption_paths),
 }));
-mkdirSync(dirname(searchOutput), { recursive: true });
-writeFileSync(searchOutput, `${JSON.stringify(searchRecords, null, 2)}\n`, 'utf8');
-console.log(`Generated ${documents.length} documentation content entries and search records`);
+emitGenerated(searchOutput, `${JSON.stringify(searchRecords, null, 2)}\n`);
+console.log(
+  `${checkOnly ? 'Validated' : 'Generated'} ${documents.length} documentation content entries and search records`,
+);

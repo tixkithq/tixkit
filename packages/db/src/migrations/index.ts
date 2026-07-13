@@ -76,3 +76,4 @@ export { EventMediaAssetsMigration } from './0075_event_media_assets.js';
 export { MediaObjectCleanupJobsMigration } from './0076_media_object_cleanup_jobs.js';
 export { PortableImportCutoverProofsMigration } from './0077_portable_import_cutover_proofs.js';
 export { PortableExportAuthorizationsMigration } from './0078_portable_export_authorizations.js';
+export { PortableRebindingAuthoritiesMigration } from './0079_portable_rebinding_authorities.js';

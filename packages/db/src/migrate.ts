@@ -79,6 +79,7 @@ import { EventMediaAssetsMigration } from './migrations/0075_event_media_assets.
 import { MediaObjectCleanupJobsMigration } from './migrations/0076_media_object_cleanup_jobs.js';
 import { PortableImportCutoverProofsMigration } from './migrations/0077_portable_import_cutover_proofs.js';
 import { PortableExportAuthorizationsMigration } from './migrations/0078_portable_export_authorizations.js';
+import { PortableRebindingAuthoritiesMigration } from './migrations/0079_portable_rebinding_authorities.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -221,6 +222,8 @@ const ALL_SCHEMA_TABLES = [
   'event_media_renditions',
   'event_media_assets',
   'media_object_cleanup_jobs',
+  'tax_registrations',
+  'wallet_credentials',
 ] as const;
 
 function quoteMssqlIdentifier(identifier: string): string {
@@ -324,6 +327,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0076_media_object_cleanup_jobs': MediaObjectCleanupJobsMigration,
       '0077_portable_import_cutover_proofs': PortableImportCutoverProofsMigration,
       '0078_portable_export_authorizations': PortableExportAuthorizationsMigration,
+      '0079_portable_rebinding_authorities': PortableRebindingAuthoritiesMigration,
     };
   }
 }

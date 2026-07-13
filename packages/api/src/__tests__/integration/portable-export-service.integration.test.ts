@@ -170,6 +170,30 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       slug: `portable-bindings-${driver}`,
     });
     const now = new Date('2026-07-12T22:00:00.000Z');
+    const taxStatusCases = [
+      { id: `txr_active_${driver}`, status: 'active', required: true },
+      { id: `txr_inactive_${driver}`, status: 'inactive', required: false },
+      { id: `txr_pending_${driver}`, status: 'pending', required: false },
+      { id: `txr_revoked_${driver}`, status: 'revoked', required: false },
+    ] as const;
+    const walletStatusCases = [
+      {
+        id: `wcr_active_expired_${driver}`,
+        status: 'active',
+        expiresAt: new Date('2025-07-12T22:00:00.000Z'),
+        required: true,
+      },
+      {
+        id: `wcr_active_${driver}`,
+        status: 'active',
+        expiresAt: new Date('2027-07-12T22:00:00.000Z'),
+        required: true,
+      },
+      { id: `wcr_expired_${driver}`, status: 'expired', expiresAt: now, required: false },
+      { id: `wcr_inactive_${driver}`, status: 'inactive', expiresAt: null, required: false },
+      { id: `wcr_pending_${driver}`, status: 'pending', expiresAt: null, required: false },
+      { id: `wcr_revoked_${driver}`, status: 'revoked', expiresAt: null, required: false },
+    ] as const;
     await Promise.all([
       db
         .insertInto('payment_accounts')
@@ -189,6 +213,41 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
           created_at: now,
           updated_at: now,
         })
+        .execute(),
+      db
+        .insertInto('tax_registrations')
+        .values(
+          taxStatusCases.map(({ id, status }, index) => ({
+            id,
+            tenant_id: tenantId,
+            organization_id: organizationId,
+            provider: 'managed_tax',
+            jurisdiction_code: `US-${String(index).padStart(2, '0')}`,
+            registration_type: 'sales_tax',
+            custody_reference: `AUTHORITY_CUSTODY_MUST_NOT_EXPORT_${id}`,
+            status,
+            created_at: now,
+            updated_at: now,
+          })),
+        )
+        .execute(),
+      db
+        .insertInto('wallet_credentials')
+        .values(
+          walletStatusCases.map(({ id, status, expiresAt }, index) => ({
+            id,
+            tenant_id: tenantId,
+            organization_id: organizationId,
+            brand_id: brand.id,
+            provider: 'apple_wallet',
+            credential_type: `pass_signing_${index}`,
+            custody_reference: `AUTHORITY_CUSTODY_MUST_NOT_EXPORT_${id}`,
+            status,
+            expires_at: expiresAt,
+            created_at: now,
+            updated_at: now,
+          })),
+        )
         .execute(),
       db
         .insertInto('brand_domains')
@@ -363,61 +422,77 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       payloads: Record<string, string>;
     };
 
-    expect(transport.envelope.manifest.rebindings).toEqual([
-      { kind: 'custom_domain', portableId: `custom_domain:bd_portable_${driver}`, required: true },
-      {
-        kind: 'email_delivery_route',
-        portableId: `email_delivery_route:epr_portable_${driver}`,
-        required: true,
-      },
-      {
-        kind: 'marketing_integration',
-        portableId: `marketing_integration:mi_portable_${driver}`,
-        required: true,
-      },
-      {
-        kind: 'oauth_redirect_origin',
-        portableId: `oauth_redirect_origin:oa_portable_${driver}`,
-        required: true,
-      },
-      {
-        kind: 'payment_provider_account',
-        portableId: `payment_provider_account:binding_shared_${driver}`,
-        required: true,
-      },
-      {
-        kind: 'sending_identity',
-        portableId: `sending_identity:email:bsi_portable_${driver}`,
-        required: true,
-      },
-      {
-        kind: 'sending_identity',
-        portableId: `sending_identity:organization:si_portable_${driver}`,
-        required: false,
-      },
-      {
-        kind: 'sending_identity',
-        portableId: `sending_identity:sms:ssi_portable_${driver}`,
-        required: true,
-      },
-      {
-        kind: 'sms_delivery_route',
-        portableId: `sms_delivery_route:spr_portable_${driver}`,
-        required: false,
-      },
-      {
-        kind: 'webhook_endpoint',
-        portableId: `webhook_endpoint:binding_shared_${driver}`,
-        required: true,
-      },
-    ]);
+    expect(transport.envelope.manifest.rebindings).toEqual(
+      [
+        {
+          kind: 'custom_domain',
+          portableId: `custom_domain:bd_portable_${driver}`,
+          required: true,
+        },
+        {
+          kind: 'email_delivery_route',
+          portableId: `email_delivery_route:epr_portable_${driver}`,
+          required: true,
+        },
+        {
+          kind: 'marketing_integration',
+          portableId: `marketing_integration:mi_portable_${driver}`,
+          required: true,
+        },
+        {
+          kind: 'oauth_redirect_origin',
+          portableId: `oauth_redirect_origin:oa_portable_${driver}`,
+          required: true,
+        },
+        {
+          kind: 'payment_provider_account',
+          portableId: `payment_provider_account:binding_shared_${driver}`,
+          required: true,
+        },
+        {
+          kind: 'sending_identity',
+          portableId: `sending_identity:email:bsi_portable_${driver}`,
+          required: true,
+        },
+        {
+          kind: 'sending_identity',
+          portableId: `sending_identity:organization:si_portable_${driver}`,
+          required: false,
+        },
+        {
+          kind: 'sending_identity',
+          portableId: `sending_identity:sms:ssi_portable_${driver}`,
+          required: true,
+        },
+        {
+          kind: 'sms_delivery_route',
+          portableId: `sms_delivery_route:spr_portable_${driver}`,
+          required: false,
+        },
+        ...taxStatusCases.map(({ id, required }) => ({
+          kind: 'tax_registration' as const,
+          portableId: `tax_registration:${id}`,
+          required,
+        })),
+        ...walletStatusCases.map(({ id, required }) => ({
+          kind: 'wallet_credential' as const,
+          portableId: `wallet_credential:${id}`,
+          required,
+        })),
+        {
+          kind: 'webhook_endpoint',
+          portableId: `webhook_endpoint:binding_shared_${driver}`,
+          required: true,
+        },
+      ].sort((left, right) => (left.portableId < right.portableId ? -1 : 1)),
+    );
     const decodedEvidence = `${canonicalPortableJson(transport.envelope.manifest)}${Object.values(
       transport.payloads,
     )
       .map((payload) => Buffer.from(payload, 'base64').toString('utf8'))
       .join('\n')}`;
     expect(decodedEvidence).not.toMatch(
-      /acct_must_not_export|domain-token-must-not-export|source-sender@example\.test|verified-source@example\.test|PN_must_not_export|hooks\.source\.example\.test|whsec_must_not_export|oauth_client_must_not_export|oauth-secret-hash-must-not-export|source\.example\.test\/oauth|EMAIL_PROVIDER_SECRET_MUST_NOT_EXPORT|SMS_PROVIDER_SECRET_MUST_NOT_EXPORT|sms-source\.example\.test|MARKETING_SECRET_MUST_NOT_EXPORT/u,
+      /acct_must_not_export|domain-token-must-not-export|source-sender@example\.test|verified-source@example\.test|PN_must_not_export|hooks\.source\.example\.test|whsec_must_not_export|oauth_client_must_not_export|oauth-secret-hash-must-not-export|source\.example\.test\/oauth|EMAIL_PROVIDER_SECRET_MUST_NOT_EXPORT|SMS_PROVIDER_SECRET_MUST_NOT_EXPORT|sms-source\.example\.test|MARKETING_SECRET_MUST_NOT_EXPORT|AUTHORITY_CUSTODY_MUST_NOT_EXPORT/u,
     );
 
     await db
@@ -946,7 +1021,7 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     expect(transport.envelope.manifest).toMatchObject({
       mode: 'historical',
       apiVersion: '2026-07-16',
-      dataSchemaVersion: '0078',
+      dataSchemaVersion: '0079',
       historicalAuthorization: {
         authorizationId: authorization.id,
         tenantId,

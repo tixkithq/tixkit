@@ -39,7 +39,7 @@ import sharp from 'sharp';
 
 const MAX_PORTABLE_ARTIFACT_BYTES = 50 * 1024 * 1024;
 const PORTABLE_EXPORT_API_VERSION = '2026-07-16';
-const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0078';
+const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0079';
 
 function historicalAuthorizationClaim(authorization: {
   id: string;
@@ -675,8 +675,8 @@ export function createPortableExportService(input: {
       compatibility: {
         minimumApiVersion: '2026-01-01',
         maximumApiVersion: '2026-12-31',
-        minimumDataSchemaVersion: '0078',
-        maximumDataSchemaVersion: '0078',
+        minimumDataSchemaVersion: '0079',
+        maximumDataSchemaVersion: '0079',
         requiredCapabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
         requiredEntitlements: request.mode === 'historical' ? ['historical-import-v1'] : [],
       },
