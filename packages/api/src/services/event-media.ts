@@ -13,6 +13,14 @@ import {
 
 export type EventMediaRole = 'poster' | 'cover' | 'social';
 
+export const EVENT_MEDIA_RENDITION_MAX_BYTES = {
+  thumbnail: 150_000,
+  page: 600_000,
+  social: 400_000,
+} as const;
+
+const RENDITION_QUALITY_STEPS = [82, 76, 70, 64, 58, 52, 46, 40] as const;
+
 const PURPOSE_BY_ROLE: Record<EventMediaRole, string[]> = {
   poster: ['event_poster'],
   cover: ['event_cover'],
@@ -106,7 +114,11 @@ async function stageRenditionCleanup(
 async function renderAtFocalPoint(
   normalized: Buffer,
   source: { width: number; height: number },
-  target: { width: number; height: number },
+  target: {
+    variant: keyof typeof EVENT_MEDIA_RENDITION_MAX_BYTES;
+    width: number;
+    height: number;
+  },
   focal: { x: number; y: number },
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const scale = Math.max(target.width / source.width, target.height / source.height);
@@ -123,12 +135,21 @@ async function renderAtFocalPoint(
       Math.round(focal.y * resizedHeight - target.height / 2),
     ),
   );
-  const { data, info } = await sharp(normalized)
+  const rendition = sharp(normalized)
     .resize(resizedWidth, resizedHeight, { fit: 'fill' })
-    .extract({ left, top, width: target.width, height: target.height })
-    .webp({ quality: 82, effort: 5 })
-    .toBuffer({ resolveWithObject: true });
-  return { buffer: data, width: info.width, height: info.height };
+    .extract({ left, top, width: target.width, height: target.height });
+  const maxBytes = EVENT_MEDIA_RENDITION_MAX_BYTES[target.variant];
+  for (const quality of RENDITION_QUALITY_STEPS) {
+    const { data, info } = await rendition
+      .clone()
+      .webp({ quality, effort: 5 })
+      .toBuffer({ resolveWithObject: true });
+    if (data.byteLength <= maxBytes)
+      return { buffer: data, width: info.width, height: info.height };
+  }
+  throw new ValidationError(
+    `The ${target.variant} event media rendition exceeds its ${maxBytes}-byte performance budget`,
+  );
 }
 
 export async function attachEventMedia(input: {

@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
@@ -46,7 +47,15 @@ test.describe('role-based event media journeys', () => {
       role: string;
       altText: string;
       original: { checksumSha256: string };
-      renditions: Array<{ variant: string; checksumSha256: string }>;
+      renditions: Array<{
+        id: string;
+        variant: 'thumbnail' | 'page' | 'social';
+        checksumSha256: string;
+        sizeBytes: number;
+        width: number;
+        height: number;
+        url: string;
+      }>;
     }>;
     const poster = media.find((asset) => asset.role === 'poster');
     expect(poster).toMatchObject({ altText });
@@ -59,6 +68,24 @@ test.describe('role-based event media journeys', () => {
     expect(
       poster?.renditions.every((rendition) => /^[a-f0-9]{64}$/u.test(rendition.checksumSha256)),
     ).toBe(true);
+    const renditionBudgets = { thumbnail: 150_000, page: 600_000, social: 400_000 } as const;
+    const renditionDimensions = {
+      thumbnail: [320, 400],
+      page: [1080, 1350],
+      social: [1200, 630],
+    } as const;
+    for (const rendition of poster!.renditions) {
+      expect(rendition.sizeBytes).toBeLessThanOrEqual(renditionBudgets[rendition.variant]);
+      expect([rendition.width, rendition.height]).toEqual(renditionDimensions[rendition.variant]);
+      const delivered = await request.get(`${apiBaseUrl}${rendition.url}`);
+      expect(delivered.status()).toBe(200);
+      expect(delivered.headers()['cache-control']).toBe('public, max-age=31536000, immutable');
+      const deliveredBody = await delivered.body();
+      expect(deliveredBody.byteLength).toBe(rendition.sizeBytes);
+      expect(createHash('sha256').update(deliveredBody).digest('hex')).toBe(
+        rendition.checksumSha256,
+      );
+    }
 
     const concurrentReplacement = {
       uploadArtifactId: poster!.original.uploadArtifactId,

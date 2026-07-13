@@ -16,11 +16,25 @@ import {
   scanUploadBuffer,
 } from '../services/uploads.js';
 import { publicUploadRoutes, uploadRoutes } from '../routes/modules/uploads.js';
-import { attachEventMedia } from '../services/event-media.js';
+import { attachEventMedia, EVENT_MEDIA_RENDITION_MAX_BYTES } from '../services/event-media.js';
 import sharp from 'sharp';
 
 const s3Send = vi.fn();
 const signedUrlInputs: unknown[] = [];
+
+async function deterministicNoisePng(width = 1600, height = 1000): Promise<Buffer> {
+  const pixels = Buffer.allocUnsafe(width * height * 3);
+  let state = 0x6d2b79f5;
+  for (let index = 0; index < pixels.length; index += 1) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    pixels[index] = state & 0xff;
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } })
+    .png({ compressionLevel: 0 })
+    .toBuffer();
+}
 
 vi.mock('@aws-sdk/client-s3', () => {
   class S3Client {
@@ -1604,11 +1618,139 @@ describe('upload artifact service', () => {
       [1200, 630],
     ]);
     expect(writes).toHaveLength(3);
+    for (const rendition of media.renditions)
+      expect(rendition.sizeBytes).toBeLessThanOrEqual(
+        EVENT_MEDIA_RENDITION_MAX_BYTES[rendition.variant],
+      );
     expect(new Set(writes.map((write) => write.Key))).toHaveLength(3);
     expect(writes.every((write) => String(write.Key).includes('/emr_'))).toBe(true);
     expect(tables.event_media_assets).toHaveLength(1);
     expect(tables.event_media_renditions).toHaveLength(3);
     expect(tables.upload_artifacts).toHaveLength(1);
+  });
+
+  it('reduces WebP quality until a high-entropy social rendition meets its byte budget', async () => {
+    const original = await deterministicNoisePng();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    const quality82 = await sharp(original)
+      .resize(1200, 750, { fit: 'fill' })
+      .extract({ left: 0, top: 60, width: 1200, height: 630 })
+      .webp({ quality: 82, effort: 5 })
+      .toBuffer();
+    expect(quality82.byteLength).toBeGreaterThan(EVENT_MEDIA_RENDITION_MAX_BYTES.social);
+    const writes: Array<Record<string, unknown>> = [];
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      if (command.input.Body) {
+        writes.push(command.input);
+        return {};
+      }
+      return { Body: { transformToByteArray: async () => original }, ContentType: 'image/png' };
+    });
+    const { db, tables } = createMockDb({
+      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' }],
+      upload_artifacts: [
+        {
+          id: 'upl_social_entropy',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'event_social',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/social-entropy.png',
+          checksum_sha256: checksum,
+          size_bytes: original.length,
+          metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'png' } }),
+        },
+      ],
+    });
+
+    const media = await attachEventMedia({
+      db,
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      eventId: 'evt_1',
+      uploadArtifactId: 'upl_social_entropy',
+      role: 'social',
+      altText: 'High-detail social card',
+      focalPoint: { x: 0.5, y: 0.5 },
+      createdBy: 'usr_1',
+    });
+
+    expect(writes).toHaveLength(3);
+    const social = media.renditions.find(({ variant }) => variant === 'social');
+    expect(social).toBeDefined();
+    expect(social!.sizeBytes).toBeLessThanOrEqual(EVENT_MEDIA_RENDITION_MAX_BYTES.social);
+    expect((writes[2]!.Body as Buffer).byteLength).toBe(social!.sizeBytes);
+    expect(tables.event_media_assets).toHaveLength(1);
+    expect(tables.event_media_renditions).toHaveLength(3);
+  });
+
+  it('removes staged renditions and preserves the database when no quality meets a budget', async () => {
+    const original = await deterministicNoisePng();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    const minimumQualityPage = await sharp(original)
+      .resize(1600, 1000, { fit: 'fill' })
+      .extract({ left: 0, top: 50, width: 1600, height: 900 })
+      .webp({ quality: 40, effort: 5 })
+      .toBuffer();
+    expect(minimumQualityPage.byteLength).toBeGreaterThan(EVENT_MEDIA_RENDITION_MAX_BYTES.page);
+    const writes: string[] = [];
+    const deletes: string[] = [];
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      const key = String(command.input.Key ?? '');
+      if (command.input.Body) {
+        writes.push(key);
+        return {};
+      }
+      if (key.startsWith('event-media/')) {
+        deletes.push(key);
+        return {};
+      }
+      return { Body: { transformToByteArray: async () => original }, ContentType: 'image/png' };
+    });
+    const { db, tables } = createMockDb({
+      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' }],
+      upload_artifacts: [
+        {
+          id: 'upl_cover_entropy',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_1',
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/cover-entropy.png',
+          checksum_sha256: checksum,
+          size_bytes: original.length,
+          metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'png' } }),
+        },
+      ],
+    });
+
+    await expect(
+      attachEventMedia({
+        db,
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        eventId: 'evt_1',
+        uploadArtifactId: 'upl_cover_entropy',
+        role: 'cover',
+        altText: 'High-detail cover image',
+        focalPoint: { x: 0.5, y: 0.5 },
+        createdBy: 'usr_1',
+      }),
+    ).rejects.toThrow('page event media rendition exceeds its 600000-byte performance budget');
+    expect(writes).toHaveLength(1);
+    expect(deletes).toEqual(writes);
+    expect(tables.event_media_assets ?? []).toHaveLength(0);
+    expect(tables.event_media_renditions ?? []).toHaveLength(0);
   });
 
   it('compensates every attempted rendition object when a later write fails', async () => {
