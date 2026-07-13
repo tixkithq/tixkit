@@ -1,11 +1,8 @@
 import { describe, it, expect } from 'vitest';
 
-// Baseline Temporal workflow structure test.
-// A full TestWorkflowEnvironment test requires the @temporalio/testing
-// embedded server which is heavy for unit tests. The CI integration job
-// provides a Temporal service container (temporalio/auto-setup:1.24) with
-// TEMPORAL_ADDRESS=localhost:7233 for integration-level workflow tests.
-// This unit test verifies the workflow module loads and exports correctly.
+// Fast unit-level workflow export baseline. Server-backed scheduling, retry,
+// ordered migration execution, and history replay are covered by
+// migration-temporal.integration.test.ts when TEMPORAL_ADDRESS is configured.
 
 describe('Temporal workflow baseline', () => {
   it('refundWorkflow is exported and has the correct input type shape', async () => {
