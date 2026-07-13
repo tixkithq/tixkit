@@ -690,6 +690,18 @@ export function validatePublicDistribution(manifest, root, schema) {
       violations.push(`stale release image Dockerfile classification: ${dockerfile}`);
   for (const contract of manifest.release.contracts)
     validateExistingPath(root, contract, 'release.contracts', violations);
+  const declaredApiContracts = new Set(
+    manifest.release.contracts.filter((contract) =>
+      /^artifacts\/api\/\d{4}-\d{2}-\d{2}$/u.test(contract),
+    ),
+  );
+  for (const entry of readdirSync(resolve(root, 'artifacts/api'), { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d{4}-\d{2}-\d{2}$/u.test(entry.name)) continue;
+    const contract = `artifacts/api/${entry.name}`;
+    if (!declaredApiContracts.has(contract)) {
+      violations.push(`retained API contract missing from release.contracts: ${contract}`);
+    }
+  }
   for (const [profile, path] of Object.entries(manifest.release.selfHostedProfiles)) {
     validateExistingPath(root, path, `self-hosted ${profile}`, violations);
   }

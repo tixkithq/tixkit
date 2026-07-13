@@ -167,6 +167,15 @@ test('rejects unsafe release paths and omitted publishable packages', () => {
     () => validatePublicDistribution(missingCli, root),
     /publishable package missing from release\.packages: packages\/cli/u,
   );
+
+  const missingRetainedApi = structuredClone(manifest);
+  missingRetainedApi.release.contracts = missingRetainedApi.release.contracts.filter(
+    (contract) => contract !== 'artifacts/api/2026-07-17',
+  );
+  assert.throws(
+    () => validatePublicDistribution(missingRetainedApi, root),
+    /retained API contract missing from release\.contracts: artifacts\/api\/2026-07-17/u,
+  );
 });
 
 test('rejects SDK workflow trigger and verification-job drift', () => {
