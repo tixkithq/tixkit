@@ -2,6 +2,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import {
   buildPortableLogicalExport,
   createPortableConfigurationPayloadPolicies,
+  portableManifestSha256,
   scanPortablePayload,
   signPortableManifest,
   type PortableBundleManifest,
@@ -150,10 +151,17 @@ function fixture(
   };
 }
 
-function prepareFixture(value: ReturnType<typeof fixture>) {
+function prepareFixture(
+  value: ReturnType<typeof fixture>,
+  input: {
+    envelope?: typeof value.envelope;
+    trustedParentEnvelope?: typeof value.envelope;
+  } = {},
+) {
   const section = value.manifest.files[0]!.section;
   return prepareTixkitPortableMigration({
-    envelope: value.envelope,
+    envelope: input.envelope ?? value.envelope,
+    ...(input.trustedParentEnvelope ? { trustedParentEnvelope: input.trustedParentEnvelope } : {}),
     destination: {
       deploymentId: 'deployment_destination',
       apiVersion: '2026-01-01',
@@ -186,6 +194,48 @@ function prepareFixture(value: ReturnType<typeof fixture>) {
 }
 
 describe('TixkitPortableMigrationAdapter', () => {
+  it('rejects delta imports unless their signed parent lineage matches exactly', () => {
+    const value = fixture();
+    const deltaManifest: PortableBundleManifest = {
+      ...value.manifest,
+      bundleId: 'bundle_migration_delta_02',
+      source: {
+        ...value.manifest.source,
+        exportSequence: 2,
+        changeCursor: 'cursor_02',
+      },
+      lineage: {
+        kind: 'delta',
+        fromChangeCursor: value.manifest.lineage.toChangeCursor,
+        toChangeCursor: 'cursor_02',
+        parentBundleId: value.manifest.bundleId,
+        parentManifestSha256: portableManifestSha256(value.manifest),
+      },
+    };
+    const deltaEnvelope = {
+      manifest: deltaManifest,
+      signature: signPortableManifest(deltaManifest, 'key_bundle_01', value.bundleKeys.privateKey),
+    };
+    expect(() => prepareFixture(value, { envelope: deltaEnvelope })).toThrow(
+      /delta lineage does not match/u,
+    );
+    expect(() =>
+      prepareFixture(value, {
+        envelope: deltaEnvelope,
+        trustedParentEnvelope: value.envelope,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      prepareFixture(value, {
+        envelope: deltaEnvelope,
+        trustedParentEnvelope: {
+          ...value.envelope,
+          manifest: { ...value.manifest, bundleId: 'bundle_wrong_parent' },
+        },
+      }),
+    ).toThrow(/not signed by a trusted key|delta lineage does not match/u);
+  });
+
   it('binds verified media bytes to their normalized event descriptor', async () => {
     const bundleKeys = generateKeyPairSync('ed25519');
     const payloadKeys = generateKeyPairSync('ed25519');

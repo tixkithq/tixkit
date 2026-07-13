@@ -6,7 +6,7 @@ import SwiftUI
 import Security
 #endif
 
-public let TixkitAPIVersion = "2026-07-14"
+public let TixkitAPIVersion = "2026-07-15"
 
 public enum TixkitScanOutcome: String, Codable, Equatable, Sendable {
   case accepted

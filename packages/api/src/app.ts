@@ -16,7 +16,10 @@ import { PricingEngine } from './services/pricing.js';
 import { InventoryService } from './services/inventory.js';
 import { QrService } from './services/qr.js';
 import { TemporalClient } from './services/temporal.js';
-import type { PortableDryRunAttestationConfiguration } from './services/portable-import-control.js';
+import type {
+  PortableCutoverTrustConfiguration,
+  PortableDryRunAttestationConfiguration,
+} from './services/portable-import-control.js';
 import { tenantRoutes } from './routes/modules/tenant.js';
 import { eventRoutes } from './routes/modules/events.js';
 import { eventMediaRoutes } from './routes/modules/event-media.js';
@@ -73,6 +76,7 @@ export type AppContext = {
   stripe?: Stripe;
   readinessServiceFactory?: (db: Database) => ReadinessService;
   portableDryRunAttestation?: PortableDryRunAttestationConfiguration;
+  portableCutoverTrust?: PortableCutoverTrustConfiguration;
   eventDuplicationCheckpoint?: (input: {
     stage: 'after_children_copied';
     sourceEventId: string;

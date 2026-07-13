@@ -1,0 +1,40 @@
+---
+title: API migration from 2026-07-14 to 2026-07-15
+description: Supply source-signed final cutover evidence for portable import commits.
+audience: [developer]
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-15
+prerequisites: [An integration using API version 2026-07-14]
+related: [/reference/api-versions, /reference/api-release-train, /operators/migration-operations]
+---
+
+API version `2026-07-15` adds the `PortableCutoverProof` schema and an optional request body to `POST /migration-jobs/{jobId}/commit`. The body remains optional for non-portable migration adapters. A `tixkit-portable` job now requires:
+
+```json
+{
+  "cutoverProof": {
+    "tenantId": "tenant_source",
+    "deploymentId": "deployment_source",
+    "sourceChangeCursor": "cursor_02",
+    "observedAt": "2026-07-15T12:00:00.000Z",
+    "sourceFrozen": true,
+    "bundleId": "bundle_01",
+    "manifestSha256": "<64 lowercase hexadecimal characters>",
+    "destinationId": "deployment_destination",
+    "operationId": "operation_01",
+    "issuedAt": "2026-07-15T12:00:00.000Z",
+    "expiresAt": "2026-07-15T12:05:00.000Z",
+    "nonce": "cutover_nonce_01",
+    "receiptSha256": "<64 lowercase hexadecimal characters>",
+    "keyId": "cutover_key_01",
+    "signature": "<base64 Ed25519 signature>"
+  }
+}
+```
+
+Generate the proof with `createPortableCutoverProof` from `@tixkit/portability`; do not construct or sign an ad hoc JSON representation. The source observation must be no more than 60 seconds old when the destination validates it, the expiry window cannot exceed five minutes, and a full bundle must truthfully report `sourceFrozen: true`. Delta transports now carry the exact signed `parentEnvelope`; imports without a matching parent fail preflight.
+
+The JavaScript SDK exposes `client.migrations.commitPortable(jobId, approvalConfirmation, cutoverProof)`. Continue using `client.migrations.commit(jobId)` for non-portable migration adapters. Destinations must configure the source public-key registry before accepting portable commits.

@@ -5,6 +5,7 @@ import {
   PORTABLE_SECTIONS,
   canonicalPortableJson,
   isPortableProtocolId,
+  portableManifestSha256,
   scanPortablePayload,
   signPortableMediaAttestation,
   signPortableManifest,
@@ -56,6 +57,13 @@ export interface PortableLogicalExportInput {
   dataSchemaVersion: string;
   exportedAt: string;
   currentTime: string;
+  lineage?:
+    | { kind: 'full' }
+    | {
+        kind: 'delta';
+        parentEnvelope: SignedPortableBundle;
+        cutoverFreeze?: { frozenAt: string; receiptSha256: string };
+      };
   compatibility: PortableBundleManifest['compatibility'];
   rebindings?: PortableBundleManifest['rebindings'];
   sections: ReadonlyMap<PortableSection, readonly PortableLogicalRecord[]>;
@@ -93,10 +101,12 @@ function sectionOrder(left: PortableSection, right: PortableSection): number {
 function encodeTransport(
   envelope: SignedPortableBundle,
   payloads: ReadonlyMap<string, Uint8Array>,
+  parentEnvelope?: SignedPortableBundle,
 ): Uint8Array {
   return new TextEncoder().encode(
     canonicalPortableJson({
       envelope,
+      ...(parentEnvelope ? { parentEnvelope } : {}),
       payloads: Object.fromEntries(
         [...payloads].map(([path, bytes]) => [path, Buffer.from(bytes).toString('base64')]),
       ),
@@ -107,8 +117,16 @@ function encodeTransport(
 export function buildPortableLogicalExport(
   input: PortableLogicalExportInput,
 ): BuiltPortableLogicalExport {
+  const parentEnvelope = input.lineage?.kind === 'delta' ? input.lineage.parentEnvelope : undefined;
   if (input.sections.size === 0) throw new Error('portable export requires at least one section');
   if (!input.source.tenantId.trim()) throw new Error('portable export source tenant is invalid');
+  if (
+    parentEnvelope &&
+    (parentEnvelope.manifest.source.tenantId !== input.source.tenantId ||
+      parentEnvelope.manifest.source.deploymentId !== input.source.deploymentId ||
+      input.source.exportSequence <= parentEnvelope.manifest.source.exportSequence)
+  )
+    throw new Error('portable delta export parent source or sequence is invalid');
   const exportedAt = Date.parse(input.exportedAt);
   const currentTime = Date.parse(input.currentTime);
   if (
@@ -310,7 +328,18 @@ export function buildPortableLogicalExport(
     apiVersion: input.apiVersion,
     dataSchemaVersion: input.dataSchemaVersion,
     exportedAt: input.exportedAt,
-    lineage: { kind: 'full', toChangeCursor: input.source.changeCursor },
+    lineage: parentEnvelope
+      ? {
+          kind: 'delta',
+          fromChangeCursor: parentEnvelope.manifest.lineage.toChangeCursor,
+          toChangeCursor: input.source.changeCursor,
+          parentBundleId: parentEnvelope.manifest.bundleId,
+          parentManifestSha256: portableManifestSha256(parentEnvelope.manifest),
+          ...(input.lineage?.kind === 'delta' && input.lineage.cutoverFreeze
+            ? { cutoverFreeze: input.lineage.cutoverFreeze }
+            : {}),
+        }
+      : { kind: 'full', toChangeCursor: input.source.changeCursor },
     compatibility: {
       ...input.compatibility,
       requiredCapabilities: [...input.compatibility.requiredCapabilities].sort(),
@@ -350,7 +379,7 @@ export function buildPortableLogicalExport(
       input.bundleSigning.privateKey,
     ),
   };
-  const transport = encodeTransport(envelope, payloads);
+  const transport = encodeTransport(envelope, payloads, parentEnvelope);
   if (transport.byteLength > MAX_PORTABLE_EXPORT_TRANSPORT_BYTES) {
     throw new Error('portable export exceeds the transport limit');
   }

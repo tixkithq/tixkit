@@ -43,6 +43,6 @@ const page = await tixkit.events.list({ limit: 10 });
 console.log(page.items.map((event) => event.id));
 ```
 
-The client rejects secret-looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-07-14`; keep SDK and server compatibility aligned.
+The client rejects secret-looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-07-15`; keep SDK and server compatibility aligned.
 
 Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry.

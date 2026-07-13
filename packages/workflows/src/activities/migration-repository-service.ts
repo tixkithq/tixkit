@@ -3,6 +3,8 @@ import {
   canonicalPortableJson,
   portableImportControlInputSha256,
   portableRebindingProvenanceSha256,
+  type PortableBundleManifest,
+  type PortableCutoverProof,
 } from '@tixkit/portability';
 import { createHash } from 'node:crypto';
 import {
@@ -103,6 +105,52 @@ async function listAllCreatedRows(repository: ImportRepository, context: Migrati
   }
 }
 
+export async function validatePortableCommitCutoverEvidence(
+  repository: ImportRepository,
+  context: Pick<MigrationActivityContext, 'tenantId' | 'organizationId' | 'jobId'>,
+): Promise<void> {
+  const authorization = await repository.findPortableImportCommitAuthorization(
+    context.tenantId,
+    context.organizationId,
+    context.jobId,
+  );
+  if (!authorization) throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_REQUIRED');
+  const cutover = await repository.findPortableImportCutoverProof(
+    context.tenantId,
+    context.organizationId,
+    context.jobId,
+  );
+  const preflight = await repository.findPortablePreflight(
+    context.tenantId,
+    context.organizationId,
+    context.jobId,
+  );
+  if (!cutover || !preflight) throw new Error('PORTABILITY_COMMIT_CUTOVER_PROOF_REQUIRED');
+  let cutoverProof: PortableCutoverProof;
+  let manifest: PortableBundleManifest;
+  try {
+    cutoverProof = JSON.parse(cutover.proof_json) as PortableCutoverProof;
+    manifest = JSON.parse(preflight.manifest_json) as PortableBundleManifest;
+  } catch {
+    throw new Error('PORTABILITY_COMMIT_CUTOVER_PROOF_INVALID');
+  }
+  if (
+    canonicalPortableJson(cutoverProof) !== cutover.proof_json ||
+    cutover.validated_by !== authorization.authorized_by ||
+    cutover.key_id !== cutoverProof.keyId ||
+    cutover.nonce !== cutoverProof.nonce ||
+    cutover.receipt_sha256 !== cutoverProof.receiptSha256 ||
+    cutoverProof.tenantId !== manifest.source.tenantId ||
+    cutoverProof.deploymentId !== preflight.source_deployment_id ||
+    cutoverProof.sourceChangeCursor !== preflight.source_change_cursor ||
+    cutoverProof.bundleId !== preflight.bundle_id ||
+    cutoverProof.manifestSha256 !== preflight.manifest_sha256 ||
+    cutoverProof.destinationId !== preflight.destination_id ||
+    cutoverProof.operationId !== preflight.operation_id
+  )
+    throw new Error('PORTABILITY_COMMIT_CUTOVER_PROOF_INVALID');
+}
+
 export function createRepositoryMigrationActivityService(
   db: Database,
   committers: MigrationCommitterRegistry,
@@ -139,6 +187,7 @@ export function createRepositoryMigrationActivityService(
             if (!job || job.source_system !== 'tixkit-portable' || job.mode !== 'commit')
               throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_INVALID');
             if (!authorization) throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_REQUIRED');
+            await validatePortableCommitCutoverEvidence(transactionRepository, context);
             const approval = await transactionRepository.findPortableImportApproval({
               tenantId: context.tenantId,
               organizationId: context.organizationId,

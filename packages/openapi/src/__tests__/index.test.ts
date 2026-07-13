@@ -66,7 +66,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-14');
+    expect(openApiSpec.info.version).toBe('2026-07-15');
   });
 
   it('publishes the authoritative API-key permission scope catalog', () => {
@@ -2023,6 +2023,19 @@ describe('openApiSpec', () => {
       expect.arrayContaining([expect.objectContaining({ name: 'jobId', in: 'path' })]),
     );
     expect(portableCommit.responses).toHaveProperty('503');
+    expect(portableCommit['x-compatibility-breaking-change']).toMatchObject({
+      id: 'portable-final-cutover-proof-required',
+      previousVersion: '2026-07-14',
+    });
+    expect(portableCommit.requestBody.content['application/json'].schema).toMatchObject({
+      required: ['cutoverProof'],
+      properties: {
+        cutoverProof: { $ref: '#/components/schemas/PortableCutoverProof' },
+      },
+    });
+    expect(openApiSpec.components.schemas.PortableCutoverProof.required).toEqual(
+      expect.arrayContaining(['manifestSha256', 'sourceChangeCursor', 'nonce', 'signature']),
+    );
     expect(openApiSpec.paths['/migration-jobs/{jobId}/activate'].post).toMatchObject({
       operationId: 'activatePortableMigrationJob',
       'x-required-permissions': ['migrations.commit'],

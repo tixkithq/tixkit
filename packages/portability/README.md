@@ -34,7 +34,7 @@ The library reads no environment variables. Callers provide trusted public-key r
 
 ## Security
 
-Bundles never contain plaintext credentials, secret keys, payment tokens, private signing keys, or infrastructure credentials. Importers must verify exact bytes, signatures, checksums, closed schemas, media safety attestations, destination scope, lineage, cutover freshness, replay identity, resume provenance, required rebindings, and reconciliation before activation.
+Bundles never contain plaintext credentials, secret keys, payment tokens, private signing keys, or infrastructure credentials. Delta transports include the exact signed parent envelope; importers reject missing, substituted, unsigned, or cursor-mismatched parents before staging. Final commit validates a fresh source-signed `PortableCutoverProof` against the already-verified immutable manifest and consumes its `(keyId, nonce)` exactly once. Importers must also verify exact bytes, signatures, checksums, closed schemas, media safety attestations, destination scope, resume provenance, required rebindings, and reconciliation before activation.
 
 ## Validation
 
@@ -46,4 +46,4 @@ The default `./schema` and explicit `./schema-v1` retain v1 compatibility; new e
 
 ## Related guides
 
-[Migration operations](../../docs/public/operators/migration-operations.mdx) · [API migration to 2026-07-14](../../docs/public/reference/migrations/2026-07-13-to-2026-07-14.mdx)
+[Migration operations](../../docs/public/operators/migration-operations.mdx) · [API migration to 2026-07-15](../../docs/public/reference/migrations/2026-07-14-to-2026-07-15.mdx)

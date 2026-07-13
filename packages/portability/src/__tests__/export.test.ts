@@ -3,10 +3,92 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPortableLogicalExport,
   parsePortableJson,
+  validatePortableLineage,
   verifyAndPreflightPortableImport,
 } from '../index.js';
 
 describe('portable logical export builder', () => {
+  it('derives delta lineage from and transports the exact signed parent', () => {
+    const bundleKeys = generateKeyPairSync('ed25519');
+    const payloadKeys = generateKeyPairSync('ed25519');
+    const policy = {
+      schemaId: 'organizations_schema_01',
+      schemaSha256: '1'.repeat(64),
+      policySha256: '2'.repeat(64),
+      scannerId: 'payload_scanner_01',
+      validateRecord: () => true,
+    };
+    const common = {
+      mode: 'configuration' as const,
+      apiVersion: '2026-07-14',
+      dataSchemaVersion: '0077',
+      exportedAt: '2026-07-12T20:00:00.000Z',
+      currentTime: '2026-07-12T20:00:00.000Z',
+      compatibility: {
+        minimumApiVersion: '2026-01-01',
+        maximumApiVersion: '2026-12-31',
+        minimumDataSchemaVersion: '0077',
+        maximumDataSchemaVersion: '0077',
+        requiredCapabilities: ['portable-bundle-v2'],
+        requiredEntitlements: [] as string[],
+      },
+      sections: new Map([
+        ['organizations' as const, [{ portableId: 'organization_1', attributes: { name: 'One' } }]],
+      ]),
+      bundleSigning: { keyId: 'bundle_key_01', privateKey: bundleKeys.privateKey },
+      payloadSigning: { keyId: 'payload_key_01', privateKey: payloadKeys.privateKey },
+      payloadPolicies: new Map([['organizations' as const, policy]]),
+    };
+    const parent = buildPortableLogicalExport({
+      ...common,
+      bundleId: 'bundle_parent_01',
+      source: {
+        operatingModel: 'self-hosted' as const,
+        deploymentId: 'deployment_source',
+        tenantId: 'tenant_source',
+        exportSequence: 1,
+        changeCursor: 'cursor_01',
+      },
+    });
+    const delta = buildPortableLogicalExport({
+      ...common,
+      bundleId: 'bundle_delta_02',
+      source: {
+        operatingModel: 'self-hosted' as const,
+        deploymentId: 'deployment_source',
+        tenantId: 'tenant_source',
+        exportSequence: 2,
+        changeCursor: 'cursor_02',
+      },
+      lineage: { kind: 'delta', parentEnvelope: parent.envelope },
+    });
+    expect(() =>
+      validatePortableLineage(
+        delta.envelope,
+        new Map([['bundle_key_01', bundleKeys.publicKey]]),
+        parent.envelope,
+      ),
+    ).not.toThrow();
+    const transport = parsePortableJson(new TextDecoder().decode(delta.transport)) as {
+      parentEnvelope: typeof parent.envelope;
+    };
+    expect(transport.parentEnvelope).toEqual(parent.envelope);
+    expect(() =>
+      buildPortableLogicalExport({
+        ...common,
+        bundleId: 'bundle_wrong_source',
+        source: {
+          operatingModel: 'cloud' as const,
+          deploymentId: 'deployment_other',
+          tenantId: 'tenant_source',
+          exportSequence: 2,
+          changeCursor: 'cursor_02',
+        },
+        lineage: { kind: 'delta', parentEnvelope: parent.envelope },
+      }),
+    ).toThrow(/parent source or sequence/u);
+  });
+
   it('emits one exact signed transport consumable by trusted import preflight', () => {
     const bundleKeys = generateKeyPairSync('ed25519');
     const payloadKeys = generateKeyPairSync('ed25519');

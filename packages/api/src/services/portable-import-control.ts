@@ -7,8 +7,10 @@ import {
   portableManifestSha256,
   portableImportControlInputSha256,
   portableRebindingProvenanceSha256,
+  validatePortableFinalCutoverManifest,
   verifyPortableDryRunReceipt,
   type PortableBundleManifest,
+  type PortableCutoverProof,
   type PortableDryRunReceipt,
   type PortabilityPreflightResult,
 } from '@tixkit/portability';
@@ -24,6 +26,38 @@ export interface PortableDryRunAttestationConfiguration {
     artifactSha256: string;
     checkedAt: string;
   }): Promise<PortableDryRunReceipt>;
+}
+
+export interface PortableCutoverTrustConfiguration {
+  trustedPublicKeys: ReadonlyMap<string, KeyObject>;
+}
+
+export function portableCutoverTrustFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): PortableCutoverTrustConfiguration {
+  const serializedTrust = environment.PORTABILITY_CUTOVER_TRUSTED_PUBLIC_KEYS;
+  if (!serializedTrust?.trim()) throw new Error('PORTABLE_CUTOVER_TRUST_REQUIRED');
+  try {
+    const parsed = JSON.parse(serializedTrust) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new Error('invalid trust object');
+    const trustedPublicKeys = new Map<string, KeyObject>();
+    for (const [keyId, pem] of Object.entries(parsed)) {
+      if (
+        !/^[A-Za-z0-9_-]{1,128}$/u.test(keyId) ||
+        typeof pem !== 'string' ||
+        /PRIVATE KEY/u.test(pem)
+      )
+        throw new Error('invalid trust entry');
+      const publicKey = createPublicKey(pem);
+      if (publicKey.asymmetricKeyType !== 'ed25519') throw new Error('invalid trust key');
+      trustedPublicKeys.set(keyId, publicKey);
+    }
+    if (trustedPublicKeys.size === 0) throw new Error('empty trust registry');
+    return { trustedPublicKeys };
+  } catch {
+    throw new Error('PORTABLE_CUTOVER_TRUST_INVALID');
+  }
 }
 
 export function createLocalPortableDryRunAttestation(input: {
@@ -377,7 +411,11 @@ export function portableDryRunAttestationFromEnvironment(
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
         throw new Error('invalid trust object');
       for (const [trustedKeyId, pem] of Object.entries(parsed)) {
-        if (!/^[A-Za-z0-9_-]{1,128}$/u.test(trustedKeyId) || typeof pem !== 'string')
+        if (
+          !/^[A-Za-z0-9_-]{1,128}$/u.test(trustedKeyId) ||
+          typeof pem !== 'string' ||
+          /PRIVATE KEY/u.test(pem)
+        )
           throw new Error('invalid trust entry');
         if (trustedKeyId === keyId) throw new Error('active key id cannot be overridden');
         const publicKey = createPublicKey(pem);
@@ -822,8 +860,11 @@ export async function authorizePortableImportCommit(input: {
   jobId: string;
   confirmation: string;
   attestation: PortableDryRunAttestationConfiguration;
+  cutoverProof: PortableCutoverProof;
+  cutoverTrust: PortableCutoverTrustConfiguration;
   authorizedBy: string;
   now?: Date;
+  checkpoint?: (stage: 'after_cutover_proof_persisted') => void | Promise<void>;
 }) {
   const durableReplay = async () => {
     const repository = new ImportRepository(input.db);
@@ -833,6 +874,11 @@ export async function authorizePortableImportCommit(input: {
       input.jobId,
     );
     if (!authorization) return undefined;
+    const cutover = await repository.findPortableImportCutoverProof(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    );
     const approval = await repository.findPortableImportApproval({
       tenantId: input.tenantId,
       organizationId: input.organizationId,
@@ -850,6 +896,7 @@ export async function authorizePortableImportCommit(input: {
       : undefined;
     if (
       !approval ||
+      !cutover ||
       !job ||
       job.mode !== 'commit' ||
       !['ready', 'committing', 'committed', 'activated'].includes(job.status) ||
@@ -862,7 +909,9 @@ export async function authorizePortableImportCommit(input: {
       authorization.authorized_by !== input.authorizedBy ||
       authorization.approval_digest !== approval.approval_digest ||
       authorization.input_sha256 !== approval.input_sha256 ||
-      authorization.rebindings_sha256 !== approval.rebindings_sha256
+      authorization.rebindings_sha256 !== approval.rebindings_sha256 ||
+      cutover.proof_json !== canonicalPortableJson(input.cutoverProof) ||
+      cutover.validated_by !== input.authorizedBy
     )
       throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT');
     return authorization;
@@ -875,6 +924,7 @@ export async function authorizePortableImportCommit(input: {
         approvalDigest: string;
         inputSha256: string;
         rebindingsSha256: string;
+        cutoverProofJson: string;
       }
     | undefined;
   const exactReplay = async () => {
@@ -885,12 +935,20 @@ export async function authorizePortableImportCommit(input: {
       input.jobId,
     );
     if (!existing) return undefined;
+    const cutover = await new ImportRepository(input.db).findPortableImportCutoverProof(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    );
     if (
+      !cutover ||
       existing.approval_id !== expected.approvalId ||
       existing.approval_digest !== expected.approvalDigest ||
       existing.input_sha256 !== expected.inputSha256 ||
       existing.rebindings_sha256 !== expected.rebindingsSha256 ||
-      existing.authorized_by !== input.authorizedBy
+      existing.authorized_by !== input.authorizedBy ||
+      cutover.proof_json !== expected.cutoverProofJson ||
+      cutover.validated_by !== input.authorizedBy
     )
       throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT');
     return existing;
@@ -913,31 +971,70 @@ export async function authorizePortableImportCommit(input: {
             approvalDigest: approval.approval_digest,
             inputSha256: approval.input_sha256,
             rebindingsSha256: approval.rebindings_sha256,
+            cutoverProofJson: canonicalPortableJson(input.cutoverProof),
           };
           const repository = new ImportRepository(transactionDatabase);
+          const preflight = await repository.findPortablePreflight(
+            input.tenantId,
+            input.organizationId,
+            input.jobId,
+          );
+          if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
+          const validationTime = input.now ?? new Date();
+          validatePortableFinalCutoverManifest(
+            parsePortableJson(preflight.manifest_json) as PortableBundleManifest,
+            input.cutoverProof,
+            input.cutoverTrust.trustedPublicKeys,
+            preflight.destination_id,
+            validationTime.toISOString(),
+            () => true,
+          );
           const existing = await repository.findPortableImportCommitAuthorization(
             input.tenantId,
             input.organizationId,
             input.jobId,
           );
           if (existing) {
+            const cutover = await repository.findPortableImportCutoverProof(
+              input.tenantId,
+              input.organizationId,
+              input.jobId,
+            );
             if (
+              !cutover ||
               existing.approval_id !== expected.approvalId ||
               existing.approval_digest !== expected.approvalDigest ||
               existing.input_sha256 !== expected.inputSha256 ||
               existing.rebindings_sha256 !== expected.rebindingsSha256 ||
-              existing.authorized_by !== input.authorizedBy
+              existing.authorized_by !== input.authorizedBy ||
+              cutover.proof_json !== expected.cutoverProofJson ||
+              cutover.validated_by !== input.authorizedBy
             )
               throw new Error('PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT');
             return existing;
           }
+          await repository.recordPortableImportCutoverProof({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            keyId: input.cutoverProof.keyId,
+            nonce: input.cutoverProof.nonce,
+            receiptSha256: input.cutoverProof.receiptSha256,
+            proofJson: expected.cutoverProofJson,
+            validatedBy: input.authorizedBy,
+            validatedAt: validationTime,
+          });
+          await input.checkpoint?.('after_cutover_proof_persisted');
           return repository.authorizePortableImportCommit({
             tenantId: input.tenantId,
             organizationId: input.organizationId,
             jobId: input.jobId,
-            ...expected,
+            approvalId: expected.approvalId,
+            approvalDigest: expected.approvalDigest,
+            inputSha256: expected.inputSha256,
+            rebindingsSha256: expected.rebindingsSha256,
             authorizedBy: input.authorizedBy,
-            authorizedAt: input.now ?? new Date(),
+            authorizedAt: validationTime,
           });
         });
     } catch (error) {

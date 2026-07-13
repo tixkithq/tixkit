@@ -77,6 +77,7 @@ import { PortableImportCommitAuthorizationsMigration } from './migrations/0073_p
 import { ImportEventImmutabilityMigration } from './migrations/0074_import_event_immutability.js';
 import { EventMediaAssetsMigration } from './migrations/0075_event_media_assets.js';
 import { MediaObjectCleanupJobsMigration } from './migrations/0076_media_object_cleanup_jobs.js';
+import { PortableImportCutoverProofsMigration } from './migrations/0077_portable_import_cutover_proofs.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -213,6 +214,7 @@ const ALL_SCHEMA_TABLES = [
   'portable_import_rebindings',
   'portable_destination_resources',
   'portable_import_commit_authorizations',
+  'portable_import_cutover_proofs',
   'event_media_renditions',
   'event_media_assets',
   'media_object_cleanup_jobs',
@@ -317,6 +319,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0074_import_event_immutability': ImportEventImmutabilityMigration,
       '0075_event_media_assets': EventMediaAssetsMigration,
       '0076_media_object_cleanup_jobs': MediaObjectCleanupJobsMigration,
+      '0077_portable_import_cutover_proofs': PortableImportCutoverProofsMigration,
     };
   }
 }
@@ -527,6 +530,7 @@ export async function dropAllTables(db: Database): Promise<void> {
     'reject_portable_import_control_mutation',
     'reject_portable_import_approval_mutation',
     'reject_portable_import_commit_authorization_mutation',
+    'reject_portable_import_cutover_proof_mutation',
     'reject_import_job_event_mutation',
   ]) {
     // eslint-disable-next-line no-await-in-loop -- PostgreSQL reset removes standalone trigger functions after their tables.
@@ -572,6 +576,7 @@ export async function truncateAllData(db: Database): Promise<void> {
       'portable_import_approval_revocations',
       'portable_import_rebindings',
       'portable_import_commit_authorizations',
+      'portable_import_cutover_proofs',
       'import_job_events',
     ]) {
       await sql
@@ -621,6 +626,7 @@ export async function truncateAllData(db: Database): Promise<void> {
         'portable_import_approval_revocations',
         'portable_import_rebindings',
         'portable_import_commit_authorizations',
+        'portable_import_cutover_proofs',
         'import_job_events',
       ]) {
         await sql

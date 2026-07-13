@@ -190,6 +190,14 @@ function compareContent(
       changes,
     );
   }
+  for (const mediaType of Object.keys(after))
+    if (!(mediaType in before))
+      changes.push({
+        severity: 'compatible',
+        category: 'media-type-added',
+        path: `${path}.${mediaType}`,
+        message: 'A media type was added.',
+      });
 }
 
 function parameters(value: Json | undefined): Map<string, Record<string, Json>> {
@@ -237,6 +245,18 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
           category: 'security-changed',
           path: operationPath,
           message: 'Authentication schemes or scopes changed.',
+        });
+      const previousBehaviorChange = previousOperation['x-compatibility-breaking-change'];
+      const currentBehaviorChange = currentOperation['x-compatibility-breaking-change'];
+      if (
+        currentBehaviorChange !== undefined &&
+        stable(previousBehaviorChange) !== stable(currentBehaviorChange)
+      )
+        changes.push({
+          severity: 'breaking',
+          category: 'declared-behavior-change',
+          path: operationPath,
+          message: 'The operation declares a conditional behavioral breaking change.',
         });
       const beforeParameters = new Map([
         ...parameters(previousItem.parameters),
@@ -338,5 +358,13 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
       });
     else compareSchema(schema, afterSchemas[name]!, `components.schemas.${name}`, changes);
   }
+  for (const name of Object.keys(afterSchemas))
+    if (!(name in beforeSchemas))
+      changes.push({
+        severity: 'compatible',
+        category: 'schema-added',
+        path: `components.schemas.${name}`,
+        message: 'A named schema was added.',
+      });
   return changes;
 }

@@ -879,6 +879,7 @@ function cutoverProofPayload(
     | 'issuedAt'
     | 'expiresAt'
     | 'nonce'
+    | 'keyId'
   >,
 ): string {
   return `${JSON.stringify({
@@ -887,6 +888,7 @@ function cutoverProofPayload(
     bundleId: proof.bundleId,
     expiresAt: proof.expiresAt,
     issuedAt: proof.issuedAt,
+    keyId: proof.keyId,
     manifestSha256: proof.manifestSha256,
     nonce: proof.nonce,
     observedAt: proof.observedAt,
@@ -902,11 +904,11 @@ export function createPortableCutoverProof(
   keyId: string,
   privateKey: KeyLike,
 ): PortableCutoverProof {
-  const payload = cutoverProofPayload(input);
+  const boundInput = { ...input, keyId };
+  const payload = cutoverProofPayload(boundInput);
   return {
-    ...input,
+    ...boundInput,
     receiptSha256: createHash('sha256').update(payload).digest('hex'),
-    keyId,
     signature: cryptoSign(null, Buffer.from(payload), privateKey).toString('base64'),
   };
 }
@@ -922,7 +924,29 @@ export function validatePortableFinalCutover(
   trustedParentEnvelope?: SignedPortableBundle,
 ): void {
   validatePortableLineage(envelope, trustedKeys, trustedParentEnvelope);
-  const manifest = envelope.manifest;
+  validatePortableFinalCutoverManifest(
+    envelope.manifest,
+    proof,
+    trustedCutoverKeys,
+    destinationId,
+    now,
+    consumeNonce,
+  );
+}
+
+/**
+ * Validates final-cutover evidence against a manifest whose signature and
+ * lineage were already verified and persisted by the destination preflight.
+ */
+export function validatePortableFinalCutoverManifest(
+  manifest: PortableBundleManifest,
+  proof: PortableCutoverProof,
+  trustedCutoverKeys: ReadonlyMap<string, KeyLike>,
+  destinationId: string,
+  now: string,
+  consumeNonce: (nonce: string) => boolean,
+): void {
+  validatePortableManifest(manifest);
   const payload = cutoverProofPayload(proof);
   const cutoverKey = trustedCutoverKeys.get(proof.keyId);
   if (

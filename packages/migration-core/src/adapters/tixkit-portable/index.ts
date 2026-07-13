@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   parsePortableJson,
+  validatePortableLineage,
   verifyAndPreflightPortableImport,
   type PortableBundleManifest,
   type PortableBundleFile,
@@ -106,6 +107,7 @@ function assertContext(
 
 export function prepareTixkitPortableMigration(input: {
   envelope: SignedPortableBundle;
+  trustedParentEnvelope?: SignedPortableBundle;
   destination: Parameters<typeof verifyAndPreflightPortableImport>[1];
   trustedBundleKeys: Parameters<typeof verifyAndPreflightPortableImport>[2];
   trustedPayloadKeys: Parameters<typeof verifyAndPreflightPortableImport>[3];
@@ -117,6 +119,9 @@ export function prepareTixkitPortableMigration(input: {
   payloads: ReadonlyMap<string, Uint8Array>;
 }): TixkitPortableAdapterConfiguration {
   const envelope = structuredClone(input.envelope);
+  const trustedParentEnvelope = input.trustedParentEnvelope
+    ? structuredClone(input.trustedParentEnvelope)
+    : undefined;
   const payloads = new Map(
     [...input.payloads].map(([path, bytes]) => [path, Uint8Array.from(bytes)]),
   );
@@ -129,6 +134,7 @@ export function prepareTixkitPortableMigration(input: {
     input.trustedMediaKeys,
     input.trustedMediaPolicies,
   );
+  validatePortableLineage(envelope, input.trustedBundleKeys, trustedParentEnvelope);
   if (!preflight.compatible) {
     throw new Error(`portable migration preflight failed: ${preflight.errors.join('; ')}`);
   }
@@ -223,9 +229,11 @@ export function prepareTixkitPortableUpload(
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('portable migration upload must be an object');
   }
-  const upload = parsed as { envelope?: unknown; payloads?: unknown };
+  const upload = parsed as { envelope?: unknown; parentEnvelope?: unknown; payloads?: unknown };
   if (
-    Object.keys(upload).some((key) => key !== 'envelope' && key !== 'payloads') ||
+    Object.keys(upload).some(
+      (key) => key !== 'envelope' && key !== 'parentEnvelope' && key !== 'payloads',
+    ) ||
     !upload.envelope ||
     typeof upload.envelope !== 'object' ||
     Array.isArray(upload.envelope) ||
@@ -261,6 +269,9 @@ export function prepareTixkitPortableUpload(
   return prepareTixkitPortableMigration({
     ...trust,
     envelope: upload.envelope as SignedPortableBundle,
+    ...(upload.parentEnvelope
+      ? { trustedParentEnvelope: upload.parentEnvelope as SignedPortableBundle }
+      : {}),
     payloads,
   });
 }

@@ -7,17 +7,18 @@ product_area: api
 content_type: reference
 status: beta
 owner: developer-platform
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 prerequisites: []
 related:
   - /reference/api
   - /contributing/add-an-sdk-operation
   - /reference/migrations/2026-01-01-to-2026-07-12
   - /reference/migrations/2026-07-13-to-2026-07-14
+  - /reference/migrations/2026-07-14-to-2026-07-15
 ---
 
-The current HTTP/OpenAPI/SDK contract release is `2026-07-14`. HTTP routes use the `/v1` URL prefix. Webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change the webhook envelope contract.
+The current HTTP/OpenAPI/SDK contract release is `2026-07-15`. HTTP routes use the `/v1` URL prefix. Webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change the webhook envelope contract.
 
-The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under `/contracts/<API version>/`. Migration guidance is published separately for [2026-01-01 to 2026-07-12](/reference/migrations/2026-01-01-to-2026-07-12) and [2026-07-13 to 2026-07-14](/reference/migrations/2026-07-13-to-2026-07-14). Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period.
+The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under `/contracts/<API version>/`. Migration guidance is published separately for [2026-01-01 to 2026-07-12](/reference/migrations/2026-01-01-to-2026-07-12), [2026-07-13 to 2026-07-14](/reference/migrations/2026-07-13-to-2026-07-14), and [2026-07-14 to 2026-07-15](/reference/migrations/2026-07-14-to-2026-07-15). Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period.
 
 SDK parity validation checks the declared API version across supported packages and guides.

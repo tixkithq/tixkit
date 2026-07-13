@@ -74,3 +74,4 @@ export { PortableImportCommitAuthorizationsMigration } from './0073_portable_imp
 export { ImportEventImmutabilityMigration } from './0074_import_event_immutability.js';
 export { EventMediaAssetsMigration } from './0075_event_media_assets.js';
 export { MediaObjectCleanupJobsMigration } from './0076_media_object_cleanup_jobs.js';
+export { PortableImportCutoverProofsMigration } from './0077_portable_import_cutover_proofs.js';

@@ -414,7 +414,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-14',
+    version: '2026-07-15',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -788,6 +788,44 @@ const rawOpenApiSpec = {
           requiredRebindings: { type: 'array', items: { type: 'string' } },
           sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           attestationKeyId: { type: 'string' },
+          signature: { type: 'string' },
+        },
+      },
+      PortableCutoverProof: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'tenantId',
+          'deploymentId',
+          'sourceChangeCursor',
+          'observedAt',
+          'sourceFrozen',
+          'bundleId',
+          'manifestSha256',
+          'destinationId',
+          'operationId',
+          'issuedAt',
+          'expiresAt',
+          'nonce',
+          'receiptSha256',
+          'keyId',
+          'signature',
+        ],
+        properties: {
+          tenantId: { type: 'string' },
+          deploymentId: { type: 'string' },
+          sourceChangeCursor: { type: 'string' },
+          observedAt: { type: 'string', format: 'date-time' },
+          sourceFrozen: { type: 'boolean' },
+          bundleId: { type: 'string' },
+          manifestSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          destinationId: { type: 'string' },
+          operationId: { type: 'string' },
+          issuedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          nonce: { type: 'string' },
+          receiptSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          keyId: { type: 'string' },
           signature: { type: 'string' },
         },
       },
@@ -14049,6 +14087,13 @@ const rawOpenApiSpec = {
       post: {
         operationId: 'commitMigrationJob',
         summary: 'Start durable migration commit',
+        description:
+          'Portable imports require the exact approval confirmation and a fresh source-signed final cutover proof. Other migration adapters use their existing commit confirmation and may omit the body.',
+        'x-compatibility-breaking-change': {
+          id: 'portable-final-cutover-proof-required',
+          previousVersion: '2026-07-14',
+          migrationGuide: '/reference/migrations/2026-07-14-to-2026-07-15',
+        },
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
         parameters: [
@@ -14065,6 +14110,21 @@ const rawOpenApiSpec = {
             schema: { type: 'string', pattern: '^commit:.+$' },
           },
         ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['cutoverProof'],
+                properties: {
+                  cutoverProof: { $ref: '#/components/schemas/PortableCutoverProof' },
+                },
+              },
+            },
+          },
+        },
         responses: {
           '202': {
             description: 'Commit accepted',

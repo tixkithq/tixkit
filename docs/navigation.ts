@@ -104,6 +104,10 @@ export const documentationNavigation = [
         label: 'Migrate 2026-07-13 to 2026-07-14',
         routeId: 'apiMigration20260713To20260714',
       },
+      {
+        label: 'Migrate 2026-07-14 to 2026-07-15',
+        routeId: 'apiMigration20260714To20260715',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

@@ -190,6 +190,46 @@ describe('TixkitClient', () => {
     });
   });
 
+  it('binds portable commit to the exact approval and final cutover proof', async () => {
+    const fetchMock = mockFetch(202, { jobId: 'job_portable_1', status: 'committing' });
+    const client = new TixkitClient({
+      apiKey: 'tk_test',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const cutoverProof = {
+      tenantId: 'tenant_source',
+      deploymentId: 'deployment_source',
+      sourceChangeCursor: 'cursor_02',
+      observedAt: '2026-07-12T23:00:00.000Z',
+      sourceFrozen: true,
+      bundleId: 'bundle_01',
+      manifestSha256: 'a'.repeat(64),
+      destinationId: 'deployment_destination',
+      operationId: 'operation_01',
+      issuedAt: '2026-07-12T23:00:00.000Z',
+      expiresAt: '2026-07-12T23:05:00.000Z',
+      nonce: 'cutover_nonce_01',
+      receiptSha256: 'b'.repeat(64),
+      keyId: 'cutover_key_01',
+      signature: 'signed-proof',
+    };
+    await client.migrations.commitPortable(
+      'job_portable_1',
+      `commit:job_portable_1:approval_01:${'c'.repeat(64)}`,
+      cutoverProof,
+    );
+    const call = getCall(fetchMock);
+    expect(call).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/migration-jobs/job_portable_1/commit',
+      headers: {
+        'x-tixkit-confirmation': `commit:job_portable_1:approval_01:${'c'.repeat(64)}`,
+      },
+    });
+    expect(JSON.parse(call.body)).toEqual({ cutoverProof });
+  });
+
   it('correlates migration job source systems with their preparation selectors', () => {
     const input: CreateMigrationJobInput = {
       organizationId: 'org_1',
@@ -365,7 +405,7 @@ describe('TixkitClient', () => {
     const client = new TixkitClient({
       apiKey: 'tk_test_123',
       apiBaseUrl: 'https://custom.api.com',
-      apiVersion: '2026-07-14',
+      apiVersion: '2026-07-15',
       timeout: 5000,
       maxRetries: 1,
     });

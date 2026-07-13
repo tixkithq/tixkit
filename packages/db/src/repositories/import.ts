@@ -221,6 +221,57 @@ export class ImportRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  findPortableImportCutoverProof(tenantId: string, organizationId: string, jobId: string) {
+    return this.db
+      .selectFrom('portable_import_cutover_proofs')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('import_job_id', '=', jobId)
+      .executeTakeFirst();
+  }
+
+  async recordPortableImportCutoverProof(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    keyId: string;
+    nonce: string;
+    receiptSha256: string;
+    proofJson: string;
+    validatedBy: string;
+    validatedAt: Date;
+  }) {
+    try {
+      await this.db
+        .insertInto('portable_import_cutover_proofs')
+        .values({
+          tenant_id: input.tenantId,
+          organization_id: input.organizationId,
+          import_job_id: input.jobId,
+          key_id: input.keyId,
+          nonce: input.nonce,
+          receipt_sha256: input.receiptSha256,
+          proof_json: input.proofJson,
+          validated_by: input.validatedBy,
+          validated_at: input.validatedAt,
+        })
+        .execute();
+    } catch (error) {
+      if (isUniqueViolation(error))
+        throw new Error('PORTABLE_IMPORT_CUTOVER_PROOF_ALREADY_CONSUMED', { cause: error });
+      throw error;
+    }
+    return this.findPortableImportCutoverProof(
+      input.tenantId,
+      input.organizationId,
+      input.jobId,
+    ).then((proof) => {
+      if (!proof) throw new Error('PORTABLE_IMPORT_CUTOVER_PROOF_NOT_FOUND');
+      return proof;
+    });
+  }
+
   async authorizePortableImportCommit(input: {
     tenantId: string;
     organizationId: string;

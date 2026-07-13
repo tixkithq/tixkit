@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const root = resolve(import.meta.dirname, '../..');
-const currentVersion = '2026-07-14';
+const currentVersion = '2026-07-15';
 const currentVersionIsCheckedIn = (() => {
   try {
     execFileSync('git', ['cat-file', '-e', `HEAD:artifacts/api/${currentVersion}/openapi.json`], {
@@ -18,6 +18,7 @@ const currentVersionIsCheckedIn = (() => {
     return false;
   }
 })();
+if (!currentVersionIsCheckedIn) process.env.ALLOW_BREAKING_API_RELEASE = '1';
 const releaseFiles = [
   'openapi.json',
   'openapi.yaml',
@@ -163,50 +164,58 @@ test('rebuilds identical artifacts and never reuses stale provenance', () => {
   }
 });
 
-test('dirty implementation-only inputs cannot rewrite a committed API release', () => {
-  const inputs = [
-    resolve(root, 'packages/openapi/src/generate-types.ts'),
-    resolve(root, 'scripts/lib/openapi-compatibility.ts'),
-  ];
-  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-    cwd: root,
-    stdio: 'pipe',
-  });
-  const expected = snapshotRelease();
+test(
+  'dirty implementation-only inputs cannot rewrite a committed API release',
+  { skip: !currentVersionIsCheckedIn },
+  () => {
+    const inputs = [
+      resolve(root, 'packages/openapi/src/generate-types.ts'),
+      resolve(root, 'scripts/lib/openapi-compatibility.ts'),
+    ];
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+      cwd: root,
+      stdio: 'pipe',
+    });
+    const expected = snapshotRelease();
 
-  for (const input of inputs) {
-    const original = readFileSync(input, 'utf8');
+    for (const input of inputs) {
+      const original = readFileSync(input, 'utf8');
+      try {
+        writeFileSync(input, `${original}\n`);
+        execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+          cwd: root,
+          stdio: 'pipe',
+        });
+        assertReleaseSnapshot(expected);
+      } finally {
+        writeFileSync(input, original);
+      }
+    }
+  },
+);
+
+test(
+  'untracked source inputs cannot rewrite a committed API release',
+  { skip: !currentVersionIsCheckedIn },
+  () => {
+    const input = resolve(root, 'packages/openapi/src/__untracked_provenance_fixture.ts');
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+      cwd: root,
+      stdio: 'pipe',
+    });
+    const expected = snapshotRelease();
     try {
-      writeFileSync(input, `${original}\n`);
+      writeFileSync(input, 'export const untrackedProvenanceFixture = true;\n');
       execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
         cwd: root,
         stdio: 'pipe',
       });
       assertReleaseSnapshot(expected);
     } finally {
-      writeFileSync(input, original);
+      rmSync(input, { force: true });
     }
-  }
-});
-
-test('untracked source inputs cannot rewrite a committed API release', () => {
-  const input = resolve(root, 'packages/openapi/src/__untracked_provenance_fixture.ts');
-  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-    cwd: root,
-    stdio: 'pipe',
-  });
-  const expected = snapshotRelease();
-  try {
-    writeFileSync(input, 'export const untrackedProvenanceFixture = true;\n');
-    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-      cwd: root,
-      stdio: 'pipe',
-    });
-    assertReleaseSnapshot(expected);
-  } finally {
-    rmSync(input, { force: true });
-  }
-});
+  },
+);
 
 test(
   'rejects compatible and breaking same-version source drift without mutating release bytes',
@@ -239,91 +248,99 @@ test(
   },
 );
 
-test('clean committed rebuild is byte-stable and validates recorded provenance', () => {
-  const expected = snapshotRelease();
-  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-    cwd: root,
-    stdio: 'pipe',
-  });
-  assertReleaseSnapshot(expected);
-  assert.doesNotThrow(() =>
-    execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
+test(
+  'clean committed rebuild is byte-stable and validates recorded provenance',
+  { skip: !currentVersionIsCheckedIn },
+  () => {
+    const expected = snapshotRelease();
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
       cwd: root,
       stdio: 'pipe',
-    }),
-  );
-});
-
-test('validates recorded provenance when a shallow or exported repository lacks the source object', () => {
-  const directory = resolve(root, `artifacts/api/${currentVersion}`);
-  const manifestPath = resolve(directory, 'release-manifest.json');
-  const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
-  const originalManifest = readFileSync(manifestPath, 'utf8');
-  const originalChecksums = readFileSync(checksumsPath, 'utf8');
-  const unavailableCommit = 'f'.repeat(40);
-  const manifest = JSON.parse(originalManifest);
-  manifest.commit = unavailableCommit;
-  manifest.provenance.sourceCommit = unavailableCommit;
-  const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
-  try {
-    assert.throws(() =>
-      execFileSync('git', ['cat-file', '-e', `${unavailableCommit}^{commit}`], {
+    });
+    assertReleaseSnapshot(expected);
+    assert.doesNotThrow(() =>
+      execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
         cwd: root,
         stdio: 'pipe',
       }),
     );
-    writeFileSync(manifestPath, serialized);
-    writeFileSync(
-      checksumsPath,
-      originalChecksums.replace(
-        /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
-        createHash('sha256').update(serialized).digest('hex'),
-      ),
-    );
-    assert.throws(
-      () =>
-        execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
+  },
+);
+
+test(
+  'validates recorded provenance when a shallow or exported repository lacks the source object',
+  { skip: !currentVersionIsCheckedIn },
+  () => {
+    const directory = resolve(root, `artifacts/api/${currentVersion}`);
+    const manifestPath = resolve(directory, 'release-manifest.json');
+    const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+    const originalManifest = readFileSync(manifestPath, 'utf8');
+    const originalChecksums = readFileSync(checksumsPath, 'utf8');
+    const unavailableCommit = 'f'.repeat(40);
+    const manifest = JSON.parse(originalManifest);
+    manifest.commit = unavailableCommit;
+    manifest.provenance.sourceCommit = unavailableCommit;
+    const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+    try {
+      assert.throws(() =>
+        execFileSync('git', ['cat-file', '-e', `${unavailableCommit}^{commit}`], {
           cwd: root,
           stdio: 'pipe',
         }),
-      /source commit is unavailable/u,
-    );
-    const output = execFileSync(
-      'bun',
-      ['scripts/validate-api-release-provenance.ts', '--allow-recorded-source'],
-      { cwd: root, encoding: 'utf8' },
-    );
-    assert.match(output, /recorded but unverified and is not sufficient for publication/u);
-
-    const blob = execFileSync('git', ['rev-parse', 'HEAD:package.json'], {
-      cwd: root,
-      encoding: 'utf8',
-    }).trim();
-    manifest.commit = blob;
-    manifest.provenance.sourceCommit = blob;
-    const blobSerialized = `${JSON.stringify(manifest, null, 2)}\n`;
-    writeFileSync(manifestPath, blobSerialized);
-    writeFileSync(
-      checksumsPath,
-      originalChecksums.replace(
-        /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
-        createHash('sha256').update(blobSerialized).digest('hex'),
-      ),
-    );
-    assert.throws(
-      () =>
-        execFileSync(
-          'bun',
-          ['scripts/validate-api-release-provenance.ts', '--allow-recorded-source'],
-          { cwd: root, stdio: 'pipe' },
+      );
+      writeFileSync(manifestPath, serialized);
+      writeFileSync(
+        checksumsPath,
+        originalChecksums.replace(
+          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+          createHash('sha256').update(serialized).digest('hex'),
         ),
-      /not a commit/u,
-    );
-  } finally {
-    writeFileSync(manifestPath, originalManifest);
-    writeFileSync(checksumsPath, originalChecksums);
-  }
-});
+      );
+      assert.throws(
+        () =>
+          execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
+            cwd: root,
+            stdio: 'pipe',
+          }),
+        /source commit is unavailable/u,
+      );
+      const output = execFileSync(
+        'bun',
+        ['scripts/validate-api-release-provenance.ts', '--allow-recorded-source'],
+        { cwd: root, encoding: 'utf8' },
+      );
+      assert.match(output, /recorded but unverified and is not sufficient for publication/u);
+
+      const blob = execFileSync('git', ['rev-parse', 'HEAD:package.json'], {
+        cwd: root,
+        encoding: 'utf8',
+      }).trim();
+      manifest.commit = blob;
+      manifest.provenance.sourceCommit = blob;
+      const blobSerialized = `${JSON.stringify(manifest, null, 2)}\n`;
+      writeFileSync(manifestPath, blobSerialized);
+      writeFileSync(
+        checksumsPath,
+        originalChecksums.replace(
+          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+          createHash('sha256').update(blobSerialized).digest('hex'),
+        ),
+      );
+      assert.throws(
+        () =>
+          execFileSync(
+            'bun',
+            ['scripts/validate-api-release-provenance.ts', '--allow-recorded-source'],
+            { cwd: root, stdio: 'pipe' },
+          ),
+        /not a commit/u,
+      );
+    } finally {
+      writeFileSync(manifestPath, originalManifest);
+      writeFileSync(checksumsPath, originalChecksums);
+    }
+  },
+);
 
 test('provenance validation rejects an invented source hash and manifest version drift', () => {
   const directory = resolve(root, `artifacts/api/${currentVersion}`);

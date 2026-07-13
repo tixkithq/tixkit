@@ -15,10 +15,12 @@ import { PortableImportPreflightsMigration } from '@tixkit/db/migrations';
 import { PortableImportApprovalsMigration } from '@tixkit/db/migrations';
 import { PortableImportRebindingsMigration } from '@tixkit/db/migrations';
 import { PortableImportCommitAuthorizationsMigration } from '@tixkit/db/migrations';
+import { PortableImportCutoverProofsMigration } from '@tixkit/db/migrations';
 import { ImportEventImmutabilityMigration } from '@tixkit/db/migrations';
 import {
   buildPortableLogicalExport,
   canonicalPortableJson,
+  createPortableCutoverProof,
   createPortableConfigurationPayloadPolicies,
   portableManifestSha256,
   verifyAndPreflightPortableImport,
@@ -26,6 +28,7 @@ import {
 import {
   approvePortableImport,
   attestPortableDryRun,
+  authorizePortableImportCommit,
   bindPortableImportDestination,
   createLocalPortableDryRunAttestation,
   portableImportCurrentInputHash,
@@ -37,6 +40,7 @@ import { migrationRoutes } from '../../routes/modules/migrations.js';
 import {
   createProductionMigrationCommitters,
   createRepositoryMigrationActivityService,
+  validatePortableCommitCutoverEvidence,
   MIGRATION_COMMIT_STAGES,
   MIGRATION_SIDE_EFFECT_POLICY,
 } from '@tixkit/workflows';
@@ -78,6 +82,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     const bundleKeys = generateKeyPairSync('ed25519');
     const payloadKeys = generateKeyPairSync('ed25519');
     const dryRunKeys = generateKeyPairSync('ed25519');
+    const cutoverKeys = generateKeyPairSync('ed25519');
     const policies = createPortableConfigurationPayloadPolicies();
     const built = buildPortableLogicalExport({
       bundleId: `bundle_control_${driver}`,
@@ -717,11 +722,33 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       organizationIds: [organizationId],
       scopes: ['migrations.commit'],
     };
+    const cutoverIssuedAt = new Date();
+    const cutoverProof = createPortableCutoverProof(
+      {
+        tenantId: built.envelope.manifest.source.tenantId,
+        deploymentId: built.envelope.manifest.source.deploymentId,
+        sourceChangeCursor: built.envelope.manifest.lineage.toChangeCursor,
+        observedAt: cutoverIssuedAt.toISOString(),
+        sourceFrozen: true,
+        bundleId: built.envelope.manifest.bundleId,
+        manifestSha256: portableManifestSha256(built.envelope.manifest),
+        destinationId: destination.deploymentId,
+        operationId: preflight.operationId,
+        issuedAt: cutoverIssuedAt.toISOString(),
+        expiresAt: new Date(cutoverIssuedAt.getTime() + 5 * 60_000).toISOString(),
+        nonce: `cutover_route_${driver}_01`,
+      },
+      'cutover_key_01',
+      cutoverKeys.privateKey,
+    );
     const startedCommits: string[] = [];
     const app = Fastify();
     app.decorate('context', {
       db,
       portableDryRunAttestation: request.attestation,
+      portableCutoverTrust: {
+        trustedPublicKeys: new Map([['cutover_key_01', cutoverKeys.publicKey]]),
+      },
       temporalClient: {
         startMigrationCommit: async ({ jobId: startedJobId }: { jobId: string }) => {
           startedCommits.push(startedJobId);
@@ -828,6 +855,88 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     });
     expect(replayResponse.statusCode).toBe(201);
     expect(replayResponse.json()).toEqual(approvedResponse.json());
+    const persistedApproval = await repository.findPortableImportApproval({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      approvalId: approvedBody.approvalId,
+    });
+    expect(persistedApproval).toBeDefined();
+    const proveWorkerCutoverGate = async (proofJson?: string) => {
+      await expect(
+        db
+          .transaction()
+          .setIsolationLevel('serializable')
+          .execute(async (transaction) => {
+            const transactionDatabase = transaction as Database;
+            const transactionRepository = new ImportRepository(transactionDatabase);
+            if (proofJson)
+              await transactionRepository.recordPortableImportCutoverProof({
+                tenantId,
+                organizationId,
+                jobId: job.id,
+                keyId: cutoverProof.keyId,
+                nonce: cutoverProof.nonce,
+                receiptSha256: cutoverProof.receiptSha256,
+                proofJson,
+                validatedBy: activePrincipal.id,
+                validatedAt: new Date(),
+              });
+            await transactionRepository.authorizePortableImportCommit({
+              tenantId,
+              organizationId,
+              jobId: job.id,
+              approvalId: persistedApproval!.id,
+              approvalDigest: persistedApproval!.approval_digest,
+              inputSha256: persistedApproval!.input_sha256,
+              rebindingsSha256: persistedApproval!.rebindings_sha256,
+              authorizedBy: persistedApproval!.approved_by,
+              authorizedAt: new Date(persistedApproval!.created_at),
+            });
+            await expect(
+              validatePortableCommitCutoverEvidence(transactionRepository, {
+                tenantId,
+                organizationId,
+                jobId: job.id,
+              }),
+            ).rejects.toThrow(
+              proofJson
+                ? /PORTABILITY_COMMIT_CUTOVER_PROOF_INVALID/u
+                : /PORTABILITY_COMMIT_CUTOVER_PROOF_REQUIRED/u,
+            );
+            throw new Error('ROLLBACK_WORKER_CUTOVER_GATE_PROOF');
+          }),
+      ).rejects.toThrow('ROLLBACK_WORKER_CUTOVER_GATE_PROOF');
+    };
+    await proveWorkerCutoverGate();
+    await proveWorkerCutoverGate(
+      canonicalPortableJson({ ...cutoverProof, destinationId: 'deployment_wrong_destination' }),
+    );
+    await expect(
+      authorizePortableImportCommit({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: approvedBody.commitConfirmation,
+        attestation: request.attestation,
+        cutoverProof,
+        cutoverTrust: {
+          trustedPublicKeys: new Map([['cutover_key_01', cutoverKeys.publicKey]]),
+        },
+        authorizedBy: activePrincipal.id,
+        checkpoint: () => {
+          throw new Error('FORCED_FAILURE_AFTER_CUTOVER_PROOF');
+        },
+      }),
+    ).rejects.toThrow('FORCED_FAILURE_AFTER_CUTOVER_PROOF');
+    expect(
+      await repository.findPortableImportCutoverProof(tenantId, organizationId, job.id),
+    ).toBeUndefined();
+    expect(
+      await repository.findPortableImportCommitAuthorization(tenantId, organizationId, job.id),
+    ).toBeUndefined();
+    expect((await repository.findJob(tenantId, organizationId, job.id))?.mode).toBe('dry-run');
     const untrustedRouteKeys = generateKeyPairSync('ed25519');
     app.context.portableDryRunAttestation = createLocalPortableDryRunAttestation({
       keyId: 'route_untrusted_key',
@@ -839,16 +948,43 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
           method: 'POST',
           url: `/migration-jobs/${job.id}/commit`,
           headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+          payload: { cutoverProof },
         })
       ).statusCode,
     ).toBe(503);
     app.context.portableDryRunAttestation = request.attestation;
+    const previousCutoverTrust = process.env.PORTABILITY_CUTOVER_TRUSTED_PUBLIC_KEYS;
+    delete process.env.PORTABILITY_CUTOVER_TRUSTED_PUBLIC_KEYS;
+    app.context.portableCutoverTrust = undefined;
+    const missingCutoverTrust = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/commit`,
+      headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+      payload: { cutoverProof },
+    });
+    expect(missingCutoverTrust.statusCode, missingCutoverTrust.body).toBe(503);
+    if (previousCutoverTrust === undefined)
+      delete process.env.PORTABILITY_CUTOVER_TRUSTED_PUBLIC_KEYS;
+    else process.env.PORTABILITY_CUTOVER_TRUSTED_PUBLIC_KEYS = previousCutoverTrust;
+    app.context.portableCutoverTrust = {
+      trustedPublicKeys: new Map([['cutover_key_01', cutoverKeys.publicKey]]),
+    };
+    const invalidCutover = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${job.id}/commit`,
+      headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+      payload: {
+        cutoverProof: { ...cutoverProof, destinationId: 'deployment_wrong_destination' },
+      },
+    });
+    expect(invalidCutover.statusCode, invalidCutover.body).toBe(409);
     const authorizedCommits = await Promise.all(
       Array.from({ length: 2 }, () =>
         app.inject({
           method: 'POST',
           url: `/migration-jobs/${job.id}/commit`,
           headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+          payload: { cutoverProof },
         }),
       ),
     );
@@ -862,6 +998,83 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       .select(({ fn }) => fn.countAll<number>().as('count'))
       .executeTakeFirstOrThrow();
     expect(Number(authorizationCount.count)).toBe(1);
+    const cutoverCount = await db
+      .selectFrom('portable_import_cutover_proofs')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow();
+    expect(Number(cutoverCount.count)).toBe(1);
+    const createNonceProbeJob = async (suffix: string) => {
+      const probe = await repository.createJob({
+        tenantId,
+        organizationId,
+        sourceSystem: 'tixkit-portable',
+        adapterVersion: 'tixkit-portable-bundle-v1',
+        mode: 'dry-run',
+        idempotencyKey: `portable-cutover-nonce-${driver}-${suffix}`,
+        requestedBy: 'user_route_approver',
+        configuration: { sourceMode: 'official-export', artifactIds: [`upl_${suffix}`] },
+      });
+      await repository.recordPortablePreflight({
+        tenantId,
+        organizationId,
+        jobId: probe.id,
+        operationId: `operation_nonce_${driver}_${suffix}`,
+        bundleId: built.envelope.manifest.bundleId,
+        manifestSha256: portableManifestSha256(built.envelope.manifest),
+        artifactSha256: 'd'.repeat(64),
+        sourceDeploymentId: built.envelope.manifest.source.deploymentId,
+        sourceChangeCursor: built.envelope.manifest.lineage.toChangeCursor,
+        destinationId: destination.deploymentId,
+        manifestJson: canonicalPortableJson(built.envelope.manifest),
+        preflightJson: canonicalPortableJson(preflight),
+        expectedCounts: canonicalPortableJson(built.envelope.manifest.entityCounts),
+        expectedAssets: canonicalPortableJson([]),
+        requiredRebindings: canonicalPortableJson(preflight.rebindings),
+      });
+      return probe;
+    };
+    const duplicateNonceJob = await createNonceProbeJob('duplicate');
+    await expect(
+      repository.recordPortableImportCutoverProof({
+        tenantId,
+        organizationId,
+        jobId: duplicateNonceJob.id,
+        keyId: cutoverProof.keyId,
+        nonce: cutoverProof.nonce,
+        receiptSha256: cutoverProof.receiptSha256,
+        proofJson: canonicalPortableJson(cutoverProof),
+        validatedBy: 'user_route_approver',
+        validatedAt: new Date(),
+      }),
+    ).rejects.toThrow(/CUTOVER_PROOF_ALREADY_CONSUMED/u);
+    const {
+      keyId: _keyId,
+      receiptSha256: _receipt,
+      signature: _signature,
+      ...unsignedProof
+    } = cutoverProof;
+    const aliasProof = createPortableCutoverProof(
+      unsignedProof,
+      'cutover_key_alias',
+      cutoverKeys.privateKey,
+    );
+    const aliasNonceJob = await createNonceProbeJob('alias');
+    await expect(
+      repository.recordPortableImportCutoverProof({
+        tenantId,
+        organizationId,
+        jobId: aliasNonceJob.id,
+        keyId: aliasProof.keyId,
+        nonce: aliasProof.nonce,
+        receiptSha256: aliasProof.receiptSha256,
+        proofJson: canonicalPortableJson(aliasProof),
+        validatedBy: 'user_route_approver',
+        validatedAt: new Date(),
+      }),
+    ).resolves.toMatchObject({ key_id: 'cutover_key_alias', nonce: cutoverProof.nonce });
+    await expect(
+      db.deleteFrom('portable_import_cutover_proofs').where('import_job_id', '=', job.id).execute(),
+    ).rejects.toThrow(/immutable/u);
     await expect(
       db
         .updateTable('portable_import_commit_authorizations')
@@ -976,6 +1189,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       method: 'POST',
       url: `/migration-jobs/${job.id}/commit`,
       headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+      payload: { cutoverProof },
     });
     expect(lostResponseRetry.statusCode, lostResponseRetry.body).toBe(202);
     expect(lostResponseRetry.json()).toEqual({ jobId: job.id, status: 'activated' });
@@ -1010,6 +1224,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     await truncateAllData(db);
     await ImportEventImmutabilityMigration.down!(db);
     await PortableImportCommitAuthorizationsMigration.down!(db);
+    await PortableImportCutoverProofsMigration.down!(db);
     await PortableImportRebindingsMigration.down!(db);
     await PortableImportApprovalsMigration.down!(db);
     await PortableImportPreflightsMigration.down!(db);
@@ -1017,9 +1232,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     await PortableImportApprovalsMigration.up(db);
     await PortableImportRebindingsMigration.up(db);
     await PortableImportCommitAuthorizationsMigration.up(db);
+    await PortableImportCutoverProofsMigration.up(db);
     await ImportEventImmutabilityMigration.up(db);
     await expect(
       db.selectFrom('portable_import_preflights').selectAll().execute(),
     ).resolves.toEqual([]);
-  }, 15_000);
+  }, 30_000);
 });

@@ -1994,6 +1994,18 @@ export interface PortableImportCommitAuthorizationTable {
   authorized_at: Timestamp;
 }
 
+export interface PortableImportCutoverProofTable {
+  tenant_id: string;
+  organization_id: string;
+  import_job_id: string;
+  key_id: string;
+  nonce: string;
+  receipt_sha256: string;
+  proof_json: string;
+  validated_by: string;
+  validated_at: Timestamp;
+}
+
 export interface DB {
   agent_principals: AgentPrincipalTable;
   agent_delegations: AgentDelegationTable;
@@ -2121,4 +2133,5 @@ export interface DB {
   portable_import_rebindings: PortableImportRebindingTable;
   portable_destination_resources: PortableDestinationResourceTable;
   portable_import_commit_authorizations: PortableImportCommitAuthorizationTable;
+  portable_import_cutover_proofs: PortableImportCutoverProofTable;
 }

@@ -937,6 +937,21 @@ describe('portable bundle manifest', () => {
     expect(() =>
       validatePortableFinalCutover(
         signedDelta,
+        { ...cutoverProof, keyId: 'key_cutover_alias' },
+        trustedKeys,
+        new Map([
+          ['key_cutover_01', cutoverKeys.publicKey],
+          ['key_cutover_alias', cutoverKeys.publicKey],
+        ]),
+        'deployment_destination',
+        '2026-07-12T17:02:00.000Z',
+        () => true,
+        signedParent,
+      ),
+    ).toThrow(/matching freeze or delta source proof/u);
+    expect(() =>
+      validatePortableFinalCutover(
+        signedDelta,
         cutoverProof,
         trustedKeys,
         new Map([['key_cutover_01', cutoverKeys.publicKey]]),

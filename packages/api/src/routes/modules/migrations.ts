@@ -24,6 +24,7 @@ import {
   attestPortableDryRun,
   authorizePortableImportCommit,
   bindPortableImportDestination,
+  portableCutoverTrustFromEnvironment,
   portableDryRunAttestationFromEnvironment,
   portableImportRebindingStatus,
   revokePortableImportApproval,
@@ -40,9 +41,38 @@ class PortableDryRunAttestationUnavailableError extends Error {
   }
 }
 
+class PortableCutoverTrustUnavailableError extends Error {
+  readonly code = 'SERVICE_UNAVAILABLE';
+  readonly statusCode = 503;
+  readonly expose = true;
+
+  constructor() {
+    super('Portable cutover trust is unavailable');
+  }
+}
+
 const id = z.string().trim().min(1).max(128);
 const organizationIdSchema = id;
 const emptyBodySchema = z.object({}).strict();
+const portableCutoverProofSchema = z
+  .object({
+    tenantId: z.string().trim().min(1).max(200),
+    deploymentId: z.string().trim().min(1).max(200),
+    sourceChangeCursor: z.string().trim().min(1).max(200),
+    observedAt: z.string().datetime({ offset: true }),
+    sourceFrozen: z.boolean(),
+    bundleId: z.string().trim().min(1).max(200),
+    manifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    destinationId: z.string().trim().min(1).max(200),
+    operationId: z.string().trim().min(1).max(200),
+    issuedAt: z.string().datetime({ offset: true }),
+    expiresAt: z.string().datetime({ offset: true }),
+    nonce: z.string().trim().min(1).max(128),
+    receiptSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    keyId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u),
+    signature: z.string().trim().min(1).max(512),
+  })
+  .strict();
 const createJobSchema = z
   .object({
     organizationId: organizationIdSchema,
@@ -394,6 +424,8 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
   const repo = () => new ImportRepository(app.context.db);
   const portableAttestation = () =>
     app.context.portableDryRunAttestation ?? portableDryRunAttestationFromEnvironment();
+  const portableCutoverTrust = () =>
+    app.context.portableCutoverTrust ?? portableCutoverTrustFromEnvironment();
 
   app.get('/migration-adapters', async (request) => {
     requireMigrationPermission(request.principal!, 'migrations.read');
@@ -1177,6 +1209,10 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const repository = repo();
     const { job, organizationId } = await scopedJob(repository, request, jobId);
     if (job.source_system === 'tixkit-portable') {
+      const body = parse(
+        z.object({ cutoverProof: portableCutoverProofSchema }).strict(),
+        request.body ?? {},
+      );
       try {
         await authorizePortableImportCommit({
           db: app.context.db,
@@ -1185,9 +1221,17 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
           jobId,
           confirmation: String(request.headers['x-tixkit-confirmation'] ?? ''),
           attestation: portableAttestation(),
+          cutoverProof: body.cutoverProof,
+          cutoverTrust: portableCutoverTrust(),
           authorizedBy: principal.id,
         });
       } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message ===
+            'portable final cutover requires a matching freeze or delta source proof'
+        )
+          throw new ConflictError('A fresh, trusted final cutover proof is required');
         if (
           error instanceof Error &&
           (error.message === 'PORTABLE_IMPORT_APPROVAL_REQUIRED' ||
@@ -1200,12 +1244,19 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
             error.message === 'PORTABLE_IMPORT_REBINDINGS_REQUIRED' ||
             error.message === 'PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND' ||
             error.message === 'PORTABLE_IMPORT_COMMIT_PRINCIPAL_MISMATCH' ||
+            error.message === 'PORTABLE_IMPORT_CUTOVER_PROOF_ALREADY_CONSUMED' ||
             error.message === 'PORTABLE_IMPORT_COMMIT_AUTHORIZATION_CONFLICT' ||
             error.message === 'PORTABLE_IMPORT_COMMIT_AUTHORIZATION_JOB_CHANGED')
         )
           throw new ConflictError(
             'Portable import input changed after approval; create a new approval',
           );
+        if (
+          error instanceof Error &&
+          (error.message === 'PORTABLE_CUTOVER_TRUST_REQUIRED' ||
+            error.message === 'PORTABLE_CUTOVER_TRUST_INVALID')
+        )
+          throw new PortableCutoverTrustUnavailableError();
         request.log.error({ err: error, jobId }, 'Portable import approval validation failed');
         throw new PortableDryRunAttestationUnavailableError();
       }

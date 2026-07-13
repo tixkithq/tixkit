@@ -44,6 +44,43 @@ const base = {
 };
 
 describe('OpenAPI compatibility', () => {
+  it('records additive request media types and named schemas', () => {
+    const previous = {
+      paths: {
+        '/jobs': {
+          post: { operationId: 'commitJob', responses: { '202': { description: 'Accepted' } } },
+        },
+      },
+      components: { schemas: {} },
+    };
+    const current = {
+      paths: {
+        '/jobs': {
+          post: {
+            operationId: 'commitJob',
+            'x-compatibility-breaking-change': {
+              id: 'proof-required-for-portable-jobs',
+              previousVersion: '2026-07-14',
+            },
+            requestBody: {
+              required: false,
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/Proof' } } },
+            },
+            responses: { '202': { description: 'Accepted' } },
+          },
+        },
+      },
+      components: { schemas: { Proof: { type: 'object' } } },
+    };
+    expect(compareOpenApi(previous as never, current as never)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: 'media-type-added', severity: 'compatible' }),
+        expect.objectContaining({ category: 'schema-added', severity: 'compatible' }),
+        expect.objectContaining({ category: 'declared-behavior-change', severity: 'breaking' }),
+      ]),
+    );
+  });
+
   it.each([
     ['operation removal', { ...base, paths: {} }, 'operation-removed'],
     [

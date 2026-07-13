@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-14';
+export const TIXKIT_API_VERSION = '2026-07-15';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -2504,6 +2504,23 @@ export type MigrationJobEvent = {
   data: unknown;
 };
 export type MigrationReport = Record<string, unknown>;
+export type PortableCutoverProof = {
+  tenantId: string;
+  deploymentId: string;
+  sourceChangeCursor: string;
+  observedAt: string;
+  sourceFrozen: boolean;
+  bundleId: string;
+  manifestSha256: string;
+  destinationId: string;
+  operationId: string;
+  issuedAt: string;
+  expiresAt: string;
+  nonce: string;
+  receiptSha256: string;
+  keyId: string;
+  signature: string;
+};
 
 export class TixkitClient {
   private readonly apiKey?: string;
@@ -4237,6 +4254,16 @@ class MigrationResource {
   commit(jobId: string): Promise<{ jobId: string; status: 'committing' }> {
     return this.client.request('POST', `/migration-jobs/${jobId}/commit`, {
       headers: { 'x-tixkit-confirmation': `commit:${jobId}` },
+    });
+  }
+  commitPortable(
+    jobId: string,
+    confirmation: `commit:${string}`,
+    cutoverProof: PortableCutoverProof,
+  ): Promise<{ jobId: string; status: 'committing' | 'committed' | 'activated' }> {
+    return this.client.request('POST', `/migration-jobs/${jobId}/commit`, {
+      headers: { 'x-tixkit-confirmation': confirmation },
+      body: { cutoverProof },
     });
   }
   pause(jobId: string) {
