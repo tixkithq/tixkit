@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
+  PORTABLE_BUNDLE_FORMAT,
+  PORTABLE_BUNDLE_LEGACY_FORMAT,
   parsePortableJson,
   validatePortableLineage,
   verifyAndPreflightPortableImport,
@@ -9,6 +11,11 @@ import {
   type PortabilityPreflightResult,
   type SignedPortableBundle,
 } from '@tixkit/portability';
+
+export const TIXKIT_PORTABLE_SUPPORTED_VERSIONS = [
+  PORTABLE_BUNDLE_FORMAT,
+  PORTABLE_BUNDLE_LEGACY_FORMAT,
+] as const;
 import {
   assertHistoricalFinancialEntity,
   createHistoricalFinancialSnapshot,
@@ -347,7 +354,7 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
   string
 > {
   readonly id = 'tixkit-portable';
-  readonly supportedVersions = ['tixkit-portable-bundle-v1'];
+  readonly supportedVersions = TIXKIT_PORTABLE_SUPPORTED_VERSIONS;
 
   async discover(
     configuration: TixkitPortableAdapterConfiguration,

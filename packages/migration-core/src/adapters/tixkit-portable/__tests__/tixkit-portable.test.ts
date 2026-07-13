@@ -194,6 +194,13 @@ function prepareFixture(
 }
 
 describe('TixkitPortableMigrationAdapter', () => {
+  it('accepts current v2 bundles while retaining legacy v1 compatibility', () => {
+    expect(new TixkitPortableMigrationAdapter().supportedVersions).toEqual([
+      'tixkit-portable-bundle-v2',
+      'tixkit-portable-bundle-v1',
+    ]);
+  });
+
   it('rejects delta imports unless their signed parent lineage matches exactly', () => {
     const value = fixture();
     const deltaManifest: PortableBundleManifest = {

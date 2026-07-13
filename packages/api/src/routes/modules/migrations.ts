@@ -488,6 +488,9 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     requireMigrationPermission(principal, 'migrations.write');
     const body = parse(createJobSchema, request.body);
+    if (body.sourceSystem === 'tixkit-portable') {
+      throw new ValidationError('Portable imports must use POST /portable-migration-jobs');
+    }
     assertMigrationConfigurationSecretFree(body.configuration);
     let configuration;
     try {

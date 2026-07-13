@@ -124,6 +124,12 @@ describe('migration importer acceptance profile', () => {
       expect(Object.keys(metadata?.featureMapping ?? {})).not.toHaveLength(0);
       expect(Object.keys(metadata?.rateLimitPolicy ?? {})).not.toHaveLength(0);
     }
+    expect(migrationAdapterCatalog().find((entry) => entry.id === 'tixkit-portable')).toMatchObject(
+      {
+        supportedVersions: ['tixkit-portable-bundle-v2', 'tixkit-portable-bundle-v1'],
+        sourceModes: ['official-export'],
+      },
+    );
   });
 
   it.each(cases)('$id passes the executable adoption contract', async (testCase) => {

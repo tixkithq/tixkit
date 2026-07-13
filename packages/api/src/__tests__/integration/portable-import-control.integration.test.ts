@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Principal } from '@tixkit/domain';
@@ -24,6 +24,8 @@ import {
   createPortableConfigurationPayloadPolicies,
   portableManifestSha256,
   verifyAndPreflightPortableImport,
+  verifyPortableDryRunReceipt,
+  type PortableDryRunReceipt,
 } from '@tixkit/portability';
 import {
   approvePortableImport,
@@ -39,6 +41,7 @@ import { registerErrorHandler } from '../../app.js';
 import { migrationRoutes } from '../../routes/modules/migrations.js';
 import {
   createProductionMigrationCommitters,
+  createMigrationPreparationService,
   createRepositoryMigrationActivityService,
   validatePortableCommitCutoverEvidence,
   MIGRATION_COMMIT_STAGES,
@@ -1402,5 +1405,387 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     await expect(
       db.selectFrom('portable_import_preflights').selectAll().execute(),
     ).resolves.toEqual([]);
+  }, 30_000);
+
+  it('ingests a signed portable artifact through routed creation, preparation, and dry-run', async () => {
+    const intakeTenantId = (
+      await new TenantRepository(db).create({ name: `Portable intake ${driver}` })
+    ).id;
+    const intakeOrganizationId = (
+      await new OrganizationRepository(db).create({
+        tenantId: intakeTenantId,
+        name: `Portable intake ${driver}`,
+        slug: `portable-intake-${driver}`,
+      })
+    ).id;
+    const bundleKeys = generateKeyPairSync('ed25519');
+    const payloadKeys = generateKeyPairSync('ed25519');
+    const dryRunKeys = generateKeyPairSync('ed25519');
+    const policies = createPortableConfigurationPayloadPolicies();
+    const built = buildPortableLogicalExport({
+      bundleId: `bundle_routed_intake_${driver}`,
+      mode: 'configuration',
+      source: {
+        operatingModel: 'self-hosted',
+        deploymentId: `deployment_routed_source_${driver}`,
+        tenantId: `tenant_routed_source_${driver}`,
+        organizationId: `organization_routed_source_${driver}`,
+        exportSequence: 1,
+        changeCursor:
+          'snapshot-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      },
+      apiVersion: '2026-01-01',
+      dataSchemaVersion: '0080',
+      exportedAt: '2026-07-13T12:00:00.000Z',
+      currentTime: '2026-07-13T12:00:00.000Z',
+      compatibility: {
+        minimumApiVersion: '2026-01-01',
+        maximumApiVersion: '2026-12-31',
+        minimumDataSchemaVersion: '0080',
+        maximumDataSchemaVersion: '0080',
+        requiredCapabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
+        requiredEntitlements: [],
+      },
+      rebindings: [],
+      sections: new Map([
+        [
+          'organizations',
+          [
+            {
+              portableId: 'organization-routed-source-01',
+              attributes: {
+                name: 'Routed source organization',
+                slug: `routed-source-${driver}`,
+                status: 'active',
+                boxOfficeSettings: {
+                  enabled: true,
+                  allowedTenderTypes: ['cash'],
+                  requireBuyerEmail: false,
+                  receiptMode: 'email',
+                },
+                eventDefaults: {},
+              },
+            },
+          ],
+        ],
+      ]),
+      bundleSigning: { keyId: 'bundle_routed_key', privateKey: bundleKeys.privateKey },
+      payloadSigning: { keyId: 'payload_routed_key', privateKey: payloadKeys.privateKey },
+      payloadPolicies: policies,
+    });
+    expect(built.envelope.manifest).toMatchObject({
+      format: 'tixkit-portable-bundle-v2',
+      schemaVersion: 2,
+      dataSchemaVersion: '0080',
+      compatibility: {
+        minimumDataSchemaVersion: '0080',
+        maximumDataSchemaVersion: '0080',
+        requiredCapabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
+      },
+    });
+    const artifactId = `upl_routed_intake_${driver}`;
+    const objectKey = `portable-intake/${artifactId}.json`;
+    const checksum = createHash('sha256').update(built.transport).digest('hex');
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: artifactId,
+        tenant_id: intakeTenantId,
+        organization_id: intakeOrganizationId,
+        brand_id: null,
+        event_id: null,
+        created_by_user_id: null,
+        purpose: 'migration_import',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: null,
+        bucket: 'tixkit',
+        object_key: objectKey,
+        file_name: 'portable-routed-intake.json',
+        content_type: 'application/vnd.tixkit.portable+json',
+        size_bytes: built.transport.byteLength,
+        checksum_sha256: checksum,
+        client_token_hash: null,
+        metadata: '{}',
+        consumed_by_checkout_session_id: null,
+        consumed_at: null,
+        expires_at: new Date(Date.now() + 60_000),
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+    const policy = policies.get('organizations')!;
+    const destination = {
+      deploymentId: `deployment_routed_destination_${driver}`,
+      apiVersion: '2026-01-01',
+      dataSchemaVersion: '0080',
+      capabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
+      entitlements: [],
+      availableStorageBytes: 1024 * 1024,
+      acceptedSourceOperatingModels: ['self-hosted' as const],
+    };
+    const objectReads: Array<{ input?: { Bucket?: string; Key?: string } }> = [];
+    const preparation = createMigrationPreparationService(
+      db,
+      { resolve: async () => Promise.reject(new Error('CREDENTIAL_RESOLUTION_NOT_EXPECTED')) },
+      {
+        signal: new AbortController().signal,
+        heartbeat: () => undefined,
+        cursorEncryptionKey: Buffer.alloc(32, 9).toString('base64'),
+        createS3Client: () =>
+          ({
+            send: async (command: { input?: { Bucket?: string; Key?: string } }) => {
+              objectReads.push(command);
+              return {
+                Body: (async function* () {
+                  yield built.transport;
+                })(),
+              };
+            },
+          }) as never,
+        portableTrust: ({ tenantId: scopedTenantId, organizationId: scopedOrganizationId }) => ({
+          destination,
+          trustedBundleKeys: new Map([['bundle_routed_key', bundleKeys.publicKey]]),
+          trustedPayloadKeys: new Map([['payload_routed_key', payloadKeys.publicKey]]),
+          trustedPayloadPolicies: new Map([
+            [
+              'organizations',
+              {
+                schemaId: policy.schemaId,
+                schemaSha256: policy.schemaSha256,
+                policySha256: policy.policySha256,
+                scannerId: policy.scannerId,
+                keyId: 'payload_routed_key',
+              },
+            ],
+          ]),
+          trustedMediaKeys: new Map(),
+          trustedMediaPolicies: new Map(),
+          destinationTenantId: scopedTenantId,
+          destinationOrganizationId: scopedOrganizationId,
+        }),
+      },
+    );
+    const principal: Principal = {
+      type: 'user',
+      id: `user_routed_intake_${driver}`,
+      tenantId: intakeTenantId,
+      organizationIds: [intakeOrganizationId],
+      scopes: ['migrations.read', 'migrations.write', 'migrations.commit'],
+    };
+    const attestation = createLocalPortableDryRunAttestation({
+      keyId: 'dry_run_routed_key',
+      privateKey: dryRunKeys.privateKey,
+      trustedPublicKeys: new Map([['dry_run_routed_key', dryRunKeys.publicKey]]),
+    });
+    const app = Fastify();
+    app.decorate('context', {
+      db,
+      portableDryRunAttestation: attestation,
+      temporalClient: {
+        startMigrationPreparation: async (input: {
+          tenantId: string;
+          organizationId: string;
+          jobId: string;
+        }) => {
+          for (;;) {
+            const chunk = await preparation.prepare({ ...input, chunkSize: 100 });
+            if (chunk.completed) return;
+          }
+        },
+      },
+    } as never);
+    app.addHook('preHandler', async (request) => {
+      request.principal = principal;
+    });
+    registerErrorHandler(app);
+    await app.register(migrationRoutes);
+    const createPayload = {
+      organizationId: intakeOrganizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v2',
+      mode: 'dry-run',
+      configuration: {
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: [artifactId],
+      },
+    };
+    const genericRoute = await app.inject({
+      method: 'POST',
+      url: '/migration-jobs',
+      headers: { 'idempotency-key': `generic-routed-intake-${driver}` },
+      payload: createPayload,
+    });
+    expect(genericRoute.statusCode, genericRoute.body).toBe(400);
+    expect(genericRoute.json()).toMatchObject({
+      error: { message: 'Portable imports must use POST /portable-migration-jobs' },
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/portable-migration-jobs',
+      headers: { 'idempotency-key': `routed-intake-${driver}` },
+      payload: createPayload,
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const createdBody = created.json<{ id: string; status: string }>();
+    expect(createdBody.status).toBe('pending');
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/portable-migration-jobs',
+      headers: { 'idempotency-key': `routed-intake-${driver}` },
+      payload: createPayload,
+    });
+    expect(replay.statusCode, replay.body).toBe(201);
+    expect(replay.json()).toEqual(created.json());
+    const domainStateBefore = {
+      organizations: await db
+        .selectFrom('organizations')
+        .selectAll()
+        .where('tenant_id', '=', intakeTenantId)
+        .orderBy('id')
+        .execute(),
+      importedEntities: await db
+        .selectFrom('imported_domain_entities')
+        .selectAll()
+        .where('tenant_id', '=', intakeTenantId)
+        .orderBy('id')
+        .execute(),
+      externalReferences: await db
+        .selectFrom('external_references')
+        .selectAll()
+        .where('tenant_id', '=', intakeTenantId)
+        .orderBy('id')
+        .execute(),
+    };
+    const registered = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/files`,
+      payload: { uploadArtifactId: artifactId },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    expect(registered.json()).toMatchObject({
+      jobId: createdBody.id,
+      sha256: checksum,
+      status: 'ready',
+    });
+    expect(Number(registered.json<{ byteSize: number | string }>().byteSize)).toBe(
+      built.transport.byteLength,
+    );
+    const prepared = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/prepare`,
+      payload: {},
+    });
+    expect(prepared.statusCode, prepared.body).toBe(202);
+    expect(prepared.json()).toEqual({ jobId: createdBody.id, status: 'preparing' });
+    expect(objectReads).toHaveLength(1);
+    expect(objectReads[0]?.input).toMatchObject({ Bucket: 'tixkit', Key: objectKey });
+    const persistedJob = await new ImportRepository(db).findJob(
+      intakeTenantId,
+      intakeOrganizationId,
+      createdBody.id,
+    );
+    expect(persistedJob?.status).toBe('prepared');
+    const dryRun = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/dry-run`,
+      payload: {},
+    });
+    expect(dryRun.statusCode, dryRun.body).toBe(200);
+    const dryRunBody = dryRun.json<{
+      status: string;
+      domainWrites: number;
+      report: { accepted: boolean; counts: Record<string, number> };
+      portableDryRunReceipt: PortableDryRunReceipt;
+      portableDryRunReceiptSha256: string;
+    }>();
+    expect(dryRunBody).toMatchObject({
+      status: 'ready',
+      domainWrites: 0,
+      report: { accepted: true, counts: { create: 1 } },
+      portableDryRunReceipt: {
+        manifestSha256: portableManifestSha256(built.envelope.manifest),
+        destinationId: destination.deploymentId,
+        artifactSha256: checksum,
+        compatible: true,
+        attestationKeyId: 'dry_run_routed_key',
+      },
+    });
+    expect(
+      verifyPortableDryRunReceipt(dryRunBody.portableDryRunReceipt, dryRunKeys.publicKey),
+    ).toBe(true);
+    const rows = await app.inject({
+      method: 'GET',
+      url: `/migration-jobs/${createdBody.id}/rows`,
+    });
+    expect(rows.statusCode, rows.body).toBe(200);
+    const rowBody = rows.json<{ items: Array<{ entityType: string; status: string }> }>();
+    expect(rowBody.items).toHaveLength(1);
+    expect(rowBody.items[0]).toMatchObject({ entityType: 'organization', status: 'validated' });
+    const intakeRepository = new ImportRepository(db);
+    const stagedRows = await intakeRepository.listRows({
+      tenantId: intakeTenantId,
+      organizationId: intakeOrganizationId,
+      jobId: createdBody.id,
+      limit: 10,
+    });
+    expect(stagedRows).toHaveLength(1);
+    expect(stagedRows[0]).toMatchObject({
+      entity_type: 'organization',
+      external_id: 'organization-routed-source-01',
+      status: 'validated',
+    });
+    expect(JSON.parse(stagedRows[0]!.source_data)).toMatchObject({
+      portableId: 'organization-routed-source-01',
+      attributes: { name: 'Routed source organization', slug: `routed-source-${driver}` },
+    });
+    expect(JSON.parse(stagedRows[0]!.normalized_data!)).toMatchObject({
+      entityType: 'organization',
+      externalId: 'organization-routed-source-01',
+      attributes: { name: 'Routed source organization', slug: `routed-source-${driver}` },
+    });
+    const preflight = await intakeRepository.findPortablePreflight(
+      intakeTenantId,
+      intakeOrganizationId,
+      createdBody.id,
+    );
+    expect(preflight).toMatchObject({
+      bundle_id: built.envelope.manifest.bundleId,
+      manifest_sha256: portableManifestSha256(built.envelope.manifest),
+      artifact_sha256: checksum,
+      destination_id: destination.deploymentId,
+    });
+    const persistedReceipt = await intakeRepository.findPortableDryRunReceipt(
+      intakeTenantId,
+      intakeOrganizationId,
+      createdBody.id,
+    );
+    expect(persistedReceipt).toMatchObject({
+      input_sha256: dryRunBody.portableDryRunReceipt.inputSha256,
+      receipt_sha256: dryRunBody.portableDryRunReceiptSha256,
+    });
+    expect(JSON.parse(persistedReceipt!.receipt_json)).toEqual(dryRunBody.portableDryRunReceipt);
+    expect({
+      organizations: await db
+        .selectFrom('organizations')
+        .selectAll()
+        .where('tenant_id', '=', intakeTenantId)
+        .orderBy('id')
+        .execute(),
+      importedEntities: await db
+        .selectFrom('imported_domain_entities')
+        .selectAll()
+        .where('tenant_id', '=', intakeTenantId)
+        .orderBy('id')
+        .execute(),
+      externalReferences: await db
+        .selectFrom('external_references')
+        .selectAll()
+        .where('tenant_id', '=', intakeTenantId)
+        .orderBy('id')
+        .execute(),
+    }).toEqual(domainStateBefore);
+    await app.close();
   }, 30_000);
 });

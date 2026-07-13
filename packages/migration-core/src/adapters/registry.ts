@@ -17,7 +17,10 @@ import {
 } from './hi-events/index.js';
 import { EVENTBRITE_ADAPTER_METADATA, eventbriteAdapter } from './eventbrite/index.js';
 import { TICKET_TAILOR_ADAPTER_METADATA, ticketTailorAdapter } from './ticket-tailor/index.js';
-import { tixkitPortableMigrationAdapter } from './tixkit-portable/index.js';
+import {
+  TIXKIT_PORTABLE_SUPPORTED_VERSIONS,
+  tixkitPortableMigrationAdapter,
+} from './tixkit-portable/index.js';
 
 export const MIGRATION_IMPORTER_ORDER = [
   'generic-csv',
@@ -30,7 +33,7 @@ export const MIGRATION_IMPORTER_ORDER = [
 export type MigrationImporterId = (typeof MIGRATION_IMPORTER_ORDER)[number] | 'tixkit-portable';
 
 export type MigrationAdapterCatalogEntry = {
-  id: (typeof MIGRATION_IMPORTER_ORDER)[number];
+  id: MigrationImporterId;
   displayName: string;
   supportedVersions: readonly string[];
   featureMapping: Readonly<Record<string, unknown>>;
@@ -85,6 +88,18 @@ export function migrationAdapterCatalog(): readonly MigrationAdapterCatalogEntry
       knownLosses: TICKET_TAILOR_ADAPTER_METADATA.knownLosses,
       rateLimitPolicy: TICKET_TAILOR_ADAPTER_METADATA.rateLimits,
       sourceModes: ['official-api', 'official-export'],
+    },
+    {
+      id: 'tixkit-portable',
+      displayName: 'Tixkit Portable Bundle',
+      supportedVersions: TIXKIT_PORTABLE_SUPPORTED_VERSIONS,
+      featureMapping: {
+        configuration: 'native logical bundle',
+        historical: 'explicitly authorized logical bundle',
+      },
+      knownLosses: [],
+      rateLimitPolicy: { strategy: 'local immutable signed export; no network requests' },
+      sourceModes: ['official-export'],
     },
   ];
 }
