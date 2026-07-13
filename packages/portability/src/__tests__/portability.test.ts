@@ -63,7 +63,7 @@ function manifest(overrides: Partial<PortableBundleManifest> = {}): PortableBund
       maximumApiVersion: '2026-12-31',
       minimumDataSchemaVersion: '0064',
       maximumDataSchemaVersion: '0069',
-      requiredCapabilities: ['portable-bundle-v1'],
+      requiredCapabilities: ['portable-bundle-v2'],
       requiredEntitlements: [],
     },
     entityCounts: { organizations: 1, events: 2 },
@@ -344,7 +344,7 @@ describe('portable bundle manifest', () => {
       deploymentId: 'deployment_destination',
       apiVersion: '2026-01-01',
       dataSchemaVersion: '0064',
-      capabilities: ['portable-bundle-v1'],
+      capabilities: ['portable-bundle-v2'],
       entitlements: [],
       availableStorageBytes: 1000,
       acceptedSourceOperatingModels: ['self-hosted'] as const,
@@ -384,6 +384,42 @@ describe('portable bundle manifest', () => {
         ]),
       ).compatible,
     ).toBe(true);
+    const v1Only = verifyAndPreflightPortableImport(
+      { manifest: value, signature },
+      {
+        ...destination,
+        capabilities: ['portable-bundle-v1'],
+        acceptedSourceOperatingModels: [...destination.acceptedSourceOperatingModels],
+      },
+      new Map([['key_portability_01', publicKey]]),
+      new Map([['key_payload_01', payloadSigningKeys.publicKey]]),
+      new Map([
+        [
+          'events',
+          {
+            schemaId: 'events_schema_01',
+            schemaSha256: '6'.repeat(64),
+            policySha256: '7'.repeat(64),
+            scannerId: 'payload_scanner_01',
+            keyId: 'key_payload_01',
+          },
+        ],
+      ]),
+      new Map([['key_media_01', mediaSigningKeys.publicKey]]),
+      new Map([
+        [
+          'media_scanner_01',
+          {
+            policySha256: '9'.repeat(64),
+            scannerId: 'media_scanner_01',
+            keyId: 'key_media_01',
+            detectedMediaTypes: ['image/webp'],
+          },
+        ],
+      ]),
+    );
+    expect(v1Only.compatible).toBe(false);
+    expect(v1Only.errors).toContain('missing capability: portable-bundle-v2');
     expect(() =>
       verifyAndPreflightPortableImport(
         { manifest: value, signature },
@@ -660,7 +696,7 @@ describe('portable bundle manifest', () => {
       deploymentId: 'deployment_destination',
       apiVersion: '2026-01-01',
       dataSchemaVersion: '0064',
-      capabilities: ['portable-bundle-v1'],
+      capabilities: ['portable-bundle-v2'],
       entitlements: [],
       availableStorageBytes: 1000,
       acceptedSourceOperatingModels: ['self-hosted'],
@@ -1111,7 +1147,7 @@ describe('portable import preflight and reconciliation', () => {
       deploymentId: 'destination',
       apiVersion: '2026-01-01',
       dataSchemaVersion: '1.10',
-      capabilities: ['portable-bundle-v1'],
+      capabilities: ['portable-bundle-v2'],
       entitlements: [],
       availableStorageBytes: 1000,
       acceptedSourceOperatingModels: ['self-hosted'],

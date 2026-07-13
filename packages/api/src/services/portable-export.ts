@@ -502,7 +502,7 @@ export function createPortableExportService(input: {
           maximumApiVersion: '2026-12-31',
           minimumDataSchemaVersion: '0076',
           maximumDataSchemaVersion: '0076',
-          requiredCapabilities: ['portable-bundle-v1', 'portable-rebinding-kinds-v2'],
+          requiredCapabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
           requiredEntitlements: [],
         },
         sections: snapshot.sections,

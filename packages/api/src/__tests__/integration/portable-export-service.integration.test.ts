@@ -108,6 +108,8 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       payloads: Record<string, string>;
     };
     expect(transport.envelope.manifest).toMatchObject({
+      schemaVersion: 2,
+      format: 'tixkit-portable-bundle-v2',
       bundleId: first.bundleId,
       mode: 'configuration',
       source: {
@@ -116,6 +118,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         exportSequence: 1,
       },
     });
+    expect(transport.envelope.manifest.compatibility.requiredCapabilities).toEqual([
+      'portable-bundle-v2',
+      'portable-rebinding-kinds-v2',
+    ]);
     expect(transport.envelope.manifest.source.changeCursor).toMatch(
       /^snapshot-sha256:[a-f0-9]{64}$/u,
     );
