@@ -8,6 +8,7 @@ import { parseBody } from '../../http/schemas.js';
 import {
   createPortableExportService,
   createS3PortableExportArtifactStore,
+  createS3PortableExportMediaStore,
   portableExportSigningFromEnvironment,
   type PortableExportService,
 } from '../../services/portable-export.js';
@@ -69,6 +70,7 @@ export const portabilityRoutes: FastifyPluginAsync<PortabilityRouteOptions> = as
         createPortableExportService({
           db: app.context.db,
           store: createS3PortableExportArtifactStore(),
+          mediaStore: createS3PortableExportMediaStore(),
           signing: portableExportSigningFromEnvironment(),
         });
       result = await service.exportConfiguration({

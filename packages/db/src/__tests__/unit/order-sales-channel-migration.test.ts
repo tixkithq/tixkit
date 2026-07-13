@@ -43,6 +43,7 @@ import { PortableImportRebindingsMigration } from '../../migrations/0072_portabl
 import { PortableImportCommitAuthorizationsMigration } from '../../migrations/0073_portable_import_commit_authorizations.js';
 import { ImportEventImmutabilityMigration } from '../../migrations/0074_import_event_immutability.js';
 import { EventMediaAssetsMigration } from '../../migrations/0075_event_media_assets.js';
+import { MediaObjectCleanupJobsMigration } from '../../migrations/0076_media_object_cleanup_jobs.js';
 
 const offlineCheckInBulkSyncMigrationPath = new URL(
   '../../migrations/0034_offline_check_in_bulk_sync.ts',
@@ -227,7 +228,7 @@ describe('OrderSalesChannelMigration', () => {
   it('is registered with the production migrator provider', async () => {
     const migrations = await new TixkitMigrationProvider().getMigrations();
 
-    expect(Object.keys(migrations).at(-1)).toBe('0075_event_media_assets');
+    expect(Object.keys(migrations).at(-1)).toBe('0076_media_object_cleanup_jobs');
     expect(migrations['0071_portable_import_approvals']).toBe(PortableImportApprovalsMigration);
     expect(migrations['0072_portable_import_rebindings']).toBe(PortableImportRebindingsMigration);
     expect(migrations['0073_portable_import_commit_authorizations']).toBe(
@@ -235,6 +236,7 @@ describe('OrderSalesChannelMigration', () => {
     );
     expect(migrations['0074_import_event_immutability']).toBe(ImportEventImmutabilityMigration);
     expect(migrations['0075_event_media_assets']).toBe(EventMediaAssetsMigration);
+    expect(migrations['0076_media_object_cleanup_jobs']).toBe(MediaObjectCleanupJobsMigration);
     expect(migrations['0070_portable_import_preflights']).toBe(PortableImportPreflightsMigration);
     expect(migrations['0069_portable_export_build_leases']).toBe(
       PortableExportBuildLeasesMigration,

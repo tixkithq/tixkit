@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import {
   buildPortableLogicalExport,
+  createPortableConfigurationPayloadPolicies,
   scanPortablePayload,
   signPortableManifest,
   type PortableBundleManifest,
@@ -185,6 +186,134 @@ function prepareFixture(value: ReturnType<typeof fixture>) {
 }
 
 describe('TixkitPortableMigrationAdapter', () => {
+  it('binds verified media bytes to their normalized event descriptor', async () => {
+    const bundleKeys = generateKeyPairSync('ed25519');
+    const payloadKeys = generateKeyPairSync('ed25519');
+    const policies = createPortableConfigurationPayloadPolicies();
+    const mediaBytes = Buffer.from('sanitized-portable-webp');
+    const built = buildPortableLogicalExport({
+      bundleId: 'bundle_media_01',
+      mode: 'configuration',
+      source: {
+        operatingModel: 'self-hosted',
+        deploymentId: 'deployment_source',
+        tenantId: 'tenant_source',
+        exportSequence: 1,
+        changeCursor: 'cursor_media_01',
+      },
+      apiVersion: '2026-01-01',
+      dataSchemaVersion: '0075',
+      exportedAt: '2026-07-12T20:00:00.000Z',
+      currentTime: '2026-07-12T20:00:00.000Z',
+      compatibility: {
+        minimumApiVersion: '2026-01-01',
+        maximumApiVersion: '2026-12-31',
+        minimumDataSchemaVersion: '0075',
+        maximumDataSchemaVersion: '0075',
+        requiredCapabilities: ['portable-bundle-v1'],
+        requiredEntitlements: [],
+      },
+      sections: new Map([
+        [
+          'events',
+          [
+            {
+              portableId: 'event_1',
+              attributes: {
+                title: 'Event',
+                slug: 'event',
+                status: 'draft',
+                currency: 'USD',
+                timezone: 'UTC',
+                startsAt: '2027-01-01T00:00:00.000Z',
+                endsAt: null,
+                visibility: 'private',
+                capacity: null,
+                minimumAge: null,
+                codeFormat: null,
+                mediaAssets: [
+                  {
+                    portableId: 'media_1',
+                    role: 'cover',
+                    altText: 'Purple cover',
+                    focalPoint: { x: 0.5, y: 0.4 },
+                  },
+                ],
+              },
+            },
+          ],
+        ],
+      ]),
+      bundleSigning: { keyId: 'bundle_key_01', privateKey: bundleKeys.privateKey },
+      payloadSigning: { keyId: 'payload_key_01', privateKey: payloadKeys.privateKey },
+      payloadPolicies: new Map([['events', policies.get('events')!]]),
+      assets: [
+        {
+          portableId: 'media_1',
+          path: 'assets/media_1/original.webp',
+          bytes: mediaBytes,
+          mediaType: 'image/webp',
+          role: 'event-media:event_1:cover:original',
+          width: 1600,
+          height: 900,
+          policySha256: '9'.repeat(64),
+          scannerId: 'media_scanner_01',
+        },
+      ],
+    });
+    const configuration = prepareTixkitPortableUpload(built.transport, {
+      destination: {
+        deploymentId: 'deployment_destination',
+        apiVersion: '2026-01-01',
+        dataSchemaVersion: '0075',
+        capabilities: ['portable-bundle-v1'],
+        entitlements: [],
+        availableStorageBytes: 1024 * 1024,
+        acceptedSourceOperatingModels: ['self-hosted'],
+      },
+      trustedBundleKeys: new Map([['bundle_key_01', bundleKeys.publicKey]]),
+      trustedPayloadKeys: new Map([['payload_key_01', payloadKeys.publicKey]]),
+      trustedPayloadPolicies: new Map([
+        [
+          'events',
+          {
+            ...policies.get('events')!,
+            keyId: 'payload_key_01',
+          },
+        ],
+      ]),
+      trustedMediaKeys: new Map([['payload_key_01', payloadKeys.publicKey]]),
+      trustedMediaPolicies: new Map([
+        [
+          'media_scanner_01',
+          {
+            policySha256: '9'.repeat(64),
+            scannerId: 'media_scanner_01',
+            keyId: 'payload_key_01',
+            detectedMediaTypes: ['image/webp'],
+          },
+        ],
+      ]),
+      destinationTenantId: 'tenant_destination',
+      destinationOrganizationId: 'organization_destination',
+    });
+    const adapter = new TixkitPortableMigrationAdapter();
+    const context = {
+      tenantId: 'tenant_destination',
+      organizationId: 'organization_destination',
+    };
+    const discovery = await adapter.discover(configuration, context);
+    const extracted = await adapter.extract({ configuration, discovery, limit: 10, context });
+    const normalized = await adapter.normalize(extracted.rows[0]!, context);
+    expect(normalized.attributes.mediaAssets).toEqual([
+      expect.objectContaining({
+        portableId: 'media_1',
+        role: 'cover',
+        sha256: createHash('sha256').update(mediaBytes).digest('hex'),
+        bytes: mediaBytes.byteLength,
+      }),
+    ]);
+  });
   it('requires trusted, compatible, exact payloads and passes importer conformance', async () => {
     const value = fixture();
     const configuration = prepareTixkitPortableMigration({

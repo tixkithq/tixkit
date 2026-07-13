@@ -751,6 +751,23 @@ export interface EventMediaRenditionTable {
   created_at: Timestamp;
 }
 
+export interface MediaObjectCleanupJobTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  bucket: string;
+  object_key: string;
+  cleanup_identity_sha256: string;
+  checksum_sha256: string;
+  reason: string;
+  status: string;
+  attempts: number;
+  available_at: Timestamp;
+  last_error: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface EventReadinessAcknowledgementTable {
   id: string;
   tenant_id: string;
@@ -2021,6 +2038,7 @@ export interface DB {
   upload_artifacts: UploadArtifactTable;
   event_media_assets: EventMediaAssetTable;
   event_media_renditions: EventMediaRenditionTable;
+  media_object_cleanup_jobs: MediaObjectCleanupJobTable;
   widget_impressions: WidgetImpressionTable;
   waitlist_entries: WaitlistEntryTable;
   ticket_secrets: TicketSecretTable;

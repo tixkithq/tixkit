@@ -59,6 +59,19 @@ describe('portable logical export builder', () => {
       bundleSigning: { keyId: 'bundle_key_01', privateKey: bundleKeys.privateKey },
       payloadSigning: { keyId: 'payload_key_01', privateKey: payloadKeys.privateKey },
       payloadPolicies: new Map([['organizations', policy]]),
+      assets: [
+        {
+          portableId: 'event_media_asset_1',
+          path: 'assets/event_media_asset_1/page.webp',
+          bytes: Buffer.from('sanitized-webp-fixture'),
+          mediaType: 'image/webp',
+          role: 'event-cover:page',
+          width: 1600,
+          height: 900,
+          policySha256: '9'.repeat(64),
+          scannerId: 'media_scanner_01',
+        },
+      ],
     });
     expect(result.envelope.manifest.entityCounts).toEqual({ organizations: 1 });
     expect(result.envelope.manifest.files[0]).toMatchObject({
@@ -91,8 +104,18 @@ describe('portable logical export builder', () => {
             },
           ],
         ]),
-        new Map(),
-        new Map(),
+        new Map([['payload_key_01', payloadKeys.publicKey]]),
+        new Map([
+          [
+            'media_scanner_01',
+            {
+              policySha256: '9'.repeat(64),
+              scannerId: 'media_scanner_01',
+              keyId: 'payload_key_01',
+              detectedMediaTypes: ['image/webp'],
+            },
+          ],
+        ]),
       ).compatible,
     ).toBe(true);
     const transport = parsePortableJson(new TextDecoder().decode(result.transport)) as {
@@ -103,6 +126,17 @@ describe('portable logical export builder', () => {
         Buffer.from(result.payloads.get('data/organizations.jsonl')!),
       ),
     ).toBe(true);
+    expect(result.envelope.manifest.assets).toEqual([
+      expect.objectContaining({
+        portableId: 'event_media_asset_1',
+        path: 'assets/event_media_asset_1/page.webp',
+        mediaType: 'image/webp',
+        role: 'event-cover:page',
+      }),
+    ]);
+    expect(
+      Buffer.from(transport.payloads['assets/event_media_asset_1/page.webp']!, 'base64').toString(),
+    ).toBe('sanitized-webp-fixture');
   });
 
   it('rejects unsupported runtime sections and duplicate identities', () => {

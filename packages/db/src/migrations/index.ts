@@ -73,3 +73,4 @@ export { PortableImportRebindingsMigration } from './0072_portable_import_rebind
 export { PortableImportCommitAuthorizationsMigration } from './0073_portable_import_commit_authorizations.js';
 export { ImportEventImmutabilityMigration } from './0074_import_event_immutability.js';
 export { EventMediaAssetsMigration } from './0075_event_media_assets.js';
+export { MediaObjectCleanupJobsMigration } from './0076_media_object_cleanup_jobs.js';

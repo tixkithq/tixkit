@@ -1,5 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Database } from '@tixkit/db';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import sharp from 'sharp';
+import {
+  parsePortableJson,
+  portableManifestSha256,
+  type PortableBundleManifest,
+} from '@tixkit/portability';
+import { ImportRepository, type Database } from '@tixkit/db';
 import {
   canonicalMigrationContentFingerprint,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
@@ -72,6 +84,352 @@ function assertSuppressedSideEffects(
 
 type DependencyIds = ReadonlyMap<MigrationEntityType, string>;
 
+export interface MigrationMediaObjectStore {
+  bucket: string;
+  putVerified(input: {
+    objectKey: string;
+    bytes: Uint8Array;
+    sha256: string;
+    contentType: string;
+  }): Promise<void>;
+  delete(objectKey: string): Promise<void>;
+}
+
+export interface MigrationPortableAssetResolver {
+  resolve(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    portableId: string;
+    sha256: string;
+    bytes: number;
+    mediaType: string;
+  }): Promise<Uint8Array>;
+}
+
+async function s3BodyBytes(body: unknown, maximumBytes: number): Promise<Uint8Array> {
+  if (!body || !(Symbol.asyncIterator in Object(body)))
+    throw new Error('MIGRATION_MEDIA_OBJECT_BODY_INVALID');
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of body as AsyncIterable<Uint8Array>) {
+    const bytes = Uint8Array.from(chunk);
+    total += bytes.byteLength;
+    if (total > maximumBytes) throw new Error('MIGRATION_MEDIA_OBJECT_TOO_LARGE');
+    chunks.push(bytes);
+  }
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+export function createMigrationMediaObjectStore(
+  environment: NodeJS.ProcessEnv = process.env,
+  providedClient?: Pick<S3Client, 'send'>,
+): MigrationMediaObjectStore {
+  const bucket = environment.S3_BUCKET?.trim() ?? '';
+  const accessKeyId = environment.S3_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = environment.S3_SECRET_ACCESS_KEY?.trim();
+  if (Boolean(accessKeyId) !== Boolean(secretAccessKey))
+    throw new Error('MIGRATION_MEDIA_STORAGE_CREDENTIALS_INCOMPLETE');
+  const client =
+    providedClient ??
+    new S3Client({
+      region: environment.S3_REGION?.trim() ?? 'us-east-1',
+      ...(environment.S3_ENDPOINT?.trim()
+        ? {
+            endpoint: environment.S3_ENDPOINT.trim(),
+            forcePathStyle: environment.S3_FORCE_PATH_STYLE === 'true',
+          }
+        : {}),
+      ...(accessKeyId && secretAccessKey
+        ? {
+            credentials: {
+              accessKeyId,
+              secretAccessKey,
+            },
+          }
+        : {}),
+    });
+  return {
+    bucket,
+    async putVerified(input) {
+      if (!bucket) throw new Error('MIGRATION_MEDIA_BUCKET_REQUIRED');
+      try {
+        await client.send(
+          new PutObjectCommand({
+            Bucket: bucket,
+            Key: input.objectKey,
+            Body: input.bytes,
+            ContentType: input.contentType,
+            ContentLength: input.bytes.byteLength,
+            ChecksumSHA256: Buffer.from(input.sha256, 'hex').toString('base64'),
+            CacheControl: 'public, max-age=31536000, immutable',
+            IfNoneMatch: '*',
+            ServerSideEncryption: 'AES256',
+          }),
+        );
+      } catch (error) {
+        const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+        if (candidate.name !== 'PreconditionFailed' && candidate.$metadata?.httpStatusCode !== 412)
+          throw error;
+        const existing = await client.send(
+          new GetObjectCommand({ Bucket: bucket, Key: input.objectKey }),
+        );
+        const bytes = await s3BodyBytes(existing.Body, input.bytes.byteLength);
+        if (
+          bytes.byteLength !== input.bytes.byteLength ||
+          createHash('sha256').update(bytes).digest('hex') !== input.sha256
+        )
+          throw new Error('MIGRATION_MEDIA_OBJECT_CONFLICT', { cause: error });
+      }
+    },
+    async delete(objectKey) {
+      if (!bucket) throw new Error('MIGRATION_MEDIA_BUCKET_REQUIRED');
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
+    },
+  };
+}
+
+async function enqueueMediaObjectCleanup(
+  db: any,
+  input: {
+    tenantId: string;
+    organizationId: string;
+    bucket: string;
+    objectKey: string;
+    sha256: string;
+    reason: string;
+    availableAt?: Date;
+  },
+): Promise<string> {
+  const cleanupIdentitySha256 = createHash('sha256')
+    .update(`${input.bucket}:${input.objectKey}`)
+    .digest('hex');
+  const existing = await db
+    .selectFrom('media_object_cleanup_jobs')
+    .select('id')
+    .where('cleanup_identity_sha256', '=', cleanupIdentitySha256)
+    .executeTakeFirst();
+  if (existing) {
+    await db
+      .updateTable('media_object_cleanup_jobs')
+      .set({
+        reason: input.reason,
+        status: 'pending',
+        available_at: input.availableAt ?? new Date(),
+        last_error: null,
+        updated_at: new Date(),
+      })
+      .where('id', '=', existing.id)
+      .execute();
+    return existing.id;
+  }
+  const now = new Date();
+  await db
+    .insertInto('media_object_cleanup_jobs')
+    .values({
+      id: `moc_${cleanupIdentitySha256.slice(0, 26)}`,
+      tenant_id: input.tenantId,
+      organization_id: input.organizationId,
+      bucket: input.bucket,
+      object_key: input.objectKey,
+      cleanup_identity_sha256: cleanupIdentitySha256,
+      checksum_sha256: input.sha256,
+      reason: input.reason,
+      status: 'pending',
+      attempts: 0,
+      available_at: input.availableAt ?? now,
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
+  return `moc_${cleanupIdentitySha256.slice(0, 26)}`;
+}
+
+export async function processMigrationMediaCleanupJobs(
+  db: Database,
+  store: MigrationMediaObjectStore,
+  now = new Date(),
+  limit = 100,
+): Promise<{ completed: number; retained: number; failed: number }> {
+  const jobs = await db
+    .selectFrom('media_object_cleanup_jobs')
+    .selectAll()
+    .where((eb) =>
+      eb.or([
+        eb('status', '=', 'pending'),
+        eb.and([
+          eb('status', '=', 'processing'),
+          eb('updated_at', '<', new Date(now.getTime() - 15 * 60_000)),
+        ]),
+      ]),
+    )
+    .where('available_at', '<=', now)
+    .orderBy('created_at', 'asc')
+    .limit(limit)
+    .execute();
+  let completed = 0;
+  let retained = 0;
+  let failed = 0;
+  for (const job of jobs) {
+    const claimed = await db
+      .updateTable('media_object_cleanup_jobs')
+      .set({ status: 'processing', updated_at: now })
+      .where('id', '=', job.id)
+      .where('status', '=', job.status)
+      .where('updated_at', '=', job.updated_at)
+      .executeTakeFirst();
+    if (Number(claimed.numUpdatedRows) !== 1) continue;
+    const [uploadReference, renditionReference] = await Promise.all([
+      db
+        .selectFrom('upload_artifacts')
+        .select('id')
+        .where('bucket', '=', job.bucket)
+        .where('object_key', '=', job.object_key)
+        .executeTakeFirst(),
+      db
+        .selectFrom('event_media_renditions')
+        .select('id')
+        .where('bucket', '=', job.bucket)
+        .where('object_key', '=', job.object_key)
+        .executeTakeFirst(),
+    ]);
+    if (uploadReference || renditionReference) {
+      await db
+        .updateTable('media_object_cleanup_jobs')
+        .set({ status: 'retained', updated_at: now })
+        .where('id', '=', job.id)
+        .where('status', '=', 'processing')
+        .execute();
+      retained += 1;
+      continue;
+    }
+    try {
+      if (store.bucket !== job.bucket) throw new Error('MIGRATION_MEDIA_CLEANUP_BUCKET_MISMATCH');
+      await store.delete(job.object_key);
+      await db
+        .updateTable('media_object_cleanup_jobs')
+        .set({ status: 'completed', attempts: job.attempts + 1, last_error: null, updated_at: now })
+        .where('id', '=', job.id)
+        .where('status', '=', 'processing')
+        .execute();
+      completed += 1;
+    } catch (error) {
+      await db
+        .updateTable('media_object_cleanup_jobs')
+        .set({
+          status: 'pending',
+          attempts: job.attempts + 1,
+          last_error: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+          available_at: new Date(now.getTime() + Math.min(60, 2 ** job.attempts) * 60_000),
+          updated_at: now,
+        })
+        .where('id', '=', job.id)
+        .where('status', '=', 'processing')
+        .execute();
+      failed += 1;
+    }
+  }
+  return { completed, retained, failed };
+}
+
+export function createMigrationPortableAssetResolver(
+  db: Database,
+  environment: NodeJS.ProcessEnv = process.env,
+  providedClient?: Pick<S3Client, 'send'>,
+): MigrationPortableAssetResolver {
+  const client = providedClient ?? createMigrationMediaObjectStoreClient(environment);
+  return {
+    async resolve(input) {
+      const repository = new ImportRepository(db);
+      const files = await repository.listFiles(input.tenantId, input.organizationId, input.jobId);
+      if (files.length !== 1 || files[0]!.status !== 'ready')
+        throw new Error('MIGRATION_PORTABLE_ASSET_BUNDLE_NOT_FOUND');
+      const artifact = await db
+        .selectFrom('upload_artifacts')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('purpose', '=', 'migration_import')
+        .where('status', '=', 'uploaded')
+        .where('scan_status', '=', 'clean')
+        .where('object_key', '=', files[0]!.object_key)
+        .executeTakeFirst();
+      if (
+        !artifact?.checksum_sha256 ||
+        artifact.checksum_sha256 !== files[0]!.sha256 ||
+        Number(artifact.size_bytes) !== Number(files[0]!.byte_size)
+      )
+        throw new Error('MIGRATION_PORTABLE_ASSET_BUNDLE_EVIDENCE_INVALID');
+      const object = await client.send(
+        new GetObjectCommand({ Bucket: artifact.bucket, Key: artifact.object_key }),
+      );
+      const transport = await s3BodyBytes(object.Body, artifact.size_bytes);
+      if (
+        transport.byteLength !== artifact.size_bytes ||
+        createHash('sha256').update(transport).digest('hex') !== artifact.checksum_sha256
+      )
+        throw new Error('MIGRATION_PORTABLE_ASSET_BUNDLE_INTEGRITY_FAILED');
+      const parsed = parsePortableJson(new TextDecoder('utf-8', { fatal: true }).decode(transport));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        throw new Error('MIGRATION_PORTABLE_ASSET_BUNDLE_INVALID');
+      const bundle = parsed as {
+        envelope?: { manifest?: PortableBundleManifest };
+        payloads?: Record<string, unknown>;
+      };
+      const manifest = bundle.envelope?.manifest;
+      const preflight = await repository.findPortablePreflight(
+        input.tenantId,
+        input.organizationId,
+        input.jobId,
+      );
+      if (!manifest || !preflight || portableManifestSha256(manifest) !== preflight.manifest_sha256)
+        throw new Error('MIGRATION_PORTABLE_ASSET_MANIFEST_EVIDENCE_INVALID');
+      const asset = manifest.assets.find((candidate) => candidate.portableId === input.portableId);
+      const encoded = asset && bundle.payloads?.[asset.path];
+      if (
+        !asset ||
+        asset.sha256 !== input.sha256 ||
+        asset.bytes !== input.bytes ||
+        asset.mediaType !== input.mediaType ||
+        typeof encoded !== 'string'
+      )
+        throw new Error('MIGRATION_PORTABLE_ASSET_REFERENCE_INVALID');
+      const bytes = Buffer.from(encoded, 'base64');
+      if (
+        bytes.toString('base64') !== encoded ||
+        bytes.byteLength !== input.bytes ||
+        createHash('sha256').update(bytes).digest('hex') !== input.sha256
+      )
+        throw new Error('MIGRATION_PORTABLE_ASSET_INTEGRITY_FAILED');
+      return bytes;
+    },
+  };
+}
+
+function createMigrationMediaObjectStoreClient(environment: NodeJS.ProcessEnv): S3Client {
+  const accessKeyId = environment.S3_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = environment.S3_SECRET_ACCESS_KEY?.trim();
+  if (Boolean(accessKeyId) !== Boolean(secretAccessKey))
+    throw new Error('MIGRATION_MEDIA_STORAGE_CREDENTIALS_INCOMPLETE');
+  return new S3Client({
+    region: environment.S3_REGION?.trim() ?? 'us-east-1',
+    ...(environment.S3_ENDPOINT?.trim()
+      ? {
+          endpoint: environment.S3_ENDPOINT.trim(),
+          forcePathStyle: environment.S3_FORCE_PATH_STYLE === 'true',
+        }
+      : {}),
+    ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
+  });
+}
+
 const CANONICAL_TABLE: Record<MigrationEntityType, string> = {
   organization: 'organizations',
   brand: 'brands',
@@ -104,9 +462,20 @@ async function canonicalHash(
   if (lock) query = query.forUpdate();
   const row = await query.executeTakeFirst();
   if (!row) return undefined;
+  const media =
+    type === 'event'
+      ? await tx
+          .selectFrom('event_media_assets')
+          .selectAll()
+          .where('event_id', '=', id)
+          .orderBy('role', 'asc')
+          .execute()
+      : [];
   return createHash('sha256')
     .update(
-      JSON.stringify(row, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)),
+      JSON.stringify(type === 'event' ? { row, media } : row, (_key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
     )
     .digest('hex');
 }
@@ -164,6 +533,278 @@ function dependency(ids: DependencyIds, type: MigrationEntityType): string {
   return id;
 }
 
+async function writePortableEventMedia(
+  tx: any,
+  input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    id: string;
+    entity: NormalizedMigrationEntity;
+    now: Date;
+    mediaStore: MigrationMediaObjectStore;
+    assetResolver: MigrationPortableAssetResolver;
+    writtenObjects: Array<{ bucket: string; objectKey: string; sha256: string }>;
+    cleanupDb: Database;
+    stagedCleanupIds: string[];
+    sourceSystem: string;
+  },
+  brandId: string,
+): Promise<void> {
+  const value = input.entity.attributes.mediaAssets;
+  if (value === undefined) return;
+  if (input.sourceSystem !== 'tixkit-portable')
+    throw new Error('MIGRATION_EVENT_MEDIA_SOURCE_NOT_TRUSTED');
+  if (!Array.isArray(value) || value.length > 3) throw new Error('MIGRATION_EVENT_MEDIA_INVALID');
+  const existingAssets = await tx
+    .selectFrom('event_media_assets')
+    .select(['id', 'upload_artifact_id'])
+    .where('tenant_id', '=', input.tenantId)
+    .where('organization_id', '=', input.organizationId)
+    .where('event_id', '=', input.id)
+    .execute();
+  if (existingAssets.length > 0) {
+    const existingUploads = await tx
+      .selectFrom('upload_artifacts')
+      .select(['bucket', 'object_key', 'checksum_sha256'])
+      .where(
+        'id',
+        'in',
+        existingAssets.map((asset: { upload_artifact_id: string }) => asset.upload_artifact_id),
+      )
+      .execute();
+    for (const upload of existingUploads) {
+      if (upload.checksum_sha256)
+        await enqueueMediaObjectCleanup(tx, {
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          bucket: upload.bucket,
+          objectKey: upload.object_key,
+          sha256: upload.checksum_sha256,
+          reason: 'portable-media-replaced',
+        });
+    }
+    await tx
+      .deleteFrom('event_media_assets')
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('event_id', '=', input.id)
+      .execute();
+    await tx
+      .deleteFrom('upload_artifacts')
+      .where(
+        'id',
+        'in',
+        existingAssets.map((asset: { upload_artifact_id: string }) => asset.upload_artifact_id),
+      )
+      .execute();
+  }
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
+      throw new Error('MIGRATION_EVENT_MEDIA_INVALID');
+    const media = candidate as Record<string, unknown>;
+    const role = String(media.role);
+    const portableId = String(media.portableId);
+    const sha256 = String(media.sha256);
+    const mediaType = String(media.mediaType);
+    const altText = String(media.altText);
+    const focalPoint = media.focalPoint as { x?: unknown; y?: unknown } | undefined;
+    const width = Number(media.width);
+    const height = Number(media.height);
+    const declaredBytes = Number(media.bytes);
+    if (
+      !['poster', 'cover', 'social'].includes(role) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/u.test(portableId) ||
+      !/^[a-f0-9]{64}$/u.test(sha256) ||
+      mediaType !== 'image/webp' ||
+      altText.length < 1 ||
+      altText.length > 500 ||
+      !Number.isSafeInteger(width) ||
+      width < 1 ||
+      !Number.isSafeInteger(height) ||
+      height < 1 ||
+      !Number.isSafeInteger(declaredBytes) ||
+      declaredBytes < 1 ||
+      !focalPoint ||
+      typeof focalPoint.x !== 'number' ||
+      focalPoint.x < 0 ||
+      focalPoint.x > 1 ||
+      typeof focalPoint.y !== 'number' ||
+      focalPoint.y < 0 ||
+      focalPoint.y > 1
+    )
+      throw new Error('MIGRATION_EVENT_MEDIA_INVALID');
+    const bytes = await input.assetResolver.resolve({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      portableId,
+      sha256,
+      bytes: declaredBytes,
+      mediaType,
+    });
+    const decoded = await sharp(bytes, {
+      failOn: 'warning',
+      limitInputPixels: 40_000_000,
+      sequentialRead: true,
+    }).metadata();
+    if (decoded.format !== 'webp' || decoded.width !== width || decoded.height !== height)
+      throw new Error('MIGRATION_EVENT_MEDIA_DECODED_EVIDENCE_MISMATCH');
+    const identity = createHash('sha256')
+      .update(`${input.tenantId}:${portableId}`)
+      .digest('hex')
+      .slice(0, 26);
+    const assetId = `ema_${identity}`;
+    const uploadId = `upl_${identity}`;
+    const renditionId = `emr_${identity}`;
+    const objectKey = `event-media/${input.tenantId}/${input.id}/${assetId}/${sha256}.webp`;
+    input.stagedCleanupIds.push(
+      await enqueueMediaObjectCleanup(input.cleanupDb, {
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        bucket: input.mediaStore.bucket,
+        objectKey,
+        sha256,
+        reason: 'portable-media-commit-staged',
+        availableAt: new Date(Date.now() + 15 * 60_000),
+      }),
+    );
+    await input.mediaStore.putVerified({
+      objectKey,
+      bytes,
+      sha256,
+      contentType: 'image/webp',
+    });
+    input.writtenObjects.push({
+      bucket: input.mediaStore.bucket,
+      objectKey,
+      sha256,
+    });
+    await tx
+      .insertInto('upload_artifacts')
+      .values({
+        id: uploadId,
+        tenant_id: input.tenantId,
+        organization_id: input.organizationId,
+        brand_id: brandId,
+        event_id: input.id,
+        created_by_user_id: null,
+        purpose: `event_${role}`,
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: 'Verified signed portable media asset',
+        bucket: input.mediaStore.bucket,
+        object_key: objectKey,
+        file_name: `${role}.webp`,
+        content_type: 'image/webp',
+        size_bytes: bytes.byteLength,
+        checksum_sha256: sha256,
+        client_token_hash: null,
+        metadata: JSON.stringify({ image: { width, height, format: 'webp' }, portableId }),
+        consumed_by_checkout_session_id: null,
+        consumed_at: null,
+        completion_owner_token: null,
+        completion_started_at: null,
+        expires_at: new Date('9999-12-31T23:59:59.000Z'),
+        created_at: input.now,
+        updated_at: input.now,
+      })
+      .execute();
+    await tx
+      .insertInto('event_media_assets')
+      .values({
+        id: assetId,
+        tenant_id: input.tenantId,
+        organization_id: input.organizationId,
+        brand_id: brandId,
+        event_id: input.id,
+        upload_artifact_id: uploadId,
+        role,
+        width,
+        height,
+        format: 'webp',
+        checksum_sha256: sha256,
+        size_bytes: bytes.byteLength,
+        focal_x: String(focalPoint.x),
+        focal_y: String(focalPoint.y),
+        alt_text: altText,
+        created_by: `migration:${input.jobId}`,
+        created_at: input.now,
+        updated_at: input.now,
+      })
+      .execute();
+    await tx
+      .insertInto('event_media_renditions')
+      .values({
+        id: renditionId,
+        asset_id: assetId,
+        variant: 'page',
+        width,
+        height,
+        format: 'webp',
+        content_type: 'image/webp',
+        bucket: input.mediaStore.bucket,
+        object_key: objectKey,
+        checksum_sha256: sha256,
+        size_bytes: bytes.byteLength,
+        created_at: input.now,
+      })
+      .execute();
+  }
+}
+
+async function verifyPortableEventMediaStorage(input: {
+  tenantId: string;
+  organizationId: string;
+  eventId: string;
+  entity: NormalizedMigrationEntity;
+  sourceSystem: string;
+  mediaStore: MigrationMediaObjectStore;
+  assetResolver: MigrationPortableAssetResolver;
+  jobId: string;
+}): Promise<void> {
+  const value = input.entity.attributes.mediaAssets;
+  if (value === undefined) return;
+  if (input.sourceSystem !== 'tixkit-portable' || !Array.isArray(value) || value.length > 3)
+    throw new Error('MIGRATION_EVENT_MEDIA_SOURCE_NOT_TRUSTED');
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
+      throw new Error('MIGRATION_EVENT_MEDIA_INVALID');
+    const media = candidate as Record<string, unknown>;
+    const portableId = String(media.portableId);
+    const sha256 = String(media.sha256);
+    const mediaType = String(media.mediaType);
+    const declaredBytes = Number(media.bytes);
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/u.test(portableId) ||
+      !/^[a-f0-9]{64}$/u.test(sha256) ||
+      !Number.isSafeInteger(declaredBytes) ||
+      declaredBytes < 1
+    )
+      throw new Error('MIGRATION_EVENT_MEDIA_INVALID');
+    if (mediaType !== 'image/webp') throw new Error('MIGRATION_EVENT_MEDIA_INVALID');
+    const bytes = await input.assetResolver.resolve({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      portableId,
+      sha256,
+      bytes: declaredBytes,
+      mediaType,
+    });
+    const identity = createHash('sha256')
+      .update(`${input.tenantId}:${portableId}`)
+      .digest('hex')
+      .slice(0, 26);
+    await input.mediaStore.putVerified({
+      objectKey: `event-media/${input.tenantId}/${input.eventId}/ema_${identity}/${sha256}.webp`,
+      bytes,
+      sha256,
+      contentType: 'image/webp',
+    });
+  }
+}
+
 // Kysely cannot express a switch whose branches target unrelated tables as one generic type.
 // Every branch below remains a concrete, parameterized query inside the caller's transaction.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,6 +820,12 @@ async function writeCanonicalEntity(
     existing: boolean;
     provenance: string;
     now: Date;
+    mediaStore: MigrationMediaObjectStore;
+    assetResolver: MigrationPortableAssetResolver;
+    writtenObjects: Array<{ bucket: string; objectKey: string; sha256: string }>;
+    cleanupDb: Database;
+    stagedCleanupIds: string[];
+    sourceSystem: string;
   },
 ): Promise<void> {
   const { entity, dependencies: deps, id, now } = input;
@@ -289,6 +936,7 @@ async function writeCanonicalEntity(
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });
+      await writePortableEventMedia(tx, input, dependency(deps, 'brand'));
       return;
     case 'occurrence':
       await updateOrInsert('event_occurrences', {
@@ -622,6 +1270,51 @@ async function deleteCanonicalEntity(
     'historical-refund': 'historical_financial_snapshots',
     'check-in': 'historical_check_ins',
   };
+  if (input.type === 'event') {
+    const media = await tx
+      .selectFrom('event_media_assets')
+      .select('upload_artifact_id')
+      .where('tenant_id', '=', input.tenantId)
+      .where('event_id', '=', input.id)
+      .execute();
+    const mediaObjects =
+      media.length > 0
+        ? await tx
+            .selectFrom('upload_artifacts')
+            .select(['bucket', 'object_key', 'checksum_sha256'])
+            .where(
+              'id',
+              'in',
+              media.map((asset: { upload_artifact_id: string }) => asset.upload_artifact_id),
+            )
+            .execute()
+        : [];
+    for (const object of mediaObjects) {
+      if (object.checksum_sha256)
+        await enqueueMediaObjectCleanup(tx, {
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          bucket: object.bucket,
+          objectKey: object.object_key,
+          sha256: object.checksum_sha256,
+          reason: 'portable-media-rollback',
+        });
+    }
+    await tx
+      .deleteFrom('event_media_assets')
+      .where('tenant_id', '=', input.tenantId)
+      .where('event_id', '=', input.id)
+      .execute();
+    if (media.length > 0)
+      await tx
+        .deleteFrom('upload_artifacts')
+        .where(
+          'id',
+          'in',
+          media.map((asset: { upload_artifact_id: string }) => asset.upload_artifact_id),
+        )
+        .execute();
+  }
   if (input.type === 'ticket') {
     await tx
       .updateTable('attendees')
@@ -749,6 +1442,8 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
   constructor(
     private readonly db: Database,
     private readonly entityType: MigrationEntityType,
+    private readonly mediaStore: MigrationMediaObjectStore,
+    private readonly assetResolver: MigrationPortableAssetResolver,
   ) {}
 
   async assessUntouched(input: Parameters<MigrationDomainCommitter['assessUntouched']>[0]) {
@@ -807,206 +1502,250 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
     assertRequiredAttributes(input.entity);
     assertSuppressedSideEffects(input);
 
-    return this.db.transaction().execute(async (transaction) => {
-      const job = await transaction
-        .selectFrom('import_jobs')
-        .select(['source_system'])
-        .where('tenant_id', '=', input.tenantId)
-        .where('organization_id', '=', input.organizationId)
-        .where('id', '=', input.jobId)
-        .executeTakeFirst();
-      if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
-
-      const dependencies = new Map<MigrationEntityType, string>();
-      for (const dependency of input.entity.dependencies ?? []) {
-        const reference = await transaction
-          .selectFrom('external_references')
-          .select(['tixkit_id'])
-          .where('tenant_id', '=', input.tenantId)
-          .where('organization_id', '=', input.organizationId)
-          .where('source_system', '=', job.source_system)
-          .where('entity_type', '=', dependency.entityType)
-          .where('external_id', '=', dependency.externalId)
-          .executeTakeFirst();
-        if (!reference) {
-          throw new Error(
-            `MIGRATION_DEPENDENCY_UNRESOLVED:${dependency.entityType}:${dependency.externalId}`,
-          );
-        }
-        dependencies.set(dependency.entityType, reference.tixkit_id);
-      }
-
-      const existingReference = await transaction
-        .selectFrom('external_references')
-        .select(['tixkit_id'])
-        .where('tenant_id', '=', input.tenantId)
-        .where('organization_id', '=', input.organizationId)
-        .where('source_system', '=', job.source_system)
-        .where('entity_type', '=', this.entityType)
-        .where('external_id', '=', input.entity.externalId)
-        .executeTakeFirst();
-      let existing = existingReference
-        ? await transaction
-            .selectFrom('imported_domain_entities')
-            .selectAll()
+    const writtenObjects: Array<{ bucket: string; objectKey: string; sha256: string }> = [];
+    const stagedCleanupIds: string[] = [];
+    try {
+      const outcome: MigrationCommitOutcome = await this.db
+        .transaction()
+        .execute(async (transaction) => {
+          const job = await transaction
+            .selectFrom('import_jobs')
+            .select(['source_system'])
             .where('tenant_id', '=', input.tenantId)
             .where('organization_id', '=', input.organizationId)
-            .where('id', '=', existingReference.tixkit_id)
-            .executeTakeFirst()
-        : await transaction
-            .selectFrom('imported_domain_entities')
-            .selectAll()
+            .where('id', '=', input.jobId)
+            .executeTakeFirst();
+          if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
+
+          const dependencies = new Map<MigrationEntityType, string>();
+          for (const dependency of input.entity.dependencies ?? []) {
+            const reference = await transaction
+              .selectFrom('external_references')
+              .select(['tixkit_id'])
+              .where('tenant_id', '=', input.tenantId)
+              .where('organization_id', '=', input.organizationId)
+              .where('source_system', '=', job.source_system)
+              .where('entity_type', '=', dependency.entityType)
+              .where('external_id', '=', dependency.externalId)
+              .executeTakeFirst();
+            if (!reference) {
+              throw new Error(
+                `MIGRATION_DEPENDENCY_UNRESOLVED:${dependency.entityType}:${dependency.externalId}`,
+              );
+            }
+            dependencies.set(dependency.entityType, reference.tixkit_id);
+          }
+
+          const existingReference = await transaction
+            .selectFrom('external_references')
+            .select(['tixkit_id'])
             .where('tenant_id', '=', input.tenantId)
             .where('organization_id', '=', input.organizationId)
             .where('source_system', '=', job.source_system)
             .where('entity_type', '=', this.entityType)
-            .where('source_external_id', '=', input.entity.externalId)
+            .where('external_id', '=', input.entity.externalId)
             .executeTakeFirst();
-      if (!existing && this.entityType === 'organization') {
-        existing = await transaction
-          .selectFrom('imported_domain_entities')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('organization_id', '=', input.organizationId)
-          .where('id', '=', input.organizationId)
-          .where('entity_type', '=', 'organization')
-          .executeTakeFirst();
-      }
-      const attributes = JSON.stringify(input.entity.attributes);
-      const snapshot = input.entity.financialSnapshot
-        ? JSON.stringify(input.entity.financialSnapshot)
-        : null;
-      const provenance = JSON.stringify({
-        sourceSystem: job.source_system,
-        sourceExternalId: input.entity.externalId,
-        sourcePosition: input.entity.sourcePosition,
-        importJobId: input.jobId,
-      });
-      const now = new Date();
-      const id =
-        existing?.id ??
-        (this.entityType === 'organization'
-          ? input.organizationId
-          : randomUUID().replaceAll('-', ''));
-      const unchanged =
-        Boolean(existing) &&
-        canonicalMigrationContentFingerprint({
-          attributes: JSON.parse(existing!.attributes) as Record<string, unknown>,
-          financialSnapshot: existing!.financial_snapshot
-            ? (JSON.parse(
-                existing!.financial_snapshot,
-              ) as NormalizedMigrationEntity['financialSnapshot'])
-            : undefined,
-        }) === canonicalMigrationContentFingerprint(input.entity);
-      const canonicalExisting = Boolean(existing) || this.entityType === 'organization';
+          let existing = existingReference
+            ? await transaction
+                .selectFrom('imported_domain_entities')
+                .selectAll()
+                .where('tenant_id', '=', input.tenantId)
+                .where('organization_id', '=', input.organizationId)
+                .where('id', '=', existingReference.tixkit_id)
+                .executeTakeFirst()
+            : await transaction
+                .selectFrom('imported_domain_entities')
+                .selectAll()
+                .where('tenant_id', '=', input.tenantId)
+                .where('organization_id', '=', input.organizationId)
+                .where('source_system', '=', job.source_system)
+                .where('entity_type', '=', this.entityType)
+                .where('source_external_id', '=', input.entity.externalId)
+                .executeTakeFirst();
+          if (!existing && this.entityType === 'organization') {
+            existing = await transaction
+              .selectFrom('imported_domain_entities')
+              .selectAll()
+              .where('tenant_id', '=', input.tenantId)
+              .where('organization_id', '=', input.organizationId)
+              .where('id', '=', input.organizationId)
+              .where('entity_type', '=', 'organization')
+              .executeTakeFirst();
+          }
+          const attributes = JSON.stringify(input.entity.attributes);
+          const snapshot = input.entity.financialSnapshot
+            ? JSON.stringify(input.entity.financialSnapshot)
+            : null;
+          const provenance = JSON.stringify({
+            sourceSystem: job.source_system,
+            sourceExternalId: input.entity.externalId,
+            sourcePosition: input.entity.sourcePosition,
+            importJobId: input.jobId,
+          });
+          const now = new Date();
+          const id =
+            existing?.id ??
+            (this.entityType === 'organization'
+              ? input.organizationId
+              : randomUUID().replaceAll('-', ''));
+          const unchanged =
+            Boolean(existing) &&
+            canonicalMigrationContentFingerprint({
+              attributes: JSON.parse(existing!.attributes) as Record<string, unknown>,
+              financialSnapshot: existing!.financial_snapshot
+                ? (JSON.parse(
+                    existing!.financial_snapshot,
+                  ) as NormalizedMigrationEntity['financialSnapshot'])
+                : undefined,
+            }) === canonicalMigrationContentFingerprint(input.entity);
+          const canonicalExisting = Boolean(existing) || this.entityType === 'organization';
 
-      if (existing && unchanged) {
-        await transaction
-          .updateTable('imported_domain_entities')
-          .set({ last_seen_import_job_id: input.jobId })
-          .where('tenant_id', '=', input.tenantId)
-          .where('organization_id', '=', input.organizationId)
-          .where('id', '=', id)
-          .execute();
-        return { disposition: 'skipped', tixkitId: id };
-      }
-      if (
-        existing &&
-        (this.entityType === 'historical-payment' || this.entityType === 'historical-refund')
-      ) {
-        return { disposition: 'conflict', tixkitId: id };
-      }
+          if (existing && unchanged) {
+            if (this.entityType === 'event')
+              await verifyPortableEventMediaStorage({
+                tenantId: input.tenantId,
+                organizationId: input.organizationId,
+                eventId: id,
+                jobId: input.jobId,
+                entity: input.entity,
+                sourceSystem: job.source_system,
+                mediaStore: this.mediaStore,
+                assetResolver: this.assetResolver,
+              });
+            await transaction
+              .updateTable('imported_domain_entities')
+              .set({ last_seen_import_job_id: input.jobId })
+              .where('tenant_id', '=', input.tenantId)
+              .where('organization_id', '=', input.organizationId)
+              .where('id', '=', id)
+              .execute();
+            return { disposition: 'skipped', tixkitId: id };
+          }
+          if (
+            existing &&
+            (this.entityType === 'historical-payment' || this.entityType === 'historical-refund')
+          ) {
+            return { disposition: 'conflict', tixkitId: id };
+          }
 
-      await writeCanonicalEntity(transaction, {
-        tenantId: input.tenantId,
-        organizationId: input.organizationId,
-        jobId: input.jobId,
-        id,
-        entity: input.entity,
-        dependencies,
-        existing: canonicalExisting,
-        provenance,
-        now,
-      });
-      const persistedCanonicalHash = await canonicalHash(transaction, this.entityType, id);
-      if (!persistedCanonicalHash)
-        throw new Error(`MIGRATION_CANONICAL_ENTITY_MISSING:${this.entityType}:${id}`);
-
-      if (existing) {
-        await transaction
-          .updateTable('imported_domain_entities')
-          .set({
-            attributes,
-            financial_snapshot: snapshot,
-            source_provenance: provenance,
-            canonical_hash: persistedCanonicalHash,
-            last_seen_import_job_id: input.jobId,
-            updated_at: now,
-          })
-          .where('tenant_id', '=', input.tenantId)
-          .where('organization_id', '=', input.organizationId)
-          .where('id', '=', id)
-          .execute();
-        await transaction
-          .deleteFrom('imported_entity_dependencies')
-          .where('tenant_id', '=', input.tenantId)
-          .where('organization_id', '=', input.organizationId)
-          .where('entity_id', '=', id)
-          .execute();
-      } else {
-        await transaction
-          .insertInto('imported_domain_entities')
-          .values({
+          await writeCanonicalEntity(transaction, {
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
             id,
-            tenant_id: input.tenantId,
-            organization_id: input.organizationId,
-            created_by_import_job_id: input.jobId,
-            last_seen_import_job_id: input.jobId,
-            source_system: job.source_system,
-            entity_type: this.entityType,
-            source_external_id: input.entity.externalId,
-            attributes,
-            financial_snapshot: snapshot,
-            source_provenance: provenance,
-            canonical_hash: persistedCanonicalHash,
-            side_effects_suppressed: HISTORICAL_TYPES.has(this.entityType),
-            created_at: now,
-            updated_at: now,
-          })
-          .execute();
-      }
-      if (dependencies.size > 0) {
-        const dependencyIds = [...new Set(dependencies.values())];
-        const importedDependencies = await transaction
-          .selectFrom('imported_domain_entities')
-          .select('id')
-          .where('tenant_id', '=', input.tenantId)
-          .where('organization_id', '=', input.organizationId)
-          .where('id', 'in', dependencyIds)
-          .execute();
-        if (importedDependencies.length > 0)
-          await transaction
-            .insertInto('imported_entity_dependencies')
-            .values(
-              importedDependencies.map(({ id: dependsOnId }) => ({
+            entity: input.entity,
+            dependencies,
+            existing: canonicalExisting,
+            provenance,
+            now,
+            mediaStore: this.mediaStore,
+            assetResolver: this.assetResolver,
+            writtenObjects,
+            cleanupDb: this.db,
+            stagedCleanupIds,
+            sourceSystem: job.source_system,
+          });
+          const persistedCanonicalHash = await canonicalHash(transaction, this.entityType, id);
+          if (!persistedCanonicalHash)
+            throw new Error(`MIGRATION_CANONICAL_ENTITY_MISSING:${this.entityType}:${id}`);
+
+          if (existing) {
+            await transaction
+              .updateTable('imported_domain_entities')
+              .set({
+                attributes,
+                financial_snapshot: snapshot,
+                source_provenance: provenance,
+                canonical_hash: persistedCanonicalHash,
+                last_seen_import_job_id: input.jobId,
+                updated_at: now,
+              })
+              .where('tenant_id', '=', input.tenantId)
+              .where('organization_id', '=', input.organizationId)
+              .where('id', '=', id)
+              .execute();
+            await transaction
+              .deleteFrom('imported_entity_dependencies')
+              .where('tenant_id', '=', input.tenantId)
+              .where('organization_id', '=', input.organizationId)
+              .where('entity_id', '=', id)
+              .execute();
+          } else {
+            await transaction
+              .insertInto('imported_domain_entities')
+              .values({
+                id,
                 tenant_id: input.tenantId,
                 organization_id: input.organizationId,
-                entity_id: id,
-                depends_on_entity_id: dependsOnId,
+                created_by_import_job_id: input.jobId,
+                last_seen_import_job_id: input.jobId,
+                source_system: job.source_system,
+                entity_type: this.entityType,
+                source_external_id: input.entity.externalId,
+                attributes,
+                financial_snapshot: snapshot,
+                source_provenance: provenance,
+                canonical_hash: persistedCanonicalHash,
+                side_effects_suppressed: HISTORICAL_TYPES.has(this.entityType),
                 created_at: now,
-              })),
-            )
-            .execute();
+                updated_at: now,
+              })
+              .execute();
+          }
+          if (dependencies.size > 0) {
+            const dependencyIds = [...new Set(dependencies.values())];
+            const importedDependencies = await transaction
+              .selectFrom('imported_domain_entities')
+              .select('id')
+              .where('tenant_id', '=', input.tenantId)
+              .where('organization_id', '=', input.organizationId)
+              .where('id', 'in', dependencyIds)
+              .execute();
+            if (importedDependencies.length > 0)
+              await transaction
+                .insertInto('imported_entity_dependencies')
+                .values(
+                  importedDependencies.map(({ id: dependsOnId }) => ({
+                    tenant_id: input.tenantId,
+                    organization_id: input.organizationId,
+                    entity_id: id,
+                    depends_on_entity_id: dependsOnId,
+                    created_at: now,
+                  })),
+                )
+                .execute();
+          }
+          return {
+            disposition: canonicalExisting
+              ? existing && unchanged
+                ? 'skipped'
+                : 'updated'
+              : 'created',
+            tixkitId: id,
+          };
+        });
+      if (stagedCleanupIds.length > 0)
+        await this.db
+          .updateTable('media_object_cleanup_jobs')
+          .set({ status: 'retained', updated_at: new Date() })
+          .where('id', 'in', stagedCleanupIds)
+          .where('status', '=', 'pending')
+          .execute();
+      return outcome;
+    } catch (error) {
+      for (const object of writtenObjects) {
+        const cleanupId = await enqueueMediaObjectCleanup(this.db, {
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          bucket: object.bucket,
+          objectKey: object.objectKey,
+          sha256: object.sha256,
+          reason: 'portable-media-commit-failed',
+        });
+        if (!stagedCleanupIds.includes(cleanupId)) stagedCleanupIds.push(cleanupId);
       }
-      return {
-        disposition: canonicalExisting
-          ? existing && unchanged
-            ? 'skipped'
-            : 'updated'
-          : 'created',
-        tixkitId: id,
-      };
-    });
+      throw error;
+    }
   }
 
   async deleteUntouched(
@@ -1098,11 +1837,15 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
   }
 }
 
-export function createProductionMigrationCommitters(db: Database): MigrationCommitterRegistry {
+export function createProductionMigrationCommitters(
+  db: Database,
+  mediaStore: MigrationMediaObjectStore = createMigrationMediaObjectStore(),
+  assetResolver: MigrationPortableAssetResolver = createMigrationPortableAssetResolver(db),
+): MigrationCommitterRegistry {
   return new Map(
     MIGRATION_ENTITY_DEPENDENCY_ORDER.map((type) => [
       type,
-      new ProductionMigrationCommitter(db, type),
+      new ProductionMigrationCommitter(db, type, mediaStore, assetResolver),
     ]),
   );
 }

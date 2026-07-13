@@ -4,6 +4,10 @@ import type { TemplateKey } from '@tixkit/domain';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 import { getActivityDb } from './activity-clients.js';
+import {
+  createMigrationMediaObjectStore,
+  processMigrationMediaCleanupJobs,
+} from './migration-domain-committers.js';
 
 const CHECKOUT_BASE_URL =
   process.env.CHECKOUT_URL ?? process.env.NEXT_PUBLIC_CHECKOUT_URL ?? 'https://checkout.tixkit.com';
@@ -74,6 +78,22 @@ export async function expireStaleHoldsActivity(): Promise<
     return errResult(
       'EXPIRE_HOLDS_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
+      true,
+    );
+  }
+}
+
+export async function cleanupMigrationMediaObjectsActivity(): Promise<
+  WorkflowActivityResult<{ completed: number; retained: number; failed: number }>
+> {
+  try {
+    return okResult(
+      await processMigrationMediaCleanupJobs(getActivityDb(), createMigrationMediaObjectStore()),
+    );
+  } catch (error) {
+    return errResult(
+      'MIGRATION_MEDIA_CLEANUP_FAILED',
+      error instanceof Error ? error.message : 'Unknown error',
       true,
     );
   }

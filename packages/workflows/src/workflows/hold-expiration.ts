@@ -6,6 +6,7 @@ const {
   expireStaleSessionsActivity,
   processWaitlistOffersActivity,
   enforcePrivacyRetentionActivity,
+  cleanupMigrationMediaObjectsActivity,
 } = proxyActivities<{
   expireStaleHoldsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
   expireStaleSessionsActivity(): Promise<WorkflowActivityResult<{ expiredCount: number }>>;
@@ -18,6 +19,9 @@ const {
   >;
   enforcePrivacyRetentionActivity(): Promise<
     WorkflowActivityResult<{ inspectedCount: number; repairedCount: number; skippedCount: number }>
+  >;
+  cleanupMigrationMediaObjectsActivity(): Promise<
+    WorkflowActivityResult<{ completed: number; retained: number; failed: number }>
   >;
 }>({
   startToCloseTimeout: '60 seconds',
@@ -76,6 +80,11 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
       // eslint-disable-next-line no-await-in-loop -- privacy retention repair runs once per deterministic maintenance tick.
       const privacyRetentionResult = await enforcePrivacyRetentionActivity();
       throwIfMaintenanceFailed('Privacy retention repair', privacyRetentionResult);
+    }
+    if (patched('portable-media-cleanup-v1')) {
+      // eslint-disable-next-line no-await-in-loop -- durable media cleanup runs once per deterministic maintenance tick.
+      const mediaCleanupResult = await cleanupMigrationMediaObjectsActivity();
+      throwIfMaintenanceFailed('Portable media cleanup', mediaCleanupResult);
     }
     iterations += 1;
     if (maxIterations !== undefined && iterations >= maxIterations) {

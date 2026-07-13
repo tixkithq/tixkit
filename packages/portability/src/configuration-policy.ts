@@ -70,6 +70,7 @@ const schemas = {
       capacity: 'nullable-number',
       minimumAge: 'nullable-number',
       codeFormat: 'json',
+      mediaAssets: 'json',
     },
   },
   occurrences: {
@@ -422,6 +423,31 @@ function validJsonField(
         (Number.isSafeInteger(rotating.digits) &&
           Number(rotating.digits) >= 6 &&
           Number(rotating.digits) <= 10))
+    );
+  }
+  if (section === 'events' && key === 'mediaAssets') {
+    return (
+      Array.isArray(value) &&
+      value.length <= 3 &&
+      value.every(
+        (item) =>
+          plainObject(item) &&
+          exactKeys(item, ['portableId', 'role', 'altText', 'focalPoint']) &&
+          typeof item.portableId === 'string' &&
+          isPortableProtocolId(item.portableId) &&
+          ['poster', 'cover', 'social'].includes(String(item.role)) &&
+          typeof item.altText === 'string' &&
+          item.altText.length >= 1 &&
+          item.altText.length <= 500 &&
+          plainObject(item.focalPoint) &&
+          exactKeys(item.focalPoint, ['x', 'y']) &&
+          typeof item.focalPoint.x === 'number' &&
+          item.focalPoint.x >= 0 &&
+          item.focalPoint.x <= 1 &&
+          typeof item.focalPoint.y === 'number' &&
+          item.focalPoint.y >= 0 &&
+          item.focalPoint.y <= 1,
+      )
     );
   }
   if (section === 'checkout_questions' && key === 'options') {

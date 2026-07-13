@@ -24,6 +24,7 @@ import {
   type TixkitOperatingModel,
 } from '@tixkit/portability';
 import { loadPortableConfigurationSections } from '@tixkit/workflows';
+import sharp from 'sharp';
 
 const MAX_PORTABLE_ARTIFACT_BYTES = 50 * 1024 * 1024;
 
@@ -39,6 +40,10 @@ export interface PortableExportSigningConfiguration {
 export interface PortableExportArtifactStore {
   putIfAbsent(key: string, bytes: Uint8Array, sha256: string): Promise<'created' | 'exists'>;
   get(key: string): Promise<Uint8Array>;
+}
+
+export interface PortableExportMediaStore {
+  read(bucket: string, objectKey: string, maximumBytes: number): Promise<Uint8Array>;
 }
 
 export async function readPortableArtifactBody(
@@ -162,6 +167,35 @@ export function createS3PortableExportArtifactStore(
   };
 }
 
+export function createS3PortableExportMediaStore(
+  environment: NodeJS.ProcessEnv = process.env,
+  providedClient?: Pick<S3Client, 'send'>,
+): PortableExportMediaStore {
+  const region = environment.S3_REGION?.trim() ?? 'us-east-1';
+  const options: S3ClientConfig = { region };
+  if (environment.S3_ENDPOINT?.trim()) {
+    options.endpoint = environment.S3_ENDPOINT.trim();
+    options.forcePathStyle = environment.S3_FORCE_PATH_STYLE === 'true';
+  }
+  const accessKeyId = environment.S3_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = environment.S3_SECRET_ACCESS_KEY?.trim();
+  if (Boolean(accessKeyId) !== Boolean(secretAccessKey))
+    throw new Error('PORTABLE_EXPORT_STORAGE_CREDENTIALS_INCOMPLETE');
+  if (accessKeyId && secretAccessKey) options.credentials = { accessKeyId, secretAccessKey };
+  const client = providedClient ?? new S3Client(options);
+  return {
+    async read(bucket, objectKey, maximumBytes) {
+      const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey }));
+      if (!result.Body) throw new Error('PORTABLE_EXPORT_MEDIA_MISSING');
+      return readPortableArtifactBody(
+        result.Body as unknown as AsyncIterable<Uint8Array | string>,
+        result.ContentLength,
+        maximumBytes,
+      );
+    },
+  };
+}
+
 function artifactKey(input: { tenantId: string; organizationId: string; jobId: string }): string {
   return `portable-exports/${input.tenantId}/${input.organizationId}/${input.jobId}.json`;
 }
@@ -252,6 +286,7 @@ export interface PortableExportService {
 export function createPortableExportService(input: {
   db: Database;
   store: PortableExportArtifactStore;
+  mediaStore?: PortableExportMediaStore;
   signing: PortableExportSigningConfiguration;
   afterSnapshotRead?: () => Promise<void>;
 }): PortableExportService {
@@ -332,9 +367,62 @@ export function createPortableExportService(input: {
             tenantId: request.tenantId,
             organizationId: request.organizationId,
           });
+          const media = await transaction
+            .selectFrom('event_media_assets as asset')
+            .innerJoin('upload_artifacts as upload', 'upload.id', 'asset.upload_artifact_id')
+            .select([
+              'asset.id',
+              'asset.event_id',
+              'asset.role',
+              'asset.alt_text',
+              'asset.focal_x',
+              'asset.focal_y',
+              'upload.bucket',
+              'upload.object_key',
+              'upload.size_bytes',
+              'upload.checksum_sha256',
+              'upload.scan_status',
+            ])
+            .where('asset.tenant_id', '=', request.tenantId)
+            .where('asset.organization_id', '=', request.organizationId)
+            .orderBy('asset.id', 'asc')
+            .execute();
+          if (
+            media.some(
+              (asset) =>
+                asset.scan_status !== 'clean' ||
+                !asset.checksum_sha256 ||
+                !Number.isSafeInteger(Number(asset.size_bytes)) ||
+                Number(asset.size_bytes) < 1,
+            )
+          )
+            throw new Error('PORTABLE_EXPORT_MEDIA_EVIDENCE_INVALID');
+          const portableSections = new Map(sections);
+          portableSections.set(
+            'events',
+            (sections.get('events') ?? []).map((event) => ({
+              ...event,
+              attributes: {
+                ...event.attributes,
+                mediaAssets: media
+                  .filter((asset) => asset.event_id === event.portableId)
+                  .map((asset) => ({
+                    portableId: asset.id,
+                    role: asset.role,
+                    altText: asset.alt_text,
+                    focalPoint: { x: Number(asset.focal_x), y: Number(asset.focal_y) },
+                  })),
+              },
+            })),
+          );
           await input.afterSnapshotRead?.();
           const sourceChangeCursor = `snapshot-sha256:${createHash('sha256')
-            .update(canonicalPortableJson(sections))
+            .update(
+              canonicalPortableJson({
+                sections: portableSections,
+                media: media.map(({ bucket: _bucket, object_key: _objectKey, ...asset }) => asset),
+              }),
+            )
             .digest('hex')}`;
           const transactionalRepository = new PortableExportRepository(transaction as Database);
           await transactionalRepository.recordSnapshotCursor({
@@ -345,8 +433,46 @@ export function createPortableExportService(input: {
             sourceChangeCursor,
             now: new Date(),
           });
-          return { sections, sourceChangeCursor };
+          return { sections: portableSections, media, sourceChangeCursor };
         });
+      if (snapshot.media.length > 0 && !input.mediaStore)
+        throw new Error('PORTABLE_EXPORT_MEDIA_STORE_REQUIRED');
+      const mediaPolicySha256 = createHash('sha256')
+        .update('tixkit-portable-event-media-v1')
+        .digest('hex');
+      const assets = await Promise.all(
+        snapshot.media.map(async (asset) => {
+          const sourceBytes = await input.mediaStore!.read(
+            asset.bucket,
+            asset.object_key,
+            Number(asset.size_bytes),
+          );
+          if (
+            sourceBytes.byteLength !== Number(asset.size_bytes) ||
+            createHash('sha256').update(sourceBytes).digest('hex') !== asset.checksum_sha256
+          )
+            throw new Error('PORTABLE_EXPORT_MEDIA_EVIDENCE_MISMATCH');
+          const { data, info } = await sharp(sourceBytes, {
+            failOn: 'warning',
+            limitInputPixels: 40_000_000,
+            sequentialRead: true,
+          })
+            .rotate()
+            .webp({ quality: 90, effort: 5 })
+            .toBuffer({ resolveWithObject: true });
+          return {
+            portableId: asset.id,
+            path: `assets/${asset.id}/original.webp`,
+            bytes: data,
+            mediaType: 'image/webp',
+            role: `event-media:${asset.event_id}:${asset.role}:original`,
+            width: info.width,
+            height: info.height,
+            policySha256: mediaPolicySha256,
+            scannerId: 'tixkit_event_media_scanner_v1',
+          };
+        }),
+      );
       const exportedAt = new Date(job.created_at).toISOString();
       const built = buildPortableLogicalExport({
         bundleId: job.bundle_id,
@@ -359,14 +485,14 @@ export function createPortableExportService(input: {
           changeCursor: snapshot.sourceChangeCursor,
         },
         apiVersion: '2026-01-01',
-        dataSchemaVersion: '0074',
+        dataSchemaVersion: '0076',
         exportedAt,
         currentTime: exportedAt,
         compatibility: {
           minimumApiVersion: '2026-01-01',
           maximumApiVersion: '2026-12-31',
-          minimumDataSchemaVersion: '0074',
-          maximumDataSchemaVersion: '0074',
+          minimumDataSchemaVersion: '0076',
+          maximumDataSchemaVersion: '0076',
           requiredCapabilities: ['portable-bundle-v1'],
           requiredEntitlements: [],
         },
@@ -380,6 +506,7 @@ export function createPortableExportService(input: {
           privateKey: input.signing.payloadPrivateKey,
         },
         payloadPolicies: createPortableConfigurationPayloadPolicies(),
+        assets,
       });
       const artifactSha256 = createHash('sha256').update(built.transport).digest('hex');
       const putResult = await input.store.putIfAbsent(key, built.transport, artifactSha256);

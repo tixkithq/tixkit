@@ -1,5 +1,6 @@
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import sharp from 'sharp';
 import {
   createDb,
   BrandRepository,
@@ -35,7 +36,12 @@ import {
   type PortableBundleManifest,
 } from '@tixkit/portability';
 import { MIGRATION_COMMIT_STAGES, MIGRATION_SIDE_EFFECT_POLICY } from '../activities/migration.js';
-import { createProductionMigrationCommitters } from '../activities/migration-domain-committers.js';
+import {
+  createProductionMigrationCommitters,
+  processMigrationMediaCleanupJobs,
+  type MigrationMediaObjectStore,
+  type MigrationPortableAssetResolver,
+} from '../activities/migration-domain-committers.js';
 import { createRepositoryMigrationActivityService } from '../activities/migration-repository-service.js';
 import { createMigrationPreparationService } from '../activities/migration-preparation.js';
 import { loadPortableConfigurationSections } from '../activities/portable-export.js';
@@ -225,6 +231,295 @@ describeDatabase('production migration committers', () => {
   });
 
   afterAll(async () => db?.destroy());
+
+  it('persists verified portable event media through the destination object store', async () => {
+    const repository = new ImportRepository(db);
+    const job = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: `portable-media-${integrationDriver}`,
+      requestedBy: 'test-user',
+    });
+    await repository.recordExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      entityType: 'brand',
+      externalId: 'source_brand_media',
+      tixkitId: brandId,
+      importJobId: job.id,
+      createdByJob: false,
+    });
+    const mediaBytes = await sharp(randomBytes(1200 * 800 * 3), {
+      raw: { width: 1200, height: 800, channels: 3 },
+    })
+      .webp()
+      .toBuffer();
+    expect(mediaBytes.byteLength).toBeGreaterThan(64 * 1024);
+    const sha256 = createHash('sha256').update(mediaBytes).digest('hex');
+    const writes: Array<{ objectKey: string; sha256: string; bytes: Uint8Array }> = [];
+    const deletedKeys: string[] = [];
+    const mediaStore: MigrationMediaObjectStore = {
+      bucket: 'destination-media',
+      async putVerified(input) {
+        writes.push({
+          objectKey: input.objectKey,
+          sha256: input.sha256,
+          bytes: Uint8Array.from(input.bytes),
+        });
+      },
+      async delete(objectKey) {
+        deletedKeys.push(objectKey);
+      },
+    };
+    const resolvedAssets = new Map([[sha256, mediaBytes]]);
+    const resolver: MigrationPortableAssetResolver = {
+      async resolve(input) {
+        const bytes = resolvedAssets.get(input.sha256);
+        if (!bytes) throw new Error('test asset missing');
+        expect(input).toMatchObject({ portableId: 'source_media_cover', mediaType: 'image/webp' });
+        expect(input.bytes).toBe(bytes.byteLength);
+        return bytes;
+      },
+    };
+    const committer = createProductionMigrationCommitters(db, mediaStore, resolver).get('event')!;
+    const portableEvent = (asset: { bytes: Buffer; sha256: string; altText: string }) => ({
+      entityType: 'event' as const,
+      externalId: 'source_event_media',
+      sourcePosition: 'data/events.jsonl:1',
+      dependencies: [{ entityType: 'brand' as const, externalId: 'source_brand_media' }],
+      attributes: {
+        title: 'Imported media event',
+        slug: `imported-media-${integrationDriver}`,
+        currency: 'USD',
+        timezone: 'UTC',
+        startsAt: '2027-01-01T00:00:00.000Z',
+        mediaAssets: [
+          {
+            portableId: 'source_media_cover',
+            role: 'cover',
+            altText: asset.altText,
+            focalPoint: { x: 0.5, y: 0.4 },
+            sha256: asset.sha256,
+            bytes: asset.bytes.byteLength,
+            mediaType: 'image/webp',
+            width: 1200,
+            height: 800,
+          },
+        ],
+      },
+    });
+    const outcome = await committer.commit({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      entity: portableEvent({ bytes: mediaBytes, sha256, altText: 'Imported purple cover' }),
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    });
+    expect(outcome.disposition).toBe('created');
+    expect(writes).toEqual([
+      expect.objectContaining({ sha256, bytes: Uint8Array.from(mediaBytes) }),
+    ]);
+    const asset = await db
+      .selectFrom('event_media_assets')
+      .innerJoin(
+        'event_media_renditions as rendition',
+        'rendition.asset_id',
+        'event_media_assets.id',
+      )
+      .select([
+        'event_media_assets.event_id',
+        'event_media_assets.role',
+        'event_media_assets.alt_text',
+        'rendition.checksum_sha256',
+      ])
+      .where('event_media_assets.event_id', '=', outcome.tixkitId!)
+      .executeTakeFirstOrThrow();
+    expect(asset).toMatchObject({
+      event_id: outcome.tixkitId,
+      role: 'cover',
+      alt_text: 'Imported purple cover',
+      checksum_sha256: sha256,
+    });
+    const provenance = await db
+      .selectFrom('imported_domain_entities')
+      .select('attributes')
+      .where('id', '=', outcome.tixkitId!)
+      .executeTakeFirstOrThrow();
+    expect(provenance.attributes.length).toBeLessThan(4_000);
+    expect(provenance.attributes).not.toContain(mediaBytes.toString('base64').slice(0, 100));
+
+    const replacementBytes = await sharp(randomBytes(1200 * 800 * 3), {
+      raw: { width: 1200, height: 800, channels: 3 },
+    })
+      .webp()
+      .toBuffer();
+    const replacementSha256 = createHash('sha256').update(replacementBytes).digest('hex');
+    resolvedAssets.set(replacementSha256, replacementBytes);
+    const updated = await committer.commit({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      entity: portableEvent({
+        bytes: replacementBytes,
+        sha256: replacementSha256,
+        altText: 'Updated portable cover',
+      }),
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    });
+    expect(updated.disposition).toBe('updated');
+    await expect(
+      processMigrationMediaCleanupJobs(db, mediaStore, new Date(Date.now() + 1_000)),
+    ).resolves.toEqual({
+      completed: 1,
+      retained: 0,
+      failed: 0,
+    });
+    expect(deletedKeys).toEqual([expect.stringContaining(sha256)]);
+  });
+
+  it('durably retries media cleanup when storage succeeds and the database commit fails', async () => {
+    const repository = new ImportRepository(db);
+    const job = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: `portable-media-failure-${integrationDriver}`,
+      requestedBy: 'test-user',
+    });
+    await repository.recordExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      entityType: 'brand',
+      externalId: 'source_brand_media_failure',
+      tixkitId: brandId,
+      importJobId: job.id,
+      createdByJob: false,
+    });
+    const mediaBytes = await sharp({
+      create: { width: 100, height: 100, channels: 3, background: '#dc2626' },
+    })
+      .webp()
+      .toBuffer();
+    const sha256 = createHash('sha256').update(mediaBytes).digest('hex');
+    const portableId = 'source_media_failure';
+    const identity = createHash('sha256')
+      .update(`${tenantId}:${portableId}`)
+      .digest('hex')
+      .slice(0, 26);
+    const collisionEvent = await new EventRepository(db).create({
+      tenantId,
+      organizationId,
+      brandId,
+      slug: `media-collision-${integrationDriver}`,
+      title: 'Collision event',
+      currency: 'USD',
+      timezone: 'UTC',
+      startsAt: new Date('2027-01-01T00:00:00Z'),
+    });
+    const now = new Date();
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: `upl_${identity}`,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: brandId,
+        event_id: collisionEvent.id,
+        created_by_user_id: null,
+        purpose: 'event_cover',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: 'collision fixture',
+        bucket: 'destination-media',
+        object_key: `event-media/${collisionEvent.id}/collision.webp`,
+        file_name: 'collision.webp',
+        content_type: 'image/webp',
+        size_bytes: 1,
+        checksum_sha256: 'f'.repeat(64),
+        client_token_hash: null,
+        metadata: '{}',
+        consumed_by_checkout_session_id: null,
+        consumed_at: null,
+        completion_owner_token: null,
+        completion_started_at: null,
+        expires_at: new Date('2028-01-01T00:00:00Z'),
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    let failDelete = true;
+    const deleted: string[] = [];
+    const store: MigrationMediaObjectStore = {
+      bucket: 'destination-media',
+      async putVerified() {},
+      async delete(objectKey) {
+        if (failDelete) throw new Error('simulated cleanup outage');
+        deleted.push(objectKey);
+      },
+    };
+    const resolver: MigrationPortableAssetResolver = {
+      async resolve() {
+        return mediaBytes;
+      },
+    };
+    await expect(
+      createProductionMigrationCommitters(db, store, resolver)
+        .get('event')!
+        .commit({
+          tenantId,
+          organizationId,
+          jobId: job.id,
+          entity: {
+            entityType: 'event',
+            externalId: 'source_event_media_failure',
+            sourcePosition: 'data/events.jsonl:1',
+            dependencies: [{ entityType: 'brand', externalId: 'source_brand_media_failure' }],
+            attributes: {
+              title: 'Failed media event',
+              slug: `failed-media-${integrationDriver}`,
+              currency: 'USD',
+              timezone: 'UTC',
+              startsAt: '2027-01-01T00:00:00.000Z',
+              mediaAssets: [
+                {
+                  portableId,
+                  role: 'cover',
+                  altText: 'Failure fixture',
+                  focalPoint: { x: 0.5, y: 0.5 },
+                  sha256,
+                  bytes: mediaBytes.byteLength,
+                  mediaType: 'image/webp',
+                  width: 100,
+                  height: 100,
+                },
+              ],
+            },
+          },
+          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+        }),
+    ).rejects.toThrow();
+    const cleanup = await db
+      .selectFrom('media_object_cleanup_jobs')
+      .selectAll()
+      .where('reason', '=', 'portable-media-commit-failed')
+      .executeTakeFirstOrThrow();
+    expect(cleanup.status).toBe('pending');
+    await expect(
+      processMigrationMediaCleanupJobs(db, store, new Date(Date.now() + 1_000)),
+    ).resolves.toEqual({ completed: 0, retained: 0, failed: 1 });
+    failDelete = false;
+    await expect(
+      processMigrationMediaCleanupJobs(db, store, new Date(Date.now() + 3 * 60_000)),
+    ).resolves.toEqual({ completed: 1, retained: 0, failed: 0 });
+    expect(deleted).toEqual([expect.stringContaining(sha256)]);
+  });
 
   async function importChain(idempotencyKey: string) {
     const repository = new ImportRepository(db);

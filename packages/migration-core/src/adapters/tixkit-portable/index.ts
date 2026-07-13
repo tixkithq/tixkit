@@ -78,6 +78,8 @@ interface VerifiedExtractedRowState {
   entityType: MigrationEntityType;
   sourcePosition: string;
   record: PortableMigrationRecord;
+  manifest: PortableBundleManifest;
+  payloads: ReadonlyMap<string, Uint8Array>;
 }
 
 const extractedRowStates = new WeakMap<ExtractedMigrationRow, VerifiedExtractedRowState>();
@@ -151,7 +153,7 @@ export function prepareTixkitPortableMigration(input: {
     throw new Error('portable migration entity counts do not match its exact payload files');
   }
   const unsupported = envelope.manifest.files.filter(
-    (file) => file.section === 'assets' || !sectionToEntity.has(file.section),
+    (file) => file.section !== 'assets' && !sectionToEntity.has(file.section),
   );
   if (unsupported.length > 0) {
     throw new Error(
@@ -394,6 +396,8 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
           entityType: row.entityType,
           sourcePosition: row.sourcePosition,
           record: verifiedRecord,
+          manifest,
+          payloads,
         });
         allRows.push(row);
       }
@@ -417,6 +421,48 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
     assertContext(state, context);
     const { externalId, entityType, sourcePosition } = state;
     const record = structuredClone(state.record);
+    let attributes = record.attributes;
+    if (entityType === 'event' && Array.isArray(record.attributes.mediaAssets)) {
+      attributes = {
+        ...record.attributes,
+        mediaAssets: record.attributes.mediaAssets.map((descriptor) => {
+          if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor))
+            throw new Error('portable event media descriptor is invalid');
+          const media = descriptor as {
+            portableId?: unknown;
+            role?: unknown;
+            altText?: unknown;
+            focalPoint?: unknown;
+          };
+          const asset = state.manifest.assets.find(
+            (candidate) => candidate.portableId === media.portableId,
+          );
+          const receipt = asset
+            ? state.manifest.assetSafety.scannedFiles.find(
+                (candidate) => candidate.path === asset.path,
+              )
+            : undefined;
+          const bytes = asset ? state.payloads.get(asset.path) : undefined;
+          if (
+            !asset ||
+            !receipt ||
+            !bytes ||
+            asset.mediaType !== 'image/webp' ||
+            receipt.detectedMediaType !== 'image/webp' ||
+            asset.role !== `event-media:${externalId}:${String(media.role)}:original`
+          )
+            throw new Error('portable event media asset binding is invalid');
+          return {
+            ...media,
+            sha256: asset.sha256,
+            bytes: asset.bytes,
+            mediaType: asset.mediaType,
+            width: receipt.width,
+            height: receipt.height,
+          };
+        }),
+      };
+    }
     if (
       record.financialSnapshot &&
       (record.financialSnapshot.provenance.sourceSystem !== this.id ||
@@ -428,7 +474,7 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
       externalId,
       entityType,
       sourcePosition,
-      attributes: record.attributes,
+      attributes,
       ...(record.dependencies
         ? {
             dependencies: record.dependencies.flatMap((dependency) => {

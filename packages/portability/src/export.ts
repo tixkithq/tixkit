@@ -6,9 +6,11 @@ import {
   canonicalPortableJson,
   isPortableProtocolId,
   scanPortablePayload,
+  signPortableMediaAttestation,
   signPortableManifest,
   type PortableBundleManifest,
   type PortableLogicalRecord,
+  type PortableAsset,
   type PortablePayloadSafetyPolicy,
   type PortableSection,
   type SignedPortableBundle,
@@ -60,6 +62,19 @@ export interface PortableLogicalExportInput {
   bundleSigning: { keyId: string; privateKey: KeyLike };
   payloadSigning: { keyId: string; privateKey: KeyLike };
   payloadPolicies: ReadonlyMap<PortableSection, PortablePayloadSafetyPolicy>;
+  assets?: readonly PortableLogicalAssetInput[];
+}
+
+export interface PortableLogicalAssetInput {
+  portableId: string;
+  path: string;
+  bytes: Uint8Array;
+  mediaType: string;
+  role: string;
+  width: number;
+  height: number;
+  policySha256: string;
+  scannerId: string;
 }
 
 export interface BuiltPortableLogicalExport {
@@ -218,6 +233,74 @@ export function buildPortableLogicalExport(
     entityCounts[section] = records.length;
   }
 
+  const assets: PortableAsset[] = [];
+  const mediaAttestations: PortableBundleManifest['assetSafety']['scannedFiles'] = [];
+  const assetPaths = new Set<string>();
+  const assetIds = new Set<string>();
+  for (const asset of [...(input.assets ?? [])].sort((left, right) =>
+    compareCodeUnits(left.portableId, right.portableId),
+  )) {
+    if (
+      !isPortableProtocolId(asset.portableId) ||
+      !asset.path.startsWith('assets/') ||
+      asset.path.includes('..') ||
+      assetPaths.has(asset.path) ||
+      assetIds.has(asset.portableId) ||
+      !Number.isSafeInteger(asset.width) ||
+      asset.width < 1 ||
+      !Number.isSafeInteger(asset.height) ||
+      asset.height < 1 ||
+      !/^[a-f0-9]{64}$/u.test(asset.policySha256) ||
+      !isPortableProtocolId(asset.scannerId)
+    )
+      throw new Error(`portable export asset is invalid: ${asset.portableId}`);
+    const bytes = new Uint8Array(asset.bytes);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    assetPaths.add(asset.path);
+    assetIds.add(asset.portableId);
+    payloads.set(asset.path, bytes);
+    files.push({
+      path: asset.path,
+      section: 'assets',
+      sha256,
+      bytes: bytes.byteLength,
+      records: 1,
+      contentType: 'application/octet-stream',
+    });
+    assets.push({
+      portableId: asset.portableId,
+      path: asset.path,
+      sha256,
+      bytes: bytes.byteLength,
+      mediaType: asset.mediaType,
+      role: asset.role,
+    });
+    mediaAttestations.push(
+      signPortableMediaAttestation(
+        {
+          path: asset.path,
+          sha256,
+          bytes: bytes.byteLength,
+          policyVersion: 'tixkit-portable-media-policy-v1',
+          policySha256: asset.policySha256,
+          scannerId: asset.scannerId,
+          detectedMediaType: asset.mediaType,
+          width: asset.width,
+          height: asset.height,
+          malwareStatus: 'clean',
+          metadataStripped: true,
+          decompressionSafe: true,
+          pixelLimitsSafe: true,
+        },
+        input.payloadSigning.keyId,
+        input.payloadSigning.privateKey,
+      ),
+    );
+    totalDecodedBytes += bytes.byteLength;
+    if (totalDecodedBytes > MAX_PORTABLE_EXPORT_DECODED_BYTES)
+      throw new Error('portable export decoded bytes exceed the limit');
+  }
+
   const manifest: PortableBundleManifest = {
     schemaVersion: PORTABLE_BUNDLE_SCHEMA_VERSION,
     format: PORTABLE_BUNDLE_FORMAT,
@@ -242,10 +325,10 @@ export function buildPortableLogicalExport(
     },
     assetSafety: {
       policyVersion: 'tixkit-portable-media-policy-v1',
-      scannedFiles: [],
+      scannedFiles: mediaAttestations,
       findings: 0,
     },
-    assets: [],
+    assets,
     identity: {
       namespace: input.source.tenantId,
       preserveSafeIds: true,
