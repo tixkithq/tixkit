@@ -440,16 +440,17 @@ function createMockDb(tables: Record<string, unknown> = {}): unknown {
     };
   }
 
-  const mockDb = {
+  const mockDb: Record<string, unknown> = {
     selectFrom: createQuery,
     updateTable: createUpdate,
     insertInto: createInsert,
     deleteFrom: (table: string) => createDelete(table, tableState),
     transaction: () => ({
-      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(mockDb),
+      execute: async (fn: (trx: unknown) => Promise<unknown>) => fn(transactionDb),
     }),
     destroy: vi.fn(),
   };
+  const transactionDb = { ...mockDb, isTransaction: true };
   return mockDb;
 }
 
@@ -6314,6 +6315,7 @@ describe('ticket transfer and attendee update', () => {
           ticket_type_ids: JSON.stringify(['tt_1']),
           event_occurrence_id: null,
           status: 'active',
+          next_activity_sequence_exact: '0',
           created_at: now,
           updated_at: now,
         },
@@ -6403,7 +6405,7 @@ describe('ticket transfer and attendee update', () => {
         scannedAt: now.toISOString(),
       },
     });
-    expect(oldScan.statusCode).toBe(200);
+    expect(oldScan.statusCode, oldScan.body).toBe(200);
     expect(oldScan.json()).toMatchObject({ outcome: 'revoked', ticketId: 'tkt_1' });
 
     const newScan = await app.inject({
