@@ -42,7 +42,7 @@ function assertReleaseSnapshot(expected) {
   }
 }
 
-test('builds a complete, checksummed, non-publishable API release', () => {
+test('builds a complete, checksummed API release with truthful compatibility metadata', () => {
   execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
     cwd: root,
     stdio: 'pipe',
@@ -58,7 +58,8 @@ test('builds a complete, checksummed, non-publishable API release', () => {
     assert.equal(manifest.timestamp, null);
     assert.equal(manifest.provenance.publishable, false);
   }
-  assert.equal(manifest.breaking, false);
+  const apiDiff = JSON.parse(readFileSync(resolve(directory, 'api-diff.json'), 'utf8'));
+  assert.equal(manifest.breaking, apiDiff.breaking);
   assert.equal(manifest.artifacts.length, 7);
   const checksums = new Map(
     readFileSync(resolve(directory, 'CHECKSUMS.sha256'), 'utf8')
