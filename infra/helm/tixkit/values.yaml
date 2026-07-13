@@ -167,6 +167,11 @@ admin:
     targetCPUUtilizationPercentage: 70
 
 availability:
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+    minReadySeconds: 10
+    progressDeadlineSeconds: 600
   podDisruptionBudget:
     enabled: false
     minAvailable: 1

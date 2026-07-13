@@ -32,6 +32,13 @@ function signArtifact(artifact, kind, env) {
   );
 }
 
+function productionBackupTest(name, fn) {
+  test(name, { timeout: 15_000 }, fn);
+}
+
+const productionBackupTestName =
+  'production backup quiesces once and binds database, objects, and Temporal to one recovery point';
+
 test('signed backup manifests bind artifact integrity and durability metadata', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-dr-manifest-'));
   const artifact = join(directory, 'backup.dump');
@@ -181,7 +188,7 @@ if [[ "\${1:-}" == mirror ]]; then destination="\${@: -1}"; mkdir -p "$destinati
   }
 });
 
-test('production backup quiesces once and binds database, objects, and Temporal to one recovery point', () => {
+productionBackupTest(productionBackupTestName, () => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-dr-production-'));
   const bin = join(directory, 'bin');
   const log = join(directory, 'lifecycle.log');

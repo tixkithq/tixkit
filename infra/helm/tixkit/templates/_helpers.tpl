@@ -94,6 +94,38 @@
 {{- if not .Values.availability.topologySpread.enabled -}}
 {{- fail "production profile requires topology spread" -}}
 {{- end -}}
+{{- if ne (int .Values.availability.rollingUpdate.maxUnavailable) 0 -}}
+{{- fail "production profile requires availability.rollingUpdate.maxUnavailable=0" -}}
+{{- end -}}
+{{- if lt (int .Values.availability.rollingUpdate.maxSurge) 1 -}}
+{{- fail "production profile requires availability.rollingUpdate.maxSurge of at least 1" -}}
+{{- end -}}
+{{- if lt (int .Values.availability.rollingUpdate.minReadySeconds) 1 -}}
+{{- fail "production profile requires availability.rollingUpdate.minReadySeconds of at least 1" -}}
+{{- end -}}
+{{- if lt (int .Values.availability.rollingUpdate.progressDeadlineSeconds) 60 -}}
+{{- fail "production profile requires availability.rollingUpdate.progressDeadlineSeconds of at least 60" -}}
+{{- end -}}
+{{- $minimumAvailable := int .Values.availability.podDisruptionBudget.minAvailable -}}
+{{- if lt $minimumAvailable 1 -}}
+{{- fail "production profile requires a positive pod disruption budget minAvailable" -}}
+{{- end -}}
+{{- range $component := list "api" "worker" "checkout" "admin" -}}
+{{- $settings := index $.Values $component -}}
+{{- $minimumReplicas := int $settings.replicas -}}
+{{- if $settings.autoscaling.enabled -}}
+{{- $minimumReplicas = int $settings.autoscaling.minReplicas -}}
+{{- if lt (int $settings.autoscaling.maxReplicas) $minimumReplicas -}}
+{{- fail (printf "production profile requires %s autoscaling.maxReplicas >= minReplicas" $component) -}}
+{{- end -}}
+{{- end -}}
+{{- if lt $minimumReplicas 2 -}}
+{{- fail (printf "production profile requires at least two %s replicas" $component) -}}
+{{- end -}}
+{{- if ge $minimumAvailable $minimumReplicas -}}
+{{- fail (printf "production profile requires pod disruption minAvailable below the %s minimum replicas" $component) -}}
+{{- end -}}
+{{- end -}}
 {{- if not (has .Values.migrations.strategy (list "hook" "manual")) -}}
 {{- fail "migrations.strategy must be hook or manual" -}}
 {{- end -}}

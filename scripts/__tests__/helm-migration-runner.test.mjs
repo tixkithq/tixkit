@@ -84,6 +84,7 @@ fi
   productionValues.secrets = {
     mode: 'external',
     name: 'tixkit-production-secrets',
+    s3ServerSideEncryption: 'AES256',
     externalSecret: {
       secretStoreName: 'production-store',
       data: externalSecretKeysForValues().map((key) => ({

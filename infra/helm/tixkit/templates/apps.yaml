@@ -7,12 +7,21 @@ metadata:
     app.kubernetes.io/component: checkout
 spec:
   replicas: {{ .Values.checkout.replicas }}
+  minReadySeconds: {{ .Values.availability.rollingUpdate.minReadySeconds }}
+  progressDeadlineSeconds: {{ .Values.availability.rollingUpdate.progressDeadlineSeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.availability.rollingUpdate.maxUnavailable }}
+      maxSurge: {{ .Values.availability.rollingUpdate.maxSurge }}
   selector:
     matchLabels:
       {{- include "tixkit.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: checkout
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: checkout
@@ -76,12 +85,21 @@ metadata:
     app.kubernetes.io/component: admin
 spec:
   replicas: {{ .Values.admin.replicas }}
+  minReadySeconds: {{ .Values.availability.rollingUpdate.minReadySeconds }}
+  progressDeadlineSeconds: {{ .Values.availability.rollingUpdate.progressDeadlineSeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.availability.rollingUpdate.maxUnavailable }}
+      maxSurge: {{ .Values.availability.rollingUpdate.maxSurge }}
   selector:
     matchLabels:
       {{- include "tixkit.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: admin
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: admin

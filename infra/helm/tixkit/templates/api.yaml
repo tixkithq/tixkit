@@ -7,12 +7,21 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   replicas: {{ .Values.api.replicas }}
+  minReadySeconds: {{ .Values.availability.rollingUpdate.minReadySeconds }}
+  progressDeadlineSeconds: {{ .Values.availability.rollingUpdate.progressDeadlineSeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.availability.rollingUpdate.maxUnavailable }}
+      maxSurge: {{ .Values.availability.rollingUpdate.maxSurge }}
   selector:
     matchLabels:
       {{- include "tixkit.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         {{- include "tixkit.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api

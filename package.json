@@ -105,6 +105,7 @@
     "infra:down": "docker compose -f infra/docker-compose.yml down",
     "iac:lint": "helm lint infra/helm/tixkit",
     "iac:template": "helm template tixkit infra/helm/tixkit --namespace tixkit",
+    "iac:verify:production": "infra/scripts/verify-production-profile.sh",
     "deploy:check": "infra/scripts/validate-deploy-templates.sh",
     "verify:arc:kata:supply-chain": "infra/ci/scripts/verify-arc-kata.sh --supply-chain-only",
     "release:dry-run": "infra/scripts/release-dry-run.sh",

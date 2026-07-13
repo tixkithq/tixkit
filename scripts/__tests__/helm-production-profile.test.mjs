@@ -89,6 +89,20 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     4,
   );
   assert.equal(rendered.filter((resource) => resource.kind === 'NetworkPolicy').length, 6);
+  const deployments = rendered.filter((resource) => resource.kind === 'Deployment');
+  assert.equal(deployments.length, 4);
+  for (const deployment of deployments) {
+    assert.equal(deployment.spec.minReadySeconds, 10);
+    assert.equal(deployment.spec.progressDeadlineSeconds, 600);
+    assert.deepEqual(deployment.spec.strategy, {
+      type: 'RollingUpdate',
+      rollingUpdate: { maxUnavailable: 0, maxSurge: 1 },
+    });
+    assert.match(
+      deployment.spec.template.metadata.annotations['checksum/config'],
+      /^[a-f0-9]{64}$/u,
+    );
+  }
   const serviceMonitor = rendered.find((resource) => resource.kind === 'ServiceMonitor');
   assert.equal(serviceMonitor.spec.endpoints[0].path, '/metrics');
   assert.deepEqual(serviceMonitor.spec.endpoints[0].bearerTokenSecret, {
@@ -160,6 +174,74 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     serviceEgress.spec.egress.slice(-2).map((rule) => rule.to[0].ipBlock.cidr),
     ['192.0.2.0/24', '2001:db8::/32'],
   );
+});
+
+test('Production config changes deterministically roll every workload', () => {
+  const base = resources(
+    render(production, [
+      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'secrets.name=tixkit-production-secrets',
+    ]),
+  );
+  const changed = resources(
+    render(production, [
+      'global.imageRegistry=ghcr.io/tixkit/tixkit',
+      'secrets.name=tixkit-production-secrets',
+      'global.apiBaseUrl=https://api.changed.example',
+    ]),
+  );
+  const checksums = (rendered) =>
+    Object.fromEntries(
+      rendered
+        .filter((resource) => resource.kind === 'Deployment')
+        .map((deployment) => [
+          deployment.metadata.labels['app.kubernetes.io/component'],
+          deployment.spec.template.metadata.annotations['checksum/config'],
+        ]),
+    );
+  const baseChecksums = checksums(base);
+  const changedChecksums = checksums(changed);
+  assert.deepEqual(Object.keys(baseChecksums).sort(), ['admin', 'api', 'checkout', 'worker']);
+  for (const component of Object.keys(baseChecksums))
+    assert.notEqual(baseChecksums[component], changedChecksums[component]);
+});
+
+test('Production rejects availability settings that permit a single-instance outage', () => {
+  for (const [overrides, message] of [
+    [['api.autoscaling.enabled=false', 'api.replicas=1'], 'requires at least two api replicas'],
+    [['api.autoscaling.minReplicas=1'], 'requires at least two api replicas'],
+    [['worker.autoscaling.maxReplicas=1'], 'worker autoscaling.maxReplicas >= minReplicas'],
+    [
+      ['availability.podDisruptionBudget.minAvailable=2'],
+      'pod disruption minAvailable below the api minimum replicas',
+    ],
+    [
+      ['availability.rollingUpdate.maxUnavailable=1'],
+      'availability.rollingUpdate.maxUnavailable=0',
+    ],
+    [
+      ['availability.rollingUpdate.maxSurge=0'],
+      'availability.rollingUpdate.maxSurge of at least 1',
+    ],
+    [
+      ['availability.rollingUpdate.minReadySeconds=0'],
+      'availability.rollingUpdate.minReadySeconds of at least 1',
+    ],
+    [
+      ['availability.rollingUpdate.progressDeadlineSeconds=59'],
+      'availability.rollingUpdate.progressDeadlineSeconds of at least 60',
+    ],
+  ]) {
+    assert.throws(
+      () =>
+        render(production, [
+          'global.imageRegistry=ghcr.io/tixkit/tixkit',
+          'secrets.name=tixkit-production-secrets',
+          ...overrides,
+        ]),
+      new RegExp(message),
+    );
+  }
 });
 
 test('Evaluation render declares its runtime profile and MinIO-compatible encryption policy', () => {
