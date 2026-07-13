@@ -1,0 +1,18 @@
+{
+  "from": "2026-07-16",
+  "to": "2026-07-17",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /portable-delta-exports",
+      "message": "Operation was added."
+    }
+  ]
+}
