@@ -1,0 +1,30 @@
+{
+  "from": "2026-07-14",
+  "to": "2026-07-15",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 1,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /migration-jobs/{jobId}/commit",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "compatible",
+      "category": "media-type-added",
+      "path": "POST /migration-jobs/{jobId}/commit.requestBody.content.application/json",
+      "message": "A media type was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PortableCutoverProof",
+      "message": "A named schema was added."
+    }
+  ]
+}
