@@ -1,0 +1,48 @@
+{
+  "from": "2026-07-15",
+  "to": "2026-07-16",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 4,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "declared-behavior-change",
+      "path": "POST /portable-exports",
+      "message": "The operation declares a conditional behavioral breaking change."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-oneOf-changed",
+      "path": "POST /portable-exports.requestBody.content.application/json.schema",
+      "message": "oneOf changed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "POST /portable-exports.requestBody.content.application/json.schema.properties.organizationId",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "breaking",
+      "category": "property-removed",
+      "path": "POST /portable-exports.requestBody.content.application/json.schema.properties.mode",
+      "message": "A property was removed."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /portable-export-authorizations",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /portable-export-authorizations/{authorizationId}/revoke",
+      "message": "Operation was added."
+    }
+  ]
+}

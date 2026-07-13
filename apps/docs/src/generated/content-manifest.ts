@@ -317,13 +317,13 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/reference/api-release-train": {
     sourcePath: "docs/public/reference/api-release-train.mdx",
-    frontmatter: {"title":"API contract release train","description":"Versioning, compatibility, verification, and publication gates for Tixkit API and SDK contracts.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-15","prerequisites":["A sandbox API credential"],"related":["/reference/api","/reference/api-versions","/sdks/javascript"]},
+    frontmatter: {"title":"API contract release train","description":"Versioning, compatibility, verification, and publication gates for Tixkit API and SDK contracts.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-16","prerequisites":["A sandbox API credential"],"related":["/reference/api","/reference/api-versions","/sdks/javascript"]},
     headings: [{"id":"incident-and-rollback-procedure","text":"Incident and rollback procedure","level":2}],
     load: () => import("../../../../docs/public/reference/api-release-train.mdx"),
   },
   "/reference/api-versions": {
     sourcePath: "docs/public/reference/api-versions.mdx",
-    frontmatter: {"title":"API versions and compatibility","description":"Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-15","prerequisites":[],"related":["/reference/api","/contributing/add-an-sdk-operation","/reference/migrations/2026-01-01-to-2026-07-12","/reference/migrations/2026-07-13-to-2026-07-14","/reference/migrations/2026-07-14-to-2026-07-15"]},
+    frontmatter: {"title":"API versions and compatibility","description":"Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-16","prerequisites":[],"related":["/reference/api","/contributing/add-an-sdk-operation","/reference/migrations/2026-01-01-to-2026-07-12","/reference/migrations/2026-07-13-to-2026-07-14","/reference/migrations/2026-07-14-to-2026-07-15","/reference/migrations/2026-07-15-to-2026-07-16"]},
     headings: [],
     load: () => import("../../../../docs/public/reference/api-versions.mdx"),
   },
@@ -356,6 +356,12 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     frontmatter: {"title":"API migration from 2026-07-14 to 2026-07-15","description":"Supply source-signed final cutover evidence for portable import commits.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-15","prerequisites":["An integration using API version 2026-07-14"],"related":["/reference/api-versions","/reference/api-release-train","/operators/migration-operations"]},
     headings: [],
     load: () => import("../../../../docs/public/reference/migrations/2026-07-14-to-2026-07-15.mdx"),
+  },
+  "/reference/migrations/2026-07-15-to-2026-07-16": {
+    sourcePath: "docs/public/reference/migrations/2026-07-15-to-2026-07-16.mdx",
+    frontmatter: {"title":"API migration from 2026-07-15 to 2026-07-16","description":"Adopt principal-bound historical portability exports and signed organization identity.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-16","prerequisites":["An integration using API version 2026-07-15"],"related":["/reference/api-versions","/reference/api-release-train","/operators/migration-operations"]},
+    headings: [{"id":"webhook-test-and-delivery-metadata","text":"Webhook test and delivery metadata","level":2}],
+    load: () => import("../../../../docs/public/reference/migrations/2026-07-15-to-2026-07-16.mdx"),
   },
   "/reference/performance": {
     sourcePath: "docs/public/reference/performance.mdx",
