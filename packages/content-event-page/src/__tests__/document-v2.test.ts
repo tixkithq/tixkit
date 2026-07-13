@@ -9,6 +9,7 @@ import {
   formatTimezoneLabel,
   migrateLegacyEventPageBlocksToPuckData,
   migrateLegacyEventPageDocumentToPuck,
+  materializeEventPageDocument,
   normalizeEventPageDocument,
   sanitizeEventPageEmbedHtml,
   validateEventPageDocument,
@@ -72,6 +73,36 @@ describe('EventPageDocument v2', () => {
       expect.stringMatching(/Central|CDT|CST|Chicago/i),
     );
     expect(formatTimezoneLabel('Pacific Time')).toBe('Pacific Time');
+  });
+
+  it('fills missing header media from current event data without replacing an explicit override', () => {
+    const original = createDefaultEventPageDocument({
+      ...defaultInput,
+      coverImageUrl: undefined,
+      coverImageAlt: undefined,
+    });
+    const filled = materializeEventPageDocument(original, defaultInput);
+    expect(filled.editor.data.content[0]).toMatchObject({
+      type: 'EventHeader',
+      props: {
+        imageUrl: defaultInput.coverImageUrl,
+        imageAlt: defaultInput.coverImageAlt,
+      },
+    });
+
+    const explicit = createDefaultEventPageDocument({
+      ...defaultInput,
+      coverImageUrl: 'https://cdn.example.test/organizer-override.jpg',
+      coverImageAlt: 'Organizer override',
+    });
+    const preserved = materializeEventPageDocument(explicit, defaultInput);
+    expect(preserved.editor.data.content[0]).toMatchObject({
+      type: 'EventHeader',
+      props: {
+        imageUrl: 'https://cdn.example.test/organizer-override.jpg',
+        imageAlt: 'Organizer override',
+      },
+    });
   });
 
   it('normalizes only the hard-cutover v2 provider shape', () => {

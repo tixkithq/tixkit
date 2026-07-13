@@ -16,22 +16,33 @@ export function checkoutContentSecurityPolicy(nonce: string): string {
   );
   const development =
     process.env.NODE_ENV === 'production' ? [] : ['http://localhost:*', 'http://127.0.0.1:*'];
+  const loopbackHttpApi = (() => {
+    if (!apiOrigin) return false;
+    const url = new URL(apiOrigin);
+    return (
+      url.protocol === 'http:' &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]')
+    );
+  })();
   return [
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
     "form-action 'self'",
     "frame-ancestors 'self' http://localhost:* http://127.0.0.1:* https:",
-    "img-src 'self' data: blob: https://q.stripe.com",
+    `img-src 'self' data: blob: ${apiOrigin ?? ''} https://q.stripe.com`
+      .replaceAll(/\s+/g, ' ')
+      .trim(),
     "font-src 'self' data:",
     `style-src 'self' 'nonce-${nonce}'`,
+    "style-src-attr 'unsafe-inline'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://js.stripe.com ${development.join(' ')}`.trim(),
     `connect-src 'self' ${apiOrigin ?? ''} https://api.stripe.com https://r.stripe.com ${development.join(' ')}`
       .replaceAll(/\s+/g, ' ')
       .trim(),
     "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com",
     "worker-src 'self' blob:",
-    'upgrade-insecure-requests',
+    ...(loopbackHttpApi ? [] : ['upgrade-insecure-requests']),
   ].join('; ');
 }
 

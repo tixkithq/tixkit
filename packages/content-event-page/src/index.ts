@@ -887,6 +887,7 @@ export function materializeEventPageDocument(
   const content = ensured.content.map((block) => {
     const materialized = materializeEventPageComponent(block, replacements);
     if (materialized.type !== 'EventHeader' || !defaultHeader) return materialized;
+    const existingImageUrl = cleanOptionalString(materialized.props.imageUrl);
     return {
       ...materialized,
       props: {
@@ -896,6 +897,10 @@ export function materializeEventPageDocument(
         startsAtLabel: defaultHeader.props.startsAtLabel,
         timezone: defaultHeader.props.timezone,
         venueName: defaultHeader.props.venueName,
+        imageUrl: existingImageUrl ?? defaultHeader.props.imageUrl,
+        imageAlt: existingImageUrl
+          ? (cleanOptionalString(materialized.props.imageAlt) ?? defaultHeader.props.imageAlt)
+          : defaultHeader.props.imageAlt,
       },
     };
   });
@@ -2413,14 +2418,25 @@ function formatEventDateLabel(value: string | undefined, timeZone?: string): str
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   try {
-    return new Intl.DateTimeFormat(undefined, {
+    const parts = new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
+      hour12: true,
       ...(timeZone ? { timeZone } : {}),
-    }).format(date);
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((candidate) => candidate.type === type)?.value;
+    const month = part('month');
+    const day = part('day');
+    const year = part('year');
+    const hour = part('hour');
+    const minute = part('minute');
+    const dayPeriod = part('dayPeriod');
+    if (!month || !day || !year || !hour || !minute || !dayPeriod) return value;
+    return `${month} ${day}, ${year}, ${hour}:${minute} ${dayPeriod}`;
   } catch {
     return value;
   }
@@ -2429,30 +2445,26 @@ function formatEventDateLabel(value: string | undefined, timeZone?: string): str
 /** Human label for an IANA zone, e.g. America/New_York → "Eastern Time". */
 export function formatTimezoneLabel(
   timeZone: string | undefined,
-  at: string | Date = new Date(),
+  _at: string | Date = new Date(),
 ): string | undefined {
   const zone = cleanOptionalString(timeZone);
   if (!zone) return undefined;
   if (!zone.includes('/')) return zone;
 
-  const date = typeof at === 'string' ? new Date(at) : at;
-  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
-
-  for (const timeZoneName of ['longGeneric', 'long', 'shortGeneric', 'short'] as const) {
-    try {
-      const parts = new Intl.DateTimeFormat(undefined, {
-        timeZone: zone,
-        timeZoneName,
-      }).formatToParts(safeDate);
-      const label = parts.find((part) => part.type === 'timeZoneName')?.value?.trim();
-      if (label && label !== zone) return label;
-    } catch {
-      // try next style / fallback below
-    }
-  }
-
-  const city = zone.split('/').pop()?.replace(/_/g, ' ');
-  return city || zone;
+  const commonLabels: Record<string, string> = {
+    'America/New_York': 'Eastern Time',
+    'America/Chicago': 'Central Time',
+    'America/Denver': 'Mountain Time',
+    'America/Phoenix': 'Arizona Time',
+    'America/Los_Angeles': 'Pacific Time',
+    'America/Anchorage': 'Alaska Time',
+    'Pacific/Honolulu': 'Hawaii Time',
+    'Europe/London': 'United Kingdom Time',
+  };
+  const common = commonLabels[zone];
+  if (common) return common;
+  const city = zone.split('/').pop()?.replace(/_/g, ' ').trim();
+  return city ? `${city} Time` : zone;
 }
 
 function buildEventPageMergeReplacements(

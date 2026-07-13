@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { headers } from 'next/headers';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
 import '@tixkit/content-event-page-react/styles.css';
@@ -17,18 +18,31 @@ const refineInjectorSrc =
     ? null
     : 'http://localhost:7331/inject.js';
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   // Default to 'ltr'. A future brand/locale resolver can override this
   // by passing a `dir` prop or reading brand configuration.
   return (
     <html lang="en" dir="ltr" suppressHydrationWarning>
       <body>
-        <ThemeProvider>
+        <script
+          nonce={nonce}
+          dangerouslySetInnerHTML={{
+            __html:
+              'globalThis.__zod_globalConfig={...(globalThis.__zod_globalConfig||{}),jitless:true}',
+          }}
+        />
+        <ThemeProvider nonce={nonce}>
           {children}
           <Toaster position="bottom-right" />
         </ThemeProvider>
         {refineInjectorSrc ? (
-          <script id="transitions-refine-injector" type="module" src={refineInjectorSrc} />
+          <script
+            id="transitions-refine-injector"
+            type="module"
+            src={refineInjectorSrc}
+            nonce={nonce}
+          />
         ) : null}
       </body>
     </html>

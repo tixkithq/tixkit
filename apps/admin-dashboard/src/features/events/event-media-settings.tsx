@@ -237,9 +237,9 @@ export function EventMediaSettings({
     <div className="space-y-4">
       <section className="space-y-4" aria-labelledby="event-role-media-heading">
         <div>
-          <h3 id="event-role-media-heading" className="font-medium">
+          <h2 id="event-role-media-heading" className="font-medium">
             Event poster, cover, and social images
-          </h3>
+          </h2>
           <p className="text-sm text-muted-foreground">
             Each upload keeps its original and creates optimized crops. Set the focal point used for
             automatic crops before uploading.
@@ -253,7 +253,7 @@ export function EventMediaSettings({
             );
             return (
               <article key={role} className="space-y-3 rounded-lg border p-4">
-                <h4 className="font-medium capitalize">{role}</h4>
+                <h3 className="font-medium capitalize">{role}</h3>
                 {preview ? (
                   <img
                     className="aspect-video w-full rounded-md object-cover"

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { createDefaultEventPageDocument } from '../../packages/content-event-page/src/index';
 import { createDb, type Database } from '../../packages/db/src/client';
@@ -97,7 +98,11 @@ export async function seedPublishedEventPageContent(input: {
         rendered_html: '',
         rendered_text: summary,
         variables: JSON.stringify([]),
-        validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        validation: JSON.stringify({
+          valid: true,
+          severity: 'warning',
+          issues: [],
+        }),
         created_by: 'e2e',
         created_at: now,
         published_at: now,
@@ -114,7 +119,11 @@ export async function seedPublishedEventPageContent(input: {
           rendered_html: '',
           rendered_text: summary,
           variables: JSON.stringify([]),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           published_at: now,
         }),
       )
@@ -164,7 +173,11 @@ export async function seedPublishedOrderConfirmationContent(input: {
         rendered_html: '<p>Your order is confirmed.</p>',
         rendered_text: 'Your order is confirmed.',
         variables: JSON.stringify([]),
-        validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        validation: JSON.stringify({
+          valid: true,
+          severity: 'warning',
+          issues: [],
+        }),
         created_by: 'e2e',
         created_at: now,
         published_at: now,
@@ -258,7 +271,12 @@ export type SeededPaidRefundableOrder = {
 
 export type RefundWorkflowState = {
   order: { status: string; refundedCents: number };
-  refunds: Array<{ id: string; amountCents: number; status: string; providerRefundId: string }>;
+  refunds: Array<{
+    id: string;
+    amountCents: number;
+    status: string;
+    providerRefundId: string;
+  }>;
   tickets: Array<{ id: string; status: string }>;
   inventoryPool: { soldCount: number };
   timelineTypes: string[];
@@ -266,7 +284,11 @@ export type RefundWorkflowState = {
 };
 
 export type PaidCheckoutCaptureState = {
-  session: { status: string; orderId: string | null; paymentIntentId: string | null };
+  session: {
+    status: string;
+    orderId: string | null;
+    paymentIntentId: string | null;
+  };
   order: {
     id: string;
     status: string;
@@ -337,7 +359,11 @@ export type CheckoutSessionArtifactAnswerState = {
 };
 
 export type OrphanPaymentCompensationState = {
-  session: { status: string; orderId: string | null; paymentIntentId: string | null };
+  session: {
+    status: string;
+    orderId: string | null;
+    paymentIntentId: string | null;
+  };
   paymentIntent: {
     id: string;
     provider: string;
@@ -383,7 +409,12 @@ export type PromoCheckoutCaptureState = PaidCheckoutCaptureState & {
 };
 
 export type SeededAffiliateAttribution = {
-  affiliate: { id: string; code: string; name: string; commissionCents: number };
+  affiliate: {
+    id: string;
+    code: string;
+    name: string;
+    commissionCents: number;
+  };
   attribution: { id: string; orderId: string };
 };
 
@@ -416,8 +447,17 @@ export type SeededCheckInList = {
 };
 
 export type CheckInWorkflowState = {
-  tickets: Array<{ id: string; status: string; checkedInByDeviceId: string | null }>;
-  scanLogs: Array<{ outcome: string; offline: boolean; ticketId: string | null; qrHash: string }>;
+  tickets: Array<{
+    id: string;
+    status: string;
+    checkedInByDeviceId: string | null;
+  }>;
+  scanLogs: Array<{
+    outcome: string;
+    offline: boolean;
+    ticketId: string | null;
+    qrHash: string;
+  }>;
 };
 
 async function expectJsonResponse(response: APIResponse, expectedStatus: number) {
@@ -534,6 +574,25 @@ function compactIdPart(suffix: string, maxLength = 18): string {
   return `${safe.slice(0, headLength)}-${safe.slice(-tailLength)}`;
 }
 
+async function publishEventWithRetry(
+  request: APIRequestContext,
+  eventId: string,
+  attempts = 5,
+): Promise<APIResponse> {
+  const response = await request.post(`${apiBaseUrl}/v1/events/${eventId}/publish`, { data: {} });
+  if (attempts <= 1) return response;
+  if (response.status() >= 500) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return publishEventWithRetry(request, eventId, attempts - 1);
+  }
+  if (response.status() !== 409) return response;
+  const body = (await response.json().catch(() => null)) as {
+    error?: { code?: string };
+  } | null;
+  if (body?.error?.code !== 'stale_event_version') return response;
+  return publishEventWithRetry(request, eventId, attempts - 1);
+}
+
 export async function seedFreeCheckoutEvent(
   request: APIRequestContext,
   suffix: string,
@@ -600,14 +659,115 @@ export async function seedFreeCheckoutEvent(
     201,
   )) as { id: string; name: string };
 
-  await expectJsonResponse(
-    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, { data: {} }),
-    200,
-  );
-
   await seedPublishedEventPageContent({ event, suffix });
+  await seedPublishedOrderConfirmationContent({ eventId: event.id, suffix });
+  await expectJsonResponse(
+    await request.post(
+      `${apiBaseUrl}/v1/events/${event.id}/readiness-acknowledgements/checkout_consent`,
+      { data: {} },
+    ),
+    201,
+  );
+  await expectJsonResponse(await publishEventWithRetry(request, event.id), 200);
 
   return { event, ticketType, product };
+}
+
+export async function seedEventMediaFixture(input: {
+  eventId: string;
+  suffix: string;
+}): Promise<{ renditionId: string; renditionPath: string }> {
+  const fixtureDigest = createHash('sha256')
+    .update(input.eventId)
+    .update('\0')
+    .update(input.suffix)
+    .digest('hex')
+    .slice(0, 18);
+  const uploadId = `upl_e2e_${fixtureDigest}`;
+  const assetId = `ema_e2e_${fixtureDigest}`;
+  const renditionId = `emr_e2e_${fixtureDigest}`;
+  const now = new Date();
+  await withE2eDb(async (db) => {
+    // A retry of the same deterministic fixture must be safe after a partially
+    // completed browser run. Delete only IDs derived from this event and suffix.
+    await db.deleteFrom('event_media_renditions').where('id', '=', renditionId).execute();
+    await db.deleteFrom('event_media_assets').where('id', '=', assetId).execute();
+    await db.deleteFrom('upload_artifacts').where('id', '=', uploadId).execute();
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: uploadId,
+        tenant_id: devTenantId,
+        organization_id: devOrganizationId,
+        brand_id: devBrandId,
+        event_id: input.eventId,
+        created_by_user_id: null,
+        purpose: 'event_poster',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: 'clean',
+        bucket: 'tixkit',
+        object_key: `e2e/event-media/${uploadId}.webp`,
+        file_name: 'poster.webp',
+        content_type: 'image/webp',
+        size_bytes: 68,
+        checksum_sha256: 'a'.repeat(64),
+        client_token_hash: null,
+        metadata: JSON.stringify({
+          image: { width: 1080, height: 1350, format: 'webp' },
+        }),
+        consumed_by_checkout_session_id: null,
+        consumed_at: null,
+        expires_at: new Date('2028-01-01T00:00:00.000Z'),
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('event_media_assets')
+      .values({
+        id: assetId,
+        tenant_id: devTenantId,
+        organization_id: devOrganizationId,
+        brand_id: devBrandId,
+        event_id: input.eventId,
+        upload_artifact_id: uploadId,
+        role: 'poster',
+        width: 1080,
+        height: 1350,
+        format: 'webp',
+        checksum_sha256: 'a'.repeat(64),
+        size_bytes: 68,
+        focal_x: '0.5',
+        focal_y: '0.5',
+        alt_text: 'Poster of the Media Browser Proof event',
+        created_by: 'e2e',
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('event_media_renditions')
+      .values({
+        id: renditionId,
+        asset_id: assetId,
+        variant: 'page',
+        width: 1080,
+        height: 1350,
+        format: 'webp',
+        content_type: 'image/webp',
+        bucket: 'tixkit',
+        object_key: `e2e/event-media/${renditionId}.webp`,
+        checksum_sha256: 'b'.repeat(64),
+        size_bytes: 68,
+        created_at: now,
+      })
+      .execute();
+  });
+  return {
+    renditionId,
+    renditionPath: `/v1/public/event-media/renditions/${renditionId}`,
+  };
 }
 
 export async function seedAdminAttendeeTableRow(
@@ -781,7 +941,12 @@ export async function seedAdminAttendeeTableRow(
 
   return {
     ...seeded,
-    attendee: { id: attendeeId, email, name: `${firstName} ${lastName}`, status: 'active' },
+    attendee: {
+      id: attendeeId,
+      email,
+      name: `${firstName} ${lastName}`,
+      status: 'active',
+    },
     order: { id: orderId, orderNumber },
     ticket: { id: ticketId },
   };
@@ -841,7 +1006,9 @@ export async function seedPaidCheckoutEvent(
   )) as { id: string; name: string };
 
   await expectJsonResponse(
-    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, { data: {} }),
+    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
+      data: {},
+    }),
     200,
   );
 
@@ -1107,13 +1274,17 @@ export async function seedTicketVariantCheckoutEvent(
   );
 
   await expectJsonResponse(
-    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, { data: {} }),
+    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
+      data: {},
+    }),
     200,
   );
 
   const soldOutSession = (await expectJsonResponse(
     await request.post(`${apiBaseUrl}/v1/checkout/sessions`, {
-      headers: { 'idempotency-key': `variant-sold-out-session-${event.id}-${soldOutTicket.id}` },
+      headers: {
+        'idempotency-key': `variant-sold-out-session-${event.id}-${soldOutTicket.id}`,
+      },
       data: {
         eventId: event.id,
         items: [{ ticketTypeId: soldOutTicket.id, quantity: 1 }],
@@ -1294,7 +1465,9 @@ export async function seedPaidRefundableOrder(
   )) as { id: string; name: string };
 
   await expectJsonResponse(
-    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, { data: {} }),
+    await request.post(`${apiBaseUrl}/v1/events/${event.id}/publish`, {
+      data: {},
+    }),
     200,
   );
   await seedRefundNotificationPrerequisites(suffix);
@@ -1667,7 +1840,11 @@ export async function seedMessagingPrerequisites(
           variables: JSON.stringify([
             { key: 'body', required: false, description: 'Campaign body copy' },
           ]),
-          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+          validation: JSON.stringify({
+            valid: true,
+            severity: 'warning',
+            issues: [],
+          }),
           created_by: 'e2e',
           created_at: now,
           published_at: now,
@@ -2069,7 +2246,11 @@ export async function seedCompensatedOrphanPaymentForSession(input: {
   amountCents: number;
   currency: string;
   providerIntentId?: string;
-}): Promise<{ paymentIntentId: string; providerIntentId: string; compensationId: string }> {
+}): Promise<{
+  paymentIntentId: string;
+  providerIntentId: string;
+  compensationId: string;
+}> {
   const now = new Date();
   const idPart = compactIdPart(input.sessionId, 19);
   const paymentIntentId = `pi_orphan_${idPart}`;
