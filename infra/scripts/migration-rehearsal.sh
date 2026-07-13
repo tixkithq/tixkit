@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 : "${DB_DRIVER:?DB_DRIVER must be postgres or mysql}"
 : "${SOURCE_DATABASE_URL:?SOURCE_DATABASE_URL is required}"

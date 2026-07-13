@@ -16,6 +16,7 @@ fi
 dr_verify_checksum "${POSTGRES_BACKUP_FILE}"
 dr_verify_backup_manifest "${POSTGRES_BACKUP_FILE}" postgres
 pg_restore --list "${POSTGRES_BACKUP_FILE}" >/dev/null
+dr_reserve_restore_evidence
 existing_relations="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atqc "select count(*) from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid=c.relnamespace where n.nspname not in ('pg_catalog','information_schema') and n.nspname not like 'pg_toast%' and c.relkind in ('r','p','v','m','S');")"
 test "${existing_relations}" = 0 || { echo 'Postgres restore target is not empty; refusing in-place restore' >&2; exit 1; }
 
