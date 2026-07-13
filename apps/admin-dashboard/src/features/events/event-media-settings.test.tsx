@@ -124,7 +124,9 @@ describe('EventMediaSettings', () => {
 
     api.removeEventMedia.mockResolvedValue({ ok: true, data: undefined });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(view.getByRole('button', { name: 'Remove cover' }));
+    const removeCover = view.getByRole('button', { name: 'Remove cover' });
+    expect(removeCover).toHaveClass('text-foreground');
+    fireEvent.click(removeCover);
     await waitFor(() => expect(api.removeEventMedia).toHaveBeenCalledWith('evt_1', 'cover'));
     expect(view.queryByAltText('Crowd under stage lights')).not.toBeInTheDocument();
   });

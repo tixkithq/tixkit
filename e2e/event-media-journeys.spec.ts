@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import type { Page } from '@playwright/test';
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
@@ -14,6 +15,37 @@ const transparentPixel = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
 );
+
+const responsiveMediaViewports = [
+  { name: 'mobile', width: 390, height: 844 },
+  { name: 'desktop', width: 1440, height: 900 },
+] as const;
+
+async function installLargestContentfulPaintObserver(page: Page) {
+  await page.addInitScript(() => {
+    window.__tixkitLargestContentfulPaint = 0;
+    if (!('PerformanceObserver' in window)) return;
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          window.__tixkitLargestContentfulPaint = Math.max(
+            window.__tixkitLargestContentfulPaint,
+            entry.startTime,
+          );
+        }
+      }).observe({ type: 'largest-contentful-paint', buffered: true });
+    } catch {
+      // Firefox and WebKit do not expose LargestContentfulPaint yet. Decode,
+      // semantic, and axe assertions still run in every browser below.
+    }
+  });
+}
+
+declare global {
+  interface Window {
+    __tixkitLargestContentfulPaint: number;
+  }
+}
 
 test.describe('role-based event media journeys', () => {
   test('organizer uploads, scans, finalizes, and renders a real poster through object storage', async ({
@@ -130,6 +162,50 @@ test.describe('role-based event media journeys', () => {
       testInfo,
       'section[aria-labelledby="event-role-media-heading"]',
     );
+
+    await installLargestContentfulPaintObserver(page);
+    for (const viewport of responsiveMediaViewports) {
+      await page.setViewportSize(viewport);
+      await page.goto(`${checkoutBaseUrl}/e/${seeded.event.id}`);
+      await expect(page.getByRole('main')).toBeVisible();
+      await expect(page.getByRole('heading', { name: seeded.event.title })).toBeVisible();
+      const buyerPoster = page.getByAltText(altText);
+      await expect(buyerPoster).toBeVisible();
+      await expect(buyerPoster).toHaveAttribute('src', /\/v1\/public\/event-media\/renditions\//u);
+      await buyerPoster.evaluate((image: HTMLImageElement) => image.decode());
+      const performance = await buyerPoster.evaluate((image: HTMLImageElement) => {
+        return {
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          largestContentfulPaintMs: window.__tixkitLargestContentfulPaint,
+          supportsLargestContentfulPaint:
+            typeof PerformanceObserver !== 'undefined' &&
+            PerformanceObserver.supportedEntryTypes.includes('largest-contentful-paint'),
+        };
+      });
+      expect(performance.naturalWidth, `${viewport.name} poster should decode`).toBeGreaterThan(0);
+      expect(performance.naturalHeight, `${viewport.name} poster should decode`).toBeGreaterThan(0);
+      if (performance.supportsLargestContentfulPaint) {
+        await buyerPoster.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => setTimeout(resolve, 500));
+              });
+            }),
+        );
+        const settledLargestContentfulPaint = await page.evaluate(
+          () => window.__tixkitLargestContentfulPaint,
+        );
+        expect(settledLargestContentfulPaint).toBeGreaterThan(0);
+        expect(settledLargestContentfulPaint).toBeLessThanOrEqual(4_000);
+      }
+      await expectNoAxeViolations(page, testInfo, 'main');
+    }
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/settings`);
+    await expect(page.getByAltText(altText)).toBeVisible();
 
     page.once('dialog', (dialog) => dialog.accept());
     const removed = page.waitForResponse(

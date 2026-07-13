@@ -338,6 +338,7 @@ export function EventMediaSettings({
                   <Button
                     type="button"
                     variant="outline"
+                    className="text-foreground"
                     disabled={state === 'uploading' || state === 'saving'}
                     onClick={() => void removeRole(role)}
                   >
