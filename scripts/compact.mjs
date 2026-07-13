@@ -357,6 +357,11 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
     publicStorageEndpoint.hash
   )
     throw new Error('Compact S3_PUBLIC_ENDPOINT must be an HTTP(S) origin without credentials.');
+  const expectedPublicStorageOrigin = `http://localhost:${environment.MINIO_API_PORT}`;
+  if (publicStorageEndpoint.origin !== expectedPublicStorageOrigin)
+    throw new Error(
+      `Compact S3_PUBLIC_ENDPOINT must match the MinIO host origin ${expectedPublicStorageOrigin}.`,
+    );
 }
 
 function pipeCompose(arguments_, { input, output, environmentPath = envFile, projectName }) {

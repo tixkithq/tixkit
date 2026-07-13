@@ -66,7 +66,7 @@ bun run compact:init -- \
   --project-name tixkit-compact-destination
 ```
 
-Edit the destination `*_PORT` values before starting both projects. Always pass the matching environment and project flags to `compact:up`, `compact:status`, `compact:logs`, `compact:backup`, `compact:restore`, `compact:upgrade` and `compact:uninstall`. Compact rejects a project-name override that does not match the owner recorded in the selected environment. Each project also receives distinct local application image tags, preventing one installation's frontend build and baked API URL from replacing another installation's restart image.
+Edit the destination `*_PORT` values before starting both projects. When changing `MINIO_API_PORT`, set `S3_PUBLIC_ENDPOINT` to the exact matching `http://localhost:<MINIO_API_PORT>` origin; validation rejects mismatches so browser-signed uploads cannot reach another local installation. Always pass the matching environment and project flags to `compact:up`, `compact:status`, `compact:logs`, `compact:backup`, `compact:restore`, `compact:upgrade` and `compact:uninstall`. Compact rejects a project-name override that does not match the owner recorded in the selected environment. Each project also receives distinct local application image tags, preventing one installation's frontend build and baked API URL from replacing another installation's restart image.
 
 ## Operate
 

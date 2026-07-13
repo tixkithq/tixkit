@@ -265,7 +265,13 @@ test('Compact-generated portability environment satisfies runtime parsers and Co
       readFileSync(secondEnvironmentPath, 'utf8')
         .replace(/^API_PORT=.*$/mu, 'API_PORT=4100')
         .replace(/^CHECKOUT_PORT=.*$/mu, 'CHECKOUT_PORT=3100')
-        .replace(/^ADMIN_PORT=.*$/mu, 'ADMIN_PORT=3101'),
+        .replace(/^ADMIN_PORT=.*$/mu, 'ADMIN_PORT=3101')
+        .replace(/^MINIO_API_PORT=.*$/mu, 'MINIO_API_PORT=9100')
+        .replace(/^MINIO_CONSOLE_PORT=.*$/mu, 'MINIO_CONSOLE_PORT=9101')
+        .replace(/^S3_PUBLIC_ENDPOINT=.*$/mu, 'S3_PUBLIC_ENDPOINT=http://localhost:9100'),
+    );
+    assert.doesNotThrow(() =>
+      validateCompactEnvironment({ environmentPath: secondEnvironmentPath }),
     );
     execFileSync(
       'bun',
@@ -345,6 +351,11 @@ portableCutoverTrustFromEnvironment(environment);`,
       secondRendered.services.checkout.build.args.NEXT_PUBLIC_TIXKIT_API_BASE_URL,
       'http://localhost:4100/v1',
     );
+    assert.equal(
+      secondRendered.services.api.environment.S3_PUBLIC_ENDPOINT,
+      'http://localhost:9100',
+    );
+    assert.equal(String(secondRendered.services.minio.ports[0].published), '9100');
     assert.deepEqual(
       Object.values(rendered.volumes).map(({ name }) => name),
       [
