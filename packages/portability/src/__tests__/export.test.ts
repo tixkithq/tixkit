@@ -2,12 +2,144 @@ import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   buildPortableLogicalExport,
+  createPortableHistoricalPayloadPolicies,
   parsePortableJson,
   validatePortableLineage,
   verifyAndPreflightPortableImport,
 } from '../index.js';
 
 describe('portable logical export builder', () => {
+  it('requires and binds a current explicit authorization for historical records', () => {
+    const keys = generateKeyPairSync('ed25519');
+    const authorization = {
+      authorizationId: 'historical_authorization_01',
+      tenantId: 'tenant_source',
+      grantedByPrincipalId: 'principal_owner_01',
+      grantedAt: '2026-07-12T19:55:00.000Z',
+      expiresAt: '2026-07-12T20:05:00.000Z',
+      scope: 'tenant-historical-portability' as const,
+    };
+    const common = {
+      bundleId: 'bundle_historical_01',
+      mode: 'historical' as const,
+      source: {
+        operatingModel: 'self-hosted' as const,
+        deploymentId: 'deployment_source',
+        tenantId: 'tenant_source',
+        exportSequence: 1,
+        changeCursor: 'cursor_01',
+      },
+      apiVersion: '2026-07-15',
+      dataSchemaVersion: '0077',
+      exportedAt: '2026-07-12T20:00:00.000Z',
+      currentTime: '2026-07-12T20:00:00.000Z',
+      compatibility: {
+        minimumApiVersion: '2026-01-01',
+        maximumApiVersion: '2026-12-31',
+        minimumDataSchemaVersion: '0077',
+        maximumDataSchemaVersion: '0077',
+        requiredCapabilities: ['portable-bundle-v2'],
+        requiredEntitlements: ['historical-import-v1'],
+      },
+      sections: new Map([
+        [
+          'buyers' as const,
+          [
+            {
+              portableId: 'buyer_01',
+              attributes: {
+                email: 'buyer@example.test',
+                createdAt: '2026-07-12T20:00:00.000Z',
+                updatedAt: '2026-07-12T20:00:00.000Z',
+              },
+            },
+          ],
+        ],
+      ]),
+      bundleSigning: { keyId: 'bundle_key_01', privateKey: keys.privateKey },
+      payloadSigning: { keyId: 'payload_key_01', privateKey: keys.privateKey },
+      payloadPolicies: createPortableHistoricalPayloadPolicies(),
+    };
+
+    expect(() => buildPortableLogicalExport(common)).toThrow(/explicit authorization/u);
+    const built = buildPortableLogicalExport({ ...common, historicalAuthorization: authorization });
+    expect(built.envelope.manifest.historicalAuthorization).toEqual(authorization);
+    const buyerPolicy = createPortableHistoricalPayloadPolicies().get('buyers')!;
+    const destination = {
+      deploymentId: 'deployment_destination',
+      apiVersion: '2026-07-15',
+      dataSchemaVersion: '0077',
+      capabilities: ['portable-bundle-v2'],
+      entitlements: ['historical-import-v1'],
+      availableStorageBytes: 1024 * 1024,
+      acceptedSourceOperatingModels: ['self-hosted' as const],
+    };
+    const preflight = (entitlements: string[]) =>
+      verifyAndPreflightPortableImport(
+        built.envelope,
+        { ...destination, entitlements },
+        new Map([['bundle_key_01', keys.publicKey]]),
+        new Map([['payload_key_01', keys.publicKey]]),
+        new Map([
+          [
+            'buyers',
+            {
+              schemaId: buyerPolicy.schemaId,
+              schemaSha256: buyerPolicy.schemaSha256,
+              policySha256: buyerPolicy.policySha256,
+              scannerId: buyerPolicy.scannerId,
+              keyId: 'payload_key_01',
+            },
+          ],
+        ]),
+        new Map(),
+        new Map(),
+      );
+    expect(preflight(['historical-import-v1']).compatible).toBe(true);
+    expect(preflight([])).toMatchObject({
+      compatible: false,
+      errors: expect.arrayContaining([expect.stringContaining('historical-import-v1')]),
+    });
+    expect(() =>
+      buildPortableLogicalExport({
+        ...common,
+        payloadPolicies: new Map([
+          [
+            'buyers',
+            {
+              schemaId: 'permissive',
+              schemaSha256: '1'.repeat(64),
+              policySha256: '2'.repeat(64),
+              scannerId: 'permissive',
+              validateRecord: () => true,
+            },
+          ],
+        ]),
+        historicalAuthorization: authorization,
+      }),
+    ).toThrow(/not canonical/u);
+    expect(() =>
+      buildPortableLogicalExport({
+        ...common,
+        compatibility: { ...common.compatibility, requiredEntitlements: [] },
+        historicalAuthorization: authorization,
+      }),
+    ).toThrow(/historical-import-v1/u);
+    expect(() =>
+      buildPortableLogicalExport({
+        ...common,
+        historicalAuthorization: { ...authorization, expiresAt: common.exportedAt },
+      }),
+    ).toThrow(/explicit authorization/u);
+    expect(() =>
+      buildPortableLogicalExport({
+        ...common,
+        mode: 'configuration',
+        historicalAuthorization: authorization,
+      }),
+    ).toThrow(/historical sections/u);
+  });
+
   it('derives delta lineage from and transports the exact signed parent', () => {
     const bundleKeys = generateKeyPairSync('ed25519');
     const payloadKeys = generateKeyPairSync('ed25519');

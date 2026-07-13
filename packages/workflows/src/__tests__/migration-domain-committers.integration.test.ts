@@ -44,7 +44,10 @@ import {
 } from '../activities/migration-domain-committers.js';
 import { createRepositoryMigrationActivityService } from '../activities/migration-repository-service.js';
 import { createMigrationPreparationService } from '../activities/migration-preparation.js';
-import { loadPortableConfigurationSections } from '../activities/portable-export.js';
+import {
+  loadPortableConfigurationSections,
+  loadPortableHistoricalSections,
+} from '../activities/portable-export.js';
 
 const integrationDriver = process.env.DB_INTEGRATION_DRIVER === 'mysql' ? 'mysql' : 'postgres';
 const url =
@@ -649,7 +652,7 @@ describeDatabase('production migration committers', () => {
             .executeTakeFirstOrThrow()
         ).count,
       ),
-    ).toBe(18);
+    ).toBe(MIGRATION_ENTITY_DEPENDENCY_ORDER.length + 1); // Includes the portable-media event fixture.
     const snapshots = await db
       .selectFrom('imported_domain_entities')
       .select(['entity_type', 'side_effects_suppressed', 'financial_snapshot'])
@@ -662,6 +665,76 @@ describeDatabase('production migration committers', () => {
         (snapshot) => snapshot.side_effects_suppressed && snapshot.financial_snapshot,
       ),
     ).toBe(true);
+    const ticketReference = await imports.findExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      entityType: 'ticket',
+      externalId: 'ticket-1',
+    });
+    expect(ticketReference).toBeDefined();
+    const ticketBeforeEdit = await db
+      .selectFrom('tickets')
+      .select(['updated_at', 'status', 'code', 'qr_payload', 'qr_hash'])
+      .where('id', '=', ticketReference!.tixkit_id)
+      .executeTakeFirstOrThrow();
+    expect(ticketBeforeEdit).toMatchObject({
+      status: 'void',
+      code: expect.stringMatching(/^historical_[a-f0-9]{39}$/u),
+      qr_payload: expect.stringMatching(/^historical_[a-f0-9]{39}$/u),
+      qr_hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(
+      await db
+        .selectFrom('attendees')
+        .select('status')
+        .where('tenant_id', '=', tenantId)
+        .where(
+          'id',
+          '=',
+          (await imports.findExternalReference({
+            tenantId,
+            organizationId,
+            sourceSystem: 'generic-csv',
+            entityType: 'attendee',
+            externalId: 'attendee-1',
+          }))!.tixkit_id,
+        )
+        .execute(),
+    ).toEqual([expect.objectContaining({ status: 'historical' })]);
+    const liveSourceTicketCode = 'LIVE_SOURCE_BEARER_TICKET_01';
+    await db
+      .updateTable('tickets')
+      .set({
+        code: liveSourceTicketCode,
+        qr_payload: liveSourceTicketCode,
+        qr_hash: createHash('sha256').update(liveSourceTicketCode).digest('hex'),
+      })
+      .where('tenant_id', '=', tenantId)
+      .where('status', '=', 'void')
+      .execute();
+    const historicalSections = await loadPortableHistoricalSections(db, {
+      tenantId,
+      organizationId,
+    });
+    expect(
+      Object.fromEntries([...historicalSections].map(([section, rows]) => [section, rows.length])),
+    ).toMatchObject({
+      buyers: 1,
+      attendees: 1,
+      orders: 1,
+      payments: 1,
+      refunds: 1,
+      tickets: 1,
+      scans: 1,
+    });
+    const historicalJson = JSON.stringify(Object.fromEntries(historicalSections));
+    expect(historicalJson).not.toContain(liveSourceTicketCode);
+    expect(historicalJson).not.toMatch(/providerReference(?!Sha256)/u);
+    expect(historicalSections.get('tickets')?.[0]?.attributes).toMatchObject({
+      status: 'void',
+      codeSha256: createHash('sha256').update(liveSourceTicketCode).digest('hex'),
+    });
     expect(
       Number(
         (
@@ -683,19 +756,6 @@ describeDatabase('production migration committers', () => {
       ),
     ).toBe(0);
 
-    const ticketReference = await imports.findExternalReference({
-      tenantId,
-      organizationId,
-      sourceSystem: 'generic-csv',
-      entityType: 'ticket',
-      externalId: 'ticket-1',
-    });
-    expect(ticketReference).toBeDefined();
-    const ticketBeforeEdit = await db
-      .selectFrom('tickets')
-      .select(['updated_at'])
-      .where('id', '=', ticketReference!.tixkit_id)
-      .executeTakeFirstOrThrow();
     await db
       .updateTable('tickets')
       .set({
@@ -1086,6 +1146,22 @@ describeDatabase('production migration committers', () => {
     const sourceBrandId = sourceEvent.dependencies!.find(
       ({ section }) => section === 'brands',
     )!.portableId;
+    const sourceMediaAssetIds = (
+      await db
+        .selectFrom('event_media_assets')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('organization_id', '=', organizationId)
+        .where('event_id', '=', sourceEvent.portableId)
+        .execute()
+    ).map(({ id }) => id);
+    if (sourceMediaAssetIds.length > 0) {
+      await db
+        .deleteFrom('event_media_renditions')
+        .where('asset_id', 'in', sourceMediaAssetIds)
+        .execute();
+      await db.deleteFrom('event_media_assets').where('id', 'in', sourceMediaAssetIds).execute();
+    }
     await db
       .updateTable('events')
       .set({ brand_id: otherBrand.id })

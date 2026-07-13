@@ -30,11 +30,13 @@ Side-effect-free TypeScript ES modules for Node.js 22 or newer. Cryptographic he
 
 ## Configuration
 
-The library reads no environment variables. Callers provide trusted public-key registries, exact payload and media policy allowlists, destination compatibility, signed historical authorization when applicable, and destination resource rebindings. Keep private signing keys in the deployment's approved secret or managed-key system.
+The library reads no environment variables. Callers provide trusted public-key registries, exact payload and media policy allowlists, destination compatibility, signer-attested historical authorization when applicable, and destination resource rebindings. Keep private signing keys in the deployment's approved secret or managed-key system.
 
 ## Security
 
-Bundles never contain plaintext credentials, secret keys, payment tokens, private signing keys, or infrastructure credentials. Delta transports include the exact signed parent envelope; importers reject missing, substituted, unsigned, or cursor-mismatched parents before staging. Final commit validates a fresh source-signed `PortableCutoverProof` against the already-verified immutable manifest and consumes its `(keyId, nonce)` exactly once. Importers must also verify exact bytes, signatures, checksums, closed schemas, media safety attestations, destination scope, resume provenance, required rebindings, and reconciliation before activation.
+Bundles never contain plaintext credentials, secret keys, payment tokens, private signing keys, or infrastructure credentials. Historical financial provider references are one-way SHA-256 reconciliation digests, and payment/refund snapshots are side-effect-suppressed. Historical destinations must explicitly advertise `historical-import-v1`. The bundle signature attests the embedded historical authorization claim; it is not an independently signed client assertion. A runtime signer must only accept a fresh, durable, unrevoked owner/admin grant and must never sign a caller-supplied authorization object directly. The public runtime endpoint remains configuration-only until that durable grant/consumption path is complete. Imported historical attendees and tickets remain inert (`historical`/`void`) with replacement non-redeemable codes; any future activation requires a separate reviewed contract.
+
+Delta transports include the exact signed parent envelope; importers reject missing, substituted, unsigned, or cursor-mismatched parents before staging. Final commit validates a fresh source-signed `PortableCutoverProof` against the already-verified immutable manifest and consumes its `(keyId, nonce)` exactly once. Importers must also verify exact bytes, signatures, checksums, closed schemas, media safety attestations, destination scope, resume provenance, required rebindings, and reconciliation before activation.
 
 ## Validation
 

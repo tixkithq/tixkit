@@ -474,6 +474,14 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
         }),
       };
     }
+    if (entityType === 'ticket') {
+      const codeSha256 = record.attributes.codeSha256;
+      if (typeof codeSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(codeSha256)) {
+        throw new Error('portable historical ticket code digest is invalid');
+      }
+      const { codeSha256: _codeSha256, ...ticketAttributes } = record.attributes;
+      attributes = { ...ticketAttributes, code: `historical_${codeSha256.slice(0, 39)}` };
+    }
     if (
       record.financialSnapshot &&
       (record.financialSnapshot.provenance.sourceSystem !== this.id ||

@@ -4,12 +4,15 @@ import {
   PORTABLE_BUNDLE_SCHEMA_VERSION,
   PORTABLE_SECTIONS,
   canonicalPortableJson,
+  HISTORICAL_SECTIONS,
   isPortableProtocolId,
   portableManifestSha256,
   scanPortablePayload,
   signPortableMediaAttestation,
   signPortableManifest,
   type PortableBundleManifest,
+  type PortableBundleMode,
+  type HistoricalExportAuthorization,
   type PortableLogicalRecord,
   type PortableAsset,
   type PortablePayloadSafetyPolicy,
@@ -17,6 +20,8 @@ import {
   type SignedPortableBundle,
   type TixkitOperatingModel,
 } from './manifest.js';
+import { createPortableHistoricalPayloadPolicies } from './historical-policy.js';
+import type { PortableHistoricalSection } from './historical-policy.js';
 
 const MAX_PORTABLE_EXPORT_RECORDS = 100_000;
 const MAX_PORTABLE_EXPORT_DECODED_BYTES = 32 * 1024 * 1024;
@@ -40,11 +45,18 @@ export const PORTABLE_RUNTIME_EXPORT_SECTIONS: ReadonlySet<PortableSection> = ne
   'checkout_questions',
   'discounts',
   'access_codes',
+  'buyers',
+  'attendees',
+  'orders',
+  'payments',
+  'refunds',
+  'tickets',
+  'scans',
 ]);
 
 export interface PortableLogicalExportInput {
   bundleId: string;
-  mode: 'configuration';
+  mode: PortableBundleMode;
   source: {
     operatingModel: TixkitOperatingModel;
     deploymentId: string;
@@ -57,6 +69,7 @@ export interface PortableLogicalExportInput {
   dataSchemaVersion: string;
   exportedAt: string;
   currentTime: string;
+  historicalAuthorization?: HistoricalExportAuthorization;
   lineage?:
     | { kind: 'full' }
     | {
@@ -144,8 +157,39 @@ export function buildPortableLogicalExport(
   ) {
     throw new Error('portable export compatibility sets contain duplicates');
   }
+  const exportedSections = [...input.sections.keys()];
+  if (
+    input.mode === 'configuration' &&
+    exportedSections.some((section) => HISTORICAL_SECTIONS.has(section))
+  ) {
+    throw new Error('portable configuration export cannot contain historical sections');
+  }
+  if (input.mode === 'historical') {
+    const authorization = input.historicalAuthorization;
+    if (
+      !authorization ||
+      authorization.tenantId !== input.source.tenantId ||
+      authorization.grantedByPrincipalId.trim().length === 0 ||
+      authorization.scope !== 'tenant-historical-portability' ||
+      !Number.isFinite(Date.parse(authorization.grantedAt)) ||
+      !Number.isFinite(Date.parse(authorization.expiresAt)) ||
+      Date.parse(authorization.grantedAt) > exportedAt ||
+      Date.parse(authorization.expiresAt) <= exportedAt ||
+      Date.parse(authorization.expiresAt) - Date.parse(authorization.grantedAt) > 86_400_000
+    ) {
+      throw new Error('portable historical export requires current explicit authorization');
+    }
+    if (!input.compatibility.requiredEntitlements.includes('historical-import-v1')) {
+      throw new Error(
+        'portable historical export requires destination historical-import-v1 opt-in',
+      );
+    }
+  } else if (input.historicalAuthorization) {
+    throw new Error('portable configuration export cannot carry historical authorization');
+  }
 
   const payloads = new Map<string, Uint8Array>();
+  const historicalPolicies = createPortableHistoricalPayloadPolicies();
   const files: PortableBundleManifest['files'] = [];
   const attestations: PortableBundleManifest['payloadSafety']['scannedFiles'] = [];
   const entityCounts: PortableBundleManifest['entityCounts'] = {};
@@ -172,7 +216,21 @@ export function buildPortableLogicalExport(
     if (!PORTABLE_RUNTIME_EXPORT_SECTIONS.has(section)) {
       throw new Error(`portable runtime export does not yet support ${section}`);
     }
-    const policy = input.payloadPolicies.get(section);
+    const suppliedPolicy = input.payloadPolicies.get(section);
+    const canonicalHistoricalPolicy = HISTORICAL_SECTIONS.has(section)
+      ? historicalPolicies.get(section as PortableHistoricalSection)
+      : undefined;
+    if (
+      canonicalHistoricalPolicy &&
+      suppliedPolicy &&
+      (suppliedPolicy.schemaId !== canonicalHistoricalPolicy.schemaId ||
+        suppliedPolicy.schemaSha256 !== canonicalHistoricalPolicy.schemaSha256 ||
+        suppliedPolicy.policySha256 !== canonicalHistoricalPolicy.policySha256 ||
+        suppliedPolicy.scannerId !== canonicalHistoricalPolicy.scannerId)
+    ) {
+      throw new Error(`portable historical policy is not canonical for ${section}`);
+    }
+    const policy = canonicalHistoricalPolicy ?? suppliedPolicy;
     if (!policy) throw new Error(`portable export safety policy is missing for ${section}`);
     const records = [...sourceRecords]
       .map((record) => {
@@ -370,6 +428,9 @@ export function buildPortableLogicalExport(
     rebindings: [...(input.rebindings ?? [])].sort((left, right) =>
       comparePortableCodeUnits(left.portableId, right.portableId),
     ),
+    ...(input.historicalAuthorization
+      ? { historicalAuthorization: input.historicalAuthorization }
+      : {}),
   };
   const envelope = {
     manifest,

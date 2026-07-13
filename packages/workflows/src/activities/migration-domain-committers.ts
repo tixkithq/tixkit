@@ -1085,7 +1085,7 @@ async function writeCanonicalEntity(
         email: textAttribute(entity, 'email'),
         phone: null,
         date_of_birth: null,
-        status: 'active',
+        status: 'historical',
         custom_answers: null,
         checked_in_at: null,
         check_in_device_id: null,
@@ -1172,7 +1172,11 @@ async function writeCanonicalEntity(
         .execute();
       return;
     }
-    case 'ticket':
+    case 'ticket': {
+      const nonRedeemableCode = `historical_${createHash('sha256')
+        .update(`${input.jobId}\0${entity.externalId}`)
+        .digest('hex')
+        .slice(0, 39)}`;
       await updateOrInsert('tickets', {
         tenant_id: input.tenantId,
         order_id: dependency(deps, 'historical-order'),
@@ -1180,10 +1184,10 @@ async function writeCanonicalEntity(
         event_id: dependency(deps, 'event'),
         event_occurrence_id: deps.get('occurrence') ?? null,
         ticket_type_id: dependency(deps, 'ticket-type'),
-        status: 'valid',
-        code: textAttribute(entity, 'code'),
-        qr_payload: textAttribute(entity, 'code'),
-        qr_hash: textAttribute(entity, 'code'),
+        status: 'void',
+        code: nonRedeemableCode,
+        qr_payload: nonRedeemableCode,
+        qr_hash: createHash('sha256').update(nonRedeemableCode).digest('hex'),
         transferred_to_email: null,
         transferred_at: null,
         checked_in_at: null,
@@ -1208,6 +1212,7 @@ async function writeCanonicalEntity(
         .where('id', '=', dependency(deps, 'attendee'))
         .execute();
       return;
+    }
     case 'historical-payment':
     case 'historical-refund': {
       const snapshot = entity.financialSnapshot!;
