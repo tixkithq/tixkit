@@ -1,0 +1,36 @@
+{
+  "from": "2026-07-13",
+  "to": "2026-07-14",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 4,
+    "compatible": 0
+  },
+  "changes": [
+    {
+      "severity": "breaking",
+      "category": "enum-expanded",
+      "path": "components.schemas.PortableImportRebinding.properties.kind",
+      "message": "Enum value payment_provider_account was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "enum-expanded",
+      "path": "components.schemas.PortableImportRebinding.properties.kind",
+      "message": "Enum value email_delivery_route was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "enum-expanded",
+      "path": "components.schemas.PortableImportRebinding.properties.kind",
+      "message": "Enum value sms_delivery_route was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "enum-expanded",
+      "path": "components.schemas.PortableImportRebinding.properties.kind",
+      "message": "Enum value marketing_integration was added."
+    }
+  ]
+}
