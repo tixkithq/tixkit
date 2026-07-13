@@ -7,7 +7,7 @@ product_area: self-hosting
 content_type: how-to
 status: beta
 owner: platform-operations
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 prerequisites:
   - Docker Desktop or Docker Engine with Compose v2
   - A clean checkout of the authoritative public repository
@@ -32,7 +32,7 @@ bun run compact:init
 bun run compact:up
 ```
 
-`compact:init` writes `infra/compact/.env` with mode `0600` and unique persistent-service and signing secrets. It refuses to overwrite an existing file. Back up this file separately; do not commit or share it. `compact:up` builds the application images, applies idempotent migrations, creates the object bucket, seeds an evaluation organization and event, and waits for every service health condition.
+`compact:init` writes `infra/compact/.env` with mode `0600`, a deployment identity, and unique persistent-service and Ed25519 portability signing keys. Only the API receives the bundle, payload and dry-run private keys plus cutover public trust needed by its current runtime routes; migration, seed, storage-init and worker containers do not receive those private keys. The generated cutover private key remains host-local for future source-side exchange tooling and is not injected into a container. Back up this file separately; it contains private keys and must not be committed or shared. External source-key registration and destination worker import trust are not configured by this bootstrap step. `compact:up` builds the application images, applies idempotent migrations, creates the object bucket, seeds an evaluation organization and event, and waits for every service health condition.
 
 The default endpoints are:
 

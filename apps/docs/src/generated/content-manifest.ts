@@ -485,7 +485,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosting/compact": {
     sourcePath: "docs/public/self-hosting/compact.mdx",
-    frontmatter: {"title":"Run the Compact profile","description":"Start, operate, back up, restore, upgrade, and remove a complete single-host Tixkit installation.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-11","prerequisites":["Docker Desktop or Docker Engine with Compose v2","A clean checkout of the authoritative public repository"],"related":["/self-hosting/backups-and-restore","/self-hosting/upgrades","/self-hosting/architecture"]},
+    frontmatter: {"title":"Run the Compact profile","description":"Start, operate, back up, restore, upgrade, and remove a complete single-host Tixkit installation.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-13","prerequisites":["Docker Desktop or Docker Engine with Compose v2","A clean checkout of the authoritative public repository"],"related":["/self-hosting/backups-and-restore","/self-hosting/upgrades","/self-hosting/architecture"]},
     headings: [{"id":"host-envelope","text":"Host envelope","level":2},{"id":"first-start","text":"First start","level":2},{"id":"operate","text":"Operate","level":2},{"id":"back-up-and-restore","text":"Back up and restore","level":2},{"id":"upgrade-and-uninstall","text":"Upgrade and uninstall","level":2}],
     load: () => import("../../../../docs/public/self-hosting/compact.mdx"),
   },

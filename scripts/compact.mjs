@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+} from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -26,6 +33,29 @@ function secret(bytes = 32) {
   return randomBytes(bytes).toString('base64url');
 }
 
+function portabilityKey(prefix, deploymentSuffix) {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return {
+    keyId: `${prefix}_${deploymentSuffix}`,
+    privateKeyBase64: Buffer.from(privateKey.export({ type: 'pkcs8', format: 'pem' })).toString(
+      'base64',
+    ),
+    publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  };
+}
+
+function parseEd25519PrivateKey(name, encoded) {
+  try {
+    const bytes = Buffer.from(encoded, 'base64');
+    if (!encoded || bytes.toString('base64') !== encoded) throw new Error('non-canonical');
+    const privateKey = createPrivateKey(bytes.toString('utf8'));
+    if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('wrong type');
+    return privateKey;
+  } catch {
+    throw new Error(`Compact environment contains an invalid ${name}.`);
+  }
+}
+
 function compose(arguments_, options = {}) {
   return execFileSync(
     'docker',
@@ -48,9 +78,16 @@ export function initializeCompactEnvironment({ environmentPath = envFile } = {})
     throw new Error(
       'Compact environment already exists; refusing to overwrite persistent-service secrets.',
     );
+  const deploymentSuffix = randomUUID().replaceAll('-', '');
+  const bundleKey = portabilityKey('compact_bundle', deploymentSuffix);
+  const payloadKey = portabilityKey('compact_payload', deploymentSuffix);
+  const dryRunKey = portabilityKey('compact_dry_run', deploymentSuffix);
+  const cutoverKey = portabilityKey('compact_cutover', deploymentSuffix);
   const contents = [
     'TIXKIT_VERSION=local',
     `TIXKIT_SANDBOX_EPOCH=${randomUUID()}`,
+    `TIXKIT_DEPLOYMENT_ID=compact_${deploymentSuffix}`,
+    'TIXKIT_OPERATING_MODEL=self-hosted',
     `POSTGRES_PASSWORD=${secret()}`,
     `TEMPORAL_POSTGRES_PASSWORD=${secret()}`,
     `MINIO_ROOT_USER=compact-${randomBytes(8).toString('hex')}`,
@@ -59,6 +96,16 @@ export function initializeCompactEnvironment({ environmentPath = envFile } = {})
     `OFFLINE_MANIFEST_SIGNING_KEY=${secret(48)}`,
     `WIDGET_IMPRESSION_HASH_SECRET=${secret(48)}`,
     `TIXKIT_MIGRATION_CURSOR_KEY=${secret(32)}`,
+    `PORTABILITY_BUNDLE_SIGNING_KEY_ID=${bundleKey.keyId}`,
+    `PORTABILITY_BUNDLE_SIGNING_PRIVATE_KEY_BASE64=${bundleKey.privateKeyBase64}`,
+    `PORTABILITY_PAYLOAD_SIGNING_KEY_ID=${payloadKey.keyId}`,
+    `PORTABILITY_PAYLOAD_SIGNING_PRIVATE_KEY_BASE64=${payloadKey.privateKeyBase64}`,
+    `PORTABILITY_DRY_RUN_SIGNING_KEY_ID=${dryRunKey.keyId}`,
+    `PORTABILITY_DRY_RUN_SIGNING_PRIVATE_KEY_BASE64=${dryRunKey.privateKeyBase64}`,
+    'PORTABILITY_DRY_RUN_TRUSTED_PUBLIC_KEYS={}',
+    `PORTABILITY_CUTOVER_SIGNING_KEY_ID=${cutoverKey.keyId}`,
+    `PORTABILITY_CUTOVER_SIGNING_PRIVATE_KEY_BASE64=${cutoverKey.privateKeyBase64}`,
+    `PORTABILITY_CUTOVER_TRUSTED_PUBLIC_KEYS=${JSON.stringify({ [cutoverKey.keyId]: cutoverKey.publicKeyPem })}`,
     '',
     'API_PORT=4000',
     'CHECKOUT_PORT=3000',
@@ -87,6 +134,10 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
   if (mode !== 0o600)
     throw new Error(`Compact environment must have mode 0600; found ${mode.toString(8)}.`);
   const environment = compactEnvironment(environmentPath);
+  if (!/^compact_[a-f0-9]{32}$/u.test(environment.TIXKIT_DEPLOYMENT_ID ?? ''))
+    throw new Error('Compact environment contains an invalid TIXKIT_DEPLOYMENT_ID.');
+  if (environment.TIXKIT_OPERATING_MODEL !== 'self-hosted')
+    throw new Error('Compact environment must use the self-hosted operating model.');
   for (const key of [
     'POSTGRES_PASSWORD',
     'TEMPORAL_POSTGRES_PASSWORD',
@@ -107,6 +158,63 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
     throw new Error('Compact environment contains an unsafe value for MINIO_ROOT_USER.');
   if (Buffer.from(environment.TIXKIT_MIGRATION_CURSOR_KEY, 'base64').byteLength !== 32)
     throw new Error('Compact migration cursor key must decode to exactly 32 bytes.');
+  for (const [purpose, keyIdName, privateKeyName, trustName, activeTrustMode] of [
+    [
+      'dry-run',
+      'PORTABILITY_DRY_RUN_SIGNING_KEY_ID',
+      'PORTABILITY_DRY_RUN_SIGNING_PRIVATE_KEY_BASE64',
+      'PORTABILITY_DRY_RUN_TRUSTED_PUBLIC_KEYS',
+      'excluded',
+    ],
+    [
+      'cutover',
+      'PORTABILITY_CUTOVER_SIGNING_KEY_ID',
+      'PORTABILITY_CUTOVER_SIGNING_PRIVATE_KEY_BASE64',
+      'PORTABILITY_CUTOVER_TRUSTED_PUBLIC_KEYS',
+      'required',
+    ],
+  ]) {
+    const keyId = environment[keyIdName] ?? '';
+    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(keyId))
+      throw new Error(`Compact environment contains an invalid ${keyIdName}.`);
+    const privateKey = parseEd25519PrivateKey(privateKeyName, environment[privateKeyName]);
+    try {
+      const trust = JSON.parse(environment[trustName] ?? '');
+      if (!trust || typeof trust !== 'object' || Array.isArray(trust)) throw new Error('invalid');
+      const trustedKeys = new Map(
+        Object.entries(trust).map(([trustedKeyId, trustedPem]) => {
+          if (
+            !/^[A-Za-z0-9_-]{1,128}$/u.test(trustedKeyId) ||
+            typeof trustedPem !== 'string' ||
+            /PRIVATE KEY/u.test(trustedPem)
+          )
+            throw new Error('invalid');
+          const trustedKey = createPublicKey(trustedPem);
+          if (trustedKey.asymmetricKeyType !== 'ed25519') throw new Error('invalid');
+          return [trustedKeyId, trustedKey];
+        }),
+      );
+      const trustedKey = trustedKeys.get(keyId);
+      const expectedKey = createPublicKey(privateKey);
+      if (
+        (activeTrustMode === 'required' && !trustedKey?.equals(expectedKey)) ||
+        (activeTrustMode === 'excluded' && trustedKey)
+      )
+        throw new Error('invalid');
+    } catch {
+      throw new Error(
+        `Compact ${purpose} trust contains invalid Ed25519 public-key entries or active-key configuration.`,
+      );
+    }
+  }
+  for (const [keyIdName, privateKeyName] of [
+    ['PORTABILITY_BUNDLE_SIGNING_KEY_ID', 'PORTABILITY_BUNDLE_SIGNING_PRIVATE_KEY_BASE64'],
+    ['PORTABILITY_PAYLOAD_SIGNING_KEY_ID', 'PORTABILITY_PAYLOAD_SIGNING_PRIVATE_KEY_BASE64'],
+  ]) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(environment[keyIdName] ?? ''))
+      throw new Error(`Compact environment contains an invalid ${keyIdName}.`);
+    parseEd25519PrivateKey(privateKeyName, environment[privateKeyName]);
+  }
   for (const key of [
     'API_PORT',
     'CHECKOUT_PORT',
@@ -208,7 +316,10 @@ export function backupCompact(destination) {
     resolve(staging, 'minio.tar.gz'),
   ];
   const objectDirectory = resolve(staging, '.objects');
-  mkdirSync(resolve(objectDirectory, 'tixkit'), { recursive: true, mode: 0o700 });
+  mkdirSync(resolve(objectDirectory, 'tixkit'), {
+    recursive: true,
+    mode: 0o700,
+  });
   compose(['stop', 'api', 'worker', 'admin', 'checkout', 'temporal-ui', 'temporal']);
   try {
     pipeCompose(['exec', '-T', 'postgres', 'pg_dump', '-U', 'tixkit', '-d', 'tixkit'], {
@@ -305,7 +416,9 @@ export function restoreCompact(source) {
   const members = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' })
     .split('\n')
     .filter(Boolean);
-  const verboseMembers = execFileSync('tar', ['-tvzf', archive], { encoding: 'utf8' })
+  const verboseMembers = execFileSync('tar', ['-tvzf', archive], {
+    encoding: 'utf8',
+  })
     .split('\n')
     .filter(Boolean);
   if (
@@ -378,7 +491,11 @@ export function restoreCompact(source) {
           '-d',
           database.stage,
         ],
-        { cwd: root, input: readFileSync(database.dump), stdio: ['pipe', 'ignore', 'inherit'] },
+        {
+          cwd: root,
+          input: readFileSync(database.dump),
+          stdio: ['pipe', 'ignore', 'inherit'],
+        },
       );
       if (staged.status !== 0) throw new Error(`Restore staging failed for ${database.current}.`);
       compose([
