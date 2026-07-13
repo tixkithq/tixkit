@@ -690,11 +690,19 @@ export function validatePublicDistribution(manifest, root, schema) {
       violations.push(`stale release image Dockerfile classification: ${dockerfile}`);
   for (const contract of manifest.release.contracts)
     validateExistingPath(root, contract, 'release.contracts', violations);
-  const declaredApiContracts = new Set(
-    manifest.release.contracts.filter((contract) =>
-      /^artifacts\/api\/\d{4}-\d{2}-\d{2}$/u.test(contract),
-    ),
+  const apiContractPaths = manifest.release.contracts.filter((contract) =>
+    /^artifacts\/api\/\d{4}-\d{2}-\d{2}$/u.test(contract),
   );
+  const declaredApiContracts = new Set(apiContractPaths);
+  const generatedOpenApiVersion = JSON.parse(
+    readFileSync(resolve(root, 'apps/docs/public/openapi.json'), 'utf8'),
+  ).info?.version;
+  const expectedActiveApiContract = `artifacts/api/${generatedOpenApiVersion}`;
+  if (apiContractPaths[0] !== expectedActiveApiContract) {
+    violations.push(
+      `first release API contract must be the generated active contract: ${expectedActiveApiContract}`,
+    );
+  }
   for (const entry of readdirSync(resolve(root, 'artifacts/api'), { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^\d{4}-\d{2}-\d{2}$/u.test(entry.name)) continue;
     const contract = `artifacts/api/${entry.name}`;

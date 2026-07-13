@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
-import { validateSdkParity } from '../lib/sdk-parity.mjs';
+import { SDK_API_VERSION, validateSdkParity } from '../lib/sdk-parity.mjs';
+
+const root = resolve(import.meta.dirname, '../..');
+const generatedOpenApiVersion = JSON.parse(
+  readFileSync(resolve(root, 'apps/docs/public/openapi.json'), 'utf8'),
+).info.version;
+assert.equal(SDK_API_VERSION, generatedOpenApiVersion);
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'tixkit-sdk-parity-'));
@@ -23,7 +29,7 @@ function fixture() {
     {
       id: 'example',
       packageName: '@tixkit/example',
-      apiVersion: '2026-01-01',
+      apiVersion: SDK_API_VERSION,
       supportStatus: 'beta',
       install: 'bun add @tixkit/example',
       initialization: 'new ExampleClient()',
@@ -38,10 +44,10 @@ function fixture() {
     join(root, 'packages/example/package.json'),
     JSON.stringify({ name: '@tixkit/example' }),
   );
-  writeFileSync(join(root, 'packages/example/README.md'), 'API version 2026-01-01');
+  writeFileSync(join(root, 'packages/example/README.md'), `API version ${SDK_API_VERSION}`);
   writeFileSync(
     join(root, 'packages/example/src.ts'),
-    "export const API_VERSION = '2026-01-01'; export class ExampleClient {}",
+    `export const API_VERSION = '${SDK_API_VERSION}'; export class ExampleClient {}`,
   );
   writeFileSync(
     join(root, 'docs/example.mdx'),

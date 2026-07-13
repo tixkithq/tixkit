@@ -16,6 +16,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const manifest = JSON.parse(
   readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
 );
+const generatedOpenApiVersion = JSON.parse(
+  readFileSync(resolve(root, 'apps/docs/public/openapi.json'), 'utf8'),
+).info.version;
 
 test('validates the authoritative public distribution and every SDK release path', () => {
   assert.deepEqual(validatePublicDistribution(structuredClone(manifest), root), manifest);
@@ -175,6 +178,25 @@ test('rejects unsafe release paths and omitted publishable packages', () => {
   assert.throws(
     () => validatePublicDistribution(missingRetainedApi, root),
     /retained API contract missing from release\.contracts: artifacts\/api\/2026-07-17/u,
+  );
+
+  const reorderedApiContracts = structuredClone(manifest);
+  const activeApiContract = reorderedApiContracts.release.contracts.find((contract) =>
+    contract.startsWith('artifacts/api/'),
+  );
+  reorderedApiContracts.release.contracts = [
+    'artifacts/api/2026-01-01',
+    ...reorderedApiContracts.release.contracts.filter(
+      (contract) => contract !== 'artifacts/api/2026-01-01',
+    ),
+  ];
+  assert.notEqual(reorderedApiContracts.release.contracts[0], activeApiContract);
+  assert.throws(
+    () => validatePublicDistribution(reorderedApiContracts, root),
+    new RegExp(
+      `first release API contract must be the generated active contract: artifacts/api/${generatedOpenApiVersion}`,
+      'u',
+    ),
   );
 });
 

@@ -33,10 +33,21 @@ import {
 } from '../publish-public-github-release.mjs';
 import { verifyCloudCoreInstall } from '../verify-cloud-core-install.mjs';
 import { classifyStagedPublicRelease } from '../validate-staged-public-release.mjs';
+import { SDK_API_VERSION } from '../lib/sdk-parity.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const distribution = JSON.parse(
   readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
+);
+const generatedOpenApiVersion = JSON.parse(
+  readFileSync(resolve(root, 'apps/docs/public/openapi.json'), 'utf8'),
+).info.version;
+assert.equal(SDK_API_VERSION, generatedOpenApiVersion);
+const activeApiVersion = generatedOpenApiVersion;
+const activeApiContract = `artifacts/api/${activeApiVersion}`;
+assert.equal(
+  distribution.release.contracts.find((path) => path.startsWith('artifacts/api/')),
+  activeApiContract,
 );
 const migrationIds = readdirSync(resolve(root, 'packages/db/src/migrations'))
   .map((name) => name.match(/^(\d{4}(?:_\d+)?)/u)?.[1])
@@ -66,7 +77,7 @@ function compatibilityManifest() {
     core: {
       sourceCommit: 'b'.repeat(40),
       sourceTreeSha256: 'c'.repeat(64),
-      apiVersion: '2026-01-01',
+      apiVersion: activeApiVersion,
       migrationRange: { ...currentMigrationRange },
       agentProtocol: agentContract
         ? { status: 'supported', version: agentVersion }
@@ -80,11 +91,11 @@ function compatibilityManifest() {
       contracts: [
         {
           name: 'openapi',
-          version: '2026-01-01',
+          version: activeApiVersion,
           sha256: readFileSync(
             [
-              resolve(root, 'artifacts/api/2026-01-01/CHECKSUMS.sha256'),
-              resolve(root, 'apps/docs/public/contracts/2026-01-01/CHECKSUMS.sha256'),
+              resolve(root, activeApiContract, 'CHECKSUMS.sha256'),
+              resolve(root, 'apps/docs/public/contracts', activeApiVersion, 'CHECKSUMS.sha256'),
             ].find(existsSync),
             'utf8',
           )
@@ -440,7 +451,9 @@ test('rejects renamed source copies, artifact rewriting, and API contract drift'
       ),
     );
     assert.ok(
-      violations.includes('openapi@2026-01-01 checksum does not match the public contract'),
+      violations.includes(
+        `openapi@${activeApiVersion} checksum does not match the public contract`,
+      ),
     );
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
