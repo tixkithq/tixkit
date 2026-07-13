@@ -164,7 +164,10 @@ test.describe('role-based event media journeys', () => {
     );
 
     await installLargestContentfulPaintObserver(page);
-    for (const viewport of responsiveMediaViewports) {
+    const viewports = testInfo.project.name.startsWith('mobile-')
+      ? [responsiveMediaViewports[0]]
+      : responsiveMediaViewports;
+    for (const viewport of viewports) {
       await page.setViewportSize(viewport);
       await page.goto(`${checkoutBaseUrl}/e/${seeded.event.id}`);
       await expect(page.getByRole('main')).toBeVisible();
@@ -203,7 +206,11 @@ test.describe('role-based event media journeys', () => {
       await expectNoAxeViolations(page, testInfo, 'main');
     }
 
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setViewportSize(
+      testInfo.project.name.startsWith('mobile-')
+        ? responsiveMediaViewports[0]
+        : responsiveMediaViewports[1],
+    );
     await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/settings`);
     await expect(page.getByAltText(altText)).toBeVisible();
 

@@ -229,6 +229,16 @@ export default defineConfig({
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
+    {
+      name: 'mobile-chromium-event-media',
+      testMatch: /event-media-journeys\.spec\.ts/u,
+      use: { ...devices['Pixel 5'] },
+    },
+    {
+      name: 'mobile-webkit-event-media',
+      testMatch: /event-media-journeys\.spec\.ts/u,
+      use: { ...devices['iPhone 13'] },
+    },
   ],
 
   webServer: useWebServer
