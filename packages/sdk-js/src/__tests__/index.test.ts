@@ -190,6 +190,79 @@ describe('TixkitClient', () => {
     });
   });
 
+  it('grants, revokes, and consumes typed historical export authorization', async () => {
+    const authorization = {
+      authorizationId: 'pexa_12345678',
+      tenantId: 'tenant_1',
+      organizationId: 'org_1',
+      grantedByPrincipalId: 'user_1',
+      grantedAt: '2026-07-16T12:00:00.000Z',
+      expiresAt: '2026-07-16T12:10:00.000Z',
+      scope: 'tenant-historical-portability',
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(authorization), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(Uint8Array.from([1, 2, 3]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/vnd.tixkit.portable+json' },
+        }),
+      );
+    const client = new TixkitClient({
+      apiKey: 'tk_test',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await expect(
+      client.portability.grantHistoricalExportAuthorization({
+        organizationId: 'org_1',
+        expiresAt: authorization.expiresAt,
+      }),
+    ).resolves.toEqual(authorization);
+    await expect(
+      client.portability.revokeHistoricalExportAuthorization('pexa_unused_01', 'org_1'),
+    ).resolves.toBeUndefined();
+    const response = await client.portability.createExport({
+      organizationId: 'org_1',
+      mode: 'historical',
+      authorizationId: authorization.authorizationId,
+      idempotencyKey: 'historical-export-1',
+    });
+    await expect(response.arrayBuffer()).resolves.toEqual(Uint8Array.from([1, 2, 3]).buffer);
+
+    expect(getCall(fetchMock, 0)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/portable-export-authorizations',
+      body: JSON.stringify({
+        organizationId: 'org_1',
+        expiresAt: authorization.expiresAt,
+      }),
+    });
+    expect(getCall(fetchMock, 1)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/portable-export-authorizations/pexa_unused_01/revoke',
+      body: JSON.stringify({ organizationId: 'org_1' }),
+    });
+    expect(getCall(fetchMock, 2)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/portable-exports',
+      headers: { 'Idempotency-Key': 'historical-export-1' },
+      body: JSON.stringify({
+        organizationId: 'org_1',
+        mode: 'historical',
+        authorizationId: authorization.authorizationId,
+      }),
+    });
+  });
+
   it('binds portable commit to the exact approval and final cutover proof', async () => {
     const fetchMock = mockFetch(202, { jobId: 'job_portable_1', status: 'committing' });
     const client = new TixkitClient({
@@ -405,7 +478,7 @@ describe('TixkitClient', () => {
     const client = new TixkitClient({
       apiKey: 'tk_test_123',
       apiBaseUrl: 'https://custom.api.com',
-      apiVersion: '2026-07-15',
+      apiVersion: '2026-07-16',
       timeout: 5000,
       maxRetries: 1,
     });

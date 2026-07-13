@@ -48,4 +48,4 @@ The default `./schema` and explicit `./schema-v1` retain v1 compatibility; new e
 
 ## Related guides
 
-[Migration operations](../../docs/public/operators/migration-operations.mdx) · [API migration to 2026-07-15](../../docs/public/reference/migrations/2026-07-14-to-2026-07-15.mdx)
+[Migration operations](../../docs/public/operators/migration-operations.mdx) · [API migration to 2026-07-16](../../docs/public/reference/migrations/2026-07-15-to-2026-07-16.mdx)

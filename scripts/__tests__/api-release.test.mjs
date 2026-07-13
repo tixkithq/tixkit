@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const root = resolve(import.meta.dirname, '../..');
-const currentVersion = '2026-07-15';
+const currentVersion = '2026-07-16';
 const currentVersionIsCheckedIn = (() => {
   try {
     execFileSync('git', ['cat-file', '-e', `HEAD:artifacts/api/${currentVersion}/openapi.json`], {

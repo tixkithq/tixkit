@@ -274,21 +274,86 @@ function schemaExample(
     return schemaExample(target, schemas, referenceName, new Set([...seen, referenceName]));
   }
   if (Array.isArray(value.oneOf) && value.oneOf.length > 0) {
-    return schemaExample(value.oneOf[0], schemas, name, seen);
+    const { oneOf: _oneOf, ...base } = value;
+    const selected = value.oneOf[0];
+    if (selected && typeof selected === 'object' && !Array.isArray(selected)) {
+      const branch = selected as Record<string, unknown>;
+      const baseProperties = (base.properties as Record<string, unknown> | undefined) ?? {};
+      const branchProperties = (branch.properties as Record<string, unknown> | undefined) ?? {};
+      const properties = Object.fromEntries(
+        [...new Set([...Object.keys(baseProperties), ...Object.keys(branchProperties)])].map(
+          (key) => [
+            key,
+            Object.hasOwn(baseProperties, key) && Object.hasOwn(branchProperties, key)
+              ? { allOf: [baseProperties[key], branchProperties[key]] }
+              : (branchProperties[key] ?? baseProperties[key]),
+          ],
+        ),
+      );
+      return schemaExample(
+        {
+          ...base,
+          ...branch,
+          properties,
+          required: [
+            ...new Set([
+              ...(Array.isArray(base.required) ? base.required : []),
+              ...(Array.isArray(branch.required) ? branch.required : []),
+            ]),
+          ],
+        },
+        schemas,
+        name,
+        seen,
+      );
+    }
+    return schemaExample(selected, schemas, name, seen);
   }
   if (Array.isArray(value.anyOf) && value.anyOf.length > 0) {
-    return schemaExample(value.anyOf[0], schemas, name, seen);
+    const { anyOf: _anyOf, ...base } = value;
+    const selected = value.anyOf[0];
+    if (selected && typeof selected === 'object' && !Array.isArray(selected)) {
+      const branch = selected as Record<string, unknown>;
+      const baseProperties = (base.properties as Record<string, unknown> | undefined) ?? {};
+      const branchProperties = (branch.properties as Record<string, unknown> | undefined) ?? {};
+      const properties = Object.fromEntries(
+        [...new Set([...Object.keys(baseProperties), ...Object.keys(branchProperties)])].map(
+          (key) => [
+            key,
+            Object.hasOwn(baseProperties, key) && Object.hasOwn(branchProperties, key)
+              ? { allOf: [baseProperties[key], branchProperties[key]] }
+              : (branchProperties[key] ?? baseProperties[key]),
+          ],
+        ),
+      );
+      return schemaExample(
+        {
+          ...base,
+          ...branch,
+          properties,
+          required: [
+            ...new Set([
+              ...(Array.isArray(base.required) ? base.required : []),
+              ...(Array.isArray(branch.required) ? branch.required : []),
+            ]),
+          ],
+        },
+        schemas,
+        name,
+        seen,
+      );
+    }
+    return schemaExample(selected, schemas, name, seen);
   }
   if (Array.isArray(value.allOf)) {
-    return Object.assign(
-      {},
-      ...value.allOf
-        .map((entry) => schemaExample(entry, schemas, name, seen))
-        .filter(
-          (entry): entry is Record<string, unknown> =>
-            Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry),
-        ),
+    const examples = value.allOf.map((entry) => schemaExample(entry, schemas, name, seen));
+    const objects = examples.filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry),
     );
+    return objects.length === examples.length
+      ? Object.assign({}, ...objects)
+      : examples.findLast((entry) => entry !== null);
   }
   const declaredType = Array.isArray(value.type)
     ? (value.type.find((entry) => entry !== 'null') ?? 'null')
@@ -414,7 +479,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-15',
+    version: '2026-07-16',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -13022,12 +13087,187 @@ const rawOpenApiSpec = {
         responses: { '204': { description: 'Migration credential revoked' } },
       },
     },
+    '/portable-export-authorizations': {
+      post: {
+        operationId: 'grantPortableHistoricalExportAuthorization',
+        summary: 'Grant a single-use historical export authorization',
+        description:
+          'Requires an accepted organization owner or admin user with migrations.write. The authorization is principal-bound, expires within 24 hours, and may be consumed by exactly one historical export job.',
+        security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['migrations.write'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['organizationId', 'expiresAt'],
+                properties: {
+                  organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                  expiresAt: { type: 'string', format: 'date-time' },
+                },
+              },
+              example: {
+                organizationId: 'organization_example',
+                expiresAt: '2026-07-16T13:00:00.000Z',
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Principal-bound historical export authorization',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: [
+                    'authorizationId',
+                    'tenantId',
+                    'organizationId',
+                    'grantedByPrincipalId',
+                    'grantedAt',
+                    'expiresAt',
+                    'scope',
+                  ],
+                  properties: {
+                    authorizationId: { type: 'string', minLength: 3, maxLength: 64 },
+                    tenantId: { type: 'string' },
+                    organizationId: { type: 'string' },
+                    grantedByPrincipalId: { type: 'string' },
+                    grantedAt: { type: 'string', format: 'date-time' },
+                    expiresAt: { type: 'string', format: 'date-time' },
+                    scope: { const: 'tenant-historical-portability' },
+                  },
+                },
+                example: {
+                  authorizationId: 'pexa_example',
+                  tenantId: 'tenant_example',
+                  organizationId: 'organization_example',
+                  grantedByPrincipalId: 'user_owner_example',
+                  grantedAt: '2026-07-16T12:00:00.000Z',
+                  expiresAt: '2026-07-16T13:00:00.000Z',
+                  scope: 'tenant-historical-portability',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid authorization lifetime or request',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '403': {
+            description: 'Accepted organization owner or admin user required',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '503': {
+            description: 'Authorization persistence is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
+    '/portable-export-authorizations/{authorizationId}/revoke': {
+      post: {
+        operationId: 'revokePortableHistoricalExportAuthorization',
+        summary: 'Revoke an unused historical export authorization',
+        description:
+          'Requires an accepted owner or admin user in the same organization. Consumed authorizations cannot be revoked or reused.',
+        security: [{ BearerAuth: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          {
+            name: 'authorizationId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 3, maxLength: 64 },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['organizationId'],
+                properties: {
+                  organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                },
+              },
+              example: { organizationId: 'organization_example' },
+            },
+          },
+        },
+        responses: {
+          '204': {
+            description:
+              'Historical export authorization revoked, or the same revocation was already applied',
+          },
+          '400': {
+            description: 'Invalid revocation request',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '403': {
+            description: 'Accepted organization owner or admin user required',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '404': {
+            description: 'Historical export authorization not found',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Authorization is already consumed or has a conflicting terminal state',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '503': {
+            description: 'Authorization persistence is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
     '/portable-exports': {
       post: {
         operationId: 'createPortableExport',
-        summary: 'Create or replay a signed Tixkit configuration export',
+        summary: 'Create or replay a signed Tixkit portable export',
         description:
-          'Self-Hosted export endpoint. Returns immutable bytes for the same principal, organization, request, and idempotency key.',
+          'Self-Hosted export endpoint. Configuration mode is the default. Historical mode requires an unscoped organization user and a fresh principal-bound, single-use authorization. Returns immutable bytes for the same principal, organization, mode, authorization, and idempotency key.',
+        'x-compatibility-breaking-change': {
+          id: 'historical-portable-export-authorization',
+          previousVersion: '2026-07-15',
+          migrationGuide: '/reference/migrations/2026-07-15-to-2026-07-16',
+        },
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
         parameters: [
@@ -13043,17 +13283,31 @@ const rawOpenApiSpec = {
           content: {
             'application/json': {
               schema: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['organizationId'],
-                properties: {
-                  organizationId: {
-                    type: 'string',
-                    minLength: 3,
-                    maxLength: 32,
+                oneOf: [
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['organizationId'],
+                    properties: {
+                      organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                      mode: { const: 'configuration', default: 'configuration' },
+                    },
                   },
-                  mode: { const: 'configuration', default: 'configuration' },
-                },
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['organizationId', 'mode', 'authorizationId'],
+                    properties: {
+                      organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                      mode: { const: 'historical' },
+                      authorizationId: { type: 'string', minLength: 3, maxLength: 64 },
+                    },
+                  },
+                ],
+              },
+              example: {
+                organizationId: 'organization_example',
+                mode: 'configuration',
               },
             },
           },
@@ -13096,7 +13350,8 @@ const rawOpenApiSpec = {
             },
           },
           '409': {
-            description: 'Idempotency conflict or export already in progress',
+            description:
+              'Idempotency conflict, export in progress, or historical authorization unavailable',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiError' },

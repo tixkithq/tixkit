@@ -1,0 +1,38 @@
+---
+title: API migration from 2026-07-15 to 2026-07-16
+description: Adopt principal-bound historical portability exports and signed organization identity.
+audience: [developer]
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites: [An integration using API version 2026-07-15]
+related: [/reference/api-versions, /reference/api-release-train, /operators/migration-operations]
+---
+
+API version `2026-07-16` adds historical export authorization and execution to the existing Self-Hosted portability endpoint. Configuration exports remain the default and require no authorization:
+
+```json
+{ "organizationId": "org_01", "mode": "configuration" }
+```
+
+Historical exports are intentionally approval-gated. An accepted organization owner or admin user first calls `POST /portable-export-authorizations` with the organization and an expiry no more than 24 hours in the future. The same user then supplies the returned single-use `authorizationId` to `POST /portable-exports`:
+
+```json
+{
+  "organizationId": "org_01",
+  "mode": "historical",
+  "authorizationId": "pexa_01"
+}
+```
+
+Both export modes require `Idempotency-Key`. Historical grants are tenant-, organization-, scope-, and principal-bound; they may be revoked before use and consumed by exactly one export job. A completed or crash-recovered job replays its exact immutable signed bytes. A new artifact cannot be signed or published after authorization expiry.
+
+Portable manifest v2 now binds `source.organizationId`. Historical manifests additionally carry the exact grant identifier, tenant, organization, granting principal, grant time, expiry, and scope. Importers must continue validating the full manifest signature, payload checksums and safety attestations. Historical imports also require explicit `historical-import-v1` destination entitlement; ticket bearer codes, plaintext provider references, credentials, payment tokens, and private signing keys are never transferred.
+
+The JavaScript SDK exposes `client.portability.grantHistoricalExportAuthorization`, `revokeHistoricalExportAuthorization`, and `createExport`. `createExport` returns the raw response so callers can stream or persist the signed bundle without JSON reserialization. This candidate remains unpublished and approval-gated until the protected release and provenance checks are complete.
+
+## Webhook test and delivery metadata
+
+Durable domain webhook payloads keep their independent `2026-01-01` envelope version. The synthetic `test.ping.apiVersion` field and the `X-Tixkit-API-Version` header passed to delivery attempts now report `2026-07-16`; these identify the HTTP/SDK test and replay contract, not a domain-event schema migration. Consumers that assert those diagnostic values must accept `2026-07-16`. Signature verification, event subscription names, durable domain payload fields, retry behavior, and delivery ordering semantics are unchanged.

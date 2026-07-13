@@ -1605,7 +1605,7 @@
     "title": "API versions and compatibility",
     "description": "Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.",
     "headings": [],
-    "body": "The current HTTP/OpenAPI/SDK contract release is 2026 07 15 . HTTP routes use the /v1 URL prefix. Webhook envelopes remain independently versioned as 2026 01 01 ; an HTTP contract release does not silently change the webhook envelope contract. The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under /contracts/ / . Migration guidance is published separately for 2026 01 01 to 2026 07 12 /reference/migrations/2026 01 01 to 2026 07 12 , 2026 07 13 to 2026 07 14 /reference/migrations/2026 07 13 to 2026 07 14 , and 2026 07 14 to 2026 07 15 /reference/migrations/2026 07 14 to 2026 07 15 . Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period. SDK parity validation checks the declared API version across supported packages and guides.",
+    "body": "The current HTTP/OpenAPI/SDK contract release is 2026 07 16 . HTTP routes use the /v1 URL prefix. Durable domain webhook envelopes remain independently versioned as 2026 01 01 ; an HTTP contract release does not silently change their payload schema. The synthetic test.ping envelope and the X Tixkit API Version delivery attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train. The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under /contracts/ / . Migration guidance is published separately for 2026 01 01 to 2026 07 12 /reference/migrations/2026 01 01 to 2026 07 12 , 2026 07 13 to 2026 07 14 /reference/migrations/2026 07 13 to 2026 07 14 , 2026 07 14 to 2026 07 15 /reference/migrations/2026 07 14 to 2026 07 15 , and 2026 07 15 to 2026 07 16 /reference/migrations/2026 07 15 to 2026 07 16 . Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period. SDK parity validation checks the declared API version across supported packages and guides.",
     "audience": [
       "developer"
     ],
@@ -1704,6 +1704,31 @@
     "description": "Supply source-signed final cutover evidence for portable import commits.",
     "headings": [],
     "body": "API version 2026 07 15 adds the PortableCutoverProof schema and an optional request body to POST /migration jobs/{jobId}/commit . The body remains optional for non portable migration adapters. A tixkit portable job now requires: Generate the proof with createPortableCutoverProof from @tixkit/portability ; do not construct or sign an ad hoc JSON representation. The source observation must be no more than 60 seconds old when the destination validates it, the expiry window cannot exceed five minutes, and a full bundle must truthfully report sourceFrozen: true . Delta transports now carry the exact signed parentEnvelope ; imports without a matching parent fail preflight. The JavaScript SDK exposes client.migrations.commitPortable jobId, approvalConfirmation, cutoverProof . Continue using client.migrations.commit jobId for non portable migration adapters. Destinations must configure the source public key registry before accepting portable commits.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": [],
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
+  },
+  {
+    "url": "/reference/migrations/2026-07-15-to-2026-07-16",
+    "title": "API migration from 2026-07-15 to 2026-07-16",
+    "description": "Adopt principal-bound historical portability exports and signed organization identity.",
+    "headings": [
+      {
+        "id": "webhook-test-and-delivery-metadata",
+        "text": "Webhook test and delivery metadata",
+        "level": 2
+      }
+    ],
+    "body": "API version 2026 07 16 adds historical export authorization and execution to the existing Self Hosted portability endpoint. Configuration exports remain the default and require no authorization: Historical exports are intentionally approval gated. An accepted organization owner or admin user first calls POST /portable export authorizations with the organization and an expiry no more than 24 hours in the future. The same user then supplies the returned single use authorizationId to POST /portable exports : Both export modes require Idempotency Key . Historical grants are tenant , organization , scope , and principal bound; they may be revoked before use and consumed by exactly one export job. A completed or crash recovered job replays its exact immutable signed bytes. A new artifact cannot be signed or published after authorization expiry. Portable manifest v2 now binds source.organizationId . Historical manifests additionally carry the exact grant identifier, tenant, organization, granting principal, grant time, expiry, and scope. Importers must continue validating the full manifest signature, payload checksums and safety attestations. Historical imports also require explicit historical import v1 destination entitlement; ticket bearer codes, plaintext provider references, credentials, payment tokens, and private signing keys are never transferred. The JavaScript SDK exposes client.portability.grantHistoricalExportAuthorization , revokeHistoricalExportAuthorization , and createExport . createExport returns the raw response so callers can stream or persist the signed bundle without JSON reserialization. This candidate remains unpublished and approval gated until the protected release and provenance checks are complete. Webhook test and delivery metadata Durable domain webhook payloads keep their independent 2026 01 01 envelope version. The synthetic test.ping.apiVersion field and the X Tixkit API Version header passed to delivery attempts now report 2026 07 16 ; these identify the HTTP/SDK test and replay contract, not a domain event schema migration. Consumers that assert those diagnostic values must accept 2026 07 16 . Signature verification, event subscription names, durable domain payload fields, retry behavior, and delivery ordering semantics are unchanged.",
     "audience": [
       "developer"
     ],
@@ -2024,7 +2049,7 @@
         "level": 2
       }
     ],
-    "body": "Install the core SDK: The client rejects secret looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer safe public data to client components. The package declares API version 2026 07 15 ; keep SDK and server compatibility aligned. Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry. javascript Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "body": "Install the core SDK: The client rejects secret looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer safe public data to client components. The package declares API version 2026 07 16 ; keep SDK and server compatibility aligned. Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry. javascript Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
     "audience": [
       "developer"
     ],

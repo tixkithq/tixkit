@@ -181,6 +181,7 @@ describe('portable export route authorization and delivery', () => {
     const authorization = {
       authorizationId: 'pexa_route_authorization_01',
       tenantId,
+      organizationId,
       scope: 'tenant-historical-portability' as const,
       grantedByPrincipalId: 'user_portability_admin',
       grantedAt: '2026-07-13T06:00:00.000Z',
@@ -210,13 +211,20 @@ describe('portable export route authorization and delivery', () => {
       payload: { organizationId },
     });
     expect(revoked.statusCode).toBe(204);
+    const replayedRevocation = await app.inject({
+      method: 'POST',
+      url: `/portable-export-authorizations/${authorization.authorizationId}/revoke`,
+      payload: { organizationId },
+    });
+    expect(replayedRevocation.statusCode).toBe(204);
     expect(revoke).toHaveBeenCalledWith({
       tenantId,
       organizationId,
       principalId: 'user_portability_admin',
       authorizationId: authorization.authorizationId,
     });
-    expect(writeAuditLog).toHaveBeenCalledTimes(2);
+    expect(revoke).toHaveBeenCalledTimes(2);
+    expect(writeAuditLog).toHaveBeenCalledTimes(3);
     await app.close();
   });
 

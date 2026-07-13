@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-15';
+export const TIXKIT_API_VERSION = '2026-07-16';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -2522,6 +2522,25 @@ export type PortableCutoverProof = {
   signature: string;
 };
 
+export type PortableHistoricalExportAuthorization = {
+  authorizationId: string;
+  tenantId: string;
+  organizationId: string;
+  grantedByPrincipalId: string;
+  grantedAt: string;
+  expiresAt: string;
+  scope: 'tenant-historical-portability';
+};
+
+export type CreatePortableExportInput =
+  | { organizationId: string; mode?: 'configuration'; idempotencyKey: string }
+  | {
+      organizationId: string;
+      mode: 'historical';
+      authorizationId: string;
+      idempotencyKey: string;
+    };
+
 export class TixkitClient {
   private readonly apiKey?: string;
   private readonly apiBaseUrl: string;
@@ -2549,6 +2568,7 @@ export class TixkitClient {
   readonly content: ContentResource;
   readonly webhookEndpoints: WebhookEndpointResource;
   readonly migrations: MigrationResource;
+  readonly portability: PortabilityResource;
   readonly paymentAccounts: PaymentAccountResource;
   readonly questions: QuestionResource;
   readonly oauthApplications: OAuthApplicationResource;
@@ -2588,6 +2608,7 @@ export class TixkitClient {
     this.content = new ContentResource(this);
     this.webhookEndpoints = new WebhookEndpointResource(this);
     this.migrations = new MigrationResource(this);
+    this.portability = new PortabilityResource(this);
     this.paymentAccounts = new PaymentAccountResource(this);
     this.questions = new QuestionResource(this);
     this.oauthApplications = new OAuthApplicationResource(this);
@@ -4130,6 +4151,36 @@ class MessageResource {
       'GET',
       `/events/${eventId}/messages/${campaignId}/provider-events/${providerEventId}`,
     );
+  }
+}
+
+class PortabilityResource {
+  constructor(private client: TixkitClient) {}
+
+  grantHistoricalExportAuthorization(input: {
+    organizationId: string;
+    expiresAt: string;
+  }): Promise<PortableHistoricalExportAuthorization> {
+    return this.client.request('POST', '/portable-export-authorizations', { body: input });
+  }
+
+  async revokeHistoricalExportAuthorization(
+    authorizationId: string,
+    organizationId: string,
+  ): Promise<void> {
+    await this.client.requestRaw(
+      'POST',
+      `/portable-export-authorizations/${authorizationId}/revoke`,
+      { body: { organizationId }, successStatuses: [204] },
+    );
+  }
+
+  createExport(input: CreatePortableExportInput): Promise<Response> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.requestRaw('POST', '/portable-exports', {
+      body,
+      idempotencyKey,
+    });
   }
 }
 

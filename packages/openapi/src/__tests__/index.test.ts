@@ -1,21 +1,30 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { OpenApiParameter } from '../index.js';
-import { openApiSpec } from '../index.js';
+import { generateOpenApiTypes, openApiSpec } from '../index.js';
 import { ALL_PERMISSIONS } from '@tixkit/domain';
 
 function exampleMatchesSchema(example: unknown, schema: any): boolean {
+  if (schema === false) return false;
+  if (schema === true) return true;
   if (!schema || typeof schema !== 'object') return true;
   if (schema.$ref) {
     const name = String(schema.$ref).split('/').at(-1);
     const schemas = openApiSpec.components.schemas as Record<string, unknown>;
     return exampleMatchesSchema(example, name ? schemas[name] : undefined);
   }
-  if (schema.oneOf)
-    return schema.oneOf.some((entry: unknown) => exampleMatchesSchema(example, entry));
-  if (schema.anyOf)
-    return schema.anyOf.some((entry: unknown) => exampleMatchesSchema(example, entry));
-  if (schema.allOf)
-    return schema.allOf.every((entry: unknown) => exampleMatchesSchema(example, entry));
+  if (Array.isArray(schema.required)) {
+    if (!example || typeof example !== 'object' || Array.isArray(example)) return false;
+    if (schema.required.some((key: string) => !Object.hasOwn(example, key))) return false;
+  }
+  if (schema.not && exampleMatchesSchema(example, schema.not)) return false;
+  if (schema.oneOf && !schema.oneOf.some((entry: unknown) => exampleMatchesSchema(example, entry)))
+    return false;
+  if (schema.anyOf && !schema.anyOf.some((entry: unknown) => exampleMatchesSchema(example, entry)))
+    return false;
+  if (schema.allOf && !schema.allOf.every((entry: unknown) => exampleMatchesSchema(example, entry)))
+    return false;
+  if (schema.const !== undefined && example !== schema.const) return false;
+  if (schema.enum && !schema.enum.includes(example)) return false;
   const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
   if (example === null) return types.includes('null');
   if (types.includes('array'))
@@ -24,9 +33,11 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
     );
   if (types.includes('object') || schema.properties) {
     if (!example || typeof example !== 'object' || Array.isArray(example)) return false;
-    return Object.entries(example).every(([key, value]) =>
-      schema.properties?.[key] ? exampleMatchesSchema(value, schema.properties[key]) : true,
-    );
+    const record = example as Record<string, unknown>;
+    return Object.entries(record).every(([key, value]) => {
+      if (schema.properties?.[key]) return exampleMatchesSchema(value, schema.properties[key]);
+      return schema.additionalProperties !== false;
+    });
   }
   if (types.includes('string')) return typeof example === 'string';
   if (types.includes('boolean')) return typeof example === 'boolean';
@@ -66,7 +77,56 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-15');
+    expect(openApiSpec.info.version).toBe('2026-07-16');
+  });
+
+  it('keeps historical portability authorization discriminated across runtime and generated types', () => {
+    expect(openApiSpec.paths).toHaveProperty('/portable-export-authorizations');
+    expect(openApiSpec.paths).toHaveProperty(
+      '/portable-export-authorizations/{authorizationId}/revoke',
+    );
+    expect(
+      openApiSpec.paths['/portable-exports'].post.requestBody.content['application/json'].schema
+        .oneOf,
+    ).toEqual([
+      expect.objectContaining({
+        required: ['organizationId'],
+        properties: expect.objectContaining({
+          mode: { const: 'configuration', default: 'configuration' },
+        }),
+      }),
+      expect.objectContaining({
+        required: ['organizationId', 'mode', 'authorizationId'],
+        properties: expect.objectContaining({ mode: { const: 'historical' } }),
+      }),
+    ]);
+    expect(
+      openApiSpec.paths['/portable-export-authorizations/{authorizationId}/revoke'].post.responses[
+        '204'
+      ].description,
+    ).toMatch(/already applied/u);
+    const grantRequest =
+      openApiSpec.paths['/portable-export-authorizations'].post.requestBody.content[
+        'application/json'
+      ].example;
+    const grantResponse =
+      openApiSpec.paths['/portable-export-authorizations'].post.responses['201'].content[
+        'application/json'
+      ].example;
+    expect(grantRequest).toMatchObject({
+      organizationId: grantResponse.organizationId,
+      expiresAt: grantResponse.expiresAt,
+    });
+    expect(Date.parse(grantResponse.expiresAt) - Date.parse(grantResponse.grantedAt)).toBe(
+      3_600_000,
+    );
+
+    const declaration = generateOpenApiTypes(openApiSpec);
+    expect(declaration).toContain('mode?: "configuration";');
+    expect(declaration).toContain(
+      'mode: "historical";\n                    authorizationId: string;',
+    );
+    expect(declaration).not.toContain('authorizationId?: string;\n                } & unknown');
   });
 
   it('publishes the authoritative API-key permission scope catalog', () => {
@@ -97,7 +157,7 @@ describe('openApiSpec', () => {
             expect(serialized).not.toContain('one-time-secret');
             expect(
               exampleMatchesSchema(json.example, json.schema),
-              `${method.toUpperCase()} ${path}`,
+              `${method.toUpperCase()} ${path}: ${serialized}`,
             ).toBe(true);
           }
         }
