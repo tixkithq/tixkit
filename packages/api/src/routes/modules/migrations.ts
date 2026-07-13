@@ -18,6 +18,7 @@ import {
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@tixkit/domain';
+import { resolvePortableCanonicalAdoption } from '@tixkit/workflows';
 import {
   approvePortableImport,
   activatePortableImport,
@@ -26,6 +27,7 @@ import {
   bindPortableImportDestination,
   portableCutoverTrustFromEnvironment,
   portableDryRunAttestationFromEnvironment,
+  portableImportCurrentInputHash,
   portableImportRebindingStatus,
   revokePortableImportApproval,
   stablePortableControlHash,
@@ -254,6 +256,7 @@ export function assertMigrationMappingSafe(mapping: Record<string, string | stri
 const migrationDigestKeys = new Set([
   'approvalDigest',
   'artifactSha256',
+  'beforeCanonicalSha256',
   'checksumSha256',
   'claimOwnerSha256',
   'configurationSha256',
@@ -1052,6 +1055,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       conflictsByExternalId.set(key, issues);
     }
     const reportRows: DryRunRow[] = [];
+    const canonicalAdoptions = [];
     const currentJobEntities = new Set(
       rows.flatMap((candidate) => {
         const normalized = normalizedEntity(candidate.normalized_data);
@@ -1151,16 +1155,42 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
           sourcePosition: entity.sourcePosition,
         });
       }
+      let canonicalAdoption;
+      if (job.source_system === 'tixkit-portable') {
+        try {
+          canonicalAdoption = await resolvePortableCanonicalAdoption(app.context.db, {
+            tenantId: principal.tenantId,
+            organizationId,
+            sourceSystem: job.source_system,
+            entity,
+          });
+          if (canonicalAdoption) canonicalAdoptions.push(canonicalAdoption);
+        } catch (error) {
+          if (error instanceof Error && error.message === 'PORTABLE_CANONICAL_ADOPTION_CONFLICT')
+            issues.push({
+              code: 'PORTABLE_CANONICAL_ADOPTION_CONFLICT',
+              severity: 'error',
+              message:
+                'The destination Compact bootstrap brand does not match the safe adoption policy.',
+              entityType: entity.entityType,
+              externalId: entity.externalId,
+              sourcePosition: entity.sourcePosition,
+            });
+          else throw error;
+        }
+      }
       reportRows.push({
         entity,
         disposition:
           issues.length > 0
             ? 'conflict'
-            : imported && sameCanonicalContent
+            : canonicalAdoption
               ? 'skip'
-              : existing
-                ? 'update'
-                : 'create',
+              : imported && sameCanonicalContent
+                ? 'skip'
+                : existing
+                  ? 'update'
+                  : 'create',
         issues,
       });
     }
@@ -1171,24 +1201,34 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       organizationId,
       job.source_system,
     );
-    const inputHash = stableHash({
-      configuration,
-      files: files.map((file) => ({
-        id: file.id,
-        sha256: file.sha256,
-        byteSize: String(file.byte_size),
-      })),
-      mappings: mappings.map((mapping) => ({
-        id: mapping.id,
-        version: mapping.version,
-        mapping: stableHash(parseJson(mapping.mapping)),
-      })),
-      rows: rows.map((row) => ({
-        id: row.id,
-        source: stableHash(parseJson(row.source_data)),
-        normalized: stableHash(parseJson(row.normalized_data)),
-      })),
-    });
+    const inputHash =
+      job.source_system === 'tixkit-portable' &&
+      reportRows.every(({ issues }) => issues.length === 0)
+        ? await portableImportCurrentInputHash({
+            db: app.context.db,
+            tenantId: principal.tenantId,
+            organizationId,
+            jobId,
+            sourceSystem: job.source_system,
+          })
+        : stableHash({
+            configuration,
+            files: files.map((file) => ({
+              id: file.id,
+              sha256: file.sha256,
+              byteSize: String(file.byte_size),
+            })),
+            mappings: mappings.map((mapping) => ({
+              id: mapping.id,
+              version: mapping.version,
+              mapping: stableHash(parseJson(mapping.mapping)),
+            })),
+            rows: rows.map((row) => ({
+              id: row.id,
+              source: stableHash(parseJson(row.source_data)),
+              normalized: stableHash(parseJson(row.normalized_data)),
+            })),
+          });
     const dryRun = buildDryRunReport({
       rows: reportRows,
       unsupportedFeatures:
@@ -1211,6 +1251,7 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         inputHash,
         configurationHash: stableHash(configuration),
         accepted,
+        ...(canonicalAdoptions.length > 0 ? { canonicalAdoptions } : {}),
       },
       correlations,
     );

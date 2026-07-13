@@ -17,6 +17,7 @@ import {
 import {
   createProductionMigrationCommitters,
   portableReconciliationReport,
+  resolvePortableCanonicalAdoption,
 } from '@tixkit/workflows';
 
 export interface PortableDryRunAttestationConfiguration {
@@ -127,6 +128,18 @@ async function portableImportCurrentInputHashFromDatabase(input: {
     input.organizationId,
     input.sourceSystem,
   );
+  const canonicalAdoptions = [];
+  for (const row of rows) {
+    const normalized = parsedJson(row.normalized_data);
+    if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) continue;
+    const adoption = await resolvePortableCanonicalAdoption(input.db, {
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      sourceSystem: input.sourceSystem,
+      entity: normalized as Parameters<typeof resolvePortableCanonicalAdoption>[1]['entity'],
+    });
+    if (adoption) canonicalAdoptions.push(adoption);
+  }
   return portableImportControlInputSha256({
     configuration: parsedJson(job.configuration),
     files: files.map((file) => ({
@@ -144,6 +157,7 @@ async function portableImportCurrentInputHashFromDatabase(input: {
       source: parsedJson(row.source_data),
       normalized: parsedJson(row.normalized_data),
     })),
+    ...(canonicalAdoptions.length > 0 ? { canonicalAdoptions } : {}),
   });
 }
 

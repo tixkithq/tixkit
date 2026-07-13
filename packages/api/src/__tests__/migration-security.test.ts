@@ -185,6 +185,7 @@ describe('migration security boundaries', () => {
     expect(
       redactMigrationReportValue({
         inputHash: digest,
+        beforeCanonicalSha256: digest,
         configurationSha256: digest,
         claimOwnerSha256: digest,
         nested: { manifestSha256: digest },
@@ -197,6 +198,7 @@ describe('migration security boundaries', () => {
       }),
     ).toEqual({
       inputHash: digest,
+      beforeCanonicalSha256: digest,
       configurationSha256: digest,
       claimOwnerSha256: digest,
       nested: { manifestSha256: digest },

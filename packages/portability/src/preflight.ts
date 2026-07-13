@@ -226,6 +226,7 @@ export function portableImportControlInputSha256(input: {
   files: Array<{ id: string; sha256: string; byteSize: string }>;
   mappings: Array<{ id: string; version: number; mapping: unknown }>;
   rows: Array<{ id: string; source: unknown; normalized: unknown }>;
+  canonicalAdoptions?: unknown[];
 }): string {
   const hash = (value: unknown) =>
     createHash('sha256').update(canonicalPortableJson(value)).digest('hex');
@@ -242,6 +243,7 @@ export function portableImportControlInputSha256(input: {
       source: hash(row.source),
       normalized: hash(row.normalized),
     })),
+    ...(input.canonicalAdoptions ? { canonicalAdoptions: input.canonicalAdoptions } : {}),
   });
 }
 

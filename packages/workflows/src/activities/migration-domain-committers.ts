@@ -7,7 +7,9 @@ import {
 } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import {
+  canonicalPortableJson,
   parsePortableJson,
+  portableImportControlInputSha256,
   portableManifestSha256,
   type PortableBundleManifest,
 } from '@tixkit/portability';
@@ -572,6 +574,192 @@ function jsonAttribute(entity: NormalizedMigrationEntity, name: string, fallback
   } catch {
     throw new Error(`MIGRATION_ATTRIBUTE_INVALID:${entity.entityType}:${name}`);
   }
+}
+
+function storedJsonMatches(value: unknown, expected: string): boolean {
+  try {
+    return JSON.stringify(typeof value === 'string' ? JSON.parse(value) : value) === expected;
+  } catch {
+    return false;
+  }
+}
+
+function storedBooleanMatches(value: unknown, expected: boolean): boolean {
+  return value === expected || value === (expected ? 1 : 0);
+}
+
+export interface PortableCanonicalAdoptionPlan {
+  policyVersion: 'compact-bootstrap-brand-v1';
+  entityType: 'brand';
+  externalId: string;
+  targetId: string;
+  beforeCanonicalSha256: string;
+  disposition: 'skip';
+}
+
+export async function resolvePortableCanonicalAdoption(
+  db: Database,
+  input: {
+    tenantId: string;
+    organizationId: string;
+    sourceSystem: string;
+    entity: NormalizedMigrationEntity;
+    lock?: boolean;
+  },
+): Promise<PortableCanonicalAdoptionPlan | undefined> {
+  if (
+    input.sourceSystem !== 'tixkit-portable' ||
+    input.entity.entityType !== 'brand' ||
+    input.entity.externalId !== 'brd_dev_local'
+  )
+    return undefined;
+  let exactQuery = db.selectFrom('brands').selectAll().where('id', '=', input.entity.externalId);
+  if (input.lock) exactQuery = exactQuery.forUpdate();
+  const exact = await exactQuery.executeTakeFirst();
+  const importedSlug = textAttribute(input.entity, 'slug');
+  let slugQuery = db
+    .selectFrom('brands')
+    .select('id')
+    .where('tenant_id', '=', input.tenantId)
+    .where('slug', '=', importedSlug);
+  if (input.lock) slugQuery = slugQuery.forUpdate();
+  const slugOwner = await slugQuery.executeTakeFirst();
+  if (!exact) {
+    if (slugOwner) throw new Error('PORTABLE_CANONICAL_ADOPTION_CONFLICT');
+    return undefined;
+  }
+  if (
+    exact.tenant_id !== input.tenantId ||
+    exact.organization_id !== input.organizationId ||
+    importedSlug !== 'tixkit-dev' ||
+    (slugOwner && slugOwner.id !== exact.id) ||
+    exact.name !== textAttribute(input.entity, 'name') ||
+    !storedJsonMatches(exact.theme, jsonAttribute(input.entity, 'theme', {})) ||
+    exact.support_url !== (textAttribute(input.entity, 'supportUrl') || null) ||
+    !storedJsonMatches(exact.legal_urls, jsonAttribute(input.entity, 'legalUrls', {})) ||
+    !storedBooleanMatches(exact.white_label, booleanAttribute(input.entity, 'whiteLabel')) ||
+    exact.email_identity_id !== null ||
+    exact.sms_identity_id !== null ||
+    exact.payment_account_id !== null
+  )
+    throw new Error('PORTABLE_CANONICAL_ADOPTION_CONFLICT');
+  const beforeCanonicalSha256 = await canonicalHash(db, 'brand', exact.id, input.lock);
+  if (!beforeCanonicalSha256) throw new Error('PORTABLE_CANONICAL_ADOPTION_CONFLICT');
+  return {
+    policyVersion: 'compact-bootstrap-brand-v1',
+    entityType: 'brand',
+    externalId: input.entity.externalId,
+    targetId: exact.id,
+    beforeCanonicalSha256,
+    disposition: 'skip',
+  };
+}
+
+async function authenticatedPortableCanonicalAdoption(
+  db: Database,
+  input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    entity: NormalizedMigrationEntity;
+    configuration: string | null;
+    summary: string | null;
+  },
+): Promise<PortableCanonicalAdoptionPlan | undefined> {
+  const repository = new ImportRepository(db);
+  const authorization = await repository.findPortableImportCommitAuthorization(
+    input.tenantId,
+    input.organizationId,
+    input.jobId,
+  );
+  const approval = authorization
+    ? await repository.findPortableImportApproval({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        approvalId: authorization.approval_id,
+      })
+    : undefined;
+  if (
+    !authorization ||
+    !approval ||
+    approval.approval_digest !== authorization.approval_digest ||
+    approval.input_sha256 !== authorization.input_sha256
+  )
+    throw new Error('PORTABILITY_COMMIT_DESTINATION_CHANGED');
+
+  const rows = [];
+  for (let offset = 0; ; offset += 5_000) {
+    const page = await repository.listRows({
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      limit: 5_000,
+      offset,
+    });
+    rows.push(...page);
+    if (page.length < 5_000) break;
+  }
+  const canonicalAdoptions: PortableCanonicalAdoptionPlan[] = [];
+  for (const row of rows) {
+    if (!row.normalized_data) continue;
+    const adoption = await resolvePortableCanonicalAdoption(db, {
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      sourceSystem: 'tixkit-portable',
+      entity: JSON.parse(row.normalized_data) as NormalizedMigrationEntity,
+      lock: true,
+    });
+    if (adoption) canonicalAdoptions.push(adoption);
+  }
+  const files = await repository.listFiles(input.tenantId, input.organizationId, input.jobId);
+  const mappings = await repository.listMappings(
+    input.tenantId,
+    input.organizationId,
+    'tixkit-portable',
+  );
+  const inputSha256 = portableImportControlInputSha256({
+    configuration: input.configuration ? JSON.parse(input.configuration) : null,
+    files: files.map((file) => ({
+      id: file.id,
+      sha256: file.sha256,
+      byteSize: String(file.byte_size),
+    })),
+    mappings: mappings.map((mapping) => ({
+      id: mapping.id,
+      version: mapping.version,
+      mapping: JSON.parse(mapping.mapping),
+    })),
+    rows: rows.map((row) => ({
+      id: row.id,
+      source: JSON.parse(row.source_data),
+      normalized: row.normalized_data ? JSON.parse(row.normalized_data) : null,
+    })),
+    ...(canonicalAdoptions.length > 0 ? { canonicalAdoptions } : {}),
+  });
+  let summary: { accepted?: boolean; inputHash?: string; canonicalAdoptions?: unknown };
+  try {
+    summary = input.summary ? JSON.parse(input.summary) : {};
+  } catch {
+    throw new Error('PORTABILITY_COMMIT_DESTINATION_CHANGED');
+  }
+  const summarizedAdoptions = Array.isArray(summary.canonicalAdoptions)
+    ? summary.canonicalAdoptions
+    : [];
+  if (
+    summary.accepted !== true ||
+    summary.inputHash !== inputSha256 ||
+    authorization.input_sha256 !== inputSha256 ||
+    approval.input_sha256 !== inputSha256 ||
+    canonicalPortableJson(summarizedAdoptions) !== canonicalPortableJson(canonicalAdoptions)
+  )
+    throw new Error('PORTABILITY_COMMIT_DESTINATION_CHANGED');
+  const matching = canonicalAdoptions.filter(
+    (plan) =>
+      plan.entityType === input.entity.entityType && plan.externalId === input.entity.externalId,
+  );
+  if (matching.length > 1) throw new Error('PORTABILITY_COMMIT_DESTINATION_CHANGED');
+  return matching[0];
 }
 
 function dependency(ids: DependencyIds, type: MigrationEntityType): string {
@@ -1489,6 +1677,20 @@ async function hasAuthoritativeRollbackBlocker(
   return false;
 }
 
+function isAdoptedCanonicalProvenance(value: string): boolean {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return (
+      Boolean(parsed) &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>).canonicalAdopted === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 class ProductionMigrationCommitter implements MigrationDomainCommitter {
   constructor(
     private readonly db: Database,
@@ -1583,7 +1785,7 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
     return this.db.transaction().execute(async (transaction) => {
       const entity = await transaction
         .selectFrom('imported_domain_entities')
-        .select(['created_by_import_job_id', 'canonical_hash'])
+        .select(['created_by_import_job_id', 'canonical_hash', 'source_provenance'])
         .where('tenant_id', '=', input.tenantId)
         .where('organization_id', '=', input.organizationId)
         .where('id', '=', input.tixkitId)
@@ -1593,6 +1795,11 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
         return {
           eligible: false,
           reason: 'Import provenance does not own canonical entity',
+        };
+      if (isAdoptedCanonicalProvenance(entity.source_provenance))
+        return {
+          eligible: false,
+          reason: 'Canonical entity predates import',
         };
       const evidence = await transaction
         .selectFrom('import_job_rows')
@@ -1647,7 +1854,7 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
         .execute(async (transaction) => {
           const job = await transaction
             .selectFrom('import_jobs')
-            .select(['source_system'])
+            .select(['source_system', 'configuration', 'summary'])
             .where('tenant_id', '=', input.tenantId)
             .where('organization_id', '=', input.organizationId)
             .where('id', '=', input.jobId)
@@ -1709,6 +1916,44 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
               .where('entity_type', '=', 'organization')
               .executeTakeFirst();
           }
+          let adoptedCanonicalBrand: PortableCanonicalAdoptionPlan | undefined;
+          if (
+            job.source_system === 'tixkit-portable' &&
+            input.entity.entityType === 'brand' &&
+            input.entity.externalId === 'brd_dev_local'
+          ) {
+            try {
+              adoptedCanonicalBrand = await authenticatedPortableCanonicalAdoption(
+                transaction as Database,
+                {
+                  tenantId: input.tenantId,
+                  organizationId: input.organizationId,
+                  jobId: input.jobId,
+                  entity: input.entity,
+                  configuration: job.configuration,
+                  summary: job.summary,
+                },
+              );
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                error.message === 'PORTABILITY_COMMIT_DESTINATION_CHANGED'
+              )
+                throw error;
+              throw new Error('PORTABILITY_COMMIT_DESTINATION_CHANGED', { cause: error });
+            }
+          } else if (!existing) {
+            adoptedCanonicalBrand = await resolvePortableCanonicalAdoption(
+              transaction as Database,
+              {
+                tenantId: input.tenantId,
+                organizationId: input.organizationId,
+                sourceSystem: job.source_system,
+                entity: input.entity,
+                lock: true,
+              },
+            );
+          }
           const attributes = JSON.stringify(input.entity.attributes);
           const snapshot = input.entity.financialSnapshot
             ? JSON.stringify(input.entity.financialSnapshot)
@@ -1718,10 +1963,12 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
             sourceExternalId: input.entity.externalId,
             sourcePosition: input.entity.sourcePosition,
             importJobId: input.jobId,
+            ...(adoptedCanonicalBrand ? { canonicalAdopted: true } : {}),
           });
           const now = new Date();
           const id =
             existing?.id ??
+            adoptedCanonicalBrand?.targetId ??
             (this.entityType === 'organization'
               ? input.organizationId
               : randomUUID().replaceAll('-', ''));
@@ -1735,7 +1982,10 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
                   ) as NormalizedMigrationEntity['financialSnapshot'])
                 : undefined,
             }) === canonicalMigrationContentFingerprint(input.entity);
-          const canonicalExisting = Boolean(existing) || this.entityType === 'organization';
+          const canonicalExisting =
+            Boolean(existing) ||
+            Boolean(adoptedCanonicalBrand) ||
+            this.entityType === 'organization';
 
           if (existing && unchanged) {
             if (this.entityType === 'event')
@@ -1763,23 +2013,24 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
             return { disposition: 'conflict', tixkitId: id };
           }
 
-          await writeCanonicalEntity(transaction, {
-            tenantId: input.tenantId,
-            organizationId: input.organizationId,
-            jobId: input.jobId,
-            id,
-            entity: input.entity,
-            dependencies,
-            existing: canonicalExisting,
-            provenance,
-            now,
-            mediaStore: this.mediaStore,
-            assetResolver: this.assetResolver,
-            writtenObjects,
-            cleanupDb: this.db,
-            stagedCleanupIds,
-            sourceSystem: job.source_system,
-          });
+          if (!adoptedCanonicalBrand)
+            await writeCanonicalEntity(transaction, {
+              tenantId: input.tenantId,
+              organizationId: input.organizationId,
+              jobId: input.jobId,
+              id,
+              entity: input.entity,
+              dependencies,
+              existing: canonicalExisting,
+              provenance,
+              now,
+              mediaStore: this.mediaStore,
+              assetResolver: this.assetResolver,
+              writtenObjects,
+              cleanupDb: this.db,
+              stagedCleanupIds,
+              sourceSystem: job.source_system,
+            });
           const persistedCanonicalHash = await canonicalHash(transaction, this.entityType, id);
           if (!persistedCanonicalHash)
             throw new Error(`MIGRATION_CANONICAL_ENTITY_MISSING:${this.entityType}:${id}`);
@@ -1851,11 +2102,13 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
                 .execute();
           }
           return {
-            disposition: canonicalExisting
-              ? existing && unchanged
-                ? 'skipped'
-                : 'updated'
-              : 'created',
+            disposition: adoptedCanonicalBrand
+              ? 'skipped'
+              : canonicalExisting
+                ? existing && unchanged
+                  ? 'skipped'
+                  : 'updated'
+                : 'created',
             tixkitId: id,
           };
         });
@@ -1889,7 +2142,7 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
     return this.db.transaction().execute(async (transaction) => {
       const entity = await transaction
         .selectFrom('imported_domain_entities')
-        .select(['id', 'created_by_import_job_id', 'canonical_hash'])
+        .select(['id', 'created_by_import_job_id', 'canonical_hash', 'source_provenance'])
         .where('tenant_id', '=', input.tenantId)
         .where('organization_id', '=', input.organizationId)
         .where('id', '=', input.tixkitId)
@@ -1897,6 +2150,7 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
         .forUpdate()
         .executeTakeFirst();
       if (!entity || entity.created_by_import_job_id !== input.jobId) return false;
+      if (isAdoptedCanonicalProvenance(entity.source_provenance)) return false;
       const evidence = await transaction
         .selectFrom('import_job_rows')
         .select(['domain_activity_at', 'rollback_blocked_reason'])

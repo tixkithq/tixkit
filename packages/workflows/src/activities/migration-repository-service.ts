@@ -28,6 +28,8 @@ import type {
   MigrationStageResult,
   MigrationWorkflowProgress,
 } from './migration.js';
+import { MIGRATION_COMMIT_STAGES } from './migration.js';
+import { resolvePortableCanonicalAdoption } from './migration-domain-committers.js';
 
 export type MigrationCommitOutcome = {
   disposition: 'created' | 'updated' | 'skipped' | 'conflict';
@@ -118,6 +120,59 @@ function parseEntity(serialized: string | null): NormalizedMigrationEntity {
 
 function summary(progress: MigrationWorkflowProgress): MigrationWorkflowProgress {
   return { ...progress };
+}
+
+const MIGRATION_PROGRESS_COUNTERS = [
+  'processed',
+  'created',
+  'updated',
+  'skipped',
+  'conflicts',
+  'failed',
+] as const;
+
+function parseCommitProgressSummary(
+  serialized: string | null,
+  expectedStatus: 'committing' | 'completed',
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = serialized ? JSON.parse(serialized) : undefined;
+  } catch {
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_INVALID');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_INVALID');
+  const progress = parsed as Record<string, unknown>;
+  if (progress.status !== expectedStatus)
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_STATUS_INVALID');
+  for (const field of MIGRATION_PROGRESS_COUNTERS) {
+    if (!Number.isSafeInteger(progress[field]) || Number(progress[field]) < 0)
+      throw new Error(`MIGRATION_PROGRESS_SUMMARY_COUNTER_INVALID:${field}`);
+  }
+  if (
+    Number(progress.processed) !==
+    Number(progress.created) +
+      Number(progress.updated) +
+      Number(progress.skipped) +
+      Number(progress.conflicts) +
+      Number(progress.failed)
+  )
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_TOTAL_INVALID');
+  if (progress.stageCount !== MIGRATION_COMMIT_STAGES.length)
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_STAGE_COUNT_INVALID');
+  if (
+    expectedStatus === 'committing' &&
+    (progress.stageIndex !== MIGRATION_COMMIT_STAGES.length - 1 ||
+      progress.stage !== MIGRATION_COMMIT_STAGES.at(-1))
+  )
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_FINAL_STAGE_INVALID');
+  if (
+    expectedStatus === 'completed' &&
+    (progress.stageIndex !== MIGRATION_COMMIT_STAGES.length || 'stage' in progress)
+  )
+    throw new Error('MIGRATION_PROGRESS_SUMMARY_TERMINAL_STAGE_INVALID');
+  return progress;
 }
 
 function stageCheckpointKey(claimOwner: string): string {
@@ -702,6 +757,18 @@ export function createRepositoryMigrationActivityService(
               context.organizationId,
               job.source_system,
             );
+            const canonicalAdoptions = [];
+            for (const row of rows) {
+              if (!row.normalized_data) continue;
+              const adoption = await resolvePortableCanonicalAdoption(transaction as Database, {
+                tenantId: context.tenantId,
+                organizationId: context.organizationId,
+                sourceSystem: job.source_system,
+                entity: JSON.parse(row.normalized_data) as NormalizedMigrationEntity,
+                lock: true,
+              });
+              if (adoption) canonicalAdoptions.push(adoption);
+            }
             const inputSha256 = portableImportControlInputSha256({
               configuration: job.configuration ? JSON.parse(job.configuration) : null,
               files: files.map((file) => ({
@@ -719,6 +786,7 @@ export function createRepositoryMigrationActivityService(
                 source: JSON.parse(row.source_data),
                 normalized: row.normalized_data ? JSON.parse(row.normalized_data) : null,
               })),
+              ...(canonicalAdoptions.length > 0 ? { canonicalAdoptions } : {}),
             });
             const dryRunSummary = job.summary
               ? (JSON.parse(job.summary) as {
@@ -1153,13 +1221,14 @@ export function createRepositoryMigrationActivityService(
     },
 
     async recordProgress(context, progress) {
+      const persistedProgress = { ...summary(progress), status: 'committing' as const };
       await repository.transitionJob({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
         from: ['committing'],
         to: 'committing',
-        summary: summary(progress),
+        summary: persistedProgress,
       });
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
@@ -1169,7 +1238,7 @@ export function createRepositoryMigrationActivityService(
         type: 'commit.progress',
         severity: progress.failed > 0 || progress.conflicts > 0 ? 'warning' : 'info',
         message: `Migration processed ${progress.processed} rows.`,
-        data: summary(progress),
+        data: persistedProgress,
       });
     },
 
@@ -1466,23 +1535,58 @@ export function createRepositoryMigrationActivityService(
     },
 
     async completeCommit(context) {
-      const changed = await repository.transitionJob({
-        tenantId: context.tenantId,
-        organizationId: context.organizationId,
-        jobId: context.jobId,
-        from: ['committing'],
-        to: 'committed',
-      });
-      if (!changed) throw new Error('MIGRATION_COMPLETE_TRANSITION_REJECTED');
-      await repository.appendIdempotentEvent({
-        tenantId: context.tenantId,
-        organizationId: context.organizationId,
-        jobId: context.jobId,
-        eventKey: 'commit:completed',
-        type: 'commit.completed',
-        severity: 'info',
-        message: 'Migration commit completed.',
-      });
+      await db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute(async (transaction) => {
+          const transactionRepository = new ImportRepository(transaction as Database);
+          const job = await transactionRepository.findJobForUpdate(
+            context.tenantId,
+            context.organizationId,
+            context.jobId,
+          );
+          if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
+
+          const completionEvent = {
+            tenantId: context.tenantId,
+            organizationId: context.organizationId,
+            jobId: context.jobId,
+            eventKey: 'commit:completed',
+            type: 'commit.completed',
+            severity: 'info' as const,
+            message: 'Migration commit completed.',
+          };
+          if (job.status === 'committing') {
+            const persistedProgress = parseCommitProgressSummary(job.summary, 'committing');
+            const changed = await transactionRepository.transitionJob({
+              tenantId: context.tenantId,
+              organizationId: context.organizationId,
+              jobId: context.jobId,
+              from: ['committing'],
+              to: 'committed',
+              summary: {
+                ...persistedProgress,
+                status: 'completed',
+                stageIndex: MIGRATION_COMMIT_STAGES.length,
+                stageCount: MIGRATION_COMMIT_STAGES.length,
+                stage: undefined,
+              },
+            });
+            if (!changed) throw new Error('MIGRATION_COMPLETE_TRANSITION_REJECTED');
+            await transactionRepository.appendIdempotentEventInCurrentTransaction(completionEvent);
+            return;
+          }
+
+          if (job.status === 'committed' || job.status === 'activated') {
+            parseCommitProgressSummary(job.summary, 'completed');
+            const existingEvent = await transactionRepository.findEventByKey(completionEvent);
+            if (!existingEvent && job.status === 'activated')
+              throw new Error('MIGRATION_COMPLETE_REPLAY_EVIDENCE_MISSING');
+            await transactionRepository.appendIdempotentEventInCurrentTransaction(completionEvent);
+            return;
+          }
+          throw new Error('MIGRATION_COMPLETE_TRANSITION_REJECTED');
+        });
     },
 
     async failCommit(context, failure: MigrationFailure) {

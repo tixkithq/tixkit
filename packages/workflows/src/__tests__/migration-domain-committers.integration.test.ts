@@ -31,6 +31,7 @@ import {
 import {
   buildPortableLogicalExport,
   createPortableConfigurationPayloadPolicies,
+  portableImportControlInputSha256,
   portableManifestSha256,
   scanPortablePayload,
   signPortableManifest,
@@ -40,6 +41,7 @@ import { MIGRATION_COMMIT_STAGES, MIGRATION_SIDE_EFFECT_POLICY } from '../activi
 import {
   createProductionMigrationCommitters,
   processMigrationMediaCleanupJobs,
+  resolvePortableCanonicalAdoption,
   type MigrationMediaObjectStore,
   type MigrationPortableAssetResolver,
 } from '../activities/migration-domain-committers.js';
@@ -1080,6 +1082,13 @@ describeDatabase('production migration committers', () => {
   it('imports the canonical dependency chain idempotently without commerce side effects', async () => {
     const firstJob = await importChain('chain:first');
     const imports = new ImportRepository(db);
+    const completedJob = await imports.findJob(tenantId, organizationId, firstJob.id);
+    expect(JSON.parse(completedJob!.summary!)).toMatchObject({
+      status: 'completed',
+      stageIndex: MIGRATION_COMMIT_STAGES.length,
+      stageCount: MIGRATION_COMMIT_STAGES.length,
+    });
+    expect(JSON.parse(completedJob!.summary!)).not.toHaveProperty('stage');
     const firstRows = await imports.listRows({
       tenantId,
       organizationId,
@@ -1157,6 +1166,23 @@ describeDatabase('production migration committers', () => {
         'commit.completed',
       ]),
     );
+    const firstJobScope = {
+      tenantId,
+      organizationId,
+      jobId: firstJob.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    };
+    await expect(
+      createRepositoryMigrationActivityService(
+        db,
+        createProductionMigrationCommitters(db),
+      ).completeCommit(firstJobScope),
+    ).resolves.toBeUndefined();
+    expect(
+      (await imports.listEvents(tenantId, organizationId, firstJob.id)).filter(
+        (event) => event.type === 'commit.completed',
+      ),
+    ).toHaveLength(1);
     const eventAfter = await db
       .selectFrom('events')
       .select(['updated_at'])
@@ -1382,6 +1408,188 @@ describeDatabase('production migration committers', () => {
         sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
       }),
     ).resolves.toMatchObject({ disposition: 'conflict' });
+  });
+
+  it('fails closed on corrupt terminal progress and repairs only safe committed replays', async () => {
+    const repository = new ImportRepository(db);
+    const service = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+    );
+    const validCommittingSummary = {
+      status: 'committing',
+      stage: MIGRATION_COMMIT_STAGES.at(-1),
+      stageIndex: MIGRATION_COMMIT_STAGES.length - 1,
+      stageCount: MIGRATION_COMMIT_STAGES.length,
+      processed: 5,
+      created: 3,
+      updated: 0,
+      skipped: 2,
+      conflicts: 0,
+      failed: 0,
+    };
+    const invalidSummaries: Array<[string, Record<string, unknown>]> = [
+      ['missing', {}],
+      ['status', { ...validCommittingSummary, status: 'reconciling' }],
+      ['negative', { ...validCommittingSummary, failed: -1 }],
+      ['fractional', { ...validCommittingSummary, created: 2.5, processed: 4.5 }],
+      ['total', { ...validCommittingSummary, processed: 6 }],
+      ['stage-count', { ...validCommittingSummary, stageCount: 11 }],
+      ['stage-index', { ...validCommittingSummary, stageIndex: 10 }],
+      ['stage-name', { ...validCommittingSummary, stage: 'tickets' }],
+    ];
+
+    for (const [name, invalidSummary] of invalidSummaries) {
+      const job = await repository.createJob({
+        tenantId,
+        organizationId,
+        sourceSystem: 'generic-csv',
+        adapterVersion: '1.0.0',
+        mode: 'commit',
+        idempotencyKey: `invalid-terminal-progress:${name}`,
+        requestedBy: 'test-user',
+      });
+      await repository.transitionJob({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        from: ['pending'],
+        to: 'committing',
+        summary: invalidSummary,
+      });
+      await expect(
+        service.completeCommit({
+          tenantId,
+          organizationId,
+          jobId: job.id,
+          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+        }),
+      ).rejects.toThrow(/MIGRATION_PROGRESS_SUMMARY_/);
+      expect((await repository.findJob(tenantId, organizationId, job.id))?.status).toBe(
+        'committing',
+      );
+      expect(await repository.listEvents(tenantId, organizationId, job.id)).toHaveLength(0);
+    }
+
+    const appendFailure = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: 'rollback-terminal-event-conflict',
+      requestedBy: 'test-user',
+    });
+    await repository.transitionJob({
+      tenantId,
+      organizationId,
+      jobId: appendFailure.id,
+      from: ['pending'],
+      to: 'committing',
+      summary: validCommittingSummary,
+    });
+    await repository.appendIdempotentEvent({
+      tenantId,
+      organizationId,
+      jobId: appendFailure.id,
+      eventKey: 'commit:completed',
+      type: 'commit.completed',
+      severity: 'warning',
+      message: 'Conflicting completion evidence.',
+    });
+    await expect(
+      service.completeCommit({
+        tenantId,
+        organizationId,
+        jobId: appendFailure.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow('IMPORT_EVENT_IDEMPOTENCY_CONFLICT');
+    const jobAfterAppendFailure = await repository.findJob(
+      tenantId,
+      organizationId,
+      appendFailure.id,
+    );
+    expect(jobAfterAppendFailure?.status).toBe('committing');
+    expect(JSON.parse(jobAfterAppendFailure!.summary!)).toEqual(validCommittingSummary);
+    expect(await repository.listEvents(tenantId, organizationId, appendFailure.id)).toEqual([
+      expect.objectContaining({
+        event_key: 'commit:completed',
+        severity: 'warning',
+        message: 'Conflicting completion evidence.',
+      }),
+    ]);
+
+    const terminalSummary = {
+      ...validCommittingSummary,
+      status: 'completed',
+      stageIndex: MIGRATION_COMMIT_STAGES.length,
+    };
+    delete (terminalSummary as { stage?: string }).stage;
+    const repairable = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: 'repair-committed-terminal-event',
+      requestedBy: 'test-user',
+    });
+    await repository.transitionJob({
+      tenantId,
+      organizationId,
+      jobId: repairable.id,
+      from: ['pending'],
+      to: 'committed',
+      summary: terminalSummary,
+    });
+    const repairableScope = {
+      tenantId,
+      organizationId,
+      jobId: repairable.id,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    };
+    await expect(service.completeCommit(repairableScope)).resolves.toBeUndefined();
+    await expect(service.completeCommit(repairableScope)).resolves.toBeUndefined();
+    expect(
+      (await repository.listEvents(tenantId, organizationId, repairable.id)).filter(
+        (event) => event.type === 'commit.completed',
+      ),
+    ).toHaveLength(1);
+    await repository.transitionJob({
+      tenantId,
+      organizationId,
+      jobId: repairable.id,
+      from: ['committed'],
+      to: 'activated',
+    });
+    await expect(service.completeCommit(repairableScope)).resolves.toBeUndefined();
+
+    const unsafeActivated = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      adapterVersion: '1.0.0',
+      mode: 'commit',
+      idempotencyKey: 'reject-activated-without-terminal-event',
+      requestedBy: 'test-user',
+    });
+    await repository.transitionJob({
+      tenantId,
+      organizationId,
+      jobId: unsafeActivated.id,
+      from: ['pending'],
+      to: 'activated',
+      summary: terminalSummary,
+    });
+    await expect(
+      service.completeCommit({
+        tenantId,
+        organizationId,
+        jobId: unsafeActivated.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow('MIGRATION_COMPLETE_REPLAY_EVIDENCE_MISSING');
   });
 
   it('loads an organization-scoped configuration bundle from production tables', async () => {
@@ -1777,6 +1985,485 @@ describeDatabase('production migration committers', () => {
     ).rejects.toThrow('MIGRATION_DEPENDENCY_UNRESOLVED:organization:organization-1');
   });
 
+  it('adopts an exact scoped Compact brand without claiming rollback ownership', async () => {
+    const existingBrand = await new BrandRepository(db).create({
+      tenantId,
+      organizationId,
+      name: 'Tixkit Dev',
+      slug: 'tixkit-dev',
+      theme: { primaryColor: '#4f46e5' },
+    });
+    const compactBrandId = 'brd_dev_local';
+    await db
+      .updateTable('brands')
+      .set({ id: compactBrandId, status: 'active' })
+      .where('id', '=', existingBrand.id)
+      .execute();
+    const imports = new ImportRepository(db);
+    const job = await imports.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v2',
+      mode: 'commit',
+      idempotencyKey: `portable-canonical-brand-${integrationDriver}`,
+      requestedBy: 'test',
+    });
+
+    const entity = {
+      entityType: 'brand' as const,
+      externalId: compactBrandId,
+      sourcePosition: 'portable:brands:1',
+      attributes: {
+        name: 'Tixkit Dev',
+        slug: existingBrand.slug,
+        theme: { primaryColor: '#4f46e5' },
+      },
+    };
+    const approvedAdoption = await resolvePortableCanonicalAdoption(db, {
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      entity,
+    });
+    expect(approvedAdoption).toMatchObject({
+      policyVersion: 'compact-bootstrap-brand-v1',
+      targetId: compactBrandId,
+      disposition: 'skip',
+      beforeCanonicalSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    const rowId = `imr_compact_adoption_${integrationDriver}`;
+    const sourceData = { sourcePosition: entity.sourcePosition };
+    const now = new Date();
+    await db
+      .insertInto('import_job_rows')
+      .values({
+        id: rowId,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        import_job_id: job.id,
+        import_job_file_id: null,
+        entity_type: entity.entityType,
+        external_id: entity.externalId,
+        row_number: 1,
+        status: 'validated',
+        claim_owner: null,
+        claim_expires_at: null,
+        severity: null,
+        source_data: JSON.stringify(sourceData),
+        normalized_data: JSON.stringify(entity),
+        tixkit_id: null,
+        domain_activity_at: null,
+        rollback_blocked_reason: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    const inputSha256 = portableImportControlInputSha256({
+      configuration: null,
+      files: [],
+      mappings: [],
+      rows: [{ id: rowId, source: sourceData, normalized: entity }],
+      canonicalAdoptions: [approvedAdoption],
+    });
+    await db
+      .updateTable('import_jobs')
+      .set({
+        summary: JSON.stringify({
+          accepted: true,
+          inputHash: inputSha256,
+          canonicalAdoptions: [approvedAdoption],
+        }),
+      })
+      .where('id', '=', job.id)
+      .execute();
+    const manifestSha256 = 'a'.repeat(64);
+    const artifactSha256 = 'b'.repeat(64);
+    const operationId = `compact-adoption-${integrationDriver}`;
+    await imports.recordPortablePreflight({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      operationId,
+      bundleId: `bundle-compact-adoption-${integrationDriver}`,
+      manifestSha256,
+      artifactSha256,
+      sourceDeploymentId: 'compact-source',
+      sourceChangeCursor: 'snapshot:compact-adoption',
+      destinationId: 'compact-destination',
+      manifestJson: '{}',
+      preflightJson: '{}',
+      expectedCounts: '{}',
+      expectedAssets: '[]',
+      requiredRebindings: '[]',
+    });
+    const receiptJson = JSON.stringify({ inputSha256 });
+    const receiptSha256 = createHash('sha256').update(receiptJson).digest('hex');
+    await imports.recordPortableDryRunReceipt({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      operationId,
+      manifestSha256,
+      inputSha256,
+      receiptSha256,
+      receiptJson,
+      createdBy: 'test',
+    });
+    const approval = await imports.createPortableImportApproval({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      operationId,
+      manifestSha256,
+      artifactSha256,
+      inputSha256,
+      receiptSha256,
+      rebindingsSha256: 'c'.repeat(64),
+      approvalDigest: 'd'.repeat(64),
+      approvedBy: 'test',
+      idempotencyKeySha256: 'e'.repeat(64),
+      requestFingerprint: 'f'.repeat(64),
+      expiresAt: new Date(now.getTime() + 5 * 60_000),
+      now,
+    });
+    await db
+      .insertInto('portable_import_commit_authorizations')
+      .values({
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        import_job_id: job.id,
+        approval_id: approval.id,
+        approval_digest: approval.approval_digest,
+        input_sha256: inputSha256,
+        rebindings_sha256: approval.rebindings_sha256,
+        authorized_by: approval.approved_by,
+        authorized_at: now,
+      })
+      .execute();
+
+    await expect(
+      resolvePortableCanonicalAdoption(db, {
+        tenantId,
+        organizationId,
+        sourceSystem: 'generic-csv',
+        entity,
+      }),
+    ).resolves.toBeUndefined();
+
+    await db
+      .updateTable('brands')
+      .set({ name: 'Changed after approval planning' })
+      .where('id', '=', compactBrandId)
+      .execute();
+    await expect(
+      resolvePortableCanonicalAdoption(db, {
+        tenantId,
+        organizationId,
+        sourceSystem: 'tixkit-portable',
+        entity,
+      }),
+    ).rejects.toThrow('PORTABLE_CANONICAL_ADOPTION_CONFLICT');
+    await db
+      .updateTable('brands')
+      .set({ name: 'Tixkit Dev' })
+      .where('id', '=', compactBrandId)
+      .execute();
+
+    await db
+      .updateTable('brands')
+      .set({ id: `${compactBrandId}_conflict` })
+      .where('id', '=', compactBrandId)
+      .execute();
+    await expect(
+      resolvePortableCanonicalAdoption(db, {
+        tenantId,
+        organizationId,
+        sourceSystem: 'tixkit-portable',
+        entity,
+      }),
+    ).rejects.toThrow('PORTABLE_CANONICAL_ADOPTION_CONFLICT');
+    await db
+      .updateTable('brands')
+      .set({ id: compactBrandId })
+      .where('id', '=', `${compactBrandId}_conflict`)
+      .execute();
+
+    await db
+      .updateTable('brands')
+      .set({ status: 'inactive' })
+      .where('id', '=', compactBrandId)
+      .execute();
+    await expect(
+      createProductionMigrationCommitters(db).get('brand')!.commit({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        entity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow('PORTABILITY_COMMIT_DESTINATION_CHANGED');
+    await expect(
+      db
+        .selectFrom('imported_domain_entities')
+        .select('id')
+        .where('id', '=', compactBrandId)
+        .executeTakeFirst(),
+    ).resolves.toBeUndefined();
+    await db
+      .updateTable('brands')
+      .set({ status: 'active' })
+      .where('id', '=', compactBrandId)
+      .execute();
+
+    await db
+      .updateTable('brands')
+      .set({ status: 'inactive' })
+      .where('id', '=', compactBrandId)
+      .execute();
+    const tamperedAdoption = await resolvePortableCanonicalAdoption(db, {
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      entity,
+    });
+    await db
+      .updateTable('import_jobs')
+      .set({
+        summary: JSON.stringify({
+          accepted: true,
+          inputHash: inputSha256,
+          canonicalAdoptions: [tamperedAdoption],
+        }),
+      })
+      .where('id', '=', job.id)
+      .execute();
+    await expect(
+      createProductionMigrationCommitters(db).get('brand')!.commit({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        entity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow('PORTABILITY_COMMIT_DESTINATION_CHANGED');
+    await db
+      .updateTable('brands')
+      .set({ status: 'active' })
+      .where('id', '=', compactBrandId)
+      .execute();
+    await db
+      .updateTable('import_jobs')
+      .set({
+        summary: JSON.stringify({
+          accepted: true,
+          inputHash: inputSha256,
+          canonicalAdoptions: [approvedAdoption],
+        }),
+      })
+      .where('id', '=', job.id)
+      .execute();
+
+    const outcome = await createProductionMigrationCommitters(db).get('brand')!.commit({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      entity,
+      sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+    });
+
+    expect(outcome).toEqual({ disposition: 'skipped', tixkitId: compactBrandId });
+    await expect(
+      createProductionMigrationCommitters(db).get('brand')!.commit({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        entity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toEqual({ disposition: 'skipped', tixkitId: compactBrandId });
+    expect(
+      await db
+        .selectFrom('brands')
+        .select(['id', 'name', 'slug', 'status'])
+        .where('id', '=', compactBrandId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({
+      id: compactBrandId,
+      name: 'Tixkit Dev',
+      slug: existingBrand.slug,
+      status: 'active',
+    });
+    expect(
+      await db
+        .selectFrom('imported_domain_entities')
+        .select(['id', 'created_by_import_job_id', 'source_external_id', 'source_provenance'])
+        .where('id', '=', compactBrandId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({
+      id: compactBrandId,
+      created_by_import_job_id: job.id,
+      source_external_id: compactBrandId,
+      source_provenance: expect.stringContaining('"canonicalAdopted":true'),
+    });
+    const importedCount = await db
+      .selectFrom('imported_domain_entities')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('id', '=', compactBrandId)
+      .executeTakeFirstOrThrow();
+    expect(Number(importedCount.count)).toBe(1);
+    await expect(
+      createProductionMigrationCommitters(db).get('brand')!.assessUntouched({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        tixkitId: compactBrandId,
+      }),
+    ).resolves.toEqual({ eligible: false, reason: 'Canonical entity predates import' });
+
+    const replayJob = await imports.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v2',
+      mode: 'commit',
+      idempotencyKey: `portable-canonical-brand-replay-${integrationDriver}`,
+      requestedBy: 'test',
+    });
+    await imports.addRows(tenantId, organizationId, replayJob.id, [
+      {
+        entityType: entity.entityType,
+        externalId: entity.externalId,
+        rowNumber: 1,
+        sourceData,
+        normalizedData: entity,
+        status: 'validated',
+      },
+    ]);
+    const replayRow = (
+      await imports.listRows({
+        tenantId,
+        organizationId,
+        jobId: replayJob.id,
+        limit: 10,
+      })
+    )[0]!;
+    const replayAdoption = await resolvePortableCanonicalAdoption(db, {
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      entity,
+    });
+    expect(replayAdoption).toEqual(approvedAdoption);
+    const replayInputSha256 = portableImportControlInputSha256({
+      configuration: null,
+      files: [],
+      mappings: [],
+      rows: [
+        {
+          id: replayRow.id,
+          source: sourceData,
+          normalized: entity,
+        },
+      ],
+      canonicalAdoptions: [replayAdoption],
+    });
+    await db
+      .updateTable('import_jobs')
+      .set({
+        summary: JSON.stringify({
+          accepted: true,
+          inputHash: replayInputSha256,
+          canonicalAdoptions: [replayAdoption],
+        }),
+      })
+      .where('id', '=', replayJob.id)
+      .execute();
+    const replayNow = new Date();
+    const replayOperationId = `compact-adoption-replay-${integrationDriver}`;
+    await imports.recordPortablePreflight({
+      tenantId,
+      organizationId,
+      jobId: replayJob.id,
+      operationId: replayOperationId,
+      bundleId: `bundle-compact-adoption-replay-${integrationDriver}`,
+      manifestSha256,
+      artifactSha256,
+      sourceDeploymentId: 'compact-source',
+      sourceChangeCursor: 'snapshot:compact-adoption-replay',
+      destinationId: 'compact-destination',
+      manifestJson: '{}',
+      preflightJson: '{}',
+      expectedCounts: '{}',
+      expectedAssets: '[]',
+      requiredRebindings: '[]',
+    });
+    const replayReceiptJson = JSON.stringify({ inputSha256: replayInputSha256 });
+    const replayReceiptSha256 = createHash('sha256').update(replayReceiptJson).digest('hex');
+    await imports.recordPortableDryRunReceipt({
+      tenantId,
+      organizationId,
+      jobId: replayJob.id,
+      operationId: replayOperationId,
+      manifestSha256,
+      inputSha256: replayInputSha256,
+      receiptSha256: replayReceiptSha256,
+      receiptJson: replayReceiptJson,
+      createdBy: 'test',
+    });
+    const replayApproval = await imports.createPortableImportApproval({
+      tenantId,
+      organizationId,
+      jobId: replayJob.id,
+      operationId: replayOperationId,
+      manifestSha256,
+      artifactSha256,
+      inputSha256: replayInputSha256,
+      receiptSha256: replayReceiptSha256,
+      rebindingsSha256: '1'.repeat(64),
+      approvalDigest: '2'.repeat(64),
+      approvedBy: 'test',
+      idempotencyKeySha256: '3'.repeat(64),
+      requestFingerprint: '4'.repeat(64),
+      expiresAt: new Date(replayNow.getTime() + 5 * 60_000),
+      now: replayNow,
+    });
+    await db
+      .insertInto('portable_import_commit_authorizations')
+      .values({
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        import_job_id: replayJob.id,
+        approval_id: replayApproval.id,
+        approval_digest: replayApproval.approval_digest,
+        input_sha256: replayInputSha256,
+        rebindings_sha256: replayApproval.rebindings_sha256,
+        authorized_by: replayApproval.approved_by,
+        authorized_at: replayNow,
+      })
+      .execute();
+    await expect(
+      createProductionMigrationCommitters(db).get('brand')!.commit({
+        tenantId,
+        organizationId,
+        jobId: replayJob.id,
+        entity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toEqual({ disposition: 'skipped', tixkitId: compactBrandId });
+    expect(
+      Number(
+        (
+          await db
+            .selectFrom('imported_domain_entities')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
+            .where('id', '=', compactBrandId)
+            .executeTakeFirstOrThrow()
+        ).count,
+      ),
+    ).toBe(1);
+  });
+
   it('resolves a live scoped credential before commit and sanitizes resolver failures', async () => {
     const imports = new ImportRepository(db);
     const credential = await imports.createCredential({
@@ -2021,8 +2708,15 @@ describeDatabase('production migration committers', () => {
           sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
         };
         await committers.beginCommit(scope);
-        const totals = { created: 0, updated: 0, skipped: 0, conflicts: 0 };
-        for (const stage of MIGRATION_COMMIT_STAGES) {
+        const totals = {
+          processed: 0,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          conflicts: 0,
+          failed: 0,
+        };
+        for (const [stageIndex, stage] of MIGRATION_COMMIT_STAGES.entries()) {
           let stageCursor: string | undefined;
           for (;;) {
             const result = await committers.processStage(scope, {
@@ -2031,10 +2725,18 @@ describeDatabase('production migration committers', () => {
               claimOwner: `${jobId}:${stage}:${stageCursor ?? 'first'}`,
               chunkSize: 2,
             });
+            totals.processed += result.processed;
             totals.created += result.created;
             totals.updated += result.updated;
             totals.skipped += result.skipped;
             totals.conflicts += result.conflicts;
+            totals.failed += result.failed;
+            await committers.recordProgress(scope, {
+              stage,
+              stageIndex,
+              stageCount: MIGRATION_COMMIT_STAGES.length,
+              ...totals,
+            });
             if (result.complete) break;
             stageCursor = result.nextCursor;
           }

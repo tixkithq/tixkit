@@ -162,8 +162,11 @@ describeLiveDatabase('migration workflow with production database activities', (
       expect(persistedJob?.status).toBe('committed');
       expect(JSON.parse(persistedJob!.summary!)).toMatchObject({
         ...result.progress,
-        status: 'committing',
+        status: 'completed',
+        stageIndex: MIGRATION_COMMIT_STAGES.length,
+        stageCount: MIGRATION_COMMIT_STAGES.length,
       });
+      expect(JSON.parse(persistedJob!.summary!)).not.toHaveProperty('stage');
       const events = await repository.listEvents(tenantId, organizationId, job.id);
       expect(events.map((event) => event.sequence)).toEqual(
         events.map((_event, index) => index + 1),
