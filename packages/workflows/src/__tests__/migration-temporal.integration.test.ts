@@ -147,4 +147,189 @@ describeWithTemporal('migration workflow on Temporal', () => {
     }
     if (cleanupError) throw cleanupError;
   }, 45_000);
+
+  it('continues on a replacement worker after the first worker drains between activities', async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const taskQueue = `migration-worker-restart-proof-${suffix}`;
+    const workflowId = `migration-worker-restart-proof:${suffix}`;
+    const workflowsPath = fileURLToPath(new URL('../workflows/index.ts', import.meta.url));
+    let releaseBegin!: () => void;
+    let markBeginStarted!: () => void;
+    let firstBeginCalls = 0;
+    let firstBeginCompletions = 0;
+    let firstStageCalls = 0;
+    const beginRelease = new Promise<void>((resolve) => {
+      releaseBegin = resolve;
+    });
+    const beginStarted = new Promise<void>((resolve) => {
+      markBeginStarted = resolve;
+    });
+    const firstWorker = await Worker.create({
+      connection: environment.nativeConnection,
+      namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+      taskQueue,
+      workflowsPath,
+      shutdownGraceTime: '5 seconds',
+      maxCachedWorkflows: 0,
+      activities: {
+        async beginMigrationCommitActivity() {
+          firstBeginCalls += 1;
+          markBeginStarted();
+          await beginRelease;
+          firstBeginCompletions += 1;
+        },
+        async processMigrationStageActivity() {
+          firstStageCalls += 1;
+          throw new Error('DRAINED_WORKER_MUST_NOT_PROCESS_A_STAGE');
+        },
+        async recordMigrationProgressActivity() {},
+        async setMigrationPausedActivity() {},
+        async cancelMigrationCommitActivity() {},
+        async reconcileMigrationActivity() {
+          throw new Error('DRAINED_WORKER_MUST_NOT_RECONCILE');
+        },
+        async assessMigrationRollbackActivity() {
+          throw new Error('DRAINED_WORKER_MUST_NOT_ASSESS_ROLLBACK');
+        },
+        async executeMigrationRollbackActivity() {
+          throw new Error('DRAINED_WORKER_MUST_NOT_ROLL_BACK');
+        },
+        async completeMigrationCommitActivity() {
+          throw new Error('DRAINED_WORKER_MUST_NOT_COMPLETE');
+        },
+        async failMigrationCommitActivity() {
+          throw new Error('DRAINED_WORKER_MUST_NOT_RECORD_FAILURE');
+        },
+      },
+    });
+    let handle: WorkflowHandleWithStartDetails<typeof migrationCommitWorkflow> | undefined;
+    let firstWorkerRun: Promise<void> | undefined;
+    let replacementWorker: Worker | undefined;
+    let replacementWorkerRan = false;
+    let cleanupError: unknown;
+    try {
+      handle = await environment.client.workflow.start(migrationCommitWorkflow, {
+        taskQueue,
+        workflowId,
+        workflowExecutionTimeout: '30 seconds',
+        args: [
+          {
+            version: 1,
+            tenantId: 'tenant_worker_restart_proof',
+            organizationId: 'organization_worker_restart_proof',
+            jobId: `job_worker_restart_proof_${suffix}`,
+            chunkSize: 100,
+          },
+        ],
+      });
+      firstWorkerRun = firstWorker.run();
+      let beginTimeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          beginStarted,
+          new Promise<never>((_, reject) => {
+            beginTimeout = setTimeout(
+              () => reject(new Error('FIRST_WORKER_DID_NOT_START_BEGIN_ACTIVITY')),
+              10_000,
+            );
+          }),
+        ]);
+      } finally {
+        if (beginTimeout) clearTimeout(beginTimeout);
+      }
+      firstWorker.shutdown();
+      releaseBegin();
+      await firstWorkerRun;
+      expect(firstBeginCalls).toBe(1);
+      expect(firstBeginCompletions).toBe(1);
+      expect(firstStageCalls).toBe(0);
+
+      const stageCalls: MigrationCommitStage[] = [];
+      let replacementBeginCalls = 0;
+      replacementWorker = await Worker.create({
+        connection: environment.nativeConnection,
+        namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+        taskQueue,
+        workflowsPath,
+        activities: {
+          async beginMigrationCommitActivity() {
+            replacementBeginCalls += 1;
+          },
+          async processMigrationStageActivity(input: { stage: MigrationCommitStage }) {
+            stageCalls.push(input.stage);
+            return {
+              processed: 1,
+              created: 1,
+              updated: 0,
+              skipped: 0,
+              conflicts: 0,
+              failed: 0,
+              complete: true,
+            };
+          },
+          async recordMigrationProgressActivity() {},
+          async setMigrationPausedActivity() {},
+          async cancelMigrationCommitActivity() {},
+          async reconcileMigrationActivity() {
+            return { repaired: 0, unresolved: 0 };
+          },
+          async assessMigrationRollbackActivity() {
+            return {
+              eligible: false as const,
+              mode: 'corrective_plan' as const,
+              reasons: ['not requested'],
+              correctivePlanId: 'plan_not_requested',
+            };
+          },
+          async executeMigrationRollbackActivity() {
+            return { deleted: 0 };
+          },
+          async completeMigrationCommitActivity() {},
+          async failMigrationCommitActivity() {},
+        },
+      });
+      replacementWorkerRan = true;
+      const result = await replacementWorker.runUntil(() => handle!.result(), {
+        promiseCompletionTimeout: '5 seconds',
+      });
+      expect(result.status).toBe('completed');
+      expect(result.progress.processed).toBe(MIGRATION_COMMIT_STAGES.length);
+      expect(firstBeginCalls).toBe(1);
+      expect(firstBeginCompletions).toBe(1);
+      expect(firstStageCalls).toBe(0);
+      expect(replacementBeginCalls).toBe(0);
+      expect(stageCalls).toEqual(MIGRATION_COMMIT_STAGES);
+    } finally {
+      releaseBegin();
+      try {
+        if (firstWorker.getState() === 'INITIALIZED') {
+          await firstWorker.runUntil(Promise.resolve());
+        } else if (firstWorker.getState() === 'RUNNING') {
+          firstWorker.shutdown();
+        }
+        if (firstWorkerRun) await firstWorkerRun;
+      } catch (error) {
+        cleanupError = error;
+      }
+      try {
+        if (replacementWorker && !replacementWorkerRan) {
+          await replacementWorker.runUntil(Promise.resolve());
+        }
+      } catch (error) {
+        cleanupError ??= error;
+      }
+      try {
+        await environment.connection.workflowService.deleteWorkflowExecution({
+          namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+          workflowExecution: {
+            workflowId,
+            ...(handle ? { runId: handle.firstExecutionRunId } : {}),
+          },
+        });
+      } catch (error) {
+        if (handle) cleanupError ??= error;
+      }
+    }
+    if (cleanupError) throw cleanupError;
+  }, 45_000);
 });
