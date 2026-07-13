@@ -12,6 +12,7 @@ import {
   portableManifestSha256,
   portableMappingProvenanceSha256,
   portableOperationId,
+  portableRebindingProvenanceSha256,
   reconcilePortableImport,
   scanPortablePayload,
   scanPortableAsset,
@@ -24,6 +25,8 @@ import {
   validatePortableResume,
   verifyPortableManifestSignature,
   verifyAndPreflightPortableImport,
+  PORTABLE_BUNDLE_FORMAT,
+  PORTABLE_BUNDLE_SCHEMA_VERSION,
   type PortableBundleManifest,
 } from '../index.js';
 
@@ -39,8 +42,8 @@ const payloadPolicy = {
 
 function manifest(overrides: Partial<PortableBundleManifest> = {}): PortableBundleManifest {
   return {
-    schemaVersion: 1,
-    format: 'tixkit-portable-bundle-v1',
+    schemaVersion: PORTABLE_BUNDLE_SCHEMA_VERSION,
+    format: PORTABLE_BUNDLE_FORMAT,
     bundleId: 'bundle_01',
     mode: 'configuration',
     source: {
@@ -232,10 +235,10 @@ describe('portable bundle manifest', () => {
     }
   });
 
-  it('keeps the published JSON schema aligned with the executable manifest contract', () => {
+  it('keeps the current JSON schema aligned with the executable manifest contract', () => {
     const schema = JSON.parse(
       readFileSync(
-        fileURLToPath(new URL('../../schemas/portable-bundle-2026-07-12.json', import.meta.url)),
+        fileURLToPath(new URL('../../schemas/portable-bundle-2026-07-14.json', import.meta.url)),
         'utf8',
       ),
     ) as object;
@@ -266,8 +269,59 @@ describe('portable bundle manifest', () => {
     ).toBe(true);
   });
 
+  it('preserves v1 validation while requiring v2 for typed delivery rebindings', () => {
+    const v1Schema = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('../../schemas/portable-bundle-2026-07-12.json', import.meta.url)),
+        'utf8',
+      ),
+    ) as object;
+    const v2Schema = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('../../schemas/portable-bundle-2026-07-14.json', import.meta.url)),
+        'utf8',
+      ),
+    ) as object;
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    addFormats(ajv);
+    const validateV1 = ajv.compile(v1Schema);
+    const validateV2 = ajv.compile(v2Schema);
+    const typed = manifest({
+      rebindings: [
+        {
+          kind: 'email_delivery_route',
+          portableId: 'email_delivery_route:route_01',
+          required: true,
+        },
+      ],
+    });
+    const legacy = {
+      ...manifest(),
+      schemaVersion: 1,
+      format: 'tixkit-portable-bundle-v1',
+      rebindings: [
+        { kind: 'provider_account', portableId: 'provider_account:account_01', required: true },
+      ],
+    } as PortableBundleManifest;
+
+    expect(validateV1(legacy), JSON.stringify(validateV1.errors)).toBe(true);
+    expect(validateV1(typed)).toBe(false);
+    expect(validateV2(typed), JSON.stringify(validateV2.errors)).toBe(true);
+    expect(validateV2(legacy)).toBe(false);
+    expect(() => validatePortableManifest(legacy)).not.toThrow();
+    expect(() => validatePortableManifest(typed)).not.toThrow();
+    expect(() =>
+      validatePortableManifest({ ...typed, format: 'tixkit-portable-bundle-v1' }),
+    ).toThrow('unsupported portable bundle format');
+  });
+
   it('canonicalizes, signs and verifies an immutable manifest digest', () => {
-    const value = manifest();
+    const value = manifest({
+      rebindings: [
+        { kind: 'provider_account', portableId: 'provider_stripe', required: true },
+        { kind: 'email_delivery_route', portableId: 'email_route_optional', required: false },
+      ],
+    });
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const signature = signPortableManifest(value, 'key_portability_01', privateKey);
     expect(canonicalPortableManifest(value)).toMatch(/\n$/u);
@@ -595,7 +649,12 @@ describe('portable bundle manifest', () => {
   });
 
   it('derives stable destination-specific operation identities and rejects checkpoint drift', () => {
-    const value = manifest();
+    const value = manifest({
+      rebindings: [
+        { kind: 'provider_account', portableId: 'provider_stripe', required: true },
+        { kind: 'email_delivery_route', portableId: 'email_route_optional', required: false },
+      ],
+    });
     const operationId = portableOperationId(value, 'deployment_destination');
     const preflight = verifiedPreflight(value, {
       deploymentId: 'deployment_destination',
@@ -685,6 +744,99 @@ describe('portable bundle manifest', () => {
         trustedDryRunKeys,
       ),
     ).not.toThrow();
+    const optionalRebinding = {
+      kind: 'email_delivery_route' as const,
+      portableId: 'email_route_optional',
+      destinationReference: 'destination_email_route_01',
+    };
+    expect(() =>
+      validatePortableResume(
+        {
+          operationId,
+          manifestSha256: portableManifestSha256(value),
+          completedFiles: [],
+          lastSourceChangeCursor: 'change_100',
+          destinationId: 'deployment_destination',
+          dryRunReceiptSha256: receipt.sha256,
+          mappings: [],
+          completedRebindings: [
+            {
+              ...optionalRebinding,
+              provenanceSha256: portableRebindingProvenanceSha256(optionalRebinding),
+            },
+          ],
+          status: 'importing',
+        },
+        value,
+        'deployment_destination',
+        receipt,
+        trustedDryRunKeys,
+      ),
+    ).not.toThrow();
+    const requiredRebinding = {
+      kind: 'provider_account' as const,
+      portableId: 'provider_stripe',
+      destinationReference: 'destination_provider_01',
+    };
+    expect(() =>
+      validatePortableResume(
+        {
+          operationId,
+          manifestSha256: portableManifestSha256(value),
+          completedFiles: [],
+          lastSourceChangeCursor: 'change_100',
+          destinationId: 'deployment_destination',
+          dryRunReceiptSha256: receipt.sha256,
+          mappings: [],
+          completedRebindings: [
+            {
+              ...requiredRebinding,
+              provenanceSha256: portableRebindingProvenanceSha256(requiredRebinding),
+            },
+          ],
+          status: 'reconciling',
+        },
+        value,
+        'deployment_destination',
+        receipt,
+        trustedDryRunKeys,
+      ),
+    ).not.toThrow();
+    const substitutedRebinding = {
+      kind: 'webhook_endpoint' as const,
+      portableId: 'provider_stripe',
+      destinationReference: 'destination_resource_01',
+    };
+    expect(() =>
+      validatePortableResume(
+        {
+          operationId,
+          manifestSha256: portableManifestSha256(value),
+          completedFiles: [],
+          lastSourceChangeCursor: 'change_100',
+          destinationId: 'deployment_destination',
+          dryRunReceiptSha256: receipt.sha256,
+          mappings: [],
+          completedRebindings: [
+            {
+              ...substitutedRebinding,
+              provenanceSha256: portableRebindingProvenanceSha256(substitutedRebinding),
+            },
+          ],
+          status: 'importing',
+        },
+        value,
+        'deployment_destination',
+        receipt,
+        trustedDryRunKeys,
+      ),
+    ).toThrow(/invalid rebinding provenance/u);
+    expect(() =>
+      validatePortableManifest({
+        ...value,
+        rebindings: [value.rebindings[0]!, { ...value.rebindings[0]! }],
+      }),
+    ).toThrow(/duplicate identities/u);
   });
 
   it('binds delta lineage to a parent and cutover cursor', () => {

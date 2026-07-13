@@ -138,6 +138,24 @@ describe('OpenAPI compatibility', () => {
       'enum-narrowed',
     ],
     [
+      'shared response enum expansion',
+      {
+        ...base,
+        components: {
+          schemas: {
+            Thing: {
+              ...base.components.schemas.Thing,
+              properties: {
+                ...base.components.schemas.Thing.properties,
+                state: { type: 'string', enum: ['new', 'ready', 'archived'] },
+              },
+            },
+          },
+        },
+      },
+      'enum-expanded',
+    ],
+    [
       'type change',
       {
         ...base,

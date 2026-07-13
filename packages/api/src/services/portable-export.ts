@@ -24,7 +24,10 @@ import {
   type SignedPortableBundle,
   type TixkitOperatingModel,
 } from '@tixkit/portability';
-import { loadPortableConfigurationSections } from '@tixkit/workflows';
+import {
+  loadPortableConfigurationRebindings,
+  loadPortableConfigurationSections,
+} from '@tixkit/workflows';
 import sharp from 'sharp';
 
 const MAX_PORTABLE_ARTIFACT_BYTES = 50 * 1024 * 1024;
@@ -368,6 +371,10 @@ export function createPortableExportService(input: {
             tenantId: request.tenantId,
             organizationId: request.organizationId,
           });
+          const rebindings = await loadPortableConfigurationRebindings(transaction as Database, {
+            tenantId: request.tenantId,
+            organizationId: request.organizationId,
+          });
           const media = await transaction
             .selectFrom('event_media_assets as asset')
             .innerJoin('upload_artifacts as upload', 'upload.id', 'asset.upload_artifact_id')
@@ -422,6 +429,7 @@ export function createPortableExportService(input: {
               canonicalPortableJson({
                 sections: portableSections,
                 media: media.map(({ bucket: _bucket, object_key: _objectKey, ...asset }) => asset),
+                rebindings,
               }),
             )
             .digest('hex')}`;
@@ -434,7 +442,7 @@ export function createPortableExportService(input: {
             sourceChangeCursor,
             now: new Date(),
           });
-          return { sections: portableSections, media, sourceChangeCursor };
+          return { sections: portableSections, media, rebindings, sourceChangeCursor };
         });
       if (snapshot.media.length > 0 && !input.mediaStore)
         throw new Error('PORTABLE_EXPORT_MEDIA_STORE_REQUIRED');
@@ -485,7 +493,7 @@ export function createPortableExportService(input: {
           exportSequence: Number(job.export_sequence),
           changeCursor: snapshot.sourceChangeCursor,
         },
-        apiVersion: '2026-07-13',
+        apiVersion: '2026-07-14',
         dataSchemaVersion: '0076',
         exportedAt,
         currentTime: exportedAt,
@@ -494,7 +502,7 @@ export function createPortableExportService(input: {
           maximumApiVersion: '2026-12-31',
           minimumDataSchemaVersion: '0076',
           maximumDataSchemaVersion: '0076',
-          requiredCapabilities: ['portable-bundle-v1'],
+          requiredCapabilities: ['portable-bundle-v1', 'portable-rebinding-kinds-v2'],
           requiredEntitlements: [],
         },
         sections: snapshot.sections,
@@ -507,6 +515,7 @@ export function createPortableExportService(input: {
           privateKey: input.signing.payloadPrivateKey,
         },
         payloadPolicies: createPortableConfigurationPayloadPolicies(),
+        rebindings: snapshot.rebindings,
         assets,
       });
       const artifactSha256 = createHash('sha256').update(built.transport).digest('hex');

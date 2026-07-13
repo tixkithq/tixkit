@@ -22,7 +22,7 @@ const MAX_PORTABLE_EXPORT_DECODED_BYTES = 32 * 1024 * 1024;
 const MAX_PORTABLE_EXPORT_TRANSPORT_BYTES = 50 * 1024 * 1024;
 const sectionRank = new Map(PORTABLE_SECTIONS.map((section, index) => [section, index]));
 
-function compareCodeUnits(left: string, right: string): number {
+export function comparePortableCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
@@ -86,7 +86,7 @@ export interface BuiltPortableLogicalExport {
 function sectionOrder(left: PortableSection, right: PortableSection): number {
   return (
     (sectionRank.get(left) ?? Number.MAX_SAFE_INTEGER) -
-      (sectionRank.get(right) ?? Number.MAX_SAFE_INTEGER) || compareCodeUnits(left, right)
+      (sectionRank.get(right) ?? Number.MAX_SAFE_INTEGER) || comparePortableCodeUnits(left, right)
   );
 }
 
@@ -162,7 +162,7 @@ export function buildPortableLogicalExport(
           ? [...record.dependencies].sort(
               (left, right) =>
                 sectionOrder(left.section, right.section) ||
-                compareCodeUnits(left.portableId, right.portableId),
+                comparePortableCodeUnits(left.portableId, right.portableId),
             )
           : undefined;
         const dependencyIdentities = dependencies?.map(
@@ -176,7 +176,7 @@ export function buildPortableLogicalExport(
         }
         return { ...record, ...(dependencies ? { dependencies } : {}) };
       })
-      .sort((left, right) => compareCodeUnits(left.portableId, right.portableId));
+      .sort((left, right) => comparePortableCodeUnits(left.portableId, right.portableId));
     totalRecords += records.length;
     if (totalRecords > MAX_PORTABLE_EXPORT_RECORDS) {
       throw new Error('portable export exceeds the logical record limit');
@@ -238,7 +238,7 @@ export function buildPortableLogicalExport(
   const assetPaths = new Set<string>();
   const assetIds = new Set<string>();
   for (const asset of [...(input.assets ?? [])].sort((left, right) =>
-    compareCodeUnits(left.portableId, right.portableId),
+    comparePortableCodeUnits(left.portableId, right.portableId),
   )) {
     if (
       !isPortableProtocolId(asset.portableId) ||
@@ -339,7 +339,7 @@ export function buildPortableLogicalExport(
       dependsOn: [...(dependencyGraph.get(section) ?? [])].sort(sectionOrder),
     })),
     rebindings: [...(input.rebindings ?? [])].sort((left, right) =>
-      compareCodeUnits(left.portableId, right.portableId),
+      comparePortableCodeUnits(left.portableId, right.portableId),
     ),
   };
   const envelope = {

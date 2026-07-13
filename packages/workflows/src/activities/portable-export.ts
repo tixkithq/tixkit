@@ -1,5 +1,10 @@
 import type { Database } from '@tixkit/db';
-import type { PortableLogicalRecord, PortableSection } from '@tixkit/portability';
+import type {
+  PortableBundleManifest,
+  PortableLogicalRecord,
+  PortableSection,
+} from '@tixkit/portability';
+import { comparePortableCodeUnits } from '@tixkit/portability';
 
 function dependency(section: PortableSection, portableId: string) {
   return { section, portableId };
@@ -67,6 +72,141 @@ function logicalBoolean(value: unknown, field: string): boolean {
   if (value === true || value === 1) return true;
   if (value === false || value === 0) return false;
   throw new Error(`portable export ${field} is not a boolean`);
+}
+
+export async function loadPortableConfigurationRebindings(
+  db: Database,
+  input: { tenantId: string; organizationId: string },
+): Promise<PortableBundleManifest['rebindings']> {
+  const brandIds = (
+    await db
+      .selectFrom('brands')
+      .select('id')
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .execute()
+  ).map(({ id }) => id);
+  const [paymentAccounts, webhooks, oauthApplications, senderIdentities, marketingIntegrations] =
+    await Promise.all([
+      db
+        .selectFrom('payment_accounts')
+        .select(['id', 'status'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .execute(),
+      db
+        .selectFrom('webhook_endpoints')
+        .select(['id', 'status'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .execute(),
+      db
+        .selectFrom('oauth_applications')
+        .select(['id', 'status'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .execute(),
+      db
+        .selectFrom('sender_identities')
+        .select(['id', 'verified'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .execute(),
+      db
+        .selectFrom('marketing_integrations')
+        .select(['id', 'status'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .execute(),
+    ]);
+  const [domains, brandSenders, smsSenders, emailRoutes, smsRoutes] =
+    brandIds.length === 0
+      ? [[], [], [], [], []]
+      : await Promise.all([
+          db
+            .selectFrom('brand_domains')
+            .select(['id', 'is_verified', 'ssl_status'])
+            .where('brand_id', 'in', brandIds)
+            .execute(),
+          db
+            .selectFrom('brand_sender_identities')
+            .select(['id', 'verified'])
+            .where('tenant_id', '=', input.tenantId)
+            .where('brand_id', 'in', brandIds)
+            .execute(),
+          db
+            .selectFrom('sms_sender_identities')
+            .select(['id', 'verified'])
+            .where('tenant_id', '=', input.tenantId)
+            .where('brand_id', 'in', brandIds)
+            .execute(),
+          db
+            .selectFrom('email_provider_routes')
+            .select(['id', 'status', 'smoke_send_verified'])
+            .where('tenant_id', '=', input.tenantId)
+            .where('brand_id', 'in', brandIds)
+            .execute(),
+          db
+            .selectFrom('sms_provider_routes')
+            .select(['id', 'status', 'smoke_send_verified'])
+            .where('tenant_id', '=', input.tenantId)
+            .where('brand_id', 'in', brandIds)
+            .execute(),
+        ]);
+  return [
+    ...paymentAccounts.map(({ id, status }) => ({
+      kind: 'payment_provider_account' as const,
+      portableId: `payment_provider_account:${id}`,
+      required: status === 'active',
+    })),
+    ...emailRoutes.map(({ id, status, smoke_send_verified }) => ({
+      kind: 'email_delivery_route' as const,
+      portableId: `email_delivery_route:${id}`,
+      required:
+        status === 'active' && logicalBoolean(smoke_send_verified, 'emailRoute.smokeVerified'),
+    })),
+    ...smsRoutes.map(({ id, status, smoke_send_verified }) => ({
+      kind: 'sms_delivery_route' as const,
+      portableId: `sms_delivery_route:${id}`,
+      required:
+        status === 'active' && logicalBoolean(smoke_send_verified, 'smsRoute.smokeVerified'),
+    })),
+    ...marketingIntegrations.map(({ id, status }) => ({
+      kind: 'marketing_integration' as const,
+      portableId: `marketing_integration:${id}`,
+      required: status === 'active',
+    })),
+    ...domains.map(({ id, is_verified, ssl_status }) => ({
+      kind: 'custom_domain' as const,
+      portableId: `custom_domain:${id}`,
+      required: logicalBoolean(is_verified, 'brandDomain.isVerified') && ssl_status === 'active',
+    })),
+    ...senderIdentities.map(({ id, verified }) => ({
+      kind: 'sending_identity' as const,
+      portableId: `sending_identity:organization:${id}`,
+      required: logicalBoolean(verified, 'senderIdentity.verified'),
+    })),
+    ...brandSenders.map(({ id, verified }) => ({
+      kind: 'sending_identity' as const,
+      portableId: `sending_identity:email:${id}`,
+      required: logicalBoolean(verified, 'brandSenderIdentity.verified'),
+    })),
+    ...smsSenders.map(({ id, verified }) => ({
+      kind: 'sending_identity' as const,
+      portableId: `sending_identity:sms:${id}`,
+      required: logicalBoolean(verified, 'smsSenderIdentity.verified'),
+    })),
+    ...webhooks.map(({ id, status }) => ({
+      kind: 'webhook_endpoint' as const,
+      portableId: `webhook_endpoint:${id}`,
+      required: status === 'active',
+    })),
+    ...oauthApplications.map(({ id, status }) => ({
+      kind: 'oauth_redirect_origin' as const,
+      portableId: `oauth_redirect_origin:${id}`,
+      required: status === 'active',
+    })),
+  ].sort((left, right) => comparePortableCodeUnits(left.portableId, right.portableId));
 }
 
 export async function loadPortableConfigurationSections(

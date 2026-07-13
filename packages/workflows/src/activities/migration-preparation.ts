@@ -1316,7 +1316,7 @@ export function createMigrationPreparationService(
             expectedAssets: canonicalPortableJson(
               evidence.manifest.assets.map(({ portableId, sha256 }) => ({ portableId, sha256 })),
             ),
-            requiredRebindings: canonicalPortableJson(evidence.preflight.requiredRebindings),
+            requiredRebindings: canonicalPortableJson(evidence.preflight.rebindings),
           });
         } else transient = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
         cursorKey = artifact.checksum_sha256;

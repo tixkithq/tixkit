@@ -11,6 +11,7 @@ import {
   type Database,
 } from '@tixkit/db';
 import {
+  canonicalPortableJson,
   parsePortableJson,
   portableManifestSha256,
   type SignedPortableBundle,
@@ -146,6 +147,295 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     const [key, stored] = [...objects].find(([key]) => key.endsWith(`${first.jobId}.json`))!;
     objects.set(key, Uint8Array.from([...stored.slice(0, -1), stored.at(-1)! ^ 1]));
     await expect(service.exportConfiguration(request)).rejects.toThrow(/EVIDENCE_MISMATCH/u);
+  });
+
+  it('requires destination rebinding without exporting provider, endpoint, or credential values', async () => {
+    const brand = await new BrandRepository(db).create({
+      tenantId,
+      organizationId,
+      name: `Portable bindings ${driver}`,
+      slug: `portable-bindings-${driver}`,
+    });
+    const now = new Date('2026-07-12T22:00:00.000Z');
+    await Promise.all([
+      db
+        .insertInto('payment_accounts')
+        .values({
+          id: `binding_shared_${driver}`,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          provider: 'stripe_connect',
+          provider_account_id: 'acct_must_not_export',
+          status: 'active',
+          default_currency: 'USD',
+          details_submitted: true,
+          charges_enabled: true,
+          payouts_enabled: true,
+          requirements: null,
+          disabled_reason: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('brand_domains')
+        .values({
+          id: `bd_portable_${driver}`,
+          brand_id: brand.id,
+          domain: 'portable-source.example.test',
+          is_primary: true,
+          is_verified: true,
+          verification_token: 'domain-token-must-not-export',
+          ssl_status: 'active',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('sender_identities')
+        .values({
+          id: `si_portable_${driver}`,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          brand_id: brand.id,
+          email: 'source-sender@example.test',
+          name: 'Source sender',
+          verified: false,
+          provider_type: 'resend',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('brand_sender_identities')
+        .values({
+          id: `bsi_portable_${driver}`,
+          tenant_id: tenantId,
+          brand_id: brand.id,
+          email: 'verified-source@example.test',
+          name: 'Verified source',
+          reply_to_email: 'reply-source@example.test',
+          verified: true,
+          verified_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('sms_sender_identities')
+        .values({
+          id: `ssi_portable_${driver}`,
+          tenant_id: tenantId,
+          brand_id: brand.id,
+          sender: '+15555550100',
+          kind: 'long_code',
+          provider_type: 'twilio',
+          provider_sender_id: 'PN_must_not_export',
+          verified: true,
+          verified_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('webhook_endpoints')
+        .values({
+          id: `binding_shared_${driver}`,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          url: 'https://hooks.source.example.test/tixkit',
+          secret: 'whsec_must_not_export',
+          events: JSON.stringify(['order.completed']),
+          status: 'active',
+          description: 'Source webhook',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('oauth_applications')
+        .values({
+          id: `oa_portable_${driver}`,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          name: 'Source OAuth application',
+          client_id: `oauth_client_must_not_export_${driver}`,
+          client_secret_hash: 'oauth-secret-hash-must-not-export',
+          redirect_uris: JSON.stringify(['https://source.example.test/oauth/callback']),
+          scopes: JSON.stringify(['events.read']),
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+    ]);
+    await Promise.all([
+      db
+        .insertInto('email_provider_routes')
+        .values({
+          id: `epr_portable_${driver}`,
+          tenant_id: tenantId,
+          brand_id: brand.id,
+          provider_type: 'resend',
+          credentials_ref: 'EMAIL_PROVIDER_SECRET_MUST_NOT_EXPORT',
+          sender_domain: 'mail-source.example.test',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: 1000,
+          allowed_categories: JSON.stringify(['transactional']),
+          status: 'active',
+          smoke_send_verified: true,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('sms_provider_routes')
+        .values({
+          id: `spr_portable_${driver}`,
+          tenant_id: tenantId,
+          brand_id: brand.id,
+          provider_type: 'twilio',
+          credentials_ref: 'SMS_PROVIDER_SECRET_MUST_NOT_EXPORT',
+          sender_identity_id: `ssi_portable_${driver}`,
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: 1000,
+          allowed_categories: JSON.stringify(['transactional']),
+          status: 'active',
+          smoke_send_verified: false,
+          webhook_url: 'https://sms-source.example.test/provider-webhook',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+      db
+        .insertInto('marketing_integrations')
+        .values({
+          id: `mi_portable_${driver}`,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          brand_id: brand.id,
+          event_id: null,
+          provider: 'meta_pixel',
+          config: JSON.stringify({ accessToken: 'MARKETING_SECRET_MUST_NOT_EXPORT' }),
+          consent_required: true,
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute(),
+    ]);
+    const service = createPortableExportService({
+      db,
+      store,
+      signing: {
+        deploymentId: `deployment_${driver}_bindings`,
+        operatingModel: 'self-hosted',
+        bundleKeyId: 'bundle_key_01',
+        bundlePrivateKey: bundleKeys.privateKey,
+        payloadKeyId: 'payload_key_01',
+        payloadPrivateKey: payloadKeys.privateKey,
+      },
+    });
+    const exported = await service.exportConfiguration({
+      tenantId,
+      organizationId,
+      requestedBy: 'user_exporter',
+      idempotencyKey: 'portable-api-rebindings',
+    });
+    const transportText = new TextDecoder().decode(exported.bytes);
+    const transport = parsePortableJson(transportText) as {
+      envelope: SignedPortableBundle;
+      payloads: Record<string, string>;
+    };
+
+    expect(transport.envelope.manifest.rebindings).toEqual([
+      { kind: 'custom_domain', portableId: `custom_domain:bd_portable_${driver}`, required: true },
+      {
+        kind: 'email_delivery_route',
+        portableId: `email_delivery_route:epr_portable_${driver}`,
+        required: true,
+      },
+      {
+        kind: 'marketing_integration',
+        portableId: `marketing_integration:mi_portable_${driver}`,
+        required: true,
+      },
+      {
+        kind: 'oauth_redirect_origin',
+        portableId: `oauth_redirect_origin:oa_portable_${driver}`,
+        required: true,
+      },
+      {
+        kind: 'payment_provider_account',
+        portableId: `payment_provider_account:binding_shared_${driver}`,
+        required: true,
+      },
+      {
+        kind: 'sending_identity',
+        portableId: `sending_identity:email:bsi_portable_${driver}`,
+        required: true,
+      },
+      {
+        kind: 'sending_identity',
+        portableId: `sending_identity:organization:si_portable_${driver}`,
+        required: false,
+      },
+      {
+        kind: 'sending_identity',
+        portableId: `sending_identity:sms:ssi_portable_${driver}`,
+        required: true,
+      },
+      {
+        kind: 'sms_delivery_route',
+        portableId: `sms_delivery_route:spr_portable_${driver}`,
+        required: false,
+      },
+      {
+        kind: 'webhook_endpoint',
+        portableId: `webhook_endpoint:binding_shared_${driver}`,
+        required: true,
+      },
+    ]);
+    const decodedEvidence = `${canonicalPortableJson(transport.envelope.manifest)}${Object.values(
+      transport.payloads,
+    )
+      .map((payload) => Buffer.from(payload, 'base64').toString('utf8'))
+      .join('\n')}`;
+    expect(decodedEvidence).not.toMatch(
+      /acct_must_not_export|domain-token-must-not-export|source-sender@example\.test|verified-source@example\.test|PN_must_not_export|hooks\.source\.example\.test|whsec_must_not_export|oauth_client_must_not_export|oauth-secret-hash-must-not-export|source\.example\.test\/oauth|EMAIL_PROVIDER_SECRET_MUST_NOT_EXPORT|SMS_PROVIDER_SECRET_MUST_NOT_EXPORT|sms-source\.example\.test|MARKETING_SECRET_MUST_NOT_EXPORT/u,
+    );
+
+    await db
+      .updateTable('sender_identities')
+      .set({ verified: true, updated_at: new Date('2026-07-12T22:01:00.000Z') })
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('id', '=', `si_portable_${driver}`)
+      .execute();
+    const changed = await service.exportConfiguration({
+      tenantId,
+      organizationId,
+      requestedBy: 'user_exporter',
+      idempotencyKey: 'portable-api-rebindings-changed',
+    });
+    const changedManifest = (
+      parsePortableJson(new TextDecoder().decode(changed.bytes)) as {
+        envelope: SignedPortableBundle;
+      }
+    ).envelope.manifest;
+    expect(changedManifest.source.changeCursor).not.toBe(
+      transport.envelope.manifest.source.changeCursor,
+    );
+    expect(
+      changedManifest.rebindings.find(({ portableId }) => portableId === `si_portable_${driver}`),
+    ).toBeUndefined();
+    expect(
+      changedManifest.rebindings.find(
+        ({ portableId }) => portableId === `sending_identity:organization:si_portable_${driver}`,
+      ),
+    ).toMatchObject({ kind: 'sending_identity', required: true });
   });
 
   it('exports owned event media as sanitized signed binary assets', async () => {

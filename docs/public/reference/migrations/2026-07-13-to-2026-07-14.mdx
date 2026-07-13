@@ -1,0 +1,15 @@
+---
+title: API migration from 2026-07-13 to 2026-07-14
+description: Handle typed portability destination rebinding kinds.
+---
+
+API version `2026-07-14` expands `PortableImportRebinding.kind` with four typed values:
+
+- `payment_provider_account`
+- `email_delivery_route`
+- `sms_delivery_route`
+- `marketing_integration`
+
+Clients that exhaustively switch on rebinding kinds must handle these values before selecting the new API version. They replace ambiguous use of `provider_account` for these resource classes. Existing `provider_account` bundles remain readable for compatibility, but current Self-Hosted exports use the typed values and require destination capability `portable-rebinding-kinds-v2`.
+
+Rebinding provenance now includes `kind`, and optional bindings may be supplied without becoming commit prerequisites. A material binding change still invalidates an existing approval and requires a fresh approval digest.

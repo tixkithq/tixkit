@@ -25,6 +25,7 @@ export interface PortabilityPreflightResult {
   compatible: boolean;
   errors: string[];
   requiredRebindings: PortableBundleManifest['rebindings'];
+  rebindings: PortableBundleManifest['rebindings'];
   operationId: string;
 }
 
@@ -112,6 +113,7 @@ function evaluatePortableImport(
     compatible: errors.length === 0,
     errors,
     requiredRebindings: manifest.rebindings.filter(({ required }) => required),
+    rebindings: manifest.rebindings,
     operationId: portableOperationId(manifest, destination.deploymentId),
   };
 }
@@ -178,6 +180,7 @@ export interface PortableImportCheckpoint {
     provenanceSha256: string;
   }>;
   completedRebindings: Array<{
+    kind: PortableBundleManifest['rebindings'][number]['kind'];
     portableId: string;
     destinationReference: string;
     provenanceSha256: string;
@@ -203,6 +206,7 @@ export function portableMappingProvenanceSha256(
 }
 
 export function portableRebindingProvenanceSha256(input: {
+  kind: PortableBundleManifest['rebindings'][number]['kind'];
   portableId: string;
   destinationReference: string;
 }): string {
@@ -210,6 +214,7 @@ export function portableRebindingProvenanceSha256(input: {
     .update(
       `${JSON.stringify({
         destinationReference: input.destinationReference,
+        kind: input.kind,
         portableId: input.portableId,
       })}\n`,
     )
@@ -355,10 +360,11 @@ export function validatePortableResume(
   trustedDryRunKeys: ReadonlyMap<string, KeyLike>,
 ): void {
   const manifestSha256 = portableManifestSha256(manifest);
-  const requiredRebindings = manifest.rebindings
-    .filter(({ required }) => required)
-    .map(({ portableId }) => portableId)
-    .sort();
+  const requiredRebindingRecords = manifest.rebindings.filter(({ required }) => required);
+  const requiredRebindings = requiredRebindingRecords.map(({ portableId }) => portableId).sort();
+  const declaredRebindingsById = new Map(
+    manifest.rebindings.map((rebinding) => [rebinding.portableId, rebinding]),
+  );
   if (checkpoint.manifestSha256 !== manifestSha256) {
     throw new Error('portable import checkpoint belongs to a different manifest');
   }
@@ -417,9 +423,11 @@ export function validatePortableResume(
   const completedRebindings = new Set<string>();
   for (const rebinding of checkpoint.completedRebindings) {
     const expectedProvenance = portableRebindingProvenanceSha256(rebinding);
+    const declaredRebinding = declaredRebindingsById.get(rebinding.portableId);
     if (
       completedRebindings.has(rebinding.portableId) ||
-      !requiredRebindings.includes(rebinding.portableId) ||
+      !declaredRebinding ||
+      rebinding.kind !== declaredRebinding.kind ||
       rebinding.provenanceSha256 !== expectedProvenance
     ) {
       throw new Error('portable import checkpoint contains invalid rebinding provenance');

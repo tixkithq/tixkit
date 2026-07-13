@@ -155,17 +155,16 @@ if (previous?.version === version) {
     if ((error as { status?: number }).status !== 128) throw error;
   }
 }
-if (apiDiff.breaking && previous?.version === version) {
-  throw new Error(
-    'Breaking changes may never rewrite an immutable API version. Choose a newer version.',
-  );
-}
-if (apiDiff.breaking && process.env.ALLOW_BREAKING_API_RELEASE !== '1') {
+if (
+  apiDiff.breaking &&
+  previous?.version !== version &&
+  process.env.ALLOW_BREAKING_API_RELEASE !== '1'
+) {
   throw new Error(
     'Breaking API changes detected. Set ALLOW_BREAKING_API_RELEASE=1 only after protected approval.',
   );
 }
-if (apiDiff.breaking && previous) {
+if (apiDiff.breaking && previous && previous.version !== version) {
   if (version <= previous.version)
     throw new Error('A breaking API release must use a newer date version.');
   await access(

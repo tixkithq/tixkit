@@ -5,16 +5,22 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { FormatsPlugin } from 'ajv-formats';
 import { parsePortableJson } from './safe-json.js';
 
-const manifestSchema = JSON.parse(
+const manifestSchemaV1 = JSON.parse(
   readFileSync(new URL('../schemas/portable-bundle-2026-07-12.json', import.meta.url), 'utf8'),
+) as object;
+const manifestSchemaV2 = JSON.parse(
+  readFileSync(new URL('../schemas/portable-bundle-2026-07-14.json', import.meta.url), 'utf8'),
 ) as object;
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 const addFormats = createRequire(import.meta.url)('ajv-formats') as FormatsPlugin;
 addFormats(ajv);
-const validateManifestSchema = ajv.compile(manifestSchema);
+const validateManifestSchemaV1 = ajv.compile(manifestSchemaV1);
+const validateManifestSchemaV2 = ajv.compile(manifestSchemaV2);
 
-export const PORTABLE_BUNDLE_SCHEMA_VERSION = 1 as const;
-export const PORTABLE_BUNDLE_FORMAT = 'tixkit-portable-bundle-v1' as const;
+export const PORTABLE_BUNDLE_SCHEMA_VERSION = 2 as const;
+export const PORTABLE_BUNDLE_FORMAT = 'tixkit-portable-bundle-v2' as const;
+export const PORTABLE_BUNDLE_LEGACY_SCHEMA_VERSION = 1 as const;
+export const PORTABLE_BUNDLE_LEGACY_FORMAT = 'tixkit-portable-bundle-v1' as const;
 
 export type PortableBundleMode = 'configuration' | 'historical';
 export type TixkitOperatingModel = 'cloud' | 'self-hosted';
@@ -110,8 +116,10 @@ export interface HistoricalExportAuthorization {
 }
 
 export interface PortableBundleManifest {
-  schemaVersion: typeof PORTABLE_BUNDLE_SCHEMA_VERSION;
-  format: typeof PORTABLE_BUNDLE_FORMAT;
+  schemaVersion:
+    | typeof PORTABLE_BUNDLE_SCHEMA_VERSION
+    | typeof PORTABLE_BUNDLE_LEGACY_SCHEMA_VERSION;
+  format: typeof PORTABLE_BUNDLE_FORMAT | typeof PORTABLE_BUNDLE_LEGACY_FORMAT;
   bundleId: string;
   mode: PortableBundleMode;
   source: {
@@ -164,6 +172,10 @@ export interface PortableBundleManifest {
     kind:
       | 'custom_domain'
       | 'provider_account'
+      | 'payment_provider_account'
+      | 'email_delivery_route'
+      | 'sms_delivery_route'
+      | 'marketing_integration'
       | 'tax_registration'
       | 'sending_identity'
       | 'wallet_credential'
@@ -347,16 +359,19 @@ function validDate(value: string): boolean {
 }
 
 export function validatePortableManifest(manifest: PortableBundleManifest): void {
+  const validateManifestSchema =
+    manifest.schemaVersion === PORTABLE_BUNDLE_SCHEMA_VERSION &&
+    manifest.format === PORTABLE_BUNDLE_FORMAT
+      ? validateManifestSchemaV2
+      : manifest.schemaVersion === PORTABLE_BUNDLE_LEGACY_SCHEMA_VERSION &&
+          manifest.format === PORTABLE_BUNDLE_LEGACY_FORMAT
+        ? validateManifestSchemaV1
+        : undefined;
+  if (!validateManifestSchema) throw new Error('unsupported portable bundle format');
   if (!validateManifestSchema(manifest)) {
     throw new Error(
       `portable manifest schema validation failed: ${ajv.errorsText(validateManifestSchema.errors)}`,
     );
-  }
-  if (
-    manifest.schemaVersion !== PORTABLE_BUNDLE_SCHEMA_VERSION ||
-    manifest.format !== PORTABLE_BUNDLE_FORMAT
-  ) {
-    throw new Error('unsupported portable bundle format');
   }
   for (const [label, value] of [
     ['bundle id', manifest.bundleId],
@@ -506,6 +521,11 @@ export function validatePortableManifest(manifest: PortableBundleManifest): void
     throw new Error('portable entity counts must be non-negative safe integers');
   }
   const sections = new Set(manifest.files.map(({ section }) => section));
+  if (
+    new Set(manifest.rebindings.map(({ portableId }) => portableId)).size !==
+    manifest.rebindings.length
+  )
+    throw new Error('portable rebindings contain duplicate identities');
   if (
     !ID_PATTERN.test(manifest.identity.namespace) ||
     manifest.identity.preserveSafeIds !== true ||

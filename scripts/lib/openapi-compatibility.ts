@@ -99,6 +99,19 @@ function compareSchema(
         message: `Enum value ${value} was removed.`,
       });
   }
+  const beforeEnumSet = new Set(beforeEnum);
+  for (const value of afterEnum) {
+    if (!beforeEnumSet.has(value))
+      changes.push({
+        severity:
+          path.includes('.parameters.') || path.includes('.requestBody.')
+            ? 'compatible'
+            : 'breaking',
+        category: 'enum-expanded',
+        path,
+        message: `Enum value ${value} was added.`,
+      });
+  }
   if (before.uniqueItems !== true && after.uniqueItems === true)
     changes.push({
       severity: 'breaking',

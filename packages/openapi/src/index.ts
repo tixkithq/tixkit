@@ -414,7 +414,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-13',
+    version: '2026-07-14',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -910,6 +910,10 @@ const rawOpenApiSpec = {
             enum: [
               'custom_domain',
               'provider_account',
+              'payment_provider_account',
+              'email_delivery_route',
+              'sms_delivery_route',
+              'marketing_integration',
               'tax_registration',
               'sending_identity',
               'wallet_credential',

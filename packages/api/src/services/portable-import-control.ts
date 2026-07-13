@@ -121,34 +121,40 @@ async function portableImportRebindingsHash(input: {
     input.jobId,
   );
   if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
-  const requiredValue = parsedJson(preflight.required_rebindings);
-  if (!Array.isArray(requiredValue)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
-  const requiredIds = requiredValue.map((value) => {
+  const declaredValue = parsedJson(preflight.required_rebindings);
+  if (!Array.isArray(declaredValue)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+  const declarations = declaredValue.map((value) => {
     if (
       !value ||
       typeof value !== 'object' ||
-      typeof (value as { portableId?: unknown }).portableId !== 'string'
+      typeof (value as { portableId?: unknown }).portableId !== 'string' ||
+      typeof (value as { kind?: unknown }).kind !== 'string' ||
+      typeof (value as { required?: unknown }).required !== 'boolean'
     )
       throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
-    return (value as { portableId: string }).portableId;
+    return value as { portableId: string; kind: string; required: boolean };
   });
+  const requiredIds = declarations
+    .filter(({ required }) => required)
+    .map(({ portableId }) => portableId);
   const rebindings = await input.repository.listPortableImportRebindings(
     input.tenantId,
     input.organizationId,
     input.jobId,
   );
-  if (
-    rebindings.length !== requiredIds.length ||
-    requiredIds.some((portableId) => !rebindings.some((row) => row.portable_id === portableId))
-  )
+  if (requiredIds.some((portableId) => !rebindings.some((row) => row.portable_id === portableId)))
     throw new Error('PORTABLE_IMPORT_REBINDINGS_REQUIRED');
   for (const rebinding of rebindings) {
+    const declaration = declarations.find(({ portableId }) => portableId === rebinding.portable_id);
     if (
+      !declaration ||
+      declaration.kind !== rebinding.kind ||
       rebinding.provenance_sha256 !==
-      portableRebindingProvenanceSha256({
-        portableId: rebinding.portable_id,
-        destinationReference: rebinding.destination_reference,
-      })
+        portableRebindingProvenanceSha256({
+          kind: rebinding.kind as Parameters<typeof portableRebindingProvenanceSha256>[0]['kind'],
+          portableId: rebinding.portable_id,
+          destinationReference: rebinding.destination_reference,
+        })
     )
       throw new Error('PORTABLE_IMPORT_REBINDING_EVIDENCE_INVALID');
     const destination = await input.repository.findPortableDestinationResource({
@@ -173,6 +179,10 @@ async function portableImportRebindingsHash(input: {
 const PORTABLE_REBINDING_KINDS = new Set([
   'custom_domain',
   'provider_account',
+  'payment_provider_account',
+  'email_delivery_route',
+  'sms_delivery_route',
+  'marketing_integration',
   'tax_registration',
   'sending_identity',
   'wallet_credential',
@@ -215,9 +225,9 @@ export async function bindPortableImportDestination(input: {
     input.jobId,
   );
   if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
-  const required = parsedJson(preflight.required_rebindings);
-  if (!Array.isArray(required)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
-  const rebinding = required.find(
+  const declarations = parsedJson(preflight.required_rebindings);
+  if (!Array.isArray(declarations)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+  const rebinding = declarations.find(
     (candidate): candidate is { portableId: string; kind: string; required: boolean } =>
       !!candidate &&
       typeof candidate === 'object' &&
@@ -235,6 +245,7 @@ export async function bindPortableImportDestination(input: {
   });
   if (!destination) throw new Error('PORTABLE_IMPORT_REBINDING_DESTINATION_NOT_FOUND');
   const provenanceSha256 = portableRebindingProvenanceSha256({
+    kind: rebinding.kind as Parameters<typeof portableRebindingProvenanceSha256>[0]['kind'],
     portableId: input.portableId,
     destinationReference: destination.resource_id,
   });
@@ -264,8 +275,16 @@ export async function portableImportRebindingStatus(input: {
     input.jobId,
   );
   if (!preflight) throw new Error('PORTABLE_IMPORT_PREFLIGHT_NOT_FOUND');
-  const required = parsedJson(preflight.required_rebindings);
-  if (!Array.isArray(required)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+  const declarations = parsedJson(preflight.required_rebindings);
+  if (!Array.isArray(declarations)) throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
+  const required = declarations.filter(
+    (candidate): candidate is { portableId: string; kind: string; required: true } =>
+      !!candidate &&
+      typeof candidate === 'object' &&
+      (candidate as { required?: unknown }).required === true &&
+      typeof (candidate as { portableId?: unknown }).portableId === 'string' &&
+      typeof (candidate as { kind?: unknown }).kind === 'string',
+  );
   const completed = await repository.listPortableImportRebindings(
     input.tenantId,
     input.organizationId,
@@ -298,7 +317,6 @@ export async function portableImportRebindingStatus(input: {
       updatedAt: rebinding.updated_at,
     })),
     complete:
-      completed.length === required.length &&
       activeDestinationIds.size === completed.length &&
       required.every(
         (candidate) =>
@@ -407,7 +425,7 @@ export async function attestPortableDryRun(input: {
     preflight.operationId !== evidence.operation_id ||
     canonicalPortableJson(manifest.entityCounts) !== evidence.expected_counts ||
     canonicalPortableJson(expectedAssets) !== evidence.expected_assets ||
-    canonicalPortableJson(preflight.requiredRebindings) !== evidence.required_rebindings
+    canonicalPortableJson(preflight.rebindings) !== evidence.required_rebindings
   )
     throw new Error('PORTABLE_IMPORT_PREFLIGHT_EVIDENCE_INVALID');
   const files = await repository.listFiles(input.tenantId, input.organizationId, input.jobId);

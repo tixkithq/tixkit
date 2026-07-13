@@ -172,6 +172,9 @@ export function createRepositoryMigrationActivityService(
               if (
                 rebinding.provenance_sha256 !==
                   portableRebindingProvenanceSha256({
+                    kind: rebinding.kind as Parameters<
+                      typeof portableRebindingProvenanceSha256
+                    >[0]['kind'],
                     portableId: rebinding.portable_id,
                     destinationReference: rebinding.destination_reference,
                   }) ||

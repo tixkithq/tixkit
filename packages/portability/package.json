@@ -28,7 +28,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./schema": "./schemas/portable-bundle-2026-07-12.json",
+    "./schema": "./schemas/portable-bundle-2026-07-14.json",
+    "./schema-v1": "./schemas/portable-bundle-2026-07-12.json",
+    "./schema-v2": "./schemas/portable-bundle-2026-07-14.json",
     "./signature-schema": "./schemas/portable-bundle-signature-2026-07-12.json",
     "./canonical-json-vectors": "./schemas/canonical-json-v1-vectors.json",
     "./package.json": "./package.json"

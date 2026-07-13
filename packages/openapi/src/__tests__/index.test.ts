@@ -66,7 +66,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-13');
+    expect(openApiSpec.info.version).toBe('2026-07-14');
   });
 
   it('publishes the authoritative API-key permission scope catalog', () => {

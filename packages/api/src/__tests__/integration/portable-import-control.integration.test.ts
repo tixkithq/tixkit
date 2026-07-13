@@ -102,7 +102,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         requiredCapabilities: ['portable-bundle-v1'],
         requiredEntitlements: [],
       },
-      rebindings: [{ kind: 'provider_account', portableId: 'provider_stripe', required: true }],
+      rebindings: [
+        { kind: 'provider_account', portableId: 'provider_stripe', required: true },
+        { kind: 'email_delivery_route', portableId: 'email_route_optional', required: false },
+      ],
       sections: new Map([
         [
           'organizations',
@@ -195,7 +198,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       preflightJson: canonicalPortableJson(preflight),
       expectedCounts: canonicalPortableJson(built.envelope.manifest.entityCounts),
       expectedAssets: canonicalPortableJson([]),
-      requiredRebindings: canonicalPortableJson(preflight.requiredRebindings),
+      requiredRebindings: canonicalPortableJson(preflight.rebindings),
     });
     await repository.addRows(tenantId, organizationId, job.id, [
       {
@@ -341,6 +344,13 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       organizationId,
       kind: 'provider_account',
       resourceId: 'acct_revoked_before_approval',
+      registeredBy: 'system_test',
+    });
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'provider_account',
+      resourceId: 'destination_email_route_01',
       registeredBy: 'system_test',
     });
     await bindPortableImportDestination({
@@ -521,6 +531,46 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         now: new Date('2026-07-12T21:06:00.000Z'),
       }),
     ).resolves.toEqual(approval);
+    await expect(
+      bindPortableImportDestination({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        portableId: 'email_route_optional',
+        destinationReference: 'destination_email_route_01',
+        boundBy: 'user_approver',
+      }),
+    ).rejects.toThrow(/DESTINATION_NOT_FOUND/u);
+    await repository.registerPortableDestinationResource({
+      tenantId,
+      organizationId,
+      kind: 'email_delivery_route',
+      resourceId: 'destination_email_route_01',
+      registeredBy: 'system_test',
+    });
+    await expect(
+      bindPortableImportDestination({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        portableId: 'email_route_optional',
+        destinationReference: 'destination_email_route_01',
+        boundBy: 'user_approver',
+      }),
+    ).resolves.toMatchObject({ kind: 'email_delivery_route' });
+    await expect(
+      validatePortableImportApproval({
+        db,
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        confirmation: commitConfirmation,
+        attestation: request.attestation,
+        now: new Date('2026-07-12T21:06:00.000Z'),
+      }),
+    ).rejects.toThrow(/APPROVAL_INPUT_CHANGED/u);
     await bindPortableImportDestination({
       db,
       tenantId,
