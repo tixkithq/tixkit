@@ -13,6 +13,7 @@ import {
   type NormalizedMigrationEntity,
 } from '@tixkit/migration-core';
 import {
+  assertPortableAdapterVersionMatchesManifest,
   assertSafeMigrationOrigin,
   buildMigrationAdapterApiPage,
   createPinnedMigrationFetch,
@@ -31,6 +32,27 @@ import {
 } from '../activities/migration-preparation.js';
 
 describe('migration source origin policy', () => {
+  it('binds the selected portable adapter version to the signed manifest format', () => {
+    expect(() =>
+      assertPortableAdapterVersionMatchesManifest(
+        'tixkit-portable-bundle-v2',
+        'tixkit-portable-bundle-v1',
+      ),
+    ).toThrow('PORTABILITY_ADAPTER_VERSION_MISMATCH');
+    expect(() =>
+      assertPortableAdapterVersionMatchesManifest(
+        'tixkit-portable-bundle-v1',
+        'tixkit-portable-bundle-v2',
+      ),
+    ).toThrow('PORTABILITY_ADAPTER_VERSION_MISMATCH');
+    expect(() =>
+      assertPortableAdapterVersionMatchesManifest(
+        'tixkit-portable-bundle-v2',
+        'tixkit-portable-bundle-v2',
+      ),
+    ).not.toThrow();
+  });
+
   it('loads portability trust as public keys and binds destination scope at runtime', () => {
     const bundle = generateKeyPairSync('ed25519');
     const payload = generateKeyPairSync('ed25519');

@@ -688,15 +688,28 @@ export type UploadPurpose =
   | 'event_social'
   | 'event_seo_image';
 
-export type CreateUploadArtifactInput = {
-  purpose: UploadPurpose;
+type CreateUploadArtifactBase = {
   fileName: string;
   contentType: string;
   sizeBytes: number;
-  brandId?: string;
-  eventId?: string;
   metadata?: Record<string, unknown>;
 };
+
+export type CreateUploadArtifactInput = CreateUploadArtifactBase &
+  (
+    | {
+        purpose: 'migration_import';
+        organizationId: string;
+        brandId?: never;
+        eventId?: never;
+      }
+    | {
+        purpose: Exclude<UploadPurpose, 'migration_import'>;
+        organizationId?: never;
+        brandId?: string;
+        eventId?: string;
+      }
+  );
 
 export type PublicCreateUploadArtifactInput = {
   fileName: string;
@@ -2422,6 +2435,7 @@ export type CreateMigrationJobInput = MigrationPreparationConfiguration extends 
   : never;
 export type CreatePortableMigrationJobInput = CreateMigrationJobBase & {
   sourceSystem: 'tixkit-portable';
+  adapterVersion: 'tixkit-portable-bundle-v2' | 'tixkit-portable-bundle-v1';
   configuration: {
     sourceMode: 'official-export';
     sourceSystem: 'tixkit-portable';

@@ -32,6 +32,7 @@ const uploadPurposeSchema = z.enum([
   'event_poster',
   'event_social',
   'event_seo_image',
+  'migration_import',
 ]);
 
 const createUploadSchema = z
@@ -40,8 +41,9 @@ const createUploadSchema = z
     fileName: z.string().min(1).max(255),
     contentType: z.string().min(1).max(255),
     sizeBytes: z.number().int().positive(),
-    brandId: z.string().optional(),
-    eventId: z.string().optional(),
+    organizationId: z.string().min(1).optional(),
+    brandId: z.string().min(1).optional(),
+    eventId: z.string().min(1).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
@@ -200,6 +202,16 @@ function requireUploadArtifactAccess(
     ClerkAuthService.requirePermission(principal, 'events.write');
     return;
   }
+
+  if (artifact.purpose === 'migration_import') {
+    if (operation === 'complete') {
+      ClerkAuthService.requirePermission(principal, 'migrations.write');
+      return;
+    }
+    requireAnyPermission(principal, ['migrations.read', 'migrations.write']);
+    return;
+  }
+
   if (
     artifact.purpose === 'event_cover' ||
     artifact.purpose === 'event_poster' ||
@@ -312,7 +324,26 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
     let brandId: string | null = body.brandId ?? null;
     let eventId: string | null = body.eventId ?? null;
 
-    if (body.purpose === 'brand_logo') {
+    if (body.purpose === 'migration_import') {
+      ClerkAuthService.requirePermission(principal, 'migrations.write');
+      if (!body.organizationId)
+        throw new ValidationError('organizationId is required for migration import uploads');
+      if (body.brandId !== undefined || body.eventId !== undefined)
+        throw new ValidationError(
+          'brandId and eventId are not allowed for migration import uploads',
+        );
+      ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+      const organization = await db
+        .selectFrom('organizations')
+        .select('id')
+        .where('id', '=', body.organizationId)
+        .where('tenant_id', '=', principal.tenantId)
+        .executeTakeFirst();
+      if (!organization) throw new NotFoundError('Organization', body.organizationId);
+      organizationId = body.organizationId;
+    } else if (body.organizationId) {
+      throw new ValidationError('organizationId is only allowed for migration import uploads');
+    } else if (body.purpose === 'brand_logo') {
       ClerkAuthService.requirePermission(principal, 'settings.write');
       if (eventId) throw new ValidationError('eventId is not allowed for brand logo uploads');
       if (hasCheckoutQuestionMetadata(body.metadata)) {

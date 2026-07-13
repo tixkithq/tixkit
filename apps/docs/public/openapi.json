@@ -5294,53 +5294,98 @@
         ]
       },
       "CreateUploadArtifact": {
-        "type": "object",
-        "properties": {
-          "purpose": {
-            "type": "string",
-            "enum": [
-              "checkout_answer",
-              "brand_logo",
-              "user_avatar",
-              "content_email_image",
-              "content_event_page_image",
-              "migration_import",
-              "event_poster",
-              "event_cover",
-              "event_social",
-              "event_seo_image"
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "purpose": {
+                "const": "migration_import"
+              },
+              "organizationId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "contentType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 52428800
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "purpose",
+              "organizationId",
+              "fileName",
+              "contentType",
+              "sizeBytes"
             ]
           },
-          "fileName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255
-          },
-          "contentType": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255
-          },
-          "sizeBytes": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "brandId": {
-            "type": "string"
-          },
-          "eventId": {
-            "type": "string"
-          },
-          "metadata": {
+          {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": false,
+            "properties": {
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "checkout_answer",
+                  "brand_logo",
+                  "user_avatar",
+                  "content_email_image",
+                  "content_event_page_image",
+                  "event_poster",
+                  "event_cover",
+                  "event_social",
+                  "event_seo_image"
+                ]
+              },
+              "fileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "contentType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "brandId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "eventId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "purpose",
+              "fileName",
+              "contentType",
+              "sizeBytes"
+            ]
           }
-        },
-        "required": [
-          "purpose",
-          "fileName",
-          "contentType",
-          "sizeBytes"
         ]
       },
       "PublicCreateUploadArtifact": {
@@ -16241,7 +16286,8 @@
                 "$ref": "#/components/schemas/CreateUploadArtifact"
               },
               "example": {
-                "purpose": "checkout_answer",
+                "purpose": "migration_import",
+                "organizationId": "organization_example",
                 "fileName": "fileName example",
                 "contentType": "contentType example",
                 "sizeBytes": 1
@@ -29224,7 +29270,12 @@
                     "const": "tixkit-portable"
                   },
                   "adapterVersion": {
-                    "const": "tixkit-portable-bundle-v1"
+                    "type": "string",
+                    "enum": [
+                      "tixkit-portable-bundle-v2",
+                      "tixkit-portable-bundle-v1"
+                    ],
+                    "default": "tixkit-portable-bundle-v2"
                   },
                   "mode": {
                     "const": "dry-run",
@@ -29261,7 +29312,7 @@
               "example": {
                 "organizationId": "organization_example",
                 "sourceSystem": "tixkit-portable",
-                "adapterVersion": "tixkit-portable-bundle-v1",
+                "adapterVersion": "tixkit-portable-bundle-v2",
                 "configuration": {
                   "sourceMode": "official-export",
                   "sourceSystem": "tixkit-portable",

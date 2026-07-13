@@ -78,6 +78,14 @@ export { ContentRepository } from './content.js';
 export { EventReadinessAcknowledgementRepository, type ReadinessScope } from './readiness.js';
 export { executeTableQuery, assertServerField } from './table-query.js';
 export type { TableQueryConfig } from './table-query.js';
-export { ImportRepository, type ImportJobStatus, type RollbackEligibility } from './import.js';
+export {
+  ImportRepository,
+  MIGRATION_IMPORT_INITIAL_RETENTION_MS,
+  MIGRATION_IMPORT_MAX_BYTES,
+  MIGRATION_IMPORT_MAX_RETENTION_MS,
+  MIGRATION_IMPORT_PREPARATION_LEASE_MS,
+  type ImportJobStatus,
+  type RollbackEligibility,
+} from './import.js';
 export { AgentExecutionRepository } from './agent.js';
 export { AgentMemoryRepository, type AgentMemoryAuditInput } from './agent-memory.js';

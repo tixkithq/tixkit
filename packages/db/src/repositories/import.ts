@@ -8,6 +8,7 @@ import type {
   ImportJobTable,
   MigrationCredentialTable,
   PortableDestinationResourceTable,
+  UploadArtifactTable,
 } from '../types/db.js';
 import { BaseRepository } from './base.js';
 import type { Database } from '../client.js';
@@ -42,6 +43,11 @@ export type ImportJobStatus =
   | 'rolling-back'
   | 'rolled-back';
 
+export const MIGRATION_IMPORT_MAX_BYTES = 50 * 1024 * 1024;
+export const MIGRATION_IMPORT_INITIAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const MIGRATION_IMPORT_PREPARATION_LEASE_MS = 24 * 60 * 60 * 1000;
+export const MIGRATION_IMPORT_MAX_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
 export interface RollbackEligibility {
   eligible: boolean;
   mode: 'cancel' | 'delete-created' | 'corrective-plan';
@@ -61,6 +67,145 @@ type ImportRowCompletionEvent = {
 };
 
 export class ImportRepository extends BaseRepository {
+  private findMigrationArtifactForUpdate(input: {
+    tenantId: string;
+    organizationId: string;
+    artifactId: string;
+  }) {
+    if (process.env.DB_DRIVER === 'mssql') {
+      return sql<Selectable<UploadArtifactTable>>`
+        select * from upload_artifacts with (updlock, holdlock)
+        where id = ${input.artifactId}
+          and tenant_id = ${input.tenantId}
+          and organization_id = ${input.organizationId}
+          and purpose = 'migration_import'
+      `
+        .execute(this.db)
+        .then((result) => result.rows[0]);
+    }
+    return this.db
+      .selectFrom('upload_artifacts')
+      .selectAll()
+      .where('id', '=', input.artifactId)
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('purpose', '=', 'migration_import')
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
+  async acquireMigrationArtifactsForStateInTransaction(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    artifactIds: readonly string[];
+    targetState: 'preparing' | 'committing';
+    transition: boolean;
+    now?: Date;
+  }): Promise<void> {
+    if (
+      input.artifactIds.length === 0 ||
+      new Set(input.artifactIds).size !== input.artifactIds.length
+    ) {
+      throw new Error('MIGRATION_ARTIFACT_SELECTION_INVALID');
+    }
+    if ((this.db as Database & { isTransaction?: boolean }).isTransaction !== true) {
+      throw new Error('MIGRATION_ARTIFACT_LEASE_TRANSACTION_REQUIRED');
+    }
+    const now = input.now ?? new Date();
+    const allowedStatuses: ImportJobStatus[] =
+      input.targetState === 'preparing'
+        ? ['pending', 'failed', 'paused', 'preparing']
+        : ['ready', 'committing'];
+    const job = await this.findJobForUpdate(input.tenantId, input.organizationId, input.jobId);
+    if (!job || !allowedStatuses.includes(job.status as ImportJobStatus)) {
+      throw new Error(
+        input.targetState === 'preparing'
+          ? 'MIGRATION_JOB_NOT_PREPARABLE'
+          : 'MIGRATION_JOB_NOT_COMMITTABLE',
+      );
+    }
+    for (const artifactId of [...input.artifactIds].sort()) {
+      const artifact = await this.findMigrationArtifactForUpdate({ ...input, artifactId });
+      if (
+        !artifact ||
+        artifact.status !== 'uploaded' ||
+        artifact.scan_status !== 'clean' ||
+        !artifact.consumed_at ||
+        !artifact.checksum_sha256 ||
+        artifact.size_bytes > MIGRATION_IMPORT_MAX_BYTES
+      ) {
+        throw new Error('MIGRATION_ARTIFACT_NOT_AVAILABLE');
+      }
+      const registeredFiles = await this.db
+        .selectFrom('import_job_files')
+        .select(['import_job_id', 'object_key', 'media_type', 'byte_size', 'sha256', 'status'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('object_key', '=', artifact.object_key)
+        .execute();
+      if (
+        registeredFiles.length !== 1 ||
+        registeredFiles[0]!.import_job_id !== input.jobId ||
+        registeredFiles[0]!.sha256 !== artifact.checksum_sha256 ||
+        Number(registeredFiles[0]!.byte_size) !== artifact.size_bytes ||
+        registeredFiles[0]!.media_type !== artifact.content_type ||
+        registeredFiles[0]!.status !== 'ready'
+      ) {
+        throw new Error('MIGRATION_ARTIFACT_NOT_REGISTERED_WITH_JOB');
+      }
+      const maximumRetentionAt =
+        new Date(artifact.consumed_at).getTime() + MIGRATION_IMPORT_MAX_RETENTION_MS;
+      if (now.getTime() >= maximumRetentionAt) {
+        throw new Error('MIGRATION_ARTIFACT_RETENTION_EXPIRED');
+      }
+      const leaseExpiresAt = new Date(
+        Math.min(
+          maximumRetentionAt,
+          Math.max(
+            new Date(artifact.expires_at).getTime(),
+            now.getTime() + MIGRATION_IMPORT_PREPARATION_LEASE_MS,
+          ),
+        ),
+      );
+      const renewed = await this.db
+        .updateTable('upload_artifacts')
+        .set({ expires_at: leaseExpiresAt, updated_at: now })
+        .where('id', '=', artifact.id)
+        .where('status', '=', 'uploaded')
+        .executeTakeFirst();
+      if (Number(renewed.numUpdatedRows) !== 1) {
+        throw new Error('MIGRATION_ARTIFACT_NOT_AVAILABLE');
+      }
+    }
+    if (input.transition && job.status !== input.targetState) {
+      const transitioned = await this.transitionJob({
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        jobId: input.jobId,
+        from: [job.status as ImportJobStatus],
+        to: input.targetState,
+      });
+      if (!transitioned) throw new Error('MIGRATION_JOB_STATE_CHANGED');
+    }
+  }
+
+  async acquireMigrationArtifactsForState(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    artifactIds: readonly string[];
+    targetState: 'preparing' | 'committing';
+    transition: boolean;
+    now?: Date;
+  }): Promise<void> {
+    await this.db.transaction().execute(async (transaction) => {
+      await new ImportRepository(
+        transaction as Database,
+      ).acquireMigrationArtifactsForStateInTransaction(input);
+    });
+  }
+
   async registerPortableDestinationResource(input: {
     tenantId: string;
     organizationId: string;

@@ -385,7 +385,8 @@ export function createMigrationPortableAssetResolver(
       if (
         !artifact?.checksum_sha256 ||
         artifact.checksum_sha256 !== files[0]!.sha256 ||
-        Number(artifact.size_bytes) !== Number(files[0]!.byte_size)
+        Number(artifact.size_bytes) !== Number(files[0]!.byte_size) ||
+        artifact.content_type !== files[0]!.media_type
       )
         throw new Error('MIGRATION_PORTABLE_ASSET_BUNDLE_EVIDENCE_INVALID');
       const object = await client.send(

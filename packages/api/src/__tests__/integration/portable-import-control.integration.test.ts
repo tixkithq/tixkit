@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Connection, WorkflowClient } from '@temporalio/client';
+import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Principal } from '@tixkit/domain';
@@ -42,6 +43,7 @@ import {
 } from '../../services/portable-import-control.js';
 import { registerErrorHandler } from '../../app.js';
 import { migrationRoutes } from '../../routes/modules/migrations.js';
+import { uploadRoutes } from '../../routes/modules/uploads.js';
 import {
   createProductionMigrationCommitters,
   createMigrationPreparationService,
@@ -161,6 +163,28 @@ function startMigrationProcessWorker(input: {
 }
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
+
+function testObjectStore(): S3Client {
+  return new S3Client({
+    endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+    region: process.env.S3_REGION ?? 'us-east-1',
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'minioadmin',
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'minioadmin',
+    },
+  });
+}
+
+async function ensureTestObjectStoreBucket(client: S3Client): Promise<void> {
+  try {
+    await client.send(new CreateBucketCommand({ Bucket: process.env.S3_BUCKET ?? 'tixkit' }));
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    if (name !== 'BucketAlreadyOwnedByYou' && name !== 'BucketAlreadyExists') throw error;
+  }
+}
+
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
 const cases = [
   { driver: 'postgres', url: process.env.DATABASE_URL ?? '' },
@@ -315,11 +339,41 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         artifactIds: ['upl_control_01'],
       },
     });
+    const controlObjectKey = `portable-control/${job.id}.json`;
+    const controlNow = new Date();
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: 'upl_control_01',
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: null,
+        event_id: null,
+        created_by_user_id: 'user_control',
+        purpose: 'migration_import',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: null,
+        bucket: 'tixkit',
+        object_key: controlObjectKey,
+        file_name: 'portable-control.json',
+        content_type: 'application/vnd.tixkit.portable+json',
+        size_bytes: 1,
+        checksum_sha256: 'b'.repeat(64),
+        client_token_hash: null,
+        metadata: '{}',
+        consumed_by_checkout_session_id: null,
+        consumed_at: controlNow,
+        expires_at: new Date(controlNow.getTime() + 30 * 24 * 60 * 60 * 1000),
+        created_at: controlNow,
+        updated_at: controlNow,
+      })
+      .execute();
     await repository.addFile({
       tenantId,
       organizationId,
       jobId: job.id,
-      objectKey: `portable-control/${job.id}.json`,
+      objectKey: controlObjectKey,
       originalName: 'portable-control.json',
       mediaType: 'application/vnd.tixkit.portable+json',
       byteSize: 1,
@@ -882,6 +936,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       cutoverKeys.privateKey,
     );
     const startedCommits: string[] = [];
+    const routeErrors: Error[] = [];
     const app = Fastify();
     app.decorate('context', {
       db,
@@ -897,6 +952,9 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     } as never);
     app.addHook('preHandler', async (fastifyRequest) => {
       fastifyRequest.principal = activePrincipal;
+    });
+    app.addHook('onError', async (_request, _reply, error) => {
+      routeErrors.push(error);
     });
     registerErrorHandler(app);
     await app.register(migrationRoutes);
@@ -1142,7 +1200,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       ),
     );
     for (const validCommit of authorizedCommits) {
-      expect(validCommit.statusCode, validCommit.body).toBe(202);
+      expect(
+        validCommit.statusCode,
+        `${validCommit.body}\n${routeErrors.map((error) => error.stack ?? error.message).join('\n')}`,
+      ).toBe(202);
       expect(validCommit.json()).toMatchObject({
         jobId: job.id,
         status: 'committing',
@@ -1596,37 +1657,9 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         requiredCapabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
       },
     });
-    const artifactId = `upl_routed_intake_${driver}`;
-    const objectKey = `portable-intake/${artifactId}.json`;
     const checksum = createHash('sha256').update(built.transport).digest('hex');
-    await db
-      .insertInto('upload_artifacts')
-      .values({
-        id: artifactId,
-        tenant_id: intakeTenantId,
-        organization_id: intakeOrganizationId,
-        brand_id: null,
-        event_id: null,
-        created_by_user_id: null,
-        purpose: 'migration_import',
-        status: 'uploaded',
-        scan_status: 'clean',
-        scan_result: null,
-        bucket: 'tixkit',
-        object_key: objectKey,
-        file_name: 'portable-routed-intake.json',
-        content_type: 'application/vnd.tixkit.portable+json',
-        size_bytes: built.transport.byteLength,
-        checksum_sha256: checksum,
-        client_token_hash: null,
-        metadata: '{}',
-        consumed_by_checkout_session_id: null,
-        consumed_at: null,
-        expires_at: new Date(Date.now() + 60_000),
-        created_at: new Date(),
-        updated_at: new Date(),
-      })
-      .execute();
+    const objectStore = testObjectStore();
+    await ensureTestObjectStoreBucket(objectStore);
     const policy = policies.get('organizations')!;
     const destination = {
       deploymentId: `deployment_routed_destination_${driver}`,
@@ -1649,11 +1682,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
           ({
             send: async (command: { input?: { Bucket?: string; Key?: string } }) => {
               objectReads.push(command);
-              return {
-                Body: (async function* () {
-                  yield built.transport;
-                })(),
-              };
+              return objectStore.send(command as never);
             },
           }) as never,
         portableTrust: ({ tenantId: scopedTenantId, organizationId: scopedOrganizationId }) => ({
@@ -1846,6 +1875,76 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     });
     registerErrorHandler(app);
     await app.register(migrationRoutes);
+    await app.register(uploadRoutes);
+    const uploadBundle = async (contentType: string, fileName: string) => {
+      const ticketResponse = await app.inject({
+        method: 'POST',
+        url: '/upload-artifacts',
+        payload: {
+          purpose: 'migration_import',
+          organizationId: intakeOrganizationId,
+          fileName,
+          contentType,
+          sizeBytes: built.transport.byteLength,
+        },
+      });
+      expect(ticketResponse.statusCode, ticketResponse.body).toBe(201);
+      const ticket = ticketResponse.json<{
+        artifactId: string;
+        uploadUrl: string;
+        uploadHeaders: Record<string, string>;
+      }>();
+      const upload = await fetch(ticket.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          ...ticket.uploadHeaders,
+          'Content-Length': String(built.transport.byteLength),
+        },
+        body: built.transport,
+      });
+      expect(upload.status, await upload.text()).toBe(200);
+      const completed = await app.inject({
+        method: 'POST',
+        url: `/upload-artifacts/${ticket.artifactId}/complete`,
+      });
+      expect(completed.statusCode, completed.body).toBe(200);
+      const artifact = await db
+        .selectFrom('upload_artifacts')
+        .selectAll()
+        .where('id', '=', ticket.artifactId)
+        .executeTakeFirstOrThrow();
+      expect(artifact).toMatchObject({
+        tenant_id: intakeTenantId,
+        organization_id: intakeOrganizationId,
+        purpose: 'migration_import',
+        status: 'uploaded',
+        scan_status: 'clean',
+        content_type: contentType,
+        size_bytes: built.transport.byteLength,
+        checksum_sha256: checksum,
+      });
+      expect(artifact.object_key).toContain(`/migration-imports/${intakeOrganizationId}/final/`);
+      return artifact;
+    };
+    const artifact = await uploadBundle(
+      'application/vnd.tixkit.portable+json',
+      'portable-routed-intake.json',
+    );
+    const wrongMediaArtifact = await uploadBundle(
+      'application/json',
+      'portable-routed-intake-wrong-media.json',
+    );
+    const mismatchedVersionArtifact = await uploadBundle(
+      'application/vnd.tixkit.portable+json',
+      'portable-routed-intake-version-mismatch.json',
+    );
+    const registrationRaceArtifact = await uploadBundle(
+      'application/vnd.tixkit.portable+json',
+      'portable-routed-intake-registration-race.json',
+    );
+    const artifactId = artifact.id;
+    const wrongMediaArtifactId = wrongMediaArtifact.id;
+    const objectKey = artifact.object_key;
     const createPayload = {
       organizationId: intakeOrganizationId,
       sourceSystem: 'tixkit-portable',
@@ -1884,6 +1983,137 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     });
     expect(replay.statusCode, replay.body).toBe(201);
     expect(replay.json()).toEqual(created.json());
+    const raceJobIds: string[] = [];
+    for (const contender of ['a', 'b']) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/portable-migration-jobs',
+        headers: { 'idempotency-key': `routed-intake-registration-race-${driver}-${contender}` },
+        payload: {
+          ...createPayload,
+          configuration: {
+            ...createPayload.configuration,
+            artifactIds: [registrationRaceArtifact.id],
+          },
+        },
+      });
+      expect(response.statusCode, response.body).toBe(201);
+      raceJobIds.push(response.json<{ id: string }>().id);
+    }
+    const racedRegistrations = await Promise.all(
+      raceJobIds.map((raceJobId) =>
+        app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${raceJobId}/files`,
+          payload: { uploadArtifactId: registrationRaceArtifact.id },
+        }),
+      ),
+    );
+    expect(racedRegistrations.map(({ statusCode }) => statusCode).sort((a, b) => a - b)).toEqual([
+      201, 409,
+    ]);
+    const winningRaceJobId =
+      raceJobIds[racedRegistrations.findIndex(({ statusCode }) => statusCode === 201)]!;
+    const racedArtifact = await db
+      .selectFrom('upload_artifacts')
+      .select(['consumed_at', 'metadata'])
+      .where('id', '=', registrationRaceArtifact.id)
+      .executeTakeFirstOrThrow();
+    expect(racedArtifact.consumed_at).not.toBeNull();
+    expect(
+      typeof racedArtifact.metadata === 'string'
+        ? JSON.parse(racedArtifact.metadata)
+        : racedArtifact.metadata,
+    ).toMatchObject({ migrationImport: { jobId: winningRaceJobId } });
+    const racedFiles = await db
+      .selectFrom('import_job_files')
+      .select(['import_job_id', 'object_key'])
+      .where('object_key', '=', registrationRaceArtifact.object_key)
+      .execute();
+    expect(racedFiles).toEqual([expect.objectContaining({ import_job_id: winningRaceJobId })]);
+    const racedAudit = await db
+      .selectFrom('audit_logs')
+      .select(['resource_id', 'action'])
+      .where('resource_id', 'in', raceJobIds)
+      .where('action', '=', 'migration_job.file_registered')
+      .execute();
+    expect(racedAudit).toEqual([expect.objectContaining({ resource_id: winningRaceJobId })]);
+    const wrongArtifactForJob = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/files`,
+      payload: { uploadArtifactId: wrongMediaArtifactId },
+    });
+    expect(wrongArtifactForJob.statusCode, wrongArtifactForJob.body).toBe(400);
+    expect(wrongArtifactForJob.json()).toMatchObject({
+      error: { message: 'Portable migrations accept only their configured upload artifact' },
+    });
+    const wrongMediaJob = await app.inject({
+      method: 'POST',
+      url: '/portable-migration-jobs',
+      headers: { 'idempotency-key': `routed-intake-wrong-media-${driver}` },
+      payload: {
+        ...createPayload,
+        configuration: {
+          ...createPayload.configuration,
+          artifactIds: [wrongMediaArtifactId],
+        },
+      },
+    });
+    expect(wrongMediaJob.statusCode, wrongMediaJob.body).toBe(201);
+    const wrongMediaRegistration = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${wrongMediaJob.json<{ id: string }>().id}/files`,
+      payload: { uploadArtifactId: wrongMediaArtifactId },
+    });
+    expect(wrongMediaRegistration.statusCode, wrongMediaRegistration.body).toBe(400);
+    expect(wrongMediaRegistration.json()).toMatchObject({
+      error: {
+        message: 'Portable migration uploads require application/vnd.tixkit.portable+json',
+      },
+    });
+    expect(objectReads).toHaveLength(0);
+    const mismatchedVersionJob = await app.inject({
+      method: 'POST',
+      url: '/portable-migration-jobs',
+      headers: { 'idempotency-key': `routed-intake-version-mismatch-${driver}` },
+      payload: {
+        ...createPayload,
+        adapterVersion: 'tixkit-portable-bundle-v1',
+        configuration: {
+          ...createPayload.configuration,
+          artifactIds: [mismatchedVersionArtifact.id],
+        },
+      },
+    });
+    expect(mismatchedVersionJob.statusCode, mismatchedVersionJob.body).toBe(201);
+    const mismatchedVersionJobId = mismatchedVersionJob.json<{ id: string }>().id;
+    const mismatchedVersionRegistration = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${mismatchedVersionJobId}/files`,
+      payload: { uploadArtifactId: mismatchedVersionArtifact.id },
+    });
+    expect(mismatchedVersionRegistration.statusCode, mismatchedVersionRegistration.body).toBe(201);
+    const mismatchedVersionPreparation = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${mismatchedVersionJobId}/prepare`,
+      payload: {},
+    });
+    expect(mismatchedVersionPreparation.statusCode, mismatchedVersionPreparation.body).toBe(500);
+    expect(objectReads).toHaveLength(1);
+    expect(
+      await db
+        .selectFrom('import_job_rows')
+        .select('id')
+        .where('import_job_id', '=', mismatchedVersionJobId)
+        .execute(),
+    ).toEqual([]);
+    expect(
+      await db
+        .selectFrom('portable_import_preflights')
+        .select('import_job_id')
+        .where('import_job_id', '=', mismatchedVersionJobId)
+        .execute(),
+    ).toEqual([]);
     const domainStateBefore = {
       organizations: await db
         .selectFrom('organizations')
@@ -1904,11 +2134,51 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         .orderBy('id')
         .execute(),
     };
-    const registered = await app.inject({
+    const auditFailure = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${createdBody.id}/files`,
+      headers: { 'user-agent': 'x'.repeat(513) },
       payload: { uploadArtifactId: artifactId },
     });
+    expect(auditFailure.statusCode, auditFailure.body).toBe(500);
+    expect(
+      await db
+        .selectFrom('upload_artifacts')
+        .select('consumed_at')
+        .where('id', '=', artifactId)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({ consumed_at: null });
+    expect(
+      await db
+        .selectFrom('import_job_files')
+        .select('id')
+        .where('import_job_id', '=', createdBody.id)
+        .execute(),
+    ).toEqual([]);
+    expect(
+      await db
+        .selectFrom('audit_logs')
+        .select('id')
+        .where('resource_id', '=', createdBody.id)
+        .where('action', '=', 'migration_job.file_registered')
+        .execute(),
+    ).toEqual([]);
+    const sameJobRegistrationRace = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/migration-jobs/${createdBody.id}/files`,
+        payload: { uploadArtifactId: artifactId },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/migration-jobs/${createdBody.id}/files`,
+        payload: { uploadArtifactId: artifactId },
+      }),
+    ]);
+    expect(
+      sameJobRegistrationRace.map(({ statusCode }) => statusCode).sort((a, b) => a - b),
+    ).toEqual([201, 409]);
+    const registered = sameJobRegistrationRace.find(({ statusCode }) => statusCode === 201)!;
     expect(registered.statusCode, registered.body).toBe(201);
     expect(registered.json()).toMatchObject({
       jobId: createdBody.id,
@@ -1918,6 +2188,28 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     expect(Number(registered.json<{ byteSize: number | string }>().byteSize)).toBe(
       built.transport.byteLength,
     );
+    const consumedArtifact = await db
+      .selectFrom('upload_artifacts')
+      .select(['consumed_at', 'expires_at', 'metadata'])
+      .where('id', '=', artifactId)
+      .executeTakeFirstOrThrow();
+    expect(consumedArtifact.consumed_at).not.toBeNull();
+    expect(new Date(consumedArtifact.expires_at).getTime()).toBeGreaterThan(
+      Date.now() + 29 * 24 * 60 * 60 * 1000,
+    );
+    expect(
+      typeof consumedArtifact.metadata === 'string'
+        ? JSON.parse(consumedArtifact.metadata)
+        : consumedArtifact.metadata,
+    ).toMatchObject({
+      migrationImport: { jobId: createdBody.id, registeredAt: expect.any(String) },
+    });
+    const duplicateRegistration = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/files`,
+      payload: { uploadArtifactId: artifactId },
+    });
+    expect(duplicateRegistration.statusCode, duplicateRegistration.body).toBe(409);
     const prepared = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${createdBody.id}/prepare`,
@@ -1925,8 +2217,8 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     });
     expect(prepared.statusCode, prepared.body).toBe(202);
     expect(prepared.json()).toEqual({ jobId: createdBody.id, status: 'preparing' });
-    expect(objectReads).toHaveLength(1);
-    expect(objectReads[0]?.input).toMatchObject({ Bucket: 'tixkit', Key: objectKey });
+    expect(objectReads).toHaveLength(2);
+    expect(objectReads[1]?.input).toMatchObject({ Bucket: 'tixkit', Key: objectKey });
     const persistedJob = await new ImportRepository(db).findJob(
       intakeTenantId,
       intakeOrganizationId,

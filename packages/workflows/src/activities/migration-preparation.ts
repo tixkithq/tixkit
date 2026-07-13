@@ -225,6 +225,15 @@ export type MigrationPreparationChunk = {
   completed: boolean;
 };
 
+export function assertPortableAdapterVersionMatchesManifest(
+  adapterVersion: string,
+  manifestFormat: string,
+): void {
+  if (adapterVersion !== manifestFormat) {
+    throw new Error('PORTABILITY_ADAPTER_VERSION_MISMATCH');
+  }
+}
+
 export interface MigrationPreparationService {
   prepare(input: MigrationPreparationInput): Promise<MigrationPreparationChunk>;
   pause(input: Omit<MigrationPreparationInput, 'chunkSize'>): Promise<void>;
@@ -1101,7 +1110,27 @@ export function createMigrationPreparationService(
         throw new Error('PORTABILITY_COMMIT_AUTHORIZATION_UNAVAILABLE');
       }
       if (job.status === 'prepared') return { processed: 0, completed: true };
-      if (['pending', 'failed', 'paused'].includes(job.status)) {
+      if (!['pending', 'failed', 'paused', 'preparing'].includes(job.status)) {
+        throw new Error('MIGRATION_JOB_NOT_PREPARABLE');
+      }
+      const raw = job.configuration
+        ? (JSON.parse(job.configuration) as Record<string, unknown>)
+        : null;
+      const { credentialId: rawCredentialId, ...sourceConfiguration } = raw ?? {};
+      const configuration = parseMigrationPreparationConfiguration(
+        { ...sourceConfiguration, sourceSystem: job.source_system },
+        job.source_system,
+      );
+      if (configuration.sourceMode === 'official-export') {
+        await repository.acquireMigrationArtifactsForState({
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          jobId: input.jobId,
+          artifactIds: configuration.artifactIds,
+          targetState: 'preparing',
+          transition: true,
+        });
+      } else if (['pending', 'failed', 'paused'].includes(job.status)) {
         const changed = await repository.transitionJob({
           tenantId: input.tenantId,
           organizationId: input.organizationId,
@@ -1110,15 +1139,7 @@ export function createMigrationPreparationService(
           to: 'preparing' as never,
         });
         if (!changed) throw new Error('MIGRATION_JOB_STATE_CHANGED');
-      } else if (job.status !== 'preparing') throw new Error('MIGRATION_JOB_NOT_PREPARABLE');
-      const raw = job.configuration
-        ? (JSON.parse(job.configuration) as Record<string, unknown>)
-        : null;
-      const { credentialId: rawCredentialId, ...sourceConfiguration } = raw ?? {};
-      const configuration = parseMigrationPreparationConfiguration(
-        sourceConfiguration,
-        job.source_system,
-      );
+      }
       const progress = await repository.preparationProgress(
         input.tenantId,
         input.organizationId,
@@ -1299,6 +1320,10 @@ export function createMigrationPreparationService(
             tenantId: input.tenantId,
             organizationId: input.organizationId,
           });
+          assertPortableAdapterVersionMatchesManifest(
+            job.adapter_version,
+            evidence.manifest.format,
+          );
           await repository.assertPortableImportLineageEligible({
             tenantId: input.tenantId,
             organizationId: input.organizationId,

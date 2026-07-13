@@ -31,6 +31,7 @@ import {
   type SmsTemplateDocument,
   type UploadArtifactDownload,
   type UploadPurpose,
+  type CreateUploadArtifactInput,
   type WebhookEvent,
   type CreateMigrationJobInput,
 } from '../index.js';
@@ -175,7 +176,7 @@ describe('TixkitClient', () => {
     await client.migrations.createPortable({
       organizationId: 'org_1',
       sourceSystem: 'tixkit-portable',
-      adapterVersion: 'tixkit-portable-bundle-v1',
+      adapterVersion: 'tixkit-portable-bundle-v2',
       idempotencyKey: 'portable-job-1',
       configuration: {
         sourceMode: 'official-export',
@@ -3676,6 +3677,31 @@ describe('TixkitClient new resource methods', () => {
 
   it('uploads.create sends a signed upload ticket request', async () => {
     expectTypeOf<'content_email_image'>().toExtend<UploadPurpose>();
+    const validMigrationUpload: CreateUploadArtifactInput = {
+      purpose: 'migration_import',
+      organizationId: 'org_1',
+      fileName: 'portable.tixkit.json',
+      contentType: 'application/vnd.tixkit.portable+json',
+      sizeBytes: 1234,
+    };
+    expectTypeOf(validMigrationUpload).toMatchTypeOf<CreateUploadArtifactInput>();
+    // @ts-expect-error migration imports require an organization scope.
+    const unscopedMigrationUpload: CreateUploadArtifactInput = {
+      purpose: 'migration_import',
+      fileName: 'portable.tixkit.json',
+      contentType: 'application/vnd.tixkit.portable+json',
+      sizeBytes: 1234,
+    };
+    // @ts-expect-error non-migration uploads must not carry an organization scope.
+    const crossPurposeOrganizationUpload: CreateUploadArtifactInput = {
+      purpose: 'user_avatar',
+      organizationId: 'org_1',
+      fileName: 'avatar.png',
+      contentType: 'image/png',
+      sizeBytes: 1234,
+    };
+    void unscopedMigrationUpload;
+    void crossPurposeOrganizationUpload;
 
     const fm = mockFetch(201, {
       artifactId: 'upl_1',
@@ -3690,21 +3716,21 @@ describe('TixkitClient new resource methods', () => {
       maxRetries: 0,
     });
     await c.uploads.create({
-      purpose: 'content_email_image',
-      fileName: 'hero.png',
-      contentType: 'image/png',
+      purpose: 'migration_import',
+      fileName: 'portable.tixkit.json',
+      contentType: 'application/vnd.tixkit.portable+json',
       sizeBytes: 1234,
-      eventId: 'evt_1',
+      organizationId: 'org_1',
     });
     const call = getCall(fm);
     expect(call.url).toBe('https://api.test/v1/upload-artifacts');
     expect(call.method).toBe('POST');
     expect(JSON.parse(call.body)).toEqual({
-      purpose: 'content_email_image',
-      fileName: 'hero.png',
-      contentType: 'image/png',
+      purpose: 'migration_import',
+      fileName: 'portable.tixkit.json',
+      contentType: 'application/vnd.tixkit.portable+json',
       sizeBytes: 1234,
-      eventId: 'evt_1',
+      organizationId: 'org_1',
     });
   });
 

@@ -30,6 +30,11 @@ import {
   revokePortableImportApproval,
   stablePortableControlHash,
 } from '../../services/portable-import-control.js';
+import {
+  MIGRATION_IMPORT_MAX_BYTES,
+  MIGRATION_IMPORT_RETENTION_MS,
+  parseUploadArtifactMetadata,
+} from '../../services/uploads.js';
 
 class PortableDryRunAttestationUnavailableError extends Error {
   readonly code = 'SERVICE_UNAVAILABLE';
@@ -185,6 +190,21 @@ function parseJson(value: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function migrationOfficialExportArtifactIds(job: {
+  configuration: string | null;
+  source_system: string;
+}): readonly string[] {
+  const raw = parseJson(job.configuration);
+  const configurationRecord =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const { credentialId: _credentialId, ...sourceConfiguration } = configurationRecord;
+  const configuration = parseMigrationPreparationConfiguration(
+    { ...sourceConfiguration, sourceSystem: job.source_system },
+    job.source_system,
+  );
+  return configuration.sourceMode === 'official-export' ? configuration.artifactIds : [];
 }
 
 const sensitiveKey =
@@ -667,6 +687,36 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     const { job, organizationId } = await scopedJob(repository, request, jobId);
     if (!['pending', 'failed', 'paused'].includes(job.status))
       throw new ConflictError('Migration preparation cannot start in the current status');
+    let preparationConfiguration;
+    try {
+      preparationConfiguration = parseMigrationPreparationConfiguration(
+        {
+          ...(parseJson(job.configuration) as Record<string, unknown> | null),
+          sourceSystem: job.source_system,
+        },
+        job.source_system,
+      );
+    } catch (error) {
+      throw new ValidationError(
+        error instanceof Error ? error.message : 'Invalid migration preparation configuration',
+      );
+    }
+    if (preparationConfiguration.sourceMode === 'official-export') {
+      try {
+        await repository.acquireMigrationArtifactsForState({
+          tenantId: principal.tenantId,
+          organizationId,
+          jobId,
+          artifactIds: preparationConfiguration.artifactIds,
+          targetState: 'preparing',
+          transition: false,
+        });
+      } catch (error) {
+        throw new ConflictError(
+          error instanceof Error ? error.message : 'Migration artifact is unavailable',
+        );
+      }
+    }
     await app.context.temporalClient.startMigrationPreparation({
       tenantId: principal.tenantId,
       organizationId,
@@ -720,9 +770,42 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     if (!['pending', 'discovering', 'extracting'].includes(job.status))
       throw new ConflictError('Files cannot be added in the current migration status');
     const body = parse(fileSchema, request.body);
+    if (job.source_system === 'tixkit-portable') {
+      let configuration;
+      try {
+        configuration = parseMigrationPreparationConfiguration(
+          {
+            ...(parseJson(job.configuration) as Record<string, unknown> | null),
+            sourceSystem: job.source_system,
+          },
+          'tixkit-portable',
+        );
+      } catch (error) {
+        throw new ValidationError(
+          error instanceof Error ? error.message : 'Invalid portable migration configuration',
+        );
+      }
+      if (
+        configuration.sourceMode !== 'official-export' ||
+        configuration.artifactIds.length !== 1 ||
+        configuration.artifactIds[0] !== body.uploadArtifactId
+      ) {
+        throw new ValidationError(
+          'Portable migrations accept only their configured upload artifact',
+        );
+      }
+    }
     const artifact = await app.context.db
       .selectFrom('upload_artifacts')
-      .select(['id', 'object_key', 'file_name', 'content_type', 'size_bytes', 'checksum_sha256'])
+      .select([
+        'id',
+        'object_key',
+        'file_name',
+        'content_type',
+        'size_bytes',
+        'checksum_sha256',
+        'metadata',
+      ])
       .where('id', '=', body.uploadArtifactId)
       .where('tenant_id', '=', principal.tenantId)
       .where('organization_id', '=', organizationId)
@@ -733,21 +816,71 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
     if (!artifact?.checksum_sha256) {
       throw new NotFoundError('MigrationUploadArtifact', body.uploadArtifactId);
     }
-    const file = await repository.addFile({
-      tenantId: principal.tenantId,
-      organizationId,
-      jobId,
-      objectKey: artifact.object_key,
-      originalName: artifact.file_name,
-      mediaType: artifact.content_type,
-      byteSize: artifact.size_bytes,
-      sha256: artifact.checksum_sha256,
-    });
-    await auditMutation(app, request, organizationId, jobId, 'migration_job.file_registered', {
-      fileId: file.id,
-      uploadArtifactId: artifact.id,
-      byteSize: artifact.size_bytes,
-      sha256: artifact.checksum_sha256,
+    const artifactSha256 = artifact.checksum_sha256;
+    if (artifact.size_bytes > MIGRATION_IMPORT_MAX_BYTES) {
+      throw new ValidationError('Migration upload artifact exceeds the 50 MiB import limit');
+    }
+    if (
+      job.source_system === 'tixkit-portable' &&
+      artifact.content_type !== 'application/vnd.tixkit.portable+json'
+    ) {
+      throw new ValidationError(
+        'Portable migration uploads require application/vnd.tixkit.portable+json',
+      );
+    }
+    const registeredAt = new Date();
+    const file = await app.context.db.transaction().execute(async (transaction) => {
+      const consumption = await transaction
+        .updateTable('upload_artifacts')
+        .set({
+          metadata: JSON.stringify({
+            ...parseUploadArtifactMetadata(artifact.metadata),
+            migrationImport: { jobId, registeredAt: registeredAt.toISOString() },
+          }),
+          consumed_at: registeredAt,
+          expires_at: new Date(registeredAt.getTime() + MIGRATION_IMPORT_RETENTION_MS),
+          updated_at: registeredAt,
+        })
+        .where('id', '=', artifact.id)
+        .where('tenant_id', '=', principal.tenantId)
+        .where('organization_id', '=', organizationId)
+        .where('purpose', '=', 'migration_import')
+        .where('status', '=', 'uploaded')
+        .where('scan_status', '=', 'clean')
+        .where('consumed_at', 'is', null)
+        .executeTakeFirst();
+      if (Number(consumption.numUpdatedRows) !== 1) {
+        throw new ConflictError('Migration upload artifact was already registered');
+      }
+      const file = await new ImportRepository(transaction as typeof app.context.db).addFile({
+        tenantId: principal.tenantId,
+        organizationId,
+        jobId,
+        objectKey: artifact.object_key,
+        originalName: artifact.file_name,
+        mediaType: artifact.content_type,
+        byteSize: artifact.size_bytes,
+        sha256: artifactSha256,
+      });
+      await new AuditLogRepository(transaction as typeof app.context.db).create({
+        tenantId: principal.tenantId,
+        organizationId,
+        actorType: principal.type,
+        actorId: principal.id,
+        action: 'migration_job.file_registered',
+        resourceType: 'MigrationJob',
+        resourceId: jobId,
+        diffSummary: {
+          fileId: file.id,
+          uploadArtifactId: artifact.id,
+          byteSize: artifact.size_bytes,
+          sha256: artifactSha256,
+        },
+        requestId: request.id,
+        ip: request.ip,
+        userAgent: request.headers['user-agent'],
+      });
+      return file;
     });
     return reply
       .status(201)
@@ -1277,12 +1410,30 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
         throw new PortableDryRunAttestationUnavailableError();
       }
       const authorizedJob = await repository.findJob(principal.tenantId, organizationId, jobId);
-      if (authorizedJob?.status === 'ready')
+      if (authorizedJob?.status === 'ready') {
+        const artifactIds = migrationOfficialExportArtifactIds(authorizedJob);
+        if (artifactIds.length > 0) {
+          try {
+            await repository.acquireMigrationArtifactsForState({
+              tenantId: principal.tenantId,
+              organizationId,
+              jobId,
+              artifactIds,
+              targetState: 'committing',
+              transition: false,
+            });
+          } catch (error) {
+            throw new ConflictError(
+              error instanceof Error ? error.message : 'Migration artifact is unavailable',
+            );
+          }
+        }
         await app.context.temporalClient.startMigrationCommit({
           tenantId: principal.tenantId,
           organizationId,
           jobId,
         });
+      }
       await auditMutation(
         app,
         request,
@@ -1344,6 +1495,23 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
       summary.configurationHash !== stableHash(parseJson(job.configuration))
     ) {
       throw new ConflictError('Dry-run report is missing, rejected, or stale');
+    }
+    const artifactIds = migrationOfficialExportArtifactIds(job);
+    if (artifactIds.length > 0) {
+      try {
+        await repository.acquireMigrationArtifactsForState({
+          tenantId: principal.tenantId,
+          organizationId,
+          jobId,
+          artifactIds,
+          targetState: 'committing',
+          transition: false,
+        });
+      } catch (error) {
+        throw new ConflictError(
+          error instanceof Error ? error.message : 'Migration artifact is unavailable',
+        );
+      }
     }
     await app.context.temporalClient.startMigrationCommit({
       tenantId: principal.tenantId,

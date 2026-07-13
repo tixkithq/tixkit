@@ -48,7 +48,9 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
 
 describe('openApiSpec', () => {
   it('documents event media purposes and safe test checkout tagging', () => {
-    expect(openApiSpec.components.schemas.CreateUploadArtifact.properties.purpose.enum).toEqual(
+    expect(
+      openApiSpec.components.schemas.CreateUploadArtifact.oneOf[1].properties.purpose.enum,
+    ).toEqual(
       expect.arrayContaining(['event_poster', 'event_cover', 'event_social', 'event_seo_image']),
     );
     expect(
@@ -1651,26 +1653,21 @@ describe('openApiSpec', () => {
   });
 
   it('requires public upload completion tokens without requiring them for authenticated completion', () => {
-    expect(openApiSpec.components.schemas.CreateUploadArtifact).toMatchObject({
-      required: ['purpose', 'fileName', 'contentType', 'sizeBytes'],
+    const createUpload = openApiSpec.components.schemas.CreateUploadArtifact;
+    expect(createUpload.oneOf).toHaveLength(2);
+    expect(createUpload.oneOf[0]).toMatchObject({
+      additionalProperties: false,
+      required: ['purpose', 'organizationId', 'fileName', 'contentType', 'sizeBytes'],
       properties: {
-        purpose: {
-          type: 'string',
-          enum: [
-            'checkout_answer',
-            'brand_logo',
-            'user_avatar',
-            'content_email_image',
-            'content_event_page_image',
-            'migration_import',
-            'event_poster',
-            'event_cover',
-            'event_social',
-            'event_seo_image',
-          ],
-        },
+        purpose: { const: 'migration_import' },
+        organizationId: { type: 'string', minLength: 1 },
+        sizeBytes: { type: 'integer', minimum: 1, maximum: 52_428_800 },
       },
     });
+    expect(createUpload.oneOf[0].properties).not.toHaveProperty('brandId');
+    expect(createUpload.oneOf[0].properties).not.toHaveProperty('eventId');
+    expect(createUpload.oneOf[1].properties.purpose.enum).not.toContain('migration_import');
+    expect(createUpload.oneOf[1].properties).not.toHaveProperty('organizationId');
 
     expect(openApiSpec.components.schemas.PublicCreateUploadArtifact).toMatchObject({
       required: ['fileName', 'contentType', 'sizeBytes', 'questionId'],
@@ -2032,6 +2029,11 @@ describe('openApiSpec', () => {
             schema: {
               properties: {
                 sourceSystem: { const: 'tixkit-portable' },
+                adapterVersion: {
+                  type: 'string',
+                  enum: ['tixkit-portable-bundle-v2', 'tixkit-portable-bundle-v1'],
+                  default: 'tixkit-portable-bundle-v2',
+                },
                 configuration: { properties: { artifactIds: { minItems: 1, maxItems: 1 } } },
               },
             },

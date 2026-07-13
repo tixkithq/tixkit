@@ -8,7 +8,7 @@ product_area: platform
 content_type: runbook
 status: beta
 owner: developer-platform
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 prerequisites:
   - A tenant-scoped Tixkit API key, a secret-manager reference for the source credential, and immutable source exports
 related:
@@ -21,7 +21,7 @@ Tixkit migrations are durable, tenant-scoped jobs. Treat the job report—not an
 ## Operator lifecycle
 
 1. Upload source objects with upload purpose `migration_import` and wait for a clean malware-scan result. Retain the returned opaque `uploadArtifactId`.
-2. Register an expiring source-credential reference, then create the job with its source system, adapter version, mapping profile, timezone, currency assumptions, and credential ID.
+2. For an official-API source, register an expiring source-credential reference. Then create the job with its source system, adapter version, mapping profile, timezone, currency assumptions, and credential ID when that source mode requires one. Portable and file-export jobs do not use a source credential.
 3. Register each clean `uploadArtifactId` on the job. Tixkit derives storage metadata and checksums; clients never submit object keys or asserted hashes.
 4. Save or select mappings, then run the dry run. Resolve every fatal/error issue and review warnings, unsupported features, duplicates, mapping failures, counts, and runtime/storage estimates.
 5. Save the final report and approval evidence. Confirm that its input/configuration hashes still match the job.
@@ -29,6 +29,34 @@ Tixkit migrations are durable, tenant-scoped jobs. Treat the job report—not an
 7. Activate imported entities only after reconciliation. Keep source files and reports under the configured retention policy.
 
 Never skip directly from creation to commit. The API rejects a stale or unsuccessful dry run even if a client attempts it.
+
+Migration imports use an organization-scoped upload artifact. `organizationId` is required for
+`migration_import` and rejected for every other upload purpose; `brandId` and `eventId` are not
+allowed on migration uploads. Each artifact must be no larger than 50 MiB. Portable bundles must use
+the exact `application/vnd.tixkit.portable+json` media type; generic migration adapters retain their
+documented source media types. Upload the exact bytes to the returned short-lived URL, then call the
+artifact completion endpoint and wait for a clean scan result before registering it on a job.
+Registration is single-use and atomically links the artifact to the job, records consumption, and
+starts a 30-day retention window. Tixkit renews recently active preparation, commit, cancellation,
+and rollback work in one-day increments, with a 90-day absolute ceiling. Pending, ready, committed,
+failed, paused, terminal, and inactive jobs do not renew automatically. Unregistered clean artifacts
+expire with their upload ticket. Inconsistent consumed-artifact linkage is placed on retention hold
+instead of deleting bytes. Preparation start/resume and commit atomically acquire the exact artifact
+lease before the job becomes active. If cleanup already acquired the artifact, the lifecycle action
+fails without changing job state; if the lifecycle action acquired it first, cleanup cannot delete
+it. A bundle at the 90-day ceiling cannot enter preparation or commit; create and approve a fresh
+export instead. Retain the source export independently through destination activation and any longer
+policy your organization requires.
+
+```ts
+const artifact = await client.uploads.create({
+  purpose: 'migration_import',
+  organizationId: 'org_01JEXAMPLE',
+  fileName: 'portable-bundle.json',
+  contentType: 'application/vnd.tixkit.portable+json',
+  sizeBytes: portableBundle.byteLength,
+});
+```
 
 ## JavaScript SDK workflow
 
@@ -72,7 +100,7 @@ Use the `tixkit-portable` adapter for the signed logical-bundle transport. A por
 const job = await client.migrations.createPortable({
   organizationId: 'org_01JEXAMPLE',
   sourceSystem: 'tixkit-portable',
-  adapterVersion: 'tixkit-portable-bundle-v1',
+  adapterVersion: 'tixkit-portable-bundle-v2',
   idempotencyKey: 'portable-import-bundle-01JEXAMPLE',
   configuration: {
     sourceMode: 'official-export',

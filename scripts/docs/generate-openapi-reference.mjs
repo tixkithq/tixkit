@@ -45,13 +45,44 @@ const operations = Object.entries(openApiSpec.paths).flatMap(([path, pathItem]) 
     })),
 );
 
+function summarizeVariant(schema, index) {
+  const properties = Object.entries(schema.properties ?? {}).map(([name, property]) => ({
+    name,
+    type:
+      property.type ??
+      (Object.hasOwn(property, 'const') ? typeof property.const : property.$ref ? 'reference' : ''),
+    const: Object.hasOwn(property, 'const') ? property.const : null,
+    enum: property.enum ?? [],
+    minimum: property.minimum ?? null,
+    maximum: property.maximum ?? null,
+    minLength: property.minLength ?? null,
+    maxLength: property.maxLength ?? null,
+    description: property.description ?? '',
+  }));
+  const discriminator = properties.find((property) => property.const !== null);
+  return {
+    name: discriminator
+      ? `${discriminator.name} = ${String(discriminator.const)}`
+      : `Variant ${index + 1}`,
+    type: schema.type ?? 'object',
+    required: schema.required ?? [],
+    properties,
+  };
+}
+
 const schemas = Object.entries(openApiSpec.components.schemas).map(([name, schema]) => ({
   name,
   type: schema.type ?? (schema.oneOf ? 'oneOf' : schema.allOf ? 'allOf' : 'object'),
   description: schema.description ?? '',
   required: schema.required ?? [],
   properties: Object.keys(schema.properties ?? {}),
+  ...(schema.oneOf ? { variants: schema.oneOf.map(summarizeVariant) } : {}),
 }));
+for (const [index, schema] of Object.values(openApiSpec.components.schemas).entries()) {
+  if (schema.oneOf && schema.oneOf.length !== schemas[index].variants?.length) {
+    throw new Error(`OpenAPI schema union generation failed for ${schemas[index].name}`);
+  }
+}
 
 const webhookMetadata = {
   'order.created': {

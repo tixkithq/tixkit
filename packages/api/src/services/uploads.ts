@@ -12,7 +12,13 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ulid } from 'ulid';
 import sharp from 'sharp';
 import { s3PutEncryption } from './s3-encryption.js';
-import type { Database } from '@tixkit/db';
+import {
+  MIGRATION_IMPORT_INITIAL_RETENTION_MS,
+  MIGRATION_IMPORT_MAX_BYTES,
+  MIGRATION_IMPORT_MAX_RETENTION_MS,
+  MIGRATION_IMPORT_PREPARATION_LEASE_MS,
+  type Database,
+} from '@tixkit/db';
 import { ValidationError, NotFoundError } from '@tixkit/domain';
 import { config } from '../config/index.js';
 
@@ -54,6 +60,19 @@ export type UploadArtifactResponse = {
 const EICAR_SIGNATURE = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
 const UPLOAD_TTL_SECONDS = 15 * 60;
 const UPLOAD_SCANNER_UNAVAILABLE_MESSAGE = 'Upload malware scanner is unavailable';
+export { MIGRATION_IMPORT_MAX_BYTES };
+export const MIGRATION_IMPORT_RETENTION_MS = MIGRATION_IMPORT_INITIAL_RETENTION_MS;
+const MIGRATION_IMPORT_ACTIVE_RENEWAL_MS = MIGRATION_IMPORT_PREPARATION_LEASE_MS;
+const MIGRATION_IMPORT_ACTIVE_JOB_STATUSES = new Set([
+  'preparing',
+  'discovering',
+  'extracting',
+  'normalizing',
+  'validating',
+  'committing',
+  'cancelling',
+  'rolling-back',
+]);
 
 const PURPOSE_LIMITS: Record<
   UploadPurpose,
@@ -91,8 +110,14 @@ const PURPOSE_LIMITS: Record<
     prefix: 'content-event-page-images',
   },
   migration_import: {
-    maxSizeBytes: 1024 * 1024 * 1024,
-    contentTypes: new Set(['application/json', 'application/zip', 'text/csv', 'text/plain']),
+    maxSizeBytes: MIGRATION_IMPORT_MAX_BYTES,
+    contentTypes: new Set([
+      'application/json',
+      'application/vnd.tixkit.portable+json',
+      'application/zip',
+      'text/csv',
+      'text/plain',
+    ]),
     prefix: 'migration-imports',
   },
   event_cover: {
@@ -402,6 +427,10 @@ export async function cleanupExpiredUploadArtifacts(
   db: Database,
   now = new Date(),
   limit = 100,
+  observer?: {
+    artifactClaimStarted?(artifactId: string): Promise<void> | void;
+    artifactClaimed?(artifactId: string): Promise<void> | void;
+  },
 ): Promise<number> {
   const staleCleanupClaimBefore = new Date(now.getTime() - 15 * 60 * 1000);
   const rows = await db
@@ -417,7 +446,10 @@ export async function cleanupExpiredUploadArtifacts(
       'object_key',
       'purpose',
       'event_id',
+      'content_type',
+      'size_bytes',
       'checksum_sha256',
+      'consumed_at',
       'updated_at',
     ])
     .where((eb) =>
@@ -425,7 +457,13 @@ export async function cleanupExpiredUploadArtifacts(
         eb('status', 'in', ['pending', 'rejected']),
         eb.and([
           eb('status', '=', 'uploaded'),
-          eb('purpose', 'in', ['event_poster', 'event_cover', 'event_social', 'event_seo_image']),
+          eb('purpose', 'in', [
+            'event_poster',
+            'event_cover',
+            'event_social',
+            'event_seo_image',
+            'migration_import',
+          ]),
         ]),
         eb.and([
           eb('status', '=', 'cleanup_pending'),
@@ -443,7 +481,7 @@ export async function cleanupExpiredUploadArtifacts(
   const s3 = createS3Client();
   const cleaned = await Promise.all(
     rows.map(async (row) => {
-      if (row.status === 'uploaded') {
+      if (row.status === 'uploaded' && row.purpose !== 'migration_import') {
         if (!row.event_id || !EVENT_MEDIA_PURPOSES.has(row.purpose as UploadPurpose)) {
           return false;
         }
@@ -487,8 +525,90 @@ export async function cleanupExpiredUploadArtifacts(
         .where('expires_at', '<', now);
       if (row.status === 'cleanup_pending')
         claimQuery = claimQuery.where('updated_at', '<', staleCleanupClaimBefore);
-      const claim = await claimQuery.executeTakeFirst();
+      const claimPromise = claimQuery.executeTakeFirst();
+      await observer?.artifactClaimStarted?.(row.id);
+      const claim = await claimPromise;
       if (Number(claim.numUpdatedRows) !== 1) return false;
+      await observer?.artifactClaimed?.(row.id);
+
+      if (row.purpose === 'migration_import') {
+        const files = row.organization_id
+          ? await db
+              .selectFrom('import_job_files')
+              .select(['id', 'import_job_id', 'media_type', 'byte_size', 'sha256', 'status'])
+              .where('tenant_id', '=', row.tenant_id)
+              .where('organization_id', '=', row.organization_id)
+              .where('object_key', '=', row.object_key)
+              .execute()
+          : [];
+        const exactFile =
+          files.length === 1 &&
+          files[0]!.sha256 === row.checksum_sha256 &&
+          Number(files[0]!.byte_size) === row.size_bytes &&
+          files[0]!.media_type === row.content_type &&
+          files[0]!.status === 'ready';
+        const registrationConsistent = row.consumed_at !== null && exactFile;
+        const unregisteredConsistent = row.consumed_at === null && files.length === 0;
+        if (!registrationConsistent && !unregisteredConsistent) {
+          await db
+            .updateTable('upload_artifacts')
+            .set({
+              status: 'retention_hold',
+              scan_result: 'Migration import retention linkage is inconsistent',
+              updated_at: now,
+            })
+            .where('id', '=', row.id)
+            .where('status', '=', 'cleanup_pending')
+            .execute();
+          return false;
+        }
+        if (registrationConsistent) {
+          const job = await db
+            .selectFrom('import_jobs')
+            .select(['status', 'updated_at'])
+            .where('tenant_id', '=', row.tenant_id)
+            .where('organization_id', '=', row.organization_id!)
+            .where('id', '=', files[0]!.import_job_id)
+            .executeTakeFirst();
+          if (!job) {
+            await db
+              .updateTable('upload_artifacts')
+              .set({
+                status: 'retention_hold',
+                scan_result: 'Migration import retention job is missing',
+                updated_at: now,
+              })
+              .where('id', '=', row.id)
+              .where('status', '=', 'cleanup_pending')
+              .execute();
+            return false;
+          }
+          const maximumRetentionAt =
+            new Date(row.consumed_at!).getTime() + MIGRATION_IMPORT_MAX_RETENTION_MS;
+          const recentlyActive =
+            new Date(job.updated_at).getTime() >=
+            now.getTime() - MIGRATION_IMPORT_ACTIVE_RENEWAL_MS;
+          if (
+            MIGRATION_IMPORT_ACTIVE_JOB_STATUSES.has(job.status) &&
+            recentlyActive &&
+            now.getTime() < maximumRetentionAt
+          ) {
+            await db
+              .updateTable('upload_artifacts')
+              .set({
+                status: 'uploaded',
+                expires_at: new Date(
+                  Math.min(now.getTime() + MIGRATION_IMPORT_ACTIVE_RENEWAL_MS, maximumRetentionAt),
+                ),
+                updated_at: now,
+              })
+              .where('id', '=', row.id)
+              .where('status', '=', 'cleanup_pending')
+              .execute();
+            return false;
+          }
+        }
+      }
 
       if (row.status === 'uploaded' && row.event_id) {
         const structuredReference = await db
@@ -574,7 +694,9 @@ export async function cleanupExpiredUploadArtifacts(
           scan_result:
             row.scan_result ??
             (row.status === 'uploaded'
-              ? 'Unattached event media artifact expired'
+              ? row.purpose === 'migration_import'
+                ? 'Migration import artifact retention expired'
+                : 'Unattached event media artifact expired'
               : 'Upload artifact expired before completion'),
           updated_at: now,
         })
@@ -638,7 +760,7 @@ export async function createUploadArtifact(
     'uploads',
     input.tenantId,
     limits.prefix,
-    input.eventId ?? input.brandId ?? input.createdByUserId ?? 'global',
+    input.eventId ?? input.brandId ?? input.organizationId ?? input.createdByUserId ?? 'global',
   ].join('/');
   const objectKey = `${objectKeyPrefix}/staging/${id}${extension(fileName)}`;
   const completeToken = input.publicComplete ? randomBytes(32).toString('base64url') : undefined;
@@ -908,7 +1030,7 @@ export async function completeUploadArtifact(
             ...parseUploadArtifactMetadata(artifact.metadata),
             image: eventMediaMetadata,
           })
-        : artifact.metadata,
+        : JSON.stringify(parseUploadArtifactMetadata(artifact.metadata)),
       completion_owner_token: null,
       completion_started_at: null,
       updated_at: now,

@@ -652,6 +652,380 @@ describe('upload artifact service', () => {
     );
   });
 
+  it('renews a recently active migration from relational linkage despite malformed metadata', async () => {
+    const now = new Date();
+    const objectKey = 'uploads/tnt_1/migration-imports/org_1/final/upl_migration_active.json';
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_migration_active',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          purpose: 'migration_import',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: objectKey,
+          content_type: 'application/vnd.tixkit.portable+json',
+          size_bytes: 10,
+          checksum_sha256: 'a'.repeat(64),
+          metadata: '{malformed',
+          consumed_at: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000),
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+      import_job_files: [
+        {
+          id: 'imf_active',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          import_job_id: 'imp_active',
+          object_key: objectKey,
+          media_type: 'application/vnd.tixkit.portable+json',
+          byte_size: 10,
+          sha256: 'a'.repeat(64),
+          status: 'ready',
+        },
+      ],
+      import_jobs: [
+        {
+          id: 'imp_active',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          status: 'preparing',
+          updated_at: now,
+        },
+      ],
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]?.status).toBe('uploaded');
+    expect(new Date(tables.upload_artifacts[0]?.expires_at as Date).getTime()).toBeGreaterThan(
+      now.getTime(),
+    );
+  });
+
+  it('cleans stale pending, failed, and paused migration registrations after retention', async () => {
+    const now = new Date();
+    const statuses = ['pending', 'failed', 'paused'];
+    const uploadArtifacts = statuses.map((_status, index) => ({
+      id: `upl_migration_stale_${index}`,
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      purpose: 'migration_import',
+      status: 'uploaded',
+      scan_status: 'clean',
+      bucket: 'tixkit',
+      object_key: `uploads/tnt_1/migration-imports/org_1/final/upl_migration_stale_${index}.json`,
+      content_type: 'application/vnd.tixkit.portable+json',
+      size_bytes: 10,
+      checksum_sha256: 'b'.repeat(64),
+      metadata: '{}',
+      consumed_at: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000),
+      expires_at: new Date(now.getTime() - 60_000),
+    }));
+    const { db, tables } = createMockDb({
+      upload_artifacts: uploadArtifacts,
+      import_job_files: statuses.map((_status, index) => ({
+        id: `imf_stale_${index}`,
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        import_job_id: `imp_stale_${index}`,
+        object_key: uploadArtifacts[index]!.object_key,
+        media_type: 'application/vnd.tixkit.portable+json',
+        byte_size: 10,
+        sha256: 'b'.repeat(64),
+        status: 'ready',
+      })),
+      import_jobs: statuses.map((status, index) => ({
+        id: `imp_stale_${index}`,
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        status,
+        updated_at: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+      })),
+    });
+    s3Send.mockResolvedValue({});
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(3);
+    expect(s3Send).toHaveBeenCalledTimes(3);
+    expect(tables.upload_artifacts.every((row) => row.status === 'cleanup_complete')).toBe(true);
+  });
+
+  it('enforces the absolute retention ceiling for a recently active migration', async () => {
+    const now = new Date();
+    const objectKey = 'uploads/tnt_1/migration-imports/org_1/final/upl_migration_max.json';
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_migration_max',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          purpose: 'migration_import',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: objectKey,
+          content_type: 'application/vnd.tixkit.portable+json',
+          size_bytes: 10,
+          checksum_sha256: 'c'.repeat(64),
+          metadata: '{}',
+          consumed_at: new Date(now.getTime() - 91 * 24 * 60 * 60 * 1000),
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+      import_job_files: [
+        {
+          id: 'imf_max',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          import_job_id: 'imp_max',
+          object_key: objectKey,
+          media_type: 'application/vnd.tixkit.portable+json',
+          byte_size: 10,
+          sha256: 'c'.repeat(64),
+          status: 'ready',
+        },
+      ],
+      import_jobs: [
+        {
+          id: 'imp_max',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          status: 'preparing',
+          updated_at: now,
+        },
+      ],
+    });
+    s3Send.mockResolvedValue({});
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(1);
+    expect(s3Send).toHaveBeenCalledTimes(1);
+    expect(tables.upload_artifacts[0]?.status).toBe('cleanup_complete');
+  });
+
+  it('places inconsistent consumed migration linkage on retention hold', async () => {
+    const now = new Date();
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_migration_inconsistent',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          purpose: 'migration_import',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/migration-imports/org_1/final/upl_migration_inconsistent.json',
+          metadata: '{malformed',
+          consumed_at: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000),
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'retention_hold',
+      scan_result: 'Migration import retention linkage is inconsistent',
+    });
+  });
+
+  it('places a consumed migration with a missing linked job on retention hold', async () => {
+    const now = new Date();
+    const objectKey = 'uploads/tnt_1/migration-imports/org_1/final/upl_missing_job.json';
+    const checksum = 'e'.repeat(64);
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_missing_job',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          purpose: 'migration_import',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: objectKey,
+          content_type: 'application/vnd.tixkit.portable+json',
+          size_bytes: 10,
+          checksum_sha256: checksum,
+          consumed_at: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000),
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+      import_job_files: [
+        {
+          id: 'imf_missing_job',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          import_job_id: 'imp_missing',
+          object_key: objectKey,
+          media_type: 'application/vnd.tixkit.portable+json',
+          byte_size: 10,
+          sha256: checksum,
+          status: 'ready',
+        },
+      ],
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      status: 'retention_hold',
+      scan_result: 'Migration import retention job is missing',
+    });
+  });
+
+  it('places checksum, byte-size, media-type, and status linkage drift on retention hold', async () => {
+    const now = new Date();
+    const mismatches = [
+      {
+        sha256: 'f'.repeat(64),
+        byte_size: 10,
+        media_type: 'application/json',
+        status: 'ready',
+      },
+      {
+        sha256: 'a'.repeat(64),
+        byte_size: 11,
+        media_type: 'application/json',
+        status: 'ready',
+      },
+      {
+        sha256: 'a'.repeat(64),
+        byte_size: 10,
+        media_type: 'text/plain',
+        status: 'ready',
+      },
+      {
+        sha256: 'a'.repeat(64),
+        byte_size: 10,
+        media_type: 'application/json',
+        status: 'rejected',
+      },
+    ];
+    const artifacts = mismatches.map((_mismatch, index) => ({
+      id: `upl_linkage_drift_${index}`,
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      purpose: 'migration_import',
+      status: 'uploaded',
+      scan_status: 'clean',
+      bucket: 'tixkit',
+      object_key: `uploads/tnt_1/migration-imports/org_1/final/upl_linkage_drift_${index}.json`,
+      content_type: 'application/json',
+      size_bytes: 10,
+      checksum_sha256: 'a'.repeat(64),
+      consumed_at: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000),
+      expires_at: new Date(now.getTime() - 60_000),
+    }));
+    const { db, tables } = createMockDb({
+      upload_artifacts: artifacts,
+      import_job_files: mismatches.map((mismatch, index) => ({
+        id: `imf_linkage_drift_${index}`,
+        tenant_id: 'tnt_1',
+        organization_id: 'org_1',
+        import_job_id: `imp_linkage_drift_${index}`,
+        object_key: artifacts[index]!.object_key,
+        ...mismatch,
+      })),
+    });
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(0);
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(tables.upload_artifacts).toHaveLength(4);
+    expect(
+      tables.upload_artifacts.every(
+        (artifact) =>
+          artifact.status === 'retention_hold' &&
+          artifact.scan_result === 'Migration import retention linkage is inconsistent',
+      ),
+    ).toBe(true);
+  });
+
+  it('deletes expired unregistered and terminal-job migration artifacts', async () => {
+    const now = new Date();
+    const terminalObjectKey =
+      'uploads/tnt_1/migration-imports/org_1/final/upl_migration_terminal.json';
+    const { db, tables } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_migration_unregistered',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          purpose: 'migration_import',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/tnt_1/migration-imports/org_1/final/upl_migration_unregistered.json',
+          metadata: '{}',
+          consumed_at: null,
+          expires_at: new Date(now.getTime() - 120_000),
+        },
+        {
+          id: 'upl_migration_terminal',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          purpose: 'migration_import',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: terminalObjectKey,
+          content_type: 'application/vnd.tixkit.portable+json',
+          size_bytes: 10,
+          checksum_sha256: 'd'.repeat(64),
+          metadata: JSON.stringify({
+            migrationImport: { jobId: 'imp_terminal', registeredAt: now.toISOString() },
+          }),
+          consumed_at: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000),
+          expires_at: new Date(now.getTime() - 60_000),
+        },
+      ],
+      import_job_files: [
+        {
+          id: 'imf_terminal',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          import_job_id: 'imp_terminal',
+          object_key: terminalObjectKey,
+          media_type: 'application/vnd.tixkit.portable+json',
+          byte_size: 10,
+          sha256: 'd'.repeat(64),
+          status: 'ready',
+        },
+      ],
+      import_jobs: [
+        {
+          id: 'imp_terminal',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          status: 'activated',
+          updated_at: now,
+        },
+      ],
+    });
+    s3Send.mockResolvedValue({});
+
+    await expect(cleanupExpiredUploadArtifacts(db, now)).resolves.toBe(2);
+    expect(s3Send).toHaveBeenCalledTimes(2);
+    expect(tables.upload_artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'upl_migration_unregistered',
+          status: 'cleanup_complete',
+          scan_result: 'Migration import artifact retention expired',
+        }),
+        expect.objectContaining({
+          id: 'upl_migration_terminal',
+          status: 'cleanup_complete',
+          scan_result: 'Migration import artifact retention expired',
+        }),
+      ]),
+    );
+  });
+
   it('does not delete a shared original while another event media asset references it', async () => {
     const now = new Date();
     const { db, tables } = createMockDb({
@@ -1816,6 +2190,237 @@ describe('upload artifact service', () => {
 });
 
 describe('upload artifact routes', () => {
+  it('creates organization-scoped portable migration uploads for authorized operators', async () => {
+    const { db, tables } = createMockDb({
+      organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }],
+    });
+    const app = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['migrations.write'] }),
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'migration_import',
+        organizationId: 'org_1',
+        fileName: 'portable-bundle.tixkit.json',
+        contentType: 'application/vnd.tixkit.portable+json',
+        sizeBytes: 50 * 1024 * 1024,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    expect(tables.upload_artifacts[0]).toMatchObject({
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+      brand_id: null,
+      event_id: null,
+      purpose: 'migration_import',
+      content_type: 'application/vnd.tixkit.portable+json',
+    });
+    expect(tables.upload_artifacts[0]?.object_key).toContain('/migration-imports/org_1/staging/');
+    tables.upload_artifacts[0] = {
+      ...tables.upload_artifacts[0],
+      status: 'uploaded',
+      scan_status: 'clean',
+    };
+    const complete = await app.inject({
+      method: 'POST',
+      url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/complete`,
+    });
+    expect(complete.statusCode, complete.body).toBe(200);
+    const download = await app.inject({
+      method: 'GET',
+      url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/download`,
+    });
+    expect(download.statusCode, download.body).toBe(200);
+    expect(download.json()).toMatchObject({ downloadUrl: expect.stringContaining('https://') });
+    await app.close();
+  });
+
+  it('allows read-only migration operators to download but not complete scoped imports', async () => {
+    const { db } = createMockDb({
+      upload_artifacts: [
+        {
+          id: 'upl_migration_clean',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: null,
+          event_id: null,
+          purpose: 'migration_import',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'migration-imports/tnt_1/org_1/upl_migration_clean.json',
+          content_type: 'application/vnd.tixkit.portable+json',
+          file_name: 'portable-bundle.json',
+        },
+      ],
+    });
+    const app = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['migrations.read'] }),
+    );
+    const download = await app.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_migration_clean/download',
+    });
+    expect(download.statusCode, download.body).toBe(200);
+    const complete = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts/upl_migration_clean/complete',
+    });
+    expect(complete.statusCode, complete.body).toBe(403);
+    await app.close();
+    const noPermission = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: [] }));
+    const deniedComplete = await noPermission.inject({
+      method: 'POST',
+      url: '/upload-artifacts/upl_migration_clean/complete',
+    });
+    const deniedDownload = await noPermission.inject({
+      method: 'GET',
+      url: '/upload-artifacts/upl_migration_clean/download',
+    });
+    expect(deniedComplete.statusCode, deniedComplete.body).toBe(403);
+    expect(deniedDownload.statusCode, deniedDownload.body).toBe(403);
+    await noPermission.close();
+  });
+
+  it('hides migration imports outside the principal tenant and organization before storage access', async () => {
+    const artifact = (id: string, tenantId: string, organizationId: string) => ({
+      id,
+      tenant_id: tenantId,
+      organization_id: organizationId,
+      brand_id: null,
+      event_id: null,
+      purpose: 'migration_import',
+      status: 'uploaded',
+      scan_status: 'clean',
+      bucket: 'tixkit',
+      object_key: `migration-imports/${tenantId}/${organizationId}/${id}.json`,
+      content_type: 'application/vnd.tixkit.portable+json',
+      file_name: 'portable-bundle.json',
+    });
+    const { db } = createMockDb({
+      upload_artifacts: [
+        artifact('upl_migration_other_org', 'tnt_1', 'org_2'),
+        artifact('upl_migration_other_tenant', 'tnt_2', 'org_1'),
+      ],
+    });
+    const app = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['migrations.read', 'migrations.write'] }),
+    );
+    for (const artifactId of ['upl_migration_other_org', 'upl_migration_other_tenant']) {
+      const complete = await app.inject({
+        method: 'POST',
+        url: `/upload-artifacts/${artifactId}/complete`,
+      });
+      const download = await app.inject({
+        method: 'GET',
+        url: `/upload-artifacts/${artifactId}/download`,
+      });
+      expect(complete.statusCode, complete.body).toBe(404);
+      expect(download.statusCode, download.body).toBe(404);
+    }
+    expect(s3Send).not.toHaveBeenCalled();
+    expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
+  it('rejects unscoped, resource-scoped, unauthorized, and cross-purpose organization uploads', async () => {
+    const { db, tables } = createMockDb({
+      organizations: [{ id: 'org_1', tenant_id: 'tnt_1' }],
+    });
+    const authorized = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({ scopes: ['migrations.write'] }),
+    );
+    const base = {
+      purpose: 'migration_import',
+      fileName: 'portable-bundle.tixkit.json',
+      contentType: 'application/vnd.tixkit.portable+json',
+      sizeBytes: 4096,
+    };
+    const invalidCases: Array<{ payload: Record<string, unknown>; expectedStatus: number }> = [
+      { payload: base, expectedStatus: 400 },
+      { payload: { ...base, organizationId: 'org_other' }, expectedStatus: 404 },
+      { payload: { ...base, organizationId: 'org_1', brandId: 'brd_1' }, expectedStatus: 400 },
+      { payload: { ...base, organizationId: 'org_1', eventId: 'evt_1' }, expectedStatus: 400 },
+      { payload: { ...base, organizationId: 'org_1', brandId: '' }, expectedStatus: 400 },
+      { payload: { ...base, organizationId: 'org_1', eventId: '' }, expectedStatus: 400 },
+      {
+        payload: { ...base, organizationId: 'org_1', sizeBytes: 50 * 1024 * 1024 + 1 },
+        expectedStatus: 400,
+      },
+      {
+        payload: {
+          purpose: 'user_avatar',
+          organizationId: 'org_1',
+          fileName: 'avatar.png',
+          contentType: 'image/png',
+          sizeBytes: 1024,
+        },
+        expectedStatus: 400,
+      },
+    ];
+    for (const { payload, expectedStatus } of invalidCases) {
+      const response = await authorized.inject({
+        method: 'POST',
+        url: '/upload-artifacts',
+        payload,
+      });
+      expect(response.statusCode, response.body).toBe(expectedStatus);
+    }
+    await authorized.close();
+    const unauthorized = await setupUploadApp(db, uploadRoutes, makePrincipal({ scopes: [] }));
+    const denied = await unauthorized.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: { ...base, organizationId: 'org_1' },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(tables.upload_artifacts).toHaveLength(0);
+    expect(signedUrlInputs).toHaveLength(0);
+    await unauthorized.close();
+  });
+
+  it('rejects a system principal organization from another tenant before signing', async () => {
+    const { db, tables } = createMockDb({
+      organizations: [{ id: 'org_other_tenant', tenant_id: 'tnt_2' }],
+    });
+    const app = await setupUploadApp(
+      db,
+      uploadRoutes,
+      makePrincipal({
+        type: 'system',
+        scopes: ['migrations.write'],
+        organizationIds: [],
+        brandIds: [],
+        eventIds: [],
+      }),
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/upload-artifacts',
+      payload: {
+        purpose: 'migration_import',
+        organizationId: 'org_other_tenant',
+        fileName: 'portable-bundle.tixkit.json',
+        contentType: 'application/vnd.tixkit.portable+json',
+        sizeBytes: 4096,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(404);
+    expect(tables.upload_artifacts).toHaveLength(0);
+    expect(signedUrlInputs).toHaveLength(0);
+    await app.close();
+  });
+
   it('scopes event-cover uploads and returns a durable public artifact URL', async () => {
     const { db, tables } = createMockDb({
       events: [
@@ -2364,6 +2969,7 @@ describe('upload artifact routes', () => {
           content_type: 'image/png',
           file_name: 'hero.png',
           size_bytes: 12,
+          metadata: '{}',
           expires_at: new Date(Date.now() + 60_000),
         },
       ],

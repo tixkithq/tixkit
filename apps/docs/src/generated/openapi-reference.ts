@@ -7084,7 +7084,8 @@ export const apiReferenceOperations = [
             "$ref": "#/components/schemas/CreateUploadArtifact"
           },
           "example": {
-            "purpose": "checkout_answer",
+            "purpose": "migration_import",
+            "organizationId": "organization_example",
             "fileName": "fileName example",
             "contentType": "contentType example",
             "sizeBytes": 1
@@ -20396,7 +20397,12 @@ export const apiReferenceOperations = [
                 "const": "tixkit-portable"
               },
               "adapterVersion": {
-                "const": "tixkit-portable-bundle-v1"
+                "type": "string",
+                "enum": [
+                  "tixkit-portable-bundle-v2",
+                  "tixkit-portable-bundle-v1"
+                ],
+                "default": "tixkit-portable-bundle-v2"
               },
               "mode": {
                 "const": "dry-run",
@@ -20433,7 +20439,7 @@ export const apiReferenceOperations = [
           "example": {
             "organizationId": "organization_example",
             "sourceSystem": "tixkit-portable",
-            "adapterVersion": "tixkit-portable-bundle-v1",
+            "adapterVersion": "tixkit-portable-bundle-v2",
             "configuration": {
               "sourceMode": "official-export",
               "sourceSystem": "tixkit-portable",
@@ -24407,7 +24413,305 @@ export const apiReferenceSchemas = [
     "type": "oneOf",
     "description": "Secret-free, source-discriminated migration locator.",
     "required": [],
-    "properties": []
+    "properties": [],
+    "variants": [
+      {
+        "name": "sourceMode = official-export",
+        "type": "object",
+        "required": [
+          "sourceMode",
+          "sourceSystem",
+          "artifactIds"
+        ],
+        "properties": [
+          {
+            "name": "sourceMode",
+            "type": "string",
+            "const": "official-export",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "sourceSystem",
+            "type": "string",
+            "const": null,
+            "enum": [
+              "generic-csv",
+              "pretix",
+              "hi-events",
+              "eventbrite",
+              "ticket-tailor"
+            ],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "artifactIds",
+            "type": "array",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "sourceMode = official-api",
+        "type": "object",
+        "required": [
+          "sourceMode",
+          "sourceSystem",
+          "organizerSlug",
+          "eventSlugs"
+        ],
+        "properties": [
+          {
+            "name": "sourceMode",
+            "type": "string",
+            "const": "official-api",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "sourceSystem",
+            "type": "string",
+            "const": "pretix",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "organizerSlug",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 200,
+            "description": ""
+          },
+          {
+            "name": "eventSlugs",
+            "type": "array",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "baseUrl",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "sourceMode = official-api",
+        "type": "object",
+        "required": [
+          "sourceMode",
+          "sourceSystem",
+          "accountId",
+          "eventIds"
+        ],
+        "properties": [
+          {
+            "name": "sourceMode",
+            "type": "string",
+            "const": "official-api",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "sourceSystem",
+            "type": "string",
+            "const": "hi-events",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "accountId",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 200,
+            "description": ""
+          },
+          {
+            "name": "eventIds",
+            "type": "array",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "baseUrl",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "sourceMode = official-api",
+        "type": "object",
+        "required": [
+          "sourceMode",
+          "sourceSystem",
+          "organizationId",
+          "eventIds"
+        ],
+        "properties": [
+          {
+            "name": "sourceMode",
+            "type": "string",
+            "const": "official-api",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "sourceSystem",
+            "type": "string",
+            "const": "eventbrite",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "organizationId",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 200,
+            "description": ""
+          },
+          {
+            "name": "eventIds",
+            "type": "array",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "sourceMode = official-api",
+        "type": "object",
+        "required": [
+          "sourceMode",
+          "sourceSystem",
+          "accountId",
+          "eventIds"
+        ],
+        "properties": [
+          {
+            "name": "sourceMode",
+            "type": "string",
+            "const": "official-api",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "sourceSystem",
+            "type": "string",
+            "const": "ticket-tailor",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "accountId",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 200,
+            "description": ""
+          },
+          {
+            "name": "eventIds",
+            "type": "array",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      }
+    ]
   },
   {
     "name": "MigrationJob",
@@ -25597,7 +25901,189 @@ export const apiReferenceSchemas = [
     "type": "oneOf",
     "description": "",
     "required": [],
-    "properties": []
+    "properties": [],
+    "variants": [
+      {
+        "name": "type = text",
+        "type": "object",
+        "required": [
+          "type",
+          "value"
+        ],
+        "properties": [
+          {
+            "name": "type",
+            "type": "string",
+            "const": "text",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "value",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "type = select",
+        "type": "object",
+        "required": [
+          "type",
+          "values"
+        ],
+        "properties": [
+          {
+            "name": "type",
+            "type": "string",
+            "const": "select",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "values",
+            "type": "array",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "type = boolean",
+        "type": "object",
+        "required": [
+          "type",
+          "value"
+        ],
+        "properties": [
+          {
+            "name": "type",
+            "type": "string",
+            "const": "boolean",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "value",
+            "type": "boolean",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "type = date_range",
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": [
+          {
+            "name": "type",
+            "type": "string",
+            "const": "date_range",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "from",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "to",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "type = number_range",
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": [
+          {
+            "name": "type",
+            "type": "string",
+            "const": "number_range",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "min",
+            "type": "number",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "max",
+            "type": "number",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      }
+    ]
   },
   {
     "name": "AdminTableFacetRow",
@@ -26149,7 +26635,21 @@ export const apiReferenceSchemas = [
     "type": "oneOf",
     "description": "",
     "required": [],
-    "properties": []
+    "properties": [],
+    "variants": [
+      {
+        "name": "Variant 1",
+        "type": "object",
+        "required": [],
+        "properties": []
+      },
+      {
+        "name": "Variant 2",
+        "type": "object",
+        "required": [],
+        "properties": []
+      }
+    ]
   },
   {
     "name": "PublicQuestionsResponse",
@@ -26287,22 +26787,189 @@ export const apiReferenceSchemas = [
   },
   {
     "name": "CreateUploadArtifact",
-    "type": "object",
+    "type": "oneOf",
     "description": "",
-    "required": [
-      "purpose",
-      "fileName",
-      "contentType",
-      "sizeBytes"
-    ],
-    "properties": [
-      "purpose",
-      "fileName",
-      "contentType",
-      "sizeBytes",
-      "brandId",
-      "eventId",
-      "metadata"
+    "required": [],
+    "properties": [],
+    "variants": [
+      {
+        "name": "purpose = migration_import",
+        "type": "object",
+        "required": [
+          "purpose",
+          "organizationId",
+          "fileName",
+          "contentType",
+          "sizeBytes"
+        ],
+        "properties": [
+          {
+            "name": "purpose",
+            "type": "string",
+            "const": "migration_import",
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "organizationId",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "fileName",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 255,
+            "description": ""
+          },
+          {
+            "name": "contentType",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 255,
+            "description": ""
+          },
+          {
+            "name": "sizeBytes",
+            "type": "integer",
+            "const": null,
+            "enum": [],
+            "minimum": 1,
+            "maximum": 52428800,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "metadata",
+            "type": "object",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "Variant 2",
+        "type": "object",
+        "required": [
+          "purpose",
+          "fileName",
+          "contentType",
+          "sizeBytes"
+        ],
+        "properties": [
+          {
+            "name": "purpose",
+            "type": "string",
+            "const": null,
+            "enum": [
+              "checkout_answer",
+              "brand_logo",
+              "user_avatar",
+              "content_email_image",
+              "content_event_page_image",
+              "event_poster",
+              "event_cover",
+              "event_social",
+              "event_seo_image"
+            ],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "fileName",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 255,
+            "description": ""
+          },
+          {
+            "name": "contentType",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": 255,
+            "description": ""
+          },
+          {
+            "name": "sizeBytes",
+            "type": "integer",
+            "const": null,
+            "enum": [],
+            "minimum": 1,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "brandId",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "eventId",
+            "type": "string",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": 1,
+            "maxLength": null,
+            "description": ""
+          },
+          {
+            "name": "metadata",
+            "type": "object",
+            "const": null,
+            "enum": [],
+            "minimum": null,
+            "maximum": null,
+            "minLength": null,
+            "maxLength": null,
+            "description": ""
+          }
+        ]
+      }
     ]
   },
   {

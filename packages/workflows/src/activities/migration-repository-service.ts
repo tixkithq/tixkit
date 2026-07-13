@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import {
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
   assertHistoricalFinancialEntity,
+  parseMigrationPreparationConfiguration,
   portableSectionForMigrationEntity,
   type MigrationCredentialResolver,
   type MigrationEntityType,
@@ -732,6 +733,36 @@ export function createRepositoryMigrationActivityService(
               dryRunSummary.inputHash !== inputSha256
             )
               throw new Error('PORTABILITY_COMMIT_INPUT_CHANGED');
+            const rawConfiguration = job.configuration
+              ? (JSON.parse(job.configuration) as Record<string, unknown>)
+              : {};
+            const { credentialId: _credentialId, ...sourceConfiguration } = rawConfiguration;
+            let preparationConfiguration;
+            try {
+              preparationConfiguration = parseMigrationPreparationConfiguration(
+                { ...sourceConfiguration, sourceSystem: job.source_system },
+                job.source_system,
+              );
+            } catch (error) {
+              throw new Error(
+                `PORTABILITY_COMMIT_ARTIFACT_CONFIGURATION_INVALID:${JSON.stringify({
+                  sourceSystem: job.source_system,
+                  sourceConfiguration,
+                })}`,
+                { cause: error },
+              );
+            }
+            if (preparationConfiguration.sourceMode !== 'official-export') {
+              throw new Error('PORTABILITY_COMMIT_ARTIFACT_CONFIGURATION_INVALID');
+            }
+            await transactionRepository.acquireMigrationArtifactsForStateInTransaction({
+              tenantId: context.tenantId,
+              organizationId: context.organizationId,
+              jobId: context.jobId,
+              artifactIds: preparationConfiguration.artifactIds,
+              targetState: 'committing',
+              transition: false,
+            });
             await transactionRepository.beginCommit({
               tenantId: context.tenantId,
               organizationId: context.organizationId,
@@ -784,11 +815,30 @@ export function createRepositoryMigrationActivityService(
           throw new Error('MIGRATION_CREDENTIAL_UNAVAILABLE');
         }
       }
-      await repository.beginCommit({
-        tenantId: context.tenantId,
-        organizationId: context.organizationId,
-        jobId: context.jobId,
-      });
+      const { credentialId: _credentialId, ...sourceConfiguration } = configuration;
+      if (configuration.sourceMode === 'official-export') {
+        const preparationConfiguration = parseMigrationPreparationConfiguration(
+          { ...sourceConfiguration, sourceSystem: pendingJob.source_system },
+          pendingJob.source_system,
+        );
+        if (preparationConfiguration.sourceMode !== 'official-export') {
+          throw new Error('MIGRATION_ARTIFACT_CONFIGURATION_INVALID');
+        }
+        await repository.acquireMigrationArtifactsForState({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+          artifactIds: preparationConfiguration.artifactIds,
+          targetState: 'committing',
+          transition: true,
+        });
+      } else {
+        await repository.beginCommit({
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          jobId: context.jobId,
+        });
+      }
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,

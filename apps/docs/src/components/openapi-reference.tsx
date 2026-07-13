@@ -80,6 +80,40 @@ export function OpenApiSchemaReference() {
                 </ul>
               </details>
             ) : null}
+            {'variants' in schema && schema.variants.length > 0 ? (
+              <div>
+                {schema.variants.map((variant) => (
+                  <details key={variant.name}>
+                    <summary>{variant.name}</summary>
+                    <p>
+                      <strong>Type:</strong> {variant.type}
+                    </p>
+                    <ul>
+                      {variant.properties.map((property) => (
+                        <li key={property.name}>
+                          <code>{property.name}</code>
+                          {(variant.required as readonly string[]).includes(property.name)
+                            ? ' — required'
+                            : ''}
+                          {property.type ? ` — ${property.type}` : ''}
+                          {property.const !== null ? ` — exactly ${String(property.const)}` : ''}
+                          {property.enum.length > 0 ? ` — one of ${property.enum.join(', ')}` : ''}
+                          {property.minimum !== null ? ` — minimum ${property.minimum}` : ''}
+                          {property.maximum !== null ? ` — maximum ${property.maximum}` : ''}
+                          {property.minLength !== null
+                            ? ` — minimum length ${property.minLength}`
+                            : ''}
+                          {property.maxLength !== null
+                            ? ` — maximum length ${property.maxLength}`
+                            : ''}
+                          {property.description ? ` — ${property.description}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>
