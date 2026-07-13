@@ -196,25 +196,43 @@ const artifacts = [...files].map(([name, contents]) => ({
   sha256: sha256(contents),
   size: Buffer.byteLength(contents),
 }));
-const manifest = canonical({
-  releaseVersion: version,
-  apiVersion: version,
-  commit,
-  timestamp,
-  provenance: {
-    sourceCommit: headCommit,
-    headTreeHash,
-    sourceTreeHash,
-    trackedFileCount: inputCount,
-    excludedGeneratedPaths: API_PROVENANCE_EXCLUSIONS,
-    worktreeState,
-    reproducible: true,
-    publishable: worktreeState === 'clean',
-  },
-  artifacts,
-  breaking: apiDiff.breaking,
-  publication: 'approval-required',
-});
+let committedManifest: JsonObject | undefined;
+try {
+  committedManifest = JSON.parse(
+    execFileSync('git', ['show', `HEAD:artifacts/api/${version}/release-manifest.json`], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }),
+  ) as JsonObject;
+} catch (error) {
+  if ((error as { status?: number }).status !== 128) throw error;
+}
+const preserveCommittedManifest = worktreeState === 'clean' && Boolean(committedManifest);
+if (preserveCommittedManifest && canonical(committedManifest!.artifacts) !== canonical(artifacts)) {
+  throw new Error('Committed API release artifacts are not reproducible from the source tree.');
+}
+const manifest = preserveCommittedManifest
+  ? canonical(committedManifest!)
+  : canonical({
+      releaseVersion: version,
+      apiVersion: version,
+      commit,
+      timestamp,
+      provenance: {
+        sourceCommit: headCommit,
+        headTreeHash,
+        sourceTreeHash,
+        trackedFileCount: inputCount,
+        excludedGeneratedPaths: API_PROVENANCE_EXCLUSIONS,
+        worktreeState,
+        reproducible: true,
+        publishable: worktreeState === 'clean',
+      },
+      artifacts,
+      breaking: apiDiff.breaking,
+      publication: 'approval-required',
+    });
 await writeFile(join(output, 'release-manifest.json'), manifest);
 const checksumLines = [...artifacts, { name: 'release-manifest.json', sha256: sha256(manifest) }]
   .map((artifact) => `${artifact.sha256}  ${artifact.name}`)
