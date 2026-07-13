@@ -1,11 +1,11 @@
 {
   "releaseVersion": "2026-07-13",
   "apiVersion": "2026-07-13",
-  "commit": null,
-  "timestamp": null,
+  "commit": "89ff78e92f4b8494ad8ea147d6eed04f4825feb8",
+  "timestamp": "2026-07-12T21:41:55-05:00",
   "provenance": {
-    "sourceCommit": "0d0b4a0d766953db5043b4a0c95b28063b137cf1",
-    "headTreeHash": "82e821c20ddfd97d1f4ea240f1c81958bfb43048",
+    "sourceCommit": "89ff78e92f4b8494ad8ea147d6eed04f4825feb8",
+    "headTreeHash": "50a3bc9d376a785ec5c0589442f208ad9b9f3b3e",
     "sourceTreeHash": "40d22b77362df8fb717d3c32d392a02a3ddcf8f269ca8058a29ce341f455f73b",
     "trackedFileCount": 1823,
     "excludedGeneratedPaths": [
@@ -15,9 +15,9 @@
       "artifacts/api/",
       "graphify-out/"
     ],
-    "worktreeState": "modified",
+    "worktreeState": "clean",
     "reproducible": true,
-    "publishable": false
+    "publishable": true
   },
   "artifacts": [
     {
