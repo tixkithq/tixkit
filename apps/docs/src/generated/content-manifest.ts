@@ -527,7 +527,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosting/production": {
     sourcePath: "docs/public/self-hosting/production.mdx",
-    frontmatter: {"title":"Run the Production profile","description":"Configure, size, upgrade, and recover the high-availability Kubernetes profile.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-12","prerequisites":["A Kubernetes cluster with independent managed backing services","Release image digests and an operator-owned secret manager"],"related":["/self-hosting/deployment","/self-hosting/backups-and-restore","/self-hosting/observability","/self-hosting/upgrades"]},
+    frontmatter: {"title":"Run the Production profile","description":"Configure, size, upgrade, and recover the high-availability Kubernetes profile.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"how-to","status":"beta","owner":"platform-operations","last_verified":"2026-07-13","prerequisites":["A Kubernetes cluster with independent managed backing services","Release image digests and an operator-owned secret manager"],"related":["/self-hosting/deployment","/self-hosting/backups-and-restore","/self-hosting/observability","/self-hosting/upgrades"]},
     headings: [{"id":"compatibility-contract","text":"Compatibility contract","level":2},{"id":"initial-sizing-tiers","text":"Initial sizing tiers","level":2},{"id":"installation-controls","text":"Installation controls","level":2}],
     load: () => import("../../../../docs/public/self-hosting/production.mdx"),
   },
