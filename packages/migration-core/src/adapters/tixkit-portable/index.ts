@@ -21,7 +21,10 @@ import {
   type MigrationIssue,
   type NormalizedMigrationEntity,
 } from '../../index.js';
-const sectionToEntity = new Map<PortableSection, MigrationEntityType>([
+export const PORTABLE_SECTION_TO_MIGRATION_ENTITY: ReadonlyMap<
+  PortableSection,
+  MigrationEntityType
+> = new Map([
   ['organizations', 'organization'],
   ['brands', 'brand'],
   ['venues', 'venue'],
@@ -41,6 +44,15 @@ const sectionToEntity = new Map<PortableSection, MigrationEntityType>([
   ['tickets', 'ticket'],
   ['scans', 'check-in'],
 ]);
+
+export function portableSectionForMigrationEntity(
+  entityType: MigrationEntityType,
+): PortableSection | undefined {
+  for (const [section, candidate] of PORTABLE_SECTION_TO_MIGRATION_ENTITY) {
+    if (candidate === entityType) return section;
+  }
+  return undefined;
+}
 
 const verifiedConfiguration = Symbol('verified-portable-migration-configuration');
 
@@ -159,7 +171,7 @@ export function prepareTixkitPortableMigration(input: {
     throw new Error('portable migration entity counts do not match its exact payload files');
   }
   const unsupported = envelope.manifest.files.filter(
-    (file) => file.section !== 'assets' && !sectionToEntity.has(file.section),
+    (file) => file.section !== 'assets' && !PORTABLE_SECTION_TO_MIGRATION_ENTITY.has(file.section),
   );
   if (unsupported.length > 0) {
     throw new Error(
@@ -229,7 +241,11 @@ export function prepareTixkitPortableUpload(
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('portable migration upload must be an object');
   }
-  const upload = parsed as { envelope?: unknown; parentEnvelope?: unknown; payloads?: unknown };
+  const upload = parsed as {
+    envelope?: unknown;
+    parentEnvelope?: unknown;
+    payloads?: unknown;
+  };
   if (
     Object.keys(upload).some(
       (key) => key !== 'envelope' && key !== 'parentEnvelope' && key !== 'payloads',
@@ -315,7 +331,7 @@ function records(file: PortableBundleFile, bytes: Uint8Array): PortableMigration
             (dependency) =>
               !dependency ||
               typeof dependency !== 'object' ||
-              !sectionToEntity.has(dependency.section) ||
+              !PORTABLE_SECTION_TO_MIGRATION_ENTITY.has(dependency.section) ||
               typeof dependency.portableId !== 'string' ||
               !dependency.portableId.trim(),
           )))
@@ -343,15 +359,21 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
     const entityCounts = new Map<MigrationEntityType, number>();
     for (const file of manifest.files) {
       if (file.section === 'assets') continue;
-      const entityType = sectionToEntity.get(file.section);
+      const entityType = PORTABLE_SECTION_TO_MIGRATION_ENTITY.get(file.section);
       if (entityType)
         entityCounts.set(entityType, (entityCounts.get(entityType) ?? 0) + file.records);
     }
-    const entities = [...entityCounts].map(([type, estimatedRows]) => ({ type, estimatedRows }));
+    const entities = [...entityCounts].map(([type, estimatedRows]) => ({
+      type,
+      estimatedRows,
+    }));
     const unsupportedFeatures = [
       ...new Set(
         manifest.files
-          .filter((file) => file.section !== 'assets' && !sectionToEntity.has(file.section))
+          .filter(
+            (file) =>
+              file.section !== 'assets' && !PORTABLE_SECTION_TO_MIGRATION_ENTITY.has(file.section),
+          )
           .map((file) => `portable-section:${file.section}`),
       ),
     ];
@@ -383,7 +405,7 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
     const seen = new Set<string>();
     for (const file of manifest.files) {
       if (file.section === 'assets') continue;
-      const entityType = sectionToEntity.get(file.section);
+      const entityType = PORTABLE_SECTION_TO_MIGRATION_ENTITY.get(file.section);
       if (!entityType) continue;
       const bytes = payloads.get(file.path);
       if (!bytes) throw new Error(`portable payload is missing: ${file.path}`);
@@ -480,7 +502,10 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
         throw new Error('portable historical ticket code digest is invalid');
       }
       const { codeSha256: _codeSha256, ...ticketAttributes } = record.attributes;
-      attributes = { ...ticketAttributes, code: `historical_${codeSha256.slice(0, 39)}` };
+      attributes = {
+        ...ticketAttributes,
+        code: `historical_${codeSha256.slice(0, 39)}`,
+      };
     }
     if (
       record.financialSnapshot &&
@@ -497,7 +522,7 @@ export class TixkitPortableMigrationAdapter implements MigrationAdapter<
       ...(record.dependencies
         ? {
             dependencies: record.dependencies.flatMap((dependency) => {
-              const entityType = sectionToEntity.get(dependency.section);
+              const entityType = PORTABLE_SECTION_TO_MIGRATION_ENTITY.get(dependency.section);
               return entityType ? [{ entityType, externalId: dependency.portableId }] : [];
             }),
           }

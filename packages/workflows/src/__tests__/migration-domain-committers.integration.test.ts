@@ -21,6 +21,7 @@ import {
   migrationAdapter,
   prepareTixkitPortableUpload,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
+  portableSectionForMigrationEntity,
   sortEntitiesByDependency,
   TixkitPortableMigrationAdapter,
   type MigrationAdapter,
@@ -42,7 +43,10 @@ import {
   type MigrationMediaObjectStore,
   type MigrationPortableAssetResolver,
 } from '../activities/migration-domain-committers.js';
-import { createRepositoryMigrationActivityService } from '../activities/migration-repository-service.js';
+import {
+  createRepositoryMigrationActivityService,
+  portableReconciliationReport,
+} from '../activities/migration-repository-service.js';
 import { createMigrationPreparationService } from '../activities/migration-preparation.js';
 import {
   loadPortableConfigurationSections,
@@ -274,6 +278,16 @@ describeDatabase('production migration committers', () => {
           bytes: Uint8Array.from(input.bytes),
         });
       },
+      async verify(input) {
+        const stored = writes.find(({ objectKey }) => objectKey === input.objectKey);
+        if (
+          !stored ||
+          stored.bytes.byteLength !== input.bytes ||
+          stored.sha256 !== input.sha256 ||
+          createHash('sha256').update(stored.bytes).digest('hex') !== input.sha256
+        )
+          throw new Error('test media object verification failed');
+      },
       async delete(objectKey) {
         deletedKeys.push(objectKey);
       },
@@ -315,14 +329,39 @@ describeDatabase('production migration committers', () => {
         ],
       },
     });
+    const initialEntity = portableEvent({
+      bytes: mediaBytes,
+      sha256,
+      altText: 'Imported purple cover',
+    });
     const outcome = await committer.commit({
       tenantId,
       organizationId,
       jobId: job.id,
-      entity: portableEvent({ bytes: mediaBytes, sha256, altText: 'Imported purple cover' }),
+      entity: initialEntity,
       sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
     });
     expect(outcome.disposition).toBe('created');
+    await repository.recordExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      entityType: 'event',
+      externalId: initialEntity.externalId,
+      tixkitId: outcome.tixkitId!,
+      importJobId: job.id,
+      createdByJob: true,
+    });
+    await expect(
+      committer.assessReconciled({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        tixkitId: outcome.tixkitId!,
+        externalId: initialEntity.externalId,
+        entity: initialEntity,
+      }),
+    ).resolves.toEqual({ reconciled: true });
     expect(writes).toEqual([
       expect.objectContaining({ sha256, bytes: Uint8Array.from(mediaBytes) }),
     ]);
@@ -374,6 +413,58 @@ describeDatabase('production migration committers', () => {
       sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
     });
     expect(updated.disposition).toBe('updated');
+    const updatedEntity = portableEvent({
+      bytes: replacementBytes,
+      sha256: replacementSha256,
+      altText: 'Updated portable cover',
+    });
+    const reconciliationInput = {
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      tixkitId: updated.tixkitId!,
+      externalId: updatedEntity.externalId,
+      entity: updatedEntity,
+    };
+    await expect(committer.assessReconciled(reconciliationInput)).resolves.toEqual({
+      reconciled: true,
+    });
+    const replacementWrite = writes.find(
+      ({ sha256: candidate }) => candidate === replacementSha256,
+    )!;
+    const originalByte = replacementWrite.bytes[0]!;
+    replacementWrite.bytes[0] = originalByte ^ 0xff;
+    await expect(committer.assessReconciled(reconciliationInput)).resolves.toMatchObject({
+      reconciled: false,
+      reason: 'test media object verification failed',
+    });
+    replacementWrite.bytes[0] = originalByte;
+    const rendition = await db
+      .selectFrom('event_media_renditions')
+      .selectAll()
+      .where('checksum_sha256', '=', replacementSha256)
+      .executeTakeFirstOrThrow();
+    await db.deleteFrom('event_media_renditions').where('id', '=', rendition.id).execute();
+    await expect(committer.assessReconciled(reconciliationInput)).resolves.toMatchObject({
+      reconciled: false,
+      reason: 'Canonical entity differs from the committed import evidence',
+    });
+    await db.insertInto('event_media_renditions').values(rendition).execute();
+    await expect(committer.assessReconciled(reconciliationInput)).resolves.toEqual({
+      reconciled: true,
+    });
+    await expect(
+      committer.commit({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        entity: updatedEntity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toMatchObject({ disposition: 'skipped', tixkitId: updated.tixkitId });
+    await expect(committer.assessReconciled(reconciliationInput)).resolves.toEqual({
+      reconciled: true,
+    });
     await expect(
       processMigrationMediaCleanupJobs(db, mediaStore, new Date(Date.now() + 1_000)),
     ).resolves.toEqual({
@@ -462,6 +553,7 @@ describeDatabase('production migration committers', () => {
     const store: MigrationMediaObjectStore = {
       bucket: 'destination-media',
       async putVerified() {},
+      async verify() {},
       async delete(objectKey) {
         if (failDelete) throw new Error('simulated cleanup outage');
         deleted.push(objectKey);
@@ -595,6 +687,57 @@ describeDatabase('production migration committers', () => {
   it('imports the canonical dependency chain idempotently without commerce side effects', async () => {
     const firstJob = await importChain('chain:first');
     const imports = new ImportRepository(db);
+    const firstRows = await imports.listRows({
+      tenantId,
+      organizationId,
+      jobId: firstJob.id,
+      limit: 100,
+    });
+    const expectedCounts = Object.fromEntries(
+      MIGRATION_ENTITY_DEPENDENCY_ORDER.map((entityType) => [
+        portableSectionForMigrationEntity(entityType)!,
+        1,
+      ]),
+    );
+    const reconciliationRepository = {
+      findPortablePreflight: vi.fn(async () => ({
+        expected_counts: JSON.stringify(expectedCounts),
+        expected_assets: '[]',
+        manifest_json: JSON.stringify({ lineage: { kind: 'full' } }),
+        required_rebindings: '[]',
+      })),
+      listPortableImportRebindings: vi.fn(async () => []),
+    } as unknown as ImportRepository;
+    const reportInput = {
+      db,
+      repository: reconciliationRepository,
+      context: { tenantId, organizationId, jobId: firstJob.id },
+      rows: firstRows,
+      unresolvedRows: [],
+      committers: createProductionMigrationCommitters(db),
+    };
+    await expect(portableReconciliationReport(reportInput)).resolves.toMatchObject({ ready: true });
+    const paymentSnapshot = await db
+      .selectFrom('historical_financial_snapshots')
+      .select(['id', 'amount_minor'])
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('kind', '=', 'historical-payment')
+      .executeTakeFirstOrThrow();
+    await db
+      .updateTable('historical_financial_snapshots')
+      .set({ amount_minor: String(BigInt(paymentSnapshot.amount_minor) + 1n) })
+      .where('id', '=', paymentSnapshot.id)
+      .execute();
+    const financialMismatch = await portableReconciliationReport(reportInput);
+    expect(financialMismatch.ready).toBe(false);
+    expect(financialMismatch.financialMismatches).toHaveLength(1);
+    await db
+      .updateTable('historical_financial_snapshots')
+      .set({ amount_minor: paymentSnapshot.amount_minor })
+      .where('id', '=', paymentSnapshot.id)
+      .execute();
+    await expect(portableReconciliationReport(reportInput)).resolves.toMatchObject({ ready: true });
     const eventReference = await imports.findExternalReference({
       tenantId,
       organizationId,

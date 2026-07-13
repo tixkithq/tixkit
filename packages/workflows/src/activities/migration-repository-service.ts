@@ -3,13 +3,17 @@ import {
   canonicalPortableJson,
   portableImportControlInputSha256,
   portableRebindingProvenanceSha256,
+  reconcilePortableImport,
   type PortableBundleManifest,
   type PortableCutoverProof,
+  type PortableSection,
+  type PortabilityFinancialTotals,
 } from '@tixkit/portability';
 import { createHash } from 'node:crypto';
 import {
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
   assertHistoricalFinancialEntity,
+  portableSectionForMigrationEntity,
   type MigrationCredentialResolver,
   type MigrationEntityType,
   type NormalizedMigrationEntity,
@@ -30,6 +34,14 @@ export type MigrationCommitOutcome = {
 };
 
 export interface MigrationDomainCommitter {
+  assessReconciled(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    tixkitId: string;
+    externalId: string;
+    entity: NormalizedMigrationEntity;
+  }): Promise<{ reconciled: boolean; reason?: string }>;
   assessUntouched(input: {
     tenantId: string;
     organizationId: string;
@@ -87,6 +99,264 @@ function parseEntity(serialized: string | null): NormalizedMigrationEntity {
 
 function summary(progress: MigrationWorkflowProgress): MigrationWorkflowProgress {
   return { ...progress };
+}
+
+type ImportRow = Awaited<ReturnType<ImportRepository['listRows']>>[number];
+
+function parsePortableEvidence<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    throw new Error(`PORTABLE_IMPORT_RECONCILIATION_${label}_INVALID`, {
+      cause: error,
+    });
+  }
+}
+
+function financialTotals(
+  values: Array<{
+    kind: string;
+    amountMinor: string | number | bigint;
+    currency: string;
+  }>,
+): PortabilityFinancialTotals[] {
+  const totals = new Map<string, { gross: bigint; refunded: bigint }>();
+  for (const value of values) {
+    const currency = value.currency.toUpperCase();
+    if (!/^[A-Z]{3}$/u.test(currency))
+      throw new Error('PORTABLE_IMPORT_RECONCILIATION_FINANCIAL_CURRENCY_INVALID');
+    let amount: bigint;
+    try {
+      amount = BigInt(value.amountMinor);
+    } catch (error) {
+      throw new Error('PORTABLE_IMPORT_RECONCILIATION_FINANCIAL_AMOUNT_INVALID', {
+        cause: error,
+      });
+    }
+    if (amount < 0n) throw new Error('PORTABLE_IMPORT_RECONCILIATION_FINANCIAL_AMOUNT_INVALID');
+    const total = totals.get(currency) ?? { gross: 0n, refunded: 0n };
+    if (value.kind === 'historical-payment') total.gross += amount;
+    else if (value.kind === 'historical-refund') total.refunded += amount;
+    else throw new Error('PORTABLE_IMPORT_RECONCILIATION_FINANCIAL_KIND_INVALID');
+    totals.set(currency, total);
+  }
+  return [...totals]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, total]) => ({
+      currency,
+      grossMinor: String(total.gross),
+      refundedMinor: String(total.refunded),
+      netMinor: String(total.gross - total.refunded),
+    }));
+}
+
+export async function portableReconciliationReport(input: {
+  db: Database;
+  repository: ImportRepository;
+  context: Pick<MigrationActivityContext, 'tenantId' | 'organizationId' | 'jobId'>;
+  rows: ImportRow[];
+  unresolvedRows: ImportRow[];
+  committers: MigrationCommitterRegistry;
+}) {
+  const preflight = await input.repository.findPortablePreflight(
+    input.context.tenantId,
+    input.context.organizationId,
+    input.context.jobId,
+  );
+  if (!preflight) throw new Error('PORTABLE_IMPORT_RECONCILIATION_PREFLIGHT_REQUIRED');
+  const expectedCounts = parsePortableEvidence<Partial<Record<PortableSection, number>>>(
+    preflight.expected_counts,
+    'COUNTS',
+  );
+  const expectedAssets = parsePortableEvidence<Array<{ portableId: string; sha256: string }>>(
+    preflight.expected_assets,
+    'ASSETS',
+  );
+  const manifest = parsePortableEvidence<PortableBundleManifest>(
+    preflight.manifest_json,
+    'MANIFEST',
+  );
+  const expectedAssetIds = new Set(expectedAssets.map(({ portableId }) => portableId));
+  const successfulRows = input.rows.filter((row) =>
+    ['created', 'updated', 'skipped'].includes(row.status),
+  );
+  const actualCounts: Partial<Record<PortableSection, number>> = {};
+  const canonicalIdentities = new Set<string>();
+  const assessmentCandidates: Array<{
+    row: ImportRow & { external_id: string; tixkit_id: string };
+    entityType: MigrationEntityType;
+    entity: NormalizedMigrationEntity;
+  }> = [];
+  const unresolvedDependencies = input.unresolvedRows.map((row) => ({
+    portableId: row.external_id ?? row.id,
+    reason: `Import row ended in ${row.status}`,
+  }));
+  for (const row of successfulRows) {
+    const entityType = row.entity_type as MigrationEntityType;
+    const section = portableSectionForMigrationEntity(entityType);
+    const entity = row.normalized_data
+      ? parsePortableEvidence<NormalizedMigrationEntity>(row.normalized_data, 'ROW')
+      : undefined;
+    if (!section || !row.tixkit_id || !row.external_id || !entity) {
+      unresolvedDependencies.push({
+        portableId: row.external_id ?? row.id,
+        reason: !section
+          ? `Unsupported entity type ${row.entity_type}`
+          : !row.tixkit_id
+            ? 'Canonical ID is missing'
+            : !row.external_id
+              ? 'Source identity is missing'
+              : 'Normalized entity is missing',
+      });
+      continue;
+    }
+    const canonicalIdentity = `${section}:${row.tixkit_id}`;
+    if (canonicalIdentities.has(canonicalIdentity)) {
+      unresolvedDependencies.push({
+        portableId: row.external_id,
+        reason: `Multiple source rows map to ${canonicalIdentity}`,
+      });
+      continue;
+    }
+    canonicalIdentities.add(canonicalIdentity);
+    actualCounts[section] = (actualCounts[section] ?? 0) + 1;
+    assessmentCandidates.push({
+      row: row as ImportRow & { external_id: string; tixkit_id: string },
+      entityType,
+      entity,
+    });
+  }
+  for (let offset = 0; offset < assessmentCandidates.length; offset += 16) {
+    const assessments = await Promise.all(
+      assessmentCandidates.slice(offset, offset + 16).map(async ({ row, entityType, entity }) => {
+        const committer = input.committers.get(entityType);
+        const assessment = committer
+          ? await committer.assessReconciled({
+              tenantId: input.context.tenantId,
+              organizationId: input.context.organizationId,
+              jobId: input.context.jobId,
+              tixkitId: row.tixkit_id,
+              externalId: row.external_id,
+              entity,
+            })
+          : { reconciled: false, reason: `Missing committer for ${entityType}` };
+        return { row, assessment };
+      }),
+    );
+    for (const { row, assessment } of assessments) {
+      if (!assessment.reconciled)
+        unresolvedDependencies.push({
+          portableId: row.external_id,
+          reason: assessment.reason ?? 'Canonical entity failed reconciliation',
+        });
+    }
+  }
+
+  const eventIds = successfulRows
+    .filter((row) => row.entity_type === 'event' && row.tixkit_id)
+    .map((row) => row.tixkit_id!);
+  const actualAssets: Array<{ portableId: string; sha256: string }> = [];
+  for (let offset = 0; offset < eventIds.length; offset += 500) {
+    const assets = await input.db
+      .selectFrom('event_media_assets as asset')
+      .innerJoin('upload_artifacts as upload', 'upload.id', 'asset.upload_artifact_id')
+      .select(['asset.id', 'asset.checksum_sha256', 'upload.metadata'])
+      .where('asset.tenant_id', '=', input.context.tenantId)
+      .where('asset.organization_id', '=', input.context.organizationId)
+      .where('asset.event_id', 'in', eventIds.slice(offset, offset + 500))
+      .execute();
+    for (const asset of assets) {
+      const metadata = parsePortableEvidence<{ portableId?: unknown }>(asset.metadata, 'ASSET');
+      const portableId =
+        typeof metadata.portableId === 'string' && metadata.portableId.trim()
+          ? metadata.portableId
+          : `destination:${asset.id}`;
+      if (manifest.lineage.kind === 'full' || expectedAssetIds.has(portableId))
+        actualAssets.push({ portableId, sha256: asset.checksum_sha256 });
+    }
+  }
+
+  const expectedFinancial = successfulRows.flatMap((row) => {
+    const entity = row.normalized_data
+      ? parsePortableEvidence<NormalizedMigrationEntity>(row.normalized_data, 'ROW')
+      : undefined;
+    return entity?.financialSnapshot
+      ? [
+          {
+            kind: entity.financialSnapshot.kind,
+            amountMinor: entity.financialSnapshot.amountMinor,
+            currency: entity.financialSnapshot.currency,
+          },
+        ]
+      : [];
+  });
+  const financialIds = successfulRows
+    .filter(
+      (row) =>
+        ['historical-payment', 'historical-refund'].includes(row.entity_type) && row.tixkit_id,
+    )
+    .map((row) => row.tixkit_id!);
+  const actualFinancial: Array<{
+    kind: string;
+    amountMinor: string | number | bigint;
+    currency: string;
+  }> = [];
+  for (let offset = 0; offset < financialIds.length; offset += 500) {
+    const snapshots = await input.db
+      .selectFrom('historical_financial_snapshots')
+      .select(['kind', 'amount_minor', 'currency'])
+      .where('tenant_id', '=', input.context.tenantId)
+      .where('organization_id', '=', input.context.organizationId)
+      .where('id', 'in', financialIds.slice(offset, offset + 500))
+      .execute();
+    actualFinancial.push(
+      ...snapshots.map((snapshot) => ({
+        kind: snapshot.kind,
+        amountMinor: snapshot.amount_minor,
+        currency: snapshot.currency,
+      })),
+    );
+  }
+
+  const required = parsePortableEvidence<
+    Array<{ portableId?: unknown; kind?: unknown; required?: unknown }>
+  >(preflight.required_rebindings, 'REBINDINGS').filter(
+    (candidate): candidate is { portableId: string; kind: string; required: true } =>
+      candidate.required === true &&
+      typeof candidate.portableId === 'string' &&
+      candidate.portableId.length > 0 &&
+      typeof candidate.kind === 'string' &&
+      candidate.kind.length > 0,
+  );
+  const completed = await input.repository.listPortableImportRebindings(
+    input.context.tenantId,
+    input.context.organizationId,
+    input.context.jobId,
+  );
+  const completedIds = new Set<string>();
+  for (const item of completed) {
+    if (
+      await input.repository.findPortableDestinationResource({
+        tenantId: input.context.tenantId,
+        organizationId: input.context.organizationId,
+        kind: item.kind,
+        resourceId: item.destination_reference,
+      })
+    )
+      completedIds.add(item.portable_id);
+  }
+  return reconcilePortableImport({
+    expectedCounts,
+    actualCounts,
+    expectedAssets,
+    actualAssets,
+    expectedFinancialTotals: financialTotals(expectedFinancial),
+    actualFinancialTotals: financialTotals(actualFinancial),
+    unresolvedDependencies,
+    requiredRebindingsRemaining: required
+      .filter(({ portableId }) => !completedIds.has(portableId))
+      .map(({ portableId }) => portableId),
+  });
 }
 
 async function listAllCreatedRows(repository: ImportRepository, context: MigrationActivityContext) {
@@ -292,7 +562,10 @@ export function createRepositoryMigrationActivityService(
               })),
             });
             const dryRunSummary = job.summary
-              ? (JSON.parse(job.summary) as { accepted?: boolean; inputHash?: string })
+              ? (JSON.parse(job.summary) as {
+                  accepted?: boolean;
+                  inputHash?: string;
+                })
               : null;
             if (
               inputSha256 !== authorization.input_sha256 ||
@@ -566,22 +839,80 @@ export function createRepositoryMigrationActivityService(
         claimedStatus,
         returnToStatus: 'validated',
       });
+      const job = await repository.findJob(context.tenantId, context.organizationId, context.jobId);
+      if (!job) throw new Error('MIGRATION_JOB_NOT_FOUND');
+      let portableReport: Awaited<ReturnType<typeof portableReconciliationReport>> | undefined;
+      if (job.source_system === 'tixkit-portable') {
+        const allRows: ImportRow[] = [];
+        for (let offset = 0; ; offset += 5_000) {
+          const page = await repository.listRows({
+            tenantId: context.tenantId,
+            organizationId: context.organizationId,
+            jobId: context.jobId,
+            limit: 5_000,
+            offset,
+          });
+          allRows.push(...page);
+          if (page.length < 5_000) break;
+        }
+        portableReport = await portableReconciliationReport({
+          db,
+          repository,
+          context,
+          rows: allRows,
+          unresolvedRows: rows,
+          committers,
+        });
+      }
+      const portableUnresolved = portableReport
+        ? portableReport.countMismatches.length +
+          portableReport.assetMismatches.length +
+          portableReport.financialMismatches.length +
+          portableReport.unresolvedDependencies.length +
+          portableReport.requiredRebindingsRemaining.length
+        : 0;
+      const unresolved = Math.max(rows.length, portableUnresolved);
+      const reportSha256 = portableReport
+        ? createHash('sha256').update(canonicalPortableJson(portableReport)).digest('hex')
+        : undefined;
       await repository.appendIdempotentEvent({
         tenantId: context.tenantId,
         organizationId: context.organizationId,
         jobId: context.jobId,
-        eventKey: `commit:reconcile:${repaired}:${rows.length}`,
+        eventKey: `commit:reconcile:${repaired}:${unresolved}${reportSha256 ? `:${reportSha256}` : ''}`,
         type: 'commit.reconciled',
-        severity: rows.length > 0 ? 'error' : 'info',
+        severity: unresolved > 0 ? 'error' : 'info',
         message:
-          rows.length > 0
-            ? `Migration reconciliation found ${rows.length} unresolved rows.`
-            : 'Migration reconciliation completed with no unresolved rows.',
-        data: { repaired, unresolved: rows.length },
+          unresolved > 0
+            ? `Migration reconciliation found ${unresolved} unresolved items.`
+            : 'Migration reconciliation completed with no unresolved items.',
+        data: portableReport
+          ? {
+              evidenceVersion: 'tixkit-portable-reconciliation-v1',
+              repaired,
+              unresolved,
+              ready: portableReport.ready,
+              reportSha256,
+              mismatchCounts: {
+                counts: portableReport.countMismatches.length,
+                assets: portableReport.assetMismatches.length,
+                financial: portableReport.financialMismatches.length,
+                dependencies: portableReport.unresolvedDependencies.length,
+                rebindings: portableReport.requiredRebindingsRemaining.length,
+              },
+              samples: {
+                counts: portableReport.countMismatches.slice(0, 25),
+                assets: portableReport.assetMismatches.slice(0, 25),
+                financial: portableReport.financialMismatches.slice(0, 25),
+                dependencies: portableReport.unresolvedDependencies.slice(0, 25),
+                rebindings: portableReport.requiredRebindingsRemaining.slice(0, 25),
+              },
+            }
+          : { repaired, unresolved },
       });
       return {
         repaired,
-        unresolved: rows.length,
+        unresolved,
       };
     },
 

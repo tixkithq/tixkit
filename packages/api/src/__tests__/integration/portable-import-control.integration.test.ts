@@ -66,7 +66,11 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     await runMigrations(url);
     db = createDb(url);
     await truncateAllData(db);
-    tenantId = (await new TenantRepository(db).create({ name: `Portable control ${driver}` })).id;
+    tenantId = (
+      await new TenantRepository(db).create({
+        name: `Portable control ${driver}`,
+      })
+    ).id;
     organizationId = (
       await new OrganizationRepository(db).create({
         tenantId,
@@ -109,8 +113,16 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         requiredEntitlements: [],
       },
       rebindings: [
-        { kind: 'provider_account', portableId: 'provider_stripe', required: true },
-        { kind: 'email_delivery_route', portableId: 'email_route_optional', required: false },
+        {
+          kind: 'provider_account',
+          portableId: 'provider_stripe',
+          required: true,
+        },
+        {
+          kind: 'email_delivery_route',
+          portableId: 'email_route_optional',
+          required: false,
+        },
       ],
       sections: new Map([
         [
@@ -134,8 +146,14 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
           ],
         ],
       ]),
-      bundleSigning: { keyId: 'bundle_key_01', privateKey: bundleKeys.privateKey },
-      payloadSigning: { keyId: 'payload_key_01', privateKey: payloadKeys.privateKey },
+      bundleSigning: {
+        keyId: 'bundle_key_01',
+        privateKey: bundleKeys.privateKey,
+      },
+      payloadSigning: {
+        keyId: 'payload_key_01',
+        privateKey: payloadKeys.privateKey,
+      },
       payloadPolicies: policies,
     });
     const policy = policies.get('organizations')!;
@@ -177,7 +195,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       mode: 'dry-run',
       idempotencyKey: 'portable-control-receipt',
       requestedBy: 'user_control',
-      configuration: { sourceMode: 'official-export', artifactIds: ['upl_control_01'] },
+      configuration: {
+        sourceMode: 'official-export',
+        artifactIds: ['upl_control_01'],
+      },
     });
     await repository.addFile({
       tenantId,
@@ -243,7 +264,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     };
     const concurrent = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
-        attestPortableDryRun({ ...request, createdBy: `user_control_${index}` }),
+        attestPortableDryRun({
+          ...request,
+          createdBy: `user_control_${index}`,
+        }),
       ),
     );
     const first = concurrent[0]!;
@@ -806,7 +830,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         })
       ).statusCode,
     ).toBe(404);
-    activePrincipal = { ...activePrincipal, organizationIds: [organizationId] };
+    activePrincipal = {
+      ...activePrincipal,
+      organizationIds: [organizationId],
+    };
     activePrincipal = { ...activePrincipal, scopes: ['migrations.read'] };
     const rebindingStatus = await app.inject({
       method: 'GET',
@@ -911,7 +938,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     };
     await proveWorkerCutoverGate();
     await proveWorkerCutoverGate(
-      canonicalPortableJson({ ...cutoverProof, destinationId: 'deployment_wrong_destination' }),
+      canonicalPortableJson({
+        ...cutoverProof,
+        destinationId: 'deployment_wrong_destination',
+      }),
     );
     await expect(
       authorizePortableImportCommit({
@@ -948,7 +978,9 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         await app.inject({
           method: 'POST',
           url: `/migration-jobs/${job.id}/commit`,
-          headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+          headers: {
+            'x-tixkit-confirmation': approvedBody.commitConfirmation,
+          },
           payload: { cutoverProof },
         })
       ).statusCode,
@@ -975,7 +1007,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       url: `/migration-jobs/${job.id}/commit`,
       headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
       payload: {
-        cutoverProof: { ...cutoverProof, destinationId: 'deployment_wrong_destination' },
+        cutoverProof: {
+          ...cutoverProof,
+          destinationId: 'deployment_wrong_destination',
+        },
       },
     });
     expect(invalidCutover.statusCode, invalidCutover.body).toBe(409);
@@ -984,14 +1019,19 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         app.inject({
           method: 'POST',
           url: `/migration-jobs/${job.id}/commit`,
-          headers: { 'x-tixkit-confirmation': approvedBody.commitConfirmation },
+          headers: {
+            'x-tixkit-confirmation': approvedBody.commitConfirmation,
+          },
           payload: { cutoverProof },
         }),
       ),
     );
     for (const validCommit of authorizedCommits) {
       expect(validCommit.statusCode, validCommit.body).toBe(202);
-      expect(validCommit.json()).toMatchObject({ jobId: job.id, status: 'committing' });
+      expect(validCommit.json()).toMatchObject({
+        jobId: job.id,
+        status: 'committing',
+      });
     }
     expect(startedCommits).toEqual([job.id, job.id]);
     const authorizationCount = await db
@@ -1013,7 +1053,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         mode: 'dry-run',
         idempotencyKey: `portable-cutover-nonce-${driver}-${suffix}`,
         requestedBy: 'user_route_approver',
-        configuration: { sourceMode: 'official-export', artifactIds: [`upl_${suffix}`] },
+        configuration: {
+          sourceMode: 'official-export',
+          artifactIds: [`upl_${suffix}`],
+        },
       });
       await repository.recordPortablePreflight({
         tenantId,
@@ -1072,7 +1115,10 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         validatedBy: 'user_route_approver',
         validatedAt: new Date(),
       }),
-    ).resolves.toMatchObject({ key_id: 'cutover_key_alias', nonce: cutoverProof.nonce });
+    ).resolves.toMatchObject({
+      key_id: 'cutover_key_alias',
+      nonce: cutoverProof.nonce,
+    });
     await expect(
       db.deleteFrom('portable_import_cutover_proofs').where('import_job_id', '=', job.id).execute(),
     ).rejects.toThrow(/immutable/u);
@@ -1095,7 +1141,9 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     );
     await db
       .updateTable('import_jobs')
-      .set({ configuration: JSON.stringify({ changedAfterAuthorization: true }) })
+      .set({
+        configuration: JSON.stringify({ changedAfterAuthorization: true }),
+      })
       .where('id', '=', job.id)
       .execute();
     await expect(
@@ -1130,6 +1178,62 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       );
       expect(result.complete).toBe(true);
     }
+    const organizationReference = await repository.findExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      entityType: 'organization',
+      externalId: 'organization_source_01',
+    });
+    expect(organizationReference).toBeDefined();
+    await db
+      .updateTable('external_references')
+      .set({ tixkit_id: 'organization_alias_collision' })
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('id', '=', organizationReference!.id)
+      .execute();
+    await expect(
+      workerService.reconcile({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toEqual({ repaired: 0, unresolved: 1 });
+    await db
+      .updateTable('external_references')
+      .set({ tixkit_id: organizationReference!.tixkit_id })
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('id', '=', organizationReference!.id)
+      .execute();
+    const committedOrganization = await db
+      .selectFrom('organizations')
+      .select('name')
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .executeTakeFirstOrThrow();
+    await db
+      .updateTable('organizations')
+      .set({ name: 'Tampered before reconciliation' })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .execute();
+    await expect(
+      workerService.reconcile({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toEqual({ repaired: 0, unresolved: 1 });
+    await db
+      .updateTable('organizations')
+      .set({ name: committedOrganization.name })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .execute();
     await expect(
       workerService.reconcile({
         tenantId,
@@ -1155,14 +1259,55 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         })
       ).statusCode,
     ).toBe(400);
-    const activation = await app.inject({
+    await db
+      .updateTable('organizations')
+      .set({ name: 'Tampered after green reconciliation' })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .execute();
+    const staleActivation = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/activate`,
       headers: { 'x-tixkit-confirmation': `activate:${job.id}` },
       payload: {},
     });
-    expect(activation.statusCode, activation.body).toBe(200);
-    expect(activation.json()).toEqual({ jobId: job.id, status: 'activated' });
+    expect(staleActivation.statusCode, staleActivation.body).toBe(409);
+    await db
+      .updateTable('organizations')
+      .set({ name: committedOrganization.name })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .execute();
+    const initialActivations = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/activate`,
+          headers: { 'x-tixkit-confirmation': `activate:${job.id}` },
+          payload: {},
+        }),
+      ),
+    );
+    const activation = initialActivations[0]!;
+    for (const response of initialActivations) {
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toEqual({ jobId: job.id, status: 'activated' });
+    }
+    const activationEventCount = await db
+      .selectFrom('import_job_events')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', organizationId)
+      .where('import_job_id', '=', job.id)
+      .where('event_key', '=', 'commit:activated')
+      .executeTakeFirstOrThrow();
+    expect(Number(activationEventCount.count)).toBe(1);
+    await db
+      .updateTable('organizations')
+      .set({ name: 'Legitimate post-activation edit' })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .execute();
     const activationRetry = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/activate`,
@@ -1171,6 +1316,20 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     });
     expect(activationRetry.statusCode, activationRetry.body).toBe(200);
     expect(activationRetry.json()).toEqual(activation.json());
+    const concurrentActivationRetries = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        app.inject({
+          method: 'POST',
+          url: `/migration-jobs/${job.id}/activate`,
+          headers: { 'x-tixkit-confirmation': `activate:${job.id}` },
+          payload: {},
+        }),
+      ),
+    );
+    for (const retry of concurrentActivationRetries) {
+      expect(retry.statusCode, retry.body).toBe(200);
+      expect(retry.json()).toEqual(activation.json());
+    }
     await expect(
       db
         .updateTable('import_job_events')
@@ -1193,12 +1352,17 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       payload: { cutoverProof },
     });
     expect(lostResponseRetry.statusCode, lostResponseRetry.body).toBe(202);
-    expect(lostResponseRetry.json()).toEqual({ jobId: job.id, status: 'activated' });
+    expect(lostResponseRetry.json()).toEqual({
+      jobId: job.id,
+      status: 'activated',
+    });
     expect(startedCommits).toEqual([job.id, job.id]);
     const revokeResponse = await app.inject({
       method: 'POST',
       url: `/migration-jobs/${job.id}/portable-approvals/${approvedBody.approvalId}/revoke`,
-      headers: { 'x-tixkit-confirmation': `revoke:${approvedBody.approvalId}` },
+      headers: {
+        'x-tixkit-confirmation': `revoke:${approvedBody.approvalId}`,
+      },
       payload: { reason: 'Route lifecycle proof' },
     });
     expect(revokeResponse.statusCode, revokeResponse.body).toBe(409);
