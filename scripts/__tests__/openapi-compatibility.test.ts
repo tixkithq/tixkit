@@ -239,6 +239,28 @@ describe('OpenAPI compatibility', () => {
     );
   });
 
+  it('classifies a request const widened to a typed enum as compatible', () => {
+    const previous = structuredClone(base);
+    const current = structuredClone(base);
+    previous.paths['/things'].post.requestBody.content['application/json'].schema = {
+      const: 'v1',
+    };
+    current.paths['/things'].post.requestBody.content['application/json'].schema = {
+      type: 'string',
+      enum: ['v2', 'v1'],
+    };
+
+    const changes = compareOpenApi(previous as never, current as never);
+    expect(changes).toContainEqual(
+      expect.objectContaining({
+        severity: 'compatible',
+        category: 'enum-expanded',
+        message: 'Enum value v2 was added.',
+      }),
+    );
+    expect(changes).not.toContainEqual(expect.objectContaining({ severity: 'breaking' }));
+  });
+
   it('detects request and response schema reference changes', () => {
     const current = structuredClone(base);
     current.paths['/things'].post.requestBody.content['application/json'].schema.$ref =

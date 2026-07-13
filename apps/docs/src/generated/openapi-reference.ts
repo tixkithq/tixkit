@@ -7085,10 +7085,10 @@ export const apiReferenceOperations = [
           },
           "example": {
             "purpose": "migration_import",
-            "organizationId": "organization_example",
             "fileName": "fileName example",
             "contentType": "contentType example",
-            "sizeBytes": 1
+            "sizeBytes": 1,
+            "organizationId": "organization_example"
           }
         }
       }
@@ -26787,20 +26787,30 @@ export const apiReferenceSchemas = [
   },
   {
     "name": "CreateUploadArtifact",
-    "type": "oneOf",
+    "type": "object",
     "description": "",
-    "required": [],
-    "properties": [],
+    "required": [
+      "purpose",
+      "fileName",
+      "contentType",
+      "sizeBytes"
+    ],
+    "properties": [
+      "purpose",
+      "organizationId",
+      "fileName",
+      "contentType",
+      "sizeBytes",
+      "brandId",
+      "eventId",
+      "metadata"
+    ],
     "variants": [
       {
         "name": "purpose = migration_import",
         "type": "object",
         "required": [
-          "purpose",
-          "organizationId",
-          "fileName",
-          "contentType",
-          "sizeBytes"
+          "organizationId"
         ],
         "properties": [
           {
@@ -26826,28 +26836,6 @@ export const apiReferenceSchemas = [
             "description": ""
           },
           {
-            "name": "fileName",
-            "type": "string",
-            "const": null,
-            "enum": [],
-            "minimum": null,
-            "maximum": null,
-            "minLength": 1,
-            "maxLength": 255,
-            "description": ""
-          },
-          {
-            "name": "contentType",
-            "type": "string",
-            "const": null,
-            "enum": [],
-            "minimum": null,
-            "maximum": null,
-            "minLength": 1,
-            "maxLength": 255,
-            "description": ""
-          },
-          {
             "name": "sizeBytes",
             "type": "integer",
             "const": null,
@@ -26857,29 +26845,13 @@ export const apiReferenceSchemas = [
             "minLength": null,
             "maxLength": null,
             "description": ""
-          },
-          {
-            "name": "metadata",
-            "type": "object",
-            "const": null,
-            "enum": [],
-            "minimum": null,
-            "maximum": null,
-            "minLength": null,
-            "maxLength": null,
-            "description": ""
           }
         ]
       },
       {
         "name": "Variant 2",
         "type": "object",
-        "required": [
-          "purpose",
-          "fileName",
-          "contentType",
-          "sizeBytes"
-        ],
+        "required": [],
         "properties": [
           {
             "name": "purpose",
@@ -26896,72 +26868,6 @@ export const apiReferenceSchemas = [
               "event_social",
               "event_seo_image"
             ],
-            "minimum": null,
-            "maximum": null,
-            "minLength": null,
-            "maxLength": null,
-            "description": ""
-          },
-          {
-            "name": "fileName",
-            "type": "string",
-            "const": null,
-            "enum": [],
-            "minimum": null,
-            "maximum": null,
-            "minLength": 1,
-            "maxLength": 255,
-            "description": ""
-          },
-          {
-            "name": "contentType",
-            "type": "string",
-            "const": null,
-            "enum": [],
-            "minimum": null,
-            "maximum": null,
-            "minLength": 1,
-            "maxLength": 255,
-            "description": ""
-          },
-          {
-            "name": "sizeBytes",
-            "type": "integer",
-            "const": null,
-            "enum": [],
-            "minimum": 1,
-            "maximum": null,
-            "minLength": null,
-            "maxLength": null,
-            "description": ""
-          },
-          {
-            "name": "brandId",
-            "type": "string",
-            "const": null,
-            "enum": [],
-            "minimum": null,
-            "maximum": null,
-            "minLength": 1,
-            "maxLength": null,
-            "description": ""
-          },
-          {
-            "name": "eventId",
-            "type": "string",
-            "const": null,
-            "enum": [],
-            "minimum": null,
-            "maximum": null,
-            "minLength": 1,
-            "maxLength": null,
-            "description": ""
-          },
-          {
-            "name": "metadata",
-            "type": "object",
-            "const": null,
-            "enum": [],
             "minimum": null,
             "maximum": null,
             "minLength": null,

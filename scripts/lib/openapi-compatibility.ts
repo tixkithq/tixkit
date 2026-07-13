@@ -20,8 +20,16 @@ function compareSchema(
 ): void {
   const before = object(previous);
   const after = object(current);
+  const beforeConstType =
+    before.const === null ? 'null' : before.const === undefined ? undefined : typeof before.const;
   for (const key of ['type', 'format', 'const', '$ref', 'pattern']) {
-    if (after[key] !== undefined && stable(before[key]) !== stable(after[key]))
+    const inferredConstType =
+      key === 'type' && before.type === undefined && beforeConstType === after.type;
+    if (
+      after[key] !== undefined &&
+      !inferredConstType &&
+      stable(before[key]) !== stable(after[key])
+    )
       changes.push({
         severity: 'breaking',
         category: `schema-${key}`,
@@ -81,8 +89,14 @@ function compareSchema(
         message: `${key} became more restrictive.`,
       });
   }
-  const beforeEnum = array(before.enum).map(String);
-  const afterEnum = new Set(array(after.enum).map(String));
+  const beforeEnum = (
+    before.enum === undefined && before.const !== undefined ? [before.const] : array(before.enum)
+  ).map(String);
+  const afterEnum = new Set(
+    (after.enum === undefined && after.const !== undefined ? [after.const] : array(after.enum)).map(
+      String,
+    ),
+  );
   if (!beforeEnum.length && afterEnum.size)
     changes.push({
       severity: 'breaking',

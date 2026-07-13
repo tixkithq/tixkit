@@ -48,9 +48,7 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
 
 describe('openApiSpec', () => {
   it('documents event media purposes and safe test checkout tagging', () => {
-    expect(
-      openApiSpec.components.schemas.CreateUploadArtifact.oneOf[1].properties.purpose.enum,
-    ).toEqual(
+    expect(openApiSpec.components.schemas.CreateUploadArtifact.properties.purpose.enum).toEqual(
       expect.arrayContaining(['event_poster', 'event_cover', 'event_social', 'event_seo_image']),
     );
     expect(
@@ -1654,20 +1652,27 @@ describe('openApiSpec', () => {
 
   it('requires public upload completion tokens without requiring them for authenticated completion', () => {
     const createUpload = openApiSpec.components.schemas.CreateUploadArtifact;
+    expect(createUpload).toMatchObject({
+      type: 'object',
+      required: ['purpose', 'fileName', 'contentType', 'sizeBytes'],
+      properties: {
+        organizationId: { type: 'string' },
+        brandId: { type: 'string' },
+        eventId: { type: 'string' },
+      },
+    });
     expect(createUpload.oneOf).toHaveLength(2);
     expect(createUpload.oneOf[0]).toMatchObject({
-      additionalProperties: false,
-      required: ['purpose', 'organizationId', 'fileName', 'contentType', 'sizeBytes'],
+      required: ['organizationId'],
       properties: {
         purpose: { const: 'migration_import' },
         organizationId: { type: 'string', minLength: 1 },
         sizeBytes: { type: 'integer', minimum: 1, maximum: 52_428_800 },
       },
+      not: { anyOf: [{ required: ['brandId'] }, { required: ['eventId'] }] },
     });
-    expect(createUpload.oneOf[0].properties).not.toHaveProperty('brandId');
-    expect(createUpload.oneOf[0].properties).not.toHaveProperty('eventId');
     expect(createUpload.oneOf[1].properties.purpose.enum).not.toContain('migration_import');
-    expect(createUpload.oneOf[1].properties).not.toHaveProperty('organizationId');
+    expect(createUpload.oneOf[1].not).toEqual({ required: ['organizationId'] });
 
     expect(openApiSpec.components.schemas.PublicCreateUploadArtifact).toMatchObject({
       required: ['fileName', 'contentType', 'sizeBytes', 'questionId'],

@@ -5294,10 +5294,60 @@
         ]
       },
       "CreateUploadArtifact": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "checkout_answer",
+              "brand_logo",
+              "user_avatar",
+              "content_email_image",
+              "content_event_page_image",
+              "migration_import",
+              "event_poster",
+              "event_cover",
+              "event_social",
+              "event_seo_image"
+            ]
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "contentType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "brandId": {
+            "type": "string"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "purpose",
+          "fileName",
+          "contentType",
+          "sizeBytes"
+        ],
         "oneOf": [
           {
             "type": "object",
-            "additionalProperties": false,
             "properties": {
               "purpose": {
                 "const": "migration_import"
@@ -5306,37 +5356,32 @@
                 "type": "string",
                 "minLength": 1
               },
-              "fileName": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 255
-              },
-              "contentType": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 255
-              },
               "sizeBytes": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 52428800
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": true
               }
             },
             "required": [
-              "purpose",
-              "organizationId",
-              "fileName",
-              "contentType",
-              "sizeBytes"
-            ]
+              "organizationId"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "brandId"
+                  ]
+                },
+                {
+                  "required": [
+                    "eventId"
+                  ]
+                }
+              ]
+            }
           },
           {
             "type": "object",
-            "additionalProperties": false,
             "properties": {
               "purpose": {
                 "type": "string",
@@ -5351,40 +5396,13 @@
                   "event_social",
                   "event_seo_image"
                 ]
-              },
-              "fileName": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 255
-              },
-              "contentType": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 255
-              },
-              "sizeBytes": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "brandId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "eventId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": true
               }
             },
-            "required": [
-              "purpose",
-              "fileName",
-              "contentType",
-              "sizeBytes"
-            ]
+            "not": {
+              "required": [
+                "organizationId"
+              ]
+            }
           }
         ]
       },
@@ -16287,10 +16305,10 @@
               },
               "example": {
                 "purpose": "migration_import",
-                "organizationId": "organization_example",
                 "fileName": "fileName example",
                 "contentType": "contentType example",
-                "sizeBytes": 1
+                "sizeBytes": 1,
+                "organizationId": "organization_example"
               }
             }
           }
