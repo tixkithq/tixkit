@@ -1407,7 +1407,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     ).resolves.toEqual([]);
   }, 30_000);
 
-  it('ingests a signed portable artifact through routed creation, preparation, and dry-run', async () => {
+  it('routes a signed portable artifact through preparation, commit, reconciliation, and activation', async () => {
     const intakeTenantId = (
       await new TenantRepository(db).create({ name: `Portable intake ${driver}` })
     ).id;
@@ -1421,6 +1421,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     const bundleKeys = generateKeyPairSync('ed25519');
     const payloadKeys = generateKeyPairSync('ed25519');
     const dryRunKeys = generateKeyPairSync('ed25519');
+    const cutoverKeys = generateKeyPairSync('ed25519');
     const policies = createPortableConfigurationPayloadPolicies();
     const built = buildPortableLogicalExport({
       bundleId: `bundle_routed_intake_${driver}`,
@@ -1578,10 +1579,18 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       privateKey: dryRunKeys.privateKey,
       trustedPublicKeys: new Map([['dry_run_routed_key', dryRunKeys.publicKey]]),
     });
+    const commitService = createRepositoryMigrationActivityService(
+      db,
+      createProductionMigrationCommitters(db),
+    );
+    const startedCommits: string[] = [];
     const app = Fastify();
     app.decorate('context', {
       db,
       portableDryRunAttestation: attestation,
+      portableCutoverTrust: {
+        trustedPublicKeys: new Map([['cutover_routed_key', cutoverKeys.publicKey]]),
+      },
       temporalClient: {
         startMigrationPreparation: async (input: {
           tenantId: string;
@@ -1592,6 +1601,28 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
             const chunk = await preparation.prepare({ ...input, chunkSize: 100 });
             if (chunk.completed) return;
           }
+        },
+        startMigrationCommit: async (input: {
+          tenantId: string;
+          organizationId: string;
+          jobId: string;
+        }) => {
+          startedCommits.push(input.jobId);
+          const scope = { ...input, sideEffects: MIGRATION_SIDE_EFFECT_POLICY };
+          await commitService.beginCommit(scope);
+          for (const stage of MIGRATION_COMMIT_STAGES) {
+            const result = await commitService.processStage(scope, {
+              stage,
+              claimOwner: `routed-intake:${stage}`,
+              chunkSize: 100,
+            });
+            if (!result.complete) throw new Error(`ROUTED_COMMIT_STAGE_INCOMPLETE:${stage}`);
+          }
+          const reconciliation = await commitService.reconcile(scope);
+          if (reconciliation.unresolved !== 0) {
+            throw new Error(`ROUTED_COMMIT_RECONCILIATION_FAILED:${reconciliation.unresolved}`);
+          }
+          await commitService.completeCommit(scope);
         },
       },
     } as never);
@@ -1786,6 +1817,86 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         .orderBy('id')
         .execute(),
     }).toEqual(domainStateBefore);
+    const approval = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/portable-approval`,
+      headers: {
+        'idempotency-key': `routed-approval-${driver}`,
+        'x-tixkit-confirmation': `approve:${createdBody.id}:${dryRunBody.portableDryRunReceiptSha256}`,
+      },
+      payload: {},
+    });
+    expect(approval.statusCode, approval.body).toBe(201);
+    const approvalBody = approval.json<{ commitConfirmation: string }>();
+    const issuedAt = new Date();
+    const cutoverProof = createPortableCutoverProof(
+      {
+        tenantId: built.envelope.manifest.source.tenantId,
+        deploymentId: built.envelope.manifest.source.deploymentId,
+        sourceChangeCursor: built.envelope.manifest.lineage.toChangeCursor,
+        observedAt: issuedAt.toISOString(),
+        sourceFrozen: true,
+        bundleId: built.envelope.manifest.bundleId,
+        manifestSha256: portableManifestSha256(built.envelope.manifest),
+        destinationId: destination.deploymentId,
+        operationId: preflight!.operation_id,
+        issuedAt: issuedAt.toISOString(),
+        expiresAt: new Date(issuedAt.getTime() + 5 * 60_000).toISOString(),
+        nonce: `cutover_routed_${driver}`,
+      },
+      'cutover_routed_key',
+      cutoverKeys.privateKey,
+    );
+    const committed = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/commit`,
+      headers: { 'x-tixkit-confirmation': approvalBody.commitConfirmation },
+      payload: { cutoverProof },
+    });
+    expect(committed.statusCode, committed.body).toBe(202);
+    expect(startedCommits).toEqual([createdBody.id]);
+    expect(
+      (await intakeRepository.findJob(intakeTenantId, intakeOrganizationId, createdBody.id))
+        ?.status,
+    ).toBe('committed');
+    expect(
+      await intakeRepository.findExternalReference({
+        tenantId: intakeTenantId,
+        organizationId: intakeOrganizationId,
+        sourceSystem: 'tixkit-portable',
+        entityType: 'organization',
+        externalId: 'organization-routed-source-01',
+      }),
+    ).toMatchObject({ tixkit_id: intakeOrganizationId });
+    await expect(
+      db
+        .selectFrom('organizations')
+        .select(['name', 'slug'])
+        .where('tenant_id', '=', intakeTenantId)
+        .where('id', '=', intakeOrganizationId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toMatchObject({
+      name: `Portable intake ${driver}`,
+      slug: `portable-intake-${driver}`,
+    });
+    const committedEntity = await intakeRepository.findImportedEntity(
+      intakeTenantId,
+      intakeOrganizationId,
+      intakeOrganizationId,
+    );
+    expect(committedEntity).toMatchObject({ entity_type: 'organization' });
+    expect(JSON.parse(committedEntity!.attributes)).toMatchObject({
+      name: 'Routed source organization',
+      slug: `routed-source-${driver}`,
+    });
+    const activated = await app.inject({
+      method: 'POST',
+      url: `/migration-jobs/${createdBody.id}/activate`,
+      headers: { 'x-tixkit-confirmation': `activate:${createdBody.id}` },
+      payload: {},
+    });
+    expect(activated.statusCode, activated.body).toBe(200);
+    expect(activated.json()).toEqual({ jobId: createdBody.id, status: 'activated' });
     await app.close();
   }, 30_000);
 });
