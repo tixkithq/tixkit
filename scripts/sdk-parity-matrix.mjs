@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { validateSdkParity } from './lib/sdk-parity.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
-const apiVersion = '2026-01-01';
+const apiVersion = '2026-07-13';
 const distribution = JSON.parse(
   readFileSync(new URL('../distribution/public-distribution.json', import.meta.url), 'utf8'),
 );
@@ -15,7 +15,7 @@ const checks = [
     platform: 'JavaScript',
     file: 'packages/sdk-js/src/index.ts',
     patterns: [
-      "TIXKIT_API_VERSION = '2026-01-01'",
+      `TIXKIT_API_VERSION = '${apiVersion}'`,
       'CheckoutResource',
       'async conversion',
       'X-Tixkit-Version',
@@ -141,7 +141,7 @@ const checks = [
     platform: 'React Native',
     file: 'packages/sdk-react-native/src/index.ts',
     patterns: [
-      "TIXKIT_API_VERSION = '2026-01-01'",
+      `TIXKIT_API_VERSION = '${apiVersion}'`,
       'checkoutHandoffUrl',
       'createTixkitReactNativeComponents',
       'createTixkitSecureStorage',
@@ -165,7 +165,7 @@ const checks = [
     platform: 'Flutter',
     file: 'packages/sdk-flutter/lib/tixkit_flutter.dart',
     patterns: [
-      "tixkitApiVersion = '2026-01-01'",
+      `tixkitApiVersion = '${apiVersion}'`,
       'tixkitCheckoutHandoffUri',
       'TixkitTicketCard',
       'TixkitScannerClient',
@@ -189,7 +189,7 @@ const checks = [
     platform: 'iOS',
     file: 'packages/sdk-ios/Sources/TixkitIOS/TixkitIOS.swift',
     patterns: [
-      'TixkitAPIVersion = "2026-01-01"',
+      `TixkitAPIVersion = "${apiVersion}"`,
       'TixkitCheckoutHandoffOptions',
       'TixkitTicketCard',
       'TixkitScannerClient',
@@ -213,7 +213,7 @@ const checks = [
     platform: 'Android',
     file: 'packages/sdk-android/sdk/src/main/java/com/tixkit/sdk/TixkitAndroid.kt',
     patterns: [
-      'API_VERSION = "2026-01-01"',
+      `API_VERSION = "${apiVersion}"`,
       'TixkitCheckoutOptions',
       'TixkitTicketDisplayView',
       'TixkitScannerClient',
@@ -237,7 +237,7 @@ const checks = [
     platform: 'Rust',
     file: 'packages/sdk-rust/src/lib.rs',
     patterns: [
-      'TIXKIT_API_VERSION: &str = "2026-01-01"',
+      `TIXKIT_API_VERSION: &str = "${apiVersion}"`,
       'TixkitClientBuilder',
       'create_box_office_order',
       'Idempotency-Key',
@@ -290,7 +290,7 @@ const checks = [
     platform: 'Go Client',
     file: 'packages/sdk-go/client.go',
     patterns: [
-      'APIVersion = "2026-01-01"',
+      `APIVersion = "${apiVersion}"`,
       'NewClient',
       'X-Tixkit-Version',
       'Idempotency-Key',
@@ -373,7 +373,7 @@ for (const ignoreFile of npmIgnores) {
 try {
   const workflow = read('.github/workflows/sdk-release-dry-run.yml');
   for (const pattern of [
-    'npm pack --dry-run',
+    'release:public:npm:dry-run',
     'flutter pub publish --dry-run',
     'swift test',
     ':sdk:publishToMavenLocal',

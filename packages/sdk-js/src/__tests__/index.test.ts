@@ -251,6 +251,12 @@ describe('TixkitClient', () => {
       method: 'PUT',
       url: 'https://api.test/v1/events/evt_1/media/poster',
     });
+
+    await client.events.removeMedia('evt_1', 'poster');
+    expect(getCall(fetchMock, 2)).toMatchObject({
+      method: 'DELETE',
+      url: 'https://api.test/v1/events/evt_1/media/poster',
+    });
   });
 
   it('rejects malformed readiness blocker envelopes', () => {
@@ -359,7 +365,7 @@ describe('TixkitClient', () => {
     const client = new TixkitClient({
       apiKey: 'tk_test_123',
       apiBaseUrl: 'https://custom.api.com',
-      apiVersion: '2026-07-12',
+      apiVersion: '2026-07-13',
       timeout: 5000,
       maxRetries: 1,
     });

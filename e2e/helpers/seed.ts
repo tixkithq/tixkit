@@ -484,81 +484,81 @@ async function withE2eDb<T>(callback: (db: Database) => Promise<T>): Promise<T> 
 async function ensureDevTenantGraph(): Promise<void> {
   const now = new Date();
   await withE2eDb(async (db) => {
-    await db
-      .insertInto('tenants')
-      .values({
-        id: devTenantId,
-        name: 'Local Development',
-        status: 'active',
-        plan: 'free',
-        created_at: now,
-        updated_at: now,
-      })
-      .onConflict((oc) =>
-        oc.column('id').doUpdateSet({
-          name: 'Local Development',
-          status: 'active',
-          plan: 'free',
-          updated_at: now,
-        }),
-      )
-      .execute();
+    const tenantInsert = db.insertInto('tenants').values({
+      id: devTenantId,
+      name: 'Local Development',
+      status: 'active',
+      plan: 'free',
+      created_at: now,
+      updated_at: now,
+    });
+    const tenantUpdate = {
+      name: 'Local Development',
+      status: 'active' as const,
+      plan: 'free',
+      updated_at: now,
+    };
+    await (
+      process.env.DB_DRIVER === 'mysql'
+        ? tenantInsert.onDuplicateKeyUpdate(tenantUpdate)
+        : tenantInsert.onConflict((oc) => oc.column('id').doUpdateSet(tenantUpdate))
+    ).execute();
 
-    await db
-      .insertInto('organizations')
-      .values({
-        id: devOrganizationId,
-        tenant_id: devTenantId,
-        name: 'Tixkit Dev',
-        slug: 'tixkit-dev',
-        clerk_organization_id: null,
-        box_office_settings: JSON.stringify({
-          enabled: true,
-          allowedTenderTypes: ['cash', 'manual_card', 'comp'],
-          requireBuyerEmail: false,
-          receiptMode: 'email',
-        }),
-        status: 'active',
-        created_at: now,
-        updated_at: now,
-      })
-      .onConflict((oc) =>
-        oc.column('id').doUpdateSet({
-          tenant_id: devTenantId,
-          name: 'Tixkit Dev',
-          slug: 'tixkit-dev',
-          status: 'active',
-          updated_at: now,
-        }),
-      )
-      .execute();
+    const organizationInsert = db.insertInto('organizations').values({
+      id: devOrganizationId,
+      tenant_id: devTenantId,
+      name: 'Tixkit Dev',
+      slug: 'tixkit-dev',
+      clerk_organization_id: null,
+      box_office_settings: JSON.stringify({
+        enabled: true,
+        allowedTenderTypes: ['cash', 'manual_card', 'comp'],
+        requireBuyerEmail: false,
+        receiptMode: 'email',
+      }),
+      status: 'active',
+      created_at: now,
+      updated_at: now,
+    });
+    const organizationUpdate = {
+      tenant_id: devTenantId,
+      name: 'Tixkit Dev',
+      slug: 'tixkit-dev',
+      status: 'active' as const,
+      updated_at: now,
+    };
+    await (
+      process.env.DB_DRIVER === 'mysql'
+        ? organizationInsert.onDuplicateKeyUpdate(organizationUpdate)
+        : organizationInsert.onConflict((oc) => oc.column('id').doUpdateSet(organizationUpdate))
+    ).execute();
 
-    await db
-      .insertInto('brands')
-      .values({
-        id: devBrandId,
-        tenant_id: devTenantId,
-        organization_id: devOrganizationId,
-        name: 'Tixkit Dev',
-        slug: 'tixkit-dev',
-        status: 'active',
-        theme: JSON.stringify({ primaryColor: '#4f46e5' }),
-        legal_urls: JSON.stringify({}),
-        white_label: false,
-        created_at: now,
-        updated_at: now,
-      })
-      .onConflict((oc) =>
-        oc.column('id').doUpdateSet({
-          tenant_id: devTenantId,
-          organization_id: devOrganizationId,
-          name: 'Tixkit Dev',
-          slug: 'tixkit-dev',
-          status: 'active',
-          updated_at: now,
-        }),
-      )
-      .execute();
+    const brandInsert = db.insertInto('brands').values({
+      id: devBrandId,
+      tenant_id: devTenantId,
+      organization_id: devOrganizationId,
+      name: 'Tixkit Dev',
+      slug: 'tixkit-dev',
+      status: 'active',
+      theme: JSON.stringify({ primaryColor: '#4f46e5' }),
+      legal_urls: JSON.stringify({}),
+      white_label: false,
+      created_at: now,
+      updated_at: now,
+    });
+    const brandUpdate = {
+      tenant_id: devTenantId,
+      organization_id: devOrganizationId,
+      name: 'Tixkit Dev',
+      slug: 'tixkit-dev',
+      status: 'active' as const,
+      updated_at: now,
+    };
+    await (
+      process.env.DB_DRIVER === 'mysql'
+        ? brandInsert.onDuplicateKeyUpdate(brandUpdate)
+        : brandInsert.onConflict((oc) => oc.column('id').doUpdateSet(brandUpdate))
+    ).execute();
   });
 }
 
@@ -774,6 +774,37 @@ export async function seedEventMediaFixture(input: {
     renditionId,
     renditionPath: `/v1/public/event-media/renditions/${renditionId}`,
   };
+}
+
+export async function readEventMediaCleanupJobs(
+  eventId: string,
+  reason: 'event-media-replaced' | 'event-media-removed',
+): Promise<Array<{ objectKey: string; status: string }>> {
+  return withE2eDb(async (db) =>
+    (
+      await db
+        .selectFrom('media_object_cleanup_jobs as cleanup')
+        .select(['cleanup.object_key', 'cleanup.status'])
+        .where('cleanup.organization_id', '=', devOrganizationId)
+        .where('cleanup.reason', '=', reason)
+        .where('cleanup.object_key', 'like', `%/${eventId}/%`)
+        .distinct()
+        .execute()
+    ).map((row) => ({ objectKey: row.object_key, status: row.status })),
+  );
+}
+
+export async function countEventMediaRemovalAudits(eventId: string): Promise<number> {
+  return withE2eDb(async (db) => {
+    const result = await db
+      .selectFrom('audit_logs')
+      .select((eb) => eb.fn.countAll<number>().as('count'))
+      .where('tenant_id', '=', devTenantId)
+      .where('resource_id', '=', eventId)
+      .where('action', '=', 'event.media.remove')
+      .executeTakeFirstOrThrow();
+    return Number(result.count);
+  });
 }
 
 export async function seedAdminAttendeeTableRow(

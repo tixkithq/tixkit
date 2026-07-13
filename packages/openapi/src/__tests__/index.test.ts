@@ -46,6 +46,9 @@ describe('openApiSpec', () => {
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/AttachEventMedia' });
     expect(
+      openApiSpec.paths['/events/{eventId}/media/{role}'].delete.responses['204'].description,
+    ).toBe('Event media role removed');
+    expect(
       openApiSpec.paths['/public/event-media/renditions/{renditionId}'].get.responses['200']
         .content['image/webp'].schema,
     ).toMatchObject({ format: 'binary' });
@@ -63,7 +66,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-12');
+    expect(openApiSpec.info.version).toBe('2026-07-13');
   });
 
   it('publishes the authoritative API-key permission scope catalog', () => {

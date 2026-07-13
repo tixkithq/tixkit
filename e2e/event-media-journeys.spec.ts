@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
-import { seedEventMediaFixture, seedFreeCheckoutEvent } from './helpers/seed';
+import {
+  countEventMediaRemovalAudits,
+  readEventMediaCleanupJobs,
+  seedEventMediaFixture,
+  seedFreeCheckoutEvent,
+} from './helpers/seed';
 
 const transparentPixel = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -54,11 +59,67 @@ test.describe('role-based event media journeys', () => {
     expect(
       poster?.renditions.every((rendition) => /^[a-f0-9]{64}$/u.test(rendition.checksumSha256)),
     ).toBe(true);
+
+    const concurrentReplacement = {
+      uploadArtifactId: poster!.original.uploadArtifactId,
+      altText,
+      focalPoint: { x: 0.5, y: 0.5 },
+    };
+    const concurrentStatuses = (
+      await Promise.all([
+        request.put(`${apiBaseUrl}/v1/events/${seeded.event.id}/media/poster`, {
+          data: concurrentReplacement,
+          headers: { 'x-tixkit-e2e-media-replacement-barrier': '1' },
+        }),
+        request.put(`${apiBaseUrl}/v1/events/${seeded.event.id}/media/poster`, {
+          data: concurrentReplacement,
+          headers: { 'x-tixkit-e2e-media-replacement-barrier': '1' },
+        }),
+      ])
+    )
+      .map((response) => response.status())
+      .sort();
+    expect(concurrentStatuses).toEqual([200, 400]);
+    await expect
+      .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-replaced'))
+      .toHaveLength(3);
+
+    const replaced = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        response.url().endsWith(`/v1/events/${seeded.event.id}/media/poster`),
+    );
+    await page.locator('#event-poster-upload').setInputFiles({
+      name: 'replacement-poster.png',
+      mimeType: 'image/png',
+      buffer: await readFile('apps/admin-dashboard/public/brand/tixkit-symbol.png'),
+    });
+    expect((await replaced).status()).toBe(200);
+    await expect
+      .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-replaced'))
+      .toHaveLength(6);
     await expectNoAxeViolations(
       page,
       testInfo,
       'section[aria-labelledby="event-role-media-heading"]',
     );
+
+    page.once('dialog', (dialog) => dialog.accept());
+    const removed = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' &&
+        response.url().endsWith(`/v1/events/${seeded.event.id}/media/poster`),
+    );
+    await page.getByRole('button', { name: 'Remove poster' }).click();
+    expect((await removed).status()).toBe(204);
+    await expect(page.getByAltText(altText)).toHaveCount(0);
+    await expect
+      .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-removed'))
+      .toHaveLength(3);
+    await expect.poll(() => countEventMediaRemovalAudits(seeded.event.id)).toBe(1);
+    expect(
+      (await request.delete(`${apiBaseUrl}/v1/events/${seeded.event.id}/media/poster`)).status(),
+    ).toBe(404);
   });
 
   test('organizer media settings expose accessible role thumbnails and per-role crop controls', async ({

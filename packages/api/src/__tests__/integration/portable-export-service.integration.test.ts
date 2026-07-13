@@ -21,6 +21,7 @@ import {
   type PortableExportMediaStore,
 } from '../../services/portable-export.js';
 import { loadPublicEventMedia } from '../../routes/modules/public.js';
+import { removeEventMedia } from '../../services/event-media.js';
 import { parseUploadArtifactMetadata } from '../../services/uploads.js';
 import sharp from 'sharp';
 
@@ -313,7 +314,30 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     const metadata = await sharp(sanitized).metadata();
     expect(metadata).toMatchObject({ format: 'webp', width: 1600, height: 1000 });
     expect(metadata.exif).toBeUndefined();
-    await db.deleteFrom('event_media_assets').where('id', '=', assetId).execute();
+    await expect(
+      removeEventMedia({
+        db,
+        tenantId,
+        organizationId,
+        brandId: brand.id,
+        eventId: event.id,
+        role: 'cover',
+      }),
+    ).resolves.toBe(true);
+    expect(
+      await db
+        .selectFrom('media_object_cleanup_jobs')
+        .select(['object_key', 'checksum_sha256', 'reason', 'status'])
+        .where('reason', '=', 'event-media-removed')
+        .execute(),
+    ).toEqual([
+      expect.objectContaining({
+        object_key: `event-media/${event.id}/${assetId}/page.webp`,
+        checksum_sha256: 'b'.repeat(64),
+        reason: 'event-media-removed',
+        status: 'pending',
+      }),
+    ]);
     await db.deleteFrom('upload_artifacts').where('id', '=', uploadId).execute();
     await db.deleteFrom('events').where('id', '=', event.id).execute();
     await db.deleteFrom('brands').where('id', '=', brand.id).execute();

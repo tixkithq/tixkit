@@ -5,9 +5,38 @@ import { NotFoundError } from '@tixkit/domain';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
 import { parseBody } from '../../http/schemas.js';
-import { attachEventMedia, type EventMediaRole } from '../../services/event-media.js';
+import {
+  attachEventMedia,
+  removeEventMedia,
+  type EventMediaRole,
+} from '../../services/event-media.js';
 
 const roleSchema = z.enum(['poster', 'cover', 'social']);
+const e2eReplacementBarriers = new Map<string, Array<() => void>>();
+
+async function waitForE2eReplacementPeer(key: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const peers = e2eReplacementBarriers.get(key) ?? [];
+    let timeout: ReturnType<typeof setTimeout>;
+    const release = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    timeout = setTimeout(() => {
+      const current = e2eReplacementBarriers.get(key)?.filter((peer) => peer !== release) ?? [];
+      if (current.length > 0) e2eReplacementBarriers.set(key, current);
+      else e2eReplacementBarriers.delete(key);
+      resolve();
+    }, 5_000);
+    peers.push(release);
+    if (peers.length < 2) {
+      e2eReplacementBarriers.set(key, peers);
+      return;
+    }
+    e2eReplacementBarriers.delete(key);
+    for (const release of peers) release();
+  });
+}
 const attachSchema = z
   .object({
     uploadArtifactId: z.string().min(1),
@@ -100,6 +129,12 @@ export const eventMediaRoutes: FastifyPluginAsync = async (app) => {
       altText: body.altText,
       focalPoint: body.focalPoint,
       createdBy: principal.id,
+      afterSnapshot:
+        process.env.NODE_ENV === 'development' &&
+        process.env.E2E_MEDIA_REPLACEMENT_BARRIER === '1' &&
+        request.headers['x-tixkit-e2e-media-replacement-barrier'] === '1'
+          ? () => waitForE2eReplacementPeer(`${eventId}:${role}`)
+          : undefined,
     });
     await writeAuditLog(new AuditLogRepository(app.context.db), request, principal, {
       action: 'event.media.attach',
@@ -115,5 +150,31 @@ export const eventMediaRoutes: FastifyPluginAsync = async (app) => {
       },
     });
     return attached;
+  });
+
+  app.delete('/events/:eventId/media/:role', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.write');
+    const { eventId, role: rawRole } = request.params as { eventId: string; role: string };
+    const role = roleSchema.parse(rawRole) as EventMediaRole;
+    const event = await scopedEvent(app, principal, eventId);
+    const removed = await removeEventMedia({
+      db: app.context.db,
+      tenantId: principal.tenantId,
+      organizationId: event.organization_id,
+      brandId: event.brand_id,
+      eventId,
+      role,
+    });
+    if (!removed) throw new NotFoundError('EventMedia', `${eventId}:${role}`);
+    await writeAuditLog(new AuditLogRepository(app.context.db), request, principal, {
+      action: 'event.media.remove',
+      resourceType: 'event',
+      resourceId: eventId,
+      organizationId: event.organization_id,
+      brandId: event.brand_id,
+      diffSummary: { role },
+    });
+    return reply.status(204).send();
   });
 };

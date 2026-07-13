@@ -74,6 +74,7 @@ const s3Env = {
 };
 const localApiEnv = {
   NODE_ENV: 'development',
+  E2E_MEDIA_REPLACEMENT_BARRIER: '1',
   PORT: apiPort,
   DATABASE_URL: databaseUrl,
   REDIS_URL: 'redis://localhost:6379',

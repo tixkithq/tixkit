@@ -39,14 +39,6 @@ async function previousSpec(): Promise<{ version: string; spec: JsonObject } | u
     // A new version has no committed same-version baseline.
   }
   try {
-    return {
-      version,
-      spec: JSON.parse(await readFile(join(output, 'openapi.json'), 'utf8')),
-    };
-  } catch {
-    // Fall back to the immediately previous complete version for a first release of this version.
-  }
-  try {
     const versions = (await readdir(releaseRoot))
       .filter((candidate) => candidate !== version && /^\d{4}-\d{2}-\d{2}$/u.test(candidate))
       .sort()
@@ -63,6 +55,14 @@ async function previousSpec(): Promise<{ version: string; spec: JsonObject } | u
     }
   } catch {
     // The first repository release has no prior artifact directory.
+  }
+  try {
+    return {
+      version,
+      spec: JSON.parse(await readFile(join(output, 'openapi.json'), 'utf8')),
+    };
+  } catch {
+    // The first repository release has no prior committed or generated baseline.
   }
   return undefined;
 }

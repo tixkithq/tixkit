@@ -414,7 +414,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-12',
+    version: '2026-07-13',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -7538,6 +7538,34 @@ const rawOpenApiSpec = {
           },
           '404': {
             description: 'Event or upload artifact not found in scope',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+        },
+      },
+      delete: {
+        summary: 'Remove one scoped event media role and schedule rendition cleanup',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'role',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', enum: ['poster', 'cover', 'social'] },
+          },
+        ],
+        responses: {
+          '204': { description: 'Event media role removed' },
+          '401': {
+            description: 'Unauthorized',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '403': {
+            description: 'Forbidden',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+          },
+          '404': {
+            description: 'Event or media role not found in scope',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
           },
         },

@@ -1,0 +1,18 @@
+{
+  "from": "2026-07-12",
+  "to": "2026-07-13",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "DELETE /events/{eventId}/media/{role}",
+      "message": "Operation was added."
+    }
+  ]
+}

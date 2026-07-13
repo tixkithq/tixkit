@@ -485,7 +485,7 @@ export function createPortableExportService(input: {
           exportSequence: Number(job.export_sequence),
           changeCursor: snapshot.sourceChangeCursor,
         },
-        apiVersion: '2026-01-01',
+        apiVersion: '2026-07-13',
         dataSchemaVersion: '0076',
         exportedAt,
         currentTime: exportedAt,

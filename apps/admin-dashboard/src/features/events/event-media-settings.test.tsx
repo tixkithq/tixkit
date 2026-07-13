@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   listEventMedia: vi.fn(),
   uploadArtifact: vi.fn(),
   attachEventMedia: vi.fn(),
+  removeEventMedia: vi.fn(),
   updateEvent: vi.fn(),
   getEvent: vi.fn(),
 }));
@@ -120,5 +121,11 @@ describe('EventMediaSettings', () => {
     expect(api.uploadArtifact).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'event_social', eventId: 'evt_1', file }),
     );
+
+    api.removeEventMedia.mockResolvedValue({ ok: true, data: undefined });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(view.getByRole('button', { name: 'Remove cover' }));
+    await waitFor(() => expect(api.removeEventMedia).toHaveBeenCalledWith('evt_1', 'cover'));
+    expect(view.queryByAltText('Crowd under stage lights')).not.toBeInTheDocument();
   });
 });

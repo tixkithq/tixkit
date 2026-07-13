@@ -142,6 +142,19 @@ export function EventMediaSettings({
       setError(cause instanceof Error ? cause.message : `Unable to upload the ${role} image.`);
     }
   };
+  const removeRole = async (role: AdminEventMediaRole) => {
+    if (!window.confirm(`Remove the ${role} image and its published renditions?`)) return;
+    setState('saving');
+    setError(undefined);
+    const removed = await adminApi.removeEventMedia(event.id, role);
+    if (!removed.ok) {
+      setState('error');
+      setError(removed.error.message);
+      return;
+    }
+    setAssets((current) => current.filter((asset) => asset.role !== role));
+    setState('saved');
+  };
   const upload = async (file: File, purpose: 'event_cover' | 'event_seo_image') => {
     setState('uploading');
     setUploadProgress(0);
@@ -321,6 +334,16 @@ export function EventMediaSettings({
                     }}
                   />
                 </label>
+                {asset ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={state === 'uploading' || state === 'saving'}
+                    onClick={() => void removeRole(role)}
+                  >
+                    Remove {role}
+                  </Button>
+                ) : null}
               </article>
             );
           })}

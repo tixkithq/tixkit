@@ -259,7 +259,9 @@ function normalizeAdminEventMediaAsset(asset: AdminEventMediaAsset): AdminEventM
     ...asset,
     renditions: asset.renditions.map((rendition) => ({
       ...rendition,
-      url: rendition.url.startsWith('/') ? `${getAdminApiBaseUrl()}${rendition.url}` : rendition.url,
+      url: rendition.url.startsWith('/')
+        ? `${getAdminApiBaseUrl()}${rendition.url}`
+        : rendition.url,
     })),
   };
 }
@@ -2096,6 +2098,7 @@ export type AdminApi = {
       focalPoint: { x: number; y: number };
     },
   ): Promise<ApiResult<AdminEventMediaAsset>>;
+  removeEventMedia(eventId: string, role: AdminEventMediaRole): Promise<ApiResult<undefined>>;
   getEventOperationalHealth(eventId: string): Promise<
     ApiResult<{
       eventId: string;
@@ -5202,6 +5205,13 @@ export const adminApi: AdminApi = {
           altText: input.altText,
           renditions: [],
         }),
+    );
+  },
+
+  async removeEventMedia(eventId, role) {
+    return withFixture(
+      () => request<undefined>(`/v1/events/${eventId}/media/${role}`, { method: 'DELETE' }),
+      () => ok(undefined),
     );
   },
 

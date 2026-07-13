@@ -11,7 +11,7 @@ describe('synthetic webhook fixture', () => {
     expect(payload).toEqual({
       type: WEBHOOK_TEST_EVENT_TYPE,
       test: true,
-      apiVersion: '2026-01-01',
+      apiVersion: '2026-07-13',
       createdAt: '2026-07-10T12:00:00.000Z',
       data: { endpointId: 'wh_1' },
     });

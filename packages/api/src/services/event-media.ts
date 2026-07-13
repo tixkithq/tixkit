@@ -48,6 +48,61 @@ function id(prefix: string): string {
   return `${prefix}_${ulid()}`;
 }
 
+async function stageRenditionCleanup(
+  db: Database,
+  input: {
+    tenantId: string;
+    organizationId: string;
+    reason: 'event-media-replaced' | 'event-media-removed';
+    renditions: Array<{ bucket: string; object_key: string; checksum_sha256: string }>;
+  },
+): Promise<void> {
+  const now = new Date();
+  for (const rendition of input.renditions) {
+    const identity = createHash('sha256')
+      .update(`${rendition.bucket}:${rendition.object_key}`)
+      .digest('hex');
+    const existing = await db
+      .selectFrom('media_object_cleanup_jobs')
+      .select('id')
+      .where('cleanup_identity_sha256', '=', identity)
+      .executeTakeFirst();
+    if (existing) {
+      await db
+        .updateTable('media_object_cleanup_jobs')
+        .set({
+          reason: input.reason,
+          status: 'pending',
+          available_at: now,
+          last_error: null,
+          updated_at: now,
+        })
+        .where('id', '=', existing.id)
+        .execute();
+      continue;
+    }
+    await db
+      .insertInto('media_object_cleanup_jobs')
+      .values({
+        id: `moc_${identity.slice(0, 26)}`,
+        tenant_id: input.tenantId,
+        organization_id: input.organizationId,
+        bucket: rendition.bucket,
+        object_key: rendition.object_key,
+        cleanup_identity_sha256: identity,
+        checksum_sha256: rendition.checksum_sha256,
+        reason: input.reason,
+        status: 'pending',
+        attempts: 0,
+        available_at: now,
+        last_error: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+  }
+}
+
 async function renderAtFocalPoint(
   normalized: Buffer,
   source: { width: number; height: number },
@@ -87,6 +142,7 @@ export async function attachEventMedia(input: {
   altText: string;
   focalPoint: { x: number; y: number };
   createdBy: string;
+  afterSnapshot?: () => Promise<void>;
 }) {
   if (
     input.altText !== input.altText.trim() ||
@@ -141,10 +197,21 @@ export async function attachEventMedia(input: {
     .toBuffer();
   const existing = await input.db
     .selectFrom('event_media_assets')
-    .select('id')
+    .select(['id', 'updated_at', 'upload_artifact_id'])
+    .where('tenant_id', '=', input.tenantId)
+    .where('organization_id', '=', input.organizationId)
+    .where('brand_id', '=', input.brandId)
     .where('event_id', '=', input.eventId)
     .where('role', '=', input.role)
     .executeTakeFirst();
+  const replacedRenditions = existing
+    ? await input.db
+        .selectFrom('event_media_renditions')
+        .select(['id', 'bucket', 'object_key', 'checksum_sha256'])
+        .where('asset_id', '=', existing.id)
+        .execute()
+    : [];
+  await input.afterSnapshot?.();
   const assetId = existing?.id ?? id('ema');
   const renditions: Array<{
     id: string;
@@ -206,6 +273,42 @@ export async function attachEventMedia(input: {
   try {
     await input.db.transaction().execute(async (transaction) => {
       if (existing) {
+        const current = await transaction
+          .selectFrom('event_media_assets')
+          .select(['id', 'upload_artifact_id', 'updated_at'])
+          .where('id', '=', existing.id)
+          .where('tenant_id', '=', input.tenantId)
+          .where('organization_id', '=', input.organizationId)
+          .where('brand_id', '=', input.brandId)
+          .where('event_id', '=', input.eventId)
+          .where('role', '=', input.role)
+          .forUpdate()
+          .executeTakeFirst();
+        const currentRenditions = current
+          ? await transaction
+              .selectFrom('event_media_renditions')
+              .select(['id', 'bucket', 'object_key', 'checksum_sha256'])
+              .where('asset_id', '=', current.id)
+              .orderBy('id', 'asc')
+              .execute()
+          : [];
+        const expectedIds = replacedRenditions.map((rendition) => rendition.id).sort();
+        const currentIds = currentRenditions.map((rendition) => rendition.id);
+        if (
+          !current ||
+          current.upload_artifact_id !== existing.upload_artifact_id ||
+          current.updated_at.getTime() !== existing.updated_at.getTime() ||
+          currentIds.length !== expectedIds.length ||
+          currentIds.some((value, index) => value !== expectedIds[index])
+        ) {
+          throw new ValidationError('Event media changed while the replacement was being prepared');
+        }
+        await stageRenditionCleanup(transaction as typeof input.db, {
+          tenantId: input.tenantId,
+          organizationId: input.organizationId,
+          reason: 'event-media-replaced',
+          renditions: currentRenditions,
+        });
         await transaction
           .updateTable('event_media_assets')
           .set({
@@ -289,6 +392,46 @@ export async function attachEventMedia(input: {
       url: `/v1/public/event-media/renditions/${rendition.id}`,
     })),
   };
+}
+
+export async function removeEventMedia(input: {
+  db: Database;
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  eventId: string;
+  role: EventMediaRole;
+}): Promise<boolean> {
+  return input.db.transaction().execute(async (transaction) => {
+    const asset = await transaction
+      .selectFrom('event_media_assets')
+      .select('id')
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('brand_id', '=', input.brandId)
+      .where('event_id', '=', input.eventId)
+      .where('role', '=', input.role)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!asset) return false;
+    const renditions = await transaction
+      .selectFrom('event_media_renditions')
+      .select(['bucket', 'object_key', 'checksum_sha256'])
+      .where('asset_id', '=', asset.id)
+      .execute();
+    await stageRenditionCleanup(transaction as typeof input.db, {
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      reason: 'event-media-removed',
+      renditions,
+    });
+    const deleted = await transaction
+      .deleteFrom('event_media_assets')
+      .where('id', '=', asset.id)
+      .where('tenant_id', '=', input.tenantId)
+      .executeTakeFirst();
+    return Number(deleted.numDeletedRows) === 1;
+  });
 }
 
 export async function streamEventMediaRendition(db: Database, renditionId: string) {

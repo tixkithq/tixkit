@@ -15,7 +15,7 @@ use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
-pub const TIXKIT_API_VERSION: &str = "2026-01-01";
+pub const TIXKIT_API_VERSION: &str = "2026-07-13";
 
 type HmacSha256 = Hmac<Sha256>;
 type BoxStreamResult<T> = Pin<Box<dyn Stream<Item = Result<T, TixkitError>> + Send>>;
