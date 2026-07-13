@@ -485,7 +485,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/self-hosting/backups-and-restore": {
     sourcePath: "docs/public/self-hosting/backups-and-restore.mdx",
-    frontmatter: {"title":"Back up and restore Tixkit","description":"Protect relational data and object artifacts with measured, rehearsed recovery procedures.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-12","prerequisites":["Backup destinations isolated from the primary failure domain"],"related":["/self-hosting/compact","/self-hosting/databases","/operations/incidents"]},
+    frontmatter: {"title":"Back up and restore Tixkit","description":"Protect relational data and object artifacts with measured, rehearsed recovery procedures.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"runbook","status":"beta","owner":"platform-operations","last_verified":"2026-07-13","prerequisites":["Backup destinations isolated from the primary failure domain"],"related":["/self-hosting/compact","/self-hosting/databases","/operations/incidents"]},
     headings: [{"id":"backup","text":"Backup","level":2},{"id":"restore-rehearsal","text":"Restore rehearsal","level":2},{"id":"production-recovery-contract","text":"Production recovery contract","level":2},{"id":"staged-restore-and-cutover","text":"Staged restore and cutover","level":2},{"id":"migration-rollback-rehearsal","text":"Migration rollback rehearsal","level":2}],
     load: () => import("../../../../docs/public/self-hosting/backups-and-restore.mdx"),
   },

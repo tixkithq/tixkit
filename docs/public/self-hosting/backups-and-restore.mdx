@@ -7,7 +7,7 @@ product_area: self-hosting
 content_type: runbook
 status: beta
 owner: platform-operations
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 prerequisites:
   - Backup destinations isolated from the primary failure domain
 related:
@@ -38,9 +38,15 @@ Use `bun run dr:backup:production` with executable `DR_QUIESCE_COMMAND` and `DR_
 
 Each artifact has a mandatory SHA-256 sidecar and a signed, versioned manifest binding its name, kind, size, checksum, recovery point, source release, encryption policy, and independent-destination class. A checksum without a valid manifest signature is insufficient. The Production bundle additionally requires `DR_BACKUP_PUBLISH_COMMAND`, `DR_BACKUP_RECEIPT_VERIFY_COMMAND`, and `DR_BACKUP_RETRIEVE_COMMAND`: the publisher must return an immutable provider receipt with different plaintext/ciphertext hashes and a provider signature, the provider-specific verifier must cryptographically validate that receipt, and retrieval must reproduce the signed plaintext exactly. Plaintext staging is then removed. Merely setting an “encrypted” environment label is not accepted as proof.
 
+Backup output directories must be caller-owned and mode `0700` or stricter. Artifacts and sidecars are published exclusively at mode `0600`; existing paths, symlinks, inode substitution, concurrent publication, and partial publisher/retriever failures fail closed. Provider hooks execute with an explicit environment allowlist and never receive the manifest signing key.
+
 ## Staged restore and cutover
 
 Never point a restore command at the active database or bucket. PostgreSQL and MySQL restores require `DR_ISOLATED_TARGET=1` and reject a non-empty target before mutation. PostgreSQL restores are transactional. Object restore requires a new `RESTORE_S3_BUCKET`, rejects traversal, links, devices, duplicate paths, and oversized expansion before extraction, mirrors with deletion semantics, and requires an exact post-copy diff.
+
+Production MySQL recovery additionally requires verified-identity TLS, an authenticated short-lived provisioning receipt, `DR_MYSQL_TARGET_LEASE_COMMAND`, `DR_MYSQL_TARGET_LEASE_VERIFY_COMMAND`, and `DR_MYSQL_FAILED_RESTORE_CLEANUP_COMMAND`. The lease holder must atomically consume the provisioning nonce and hold or renew an exclusive provider lease bound to the artifact SHA-256, opaque restore target ID, server UUID, database, and unique attempt ID. Tixkit verifies the lease before import, periodically during import, after import, and before evidence; loss or expiry terminates the import and requires independently checked cleanup. The lease is released only after signed evidence or verified cleanup. A boolean “isolated” assertion or an empty-table query alone is not sufficient.
+
+Production object recovery requires workload identity, metadata restore, a run-owned bucket-creation receipt, independent ownership verification, remote inventory reconciliation, and failed-bucket cleanup plus independent absence verification. Destructive cleanup is armed only after the ownership verifier binds the exact endpoint, bucket, and restore-run nonce. An existing bucket or a failure before ownership proof is never cleanup-authorized. Metadata hooks never receive the reconciliation output path; the inventory verifier returns its result on stdout and the parent exclusively writes mode-`0600` evidence binding the verifier hash and signed inventory.
 
 Every restore requires an executable `DR_VERIFY_COMMAND`. This verifier must check tenant/event/order/ticket/payment invariants, owned object references and checksums, Temporal visibility/replay expectations, API and worker health, and representative checkout, webhook, check-in, and export behavior. When `DR_EVIDENCE_FILE` and `DR_INCIDENT_AT` are supplied, the restore signs evidence binding the artifact, target, source/target releases, verifier hash, recovery point, execution duration, measured RPO, and incident-to-recovery RTO. Future incident timestamps are rejected.
 
@@ -52,4 +58,4 @@ After review of the signed aggregate `production.json`, use `bun run dr:promote-
 
 `bun run dr:migration-rehearsal` requires three distinct URLs: source, empty forward clone, and empty rollback clone. Supply separate opaque `FORWARD_TARGET_ID` and `ROLLBACK_TARGET_ID` values for evidence. It backs up the source, restores and verifies the forward clone, executes the real forward migration without loading `.env.local`, verifies the new version, then restores and verifies a second old-version clone. `DR_EXPECT_FORWARD_FAILURE=1` exercises failure injection and still executes restore-based rollback. PostgreSQL and MySQL must each pass this rehearsal.
 
-These commands make local and production-like drills reproducible. C-037 remains incomplete until the trusted runner and EPYC lab execute them against real Postgres, MySQL, object storage, Temporal backup references, and application verification commands, with the resulting non-secret evidence retained.
+These commands make local and production-like drills reproducible. The repository safety suite proves the fail-closed contracts with controlled adapters, including concurrent MySQL lease contention and object cleanup authorization; it is not provider or production proof. C-037 and C-119 remain incomplete until the trusted runner and EPYC lab execute them against real Postgres, MySQL, object storage, Temporal backup references, and application verification commands, with the resulting non-secret evidence retained.
