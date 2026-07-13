@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openApiSpec } from '../packages/openapi/src/index.js';
 import {
   API_PROVENANCE_EXCLUSIONS,
-  collectApiReleaseProvenance,
+  collectCommittedApiReleaseProvenance,
 } from './lib/api-release-provenance.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,6 +18,7 @@ const distributionPath =
     ? resolve(root, 'distribution/public-distribution.json')
     : resolve(process.argv[distributionArgument + 1] ?? '');
 const distribution = JSON.parse(readFileSync(distributionPath, 'utf8'));
+const allowRecordedSource = process.argv.includes('--allow-recorded-source');
 const activeVersion = openApiSpec.info.version;
 const declaredApiContracts = distribution.release.contracts.filter((path: string) =>
   path.startsWith('artifacts/api/'),
@@ -28,7 +29,26 @@ if (!declaredApiContracts.includes(activeContract)) {
   violations.push(`active API contract is not manifest-declared: ${activeContract}`);
 }
 
-const expected = await collectApiReleaseProvenance(root);
+let validatedSourceCommit = '';
+let recordedOnly = false;
+function gitObjectType(objectId: string): string | undefined {
+  try {
+    return execFileSync('git', ['cat-file', '-t', objectId], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch (error) {
+    const failure = error as { status?: number; stderr?: Buffer | string };
+    const stderr = String(failure.stderr ?? '');
+    if (
+      failure.status === 128 &&
+      /could not get object info|not a valid object name/iu.test(stderr)
+    )
+      return undefined;
+    throw error;
+  }
+}
 for (const contract of declaredApiContracts) {
   const releaseDirectory = resolve(root, contract);
   if (!existsSync(releaseDirectory)) {
@@ -42,18 +62,57 @@ for (const contract of declaredApiContracts) {
   if (manifest.apiVersion !== contractVersion)
     violations.push(`${contract}: apiVersion does not match its versioned path`);
   if (contract === activeContract) {
-    if (manifest.commit !== expected.headCommit)
-      violations.push('release commit does not match HEAD');
-    if (manifest.timestamp !== expected.headTimestamp)
-      violations.push('release timestamp does not match HEAD');
-    if (manifest.provenance?.sourceCommit !== expected.headCommit)
-      violations.push('provenance sourceCommit does not match HEAD');
-    if (manifest.provenance?.headTreeHash !== expected.headTreeHash)
-      violations.push('provenance headTreeHash does not match HEAD');
-    if (manifest.provenance?.sourceTreeHash !== expected.sourceTreeHash)
-      violations.push('provenance sourceTreeHash does not match repository inputs');
-    if (manifest.provenance?.trackedFileCount !== expected.inputCount)
-      violations.push('provenance trackedFileCount does not match repository inputs');
+    const sourceCommit = manifest.provenance?.sourceCommit;
+    if (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/u.test(sourceCommit))
+      violations.push('provenance sourceCommit is not a canonical SHA-1 commit identifier');
+    if (
+      typeof manifest.provenance?.headTreeHash !== 'string' ||
+      !/^[a-f0-9]{40}$/u.test(manifest.provenance.headTreeHash)
+    )
+      violations.push('provenance headTreeHash is not a canonical SHA-1 tree identifier');
+    if (
+      typeof manifest.provenance?.sourceTreeHash !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(manifest.provenance.sourceTreeHash)
+    )
+      violations.push('provenance sourceTreeHash is not a SHA-256 digest');
+    if (
+      !Number.isSafeInteger(manifest.provenance?.trackedFileCount) ||
+      manifest.provenance.trackedFileCount < 1
+    )
+      violations.push('provenance trackedFileCount is invalid');
+    let expected: ReturnType<typeof collectCommittedApiReleaseProvenance> | undefined;
+    try {
+      const objectType = typeof sourceCommit === 'string' ? gitObjectType(sourceCommit) : undefined;
+      if (objectType === 'commit') {
+        expected = collectCommittedApiReleaseProvenance(root, sourceCommit);
+        validatedSourceCommit = expected.headCommit;
+      } else if (objectType) {
+        violations.push('provenance sourceCommit resolves to an object that is not a commit');
+      } else if (allowRecordedSource && typeof sourceCommit === 'string') {
+        recordedOnly = true;
+        validatedSourceCommit = sourceCommit;
+      } else {
+        violations.push(
+          'provenance source commit is unavailable; use --allow-recorded-source only for shallow or exported repository integrity checks',
+        );
+      }
+    } catch {
+      violations.push(
+        'recorded source commit exists but its provenance could not be reconstructed',
+      );
+    }
+    if (manifest.commit !== manifest.provenance?.sourceCommit)
+      violations.push('release commit does not match provenance sourceCommit');
+    if (expected && manifest.timestamp !== expected.headTimestamp)
+      violations.push('release timestamp does not match recorded source commit');
+    if (expected && manifest.provenance?.sourceCommit !== expected.headCommit)
+      violations.push('provenance sourceCommit is not canonical');
+    if (expected && manifest.provenance?.headTreeHash !== expected.headTreeHash)
+      violations.push('provenance headTreeHash does not match recorded source commit');
+    if (expected && manifest.provenance?.sourceTreeHash !== expected.sourceTreeHash)
+      violations.push('provenance sourceTreeHash does not match recorded source inputs');
+    if (expected && manifest.provenance?.trackedFileCount !== expected.inputCount)
+      violations.push('provenance trackedFileCount does not match recorded source inputs');
     if (
       JSON.stringify(manifest.provenance?.excludedGeneratedPaths) !==
       JSON.stringify(API_PROVENANCE_EXCLUSIONS)
@@ -86,5 +145,7 @@ if (violations.length > 0) {
   throw new Error(`API release provenance validation failed:\n${violations.join('\n')}`);
 }
 process.stdout.write(
-  `Validated publishable API release ${activeVersion} for ${expected.headCommit}.\n`,
+  recordedOnly
+    ? `Validated API artifact integrity for ${activeVersion}; source provenance ${validatedSourceCommit} is recorded but unverified and is not sufficient for publication.\n`
+    : `Validated publishable API release ${activeVersion} for ${validatedSourceCommit}.\n`,
 );

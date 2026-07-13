@@ -13,7 +13,7 @@ test('defines the complete independent public repository validation sequence', (
     ['bun', ['run', 'lint', '--force']],
     ['bun', ['run', 'typecheck', '--force']],
     ['bun', ['run', 'test:unit']],
-    ['bun', ['scripts/validate-api-release-provenance.ts']],
+    ['bun', ['scripts/validate-api-release-provenance.ts', '--allow-recorded-source']],
     ['git', ['restore', '--worktree', '--', 'artifacts/api', 'apps/docs/public/contracts']],
     ['bun', ['run', 'build']],
     ['node', ['packages/cli/dist/index.js', '--help']],
