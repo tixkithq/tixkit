@@ -473,6 +473,158 @@ export class ImportRepository extends BaseRepository {
       .executeTakeFirst();
   }
 
+  findPortableImportLineageCheckpoint(input: {
+    tenantId: string;
+    organizationId: string;
+    destinationId: string;
+    sourceDeploymentId: string;
+    sourceTenantId: string;
+    sourceOrganizationId?: string;
+    lock?: boolean;
+  }) {
+    let query = this.db
+      .selectFrom('portable_import_lineage_checkpoints')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('destination_id', '=', input.destinationId)
+      .where('source_deployment_id', '=', input.sourceDeploymentId)
+      .where('source_tenant_id', '=', input.sourceTenantId)
+      .where('source_organization_id', '=', input.sourceOrganizationId ?? '');
+    if (input.lock) query = query.forUpdate();
+    return query.executeTakeFirst();
+  }
+
+  async assertPortableImportLineageEligible(input: {
+    tenantId: string;
+    organizationId: string;
+    destinationId: string;
+    sourceDeploymentId: string;
+    sourceTenantId: string;
+    sourceOrganizationId?: string;
+    lineageKind: 'full' | 'delta';
+    exportSequence: number;
+    parentBundleId?: string;
+    parentManifestSha256?: string;
+    fromChangeCursor?: string;
+  }): Promise<void> {
+    const checkpoint = await this.findPortableImportLineageCheckpoint(input);
+    if (checkpoint?.cutover_frozen_at) throw new Error('PORTABLE_IMPORT_LINEAGE_CUTOVER_FINALIZED');
+    if (input.lineageKind === 'full') {
+      if (checkpoint) throw new Error('PORTABLE_IMPORT_LINEAGE_REBASE_REQUIRED');
+      return;
+    }
+    if (
+      !checkpoint ||
+      checkpoint.last_bundle_id !== input.parentBundleId ||
+      checkpoint.last_manifest_sha256 !== input.parentManifestSha256 ||
+      checkpoint.last_change_cursor !== input.fromChangeCursor ||
+      input.exportSequence <= checkpoint.last_export_sequence
+    )
+      throw new Error('PORTABLE_IMPORT_LINEAGE_PARENT_NOT_ACTIVATED');
+  }
+
+  async advancePortableImportLineageCheckpoint(input: {
+    tenantId: string;
+    organizationId: string;
+    jobId: string;
+    destinationId: string;
+    sourceDeploymentId: string;
+    sourceTenantId: string;
+    sourceOrganizationId?: string;
+    lineageKind: 'full' | 'delta';
+    bundleId: string;
+    manifestSha256: string;
+    changeCursor: string;
+    exportSequence: number;
+    parentBundleId?: string;
+    parentManifestSha256?: string;
+    fromChangeCursor?: string;
+    cutoverFrozenAt?: Date;
+    activatedAt: Date;
+  }): Promise<void> {
+    if (
+      !Number.isSafeInteger(input.exportSequence) ||
+      input.exportSequence < 1 ||
+      !/^[a-f0-9]{64}$/u.test(input.manifestSha256)
+    )
+      throw new Error('PORTABLE_IMPORT_LINEAGE_INVALID');
+    const checkpoint = await this.findPortableImportLineageCheckpoint({ ...input, lock: true });
+    if (checkpoint?.cutover_frozen_at) throw new Error('PORTABLE_IMPORT_LINEAGE_CUTOVER_FINALIZED');
+    if (input.lineageKind === 'delta') {
+      if (
+        !checkpoint ||
+        checkpoint.last_bundle_id !== input.parentBundleId ||
+        checkpoint.last_manifest_sha256 !== input.parentManifestSha256 ||
+        checkpoint.last_change_cursor !== input.fromChangeCursor ||
+        input.exportSequence <= checkpoint.last_export_sequence
+      )
+        throw new Error('PORTABLE_IMPORT_LINEAGE_STALE');
+    } else if (checkpoint) {
+      throw new Error('PORTABLE_IMPORT_LINEAGE_REBASE_REQUIRED');
+    }
+    const now = input.activatedAt;
+    if (!checkpoint) {
+      const scopeSha256 = createHash('sha256')
+        .update(
+          [
+            input.tenantId,
+            input.organizationId,
+            input.destinationId,
+            input.sourceDeploymentId,
+            input.sourceTenantId,
+            input.sourceOrganizationId ?? '',
+          ].join('\0'),
+        )
+        .digest('hex');
+      try {
+        await this.db
+          .insertInto('portable_import_lineage_checkpoints')
+          .values({
+            id: `pil_${scopeSha256.slice(0, 32)}`,
+            tenant_id: input.tenantId,
+            organization_id: input.organizationId,
+            destination_id: input.destinationId,
+            source_deployment_id: input.sourceDeploymentId,
+            source_tenant_id: input.sourceTenantId,
+            source_organization_id: input.sourceOrganizationId ?? '',
+            scope_sha256: scopeSha256,
+            last_bundle_id: input.bundleId,
+            last_manifest_sha256: input.manifestSha256,
+            last_change_cursor: input.changeCursor,
+            last_export_sequence: input.exportSequence,
+            last_import_job_id: input.jobId,
+            cutover_frozen_at: input.cutoverFrozenAt ?? null,
+            activated_at: now,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      } catch (error) {
+        if (isUniqueViolation(error))
+          throw new Error('PORTABLE_IMPORT_LINEAGE_STALE', { cause: error });
+        throw error;
+      }
+      return;
+    }
+    const result = await this.db
+      .updateTable('portable_import_lineage_checkpoints')
+      .set({
+        last_bundle_id: input.bundleId,
+        last_manifest_sha256: input.manifestSha256,
+        last_change_cursor: input.changeCursor,
+        last_export_sequence: input.exportSequence,
+        last_import_job_id: input.jobId,
+        cutover_frozen_at: input.cutoverFrozenAt ?? null,
+        activated_at: now,
+        updated_at: now,
+      })
+      .where('id', '=', checkpoint.id)
+      .where('last_manifest_sha256', '=', checkpoint.last_manifest_sha256)
+      .executeTakeFirst();
+    if (Number(result.numUpdatedRows) !== 1) throw new Error('PORTABLE_IMPORT_LINEAGE_STALE');
+  }
+
   async recordPortableDryRunReceipt(input: {
     tenantId: string;
     organizationId: string;

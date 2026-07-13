@@ -1,0 +1,48 @@
+---
+title: API migration from 2026-07-16 to 2026-07-17
+description: Adopt durable exact-parent delta exports and final cutover receipts.
+audience: [developer]
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-17
+prerequisites: [An integration using API version 2026-07-16]
+related: [/reference/api-versions, /reference/api-release-train, /operators/migration-operations]
+---
+
+API version `2026-07-17` adds optional delta lineage to configuration portability exports. Existing full and historical export requests remain compatible.
+
+Create and retain a successful full export through `POST /portable-exports`. For the next configuration export, call `POST /portable-delta-exports` and pass the durable job identifier as `parentExportJobId`:
+
+```json
+{
+  "organizationId": "org_01",
+  "mode": "configuration",
+  "parentExportJobId": "pex_full_01"
+}
+```
+
+Tixkit reopens the immutable parent artifact, verifies its stored size and checksum, validates its Ed25519 signature and internal lineage, and requires the parent to belong to the same tenant, organization and source deployment. The new signed manifest binds the exact parent bundle, manifest SHA-256 and change cursor. Export sequence numbers are strictly increasing but may contain gaps after failed builds; identity comes from the signed parent tuple, not arithmetic adjacency.
+
+For the final delta after source writes are frozen, include the separately produced freeze receipt:
+
+```json
+{
+  "organizationId": "org_01",
+  "mode": "configuration",
+  "parentExportJobId": "pex_delta_01",
+  "cutoverFreeze": {
+    "frozenAt": "2026-07-17T12:00:00.000Z",
+    "receiptSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}
+```
+
+`cutoverFreeze` is invalid without `parentExportJobId`. Historical exports cannot use delta lineage. Every request still requires `Idempotency-Key`; the parent and freeze receipt participate in the immutable request fingerprint, so substitution under the same key fails closed. The receipt hash is a signed manifest commitment, not destination authorization by itself. The destination separately validates its short-lived signed `PortableCutoverProof` before commit. Activating that final delta makes the destination lineage terminal: later deltas and implicit full-snapshot rebaselines fail closed. A new baseline requires a future explicit operator-authorized rebase protocol.
+
+The runtime data schema advances to `0080` for durable destination lineage checkpoints. Destinations may import a signed `0079` parent followed by an `0080` delta, but newly produced exports require destination compatibility with `0080`. Keep the bundle-signing key pinned for the complete cutover chain; the current exporter does not support changing that key between a parent and successor.
+
+The JavaScript SDK models full, delta and final-delta requests as a discriminated union. Other SDKs retain their existing raw HTTP facilities until typed portability helpers are added. This candidate is unpublished and remains protected-release approval-gated.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion` and the `X-Tixkit-API-Version` delivery-attempt header now report `2026-07-17`.

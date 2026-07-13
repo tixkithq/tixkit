@@ -77,3 +77,4 @@ export { MediaObjectCleanupJobsMigration } from './0076_media_object_cleanup_job
 export { PortableImportCutoverProofsMigration } from './0077_portable_import_cutover_proofs.js';
 export { PortableExportAuthorizationsMigration } from './0078_portable_export_authorizations.js';
 export { PortableRebindingAuthoritiesMigration } from './0079_portable_rebinding_authorities.js';
+export { PortableImportLineageCheckpointsMigration } from './0080_portable_import_lineage_checkpoints.js';

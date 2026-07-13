@@ -1224,6 +1224,49 @@ export async function activatePortableImport(input: {
             currentReportSha256 !== reconciliationData.reportSha256
           )
             throw new Error('PORTABLE_IMPORT_ACTIVATION_RECONCILIATION_REQUIRED');
+          const lineagePreflight = await repository.findPortablePreflight(
+            input.tenantId,
+            input.organizationId,
+            input.jobId,
+          );
+          if (!lineagePreflight) throw new Error('PORTABLE_IMPORT_ACTIVATION_PREFLIGHT_REQUIRED');
+          const lineageManifest = parsePortableJson(
+            lineagePreflight.manifest_json,
+          ) as PortableBundleManifest;
+          await repository.advancePortableImportLineageCheckpoint({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            jobId: input.jobId,
+            destinationId: lineagePreflight.destination_id,
+            sourceDeploymentId: lineageManifest.source.deploymentId,
+            sourceTenantId: lineageManifest.source.tenantId,
+            ...(lineageManifest.source.organizationId
+              ? { sourceOrganizationId: lineageManifest.source.organizationId }
+              : {}),
+            lineageKind: lineageManifest.lineage.kind,
+            bundleId: lineageManifest.bundleId,
+            manifestSha256: lineagePreflight.manifest_sha256,
+            changeCursor: lineageManifest.lineage.toChangeCursor,
+            exportSequence: lineageManifest.source.exportSequence,
+            ...(lineageManifest.lineage.parentBundleId
+              ? { parentBundleId: lineageManifest.lineage.parentBundleId }
+              : {}),
+            ...(lineageManifest.lineage.parentManifestSha256
+              ? { parentManifestSha256: lineageManifest.lineage.parentManifestSha256 }
+              : {}),
+            ...(lineageManifest.lineage.fromChangeCursor
+              ? { fromChangeCursor: lineageManifest.lineage.fromChangeCursor }
+              : {}),
+            ...((lineageManifest.lineage.cutoverFreeze?.frozenAt ?? lineageManifest.source.frozenAt)
+              ? {
+                  cutoverFrozenAt: new Date(
+                    lineageManifest.lineage.cutoverFreeze?.frozenAt ??
+                      lineageManifest.source.frozenAt!,
+                  ),
+                }
+              : {}),
+            activatedAt: input.now ?? new Date(),
+          });
           const changed = await repository.transitionJob({
             tenantId: input.tenantId,
             organizationId: input.organizationId,
@@ -1251,18 +1294,25 @@ export async function activatePortableImport(input: {
     } catch (error) {
       const databaseError = error as {
         code?: string;
+        number?: number;
         errno?: number;
-        cause?: { code?: string; errno?: number };
+        cause?: { code?: string; number?: number; errno?: number };
       };
       const code = databaseError.code ?? databaseError.cause?.code;
+      const number = databaseError.number ?? databaseError.cause?.number;
       const errno = databaseError.errno ?? databaseError.cause?.errno;
       const retryable =
         code === '40001' ||
         code === '40P01' ||
+        code === '23505' ||
         code === 'ER_LOCK_DEADLOCK' ||
         code === 'ER_LOCK_WAIT_TIMEOUT' ||
+        code === 'ER_DUP_ENTRY' ||
         errno === 1213 ||
-        errno === 1205;
+        errno === 1205 ||
+        errno === 1062 ||
+        number === 2601 ||
+        number === 2627;
       if (!retryable || attempt === 4) throw error;
     }
   }

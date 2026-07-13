@@ -112,6 +112,10 @@ export const documentationNavigation = [
         label: 'Migrate 2026-07-15 to 2026-07-16',
         routeId: 'apiMigration20260715To20260716',
       },
+      {
+        label: 'Adopt 2026-07-17 delta exports',
+        routeId: 'apiMigration20260716To20260717',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

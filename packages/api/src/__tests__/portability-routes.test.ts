@@ -134,6 +134,66 @@ describe('portable export route authorization and delivery', () => {
     await app.close();
   });
 
+  it('forwards exact-parent delta lineage and a final cutover receipt', async () => {
+    const bytes = new TextEncoder().encode('{"portable":"delta"}');
+    const exportConfiguration = vi.fn(async () => ({
+      jobId: 'pex_route_delta_01',
+      bundleId: 'bundle_route_delta_01',
+      bytes,
+    }));
+    const app = await testApp({
+      principal: principal(),
+      service: { exportConfiguration, exportHistorical: vi.fn() },
+    });
+    const cutoverFreeze = {
+      frozenAt: '2026-07-17T12:00:00.000Z',
+      receiptSha256: 'a'.repeat(64),
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: '/portable-delta-exports',
+      headers: { 'idempotency-key': 'route-final-delta' },
+      payload: {
+        organizationId,
+        parentExportJobId: 'pex_route_parent_01',
+        cutoverFreeze,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(exportConfiguration).toHaveBeenCalledWith({
+      tenantId,
+      organizationId,
+      requestedBy: 'user_portability_admin',
+      idempotencyKey: 'route-final-delta',
+      parentExportJobId: 'pex_route_parent_01',
+      cutoverFreeze,
+    });
+    await app.close();
+  });
+
+  it('rejects a cutover receipt without a delta parent', async () => {
+    const exportConfiguration = vi.fn();
+    const app = await testApp({
+      principal: principal(),
+      service: { exportConfiguration, exportHistorical: vi.fn() },
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/portable-exports',
+      headers: { 'idempotency-key': 'route-invalid-cutover' },
+      payload: {
+        organizationId,
+        cutoverFreeze: {
+          frozenAt: '2026-07-17T12:00:00.000Z',
+          receiptSha256: 'a'.repeat(64),
+        },
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(exportConfiguration).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('requires and forwards a principal-bound authorization for historical export', async () => {
     const bytes = new TextEncoder().encode('{"historical":true}');
     const exportHistorical = vi.fn(async () => ({

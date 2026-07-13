@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-16';
+export const TIXKIT_API_VERSION = '2026-07-17';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -2533,7 +2533,20 @@ export type PortableHistoricalExportAuthorization = {
 };
 
 export type CreatePortableExportInput =
-  | { organizationId: string; mode?: 'configuration'; idempotencyKey: string }
+  | {
+      organizationId: string;
+      mode?: 'configuration';
+      idempotencyKey: string;
+      parentExportJobId?: never;
+      cutoverFreeze?: never;
+    }
+  | {
+      organizationId: string;
+      mode?: 'configuration';
+      idempotencyKey: string;
+      parentExportJobId: string;
+      cutoverFreeze?: { frozenAt: string; receiptSha256: string };
+    }
   | {
       organizationId: string;
       mode: 'historical';
@@ -4177,7 +4190,8 @@ class PortabilityResource {
 
   createExport(input: CreatePortableExportInput): Promise<Response> {
     const { idempotencyKey, ...body } = input;
-    return this.client.requestRaw('POST', '/portable-exports', {
+    const path = 'parentExportJobId' in input ? '/portable-delta-exports' : '/portable-exports';
+    return this.client.requestRaw('POST', path, {
       body,
       idempotencyKey,
     });

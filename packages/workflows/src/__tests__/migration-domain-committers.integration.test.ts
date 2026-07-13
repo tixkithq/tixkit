@@ -2114,6 +2114,41 @@ describeDatabase('production migration committers', () => {
       byteSize: upload.byteLength,
       sha256: checksum,
     });
+    const portableTrust = ({
+      tenantId: destinationTenantId,
+      organizationId: destinationOrganizationId,
+    }: {
+      tenantId: string;
+      organizationId: string;
+    }) => ({
+      destination: {
+        deploymentId: 'deployment_destination',
+        apiVersion: '2026-01-01',
+        dataSchemaVersion: '0067',
+        capabilities: ['portable-bundle-v1'],
+        entitlements: [],
+        availableStorageBytes: 1024 * 1024,
+        acceptedSourceOperatingModels: ['self-hosted' as const],
+      },
+      trustedBundleKeys: new Map([['bundle_key_01', activeBundlePublicKey]]),
+      trustedPayloadKeys: new Map([['payload_key_01', payloadKeys.publicKey]]),
+      trustedPayloadPolicies: new Map([
+        [
+          'organizations' as const,
+          {
+            schemaId: receipt.schemaId,
+            schemaSha256: receipt.schemaSha256,
+            policySha256: receipt.policySha256,
+            scannerId: receipt.scannerId,
+            keyId: receipt.keyId,
+          },
+        ],
+      ]),
+      trustedMediaKeys: new Map(),
+      trustedMediaPolicies: new Map(),
+      destinationTenantId,
+      destinationOrganizationId,
+    });
     const service = createMigrationPreparationService(
       db,
       { resolve: vi.fn() },
@@ -2129,38 +2164,7 @@ describeDatabase('production migration committers', () => {
               })(),
             })),
           }) as never,
-        portableTrust: ({
-          tenantId: destinationTenantId,
-          organizationId: destinationOrganizationId,
-        }) => ({
-          destination: {
-            deploymentId: 'deployment_destination',
-            apiVersion: '2026-01-01',
-            dataSchemaVersion: '0067',
-            capabilities: ['portable-bundle-v1'],
-            entitlements: [],
-            availableStorageBytes: 1024 * 1024,
-            acceptedSourceOperatingModels: ['self-hosted'],
-          },
-          trustedBundleKeys: new Map([['bundle_key_01', activeBundlePublicKey]]),
-          trustedPayloadKeys: new Map([['payload_key_01', payloadKeys.publicKey]]),
-          trustedPayloadPolicies: new Map([
-            [
-              'organizations',
-              {
-                schemaId: receipt.schemaId,
-                schemaSha256: receipt.schemaSha256,
-                policySha256: receipt.policySha256,
-                scannerId: receipt.scannerId,
-                keyId: receipt.keyId,
-              },
-            ],
-          ]),
-          trustedMediaKeys: new Map(),
-          trustedMediaPolicies: new Map(),
-          destinationTenantId,
-          destinationOrganizationId,
-        }),
+        portableTrust,
       },
     );
     await expect(
@@ -2198,6 +2202,156 @@ describeDatabase('production migration committers', () => {
       attributes: { name: 'Portable organization 1' },
     });
     expect(rows[0]?.status).toBe('validated');
+
+    const deltaManifest: PortableBundleManifest = {
+      ...manifest,
+      bundleId: 'bundle_workflow_integration_delta_01',
+      source: {
+        ...manifest.source,
+        exportSequence: 7,
+        changeCursor: 'cursor_02',
+      },
+      exportedAt: '2026-07-12T18:05:00.000Z',
+      lineage: {
+        kind: 'delta',
+        fromChangeCursor: manifest.lineage.toChangeCursor,
+        toChangeCursor: 'cursor_02',
+        parentBundleId: manifest.bundleId,
+        parentManifestSha256: portableManifestSha256(manifest),
+      },
+    };
+    const deltaEnvelope = {
+      manifest: deltaManifest,
+      signature: signPortableManifest(deltaManifest, 'bundle_key_01', bundleKeys.privateKey),
+    };
+    const deltaUpload = Buffer.from(
+      JSON.stringify({
+        envelope: deltaEnvelope,
+        parentEnvelope: envelope,
+        payloads: { [file.path]: payload.toString('base64') },
+      }),
+    );
+    const deltaArtifactId = `upl_portable_delta_${Date.now()}`;
+    const deltaObjectKey = `uploads/${tenantId}/${deltaArtifactId}.json`;
+    const deltaChecksum = createHash('sha256').update(deltaUpload).digest('hex');
+    await db
+      .insertInto('upload_artifacts')
+      .values({
+        id: deltaArtifactId,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: null,
+        event_id: null,
+        created_by_user_id: null,
+        purpose: 'migration_import',
+        status: 'uploaded',
+        scan_status: 'clean',
+        scan_result: null,
+        bucket: 'tixkit',
+        object_key: deltaObjectKey,
+        file_name: 'portable-delta-bundle.json',
+        content_type: 'application/json',
+        size_bytes: deltaUpload.byteLength,
+        checksum_sha256: deltaChecksum,
+        client_token_hash: null,
+        metadata: '{}',
+        consumed_by_checkout_session_id: null,
+        consumed_at: null,
+        expires_at: new Date(Date.now() + 60_000),
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+    const deltaJob = await repository.createJob({
+      tenantId,
+      organizationId,
+      sourceSystem: 'tixkit-portable',
+      adapterVersion: 'tixkit-portable-bundle-v1',
+      mode: 'dry-run',
+      idempotencyKey: 'portable-workflow-delta-integration',
+      requestedBy: 'test-user',
+      configuration: {
+        sourceMode: 'official-export',
+        sourceSystem: 'tixkit-portable',
+        artifactIds: [deltaArtifactId],
+      },
+    });
+    await repository.addFile({
+      tenantId,
+      organizationId,
+      jobId: deltaJob.id,
+      objectKey: deltaObjectKey,
+      originalName: 'portable-delta-bundle.json',
+      mediaType: 'application/json',
+      byteSize: deltaUpload.byteLength,
+      sha256: deltaChecksum,
+    });
+    const deltaService = createMigrationPreparationService(
+      db,
+      { resolve: vi.fn() },
+      {
+        signal: new AbortController().signal,
+        heartbeat: vi.fn(),
+        cursorEncryptionKey: Buffer.alloc(32, 7).toString('base64'),
+        createS3Client: () =>
+          ({
+            send: vi.fn(async () => ({
+              Body: (async function* () {
+                yield deltaUpload;
+              })(),
+            })),
+          }) as never,
+        portableTrust,
+      },
+    );
+    await expect(
+      deltaService.prepare({ tenantId, organizationId, jobId: deltaJob.id, chunkSize: 1 }),
+    ).rejects.toThrow('PORTABLE_IMPORT_LINEAGE_PARENT_NOT_ACTIVATED');
+    await repository.advancePortableImportLineageCheckpoint({
+      tenantId,
+      organizationId,
+      jobId: job.id,
+      destinationId: 'deployment_destination',
+      sourceDeploymentId: manifest.source.deploymentId,
+      sourceTenantId: manifest.source.tenantId,
+      lineageKind: 'full',
+      bundleId: manifest.bundleId,
+      manifestSha256: portableManifestSha256(manifest),
+      changeCursor: manifest.lineage.toChangeCursor,
+      exportSequence: manifest.source.exportSequence,
+      activatedAt: new Date('2026-07-12T18:04:00.000Z'),
+    });
+    await expect(
+      deltaService.prepare({ tenantId, organizationId, jobId: deltaJob.id, chunkSize: 1 }),
+    ).resolves.toEqual({ processed: 1, completed: false });
+    await expect(
+      repository.findPortablePreflight(tenantId, organizationId, deltaJob.id),
+    ).resolves.toMatchObject({
+      bundle_id: deltaManifest.bundleId,
+      manifest_sha256: portableManifestSha256(deltaManifest),
+      source_change_cursor: deltaManifest.lineage.toChangeCursor,
+    });
+    await repository.advancePortableImportLineageCheckpoint({
+      tenantId,
+      organizationId,
+      jobId: deltaJob.id,
+      destinationId: 'deployment_destination',
+      sourceDeploymentId: deltaManifest.source.deploymentId,
+      sourceTenantId: deltaManifest.source.tenantId,
+      lineageKind: 'delta',
+      bundleId: deltaManifest.bundleId,
+      manifestSha256: portableManifestSha256(deltaManifest),
+      changeCursor: deltaManifest.lineage.toChangeCursor,
+      exportSequence: deltaManifest.source.exportSequence,
+      parentBundleId: manifest.bundleId,
+      parentManifestSha256: portableManifestSha256(manifest),
+      fromChangeCursor: manifest.lineage.toChangeCursor,
+      cutoverFrozenAt: new Date('2026-07-12T18:06:00.000Z'),
+      activatedAt: new Date('2026-07-12T18:07:00.000Z'),
+    });
+    await expect(
+      deltaService.prepare({ tenantId, organizationId, jobId: deltaJob.id, chunkSize: 1 }),
+    ).rejects.toThrow('PORTABLE_IMPORT_LINEAGE_CUTOVER_FINALIZED');
 
     const unauthorizedCommitJob = await repository.createJob({
       tenantId,

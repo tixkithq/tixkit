@@ -25,6 +25,7 @@ import {
   parsePortableJson,
   portableManifestSha256,
   validatePortableManifest,
+  validatePortableLineage,
   verifyPortableManifestSignature,
   type HistoricalExportAuthorization,
   type SignedPortableBundle,
@@ -38,8 +39,8 @@ import {
 import sharp from 'sharp';
 
 const MAX_PORTABLE_ARTIFACT_BYTES = 50 * 1024 * 1024;
-const PORTABLE_EXPORT_API_VERSION = '2026-07-16';
-const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0079';
+const PORTABLE_EXPORT_API_VERSION = '2026-07-17';
+const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0080';
 
 function historicalAuthorizationClaim(authorization: {
   id: string;
@@ -284,15 +285,22 @@ function verifyRecoverableArtifact(
     historicalAuthorization?: HistoricalExportAuthorization;
     requiredEntitlements: readonly string[];
     signing: PortableExportSigningConfiguration;
+    acceptedCompatibilityPairs?: readonly Readonly<{
+      apiVersion: string;
+      dataSchemaVersion: string;
+    }>[];
+    expectedParentEnvelope?: SignedPortableBundle;
+    enforceExpectedParentEnvelope?: boolean;
   },
 ): { envelope: SignedPortableBundle; artifactSha256: string } {
   if (bytes.byteLength < 1 || bytes.byteLength > MAX_PORTABLE_ARTIFACT_BYTES)
     throw new Error('PORTABLE_EXPORT_ARTIFACT_EVIDENCE_MISMATCH');
   const decoded = parsePortableJson(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as {
     envelope?: SignedPortableBundle;
+    parentEnvelope?: SignedPortableBundle;
     payloads?: Record<string, string>;
   };
-  const { envelope, payloads } = decoded;
+  const { envelope, parentEnvelope, payloads } = decoded;
   try {
     if (envelope) validatePortableManifest(envelope.manifest);
   } catch {
@@ -307,8 +315,18 @@ function verifyRecoverableArtifact(
     envelope.manifest.source.organizationId !== input.organizationId ||
     Number(envelope.manifest.source.exportSequence) !== input.exportSequence ||
     envelope.manifest.mode !== input.mode ||
-    envelope.manifest.apiVersion !== PORTABLE_EXPORT_API_VERSION ||
-    envelope.manifest.dataSchemaVersion !== PORTABLE_EXPORT_DATA_SCHEMA_VERSION ||
+    !(
+      input.acceptedCompatibilityPairs ?? [
+        {
+          apiVersion: PORTABLE_EXPORT_API_VERSION,
+          dataSchemaVersion: PORTABLE_EXPORT_DATA_SCHEMA_VERSION,
+        },
+      ]
+    ).some(
+      (pair) =>
+        pair.apiVersion === envelope.manifest.apiVersion &&
+        pair.dataSchemaVersion === envelope.manifest.dataSchemaVersion,
+    ) ||
     canonicalPortableJson(envelope.manifest.compatibility.requiredEntitlements) !==
       canonicalPortableJson(input.requiredEntitlements) ||
     canonicalPortableJson(envelope.manifest.historicalAuthorization ?? null) !==
@@ -320,6 +338,21 @@ function verifyRecoverableArtifact(
       envelope.signature,
       createPublicKey(input.signing.bundlePrivateKey),
     )
+  )
+    throw new Error('PORTABLE_EXPORT_ARTIFACT_CONFLICT');
+  try {
+    validatePortableLineage(
+      envelope,
+      new Map([[input.signing.bundleKeyId, createPublicKey(input.signing.bundlePrivateKey)]]),
+      parentEnvelope,
+    );
+  } catch {
+    throw new Error('PORTABLE_EXPORT_ARTIFACT_CONFLICT');
+  }
+  if (
+    input.enforceExpectedParentEnvelope &&
+    canonicalPortableJson(parentEnvelope ?? null) !==
+      canonicalPortableJson(input.expectedParentEnvelope ?? null)
   )
     throw new Error('PORTABLE_EXPORT_ARTIFACT_CONFLICT');
   const expectedPaths = new Set(envelope.manifest.files.map(({ path }) => path));
@@ -353,6 +386,8 @@ export interface PortableExportService {
     organizationId: string;
     requestedBy: string;
     idempotencyKey: string;
+    parentExportJobId?: string;
+    cutoverFreeze?: { frozenAt: string; receiptSha256: string };
   }): Promise<{ jobId: string; bundleId: string; bytes: Uint8Array }>;
   exportHistorical(request: {
     tenantId: string;
@@ -379,6 +414,8 @@ export function createPortableExportService(input: {
     idempotencyKey: string;
     mode: 'configuration' | 'historical';
     authorizationId?: string;
+    parentExportJobId?: string;
+    cutoverFreeze?: { frozenAt: string; receiptSha256: string };
   }): Promise<{ jobId: string; bundleId: string; bytes: Uint8Array }> => {
     const requestFingerprint = createHash('sha256')
       .update(
@@ -387,6 +424,8 @@ export function createPortableExportService(input: {
           organizationId: request.organizationId,
           requestedBy: request.requestedBy,
           ...(request.authorizationId ? { authorizationId: request.authorizationId } : {}),
+          ...(request.parentExportJobId ? { parentExportJobId: request.parentExportJobId } : {}),
+          ...(request.cutoverFreeze ? { cutoverFreeze: request.cutoverFreeze } : {}),
           policy:
             request.mode === 'historical'
               ? 'tixkit-portable-historical-policy-v1'
@@ -404,6 +443,53 @@ export function createPortableExportService(input: {
       job.historical_authorization_id !== (request.authorizationId ?? null)
     )
       throw new Error('PORTABLE_EXPORT_IMMUTABLE_EVIDENCE_MISMATCH');
+    if (request.mode === 'historical' && (request.parentExportJobId || request.cutoverFreeze))
+      throw new Error('PORTABLE_EXPORT_LINEAGE_INVALID');
+    if (request.cutoverFreeze && !request.parentExportJobId)
+      throw new Error('PORTABLE_EXPORT_LINEAGE_INVALID');
+    let parentEnvelope: SignedPortableBundle | undefined;
+    if (request.parentExportJobId) {
+      const parent = await input.db
+        .selectFrom('portable_export_jobs')
+        .selectAll()
+        .where('tenant_id', '=', request.tenantId)
+        .where('organization_id', '=', request.organizationId)
+        .where('id', '=', request.parentExportJobId)
+        .executeTakeFirst();
+      if (
+        !parent ||
+        parent.status !== 'completed' ||
+        parent.mode !== 'configuration' ||
+        Number(parent.export_sequence) >= Number(job.export_sequence) ||
+        !parent.manifest_sha256 ||
+        !parent.source_change_cursor
+      )
+        throw new Error('PORTABLE_EXPORT_LINEAGE_PARENT_INVALID');
+      const parentBytes = await input.store.get(
+        artifactKey({
+          tenantId: request.tenantId,
+          organizationId: request.organizationId,
+          jobId: parent.id,
+        }),
+      );
+      verifyPersistedArtifact(parentBytes, parent);
+      const recoveredParent = verifyRecoverableArtifact(parentBytes, {
+        bundleId: parent.bundle_id,
+        tenantId: request.tenantId,
+        organizationId: request.organizationId,
+        exportSequence: Number(parent.export_sequence),
+        mode: 'configuration',
+        requiredEntitlements: [],
+        signing: input.signing,
+        acceptedCompatibilityPairs: [
+          { apiVersion: '2026-07-16', dataSchemaVersion: '0079' },
+          { apiVersion: '2026-07-17', dataSchemaVersion: '0080' },
+        ],
+      });
+      if (portableManifestSha256(recoveredParent.envelope.manifest) !== parent.manifest_sha256)
+        throw new Error('PORTABLE_EXPORT_LINEAGE_PARENT_INVALID');
+      parentEnvelope = recoveredParent.envelope;
+    }
     const key = artifactKey({ ...request, jobId: job.id });
     if (job.status === 'completed') {
       const historicalAuthorization = request.authorizationId
@@ -448,6 +534,8 @@ export function createPortableExportService(input: {
         ...(historicalAuthorization ? { historicalAuthorization } : {}),
         requiredEntitlements: request.mode === 'historical' ? ['historical-import-v1'] : [],
         signing: input.signing,
+        ...(parentEnvelope ? { expectedParentEnvelope: parentEnvelope } : {}),
+        enforceExpectedParentEnvelope: true,
       });
       if (
         verified.envelope.manifest.source.changeCursor !== evidence.source_change_cursor ||
@@ -496,6 +584,8 @@ export function createPortableExportService(input: {
         ...(historicalAuthorization ? { historicalAuthorization } : {}),
         requiredEntitlements: request.mode === 'historical' ? ['historical-import-v1'] : [],
         signing: input.signing,
+        ...(parentEnvelope ? { expectedParentEnvelope: parentEnvelope } : {}),
+        enforceExpectedParentEnvelope: true,
       });
       if (
         !job.source_change_cursor ||
@@ -675,8 +765,8 @@ export function createPortableExportService(input: {
       compatibility: {
         minimumApiVersion: '2026-01-01',
         maximumApiVersion: '2026-12-31',
-        minimumDataSchemaVersion: '0079',
-        maximumDataSchemaVersion: '0079',
+        minimumDataSchemaVersion: '0080',
+        maximumDataSchemaVersion: '0080',
         requiredCapabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
         requiredEntitlements: request.mode === 'historical' ? ['historical-import-v1'] : [],
       },
@@ -692,6 +782,15 @@ export function createPortableExportService(input: {
       payloadPolicies: createPortableConfigurationPayloadPolicies(),
       rebindings: snapshot.rebindings,
       assets,
+      ...(parentEnvelope
+        ? {
+            lineage: {
+              kind: 'delta' as const,
+              parentEnvelope,
+              ...(request.cutoverFreeze ? { cutoverFreeze: request.cutoverFreeze } : {}),
+            },
+          }
+        : {}),
     });
     if (historicalAuthorization) {
       await authorizationRepository.validateForSigning({
@@ -714,6 +813,8 @@ export function createPortableExportService(input: {
       ...(historicalAuthorization ? { historicalAuthorization } : {}),
       requiredEntitlements: request.mode === 'historical' ? ['historical-import-v1'] : [],
       signing: input.signing,
+      ...(parentEnvelope ? { expectedParentEnvelope: parentEnvelope } : {}),
+      enforceExpectedParentEnvelope: true,
     });
     if (putResult === 'created' && recovered.artifactSha256 !== artifactSha256)
       throw new Error('PORTABLE_EXPORT_ARTIFACT_CONFLICT');

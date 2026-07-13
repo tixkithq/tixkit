@@ -1366,7 +1366,11 @@ export const migrationRoutes: FastifyPluginAsync = async (app) => {
           error.message === 'PORTABLE_IMPORT_ACTIVATION_AUTHORIZATION_REQUIRED' ||
           error.message === 'PORTABLE_IMPORT_ACTIVATION_INPUT_CHANGED' ||
           error.message === 'PORTABLE_IMPORT_ACTIVATION_RECONCILIATION_REQUIRED' ||
+          error.message === 'PORTABLE_IMPORT_ACTIVATION_PREFLIGHT_REQUIRED' ||
           error.message === 'PORTABLE_IMPORT_ACTIVATION_EVIDENCE_INVALID' ||
+          error.message === 'PORTABLE_IMPORT_LINEAGE_STALE' ||
+          error.message === 'PORTABLE_IMPORT_LINEAGE_CUTOVER_FINALIZED' ||
+          error.message === 'PORTABLE_IMPORT_LINEAGE_REBASE_REQUIRED' ||
           error.message === 'PORTABLE_IMPORT_ACTIVATION_CONFLICT')
       )
         throw new ConflictError('Portable import is not eligible for activation');

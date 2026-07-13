@@ -6,6 +6,7 @@ import {
   EventRepository,
   OrganizationRepository,
   PortableExportAuthorizationRepository,
+  PortableExportRepository,
   runMigrations,
   TenantRepository,
   truncateAllData,
@@ -144,6 +145,215 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     });
     expect(Number(job.artifact_bytes)).toBe(first.bytes.byteLength);
     expect(Object.keys(transport.payloads)).toContain('data/organizations.jsonl');
+    const firstObjectKey = [...objects.keys()].find((key) => key.endsWith(`${first.jobId}.json`))!;
+    const exportRepository = new PortableExportRepository(db);
+
+    const persistCompatibilityParent = async (
+      apiVersion: string,
+      dataSchemaVersion: string,
+      suffix: string,
+    ) => {
+      const parentJob = await exportRepository.begin({
+        tenantId,
+        organizationId,
+        mode: 'configuration',
+        requestedBy: 'compatibility_test',
+        idempotencyKey: `compatibility-parent-${suffix}`,
+        requestFingerprint: createHash('sha256').update(`parent:${suffix}`).digest('hex'),
+      });
+      const ownerSha256 = createHash('sha256').update(`owner:${suffix}`).digest('hex');
+      const claimTime = new Date();
+      expect(
+        await exportRepository.claimBuild({
+          tenantId,
+          organizationId,
+          jobId: parentJob.id,
+          ownerSha256,
+          now: claimTime,
+          leaseExpiresAt: new Date(claimTime.getTime() + 60_000),
+        }),
+      ).toBe(true);
+      const parentManifest = {
+        ...transport.envelope.manifest,
+        bundleId: parentJob.bundle_id,
+        apiVersion,
+        dataSchemaVersion,
+        source: {
+          ...transport.envelope.manifest.source,
+          exportSequence: Number(parentJob.export_sequence),
+        },
+        compatibility: {
+          ...transport.envelope.manifest.compatibility,
+          minimumDataSchemaVersion: dataSchemaVersion,
+          maximumDataSchemaVersion: dataSchemaVersion,
+        },
+      };
+      const parentEnvelope = {
+        manifest: parentManifest,
+        signature: signPortableManifest(parentManifest, 'bundle_key_01', bundleKeys.privateKey),
+      };
+      const bytes = new TextEncoder().encode(
+        canonicalPortableJson({ envelope: parentEnvelope, payloads: transport.payloads }),
+      );
+      const manifestSha256 = portableManifestSha256(parentManifest);
+      const artifactSha256 = createHash('sha256').update(bytes).digest('hex');
+      objects.set(firstObjectKey.replace(first.jobId, parentJob.id), bytes);
+      await exportRepository.recordSnapshotCursor({
+        tenantId,
+        organizationId,
+        jobId: parentJob.id,
+        ownerSha256,
+        sourceChangeCursor: parentManifest.source.changeCursor,
+        now: new Date(),
+      });
+      await exportRepository.complete({
+        tenantId,
+        organizationId,
+        jobId: parentJob.id,
+        ownerSha256,
+        manifestSha256,
+        artifactSha256,
+        artifactBytes: bytes.byteLength,
+      });
+      return parentJob.id;
+    };
+
+    for (const [apiVersion, dataSchemaVersion, suffix] of [
+      ['2026-07-16', '0080', '16_80'],
+      ['2026-07-17', '0079', '17_79'],
+    ] as const) {
+      const parentExportJobId = await persistCompatibilityParent(
+        apiVersion,
+        dataSchemaVersion,
+        suffix,
+      );
+      await expect(
+        service.exportConfiguration({
+          ...request,
+          idempotencyKey: `portable-api-cross-pair-${suffix}`,
+          parentExportJobId,
+        }),
+      ).rejects.toThrow('PORTABLE_EXPORT_ARTIFACT_CONFLICT');
+    }
+
+    const legacyJob = await exportRepository.begin({
+      tenantId,
+      organizationId,
+      mode: 'configuration',
+      requestedBy: 'legacy_exporter',
+      idempotencyKey: 'portable-api-legacy-parent',
+      requestFingerprint: createHash('sha256').update('legacy-parent').digest('hex'),
+    });
+    const legacyOwnerSha256 = createHash('sha256').update('legacy-owner').digest('hex');
+    const legacyNow = new Date();
+    expect(
+      await exportRepository.claimBuild({
+        tenantId,
+        organizationId,
+        jobId: legacyJob.id,
+        ownerSha256: legacyOwnerSha256,
+        now: legacyNow,
+        leaseExpiresAt: new Date(legacyNow.getTime() + 60_000),
+      }),
+    ).toBe(true);
+    const legacyManifest = {
+      ...transport.envelope.manifest,
+      bundleId: legacyJob.bundle_id,
+      apiVersion: '2026-07-16',
+      dataSchemaVersion: '0079',
+      source: {
+        ...transport.envelope.manifest.source,
+        exportSequence: Number(legacyJob.export_sequence),
+      },
+      compatibility: {
+        ...transport.envelope.manifest.compatibility,
+        minimumDataSchemaVersion: '0079',
+        maximumDataSchemaVersion: '0079',
+      },
+    };
+    const legacyEnvelope = {
+      manifest: legacyManifest,
+      signature: signPortableManifest(legacyManifest, 'bundle_key_01', bundleKeys.privateKey),
+    };
+    const legacyBytes = new TextEncoder().encode(
+      canonicalPortableJson({ envelope: legacyEnvelope, payloads: transport.payloads }),
+    );
+    const legacyObjectKey = firstObjectKey.replace(first.jobId, legacyJob.id);
+    objects.set(legacyObjectKey, legacyBytes);
+    const legacyManifestSha256 = portableManifestSha256(legacyManifest);
+    const legacyArtifactSha256 = createHash('sha256').update(legacyBytes).digest('hex');
+    await exportRepository.recordSnapshotCursor({
+      tenantId,
+      organizationId,
+      jobId: legacyJob.id,
+      ownerSha256: legacyOwnerSha256,
+      sourceChangeCursor: legacyManifest.source.changeCursor,
+      now: new Date(),
+    });
+    await exportRepository.complete({
+      tenantId,
+      organizationId,
+      jobId: legacyJob.id,
+      ownerSha256: legacyOwnerSha256,
+      manifestSha256: legacyManifestSha256,
+      artifactSha256: legacyArtifactSha256,
+      artifactBytes: legacyBytes.byteLength,
+    });
+
+    await db
+      .updateTable('organizations')
+      .set({ name: `Portable API delta ${driver}` })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', organizationId)
+      .execute();
+    const deltaRequest = {
+      ...request,
+      idempotencyKey: 'portable-api-delta-replay',
+      parentExportJobId: legacyJob.id,
+    };
+    const delta = await service.exportConfiguration(deltaRequest);
+    expect((await service.exportConfiguration(deltaRequest)).bytes).toEqual(delta.bytes);
+    const deltaTransport = parsePortableJson(new TextDecoder().decode(delta.bytes)) as {
+      envelope: SignedPortableBundle;
+      parentEnvelope: SignedPortableBundle;
+    };
+    expect(deltaTransport.parentEnvelope).toEqual(legacyEnvelope);
+    expect(deltaTransport.envelope.manifest).toMatchObject({
+      dataSchemaVersion: '0080',
+      source: { exportSequence: Number(legacyJob.export_sequence) + 1 },
+      lineage: {
+        kind: 'delta',
+        parentBundleId: legacyJob.bundle_id,
+        parentManifestSha256: legacyManifestSha256,
+        fromChangeCursor: legacyManifest.lineage.toChangeCursor,
+      },
+    });
+
+    const finalDelta = await service.exportConfiguration({
+      ...request,
+      idempotencyKey: 'portable-api-final-delta',
+      parentExportJobId: delta.jobId,
+      cutoverFreeze: {
+        frozenAt: '2026-07-12T23:59:00.000Z',
+        receiptSha256: 'f'.repeat(64),
+      },
+    });
+    const finalTransport = parsePortableJson(new TextDecoder().decode(finalDelta.bytes)) as {
+      envelope: SignedPortableBundle;
+      parentEnvelope: SignedPortableBundle;
+    };
+    expect(finalTransport.parentEnvelope).toEqual(deltaTransport.envelope);
+    expect(finalTransport.envelope.manifest).toMatchObject({
+      source: { exportSequence: Number(legacyJob.export_sequence) + 2 },
+      lineage: {
+        kind: 'delta',
+        parentBundleId: delta.bundleId,
+        cutoverFreeze: {
+          frozenAt: '2026-07-12T23:59:00.000Z',
+          receiptSha256: 'f'.repeat(64),
+        },
+      },
+    });
 
     await db
       .updateTable('portable_export_jobs')
@@ -157,8 +367,8 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       .where('id', '=', first.jobId)
       .execute();
 
-    const [key, stored] = [...objects].find(([key]) => key.endsWith(`${first.jobId}.json`))!;
-    objects.set(key, Uint8Array.from([...stored.slice(0, -1), stored.at(-1)! ^ 1]));
+    const stored = objects.get(firstObjectKey)!;
+    objects.set(firstObjectKey, Uint8Array.from([...stored.slice(0, -1), stored.at(-1)! ^ 1]));
     await expect(service.exportConfiguration(request)).rejects.toThrow(/EVIDENCE_MISMATCH/u);
   });
 
@@ -1020,8 +1230,8 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     };
     expect(transport.envelope.manifest).toMatchObject({
       mode: 'historical',
-      apiVersion: '2026-07-16',
-      dataSchemaVersion: '0079',
+      apiVersion: '2026-07-17',
+      dataSchemaVersion: '0080',
       historicalAuthorization: {
         authorizationId: authorization.id,
         tenantId,

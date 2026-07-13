@@ -44,6 +44,19 @@ const createPortableExportSchema = z
         message: 'Configuration exports cannot use a historical authorization',
       });
   });
+const createPortableDeltaExportSchema = z
+  .object({
+    organizationId: z.string().trim().min(3).max(32),
+    parentExportJobId: z.string().trim().min(3).max(64),
+    cutoverFreeze: z
+      .object({
+        frozenAt: z.string().datetime({ offset: false }),
+        receiptSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 const createHistoricalAuthorizationSchema = z
   .object({
     organizationId: z.string().trim().min(3).max(32),
@@ -223,9 +236,12 @@ export const portabilityRoutes: FastifyPluginAsync<PortabilityRouteOptions> = as
       if (
         error instanceof Error &&
         (error.message === 'PORTABLE_EXPORT_IDEMPOTENCY_CONFLICT' ||
-          error.message === 'PORTABLE_EXPORT_IN_PROGRESS')
+          error.message === 'PORTABLE_EXPORT_IN_PROGRESS' ||
+          error.message === 'PORTABLE_EXPORT_LINEAGE_PARENT_INVALID')
       )
         throw new ConflictError('Portable export request conflicts with an existing request');
+      if (error instanceof Error && error.message === 'PORTABLE_EXPORT_LINEAGE_INVALID')
+        throw new ValidationError('Portable export lineage is invalid');
       if (error instanceof Error && error.message.startsWith('PORTABLE_EXPORT_AUTHORIZATION_'))
         rethrowHistoricalAuthorizationError(error);
       throw new PortableExportUnavailableError();
@@ -241,6 +257,72 @@ export const portabilityRoutes: FastifyPluginAsync<PortabilityRouteOptions> = as
       diffSummary: { bundleId: result.bundleId, mode: body.mode },
     });
 
+    return reply
+      .header('content-type', 'application/vnd.tixkit.portable+json')
+      .header('content-disposition', `attachment; filename="${result.bundleId}.tixkit.json"`)
+      .header('x-tixkit-portable-job-id', result.jobId)
+      .header('cache-control', 'private, no-store')
+      .send(Buffer.from(result.bytes));
+  });
+
+  app.post('/portable-delta-exports', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'migrations.write');
+    const body = parseBody(createPortableDeltaExportSchema, request.body);
+    ClerkAuthService.requireOrganizationScope(principal, body.organizationId);
+    ClerkAuthService.requireNoEventScope(principal, 'organization portability exports');
+    if (principal.type !== 'system' && principal.brandIds?.length)
+      throw new ForbiddenError(
+        'Brand-scoped principals cannot access organization portability exports',
+      );
+    const parsedIdempotencyKey = portableExportIdempotencyKeySchema.safeParse(
+      request.headers['idempotency-key'],
+    );
+    if (!parsedIdempotencyKey.success)
+      throw new ValidationError(
+        'Idempotency-Key must be present, contain 1-255 characters, and have no surrounding whitespace',
+      );
+    let result: Awaited<ReturnType<PortableExportService['exportConfiguration']>>;
+    try {
+      const service =
+        options.exportService ??
+        createPortableExportService({
+          db: app.context.db,
+          store: createS3PortableExportArtifactStore(),
+          mediaStore: createS3PortableExportMediaStore(),
+          signing: portableExportSigningFromEnvironment(),
+        });
+      result = await service.exportConfiguration({
+        tenantId: principal.tenantId,
+        organizationId: body.organizationId,
+        requestedBy: principal.id,
+        idempotencyKey: parsedIdempotencyKey.data,
+        parentExportJobId: body.parentExportJobId,
+        ...(body.cutoverFreeze ? { cutoverFreeze: body.cutoverFreeze } : {}),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === 'PORTABLE_EXPORT_IDEMPOTENCY_CONFLICT' ||
+          error.message === 'PORTABLE_EXPORT_IN_PROGRESS' ||
+          error.message === 'PORTABLE_EXPORT_LINEAGE_PARENT_INVALID')
+      )
+        throw new ConflictError('Portable delta export conflicts with its durable parent');
+      if (error instanceof Error && error.message === 'PORTABLE_EXPORT_LINEAGE_INVALID')
+        throw new ValidationError('Portable export lineage is invalid');
+      throw new PortableExportUnavailableError();
+    }
+    await writeAuditLog(new AuditLogRepository(app.context.db), request, principal, {
+      action: 'portability.export.configuration_delta',
+      organizationId: body.organizationId,
+      resourceType: 'portable_export',
+      resourceId: result.jobId,
+      diffSummary: {
+        bundleId: result.bundleId,
+        parentExportJobId: body.parentExportJobId,
+        finalCutover: Boolean(body.cutoverFreeze),
+      },
+    });
     return reply
       .header('content-type', 'application/vnd.tixkit.portable+json')
       .header('content-disposition', `attachment; filename="${result.bundleId}.tixkit.json"`)

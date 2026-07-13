@@ -80,6 +80,7 @@ import { MediaObjectCleanupJobsMigration } from './migrations/0076_media_object_
 import { PortableImportCutoverProofsMigration } from './migrations/0077_portable_import_cutover_proofs.js';
 import { PortableExportAuthorizationsMigration } from './migrations/0078_portable_export_authorizations.js';
 import { PortableRebindingAuthoritiesMigration } from './migrations/0079_portable_rebinding_authorities.js';
+import { PortableImportLineageCheckpointsMigration } from './migrations/0080_portable_import_lineage_checkpoints.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -213,6 +214,7 @@ const ALL_SCHEMA_TABLES = [
   'portable_export_authorization_events',
   'portable_import_dry_run_receipts',
   'portable_import_preflights',
+  'portable_import_lineage_checkpoints',
   'portable_import_approval_revocations',
   'portable_import_approvals',
   'portable_import_rebindings',
@@ -328,6 +330,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0077_portable_import_cutover_proofs': PortableImportCutoverProofsMigration,
       '0078_portable_export_authorizations': PortableExportAuthorizationsMigration,
       '0079_portable_rebinding_authorities': PortableRebindingAuthoritiesMigration,
+      '0080_portable_import_lineage_checkpoints': PortableImportLineageCheckpointsMigration,
     };
   }
 }

@@ -482,7 +482,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-16',
+    version: '2026-07-17',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -13260,17 +13260,107 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/portable-delta-exports': {
+      post: {
+        operationId: 'createPortableDeltaExport',
+        summary: 'Create or replay an exact-parent portable delta export',
+        description:
+          'Self-Hosted delta export endpoint. Reopens and verifies the immutable completed parent artifact in the same tenant and organization, then signs its exact bundle, manifest hash and cursor into the new lineage. An optional cutoverFreeze binds a final source-freeze receipt.',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['migrations.write'],
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', minLength: 1, maxLength: 255 },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['organizationId', 'parentExportJobId'],
+                properties: {
+                  organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                  parentExportJobId: { type: 'string', minLength: 3, maxLength: 64 },
+                  cutoverFreeze: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['frozenAt', 'receiptSha256'],
+                    properties: {
+                      frozenAt: { type: 'string', format: 'date-time' },
+                      receiptSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                    },
+                  },
+                },
+              },
+              example: {
+                organizationId: 'organization_example',
+                parentExportJobId: 'pex_parent_example',
+                cutoverFreeze: {
+                  frozenAt: '2026-07-17T12:00:00.000Z',
+                  receiptSha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signed, checksummed Tixkit portable delta bundle',
+            headers: {
+              'X-Tixkit-Portable-Job-Id': { schema: { type: 'string' } },
+              'Content-Disposition': { schema: { type: 'string' } },
+            },
+            content: {
+              'application/vnd.tixkit.portable+json': {
+                schema: { type: 'string', format: 'binary' },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid delta or cutover request',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '403': {
+            description: 'Insufficient permission or invalid principal scope',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '409': {
+            description: 'Idempotency conflict, export in progress, or invalid durable parent',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+          '503': {
+            description: 'Export signing or immutable storage is unavailable',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+            },
+          },
+        },
+      },
+    },
     '/portable-exports': {
       post: {
         operationId: 'createPortableExport',
         summary: 'Create or replay a signed Tixkit portable export',
         description:
-          'Self-Hosted export endpoint. Configuration mode is the default. Historical mode requires an unscoped organization user and a fresh principal-bound, single-use authorization. Returns immutable bytes for the same principal, organization, mode, authorization, and idempotency key.',
-        'x-compatibility-breaking-change': {
-          id: 'historical-portable-export-authorization',
-          previousVersion: '2026-07-15',
-          migrationGuide: '/reference/migrations/2026-07-15-to-2026-07-16',
-        },
+          'Self-Hosted full export endpoint. Configuration mode is the default. Historical mode requires an unscoped organization user and a fresh principal-bound, single-use authorization. Returns immutable bytes for the same principal, organization, mode, authorization, and idempotency key.',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
         parameters: [

@@ -1864,7 +1864,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-07-16',
+        apiVersion: '2026-07-17',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'order.paid',
@@ -1985,7 +1985,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-07-16',
+        apiVersion: '2026-07-17',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'order.paid',

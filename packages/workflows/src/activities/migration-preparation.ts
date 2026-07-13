@@ -1299,6 +1299,27 @@ export function createMigrationPreparationService(
             tenantId: input.tenantId,
             organizationId: input.organizationId,
           });
+          await repository.assertPortableImportLineageEligible({
+            tenantId: input.tenantId,
+            organizationId: input.organizationId,
+            destinationId: trust.destination.deploymentId,
+            sourceDeploymentId: evidence.manifest.source.deploymentId,
+            sourceTenantId: evidence.manifest.source.tenantId,
+            ...(evidence.manifest.source.organizationId
+              ? { sourceOrganizationId: evidence.manifest.source.organizationId }
+              : {}),
+            lineageKind: evidence.manifest.lineage.kind,
+            exportSequence: evidence.manifest.source.exportSequence,
+            ...(evidence.manifest.lineage.parentBundleId
+              ? { parentBundleId: evidence.manifest.lineage.parentBundleId }
+              : {}),
+            ...(evidence.manifest.lineage.parentManifestSha256
+              ? { parentManifestSha256: evidence.manifest.lineage.parentManifestSha256 }
+              : {}),
+            ...(evidence.manifest.lineage.fromChangeCursor
+              ? { fromChangeCursor: evidence.manifest.lineage.fromChangeCursor }
+              : {}),
+          });
           await repository.recordPortablePreflight({
             tenantId: input.tenantId,
             organizationId: input.organizationId,

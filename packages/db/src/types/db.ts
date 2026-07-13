@@ -1968,6 +1968,26 @@ export interface PortableImportPreflightTable {
   created_at: Timestamp;
 }
 
+export interface PortableImportLineageCheckpointTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  destination_id: string;
+  source_deployment_id: string;
+  source_tenant_id: string;
+  source_organization_id: string;
+  scope_sha256: string;
+  last_bundle_id: string;
+  last_manifest_sha256: string;
+  last_change_cursor: string;
+  last_export_sequence: number;
+  last_import_job_id: string;
+  cutover_frozen_at: Timestamp | null;
+  activated_at: Timestamp;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface PortableImportDryRunReceiptTable {
   tenant_id: string;
   organization_id: string;
@@ -2185,6 +2205,7 @@ export interface DB {
   portable_export_events: PortableExportEventTable;
   portable_export_authorization_events: PortableExportAuthorizationEventTable;
   portable_import_preflights: PortableImportPreflightTable;
+  portable_import_lineage_checkpoints: PortableImportLineageCheckpointTable;
   portable_import_dry_run_receipts: PortableImportDryRunReceiptTable;
   portable_import_approvals: PortableImportApprovalTable;
   portable_import_approval_revocations: PortableImportApprovalRevocationTable;

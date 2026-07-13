@@ -263,6 +263,42 @@ describe('TixkitClient', () => {
     });
   });
 
+  it('creates an exact-parent final delta export', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(Uint8Array.from([4, 5, 6]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/vnd.tixkit.portable+json' },
+      }),
+    );
+    const client = new TixkitClient({
+      apiKey: 'tk_test',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const cutoverFreeze = {
+      frozenAt: '2026-07-17T12:00:00.000Z',
+      receiptSha256: 'a'.repeat(64),
+    };
+    await client.portability.createExport({
+      organizationId: 'org_1',
+      mode: 'configuration',
+      parentExportJobId: 'pex_parent_01',
+      cutoverFreeze,
+      idempotencyKey: 'final-delta-1',
+    });
+    expect(getCall(fetchMock)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/portable-delta-exports',
+      headers: { 'Idempotency-Key': 'final-delta-1' },
+      body: JSON.stringify({
+        organizationId: 'org_1',
+        mode: 'configuration',
+        parentExportJobId: 'pex_parent_01',
+        cutoverFreeze,
+      }),
+    });
+  });
+
   it('binds portable commit to the exact approval and final cutover proof', async () => {
     const fetchMock = mockFetch(202, { jobId: 'job_portable_1', status: 'committing' });
     const client = new TixkitClient({

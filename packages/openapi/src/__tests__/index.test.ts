@@ -77,7 +77,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-16');
+    expect(openApiSpec.info.version).toBe('2026-07-17');
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {
