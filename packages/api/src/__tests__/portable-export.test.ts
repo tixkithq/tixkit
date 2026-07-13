@@ -120,4 +120,45 @@ describe('portable export immutable object storage', () => {
       conflictingStore.putIfAbsent('artifact.json', Uint8Array.from([1]), digest),
     ).resolves.toBe('exists');
   });
+
+  it('distinguishes a missing recovery object from storage failure', async () => {
+    const missingStore = createS3PortableExportArtifactStore(
+      { PORTABILITY_EXPORT_BUCKET: 'portable-test' },
+      {
+        async send() {
+          throw { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } };
+        },
+      } as unknown as Pick<S3Client, 'send'>,
+    );
+    await expect(missingStore.getIfExists('missing.json')).resolves.toBeUndefined();
+
+    const availableStore = createS3PortableExportArtifactStore(
+      { PORTABILITY_EXPORT_BUCKET: 'portable-test' },
+      {
+        async send() {
+          return {
+            ContentLength: 3,
+            Body: (async function* () {
+              yield Uint8Array.from([1, 2, 3]);
+            })(),
+          };
+        },
+      } as unknown as Pick<S3Client, 'send'>,
+    );
+    await expect(availableStore.getIfExists('available.json')).resolves.toEqual(
+      Uint8Array.from([1, 2, 3]),
+    );
+
+    const failedStore = createS3PortableExportArtifactStore(
+      { PORTABILITY_EXPORT_BUCKET: 'portable-test' },
+      {
+        async send() {
+          throw { name: 'ServiceUnavailable', $metadata: { httpStatusCode: 503 } };
+        },
+      } as unknown as Pick<S3Client, 'send'>,
+    );
+    await expect(failedStore.getIfExists('unknown.json')).rejects.toMatchObject({
+      name: 'ServiceUnavailable',
+    });
+  });
 });

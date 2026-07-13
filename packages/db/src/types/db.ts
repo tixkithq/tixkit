@@ -1870,6 +1870,7 @@ export interface PortableExportJobTable {
   source_change_cursor: string | null;
   build_owner_sha256: string | null;
   build_lease_expires_at: Timestamp | null;
+  historical_authorization_id: string | null;
   manifest_sha256: string | null;
   artifact_sha256: string | null;
   artifact_bytes: number | string | bigint | null;
@@ -1881,6 +1882,30 @@ export interface PortableExportJobTable {
   completed_at: Timestamp | null;
 }
 
+export interface PortableExportAuthorizationTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  scope: string;
+  granted_by_principal_id: string;
+  granted_at: Timestamp;
+  expires_at: Timestamp;
+  revoked_by_principal_id: string | null;
+  revoked_at: Timestamp | null;
+  consumed_at: Timestamp | null;
+}
+
+export interface PortableExportAuthorizationEventTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  authorization_id: string;
+  event_type: string;
+  actor_principal_id: string;
+  export_job_id: string | null;
+  occurred_at: Timestamp;
+}
+
 export interface PortableExportEventTable {
   id: string;
   tenant_id: string;
@@ -1889,6 +1914,8 @@ export interface PortableExportEventTable {
   bundle_id: string;
   export_sequence: number | string | bigint;
   source_change_cursor: string;
+  mode: string;
+  historical_authorization_id: string | null;
   manifest_sha256: string;
   artifact_sha256: string;
   artifact_bytes: number | string | bigint;
@@ -2124,8 +2151,10 @@ export interface DB {
   historical_financial_snapshots: HistoricalFinancialSnapshotTable;
   historical_check_ins: HistoricalCheckInTable;
   portable_export_sequences: PortableExportSequenceTable;
+  portable_export_authorizations: PortableExportAuthorizationTable;
   portable_export_jobs: PortableExportJobTable;
   portable_export_events: PortableExportEventTable;
+  portable_export_authorization_events: PortableExportAuthorizationEventTable;
   portable_import_preflights: PortableImportPreflightTable;
   portable_import_dry_run_receipts: PortableImportDryRunReceiptTable;
   portable_import_approvals: PortableImportApprovalTable;

@@ -6,6 +6,8 @@ import { BaseRepository } from './base.js';
 export interface BeginPortableExportInput {
   tenantId: string;
   organizationId: string;
+  mode: 'configuration' | 'historical';
+  historicalAuthorizationId?: string;
   requestedBy: string;
   idempotencyKey: string;
   requestFingerprint: string;
@@ -71,6 +73,10 @@ export class PortableExportRepository extends BaseRepository {
       input.tenantId.length > 32 ||
       !input.organizationId.trim() ||
       input.organizationId.length > 32 ||
+      (input.mode !== 'configuration' && input.mode !== 'historical') ||
+      (input.mode === 'configuration' && input.historicalAuthorizationId !== undefined) ||
+      (input.mode === 'historical' && !input.historicalAuthorizationId?.trim()) ||
+      (input.historicalAuthorizationId?.length ?? 0) > 64 ||
       !input.requestedBy.trim() ||
       input.requestedBy.length > 128 ||
       input.idempotencyKey !== input.idempotencyKey.trim() ||
@@ -124,12 +130,13 @@ export class PortableExportRepository extends BaseRepository {
               tenant_id: input.tenantId,
               organization_id: input.organizationId,
               export_sequence: sequence,
-              mode: 'configuration',
+              mode: input.mode,
               status: 'building',
               bundle_id: bundleId,
               source_change_cursor: null,
               build_owner_sha256: null,
               build_lease_expires_at: null,
+              historical_authorization_id: input.historicalAuthorizationId ?? null,
               manifest_sha256: null,
               artifact_sha256: null,
               artifact_bytes: null,
@@ -279,6 +286,8 @@ export class PortableExportRepository extends BaseRepository {
           bundle_id: job.bundle_id,
           export_sequence: job.export_sequence,
           source_change_cursor: job.source_change_cursor,
+          mode: job.mode,
+          historical_authorization_id: job.historical_authorization_id,
           manifest_sha256: input.manifestSha256,
           artifact_sha256: input.artifactSha256,
           artifact_bytes: input.artifactBytes,
@@ -312,6 +321,8 @@ export class PortableExportRepository extends BaseRepository {
         event?.bundle_id === existing.bundle_id &&
         Number(event.export_sequence) === Number(existing.export_sequence) &&
         event.source_change_cursor === existing.source_change_cursor &&
+        event.mode === existing.mode &&
+        event.historical_authorization_id === existing.historical_authorization_id &&
         event.manifest_sha256 === input.manifestSha256 &&
         event.artifact_sha256 === input.artifactSha256 &&
         Number(event.artifact_bytes) === input.artifactBytes

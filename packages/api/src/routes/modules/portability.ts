@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { writeAuditLog } from '../../auth/audit.js';
 import { AuditLogRepository } from '@tixkit/db';
-import { ConflictError, ForbiddenError, ValidationError } from '@tixkit/domain';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  type Principal,
+} from '@tixkit/domain';
 import { parseBody } from '../../http/schemas.js';
 import {
   createPortableExportService,
@@ -12,12 +18,43 @@ import {
   portableExportSigningFromEnvironment,
   type PortableExportService,
 } from '../../services/portable-export.js';
+import {
+  createPortableHistoricalAuthorizationService,
+  type PortableHistoricalAuthorizationService,
+} from '../../services/portable-export-authorization.js';
 
 const createPortableExportSchema = z
   .object({
     organizationId: z.string().trim().min(3).max(32),
-    mode: z.literal('configuration').default('configuration'),
+    mode: z.enum(['configuration', 'historical']).default('configuration'),
+    authorizationId: z.string().trim().min(3).max(64).optional(),
   })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.mode === 'historical' && !value.authorizationId)
+      context.addIssue({
+        code: 'custom',
+        path: ['authorizationId'],
+        message: 'Historical exports require an authorizationId',
+      });
+    if (value.mode === 'configuration' && value.authorizationId)
+      context.addIssue({
+        code: 'custom',
+        path: ['authorizationId'],
+        message: 'Configuration exports cannot use a historical authorization',
+      });
+  });
+const createHistoricalAuthorizationSchema = z
+  .object({
+    organizationId: z.string().trim().min(3).max(32),
+    expiresAt: z.string().datetime({ offset: false }),
+  })
+  .strict();
+const revokeHistoricalAuthorizationSchema = z
+  .object({ organizationId: z.string().trim().min(3).max(32) })
+  .strict();
+const historicalAuthorizationParamsSchema = z
+  .object({ authorizationId: z.string().trim().min(3).max(64) })
   .strict();
 const portableExportIdempotencyKeySchema = z
   .string()
@@ -37,12 +74,104 @@ class PortableExportUnavailableError extends Error {
 
 export interface PortabilityRouteOptions {
   exportService?: PortableExportService;
+  authorizationService?: PortableHistoricalAuthorizationService;
+}
+
+function requireHistoricalAuthorizationPrincipal(
+  principal: Principal,
+  organizationId: string,
+): void {
+  ClerkAuthService.requirePermission(principal, 'migrations.write');
+  ClerkAuthService.requireOrganizationScope(principal, organizationId);
+  ClerkAuthService.requireNoEventScope(principal, 'historical portability authorization');
+  if (principal.type !== 'user' || principal.brandIds?.length)
+    throw new ForbiddenError(
+      'Historical portability authorization requires an unscoped organization user',
+    );
+}
+
+function rethrowHistoricalAuthorizationError(error: unknown): never {
+  if (!(error instanceof Error)) throw new PortableExportUnavailableError();
+  if (error.message === 'PORTABLE_EXPORT_AUTHORIZATION_ADMIN_REQUIRED')
+    throw new ForbiddenError('An accepted organization owner or admin is required');
+  if (error.message === 'PORTABLE_EXPORT_AUTHORIZATION_NOT_FOUND')
+    throw new NotFoundError('Historical export authorization', 'requested');
+  if (
+    error.message === 'PORTABLE_EXPORT_AUTHORIZATION_REVOKED' ||
+    error.message === 'PORTABLE_EXPORT_AUTHORIZATION_EXPIRED' ||
+    error.message === 'PORTABLE_EXPORT_AUTHORIZATION_ALREADY_CONSUMED' ||
+    error.message === 'PORTABLE_EXPORT_AUTHORIZATION_PRINCIPAL_MISMATCH' ||
+    error.message === 'PORTABLE_EXPORT_AUTHORIZATION_STATE_CONFLICT'
+  )
+    throw new ConflictError('A fresh unrevoked historical export authorization is required');
+  if (
+    error.message === 'PORTABLE_EXPORT_AUTHORIZATION_INVALID' ||
+    error.message === 'PORTABLE_EXPORT_AUTHORIZATION_REVOCATION_INVALID'
+  )
+    throw new ValidationError('Historical export authorization is invalid');
+  throw new PortableExportUnavailableError();
 }
 
 export const portabilityRoutes: FastifyPluginAsync<PortabilityRouteOptions> = async (
   app,
   options,
 ) => {
+  app.post('/portable-export-authorizations', async (request, reply) => {
+    const principal = request.principal!;
+    const body = parseBody(createHistoricalAuthorizationSchema, request.body);
+    requireHistoricalAuthorizationPrincipal(principal, body.organizationId);
+    let authorization;
+    try {
+      const service =
+        options.authorizationService ??
+        createPortableHistoricalAuthorizationService(app.context.db);
+      authorization = await service.grant({
+        tenantId: principal.tenantId,
+        organizationId: body.organizationId,
+        principalId: principal.id,
+        expiresAt: new Date(body.expiresAt),
+      });
+    } catch (error) {
+      rethrowHistoricalAuthorizationError(error);
+    }
+    await writeAuditLog(new AuditLogRepository(app.context.db), request, principal, {
+      action: 'portability.export.historical_authorization.grant',
+      organizationId: body.organizationId,
+      resourceType: 'portable_export_authorization',
+      resourceId: authorization.authorizationId,
+      diffSummary: { expiresAt: authorization.expiresAt, scope: authorization.scope },
+    });
+    return reply.code(201).send(authorization);
+  });
+
+  app.post('/portable-export-authorizations/:authorizationId/revoke', async (request, reply) => {
+    const principal = request.principal!;
+    const body = parseBody(revokeHistoricalAuthorizationSchema, request.body);
+    const params = parseBody(historicalAuthorizationParamsSchema, request.params);
+    requireHistoricalAuthorizationPrincipal(principal, body.organizationId);
+    try {
+      const service =
+        options.authorizationService ??
+        createPortableHistoricalAuthorizationService(app.context.db);
+      await service.revoke({
+        tenantId: principal.tenantId,
+        organizationId: body.organizationId,
+        principalId: principal.id,
+        authorizationId: params.authorizationId,
+      });
+    } catch (error) {
+      rethrowHistoricalAuthorizationError(error);
+    }
+    await writeAuditLog(new AuditLogRepository(app.context.db), request, principal, {
+      action: 'portability.export.historical_authorization.revoke',
+      organizationId: body.organizationId,
+      resourceType: 'portable_export_authorization',
+      resourceId: params.authorizationId,
+      diffSummary: { revoked: true },
+    });
+    return reply.code(204).send();
+  });
+
   app.post('/portable-exports', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'migrations.write');
@@ -54,6 +183,8 @@ export const portabilityRoutes: FastifyPluginAsync<PortabilityRouteOptions> = as
         'Brand-scoped principals cannot access organization portability exports',
       );
     }
+    if (body.mode === 'historical' && principal.type !== 'user')
+      throw new ForbiddenError('Historical portability exports require a user principal');
     const idempotencyKey = request.headers['idempotency-key'];
     const parsedIdempotencyKey = portableExportIdempotencyKeySchema.safeParse(idempotencyKey);
     if (!parsedIdempotencyKey.success)
@@ -73,12 +204,21 @@ export const portabilityRoutes: FastifyPluginAsync<PortabilityRouteOptions> = as
           mediaStore: createS3PortableExportMediaStore(),
           signing: portableExportSigningFromEnvironment(),
         });
-      result = await service.exportConfiguration({
-        tenantId: principal.tenantId,
-        organizationId: body.organizationId,
-        requestedBy: principal.id,
-        idempotencyKey: parsedIdempotencyKey.data,
-      });
+      result =
+        body.mode === 'historical'
+          ? await service.exportHistorical({
+              tenantId: principal.tenantId,
+              organizationId: body.organizationId,
+              requestedBy: principal.id,
+              idempotencyKey: parsedIdempotencyKey.data,
+              authorizationId: body.authorizationId!,
+            })
+          : await service.exportConfiguration({
+              tenantId: principal.tenantId,
+              organizationId: body.organizationId,
+              requestedBy: principal.id,
+              idempotencyKey: parsedIdempotencyKey.data,
+            });
     } catch (error) {
       if (
         error instanceof Error &&
@@ -86,10 +226,15 @@ export const portabilityRoutes: FastifyPluginAsync<PortabilityRouteOptions> = as
           error.message === 'PORTABLE_EXPORT_IN_PROGRESS')
       )
         throw new ConflictError('Portable export request conflicts with an existing request');
+      if (error instanceof Error && error.message.startsWith('PORTABLE_EXPORT_AUTHORIZATION_'))
+        rethrowHistoricalAuthorizationError(error);
       throw new PortableExportUnavailableError();
     }
     await writeAuditLog(new AuditLogRepository(app.context.db), request, principal, {
-      action: 'portability.export.configuration',
+      action:
+        body.mode === 'historical'
+          ? 'portability.export.historical'
+          : 'portability.export.configuration',
       organizationId: body.organizationId,
       resourceType: 'portable_export',
       resourceId: result.jobId,

@@ -50,6 +50,7 @@ function manifest(overrides: Partial<PortableBundleManifest> = {}): PortableBund
       operatingModel: 'self-hosted',
       deploymentId: 'deployment_source',
       tenantId: 'tenant_primary',
+      organizationId: 'organization_primary',
       exportSequence: 1,
       changeCursor: 'change_100',
       frozenAt: '2026-07-12T17:00:00.000Z',
@@ -295,10 +296,12 @@ describe('portable bundle manifest', () => {
         },
       ],
     });
+    const { organizationId: _organizationId, ...legacySource } = manifest().source;
     const legacy = {
       ...manifest(),
       schemaVersion: 1,
       format: 'tixkit-portable-bundle-v1',
+      source: legacySource,
       rebindings: [
         { kind: 'provider_account', portableId: 'provider_account:account_01', required: true },
       ],
@@ -307,6 +310,10 @@ describe('portable bundle manifest', () => {
     expect(validateV1(legacy), JSON.stringify(validateV1.errors)).toBe(true);
     expect(validateV1(typed)).toBe(false);
     expect(validateV2(typed), JSON.stringify(validateV2.errors)).toBe(true);
+    expect(validateV2({ ...typed, source: legacySource })).toBe(false);
+    expect(() =>
+      validatePortableManifest({ ...typed, source: legacySource } as PortableBundleManifest),
+    ).toThrow(/schema validation|organization id is required/u);
     expect(validateV2(legacy)).toBe(false);
     expect(() => validatePortableManifest(legacy)).not.toThrow();
     expect(() => validatePortableManifest(typed)).not.toThrow();
@@ -539,6 +546,7 @@ describe('portable bundle manifest', () => {
   it('requires explicit unexpired authorization for historical data', () => {
     const historical = manifest({
       mode: 'historical',
+      source: { ...manifest().source, organizationId: 'organization_primary' },
       files: [
         ...manifest().files,
         {
@@ -604,6 +612,7 @@ describe('portable bundle manifest', () => {
         historicalAuthorization: {
           authorizationId: 'auth_history_01',
           tenantId: 'tenant_primary',
+          organizationId: 'organization_primary',
           grantedByPrincipalId: 'principal_owner',
           grantedAt: '2026-07-12T16:00:00.000Z',
           expiresAt: '2026-07-12T18:00:00.000Z',
@@ -617,6 +626,7 @@ describe('portable bundle manifest', () => {
         historicalAuthorization: {
           authorizationId: 'auth_history_02',
           tenantId: 'tenant_primary',
+          organizationId: 'organization_primary',
           grantedByPrincipalId: 'principal_owner',
           grantedAt: '2026-07-12T17:30:00.000Z',
           expiresAt: '2026-07-12T18:00:00.000Z',

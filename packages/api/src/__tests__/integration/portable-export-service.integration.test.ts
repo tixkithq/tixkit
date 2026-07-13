@@ -5,6 +5,7 @@ import {
   BrandRepository,
   EventRepository,
   OrganizationRepository,
+  PortableExportAuthorizationRepository,
   runMigrations,
   TenantRepository,
   truncateAllData,
@@ -14,6 +15,7 @@ import {
   canonicalPortableJson,
   parsePortableJson,
   portableManifestSha256,
+  signPortableManifest,
   type SignedPortableBundle,
 } from '@tixkit/portability';
 import {
@@ -24,6 +26,7 @@ import {
 import { loadPublicEventMedia } from '../../routes/modules/public.js';
 import { removeEventMedia } from '../../services/event-media.js';
 import { parseUploadArtifactMetadata } from '../../services/uploads.js';
+import { createPortableHistoricalAuthorizationService } from '../../services/portable-export-authorization.js';
 import sharp from 'sharp';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
@@ -52,6 +55,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       const value = objects.get(key);
       if (!value) throw new Error('missing test artifact');
       return Uint8Array.from(value);
+    },
+    async getIfExists(key) {
+      const value = objects.get(key);
+      return value ? Uint8Array.from(value) : undefined;
     },
   };
   const bundleKeys = generateKeyPairSync('ed25519');
@@ -656,6 +663,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         if (!value) throw new Error('missing test artifact');
         return Uint8Array.from(value);
       },
+      async getIfExists(key) {
+        const value = objects.get(key);
+        return value ? Uint8Array.from(value) : undefined;
+      },
     };
     const service = createPortableExportService({
       db,
@@ -709,6 +720,86 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     expect(completed.source_change_cursor).toBe(transport.envelope.manifest.source.changeCursor);
   });
 
+  it('recovers an already-signed historical artifact after its consumed grant expires', async () => {
+    const recoveredObjects = new Map<string, Uint8Array>();
+    let failFirstPostWriteRead = true;
+    const crashStore: PortableExportArtifactStore = {
+      async putIfAbsent(key, bytes) {
+        if (recoveredObjects.has(key)) return 'exists';
+        recoveredObjects.set(key, Uint8Array.from(bytes));
+        return 'created';
+      },
+      async get(key) {
+        if (failFirstPostWriteRead) {
+          failFirstPostWriteRead = false;
+          throw new Error('simulated historical crash after immutable put');
+        }
+        const value = recoveredObjects.get(key);
+        if (!value) throw new Error('missing test artifact');
+        return Uint8Array.from(value);
+      },
+      async getIfExists(key) {
+        const value = recoveredObjects.get(key);
+        return value ? Uint8Array.from(value) : undefined;
+      },
+    };
+    const requestedBy = `user_historical_crash_${driver}`;
+    const authorization = await new PortableExportAuthorizationRepository(db).grant({
+      tenantId,
+      organizationId,
+      grantedByPrincipalId: requestedBy,
+      expiresAt: new Date(Date.now() + 7_000),
+    });
+    const service = createPortableExportService({
+      db,
+      store: crashStore,
+      signing: {
+        deploymentId: `deployment_${driver}_01`,
+        operatingModel: 'self-hosted',
+        bundleKeyId: 'bundle_key_01',
+        bundlePrivateKey: bundleKeys.privateKey,
+        payloadKeyId: 'payload_key_01',
+        payloadPrivateKey: payloadKeys.privateKey,
+      },
+    });
+    const request = {
+      tenantId,
+      organizationId,
+      requestedBy,
+      idempotencyKey: `portable-api-historical-crash-${driver}`,
+      authorizationId: authorization.id,
+    };
+    await expect(service.exportHistorical(request)).rejects.toThrow(/simulated historical crash/u);
+    const building = await db
+      .selectFrom('portable_export_jobs')
+      .selectAll()
+      .where('idempotency_key', '=', request.idempotencyKey)
+      .executeTakeFirstOrThrow();
+    await db
+      .updateTable('portable_export_jobs')
+      .set({ build_lease_expires_at: new Date(0) })
+      .where('id', '=', building.id)
+      .execute();
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        Math.max(0, new Date(authorization.expires_at).getTime() - Date.now() + 250),
+      ),
+    );
+
+    const recovered = await service.exportHistorical(request);
+    expect(recovered.jobId).toBe(building.id);
+    const completed = await db
+      .selectFrom('portable_export_jobs')
+      .select(['status', 'artifact_sha256'])
+      .where('id', '=', building.id)
+      .executeTakeFirstOrThrow();
+    expect(completed).toMatchObject({
+      status: 'completed',
+      artifact_sha256: createHash('sha256').update(recovered.bytes).digest('hex'),
+    });
+  }, 15_000);
+
   it('fences a concurrent same-key builder before any duplicate immutable write', async () => {
     let releasePut!: () => void;
     let markPutStarted!: () => void;
@@ -732,6 +823,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         const value = objects.get(key);
         if (!value) throw new Error('missing test artifact');
         return Uint8Array.from(value);
+      },
+      async getIfExists(key) {
+        const value = objects.get(key);
+        return value ? Uint8Array.from(value) : undefined;
       },
     };
     const service = createPortableExportService({
@@ -812,5 +907,284 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         .where('id', '=', organizationId)
         .executeTakeFirstOrThrow(),
     ).resolves.toMatchObject({ name: changedName });
+  });
+
+  it('consumes one principal-bound grant into an immutable signed historical artifact', async () => {
+    const requestedBy = 'user_historical_exporter';
+    const authorization = await new PortableExportAuthorizationRepository(db).grant({
+      tenantId,
+      organizationId,
+      grantedByPrincipalId: requestedBy,
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
+    const service = createPortableExportService({
+      db,
+      store,
+      signing: {
+        deploymentId: `deployment_${driver}_01`,
+        operatingModel: 'self-hosted',
+        bundleKeyId: 'bundle_key_01',
+        bundlePrivateKey: bundleKeys.privateKey,
+        payloadKeyId: 'payload_key_01',
+        payloadPrivateKey: payloadKeys.privateKey,
+      },
+    });
+    const request = {
+      tenantId,
+      organizationId,
+      requestedBy,
+      idempotencyKey: 'portable-api-historical-replay',
+      authorizationId: authorization.id,
+    };
+    const first = await service.exportHistorical(request);
+    const replay = await service.exportHistorical(request);
+    expect(replay).toEqual(first);
+    const transport = parsePortableJson(new TextDecoder().decode(first.bytes)) as {
+      envelope: SignedPortableBundle;
+      payloads: Record<string, string>;
+    };
+    expect(transport.envelope.manifest).toMatchObject({
+      mode: 'historical',
+      apiVersion: '2026-07-16',
+      dataSchemaVersion: '0078',
+      historicalAuthorization: {
+        authorizationId: authorization.id,
+        tenantId,
+        organizationId,
+        grantedByPrincipalId: requestedBy,
+        scope: 'tenant-historical-portability',
+      },
+      compatibility: { requiredEntitlements: ['historical-import-v1'] },
+    });
+    for (const section of [
+      'buyers',
+      'attendees',
+      'orders',
+      'payments',
+      'refunds',
+      'tickets',
+      'scans',
+    ])
+      expect(transport.payloads[`data/${section}.jsonl`]).toBeDefined();
+    await expect(
+      db
+        .selectFrom('portable_export_authorization_events')
+        .select(['event_type', 'export_job_id'])
+        .where('authorization_id', '=', authorization.id)
+        .where('event_type', '=', 'consumed')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toMatchObject({ event_type: 'consumed', export_job_id: first.jobId });
+    await expect(
+      service.exportHistorical({ ...request, idempotencyKey: 'portable-api-historical-reuse' }),
+    ).rejects.toThrow(/ALREADY_CONSUMED/u);
+  });
+
+  it('fails closed without publishing when a consumed grant expires during snapshot work', async () => {
+    const requestedBy = `user_expiring_historical_${driver}`;
+    const authorization = await new PortableExportAuthorizationRepository(db).grant({
+      tenantId,
+      organizationId,
+      grantedByPrincipalId: requestedBy,
+      expiresAt: new Date(Date.now() + 2_500),
+    });
+    let putCount = 0;
+    const rejectingStore: PortableExportArtifactStore = {
+      async putIfAbsent() {
+        putCount += 1;
+        return 'created';
+      },
+      async get() {
+        throw new Error('expired authorization must not publish an artifact');
+      },
+      async getIfExists() {
+        return undefined;
+      },
+    };
+    const service = createPortableExportService({
+      db,
+      store: rejectingStore,
+      signing: {
+        deploymentId: `deployment_${driver}_01`,
+        operatingModel: 'self-hosted',
+        bundleKeyId: 'bundle_key_01',
+        bundlePrivateKey: bundleKeys.privateKey,
+        payloadKeyId: 'payload_key_01',
+        payloadPrivateKey: payloadKeys.privateKey,
+      },
+      async afterSnapshotRead() {
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            Math.max(0, new Date(authorization.expires_at).getTime() - Date.now() + 250),
+          ),
+        );
+      },
+    });
+    await expect(
+      service.exportHistorical({
+        tenantId,
+        organizationId,
+        requestedBy,
+        idempotencyKey: `portable-api-expired-during-build-${driver}`,
+        authorizationId: authorization.id,
+      }),
+    ).rejects.toThrow(/AUTHORIZATION_EXPIRED/u);
+    expect(putCount).toBe(0);
+    const job = await db
+      .selectFrom('portable_export_jobs')
+      .select(['id', 'status'])
+      .where('idempotency_key', '=', `portable-api-expired-during-build-${driver}`)
+      .executeTakeFirstOrThrow();
+    expect(job.status).toBe('building');
+    await expect(
+      db
+        .selectFrom('portable_export_events')
+        .select('id')
+        .where('export_job_id', '=', job.id)
+        .executeTakeFirst(),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects a valid signed artifact whose authorization contract does not match recovery', async () => {
+    const authorization = await new PortableExportAuthorizationRepository(db).grant({
+      tenantId,
+      organizationId,
+      grantedByPrincipalId: `user_recovery_contract_${driver}`,
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
+    const conflictingStore: PortableExportArtifactStore = {
+      async putIfAbsent(key, bytes) {
+        const transport = parsePortableJson(new TextDecoder().decode(bytes)) as {
+          envelope: SignedPortableBundle;
+          payloads: Record<string, string>;
+        };
+        transport.envelope.manifest.historicalAuthorization = {
+          ...transport.envelope.manifest.historicalAuthorization!,
+          authorizationId: 'authorization_substitution_01',
+        };
+        transport.envelope.signature = signPortableManifest(
+          transport.envelope.manifest,
+          'bundle_key_01',
+          bundleKeys.privateKey,
+        );
+        objects.set(
+          key,
+          new TextEncoder().encode(
+            canonicalPortableJson({ envelope: transport.envelope, payloads: transport.payloads }),
+          ),
+        );
+        return 'exists';
+      },
+      async get(key) {
+        const value = objects.get(key);
+        if (!value) throw new Error('missing test artifact');
+        return Uint8Array.from(value);
+      },
+      async getIfExists() {
+        return undefined;
+      },
+    };
+    const historical = createPortableExportService({
+      db,
+      store: conflictingStore,
+      signing: {
+        deploymentId: `deployment_${driver}_01`,
+        operatingModel: 'self-hosted',
+        bundleKeyId: 'bundle_key_01',
+        bundlePrivateKey: bundleKeys.privateKey,
+        payloadKeyId: 'payload_key_01',
+        payloadPrivateKey: payloadKeys.privateKey,
+      },
+    });
+    await expect(
+      historical.exportHistorical({
+        tenantId,
+        organizationId,
+        requestedBy: `user_recovery_contract_${driver}`,
+        idempotencyKey: `portable-api-recovery-conflict-${driver}`,
+        authorizationId: authorization.id,
+      }),
+    ).rejects.toThrow(/ARTIFACT_CONFLICT/u);
+  });
+
+  it('restricts historical grants and revocation to accepted organization owners and admins', async () => {
+    const now = new Date();
+    const users = [
+      { id: `user_owner_${driver}`, role: 'owner', acceptedAt: now },
+      { id: `user_admin_${driver}`, role: 'admin', acceptedAt: now },
+      { id: `user_member_${driver}`, role: 'member', acceptedAt: now },
+      { id: `user_invited_${driver}`, role: 'admin', acceptedAt: null },
+    ] as const;
+    for (const user of users) {
+      await db
+        .insertInto('user_profiles')
+        .values({
+          id: user.id,
+          tenant_id: tenantId,
+          clerk_user_id: `clerk_${user.id}`,
+          email: `${user.id}@example.test`,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'active',
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await db
+        .insertInto('organization_members')
+        .values({
+          id: `member_${user.id}`,
+          tenant_id: tenantId,
+          organization_id: organizationId,
+          user_id: user.id,
+          role: user.role,
+          invited_at: now,
+          accepted_at: user.acceptedAt,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+    }
+    const service = createPortableHistoricalAuthorizationService(db);
+    const authorization = await service.grant({
+      tenantId,
+      organizationId,
+      principalId: `user_owner_${driver}`,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    await expect(
+      service.grant({
+        tenantId,
+        organizationId,
+        principalId: `user_member_${driver}`,
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    ).rejects.toThrow(/ADMIN_REQUIRED/u);
+    await expect(
+      service.grant({
+        tenantId,
+        organizationId,
+        principalId: `user_invited_${driver}`,
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    ).rejects.toThrow(/ADMIN_REQUIRED/u);
+    await expect(
+      service.revoke({
+        tenantId,
+        organizationId,
+        principalId: `user_admin_${driver}`,
+        authorizationId: authorization.authorizationId,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      db
+        .selectFrom('portable_export_authorization_events')
+        .select('actor_principal_id')
+        .where('authorization_id', '=', authorization.authorizationId)
+        .where('event_type', '=', 'revoked')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toMatchObject({ actor_principal_id: `user_admin_${driver}` });
   });
 });

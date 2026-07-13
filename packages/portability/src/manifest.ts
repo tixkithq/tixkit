@@ -109,6 +109,7 @@ export interface PortableAsset {
 export interface HistoricalExportAuthorization {
   authorizationId: string;
   tenantId: string;
+  organizationId?: string;
   grantedByPrincipalId: string;
   grantedAt: string;
   expiresAt: string;
@@ -126,6 +127,7 @@ export interface PortableBundleManifest {
     operatingModel: TixkitOperatingModel;
     deploymentId: string;
     tenantId: string;
+    organizationId?: string;
     exportSequence: number;
     changeCursor: string;
     frozenAt?: string;
@@ -380,6 +382,15 @@ export function validatePortableManifest(manifest: PortableBundleManifest): void
   ] as const) {
     if (!ID_PATTERN.test(value)) throw new Error(`portable ${label} is invalid`);
   }
+  if (manifest.source.organizationId && !ID_PATTERN.test(manifest.source.organizationId)) {
+    throw new Error('portable source organization id is invalid');
+  }
+  if (
+    manifest.schemaVersion === PORTABLE_BUNDLE_SCHEMA_VERSION &&
+    !manifest.source.organizationId
+  ) {
+    throw new Error('portable v2 source organization id is required');
+  }
   if (!Number.isSafeInteger(manifest.source.exportSequence) || manifest.source.exportSequence < 1) {
     throw new Error('portable export sequence must be a positive safe integer');
   }
@@ -588,7 +599,11 @@ export function validatePortableManifest(manifest: PortableBundleManifest): void
       !authorization ||
       authorization.scope !== 'tenant-historical-portability' ||
       authorization.tenantId !== manifest.source.tenantId ||
+      (manifest.schemaVersion === PORTABLE_BUNDLE_SCHEMA_VERSION &&
+        authorization.organizationId !== manifest.source.organizationId) ||
       !ID_PATTERN.test(authorization.authorizationId) ||
+      (authorization.organizationId !== undefined &&
+        !ID_PATTERN.test(authorization.organizationId)) ||
       !ID_PATTERN.test(authorization.grantedByPrincipalId) ||
       !validDate(authorization.grantedAt) ||
       !validDate(authorization.expiresAt) ||

@@ -91,6 +91,7 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         operatingModel: 'self-hosted',
         deploymentId: `deployment_source_${driver}`,
         tenantId: `tenant_source_${driver}`,
+        organizationId: `organization_source_${driver}`,
         exportSequence: 1,
         changeCursor:
           'snapshot-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',

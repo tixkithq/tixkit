@@ -78,6 +78,7 @@ import { ImportEventImmutabilityMigration } from './migrations/0074_import_event
 import { EventMediaAssetsMigration } from './migrations/0075_event_media_assets.js';
 import { MediaObjectCleanupJobsMigration } from './migrations/0076_media_object_cleanup_jobs.js';
 import { PortableImportCutoverProofsMigration } from './migrations/0077_portable_import_cutover_proofs.js';
+import { PortableExportAuthorizationsMigration } from './migrations/0078_portable_export_authorizations.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -205,8 +206,10 @@ const ALL_SCHEMA_TABLES = [
   'agent_memory_events',
   'agent_memory_entries',
   'portable_export_sequences',
+  'portable_export_authorizations',
   'portable_export_jobs',
   'portable_export_events',
+  'portable_export_authorization_events',
   'portable_import_dry_run_receipts',
   'portable_import_preflights',
   'portable_import_approval_revocations',
@@ -320,6 +323,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0075_event_media_assets': EventMediaAssetsMigration,
       '0076_media_object_cleanup_jobs': MediaObjectCleanupJobsMigration,
       '0077_portable_import_cutover_proofs': PortableImportCutoverProofsMigration,
+      '0078_portable_export_authorizations': PortableExportAuthorizationsMigration,
     };
   }
 }
@@ -527,6 +531,8 @@ export async function dropAllTables(db: Database): Promise<void> {
     'reject_agent_control_mutation',
     'reject_agent_memory_event_mutation',
     'reject_portable_export_event_mutation',
+    'reject_portable_export_authorization_event_mutation',
+    'enforce_portable_export_authorization_transition',
     'reject_portable_import_control_mutation',
     'reject_portable_import_approval_mutation',
     'reject_portable_import_commit_authorization_mutation',
@@ -577,6 +583,8 @@ export async function truncateAllData(db: Database): Promise<void> {
       'portable_import_rebindings',
       'portable_import_commit_authorizations',
       'portable_import_cutover_proofs',
+      'portable_export_authorization_events',
+      'portable_export_authorizations',
       'import_job_events',
     ]) {
       await sql
@@ -627,6 +635,8 @@ export async function truncateAllData(db: Database): Promise<void> {
         'portable_import_rebindings',
         'portable_import_commit_authorizations',
         'portable_import_cutover_proofs',
+        'portable_export_authorization_events',
+        'portable_export_authorizations',
         'import_job_events',
       ]) {
         await sql

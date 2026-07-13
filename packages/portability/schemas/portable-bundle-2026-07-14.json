@@ -32,11 +32,19 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["operatingModel", "deploymentId", "tenantId", "exportSequence", "changeCursor"],
+      "required": [
+        "operatingModel",
+        "deploymentId",
+        "tenantId",
+        "organizationId",
+        "exportSequence",
+        "changeCursor"
+      ],
       "properties": {
         "operatingModel": { "enum": ["cloud", "self-hosted"] },
         "deploymentId": { "$ref": "#/$defs/id" },
         "tenantId": { "$ref": "#/$defs/id" },
+        "organizationId": { "$ref": "#/$defs/id" },
         "exportSequence": { "type": "integer", "minimum": 1 },
         "changeCursor": { "type": "string", "minLength": 1 },
         "frozenAt": { "type": "string", "format": "date-time" }
@@ -374,6 +382,7 @@
       "required": [
         "authorizationId",
         "tenantId",
+        "organizationId",
         "grantedByPrincipalId",
         "grantedAt",
         "expiresAt",
@@ -382,6 +391,7 @@
       "properties": {
         "authorizationId": { "$ref": "#/$defs/id" },
         "tenantId": { "$ref": "#/$defs/id" },
+        "organizationId": { "$ref": "#/$defs/id" },
         "grantedByPrincipalId": { "$ref": "#/$defs/id" },
         "grantedAt": { "type": "string", "format": "date-time" },
         "expiresAt": { "type": "string", "format": "date-time" },

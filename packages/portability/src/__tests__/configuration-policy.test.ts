@@ -180,6 +180,7 @@ describe('portable configuration section policies', () => {
           operatingModel: 'self-hosted',
           deploymentId: 'deployment_source',
           tenantId: 'tenant_1',
+          organizationId: 'organization_1',
           exportSequence: 1,
           changeCursor: 'cursor_1',
         },

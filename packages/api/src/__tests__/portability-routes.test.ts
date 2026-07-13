@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@tixkit/domain';
 import type { PortableExportService } from '../services/portable-export.js';
+import type { PortableHistoricalAuthorizationService } from '../services/portable-export-authorization.js';
 
 const { writeAuditLog } = vi.hoisted(() => ({
   writeAuditLog: vi.fn(async () => undefined),
@@ -25,14 +26,21 @@ function principal(overrides: Partial<Principal> = {}): Principal {
   };
 }
 
-async function testApp(input: { principal: Principal; service: PortableExportService }) {
+async function testApp(input: {
+  principal: Principal;
+  service: PortableExportService;
+  authorizationService?: PortableHistoricalAuthorizationService;
+}) {
   const app = Fastify();
   app.decorate('context', { db: {} } as never);
   app.addHook('preHandler', async (request) => {
     request.principal = input.principal;
   });
   registerErrorHandler(app);
-  await app.register(portabilityRoutes, { exportService: input.service });
+  await app.register(portabilityRoutes, {
+    exportService: input.service,
+    authorizationService: input.authorizationService,
+  });
   return app;
 }
 
@@ -64,7 +72,7 @@ describe('portable export route authorization and delivery', () => {
     const exportConfiguration = vi.fn();
     const app = await testApp({
       principal: deniedPrincipal,
-      service: { exportConfiguration },
+      service: { exportConfiguration, exportHistorical: vi.fn() },
     });
     const response = await app.inject({
       method: 'POST',
@@ -84,7 +92,7 @@ describe('portable export route authorization and delivery', () => {
       const exportConfiguration = vi.fn();
       const app = await testApp({
         principal: principal(),
-        service: { exportConfiguration },
+        service: { exportConfiguration, exportHistorical: vi.fn() },
       });
       const response = await app.inject({
         method: 'POST',
@@ -107,7 +115,7 @@ describe('portable export route authorization and delivery', () => {
     }));
     const app = await testApp({
       principal: principal(),
-      service: { exportConfiguration },
+      service: { exportConfiguration, exportHistorical: vi.fn() },
     });
     for (let requestNumber = 0; requestNumber < 2; requestNumber += 1) {
       const response = await app.inject({
@@ -123,6 +131,128 @@ describe('portable export route authorization and delivery', () => {
     }
     expect(exportConfiguration).toHaveBeenCalledTimes(2);
     expect(writeAuditLog).toHaveBeenCalledTimes(2);
+    await app.close();
+  });
+
+  it('requires and forwards a principal-bound authorization for historical export', async () => {
+    const bytes = new TextEncoder().encode('{"historical":true}');
+    const exportHistorical = vi.fn(async () => ({
+      jobId: 'pex_historical_01',
+      bundleId: 'bundle_historical_01',
+      bytes,
+    }));
+    const service = { exportConfiguration: vi.fn(), exportHistorical };
+    const app = await testApp({ principal: principal(), service });
+    const missing = await app.inject({
+      method: 'POST',
+      url: '/portable-exports',
+      headers: { 'idempotency-key': 'historical-missing' },
+      payload: { organizationId, mode: 'historical' },
+    });
+    expect(missing.statusCode).toBe(400);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/portable-exports',
+      headers: { 'idempotency-key': 'historical-valid' },
+      payload: {
+        organizationId,
+        mode: 'historical',
+        authorizationId: 'pexa_route_authorization_01',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(exportHistorical).toHaveBeenCalledWith({
+      tenantId,
+      organizationId,
+      requestedBy: 'user_portability_admin',
+      idempotencyKey: 'historical-valid',
+      authorizationId: 'pexa_route_authorization_01',
+    });
+    expect(writeAuditLog).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ action: 'portability.export.historical' }),
+    );
+    await app.close();
+  });
+
+  it('grants and revokes historical authorization only through the control service', async () => {
+    const authorization = {
+      authorizationId: 'pexa_route_authorization_01',
+      tenantId,
+      scope: 'tenant-historical-portability' as const,
+      grantedByPrincipalId: 'user_portability_admin',
+      grantedAt: '2026-07-13T06:00:00.000Z',
+      expiresAt: '2026-07-13T06:10:00.000Z',
+    };
+    const grant = vi.fn(async () => authorization);
+    const revoke = vi.fn(async () => undefined);
+    const authorizationService = { grant, revoke };
+    const service = { exportConfiguration: vi.fn(), exportHistorical: vi.fn() };
+    const app = await testApp({ principal: principal(), service, authorizationService });
+    const granted = await app.inject({
+      method: 'POST',
+      url: '/portable-export-authorizations',
+      payload: { organizationId, expiresAt: authorization.expiresAt },
+    });
+    expect(granted.statusCode).toBe(201);
+    expect(granted.json()).toEqual(authorization);
+    expect(grant).toHaveBeenCalledWith({
+      tenantId,
+      organizationId,
+      principalId: 'user_portability_admin',
+      expiresAt: new Date(authorization.expiresAt),
+    });
+    const revoked = await app.inject({
+      method: 'POST',
+      url: `/portable-export-authorizations/${authorization.authorizationId}/revoke`,
+      payload: { organizationId },
+    });
+    expect(revoked.statusCode).toBe(204);
+    expect(revoke).toHaveBeenCalledWith({
+      tenantId,
+      organizationId,
+      principalId: 'user_portability_admin',
+      authorizationId: authorization.authorizationId,
+    });
+    expect(writeAuditLog).toHaveBeenCalledTimes(2);
+    await app.close();
+  });
+
+  it('denies non-user authorization and maps stale authorization to conflict', async () => {
+    const service = {
+      exportConfiguration: vi.fn(),
+      exportHistorical: vi.fn(async () => {
+        throw new Error('PORTABLE_EXPORT_AUTHORIZATION_EXPIRED');
+      }),
+    };
+    const systemApp = await testApp({
+      principal: principal({ type: 'system' }),
+      service,
+      authorizationService: { grant: vi.fn(), revoke: vi.fn() },
+    });
+    const denied = await systemApp.inject({
+      method: 'POST',
+      url: '/portable-export-authorizations',
+      payload: { organizationId, expiresAt: '2026-07-13T06:10:00.000Z' },
+    });
+    expect(denied.statusCode).toBe(403);
+    await systemApp.close();
+
+    const app = await testApp({ principal: principal(), service });
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/portable-exports',
+      headers: { 'idempotency-key': 'historical-expired' },
+      payload: {
+        organizationId,
+        mode: 'historical',
+        authorizationId: 'pexa_expired_01',
+      },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(writeAuditLog).not.toHaveBeenCalled();
     await app.close();
   });
 });

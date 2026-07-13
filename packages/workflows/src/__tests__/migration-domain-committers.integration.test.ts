@@ -934,6 +934,7 @@ describeDatabase('production migration committers', () => {
           operatingModel: 'self-hosted',
           deploymentId: 'integration_source',
           tenantId,
+          organizationId,
           exportSequence: 1,
           changeCursor: `cursor_${suffix}`,
         },

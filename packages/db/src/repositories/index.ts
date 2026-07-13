@@ -1,5 +1,6 @@
 export { BaseRepository } from './base.js';
 export { PortableExportRepository, type BeginPortableExportInput } from './portable-export.js';
+export { PortableExportAuthorizationRepository } from './portable-export-authorization.js';
 export {
   TenantRepository,
   OrganizationRepository,

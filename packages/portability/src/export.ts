@@ -61,6 +61,7 @@ export interface PortableLogicalExportInput {
     operatingModel: TixkitOperatingModel;
     deploymentId: string;
     tenantId: string;
+    organizationId: string;
     exportSequence: number;
     changeCursor: string;
     frozenAt?: string;
@@ -133,6 +134,8 @@ export function buildPortableLogicalExport(
   const parentEnvelope = input.lineage?.kind === 'delta' ? input.lineage.parentEnvelope : undefined;
   if (input.sections.size === 0) throw new Error('portable export requires at least one section');
   if (!input.source.tenantId.trim()) throw new Error('portable export source tenant is invalid');
+  if (!input.source.organizationId?.trim())
+    throw new Error('portable export source organization is invalid');
   if (
     parentEnvelope &&
     (parentEnvelope.manifest.source.tenantId !== input.source.tenantId ||
@@ -169,6 +172,8 @@ export function buildPortableLogicalExport(
     if (
       !authorization ||
       authorization.tenantId !== input.source.tenantId ||
+      !authorization.organizationId ||
+      authorization.organizationId !== input.source.organizationId ||
       authorization.grantedByPrincipalId.trim().length === 0 ||
       authorization.scope !== 'tenant-historical-portability' ||
       !Number.isFinite(Date.parse(authorization.grantedAt)) ||
