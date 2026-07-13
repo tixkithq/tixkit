@@ -126,7 +126,7 @@ const examples = {
 const currentSpec = openApiSpec as unknown as JsonObject;
 const changes = previous ? compareOpenApi(previous.spec as never, currentSpec as never) : [];
 const breakingChanges = changes.filter((change) => change.severity === 'breaking');
-const apiDiff = {
+let apiDiff = {
   from: previous?.version ?? null,
   to: version,
   initialRelease: !previous,
@@ -137,6 +137,19 @@ const apiDiff = {
   },
   changes,
 };
+if (previous?.version === version) {
+  try {
+    apiDiff = JSON.parse(
+      execFileSync('git', ['show', `HEAD:artifacts/api/${version}/api-diff.json`], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    ) as typeof apiDiff;
+  } catch (error) {
+    if ((error as { status?: number }).status !== 128) throw error;
+  }
+}
 if (apiDiff.breaking && previous?.version === version) {
   throw new Error(
     'Breaking changes may never rewrite an immutable API version. Choose a newer version.',
@@ -159,8 +172,8 @@ if (apiDiff.breaking && previous) {
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 const changelog = `# API ${version}\n\n${
-  previous
-    ? `Compared with ${previous.version}. Breaking changes: ${breakingChanges.length}. Compatible changes: ${changes.length - breakingChanges.length}.`
+  apiDiff.from
+    ? `Compared with ${apiDiff.from}. Breaking changes: ${apiDiff.summary.breaking}. Compatible changes: ${apiDiff.summary.compatible}.`
     : 'Initial versioned repository contract release.'
 }\n\n- OpenAPI JSON and YAML\n- Generated TypeScript declarations\n- Webhook event catalog\n- Sanitized request/response examples\n- Machine-readable API diff and checksums\n`;
 
