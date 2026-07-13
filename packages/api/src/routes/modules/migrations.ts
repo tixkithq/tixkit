@@ -231,9 +231,22 @@ export function assertMigrationMappingSafe(mapping: Record<string, string | stri
   }
 }
 
-export function redactMigrationReportValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactMigrationReportValue);
+const migrationDigestKeys = new Set([
+  'approvalDigest',
+  'artifactSha256',
+  'checksumSha256',
+  'claimOwnerSha256',
+  'configurationSha256',
+  'inputHash',
+  'inputSha256',
+  'manifestSha256',
+  'receiptSha256',
+]);
+
+export function redactMigrationReportValue(value: unknown, key?: string): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactMigrationReportValue(item));
   if (typeof value === 'string') {
+    if (key && migrationDigestKeys.has(key) && /^[a-f0-9]{64}$/u.test(value)) return value;
     return value
       .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[REDACTED_EMAIL]')
       .replace(/(?:\+?\d[\d ().-]{6,}\d)/gu, '[REDACTED_PHONE]')
@@ -248,7 +261,7 @@ export function redactMigrationReportValue(value: unknown): unknown {
       key,
       sensitiveKey.test(key) || piiKey.test(key)
         ? '[REDACTED]'
-        : redactMigrationReportValue(nested),
+        : redactMigrationReportValue(nested, key),
     ]),
   );
 }

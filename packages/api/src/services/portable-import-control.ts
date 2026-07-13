@@ -620,7 +620,20 @@ export async function approvePortableImport(input: {
             summary.inputHash !== currentInputSha256 ||
             storedReceipt.input_sha256 !== currentInputSha256
           )
-            throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED');
+            throw new Error('PORTABLE_IMPORT_APPROVAL_INPUT_CHANGED', {
+              cause: new Error(
+                JSON.stringify({
+                  summaryAccepted: summary?.accepted === true,
+                  summaryMatches: summary?.inputHash === currentInputSha256,
+                  receiptMatches: storedReceipt.input_sha256 === currentInputSha256,
+                  summaryLength: summary?.inputHash?.length,
+                  currentLength: currentInputSha256.length,
+                  firstDifference: [...(summary?.inputHash ?? '')].findIndex(
+                    (character, index) => character !== currentInputSha256[index],
+                  ),
+                }),
+              ),
+            });
           if (input.confirmation !== `approve:${input.jobId}:${storedReceipt.receipt_sha256}`)
             throw new Error('PORTABLE_IMPORT_APPROVAL_CONFIRMATION_INVALID');
           const { receipt } = await attestPortableDryRun({

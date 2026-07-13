@@ -179,4 +179,38 @@ describe('migration security boundaries', () => {
     expect(JSON.stringify(report)).not.toContain('external-');
     expect(JSON.stringify(report)).not.toContain('buyer@example.test');
   });
+
+  it('preserves explicit cryptographic digests without exempting ordinary text from redaction', () => {
+    const digest = 'cc138437817b35e8b7b3aadc12d64d9e93d39f984752e035f56b792535414aee';
+    expect(
+      redactMigrationReportValue({
+        inputHash: digest,
+        configurationSha256: digest,
+        claimOwnerSha256: digest,
+        nested: { manifestSha256: digest },
+        notesHash: digest,
+        metadataDigest: digest,
+        secretInputHash: digest,
+        arrayDigest: [digest],
+        receiptSha256: digest.toUpperCase(),
+        message: `Untrusted value ${digest}`,
+      }),
+    ).toEqual({
+      inputHash: digest,
+      configurationSha256: digest,
+      claimOwnerSha256: digest,
+      nested: { manifestSha256: digest },
+      notesHash: 'cc[REDACTED_PHONE]b35e8b7b3aadc12d64d9e93d39f984752e035f56b[REDACTED_PHONE]aee',
+      metadataDigest:
+        'cc[REDACTED_PHONE]b35e8b7b3aadc12d64d9e93d39f984752e035f56b[REDACTED_PHONE]aee',
+      secretInputHash: '[REDACTED]',
+      arrayDigest: [
+        'cc[REDACTED_PHONE]b35e8b7b3aadc12d64d9e93d39f984752e035f56b[REDACTED_PHONE]aee',
+      ],
+      receiptSha256:
+        'CC[REDACTED_PHONE]B35E8B7B3AADC12D64D9E93D39F984752E035F56B[REDACTED_PHONE]AEE',
+      message:
+        'Untrusted value cc[REDACTED_PHONE]b35e8b7b3aadc12d64d9e93d39f984752e035f56b[REDACTED_PHONE]aee',
+    });
+  });
 });
