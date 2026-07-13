@@ -1,9 +1,11 @@
 export const WEBHOOK_TEST_EVENT_TYPE = 'test.ping' as const;
+export const WEBHOOK_TEST_API_VERSION = '2026-07-18' as const;
+const SUPPORTED_WEBHOOK_TEST_API_VERSIONS = new Set(['2026-07-17', WEBHOOK_TEST_API_VERSION]);
 
 export type WebhookTestPayload = {
   type: typeof WEBHOOK_TEST_EVENT_TYPE;
   test: true;
-  apiVersion: '2026-07-18';
+  apiVersion: '2026-07-17' | typeof WEBHOOK_TEST_API_VERSION;
   createdAt: string;
   data: { endpointId: string };
 };
@@ -12,7 +14,7 @@ export function createWebhookTestPayload(endpointId: string, now = new Date()): 
   return {
     type: WEBHOOK_TEST_EVENT_TYPE,
     test: true,
-    apiVersion: '2026-07-18',
+    apiVersion: WEBHOOK_TEST_API_VERSION,
     createdAt: now.toISOString(),
     data: { endpointId },
   };
@@ -34,7 +36,8 @@ export function isWebhookTestPayload(
     JSON.stringify(dataKeys) === JSON.stringify(['endpointId']) &&
     payload.type === WEBHOOK_TEST_EVENT_TYPE &&
     payload.test === true &&
-    payload.apiVersion === '2026-07-18' &&
+    typeof payload.apiVersion === 'string' &&
+    SUPPORTED_WEBHOOK_TEST_API_VERSIONS.has(payload.apiVersion) &&
     createdAt !== null &&
     Number.isFinite(createdAt.getTime()) &&
     createdAt.toISOString() === payload.createdAt &&

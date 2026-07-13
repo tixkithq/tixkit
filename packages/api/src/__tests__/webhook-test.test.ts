@@ -25,4 +25,13 @@ describe('synthetic webhook fixture', () => {
     expect(isWebhookTestPayload({ ...payload, test: false }, 'wh_1')).toBe(false);
     expect(isWebhookTestPayload({ ...payload, type: 'order.paid' }, 'wh_1')).toBe(false);
   });
+
+  it('accepts the retained 2026-07-17 fixture while emitting the current version', () => {
+    const current = createWebhookTestPayload('wh_1', new Date('2026-07-10T12:00:00.000Z'));
+    const retained = { ...current, apiVersion: '2026-07-17' };
+
+    expect(isWebhookTestPayload(retained, 'wh_1')).toBe(true);
+    expect(current.apiVersion).toBe('2026-07-18');
+    expect(isWebhookTestPayload({ ...retained, apiVersion: '2026-07-16' }, 'wh_1')).toBe(false);
+  });
 });

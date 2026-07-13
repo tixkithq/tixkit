@@ -1895,7 +1895,7 @@ describe('developer routes integration', () => {
     await app.close();
   });
 
-  it('queues only the requested endpoint for endpoint-scoped webhook replay', async () => {
+  it('upgrades retained synthetic payloads for endpoint-scoped webhook replay', async () => {
     const principal: Principal = {
       type: 'user',
       id: 'usr_1',
@@ -1911,8 +1911,14 @@ describe('developer routes integration', () => {
           id: 'whe_1',
           tenant_id: 'tnt_1',
           organization_id: 'org_1',
-          type: 'order.paid',
-          payload: JSON.stringify({ orderId: 'ord_1' }),
+          type: 'test.ping',
+          payload: JSON.stringify({
+            type: 'test.ping',
+            test: true,
+            apiVersion: '2026-07-17',
+            createdAt: createdAt.toISOString(),
+            data: { endpointId: 'wh_1' },
+          }),
           status: 'pending',
           created_at: createdAt,
         },
@@ -1924,7 +1930,7 @@ describe('developer routes integration', () => {
           organization_id: 'org_1',
           url: 'https://primary.example.com/webhooks',
           secret: 'secret_1',
-          events: JSON.stringify(['order.paid']),
+          events: JSON.stringify([]),
           status: 'active',
           description: null,
           created_at: createdAt,
@@ -1936,7 +1942,7 @@ describe('developer routes integration', () => {
           organization_id: 'org_1',
           url: 'https://secondary.example.com/webhooks',
           secret: 'secret_2',
-          events: JSON.stringify(['order.paid']),
+          events: JSON.stringify([]),
           status: 'active',
           description: null,
           created_at: createdAt,
@@ -1988,9 +1994,14 @@ describe('developer routes integration', () => {
         apiVersion: '2026-07-18',
         endpointId: 'wh_1',
         eventId: 'whe_1',
-        eventType: 'order.paid',
+        eventType: 'test.ping',
         maxAttempts: 5,
-        payload: { orderId: 'ord_1' },
+        payload: expect.objectContaining({
+          type: 'test.ping',
+          test: true,
+          apiVersion: '2026-07-18',
+          data: { endpointId: 'wh_1' },
+        }),
         replayNonce: expect.any(String),
       }),
     );
@@ -2004,10 +2015,10 @@ describe('developer routes integration', () => {
     expect(JSON.parse(tables.audit_logs[0].diff_summary as string)).toEqual({
       replayScope: 'endpoint',
       endpointId: 'wh_1',
-      eventType: 'order.paid',
+      eventType: 'test.ping',
       queuedEndpointCount: 1,
     });
-    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('ord_1');
+    expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret');
     expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret_1');
     expect(JSON.stringify(tables.audit_logs[0])).not.toContain('secret_2');
 

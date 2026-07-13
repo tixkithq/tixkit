@@ -16,11 +16,11 @@ related:
   - /operators/migration-operations
 ---
 
-API version `2026-07-18` adds authenticated portable-import upload contracts. Existing export, delta lineage and final-cutover contracts from `2026-07-17` remain compatible.
+API version `2026-07-18` adds authenticated portable-import upload contracts. Export, delta-lineage and final-cutover request shapes from `2026-07-17` remain compatible. The upload request is intentionally breaking for clients that used the previously open-ended `migration_import` purpose: destination organization scope is now mandatory and unrelated resource scopes are rejected. The candidate remains unpublished and requires protected release approval.
 
 ## Portable import uploads
 
-Portable bundle upload tickets now use purpose `migration_import`. The request must include `organizationId` and `maxBytes`; `brandId` and `eventId` are rejected. The caller needs `migrations.write`, and the service resolves the tenant and organization before issuing a signed upload.
+Portable bundle upload tickets now use purpose `migration_import`. The request must include `organizationId` and `sizeBytes`; `brandId` and `eventId` are rejected. The caller needs `migrations.write`, and the service resolves the tenant and organization before issuing a signed upload.
 
 The maximum portable artifact size is 50 MiB. Clients must send one of the documented portable bundle media types and preserve the exact byte length and checksum through upload completion. Import registration accepts only the completed, clean artifact selected by the signed manifest and consumes it once while creating the job-file link and audit event atomically.
 
