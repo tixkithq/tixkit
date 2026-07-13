@@ -351,9 +351,12 @@ function schemaExample(
       (entry): entry is Record<string, unknown> =>
         Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry),
     );
-    return objects.length === examples.length
-      ? Object.assign({}, ...objects)
-      : examples.findLast((entry) => entry !== null);
+    if (objects.length === examples.length) return Object.assign({}, ...objects);
+    let lastNonNull: unknown = null;
+    for (const example of examples) {
+      if (example !== null) lastNonNull = example;
+    }
+    return lastNonNull;
   }
   const declaredType = Array.isArray(value.type)
     ? (value.type.find((entry) => entry !== 'null') ?? 'null')
