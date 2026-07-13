@@ -212,7 +212,9 @@ services:
       context: ../..
       dockerfile: Dockerfile.worker
     restart: unless-stopped
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      TIXKIT_PORTABILITY_IMPORT_TRUST: ${TIXKIT_PORTABILITY_IMPORT_TRUST:-}
     depends_on:
       api:
         condition: service_healthy

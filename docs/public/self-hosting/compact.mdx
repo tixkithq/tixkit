@@ -54,6 +54,28 @@ bun run compact:logs -- api worker
 
 Restarting the host or Docker preserves the four named data volumes. Running `bun run compact:up` again rechecks migrations, storage initialization, seed idempotency, and service health.
 
+## Trust a portability source
+
+On the source Compact host, write the public identity artifact:
+
+```bash
+bun run compact:portability-identity -- ./compact-source-identity.json
+```
+
+The command prints the artifact's SHA-256. The JSON contains only the deployment identity and Ed25519 public keys, plus a self-signature proving possession of the advertised bundle key. Send the JSON and its printed SHA-256 to the destination over separate authenticated channels. The self-signature detects modification but does not establish trust by itself; the destination operator must verify the expected SHA-256 out of band.
+
+On the destination Compact host, install trust for that exact source. Set the capacity to the number of bytes actually available to Tixkit-owned object storage, excluding the space needed for databases, logs, backups, and upgrades:
+
+```bash
+bun run compact:portability-trust -- \
+  ./compact-source-identity.json \
+  --sha256 <verified-sha256> \
+  --available-storage-bytes <available-bytes>
+bun run compact:up
+```
+
+The trust command verifies the checksum, strict artifact schema, bundle-key self-signature, distinct Ed25519 role keys, current API/data-schema pair, and different source/destination deployment identities and authorities. It then atomically adds only source public keys and destination compatibility policy to the mode-`0600` environment. The worker receives the resulting import trust; the API receives the source cutover public key. Source private keys never enter the artifact or destination. A destination has one explicitly selected import source at a time. Replacing it requires `--replace`, followed by `compact:up`; retain the verified artifact and checksum with the migration change record. Concurrent trust changes fail closed. No existing `infra/compact/.env.portability.lock` is removed automatically. If the trust process is forcibly terminated, verify from the recorded PID that no trust process is running before removing the lock manually.
+
 ## Back up and restore
 
 ```bash

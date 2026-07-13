@@ -22,6 +22,8 @@
     "dev:all": "sh -c 'bun run dev:api & bun run dev:worker & bun run dev:checkout & bun run dev:admin & bun run dev:docs & wait'",
     "quickstart": "bun run --env-file=.env.local --filter tixkit quickstart",
     "compact:init": "node scripts/compact.mjs init",
+    "compact:portability-identity": "bun scripts/compact-portability.mjs identity",
+    "compact:portability-trust": "bun scripts/compact-portability.mjs trust",
     "compact:up": "node scripts/compact.mjs up",
     "compact:status": "node scripts/compact.mjs status",
     "compact:logs": "node scripts/compact.mjs logs",

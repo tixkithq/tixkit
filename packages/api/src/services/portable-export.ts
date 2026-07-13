@@ -39,8 +39,12 @@ import {
 import sharp from 'sharp';
 
 const MAX_PORTABLE_ARTIFACT_BYTES = 50 * 1024 * 1024;
-const PORTABLE_EXPORT_API_VERSION = '2026-07-17';
-const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0080';
+export const PORTABLE_EXPORT_API_VERSION = '2026-07-17';
+export const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0080';
+export const PORTABLE_EXPORT_MEDIA_SCANNER_ID = 'tixkit_event_media_scanner_v1';
+export const PORTABLE_EXPORT_MEDIA_POLICY_SHA256 = createHash('sha256')
+  .update('tixkit-portable-event-media-v1')
+  .digest('hex');
 
 function historicalAuthorizationClaim(authorization: {
   id: string;
@@ -698,9 +702,6 @@ export function createPortableExportService(input: {
       });
     if (snapshot.media.length > 0 && !input.mediaStore)
       throw new Error('PORTABLE_EXPORT_MEDIA_STORE_REQUIRED');
-    const mediaPolicySha256 = createHash('sha256')
-      .update('tixkit-portable-event-media-v1')
-      .digest('hex');
     const assets = await Promise.all(
       snapshot.media.map(async (asset) => {
         const sourceBytes = await input.mediaStore!.read(
@@ -729,8 +730,8 @@ export function createPortableExportService(input: {
           role: `event-media:${asset.event_id}:${asset.role}:original`,
           width: info.width,
           height: info.height,
-          policySha256: mediaPolicySha256,
-          scannerId: 'tixkit_event_media_scanner_v1',
+          policySha256: PORTABLE_EXPORT_MEDIA_POLICY_SHA256,
+          scannerId: PORTABLE_EXPORT_MEDIA_SCANNER_ID,
         };
       }),
     );
