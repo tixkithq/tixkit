@@ -1,4 +1,7 @@
+import { spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { Connection, WorkflowClient } from '@temporalio/client';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Principal } from '@tixkit/domain';
@@ -46,7 +49,116 @@ import {
   validatePortableCommitCutoverEvidence,
   MIGRATION_COMMIT_STAGES,
   MIGRATION_SIDE_EFFECT_POLICY,
+  migrationCommitWorkflow,
 } from '@tixkit/workflows';
+
+type MigrationProcessWorker = {
+  waitFor(text: string, timeoutMs?: number): Promise<void>;
+  stop(signal?: NodeJS.Signals): Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+};
+
+function errorCode(error: unknown): number | undefined {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (typeof candidate.code === 'number') return candidate.code;
+    current = candidate.cause;
+  }
+  return undefined;
+}
+
+function startMigrationProcessWorker(input: {
+  driver: 'postgres' | 'mysql';
+  databaseUrl: string;
+  taskQueue: string;
+  crashAfterStage?: string;
+}): MigrationProcessWorker {
+  const fixture = fileURLToPath(
+    new URL(
+      '../../../../workflows/src/__tests__/fixtures/migration-process-worker.ts',
+      import.meta.url,
+    ),
+  );
+  const child = spawn(process.execPath, ['--import', import.meta.resolve('tsx'), fixture], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      DB_DRIVER: input.driver,
+      TIXKIT_TEST_DATABASE_URL: input.databaseUrl,
+      TIXKIT_MIGRATION_TASK_QUEUE: input.taskQueue,
+      ...(input.crashAfterStage
+        ? { TIXKIT_MIGRATION_CRASH_AFTER_ROW_STAGE: input.crashAfterStage }
+        : {}),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  const append = (chunk: Buffer | string) => {
+    output = `${output}${chunk.toString()}`.slice(-65_536);
+  };
+  child.stdout.on('data', append);
+  child.stderr.on('data', append);
+  let spawnError: Error | undefined;
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    child.once('error', (error) => {
+      spawnError = error;
+    });
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  const waitForExit = async (timeoutMs: number) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        exited,
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error(`Migration worker pid ${child.pid ?? 'unknown'} did not exit`)),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  };
+  return {
+    async waitFor(text, timeoutMs = 20_000) {
+      const startedAt = Date.now();
+      while (!output.includes(text)) {
+        if (spawnError)
+          throw new Error(`Migration worker failed to spawn\n${output}`, { cause: spawnError });
+        if (child.exitCode !== null || child.signalCode !== null) {
+          throw new Error(`Migration worker exited before ${text}\n${output}`);
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          throw new Error(`Timed out waiting for ${text}\n${output}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    },
+    async stop(signal = 'SIGTERM') {
+      if (child.exitCode !== null || child.signalCode !== null)
+        return { code: child.exitCode, signal: child.signalCode };
+      if (spawnError) throw spawnError;
+      child.kill(signal);
+      try {
+        return await waitForExit(10_000);
+      } catch (error) {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        try {
+          return await waitForExit(5_000);
+        } catch (forcedExitError) {
+          throw new Error(
+            `Migration worker pid ${child.pid ?? 'unknown'} could not be stopped after graceful wait failed: ${String(error)}`,
+            { cause: forcedExitError },
+          );
+        }
+      }
+    },
+  };
+}
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
@@ -1583,6 +1695,11 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       db,
       createProductionMigrationCommitters(db),
     );
+    const useProcessRecovery = process.env.TIXKIT_TEMPORAL_PROCESS_RECOVERY === '1';
+    let processRecoveryResult: Awaited<ReturnType<typeof migrationCommitWorkflow>> | undefined;
+    let processRecoveryCrashObserved = false;
+    let processRecoveryExitSignal: NodeJS.Signals | null | undefined;
+    let processRecoveryFailure: string | undefined;
     const startedCommits: string[] = [];
     const app = Fastify();
     app.decorate('context', {
@@ -1608,6 +1725,104 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
           jobId: string;
         }) => {
           startedCommits.push(input.jobId);
+          if (useProcessRecovery) {
+            const temporalAddress = process.env.TEMPORAL_ADDRESS;
+            if (!temporalAddress)
+              throw new Error('TEMPORAL_ADDRESS is required for process recovery');
+            const taskQueue = `portable-process-recovery-${driver}-${input.jobId}`;
+            const workflowId = `portable-process-recovery:${driver}:${input.jobId}`;
+            const namespace = process.env.TEMPORAL_NAMESPACE ?? 'default';
+            const connection = await Connection.connect({ address: temporalAddress });
+            const client = new WorkflowClient({ connection, namespace });
+            const firstWorker = startMigrationProcessWorker({
+              driver,
+              databaseUrl: url,
+              taskQueue,
+              crashAfterStage: MIGRATION_COMMIT_STAGES[0],
+            });
+            let replacementWorker: MigrationProcessWorker | undefined;
+            let handle: Awaited<ReturnType<typeof client.start>> | undefined;
+            let executionError: unknown;
+            try {
+              await firstWorker.waitFor('TIXKIT_MIGRATION_PROCESS_WORKER_READY');
+              handle = await client.start(migrationCommitWorkflow, {
+                taskQueue,
+                workflowId,
+                workflowExecutionTimeout: '75 seconds',
+                args: [{ version: 1, ...input, chunkSize: 1 }],
+              });
+              await firstWorker.waitFor(
+                `TIXKIT_MIGRATION_CRASH_POINT stage=${MIGRATION_COMMIT_STAGES[0]}`,
+                30_000,
+              );
+              processRecoveryCrashObserved = true;
+              processRecoveryExitSignal = (await firstWorker.stop('SIGKILL')).signal;
+              if (processRecoveryExitSignal !== 'SIGKILL')
+                throw new Error(
+                  `PORTABLE_PROCESS_RECOVERY_WRONG_EXIT_SIGNAL:${processRecoveryExitSignal ?? 'none'}`,
+                );
+              replacementWorker = startMigrationProcessWorker({
+                driver,
+                databaseUrl: url,
+                taskQueue,
+              });
+              await replacementWorker.waitFor('TIXKIT_MIGRATION_PROCESS_WORKER_READY');
+              const result = await handle.result();
+              processRecoveryResult = result;
+              if (
+                result.status !== 'completed' ||
+                result.progress.processed !== 1 ||
+                result.progress.failed !== 0 ||
+                result.progress.conflicts !== 0
+              ) {
+                throw new Error(
+                  `PORTABLE_PROCESS_RECOVERY_RESULT_INVALID:${JSON.stringify(result)}`,
+                );
+              }
+            } catch (error) {
+              processRecoveryFailure = error instanceof Error ? error.stack : String(error);
+              executionError = error;
+            } finally {
+              const cleanupErrors: unknown[] = [];
+              await firstWorker.stop().catch((error: unknown) => cleanupErrors.push(error));
+              await replacementWorker?.stop().catch((error: unknown) => cleanupErrors.push(error));
+              try {
+                try {
+                  await connection.workflowService.deleteWorkflowExecution({
+                    namespace,
+                    workflowExecution: {
+                      workflowId,
+                      ...(handle ? { runId: handle.firstExecutionRunId } : {}),
+                    },
+                  });
+                } catch (error) {
+                  cleanupErrors.push(error);
+                }
+              } finally {
+                await Promise.resolve(connection.close()).catch((error: unknown) =>
+                  cleanupErrors.push(error),
+                );
+              }
+              if (cleanupErrors.length > 0)
+                executionError = new AggregateError(
+                  executionError ? [executionError, ...cleanupErrors] : cleanupErrors,
+                  `Portable process-recovery cleanup failed: ${cleanupErrors
+                    .map((error) =>
+                      error instanceof Error
+                        ? `${error.name}:${error.message}:code=${errorCode(error) ?? 'none'}`
+                        : String(error),
+                    )
+                    .join('; ')}`,
+                  executionError ? { cause: executionError } : undefined,
+                );
+            }
+            if (executionError) {
+              processRecoveryFailure =
+                executionError instanceof Error ? executionError.stack : String(executionError);
+              throw executionError;
+            }
+            return;
+          }
           const scope = { ...input, sideEffects: MIGRATION_SIDE_EFFECT_POLICY };
           await commitService.beginCommit(scope);
           for (const stage of MIGRATION_COMMIT_STAGES) {
@@ -1826,7 +2041,34 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       },
       payload: {},
     });
-    expect(approval.statusCode, approval.body).toBe(201);
+    if (approval.statusCode !== 201) {
+      const failedJob = await intakeRepository.findJob(
+        intakeTenantId,
+        intakeOrganizationId,
+        createdBody.id,
+      );
+      const failedReceipt = await intakeRepository.findPortableDryRunReceipt(
+        intakeTenantId,
+        intakeOrganizationId,
+        createdBody.id,
+      );
+      const failedInputHash = await portableImportCurrentInputHash({
+        db,
+        tenantId: intakeTenantId,
+        organizationId: intakeOrganizationId,
+        jobId: createdBody.id,
+        sourceSystem: 'tixkit-portable',
+      });
+      throw new Error(
+        `PORTABLE_APPROVAL_FAILED:${JSON.stringify({
+          response: approval.json(),
+          status: failedJob?.status,
+          summary: failedJob?.summary ? JSON.parse(failedJob.summary) : null,
+          receiptInputSha256: failedReceipt?.input_sha256,
+          currentInputSha256: failedInputHash,
+        })}`,
+      );
+    }
     const approvalBody = approval.json<{ commitConfirmation: string }>();
     const issuedAt = new Date();
     const cutoverProof = createPortableCutoverProof(
@@ -1853,8 +2095,66 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       headers: { 'x-tixkit-confirmation': approvalBody.commitConfirmation },
       payload: { cutoverProof },
     });
-    expect(committed.statusCode, committed.body).toBe(202);
+    expect(committed.statusCode, processRecoveryFailure ?? committed.body).toBe(202);
     expect(startedCommits).toEqual([createdBody.id]);
+    if (useProcessRecovery) {
+      expect(processRecoveryCrashObserved).toBe(true);
+      expect(processRecoveryExitSignal).toBe('SIGKILL');
+      expect(processRecoveryResult).toMatchObject({
+        status: 'completed',
+        progress: { processed: 1, failed: 0, conflicts: 0 },
+      });
+      const recoveryEvents = await intakeRepository.listEvents(
+        intakeTenantId,
+        intakeOrganizationId,
+        createdBody.id,
+      );
+      const checkpoints = recoveryEvents.filter((event) => event.type === 'commit.stage.completed');
+      expect(checkpoints).toHaveLength(1);
+      expect(
+        recoveryEvents.filter((event) => event.type === 'commit.stage.row.completed'),
+      ).toHaveLength(1);
+      expect(JSON.stringify(recoveryEvents)).not.toContain(
+        `${createdBody.id}:${MIGRATION_COMMIT_STAGES[0]}:initial`,
+      );
+      const checkpoint = JSON.parse(checkpoints[0]!.data!) as {
+        claimOwnerSha256: string;
+        result: {
+          processed: number;
+          created: number;
+          updated: number;
+          skipped: number;
+          conflicts: number;
+          failed: number;
+          complete: boolean;
+        };
+      };
+      expect(checkpoint).toMatchObject({
+        version: 1,
+        stage: MIGRATION_COMMIT_STAGES[0],
+        result: { processed: 1, complete: false },
+      });
+      expect(checkpoint.claimOwnerSha256).toMatch(/^[a-f0-9]{64}$/u);
+      const routedEvents = await app.inject({
+        method: 'GET',
+        url: `/migration-jobs/${createdBody.id}/events`,
+      });
+      expect(routedEvents.statusCode, routedEvents.body).toBe(200);
+      const routedCheckpoint = routedEvents
+        .json<{
+          items: Array<{ type: string; data?: { claimOwnerSha256?: string } }>;
+        }>()
+        .items.find((event) => event.type === 'commit.stage.completed');
+      expect(routedCheckpoint?.data?.claimOwnerSha256).toBe(checkpoint.claimOwnerSha256);
+      expect(processRecoveryResult!.progress).toMatchObject({
+        processed: checkpoint.result.processed,
+        created: checkpoint.result.created,
+        updated: checkpoint.result.updated,
+        skipped: checkpoint.result.skipped,
+        conflicts: checkpoint.result.conflicts,
+        failed: checkpoint.result.failed,
+      });
+    }
     expect(
       (await intakeRepository.findJob(intakeTenantId, intakeOrganizationId, createdBody.id))
         ?.status,
@@ -1898,5 +2198,5 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
     expect(activated.statusCode, activated.body).toBe(200);
     expect(activated.json()).toEqual({ jobId: createdBody.id, status: 'activated' });
     await app.close();
-  }, 30_000);
+  }, 180_000);
 });
