@@ -482,7 +482,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-17',
+    version: '2026-07-18',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },

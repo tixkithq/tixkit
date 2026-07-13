@@ -116,6 +116,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-07-17 delta exports',
         routeId: 'apiMigration20260716To20260717',
       },
+      {
+        label: 'Adopt 2026-07-18 import intake',
+        routeId: 'apiMigration20260717To20260718',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

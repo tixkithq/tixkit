@@ -10,7 +10,7 @@ Remix loaders, actions, server routes, and browser checkout UI.
 
 ## Status
 
-Public SDK at version 0.1.0 and API version `2026-07-17`; pre-1.0 exports may evolve with release notes.
+Public SDK at version 0.1.0 and API version `2026-07-18`; pre-1.0 exports may evolve with release notes.
 
 ## Installation
 
@@ -42,7 +42,7 @@ bun run --filter @tixkit/remix typecheck && bun run --filter @tixkit/remix lint 
 
 ## Compatibility
 
-Tracks API version `2026-07-17`; framework peer versions and subpath exports are the compatibility boundary.
+Tracks API version `2026-07-18`; framework peer versions and subpath exports are the compatibility boundary.
 
 ## Related guides
 

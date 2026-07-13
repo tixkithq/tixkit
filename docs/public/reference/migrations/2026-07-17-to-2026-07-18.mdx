@@ -1,0 +1,37 @@
+---
+title: API migration from 2026-07-17 to 2026-07-18
+description: Adopt authenticated, bounded portable import artifact intake.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-18
+prerequisites:
+  - An integration using API version 2026-07-17
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /operators/migration-operations
+---
+
+API version `2026-07-18` adds authenticated portable-import upload contracts. Existing export, delta lineage and final-cutover contracts from `2026-07-17` remain compatible.
+
+## Portable import uploads
+
+Portable bundle upload tickets now use purpose `migration_import`. The request must include `organizationId` and `maxBytes`; `brandId` and `eventId` are rejected. The caller needs `migrations.write`, and the service resolves the tenant and organization before issuing a signed upload.
+
+The maximum portable artifact size is 50 MiB. Clients must send one of the documented portable bundle media types and preserve the exact byte length and checksum through upload completion. Import registration accepts only the completed, clean artifact selected by the signed manifest and consumes it once while creating the job-file link and audit event atomically.
+
+Use the upload lifecycle in this order:
+
+1. Request a `migration_import` upload ticket for the destination organization.
+2. Upload the exact artifact bytes to the returned signed URL.
+3. Complete scanning and checksum verification.
+4. Register the artifact with the portable import job.
+5. Start preparation only after registration succeeds.
+
+Artifact retention is lease-based. Active preparation and commit may renew a recently active artifact, but no new work starts after the absolute 90-day retention ceiling. A missing, substituted or inconsistently linked artifact fails closed and enters retention hold where applicable.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-18`.
