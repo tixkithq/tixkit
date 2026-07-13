@@ -49,6 +49,8 @@ export const docRoutes = {
   webhookEvents: '/reference/webhook-events',
   apiVersions: '/reference/api-versions',
   apiReleaseTrain: '/reference/api-release-train',
+  apiMigration20260101To20260712: '/reference/migrations/2026-01-01-to-2026-07-12',
+  apiMigration20260713To20260714: '/reference/migrations/2026-07-13-to-2026-07-14',
   accessibility: '/reference/accessibility',
   performance: '/reference/performance',
   privacyAndRetention: '/reference/privacy-and-retention',

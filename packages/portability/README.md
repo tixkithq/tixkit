@@ -1,11 +1,49 @@
-# @tixkit/portability
+# `@tixkit/portability`
 
-Public, operating-model-neutral contracts for moving a tenant between Tixkit Cloud and Self-Hosted deployments. The package defines signed logical bundle manifests, compatibility preflight, resumable operation identities, destination re-binding requirements, and reconciliation reports.
+## Purpose
 
-Bundles are logical exports, never raw database replication. Payloads must not contain credentials, secret keys, payment tokens, or infrastructure identifiers. Exporters must scan the exact bytes of every logical payload through `scanPortablePayload` using a closed section schema, then bind the signed scanner receipt and portable-ID digest into the manifest. Importers verify the payload scanner key and an allowlist of exact section/schema/policy/scanner hashes. Owned media requires an exact-byte attestation signed by a trusted hardened media pipeline covering detected MIME, dimensions, malware, metadata, decompression and pixel-limit decisions. Historical exports require an explicit, tenant-bound, expiring authorization record granted before capture.
+Operating-model-neutral contracts for signed, checksummed, versioned logical bundles that move tenant configuration, content, and owned media between Tixkit Cloud and Self-Hosted deployments without raw database replication.
 
-Importers accept only `SignedPortableBundle` through `verifyAndPreflightPortableImport`. Operators provide the currently trusted Ed25519 public keys indexed by immutable key ID; removing a key revokes bundles signed by it, while overlap between old and new IDs supports rotation. Preflight derives the destination-specific operation identity internally. Apply is allowed only after a persisted dry-run receipt, and retries must validate the exact manifest, destination, change cursor, completed file hashes, identity mappings, and provenance through `validatePortableResume`.
+## Consumers
 
-Full and delta bundles share one lineage contract. A delta binds its trusted signed parent bundle and manifest digest. Final cutover requires a fresh, signed, destination/operation/manifest-bound freeze or delta observation and one-time nonce consumption. Active-active synchronization is not provided.
+Cloud export/import services, Compact and Production Self-Hosted runtimes, migration workers, compatibility tooling, and third-party operators implementing the public portability contract.
 
-Manifest signatures use Tixkit Canonical JSON v1: recursively sort object member names by Unicode code-unit order, retain array order, serialize with ECMAScript `JSON.stringify`, encode as UTF-8, and append one LF byte. Manifests accept only finite safe integers for numeric fields. The package publishes fixed digest/signature test vectors so other runtimes can implement the same bytes without JavaScript-specific locale behavior.
+## Status
+
+Manifest v2 (`2026-07-14`) is the current contract; immutable v1 (`2026-07-12`) remains available for legacy verification. The package is a public-release candidate, but publication and MIT licensing remain subject to pending legal and protected-release gates.
+
+## Installation
+
+Use `bun add @tixkit/portability` after an approved public release, or add it as a `workspace:*` dependency inside this repository.
+
+## Example
+
+`const preflight = verifyAndPreflightPortableImport(envelope, destination, bundleKeys, payloadKeys, payloadPolicies, mediaKeys, mediaPolicies);`
+
+## Public exports
+
+The root exports logical manifest, signature, lineage, historical authorization, media and cutover contracts; canonical JSON and signing helpers; payload/media scanners and attestations; export builders; compatibility preflight; dry-run receipts; resume and provenance validation; reconciliation; safe JSON parsing; and the closed configuration policy. Subpaths expose v1/v2 schemas, signature schema, canonical test vectors, and package metadata.
+
+## Runtime
+
+Side-effect-free TypeScript ES modules for Node.js 22 or newer. Cryptographic helpers use Ed25519 and SHA-256; callers supply storage, transport, malware/media processing, key custody, persistence, and workflow execution.
+
+## Configuration
+
+The library reads no environment variables. Callers provide trusted public-key registries, exact payload and media policy allowlists, destination compatibility, signed historical authorization when applicable, and destination resource rebindings. Keep private signing keys in the deployment's approved secret or managed-key system.
+
+## Security
+
+Bundles never contain plaintext credentials, secret keys, payment tokens, private signing keys, or infrastructure credentials. Importers must verify exact bytes, signatures, checksums, closed schemas, media safety attestations, destination scope, lineage, cutover freshness, replay identity, resume provenance, required rebindings, and reconciliation before activation.
+
+## Validation
+
+`bun run --filter @tixkit/portability typecheck && bun run --filter @tixkit/portability lint && bun run --filter @tixkit/portability test:unit && bun run --filter @tixkit/portability build`
+
+## Compatibility
+
+The default `./schema` and explicit `./schema-v1` retain v1 compatibility; new exporters use `./schema-v2` and require `portable-bundle-v2` plus `portable-rebinding-kinds-v2`. Canonical byte rules, signature inputs, schema version, section policy, capability names, and provenance digests are immutable compatibility boundaries.
+
+## Related guides
+
+[Migration operations](../../docs/public/operators/migration-operations.mdx) · [API migration to 2026-07-14](../../docs/public/reference/migrations/2026-07-13-to-2026-07-14.mdx)

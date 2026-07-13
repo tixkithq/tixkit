@@ -317,13 +317,13 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/reference/api-release-train": {
     sourcePath: "docs/public/reference/api-release-train.mdx",
-    frontmatter: {"title":"API contract release train","description":"Versioning, compatibility, verification, and publication gates for Tixkit API and SDK contracts.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-10","prerequisites":["A sandbox API credential"],"related":["/reference/api","/reference/api-versions","/sdks/javascript"]},
+    frontmatter: {"title":"API contract release train","description":"Versioning, compatibility, verification, and publication gates for Tixkit API and SDK contracts.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-14","prerequisites":["A sandbox API credential"],"related":["/reference/api","/reference/api-versions","/sdks/javascript"]},
     headings: [{"id":"incident-and-rollback-procedure","text":"Incident and rollback procedure","level":2}],
     load: () => import("../../../../docs/public/reference/api-release-train.mdx"),
   },
   "/reference/api-versions": {
     sourcePath: "docs/public/reference/api-versions.mdx",
-    frontmatter: {"title":"API versions and compatibility","description":"Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-10","prerequisites":[],"related":["/reference/api","/contributing/add-an-sdk-operation"]},
+    frontmatter: {"title":"API versions and compatibility","description":"Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-14","prerequisites":[],"related":["/reference/api","/contributing/add-an-sdk-operation","/reference/migrations/2026-01-01-to-2026-07-12","/reference/migrations/2026-07-13-to-2026-07-14"]},
     headings: [],
     load: () => import("../../../../docs/public/reference/api-versions.mdx"),
   },
@@ -338,6 +338,18 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     frontmatter: {"title":"API schema reference","description":"Browse canonical request and response schema names generated from OpenAPI.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-10","prerequisites":[],"related":["/reference/api","/reference/api-versions"]},
     headings: [],
     load: () => import("../../../../docs/public/reference/api/schemas.mdx"),
+  },
+  "/reference/migrations/2026-01-01-to-2026-07-12": {
+    sourcePath: "docs/public/reference/migrations/2026-01-01-to-2026-07-12.mdx",
+    frontmatter: {"title":"Migrate from API 2026-01-01 to 2026-07-12","description":"Replace legacy event upload URLs with role-based public media renditions.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-12","prerequisites":["An integration using API version 2026-01-01"],"related":["/reference/api-versions","/reference/api-release-train"]},
+    headings: [],
+    load: () => import("../../../../docs/public/reference/migrations/2026-01-01-to-2026-07-12.mdx"),
+  },
+  "/reference/migrations/2026-07-13-to-2026-07-14": {
+    sourcePath: "docs/public/reference/migrations/2026-07-13-to-2026-07-14.mdx",
+    frontmatter: {"title":"API migration from 2026-07-13 to 2026-07-14","description":"Handle typed portability destination rebinding kinds.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-14","prerequisites":["An integration using API version 2026-07-13"],"related":["/reference/api-versions","/reference/api-release-train"]},
+    headings: [],
+    load: () => import("../../../../docs/public/reference/migrations/2026-07-13-to-2026-07-14.mdx"),
   },
   "/reference/performance": {
     sourcePath: "docs/public/reference/performance.mdx",

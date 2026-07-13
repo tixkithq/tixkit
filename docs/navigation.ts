@@ -96,6 +96,14 @@ export const documentationNavigation = [
       { label: 'Webhook events', routeId: 'webhookEvents' },
       { label: 'Versions', routeId: 'apiVersions' },
       { label: 'API release train', routeId: 'apiReleaseTrain' },
+      {
+        label: 'Migrate 2026-01-01 to 2026-07-12',
+        routeId: 'apiMigration20260101To20260712',
+      },
+      {
+        label: 'Migrate 2026-07-13 to 2026-07-14',
+        routeId: 'apiMigration20260713To20260714',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },
