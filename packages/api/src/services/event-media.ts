@@ -5,6 +5,7 @@ import type { Database } from '@tixkit/db';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   deleteEventMediaRendition,
+  parseUploadArtifactMetadata,
   readCleanUploadArtifact,
   streamPublicUploadArtifact,
   writeEventMediaRendition,
@@ -118,7 +119,7 @@ export async function attachEventMedia(input: {
     !artifact.checksum_sha256
   )
     throw new NotFoundError('UploadArtifact', input.uploadArtifactId);
-  const metadata = JSON.parse(artifact.metadata) as {
+  const metadata = parseUploadArtifactMetadata(artifact.metadata) as {
     image?: { width?: number; height?: number; format?: string };
   };
   const width = metadata.image?.width;

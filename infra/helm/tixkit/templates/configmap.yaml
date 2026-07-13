@@ -7,6 +7,7 @@ metadata:
     {{- include "tixkit.labels" . | nindent 4 }}
 data:
   NODE_ENV: {{ .Values.global.environment | quote }}
+  TIXKIT_DEPLOYMENT_PROFILE: {{ .Values.deploymentProfile | quote }}
   DB_DRIVER: {{ .Values.database.driver | quote }}
   AUTH_PROVIDER: {{ .Values.auth.provider | quote }}
   API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
@@ -26,6 +27,7 @@ data:
   S3_REGION: {{ .Values.secrets.s3Region | quote }}
   S3_AUTH_MODE: {{ .Values.secrets.s3AuthMode | quote }}
   S3_FORCE_PATH_STYLE: {{ .Values.secrets.s3ForcePathStyle | quote }}
+  S3_SERVER_SIDE_ENCRYPTION: {{ .Values.secrets.s3ServerSideEncryption | quote }}
   OTEL_SDK_DISABLED: {{ not .Values.observability.enabled | quote }}
   OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.observability.otlp.protocol | quote }}
   OTEL_RESOURCE_ATTRIBUTES: {{ .Values.observability.otlp.resourceAttributes | quote }}

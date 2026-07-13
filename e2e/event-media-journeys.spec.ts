@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl, apiBaseUrl, checkoutBaseUrl } from './helpers/env';
@@ -9,6 +10,57 @@ const transparentPixel = Buffer.from(
 );
 
 test.describe('role-based event media journeys', () => {
+  test('organizer uploads, scans, finalizes, and renders a real poster through object storage', async ({
+    page,
+    request,
+  }, testInfo) => {
+    await requireReachable(page, adminBaseUrl, 'admin dashboard');
+    const suffix = `media-upload-${testInfo.project.name}-${Date.now()}`;
+    const seeded = await seedFreeCheckoutEvent(request, suffix);
+
+    await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/settings`);
+    if (new URL(page.url()).pathname === '/sign-in')
+      test.skip(true, 'runtime admin server requires live Clerk authentication');
+
+    const altText = `Tixkit poster uploaded in ${testInfo.project.name}`;
+    await page.locator('#event-poster-alt').fill(altText);
+    await page.locator('#event-poster-upload').setInputFiles({
+      name: 'event-poster.png',
+      mimeType: 'image/png',
+      buffer: await readFile('apps/admin-dashboard/public/brand/tixkit-symbol.png'),
+    });
+
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 30_000 });
+    const preview = page.getByAltText(altText);
+    await expect(preview).toBeVisible();
+    await expect(preview).toHaveAttribute('src', /\/v1\/public\/event-media\/renditions\//u);
+
+    const mediaResponse = await request.get(`${apiBaseUrl}/v1/events/${seeded.event.id}/media`);
+    expect(mediaResponse.status()).toBe(200);
+    const media = (await mediaResponse.json()) as Array<{
+      role: string;
+      altText: string;
+      original: { checksumSha256: string };
+      renditions: Array<{ variant: string; checksumSha256: string }>;
+    }>;
+    const poster = media.find((asset) => asset.role === 'poster');
+    expect(poster).toMatchObject({ altText });
+    expect(poster?.original.checksumSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(poster?.renditions.map((rendition) => rendition.variant).sort()).toEqual([
+      'page',
+      'social',
+      'thumbnail',
+    ]);
+    expect(
+      poster?.renditions.every((rendition) => /^[a-f0-9]{64}$/u.test(rendition.checksumSha256)),
+    ).toBe(true);
+    await expectNoAxeViolations(
+      page,
+      testInfo,
+      'section[aria-labelledby="event-role-media-heading"]',
+    );
+  });
+
   test('organizer media settings expose accessible role thumbnails and per-role crop controls', async ({
     page,
     request,

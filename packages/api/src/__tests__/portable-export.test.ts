@@ -88,7 +88,11 @@ describe('portable export immutable object storage', () => {
       },
     } as unknown as Pick<S3Client, 'send'>;
     const store = createS3PortableExportArtifactStore(
-      { PORTABILITY_EXPORT_BUCKET: 'portable-test', S3_REGION: 'us-east-1' },
+      {
+        NODE_ENV: 'production',
+        PORTABILITY_EXPORT_BUCKET: 'portable-test',
+        S3_REGION: 'us-east-1',
+      },
       client,
     );
     const digest = 'a'.repeat(64);

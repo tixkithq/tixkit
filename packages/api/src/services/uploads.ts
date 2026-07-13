@@ -11,6 +11,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ulid } from 'ulid';
 import sharp from 'sharp';
+import { s3PutEncryption } from './s3-encryption.js';
 import type { Database } from '@tixkit/db';
 import { ValidationError, NotFoundError } from '@tixkit/domain';
 import { config } from '../config/index.js';
@@ -602,6 +603,21 @@ export async function scanUploadBuffer(
   throw new UploadScannerUnavailableError();
 }
 
+export function parseUploadArtifactMetadata(metadata: unknown): Record<string, unknown> {
+  let parsed = metadata;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed) as unknown;
+    } catch {
+      throw new ValidationError('Upload artifact metadata is invalid');
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ValidationError('Upload artifact metadata is invalid');
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export async function createUploadArtifact(
   db: Database,
   input: CreateUploadInput,
@@ -861,7 +877,7 @@ export async function completeUploadArtifact(
         ContentType: artifact.content_type,
         ContentLength: buffer.length,
         ChecksumSHA256: Buffer.from(checksum, 'hex').toString('base64'),
-        ServerSideEncryption: 'AES256',
+        ...s3PutEncryption(),
         IfNoneMatch: '*',
       }),
     );
@@ -889,7 +905,7 @@ export async function completeUploadArtifact(
       object_key: finalObjectKey,
       metadata: eventMediaMetadata
         ? JSON.stringify({
-            ...(JSON.parse(artifact.metadata) as Record<string, unknown>),
+            ...parseUploadArtifactMetadata(artifact.metadata),
             image: eventMediaMetadata,
           })
         : artifact.metadata,
@@ -1007,7 +1023,7 @@ export async function writeEventMediaRendition(input: {
       CacheControl: 'public, max-age=31536000, immutable',
       IfNoneMatch: '*',
       ChecksumSHA256: Buffer.from(input.checksumSha256, 'hex').toString('base64'),
-      ServerSideEncryption: 'AES256',
+      ...s3PutEncryption(),
     }),
   );
 }

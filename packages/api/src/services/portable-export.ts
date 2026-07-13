@@ -11,6 +11,7 @@ import {
   S3Client,
   type S3ClientConfig,
 } from '@aws-sdk/client-s3';
+import { s3PutEncryption } from './s3-encryption.js';
 import { PortableExportRepository, type Database } from '@tixkit/db';
 import {
   buildPortableLogicalExport,
@@ -147,7 +148,7 @@ export function createS3PortableExportArtifactStore(
             ContentType: 'application/vnd.tixkit.portable+json',
             ChecksumSHA256: Buffer.from(sha256, 'hex').toString('base64'),
             IfNoneMatch: '*',
-            ServerSideEncryption: 'AES256',
+            ...s3PutEncryption(environment),
           }),
         );
         return 'created';

@@ -21,7 +21,13 @@
 {{- if not (has .Values.secrets.s3AuthMode (list "static" "workload-identity")) -}}
 {{- fail "secrets.s3AuthMode must be static or workload-identity" -}}
 {{- end -}}
+{{- if not (has .Values.secrets.s3ServerSideEncryption (list "none" "AES256")) -}}
+{{- fail "secrets.s3ServerSideEncryption must be none or AES256" -}}
+{{- end -}}
 {{- if eq .Values.deploymentProfile "production" -}}
+{{- if ne .Values.secrets.s3ServerSideEncryption "AES256" -}}
+{{- fail "production profile requires secrets.s3ServerSideEncryption=AES256" -}}
+{{- end -}}
 {{- if ne .Values.migrations.strategy "manual" -}}
 {{- fail "production profile requires migrations.strategy=manual" -}}
 {{- end -}}

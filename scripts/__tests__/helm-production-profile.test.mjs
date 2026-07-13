@@ -162,6 +162,13 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   );
 });
 
+test('Evaluation render declares its runtime profile and MinIO-compatible encryption policy', () => {
+  const config = resources(render(evaluation)).find((resource) => resource.kind === 'ConfigMap');
+  assert.equal(config.data.NODE_ENV, 'production');
+  assert.equal(config.data.TIXKIT_DEPLOYMENT_PROFILE, 'evaluation');
+  assert.equal(config.data.S3_SERVER_SIDE_ENCRYPTION, 'none');
+});
+
 test('Production Helm render rejects bundled services and chart-created secrets', () => {
   for (const override of ['postgres.enabled=true', 'secrets.mode=create']) {
     const result = spawnSync(
@@ -179,6 +186,26 @@ test('Production Helm render rejects bundled services and chart-created secrets'
         ...productionRuntime.flatMap((value) => ['--set', value]),
         '--set',
         override,
+      ],
+      { cwd: root, encoding: 'utf8' },
+    );
+    assert.notEqual(result.status, 0);
+  }
+});
+
+test('Production Helm render requires AES256 object encryption', () => {
+  for (const encryption of ['none', 'kms']) {
+    const result = spawnSync(
+      'helm',
+      [
+        'template',
+        'tixkit',
+        chart,
+        '--values',
+        production,
+        ...productionRuntime.flatMap((value) => ['--set', value]),
+        '--set',
+        `secrets.s3ServerSideEncryption=${encryption}`,
       ],
       { cwd: root, encoding: 'utf8' },
     );

@@ -24,6 +24,7 @@ secrets:
   mode: existing
   create: false
   name: ''
+  s3ServerSideEncryption: AES256
 
 postgres:
   enabled: false

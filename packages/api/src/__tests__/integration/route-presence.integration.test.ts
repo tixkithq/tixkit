@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import { openApiSpec } from '@tixkit/openapi';
 import { tenantRoutes } from '../../routes/modules/tenant.js';
 import { eventRoutes } from '../../routes/modules/events.js';
+import { eventMediaRoutes } from '../../routes/modules/event-media.js';
 import { readinessRoutes } from '../../routes/modules/readiness.js';
 import { ticketingRoutes } from '../../routes/modules/ticketing.js';
 import { checkoutRoutes } from '../../routes/modules/checkout.js';
@@ -21,6 +22,7 @@ import { authRoutes } from '../../routes/modules/auth.js';
 import { publicUploadRoutes, uploadRoutes } from '../../routes/modules/uploads.js';
 import { publicWaitlistRoutes, waitlistRoutes } from '../../routes/modules/waitlist.js';
 import { migrationRoutes } from '../../routes/modules/migrations.js';
+import { portabilityRoutes } from '../../routes/modules/portability.js';
 import { oauthAuthorizeRoutes, oauthTokenRoutes } from '../../routes/modules/oauth.js';
 import { clerkWebhookRoutes } from '../../routes/modules/clerk-webhooks.js';
 import { stripeWebhookRoutes } from '../../routes/modules/stripe-webhooks.js';
@@ -102,6 +104,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
   await app.register(async (authenticated) => {
     await authenticated.register(tenantRoutes, { prefix: '/v1' });
     await authenticated.register(eventRoutes, { prefix: '/v1' });
+    await authenticated.register(eventMediaRoutes, { prefix: '/v1' });
     await authenticated.register(readinessRoutes, { prefix: '/v1' });
     await authenticated.register(ticketingRoutes, { prefix: '/v1' });
     await authenticated.register(orderRoutes, { prefix: '/v1' });
@@ -119,6 +122,7 @@ async function buildRouteManifest(): Promise<CapturedRoute[]> {
     await authenticated.register(uploadRoutes, { prefix: '/v1' });
     await authenticated.register(waitlistRoutes, { prefix: '/v1' });
     await authenticated.register(migrationRoutes, { prefix: '/v1' });
+    await authenticated.register(portabilityRoutes, { prefix: '/v1' });
   });
 
   await app.ready();

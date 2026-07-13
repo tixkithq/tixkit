@@ -21,6 +21,7 @@ import {
   type PortableExportMediaStore,
 } from '../../services/portable-export.js';
 import { loadPublicEventMedia } from '../../routes/modules/public.js';
+import { parseUploadArtifactMetadata } from '../../services/uploads.js';
 import sharp from 'sharp';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
@@ -203,6 +204,14 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         updated_at: now,
       })
       .execute();
+    const persistedUpload = await db
+      .selectFrom('upload_artifacts')
+      .select('metadata')
+      .where('id', '=', uploadId)
+      .executeTakeFirstOrThrow();
+    expect(parseUploadArtifactMetadata(persistedUpload.metadata)).toEqual({
+      image: { width: 1600, height: 1000, format: 'jpeg' },
+    });
     await db
       .insertInto('event_media_assets')
       .values({

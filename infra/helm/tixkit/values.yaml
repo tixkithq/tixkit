@@ -62,6 +62,7 @@ secrets:
   s3Region: us-east-1
   s3AuthMode: static
   s3ForcePathStyle: true
+  s3ServerSideEncryption: none
   otelExporterOtlpEndpoint: ''
   otelExporterOtlpHeaders: ''
   prometheusPushgatewayUrl: ''

@@ -580,6 +580,12 @@ async function publishEventWithRetry(
   attempts = 5,
 ): Promise<APIResponse> {
   const response = await request.post(`${apiBaseUrl}/v1/events/${eventId}/publish`, { data: {} });
+  if (response.status() === 200) {
+    const publicEvent = await request.get(`${apiBaseUrl}/v1/public/events/${eventId}`);
+    if (publicEvent.status() === 200 || attempts <= 1) return response;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return publishEventWithRetry(request, eventId, attempts - 1);
+  }
   if (attempts <= 1) return response;
   if (response.status() >= 500) {
     await new Promise((resolve) => setTimeout(resolve, 25));
