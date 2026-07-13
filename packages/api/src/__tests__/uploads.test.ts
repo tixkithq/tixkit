@@ -21,6 +21,7 @@ import sharp from 'sharp';
 
 const s3Send = vi.fn();
 const signedUrlInputs: unknown[] = [];
+const s3ClientOptions: unknown[] = [];
 
 async function deterministicNoisePng(width = 1600, height = 1000): Promise<Buffer> {
   const pixels = Buffer.allocUnsafe(width * height * 3);
@@ -38,6 +39,9 @@ async function deterministicNoisePng(width = 1600, height = 1000): Promise<Buffe
 
 vi.mock('@aws-sdk/client-s3', () => {
   class S3Client {
+    constructor(options: unknown) {
+      s3ClientOptions.push(options);
+    }
     send = s3Send;
   }
   class PutObjectCommand {
@@ -286,10 +290,28 @@ async function setupUploadApp(db: Database, routes = uploadRoutes, principal = m
 describe('upload artifact service', () => {
   beforeEach(() => {
     signedUrlInputs.length = 0;
+    s3ClientOptions.length = 0;
     s3Send.mockReset();
+    delete process.env.S3_PUBLIC_ENDPOINT;
     delete process.env.UPLOAD_MALWARE_SCANNER;
     delete process.env.CLAMAV_HOST;
     delete process.env.CLAMAV_PORT;
+  });
+
+  it('signs browser-facing object URLs against the public storage endpoint', async () => {
+    process.env.S3_PUBLIC_ENDPOINT = 'http://localhost:59002';
+    const { db } = createMockDb();
+
+    await createUploadArtifact(db, {
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      purpose: 'migration_import',
+      fileName: 'portable.tixkit.json',
+      contentType: 'application/vnd.tixkit.portable+json',
+      sizeBytes: 1024,
+    });
+
+    expect(s3ClientOptions.at(-1)).toMatchObject({ endpoint: 'http://localhost:59002' });
   });
 
   it('creates scoped presigned PUT artifacts without storing the public completion token', async () => {
@@ -2484,7 +2506,9 @@ describe('upload artifact routes', () => {
   });
   beforeEach(() => {
     signedUrlInputs.length = 0;
+    s3ClientOptions.length = 0;
     s3Send.mockReset();
+    delete process.env.S3_PUBLIC_ENDPOINT;
     delete process.env.UPLOAD_MALWARE_SCANNER;
     delete process.env.CLAMAV_HOST;
   });

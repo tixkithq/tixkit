@@ -175,6 +175,7 @@ export function initializeCompactEnvironment({
     'TEMPORAL_UI_PORT=8080',
     'MINIO_API_PORT=9000',
     'MINIO_CONSOLE_PORT=9001',
+    'S3_PUBLIC_ENDPOINT=http://localhost:9000',
     '',
   ].join('\n');
   writeFileSync(environmentPath, contents, { mode: 0o600 });
@@ -341,6 +342,21 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
     if (!Number.isInteger(port) || port < 1 || port > 65535)
       throw new Error(`Compact environment contains an invalid ${key}.`);
   }
+  let publicStorageEndpoint;
+  try {
+    publicStorageEndpoint = new URL(environment.S3_PUBLIC_ENDPOINT ?? '');
+  } catch {
+    throw new Error('Compact environment contains an invalid S3_PUBLIC_ENDPOINT.');
+  }
+  if (
+    !['http:', 'https:'].includes(publicStorageEndpoint.protocol) ||
+    publicStorageEndpoint.username ||
+    publicStorageEndpoint.password ||
+    publicStorageEndpoint.pathname !== '/' ||
+    publicStorageEndpoint.search ||
+    publicStorageEndpoint.hash
+  )
+    throw new Error('Compact S3_PUBLIC_ENDPOINT must be an HTTP(S) origin without credentials.');
 }
 
 function pipeCompose(arguments_, { input, output, environmentPath = envFile, projectName }) {

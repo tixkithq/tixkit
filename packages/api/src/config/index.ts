@@ -186,6 +186,7 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
     ['REDIS_URL', process.env.REDIS_URL],
     ['API_BASE_URL', process.env.API_BASE_URL],
     ['S3_ENDPOINT', process.env.S3_ENDPOINT],
+    ['S3_PUBLIC_ENDPOINT', process.env.S3_PUBLIC_ENDPOINT],
   ]
     .filter(([, value]) => isLocalEndpoint(value))
     .map(([name]) => name);

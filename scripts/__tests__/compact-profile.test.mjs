@@ -93,6 +93,7 @@ test('Compact topology contains the complete single-database application stack',
   );
   assert.match(compose['x-app-environment'].ADMIN_DASHBOARD_URL, /ADMIN_PORT/u);
   assert.match(compose['x-app-environment'].CHECKOUT_URL, /CHECKOUT_PORT/u);
+  assert.match(compose['x-app-environment'].S3_PUBLIC_ENDPOINT, /S3_PUBLIC_ENDPOINT/u);
   assert.match(compose.services.postgres.image, /@sha256:[a-f0-9]{64}$/u);
   assert.match(compose.services.minio.image, /@sha256:[a-f0-9]{64}$/u);
 });
@@ -177,6 +178,7 @@ test('Compact environment generation creates unique non-placeholder secrets with
     assert.equal(firstValues.COMPOSE_PROJECT_NAME, 'tixkit-compact');
     assert.notEqual(firstValues.TIXKIT_DEPLOYMENT_ID, secondValues.TIXKIT_DEPLOYMENT_ID);
     assert.equal(firstValues.TIXKIT_OPERATING_MODEL, 'self-hosted');
+    assert.equal(firstValues.S3_PUBLIC_ENDPOINT, 'http://localhost:9000');
     for (const [keyIdName, privateKeyName] of [
       ['PORTABILITY_BUNDLE_SIGNING_KEY_ID', 'PORTABILITY_BUNDLE_SIGNING_PRIVATE_KEY_BASE64'],
       ['PORTABILITY_PAYLOAD_SIGNING_KEY_ID', 'PORTABILITY_PAYLOAD_SIGNING_PRIVATE_KEY_BASE64'],
@@ -636,6 +638,20 @@ test('Compact-only insecure frontend build escape stays limited to loopback URLs
     assert.match(content, /http:\/\/localhost:\*\|http:\/\/127\.0\.0\.1:\*/u);
     assert.doesNotMatch(content, /http:\/\/0\.0\.0\.0/u);
     assert.match(content, /node_modules/u);
+  }
+});
+
+test('Compact application images install only their build dependency closures', () => {
+  for (const [dockerfile, filters] of [
+    ['Dockerfile.api', '--filter=./ --filter=./packages/api --filter=./packages/cli'],
+    ['Dockerfile.worker', '--filter=./ --filter=./packages/workflows'],
+    ['Dockerfile.checkout', '--filter=./ --filter=./apps/checkout'],
+    ['Dockerfile.admin', '--filter=./ --filter=./apps/admin-dashboard'],
+  ]) {
+    const content = readFileSync(resolve(root, dockerfile), 'utf8');
+    assert.match(content, new RegExp(`RUN bun install --frozen-lockfile ${filters}`, 'u'));
+    assert.doesNotMatch(content, /^RUN bun install --frozen-lockfile$/mu);
+    assert.ok(content.includes('${package_dir}/schemas'));
   }
 });
 

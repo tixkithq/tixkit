@@ -20,6 +20,7 @@ x-app-environment: &app-environment
   CORS_ALLOWED_ORIGINS: http://localhost:${CHECKOUT_PORT:-3000},http://localhost:${ADMIN_PORT:-3001}
   AUTH_PROVIDER: dev
   S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
   S3_BUCKET: tixkit
   S3_EXPORT_BUCKET: tixkit
   S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?run bun run compact:init}

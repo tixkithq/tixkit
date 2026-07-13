@@ -299,12 +299,12 @@ function finalObjectKeyFromStaging(stagingKey: string, checksum: string): string
   return `${stagingKey}.final${immutableSuffix}`;
 }
 
-function createS3Client(): S3Client {
+function createS3Client(endpoint = config.s3Endpoint): S3Client {
   const options: S3ClientConfig = {
     region: config.s3Region,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
   };
-  if (config.s3Endpoint) options.endpoint = config.s3Endpoint;
+  if (endpoint) options.endpoint = endpoint;
   if (config.s3AccessKeyId && config.s3SecretAccessKey) {
     options.credentials = {
       accessKeyId: config.s3AccessKeyId,
@@ -312,6 +312,10 @@ function createS3Client(): S3Client {
     };
   }
   return new S3Client(options);
+}
+
+function createS3SigningClient(): S3Client {
+  return createS3Client(process.env.S3_PUBLIC_ENDPOINT?.trim() || config.s3Endpoint);
 }
 
 async function bodyToBuffer(
@@ -765,7 +769,7 @@ export async function createUploadArtifact(
   const objectKey = `${objectKeyPrefix}/staging/${id}${extension(fileName)}`;
   const completeToken = input.publicComplete ? randomBytes(32).toString('base64url') : undefined;
   const uploadHeaders = { 'Content-Type': input.contentType };
-  const s3 = createS3Client();
+  const s3 = createS3SigningClient();
   const uploadUrl = await getSignedUrl(
     s3,
     new PutObjectCommand({
@@ -1060,7 +1064,7 @@ export async function getUploadArtifactDownloadUrl(
     throw new NotFoundError('UploadArtifact', artifactId);
   }
   return getSignedUrl(
-    createS3Client(),
+    createS3SigningClient(),
     new GetObjectCommand({
       Bucket: artifact.bucket,
       Key: artifact.object_key,

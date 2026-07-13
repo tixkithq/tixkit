@@ -10,7 +10,7 @@ ENV NEXT_PUBLIC_ADMIN_API_BASE_URL=${NEXT_PUBLIC_ADMIN_API_BASE_URL}
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 
 COPY . .
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --filter=./ --filter=./apps/admin-dashboard
 RUN test -n "${NEXT_PUBLIC_ADMIN_API_BASE_URL}" && \
   test -n "${NEXT_PUBLIC_API_BASE_URL}" && \
   if [ "${ALLOW_INSECURE_LOCAL_ORIGINS}" = 1 ]; then \
@@ -35,6 +35,7 @@ RUN mkdir -p /runtime/packages && \
     cp "${package_json}" "/runtime/${package_dir}/package.json"; \
     if [ -d "${package_dir}/src" ]; then cp -R "${package_dir}/src" "/runtime/${package_dir}/src"; fi; \
     if [ -d "${package_dir}/dist" ]; then cp -R "${package_dir}/dist" "/runtime/${package_dir}/dist"; fi; \
+    if [ -d "${package_dir}/schemas" ]; then cp -R "${package_dir}/schemas" "/runtime/${package_dir}/schemas"; fi; \
     if [ -d "${package_dir}/node_modules" ]; then cp -R "${package_dir}/node_modules" "/runtime/${package_dir}/node_modules"; fi; \
   done
 
