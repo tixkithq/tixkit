@@ -1,0 +1,30 @@
+{
+  "from": "2026-07-17",
+  "to": "2026-07-18",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 1,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /portable-migration-jobs.requestBody.content.application/json.schema.properties.adapterVersion",
+      "message": "Enum value tixkit-portable-bundle-v2 was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "schema-oneOf-changed",
+      "path": "components.schemas.CreateUploadArtifact",
+      "message": "oneOf changed."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.CreateUploadArtifact.properties.organizationId",
+      "message": "An optional property was added."
+    }
+  ]
+}
