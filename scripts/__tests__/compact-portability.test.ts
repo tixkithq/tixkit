@@ -9,6 +9,9 @@ import { portableImportTrustFromEnvironment } from '../../packages/workflows/src
 import { canonicalPortableJson } from '../../packages/portability/src/index.ts';
 import {
   createCompactPortabilityIdentity,
+  parseCompactPortabilityCliArguments,
+  parseCompactPortabilityIdentityArguments,
+  parseCompactPortabilityTrustArguments,
   trustCompactPortabilityIdentity,
 } from '../compact-portability.mjs';
 import { initializeCompactEnvironment } from '../compact.mjs';
@@ -41,6 +44,52 @@ afterEach(() => {
 });
 
 describe('Compact portability public identity exchange', () => {
+  test('selects a non-default environment without consuming command arguments', () => {
+    const selected = parseCompactPortabilityCliArguments([
+      'identity.json',
+      '--env-file',
+      './tmp/destination.env',
+      '--replace',
+    ]);
+    expect(selected.environmentPath).toBe(resolve('./tmp/destination.env'));
+    expect(selected.remaining).toEqual(['identity.json', '--replace']);
+    expect(() => parseCompactPortabilityCliArguments(['--env-file'])).toThrow(
+      '--env-file requires a value.',
+    );
+    expect(() =>
+      parseCompactPortabilityCliArguments([
+        '--env-file',
+        './source.env',
+        '--env-file',
+        './destination.env',
+      ]),
+    ).toThrow('--env-file may be provided only once.');
+    expect(
+      parseCompactPortabilityTrustArguments([
+        'identity.json',
+        '--sha256',
+        'a'.repeat(64),
+        '--available-storage-bytes',
+        '1024',
+        '--replace',
+      ]),
+    ).toEqual({
+      artifactPath: 'identity.json',
+      expectedSha256: 'a'.repeat(64),
+      storageBytes: 1024,
+      replace: true,
+    });
+    expect(() =>
+      parseCompactPortabilityTrustArguments(['identity.json', '--sha256', 'a', '--sha256', 'b']),
+    ).toThrow('--sha256 may be provided only once.');
+    expect(() => parseCompactPortabilityTrustArguments(['identity.json', '--unknown'])).toThrow(
+      'Unknown Compact portability trust argument',
+    );
+    expect(() =>
+      parseCompactPortabilityIdentityArguments(['identity.json', 'ignored.json']),
+    ).toThrow('Usage:');
+  });
+
   test('installs checksum-pinned source trust for the destination worker without private-key transfer', () => {
     const directory = temporaryDirectory();
     const sourceEnvironment = resolve(directory, 'source.env');

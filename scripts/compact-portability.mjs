@@ -372,30 +372,87 @@ export function trustCompactPortabilityIdentity(input = {}) {
 function usage() {
   return [
     'Usage:',
-    '  bun run compact:portability-identity -- <output.json>',
-    '  bun run compact:portability-trust -- <identity.json> --sha256 <digest> --available-storage-bytes <bytes> [--replace]',
+    '  bun run compact:portability-identity -- [--env-file <path>] <output.json>',
+    '  bun run compact:portability-trust -- [--env-file <path>] <identity.json> --sha256 <digest> --available-storage-bytes <bytes> [--replace]',
   ].join('\n');
 }
 
-const [command, ...arguments_] = process.argv.slice(2);
+export function parseCompactPortabilityCliArguments(arguments_) {
+  const environmentIndexes = arguments_.flatMap((argument, index) =>
+    argument === '--env-file' ? [index] : [],
+  );
+  if (environmentIndexes.length > 1) throw new Error('--env-file may be provided only once.');
+  const environmentIndex = environmentIndexes[0] ?? -1;
+  const environmentValue = environmentIndex >= 0 ? arguments_[environmentIndex + 1] : undefined;
+  if (environmentIndex >= 0 && (!environmentValue || environmentValue.startsWith('--')))
+    throw new Error('--env-file requires a value.');
+  return {
+    environmentPath: environmentValue ? resolve(environmentValue) : defaultEnvironmentPath,
+    remaining:
+      environmentIndex >= 0
+        ? arguments_.filter(
+            (_argument, index) => index !== environmentIndex && index !== environmentIndex + 1,
+          )
+        : [...arguments_],
+  };
+}
+
+export function parseCompactPortabilityTrustArguments(arguments_) {
+  const artifactPath = arguments_[0];
+  if (!artifactPath || artifactPath.startsWith('--')) throw new Error(usage());
+  let expectedSha256;
+  let storageBytes;
+  let replace = false;
+  for (let index = 1; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === '--replace') {
+      if (replace) throw new Error('--replace may be provided only once.');
+      replace = true;
+      continue;
+    }
+    if (argument !== '--sha256' && argument !== '--available-storage-bytes')
+      throw new Error(`Unknown Compact portability trust argument: ${argument}`);
+    const value = arguments_[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`${argument} requires a value.`);
+    if (argument === '--sha256') {
+      if (expectedSha256 !== undefined) throw new Error('--sha256 may be provided only once.');
+      expectedSha256 = value;
+    } else {
+      if (storageBytes !== undefined)
+        throw new Error('--available-storage-bytes may be provided only once.');
+      storageBytes = Number(value);
+    }
+    index += 1;
+  }
+  return { artifactPath, expectedSha256, storageBytes, replace };
+}
+
+export function parseCompactPortabilityIdentityArguments(arguments_) {
+  if (arguments_.length !== 1 || !arguments_[0] || arguments_[0].startsWith('--'))
+    throw new Error(usage());
+  return arguments_[0];
+}
+
+const [command, ...rawArguments] = process.argv.slice(2);
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   try {
+    const { environmentPath, remaining: arguments_ } =
+      parseCompactPortabilityCliArguments(rawArguments);
     if (command === 'identity') {
-      const output = arguments_[0];
-      if (!output) throw new Error(usage());
-      const identity = createCompactPortabilityIdentity();
+      const output = parseCompactPortabilityIdentityArguments(arguments_);
+      const identity = createCompactPortabilityIdentity({ environmentPath });
       writeFileSync(resolve(output), identity.artifact, { mode: 0o644, flag: 'wx' });
       console.log(`Wrote public Compact portability identity ${resolve(output)}`);
       console.log(`SHA-256 ${identity.sha256}`);
     } else if (command === 'trust') {
-      const artifactPath = arguments_[0];
-      const shaIndex = arguments_.indexOf('--sha256');
-      const storageIndex = arguments_.indexOf('--available-storage-bytes');
+      const { artifactPath, expectedSha256, storageBytes, replace } =
+        parseCompactPortabilityTrustArguments(arguments_);
       const result = trustCompactPortabilityIdentity({
         artifactPath,
-        expectedSha256: shaIndex >= 0 ? arguments_[shaIndex + 1] : undefined,
-        ...(storageIndex >= 0 ? { storageBytes: Number(arguments_[storageIndex + 1]) } : {}),
-        replace: arguments_.includes('--replace'),
+        environmentPath,
+        expectedSha256,
+        storageBytes,
+        replace,
       });
       console.log(
         `Trusted ${result.sourceDeploymentId} for destination ${result.destinationDeploymentId} using identity ${result.identitySha256}.`,

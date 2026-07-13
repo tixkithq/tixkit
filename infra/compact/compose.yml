@@ -1,4 +1,4 @@
-name: tixkit-compact
+name: ${COMPOSE_PROJECT_NAME:-tixkit-compact}
 
 x-app-environment: &app-environment
   NODE_ENV: development
@@ -36,7 +36,7 @@ x-app-environment: &app-environment
   OTEL_SDK_DISABLED: 'true'
 
 x-api-image: &api-image
-  image: tixkit/api:${TIXKIT_VERSION:-local}
+  image: ${TIXKIT_API_IMAGE:-tixkit/api:${TIXKIT_VERSION:-local}}
 
 services:
   postgres:
@@ -207,7 +207,7 @@ services:
       retries: 30
 
   worker:
-    image: tixkit/worker:${TIXKIT_VERSION:-local}
+    image: ${TIXKIT_WORKER_IMAGE:-tixkit/worker:${TIXKIT_VERSION:-local}}
     build:
       context: ../..
       dockerfile: Dockerfile.worker
@@ -228,7 +228,7 @@ services:
       start_period: 30s
 
   checkout:
-    image: tixkit/checkout:${TIXKIT_VERSION:-local}
+    image: ${TIXKIT_CHECKOUT_IMAGE:-tixkit/checkout:${TIXKIT_VERSION:-local}}
     build:
       context: ../..
       dockerfile: Dockerfile.checkout
@@ -253,7 +253,7 @@ services:
       retries: 30
 
   admin:
-    image: tixkit/admin:${TIXKIT_VERSION:-local}
+    image: ${TIXKIT_ADMIN_IMAGE:-tixkit/admin:${TIXKIT_VERSION:-local}}
     build:
       context: ../..
       dockerfile: Dockerfile.admin

@@ -56,10 +56,36 @@ function parseEd25519PrivateKey(name, encoded) {
   }
 }
 
+function compactProjectName(environmentPath = envFile, explicitProjectName) {
+  const recordedProjectName = compactEnvironment(environmentPath).COMPOSE_PROJECT_NAME;
+  if (explicitProjectName && recordedProjectName && explicitProjectName !== recordedProjectName) {
+    throw new Error(
+      `Compact project ${explicitProjectName} does not own environment ${environmentPath}; expected ${recordedProjectName}.`,
+    );
+  }
+  const projectName = explicitProjectName ?? recordedProjectName ?? 'tixkit-compact';
+  if (!/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName))
+    throw new Error(
+      'Compact Compose project name must use 1-63 lowercase letters, digits, hyphens, or underscores.',
+    );
+  return projectName;
+}
+
 function compose(arguments_, options = {}) {
+  const environmentPath = options.environmentPath ?? envFile;
+  const projectName = compactProjectName(environmentPath, options.projectName);
   return execFileSync(
     'docker',
-    ['compose', '--env-file', envFile, '-f', composeFile, ...arguments_],
+    [
+      'compose',
+      '--project-name',
+      projectName,
+      '--env-file',
+      environmentPath,
+      '-f',
+      composeFile,
+      ...arguments_,
+    ],
     {
       cwd: root,
       stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
@@ -68,12 +94,24 @@ function compose(arguments_, options = {}) {
   );
 }
 
-function buildApplications({ pull = false } = {}) {
-  for (const service of ['api', 'worker', 'checkout', 'admin'])
-    compose(['build', ...(pull ? ['--pull'] : []), service]);
+function prepareApplications({ pull = false, environmentPath = envFile, projectName } = {}) {
+  const mode = compactEnvironment(environmentPath).TIXKIT_IMAGE_MODE ?? 'legacy-source';
+  for (const service of ['api', 'worker', 'checkout', 'admin']) {
+    if (mode === 'release') compose(['pull', service], { environmentPath, projectName });
+    else
+      compose(['build', ...(pull ? ['--pull'] : []), service], {
+        environmentPath,
+        projectName,
+      });
+  }
 }
 
-export function initializeCompactEnvironment({ environmentPath = envFile } = {}) {
+export function initializeCompactEnvironment({
+  environmentPath = envFile,
+  projectName = 'tixkit-compact',
+  imageMode = 'source',
+  version = imageMode === 'release' ? undefined : 'local',
+} = {}) {
   if (existsSync(environmentPath))
     throw new Error(
       'Compact environment already exists; refusing to overwrite persistent-service secrets.',
@@ -83,8 +121,30 @@ export function initializeCompactEnvironment({ environmentPath = envFile } = {})
   const payloadKey = portabilityKey('compact_payload', deploymentSuffix);
   const dryRunKey = portabilityKey('compact_dry_run', deploymentSuffix);
   const cutoverKey = portabilityKey('compact_cutover', deploymentSuffix);
+  if (!/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName))
+    throw new Error(
+      'Compact Compose project name must use 1-63 lowercase letters, digits, hyphens, or underscores.',
+    );
+  if (!['source', 'release'].includes(imageMode))
+    throw new Error('Compact image mode must be source or release.');
+  if (imageMode === 'source' && version !== 'local')
+    throw new Error('Compact source image mode must use the local version identity.');
+  if (
+    imageMode === 'release' &&
+    (!version || version === 'local' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(version))
+  )
+    throw new Error('Compact release image mode requires a non-local release version.');
+  if (imageMode === 'release' && projectName !== 'tixkit-compact')
+    throw new Error('Compact release image mode currently requires the default project and ports.');
+  const imageVersion = version ?? 'local';
   const contents = [
-    'TIXKIT_VERSION=local',
+    `COMPOSE_PROJECT_NAME=${projectName}`,
+    `TIXKIT_VERSION=${imageVersion}`,
+    `TIXKIT_IMAGE_MODE=${imageMode}`,
+    `TIXKIT_API_IMAGE=tixkit/api:${imageMode === 'source' ? `${projectName}-local` : imageVersion}`,
+    `TIXKIT_WORKER_IMAGE=tixkit/worker:${imageMode === 'source' ? `${projectName}-local` : imageVersion}`,
+    `TIXKIT_CHECKOUT_IMAGE=tixkit/checkout:${imageMode === 'source' ? `${projectName}-local` : imageVersion}`,
+    `TIXKIT_ADMIN_IMAGE=tixkit/admin:${imageMode === 'source' ? `${projectName}-local` : imageVersion}`,
     `TIXKIT_SANDBOX_EPOCH=${randomUUID()}`,
     `TIXKIT_DEPLOYMENT_ID=compact_${deploymentSuffix}`,
     'TIXKIT_OPERATING_MODEL=self-hosted',
@@ -122,10 +182,10 @@ export function initializeCompactEnvironment({ environmentPath = envFile } = {})
   return environmentPath;
 }
 
-function requireEnvironment() {
-  if (!existsSync(envFile))
+function requireEnvironment({ environmentPath = envFile } = {}) {
+  if (!existsSync(environmentPath))
     throw new Error('Compact is not initialized. Run `bun run compact:init`.');
-  validateCompactEnvironment({ environmentPath: envFile });
+  validateCompactEnvironment({ environmentPath });
 }
 
 export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
@@ -134,10 +194,62 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
   if (mode !== 0o600)
     throw new Error(`Compact environment must have mode 0600; found ${mode.toString(8)}.`);
   const environment = compactEnvironment(environmentPath);
+  compactProjectName(environmentPath);
   if (!/^compact_[a-f0-9]{32}$/u.test(environment.TIXKIT_DEPLOYMENT_ID ?? ''))
     throw new Error('Compact environment contains an invalid TIXKIT_DEPLOYMENT_ID.');
   if (environment.TIXKIT_OPERATING_MODEL !== 'self-hosted')
     throw new Error('Compact environment must use the self-hosted operating model.');
+  const projectName = compactProjectName(environmentPath);
+  const imageEntries = [
+    ['api', 'TIXKIT_API_IMAGE'],
+    ['worker', 'TIXKIT_WORKER_IMAGE'],
+    ['checkout', 'TIXKIT_CHECKOUT_IMAGE'],
+    ['admin', 'TIXKIT_ADMIN_IMAGE'],
+  ];
+  const imageMode = environment.TIXKIT_IMAGE_MODE ?? 'legacy-source';
+  if (imageMode === 'legacy-source') {
+    if (projectName !== 'tixkit-compact' || imageEntries.some(([, key]) => environment[key]))
+      throw new Error(
+        'Legacy Compact image settings are only valid for the historical default project.',
+      );
+  } else if (imageMode === 'source') {
+    if (environment.TIXKIT_VERSION !== 'local')
+      throw new Error('Compact source image mode must use the local version identity.');
+    for (const [service, key] of imageEntries) {
+      if (environment[key] !== `tixkit/${service}:${projectName}-local`)
+        throw new Error(`Compact environment contains an invalid project-scoped ${key}.`);
+    }
+  } else if (imageMode === 'release') {
+    const version = environment.TIXKIT_VERSION ?? '';
+    if (version === 'local' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(version))
+      throw new Error('Compact release image mode requires a non-local release version.');
+    for (const [service, key] of imageEntries) {
+      const reference = environment[key] ?? '';
+      const tagReference = `tixkit/${service}:${version}`;
+      const digestPattern = new RegExp(`^tixkit/${service}@sha256:[a-f0-9]{64}$`, 'u');
+      if (reference !== tagReference && !digestPattern.test(reference))
+        throw new Error(`Compact environment contains an invalid release ${key}.`);
+    }
+    const defaultReleasePorts = {
+      API_PORT: '4000',
+      CHECKOUT_PORT: '3000',
+      ADMIN_PORT: '3001',
+      POSTGRES_PORT: '5432',
+      REDIS_PORT: '6379',
+      TEMPORAL_UI_PORT: '8080',
+      MINIO_API_PORT: '9000',
+      MINIO_CONSOLE_PORT: '9001',
+    };
+    if (
+      projectName !== 'tixkit-compact' ||
+      Object.entries(defaultReleasePorts).some(([key, value]) => environment[key] !== value)
+    )
+      throw new Error(
+        'Compact release image mode currently requires the default project and ports.',
+      );
+  } else {
+    throw new Error('Compact image mode must be source or release.');
+  }
   for (const key of [
     'POSTGRES_PASSWORD',
     'TEMPORAL_POSTGRES_PASSWORD',
@@ -231,10 +343,19 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
   }
 }
 
-function pipeCompose(arguments_, { input, output }) {
+function pipeCompose(arguments_, { input, output, environmentPath = envFile, projectName }) {
   const result = spawnSync(
     'docker',
-    ['compose', '--env-file', envFile, '-f', composeFile, ...arguments_],
+    [
+      'compose',
+      '--project-name',
+      compactProjectName(environmentPath, projectName),
+      '--env-file',
+      environmentPath,
+      '-f',
+      composeFile,
+      ...arguments_,
+    ],
     { cwd: root, input, encoding: null, maxBuffer: 1024 * 1024 * 1024 },
   );
   if (result.status !== 0)
@@ -271,8 +392,8 @@ function compactEnvironment(environmentPath = envFile) {
   );
 }
 
-function compactUrl(service) {
-  const environment = compactEnvironment();
+function compactUrl(service, { environmentPath = envFile } = {}) {
+  const environment = compactEnvironment(environmentPath);
   const ports = {
     admin: environment.ADMIN_PORT || '3001',
     checkout: environment.CHECKOUT_PORT || '3000',
@@ -280,8 +401,8 @@ function compactUrl(service) {
   return `http://localhost:${ports[service]}`;
 }
 
-function minioClient(arguments_, mount) {
-  const environment = compactEnvironment();
+function minioClient(arguments_, mount, { environmentPath = envFile, projectName } = {}) {
+  const environment = compactEnvironment(environmentPath);
   const user = encodeURIComponent(environment.MINIO_ROOT_USER);
   const password = encodeURIComponent(environment.MINIO_ROOT_PASSWORD);
   execFileSync(
@@ -290,7 +411,7 @@ function minioClient(arguments_, mount) {
       'run',
       '--rm',
       '--network',
-      'tixkit-compact_default',
+      `${compactProjectName(environmentPath, projectName)}_default`,
       '--env',
       `MC_HOST_tixkit=http://${user}:${password}@minio:9000`,
       '--volume',
@@ -302,8 +423,9 @@ function minioClient(arguments_, mount) {
   );
 }
 
-export function backupCompact(destination) {
-  requireEnvironment();
+export function backupCompact(destination, options = {}) {
+  const environmentPath = options.environmentPath ?? envFile;
+  requireEnvironment({ environmentPath });
   const directory = resolve(destination);
   if (existsSync(directory) && readdirSync(directory).length)
     throw new Error('Compact backup destination must be empty.');
@@ -320,23 +442,24 @@ export function backupCompact(destination) {
     recursive: true,
     mode: 0o700,
   });
-  compose(['stop', 'api', 'worker', 'admin', 'checkout', 'temporal-ui', 'temporal']);
+  compose(['stop', 'api', 'worker', 'admin', 'checkout', 'temporal-ui', 'temporal'], options);
   try {
     pipeCompose(['exec', '-T', 'postgres', 'pg_dump', '-U', 'tixkit', '-d', 'tixkit'], {
       output: paths[0],
+      ...options,
     });
     pipeCompose(
       ['exec', '-T', 'temporal-postgres', 'pg_dump', '-U', 'temporal', '-d', 'temporal'],
-      { output: paths[1] },
+      { output: paths[1], ...options },
     );
     pipeCompose(
       ['exec', '-T', 'temporal-postgres', 'pg_dump', '-U', 'temporal', '-d', 'temporal_visibility'],
-      { output: paths[2] },
+      { output: paths[2], ...options },
     );
-    minioClient(['mirror', 'tixkit/tixkit', '/backup/tixkit'], objectDirectory);
+    minioClient(['mirror', 'tixkit/tixkit', '/backup/tixkit'], objectDirectory, options);
     execFileSync('tar', ['-C', objectDirectory, '-czf', paths[3], 'tixkit']);
     rmSync(objectDirectory, { recursive: true, force: true });
-    const environment = compactEnvironment();
+    const environment = compactEnvironment(environmentPath);
     const metadata = {
       schemaVersion: 2,
       profile: 'compact',
@@ -358,12 +481,12 @@ export function backupCompact(destination) {
     });
   } catch (error) {
     runRecoveryActions(error, [
-      () => compose(['up', '-d', '--no-build', '--wait']),
+      () => compose(['up', '-d', '--no-build', '--wait'], options),
       () => rmSync(staging, { recursive: true, force: true }),
     ]);
   }
   try {
-    compose(['up', '-d', '--no-build', '--wait']);
+    compose(['up', '-d', '--no-build', '--wait'], options);
   } catch (error) {
     runRecoveryActions(error, [() => rmSync(staging, { recursive: true, force: true })]);
   }
@@ -372,8 +495,9 @@ export function backupCompact(destination) {
   return directory;
 }
 
-export function restoreCompact(source) {
-  requireEnvironment();
+export function restoreCompact(source, options = {}) {
+  const environmentPath = options.environmentPath ?? envFile;
+  requireEnvironment({ environmentPath });
   const directory = resolve(source);
   const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'));
   if (
@@ -392,7 +516,7 @@ export function restoreCompact(source) {
       .some((name, index) => name !== expectedFiles[index])
   )
     throw new Error('Compact backup manifest has an invalid artifact set.');
-  const currentVersion = compactEnvironment().TIXKIT_VERSION;
+  const currentVersion = compactEnvironment(environmentPath).TIXKIT_VERSION;
   const currentCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: root,
     encoding: 'utf8',
@@ -460,24 +584,32 @@ export function restoreCompact(source) {
   }));
   try {
     for (const database of databases) {
-      compose([
-        'exec',
-        '-T',
-        database.service,
-        'dropdb',
-        '--if-exists',
-        '--force',
-        '-U',
-        database.user,
-        database.stage,
-      ]);
-      compose(['exec', '-T', database.service, 'createdb', '-U', database.user, database.stage]);
+      compose(
+        [
+          'exec',
+          '-T',
+          database.service,
+          'dropdb',
+          '--if-exists',
+          '--force',
+          '-U',
+          database.user,
+          database.stage,
+        ],
+        options,
+      );
+      compose(
+        ['exec', '-T', database.service, 'createdb', '-U', database.user, database.stage],
+        options,
+      );
       const staged = spawnSync(
         'docker',
         [
           'compose',
+          '--project-name',
+          compactProjectName(environmentPath, options.projectName),
           '--env-file',
-          envFile,
+          environmentPath,
           '-f',
           composeFile,
           'exec',
@@ -498,7 +630,58 @@ export function restoreCompact(source) {
         },
       );
       if (staged.status !== 0) throw new Error(`Restore staging failed for ${database.current}.`);
-      compose([
+      compose(
+        [
+          'exec',
+          '-T',
+          database.service,
+          'psql',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-U',
+          database.user,
+          '-d',
+          database.stage,
+          '-c',
+          `DO $$ BEGIN IF ${database.relation} IS NULL THEN RAISE EXCEPTION 'required relation missing'; END IF; END $$;`,
+        ],
+        options,
+      );
+    }
+  } catch (error) {
+    for (const database of databases)
+      compose(
+        [
+          'exec',
+          '-T',
+          database.service,
+          'dropdb',
+          '--if-exists',
+          '--force',
+          '-U',
+          database.user,
+          database.stage,
+        ],
+        options,
+      );
+    throw error;
+  }
+  const objectDirectory = resolve(directory, '.restore-objects');
+  rmSync(objectDirectory, { recursive: true, force: true });
+  mkdirSync(objectDirectory, { recursive: true, mode: 0o700 });
+  execFileSync('tar', ['-C', objectDirectory, '-xzf', archive]);
+  const stageBucket = `tixkit-restore-${restoreId}`;
+  const rollbackBucket = `tixkit-rollback-${restoreId}`;
+  minioClient(['mb', '--ignore-existing', `tixkit/${stageBucket}`], objectDirectory, options);
+  minioClient(
+    ['mirror', '--overwrite', '--remove', '/backup/tixkit', `tixkit/${stageBucket}`],
+    objectDirectory,
+    options,
+  );
+
+  const renameDatabase = (database, from, to) =>
+    compose(
+      [
         'exec',
         '-T',
         database.service,
@@ -508,56 +691,15 @@ export function restoreCompact(source) {
         '-U',
         database.user,
         '-d',
-        database.stage,
+        'postgres',
         '-c',
-        `DO $$ BEGIN IF ${database.relation} IS NULL THEN RAISE EXCEPTION 'required relation missing'; END IF; END $$;`,
-      ]);
-    }
-  } catch (error) {
-    for (const database of databases)
-      compose([
-        'exec',
-        '-T',
-        database.service,
-        'dropdb',
-        '--if-exists',
-        '--force',
-        '-U',
-        database.user,
-        database.stage,
-      ]);
-    throw error;
-  }
-  const objectDirectory = resolve(directory, '.restore-objects');
-  rmSync(objectDirectory, { recursive: true, force: true });
-  mkdirSync(objectDirectory, { recursive: true, mode: 0o700 });
-  execFileSync('tar', ['-C', objectDirectory, '-xzf', archive]);
-  const stageBucket = `tixkit-restore-${restoreId}`;
-  const rollbackBucket = `tixkit-rollback-${restoreId}`;
-  minioClient(['mb', '--ignore-existing', `tixkit/${stageBucket}`], objectDirectory);
-  minioClient(
-    ['mirror', '--overwrite', '--remove', '/backup/tixkit', `tixkit/${stageBucket}`],
-    objectDirectory,
-  );
-
-  const renameDatabase = (database, from, to) =>
-    compose([
-      'exec',
-      '-T',
-      database.service,
-      'psql',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-U',
-      database.user,
-      '-d',
-      'postgres',
-      '-c',
-      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${from}' AND pid <> pg_backend_pid(); ALTER DATABASE ${from} RENAME TO ${to};`,
-    ]);
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${from}' AND pid <> pg_backend_pid(); ALTER DATABASE ${from} RENAME TO ${to};`,
+      ],
+      options,
+    );
   let swapped = 0;
   let objectRollbackReady = false;
-  compose(['stop', 'api', 'worker', 'admin', 'checkout', 'temporal-ui', 'temporal']);
+  compose(['stop', 'api', 'worker', 'admin', 'checkout', 'temporal-ui', 'temporal'], options);
   try {
     for (const database of databases) {
       renameDatabase(database, database.current, database.rollback);
@@ -570,33 +712,38 @@ export function restoreCompact(source) {
       }
       swapped += 1;
     }
-    minioClient(['mb', '--ignore-existing', `tixkit/${rollbackBucket}`], objectDirectory);
+    minioClient(['mb', '--ignore-existing', `tixkit/${rollbackBucket}`], objectDirectory, options);
     minioClient(
       ['mirror', '--overwrite', 'tixkit/tixkit', `tixkit/${rollbackBucket}`],
       objectDirectory,
+      options,
     );
     objectRollbackReady = true;
     minioClient(
       ['mirror', '--overwrite', '--remove', `tixkit/${stageBucket}`, 'tixkit/tixkit'],
       objectDirectory,
+      options,
     );
-    compose(['up', '-d', '--no-build', '--wait']);
+    compose(['up', '-d', '--no-build', '--wait'], options);
   } catch (error) {
     const recoveryActions = [];
     for (const database of databases.slice(0, swapped).toReversed()) {
       recoveryActions.push(
         () =>
-          compose([
-            'exec',
-            '-T',
-            database.service,
-            'dropdb',
-            '--if-exists',
-            '--force',
-            '-U',
-            database.user,
-            database.current,
-          ]),
+          compose(
+            [
+              'exec',
+              '-T',
+              database.service,
+              'dropdb',
+              '--if-exists',
+              '--force',
+              '-U',
+              database.user,
+              database.current,
+            ],
+            options,
+          ),
         () => renameDatabase(database, database.rollback, database.current),
       );
     }
@@ -605,77 +752,145 @@ export function restoreCompact(source) {
         minioClient(
           ['mirror', '--overwrite', '--remove', `tixkit/${rollbackBucket}`, 'tixkit/tixkit'],
           objectDirectory,
+          options,
         ),
       );
-    recoveryActions.push(() => compose(['up', '-d', '--no-build', '--wait']));
+    recoveryActions.push(() => compose(['up', '-d', '--no-build', '--wait'], options));
     runRecoveryActions(error, recoveryActions);
   }
   for (const database of databases)
-    compose([
-      'exec',
-      '-T',
-      database.service,
-      'dropdb',
-      '--if-exists',
-      '--force',
-      '-U',
-      database.user,
-      database.rollback,
-    ]);
-  minioClient(['rb', '--force', `tixkit/${stageBucket}`], objectDirectory);
-  minioClient(['rb', '--force', `tixkit/${rollbackBucket}`], objectDirectory);
+    compose(
+      [
+        'exec',
+        '-T',
+        database.service,
+        'dropdb',
+        '--if-exists',
+        '--force',
+        '-U',
+        database.user,
+        database.rollback,
+      ],
+      options,
+    );
+  minioClient(['rb', '--force', `tixkit/${stageBucket}`], objectDirectory, options);
+  minioClient(['rb', '--force', `tixkit/${rollbackBucket}`], objectDirectory, options);
   rmSync(objectDirectory, { recursive: true, force: true });
 }
 
 function usage() {
-  return 'Usage: bun run compact:<init|up|status|logs|backup|restore|upgrade|uninstall> [options]';
+  return 'Usage: bun run compact:<init|up|status|logs|backup|restore|upgrade|uninstall> [--env-file <path>] [--project-name <name>] [init: --image-mode <source|release> --version <version>] [options]';
 }
 
-const [command, ...arguments_] = process.argv.slice(2);
+export function parseCompactCliArguments(arguments_) {
+  let environmentPath = envFile;
+  let projectName;
+  let environmentSelected = false;
+  let projectSelected = false;
+  let imageMode;
+  let version;
+  let imageModeSelected = false;
+  let versionSelected = false;
+  const remaining = [];
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (!['--env-file', '--project-name', '--image-mode', '--version'].includes(argument)) {
+      remaining.push(argument);
+      continue;
+    }
+    const value = arguments_[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`${argument} requires a value.`);
+    if (argument === '--env-file') {
+      if (environmentSelected) throw new Error('--env-file may only be provided once.');
+      environmentSelected = true;
+      environmentPath = resolve(value);
+    } else if (argument === '--project-name') {
+      if (projectSelected) throw new Error('--project-name may only be provided once.');
+      projectSelected = true;
+      projectName = value;
+    } else if (argument === '--image-mode') {
+      if (imageModeSelected) throw new Error('--image-mode may only be provided once.');
+      imageModeSelected = true;
+      imageMode = value;
+    } else {
+      if (versionSelected) throw new Error('--version may only be provided once.');
+      versionSelected = true;
+      version = value;
+    }
+    index += 1;
+  }
+  if (projectName && !/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName)) {
+    throw new Error(
+      'Compact Compose project name must use 1-63 lowercase letters, digits, hyphens, or underscores.',
+    );
+  }
+  if (imageMode && !['source', 'release'].includes(imageMode))
+    throw new Error('Compact image mode must be source or release.');
+  return { environmentPath, projectName, imageMode, version, remaining };
+}
+
+const [command, ...rawArguments] = process.argv.slice(2);
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   try {
+    const {
+      environmentPath,
+      projectName,
+      imageMode,
+      version,
+      remaining: arguments_,
+    } = parseCompactCliArguments(rawArguments);
+    const runtime = { environmentPath, projectName };
+    if (command !== 'init' && (imageMode !== undefined || version !== undefined))
+      throw new Error('--image-mode and --version may only be used with compact:init.');
+    if (command === 'init' && version !== undefined && imageMode !== 'release')
+      throw new Error('--version requires --image-mode release.');
     switch (command) {
       case 'init':
-        console.log(`Generated ${initializeCompactEnvironment()}`);
+        console.log(
+          `Generated ${initializeCompactEnvironment({ ...runtime, imageMode, version })}`,
+        );
         break;
       case 'up':
-        requireEnvironment();
-        buildApplications();
-        compose(['up', '-d', '--no-build', '--wait']);
+        requireEnvironment(runtime);
+        prepareApplications(runtime);
+        compose(['up', '-d', '--no-build', '--wait'], runtime);
         console.log(
-          `Compact is healthy: admin ${compactUrl('admin')}, checkout ${compactUrl('checkout')}`,
+          `Compact is healthy: admin ${compactUrl('admin', runtime)}, checkout ${compactUrl('checkout', runtime)}`,
         );
         break;
       case 'status':
-        requireEnvironment();
-        compose(['ps']);
+        requireEnvironment(runtime);
+        compose(['ps'], runtime);
         break;
       case 'logs':
-        requireEnvironment();
-        compose(['logs', '--tail', '200', ...arguments_]);
+        requireEnvironment(runtime);
+        compose(['logs', '--tail', '200', ...arguments_], runtime);
         break;
       case 'backup': {
         const destination =
           arguments_[0] ?? resolve(root, 'backups', new Date().toISOString().replaceAll(':', '-'));
-        console.log(`Compact backup written to ${backupCompact(destination)}`);
+        console.log(`Compact backup written to ${backupCompact(destination, runtime)}`);
         break;
       }
       case 'restore':
         if (!arguments_[0]) throw new Error('compact:restore requires a backup directory.');
-        restoreCompact(arguments_[0]);
+        restoreCompact(arguments_[0], runtime);
         console.log('Compact restore completed and services are healthy.');
         break;
       case 'upgrade':
-        requireEnvironment();
-        backupCompact(resolve(root, 'backups', `pre-upgrade-${Date.now()}`));
-        buildApplications({ pull: true });
-        compose(['up', '-d', '--no-build', '--wait']);
+        requireEnvironment(runtime);
+        backupCompact(
+          arguments_[0] ?? resolve(root, 'backups', `pre-upgrade-${Date.now()}`),
+          runtime,
+        );
+        prepareApplications({ ...runtime, pull: true });
+        compose(['up', '-d', '--no-build', '--wait'], runtime);
         console.log('Compact upgrade completed after a pre-upgrade backup.');
         break;
       case 'uninstall':
-        requireEnvironment();
-        compose(['down', ...(arguments_.includes('--volumes') ? ['--volumes'] : [])]);
-        if (arguments_.includes('--volumes')) rmSync(envFile, { force: true });
+        requireEnvironment(runtime);
+        compose(['down', ...(arguments_.includes('--volumes') ? ['--volumes'] : [])], runtime);
+        if (arguments_.includes('--volumes')) rmSync(environmentPath, { force: true });
         break;
       default:
         throw new Error(usage());
