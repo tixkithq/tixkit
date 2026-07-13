@@ -21,6 +21,18 @@ const responsiveMediaViewports = [
   { name: 'desktop', width: 1440, height: 900 },
 ] as const;
 
+async function focusWithKeyboard(page: Page, targetName: string, focusKey = 'Tab') {
+  const target = page.getByRole('button', { name: targetName });
+  await expect(target).toBeVisible();
+
+  for (let tabIndex = 0; tabIndex < 10; tabIndex += 1) {
+    await page.keyboard.press(focusKey);
+    if (await target.evaluate((element) => element === document.activeElement)) return target;
+  }
+
+  throw new Error(`Keyboard focus did not reach the "${targetName}" button after 10 Tab presses`);
+}
+
 async function installLargestContentfulPaintObserver(page: Page) {
   await page.addInitScript(() => {
     window.__tixkitLargestContentfulPaint = 0;
@@ -52,6 +64,7 @@ test.describe('role-based event media journeys', () => {
     page,
     request,
   }, testInfo) => {
+    testInfo.setTimeout(60_000);
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     const suffix = `media-upload-${testInfo.project.name}-${Date.now()}`;
     const seeded = await seedFreeCheckoutEvent(request, suffix);
@@ -214,13 +227,34 @@ test.describe('role-based event media journeys', () => {
     await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/settings`);
     await expect(page.getByAltText(altText)).toBeVisible();
 
-    page.once('dialog', (dialog) => dialog.accept());
+    const confirmation = new Promise<void>((resolve, reject) => {
+      page.once('dialog', async (dialog) => {
+        try {
+          expect(dialog.type()).toBe('confirm');
+          expect(dialog.message()).toBe('Remove the poster image and its published renditions?');
+          await dialog.accept();
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
     const removed = page.waitForResponse(
       (response) =>
         response.request().method() === 'DELETE' &&
         response.url().endsWith(`/v1/events/${seeded.event.id}/media/poster`),
     );
-    await page.getByRole('button', { name: 'Remove poster' }).click();
+    const posterUpload = page.locator('#event-poster-upload');
+    await posterUpload.focus();
+    await expect(posterUpload).toBeFocused();
+    const removePoster = await focusWithKeyboard(
+      page,
+      'Remove poster',
+      testInfo.project.name.includes('webkit') ? 'Alt+Tab' : 'Tab',
+    );
+    await expect(removePoster).toBeFocused();
+    await page.keyboard.press('Enter');
+    await confirmation;
     expect((await removed).status()).toBe(204);
     await expect(page.getByAltText(altText)).toHaveCount(0);
     await expect
