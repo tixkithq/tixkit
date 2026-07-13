@@ -1,0 +1,20 @@
+---
+title: Migrate from API 2026-01-01 to 2026-07-12
+description: Replace legacy event upload URLs with role-based public media renditions.
+---
+
+# Migrate from API 2026-01-01 to 2026-07-12
+
+The `2026-07-12` contract removes `GET /public/event-media/{purpose}/{artifactId}`. That legacy
+route addressed an upload artifact directly and could not express publication state, media role,
+or a sanitized rendition. It is not available in the new version.
+
+Read public event media from `PublicEvent.mediaAssets`. Select a role (`poster`, `cover`, or
+`social`) and a rendition (`thumbnail`, `page`, or `social`), then use that rendition's `url`.
+Rendition URLs are publication-aware and serve normalized, metadata-stripped WebP content.
+
+For organizer applications, upload the original through the upload-artifact flow and attach it with
+`PUT /events/{eventId}/media/{role}`. Do not persist upload download URLs as buyer-facing media.
+
+Clients that do not use event media require no changes. `mediaAssets` is optional in the schema so
+clients can continue to read events produced by older deployments during a rolling upgrade.

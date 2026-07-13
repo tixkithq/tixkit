@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-01-01';
+export const TIXKIT_API_VERSION = '2026-07-12';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -436,6 +436,20 @@ export type PublicMarketingIntegration = {
   status: 'active' | 'disabled' | string;
 };
 
+export type PublicEventMediaRendition = {
+  variant: 'thumbnail' | 'page' | 'social';
+  width: number;
+  height: number;
+  url: string;
+};
+
+export type PublicEventMediaAsset = {
+  role: 'poster' | 'cover' | 'social';
+  altText: string;
+  focalPoint: { x: number; y: number };
+  renditions: PublicEventMediaRendition[];
+};
+
 export type PublicEvent = {
   id: string;
   slug: string;
@@ -448,6 +462,7 @@ export type PublicEvent = {
   venue: Record<string, unknown> | null;
   brandId: string;
   coverImageUrl?: string;
+  mediaAssets?: PublicEventMediaAsset[];
   minimumAge: number | null;
   marketingIntegrations: PublicMarketingIntegration[];
 };

@@ -352,6 +352,48 @@ describe('publicApi.getResaleListings', () => {
   });
 });
 
+describe('public event media normalization', () => {
+  it('resolves API-relative rendition URLs to the configured API origin', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: 'evt_1',
+              title: 'Event',
+              status: 'published',
+              timezone: 'UTC',
+              startsAt: '2026-08-01T00:00:00.000Z',
+              mediaAssets: [
+                {
+                  role: 'cover',
+                  altText: 'Event cover',
+                  focalPoint: { x: 0.5, y: 0.5 },
+                  renditions: [
+                    {
+                      variant: 'page',
+                      width: 1600,
+                      height: 900,
+                      url: '/v1/public/event-media/renditions/emr_1',
+                    },
+                  ],
+                },
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        ),
+      ),
+    );
+
+    const event = await publicApi.getEvent('evt_1');
+    expect(event.mediaAssets?.[0]?.renditions[0]?.url).toBe(
+      'http://localhost:4000/v1/public/event-media/renditions/emr_1',
+    );
+  });
+});
+
 describe('publicApi.validateAccessCode', () => {
   it('posts selected ticket types and access code to the public validator', async () => {
     const fetchMock = vi.fn(

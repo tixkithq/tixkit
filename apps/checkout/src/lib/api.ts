@@ -36,8 +36,21 @@ export type PublicEvent = {
   } | null;
   brandId?: string;
   coverImageUrl?: string;
+  mediaAssets?: PublicEventMediaAsset[];
   minimumAge?: number | null;
   marketingIntegrations?: MarketingIntegration[];
+};
+
+export type PublicEventMediaAsset = {
+  role: 'poster' | 'cover' | 'social';
+  altText: string;
+  focalPoint: { x: number; y: number };
+  renditions: Array<{
+    variant: 'thumbnail' | 'page' | 'social';
+    width: number;
+    height: number;
+    url: string;
+  }>;
 };
 
 export type MarketingIntegration = {
@@ -382,6 +395,20 @@ export function apiBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_TIXKIT_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
 }
 
+function normalizePublicEvent(event: PublicEvent): PublicEvent {
+  const origin = new URL(apiBaseUrl()).origin;
+  return {
+    ...event,
+    mediaAssets: event.mediaAssets?.map((asset) => ({
+      ...asset,
+      renditions: asset.renditions.map((rendition) => ({
+        ...rendition,
+        url: rendition.url.startsWith('/') ? `${origin}${rendition.url}` : rendition.url,
+      })),
+    })),
+  };
+}
+
 function idempotencyKey(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return `${prefix}_${crypto.randomUUID()}`;
@@ -479,14 +506,18 @@ async function apiRequest<T>(
 
 export const publicApi = {
   async getEvent(eventId: string, signal?: AbortSignal): Promise<PublicEvent> {
-    return apiRequest<PublicEvent>(`/public/events/${encodeURIComponent(eventId)}`, { signal });
+    return normalizePublicEvent(
+      await apiRequest<PublicEvent>(`/public/events/${encodeURIComponent(eventId)}`, { signal }),
+    );
   },
 
   async getEventBySlug(slug: string, host: string, signal?: AbortSignal): Promise<PublicEvent> {
     const params = new URLSearchParams({ host });
-    return apiRequest<PublicEvent>(
-      `/public/events/by-slug/${encodeURIComponent(slug)}?${params.toString()}`,
-      { signal },
+    return normalizePublicEvent(
+      await apiRequest<PublicEvent>(
+        `/public/events/by-slug/${encodeURIComponent(slug)}?${params.toString()}`,
+        { signal },
+      ),
     );
   },
 
@@ -535,7 +566,7 @@ export const publicApi = {
       signal,
     });
     return {
-      event: response.event,
+      event: normalizePublicEvent(response.event),
       contentPage: response.contentPage ?? null,
       availability: Array.isArray(response.availability) ? response.availability : [],
       resaleListings: response.resaleListings ?? { items: [], nextCursor: null, hasMore: false },
@@ -559,7 +590,7 @@ export const publicApi = {
       signal,
     });
     return {
-      event: response.event,
+      event: normalizePublicEvent(response.event),
       contentPage: response.contentPage ?? null,
       availability: Array.isArray(response.availability) ? response.availability : [],
       resaleListings: response.resaleListings ?? { items: [], nextCursor: null, hasMore: false },

@@ -161,6 +161,18 @@ export type PublicEventRow = {
 
 export type PublicAvailabilityItem = Record<string, unknown>;
 
+export type PublicEventMediaAsset = {
+  role: 'poster' | 'cover' | 'social';
+  altText: string;
+  focalPoint: { x: number; y: number };
+  renditions: Array<{
+    variant: 'thumbnail' | 'page' | 'social';
+    width: number;
+    height: number;
+    url: string;
+  }>;
+};
+
 type PublicAvailabilityMetadata = {
   ticketTypes: Array<Record<string, any>>;
   products: Array<Record<string, any>>;
@@ -256,9 +268,59 @@ export async function loadPublicMarketingIntegrations(db: Database, eventId: str
     .execute();
 }
 
+export async function loadPublicEventMedia(
+  db: Database,
+  eventId: string,
+): Promise<PublicEventMediaAsset[]> {
+  const assetRows = await db
+    .selectFrom('event_media_assets')
+    .select(['id', 'role', 'alt_text', 'focal_x', 'focal_y'])
+    .where('event_id', '=', eventId)
+    .orderBy('role', 'asc')
+    .execute();
+  if (assetRows.length === 0) return [];
+  const renditionRows = await db
+    .selectFrom('event_media_renditions')
+    .select(['id', 'asset_id', 'variant', 'width', 'height'])
+    .where(
+      'asset_id',
+      'in',
+      assetRows.map((asset) => asset.id),
+    )
+    .orderBy('variant', 'asc')
+    .execute();
+  const assets = new Map<string, PublicEventMediaAsset>();
+  for (const row of assetRows) {
+    if (row.role !== 'poster' && row.role !== 'cover' && row.role !== 'social') continue;
+    const asset: PublicEventMediaAsset = {
+      role: row.role,
+      altText: row.alt_text,
+      focalPoint: { x: Number(row.focal_x), y: Number(row.focal_y) },
+      renditions: [],
+    };
+    assets.set(row.id, asset);
+  }
+  for (const row of renditionRows) {
+    const asset = assets.get(row.asset_id);
+    if (
+      !asset ||
+      (row.variant !== 'thumbnail' && row.variant !== 'page' && row.variant !== 'social')
+    )
+      continue;
+    asset.renditions.push({
+      variant: row.variant,
+      width: row.width,
+      height: row.height,
+      url: `/v1/public/event-media/renditions/${row.id}`,
+    });
+  }
+  return [...assets.values()];
+}
+
 export function serializePublicEvent(
   event: PublicEventRow,
   marketingIntegrations: Record<string, unknown>[],
+  mediaAssets: PublicEventMediaAsset[] = [],
 ) {
   return {
     id: event.id,
@@ -272,6 +334,7 @@ export function serializePublicEvent(
     venue: parseJsonValue(event.venue, null),
     brandId: event.brand_id,
     coverImageUrl: event.cover_image_url ?? undefined,
+    mediaAssets,
     minimumAge: event.minimum_age,
     marketingIntegrations: marketingIntegrations.map((row) =>
       serializeMarketingIntegration(row, { public: true }),
@@ -637,8 +700,11 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
   app.get('/public/events/:eventId', async (request) => {
     const { eventId } = request.params as { eventId: string };
     const event = await loadPublicEventById(db, eventId);
-    const marketingIntegrations = await loadPublicMarketingIntegrations(db, eventId);
-    return serializePublicEvent(event, marketingIntegrations);
+    const [marketingIntegrations, mediaAssets] = await Promise.all([
+      loadPublicMarketingIntegrations(db, eventId),
+      loadPublicEventMedia(db, eventId),
+    ]);
+    return serializePublicEvent(event, marketingIntegrations, mediaAssets);
   });
 
   app.get('/public/events/by-slug/:slug', async (request) => {
@@ -681,12 +747,10 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!tenant || tenant.plan === 'free') throw new NotFoundError('Event', slug);
 
-    const marketingIntegrations = await db
-      .selectFrom('marketing_integrations')
-      .select(['provider', 'config', 'consent_required', 'status'])
-      .where('event_id', '=', event.id)
-      .where('status', '=', 'active')
-      .execute();
+    const [marketingIntegrations, mediaAssets] = await Promise.all([
+      loadPublicMarketingIntegrations(db, event.id),
+      loadPublicEventMedia(db, event.id),
+    ]);
     return {
       id: event.id,
       slug: event.slug,
@@ -698,6 +762,8 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       endsAt: event.ends_at,
       venue: parseJsonValue(event.venue, null),
       brandId: event.brand_id,
+      coverImageUrl: event.cover_image_url ?? undefined,
+      mediaAssets,
       minimumAge: event.minimum_age ?? null,
       marketingIntegrations: marketingIntegrations.map((row) =>
         serializeMarketingIntegration(row, { public: true }),
@@ -837,24 +903,31 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
     const requestedProducts = parseRequestedProducts(query.products);
     const resaleListingId = firstQueryParam(query.resaleListingId).trim() || undefined;
     const event = await loadPublicEventById(db, eventId);
-    const [marketingIntegrations, availability, questions, resaleListing, occurrences] =
-      await Promise.all([
-        loadPublicMarketingIntegrations(db, eventId),
-        loadPublicAvailability(
-          db,
-          inventoryService,
-          eventId,
-          requestedProducts,
-          availabilityMetadataCache,
-        ),
-        loadPublicCheckoutQuestions(db, eventId),
-        resaleListingId
-          ? loadPublicResaleListingById(db, event, resaleListingId)
-          : Promise.resolve(null),
-        new EventOccurrenceRepository(db).findByEvent(eventId),
-      ]);
+    const [
+      marketingIntegrations,
+      mediaAssets,
+      availability,
+      questions,
+      resaleListing,
+      occurrences,
+    ] = await Promise.all([
+      loadPublicMarketingIntegrations(db, eventId),
+      loadPublicEventMedia(db, eventId),
+      loadPublicAvailability(
+        db,
+        inventoryService,
+        eventId,
+        requestedProducts,
+        availabilityMetadataCache,
+      ),
+      loadPublicCheckoutQuestions(db, eventId),
+      resaleListingId
+        ? loadPublicResaleListingById(db, event, resaleListingId)
+        : Promise.resolve(null),
+      new EventOccurrenceRepository(db).findByEvent(eventId),
+    ]);
     return {
-      event: serializePublicEvent(event, marketingIntegrations),
+      event: serializePublicEvent(event, marketingIntegrations, mediaAssets),
       availability,
       questions,
       resaleListing,

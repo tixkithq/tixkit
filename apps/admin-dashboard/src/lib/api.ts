@@ -227,6 +227,43 @@ export type AdminEventDetail = AdminEventListItem & {
   seoUseCoverImage?: boolean;
 };
 
+export type AdminEventMediaRole = 'poster' | 'cover' | 'social';
+
+export type AdminEventMediaAsset = {
+  id: string;
+  role: AdminEventMediaRole;
+  original: {
+    uploadArtifactId: string;
+    width: number;
+    height: number;
+    format: string;
+    checksumSha256: string;
+    sizeBytes: number;
+  };
+  focalPoint: { x: number; y: number };
+  altText: string;
+  renditions: Array<{
+    id: string;
+    variant: 'thumbnail' | 'page' | 'social';
+    width: number;
+    height: number;
+    format: string;
+    checksumSha256: string;
+    sizeBytes: number;
+    url: string;
+  }>;
+};
+
+function normalizeAdminEventMediaAsset(asset: AdminEventMediaAsset): AdminEventMediaAsset {
+  return {
+    ...asset,
+    renditions: asset.renditions.map((rendition) => ({
+      ...rendition,
+      url: rendition.url.startsWith('/') ? `${getAdminApiBaseUrl()}${rendition.url}` : rendition.url,
+    })),
+  };
+}
+
 export type AdminReadinessStep = {
   id: WorkspaceReadinessStepId | EventLaunchReadinessStepId;
   status: 'complete' | 'incomplete' | 'blocked' | 'not_applicable';
@@ -1799,7 +1836,9 @@ export type AdminUploadPurpose =
   | 'content_email_image'
   | 'content_event_page_image'
   | 'migration_import'
+  | 'event_poster'
   | 'event_cover'
+  | 'event_social'
   | 'event_seo_image';
 
 export type CreateUploadArtifactInput = {
@@ -2047,6 +2086,16 @@ export type AdminApi = {
     },
   ): Promise<ApiResult<AdminTablePage<AdminEventListItem>>>;
   getEvent(eventId: string): Promise<ApiResult<AdminEventDetail>>;
+  listEventMedia(eventId: string): Promise<ApiResult<AdminEventMediaAsset[]>>;
+  attachEventMedia(
+    eventId: string,
+    role: AdminEventMediaRole,
+    input: {
+      uploadArtifactId: string;
+      altText: string;
+      focalPoint: { x: number; y: number };
+    },
+  ): Promise<ApiResult<AdminEventMediaAsset>>;
   getEventOperationalHealth(eventId: string): Promise<
     ApiResult<{
       eventId: string;
@@ -5113,6 +5162,46 @@ export const adminApi: AdminApi = {
         if (!event) return err<AdminEventDetail>(apiError('not_found', 'Event not found', 404));
         return ok(event);
       },
+    );
+  },
+
+  async listEventMedia(eventId) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminEventMediaAsset[]>(`/v1/events/${eventId}/media`, {
+          method: 'GET',
+        });
+        return result.ok ? ok(result.data.map(normalizeAdminEventMediaAsset)) : result;
+      },
+      () => ok([]),
+    );
+  },
+
+  async attachEventMedia(eventId, role, input) {
+    return withFixture(
+      async () => {
+        const result = await request<AdminEventMediaAsset>(`/v1/events/${eventId}/media/${role}`, {
+          method: 'PUT',
+          body: JSON.stringify(input),
+        });
+        return result.ok ? ok(normalizeAdminEventMediaAsset(result.data)) : result;
+      },
+      () =>
+        ok({
+          id: newFixtureId('ema'),
+          role,
+          original: {
+            uploadArtifactId: input.uploadArtifactId,
+            width: 1600,
+            height: 900,
+            format: 'webp',
+            checksumSha256: '0'.repeat(64),
+            sizeBytes: 1,
+          },
+          focalPoint: input.focalPoint,
+          altText: input.altText,
+          renditions: [],
+        }),
     );
   },
 

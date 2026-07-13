@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { PublicEventPageBootstrap } from '@/lib/api';
+import { resolveEventSocialMedia } from '@/lib/event-media';
 
 export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstrap): Metadata {
   const storedDiscovery = bootstrap.contentPage?.page.settings?.discovery as
@@ -17,8 +18,13 @@ export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstr
     publicDiscovery?.summary ||
     bootstrap.event.description ||
     undefined;
+  const socialMedia = resolveEventSocialMedia(bootstrap.event);
   const imageUrl =
-    storedDiscovery?.socialImageUrl || storedDiscovery?.coverImageUrl || publicDiscovery?.imageUrl;
+    storedDiscovery?.socialImageUrl ||
+    socialMedia?.url ||
+    storedDiscovery?.coverImageUrl ||
+    publicDiscovery?.imageUrl ||
+    bootstrap.event.coverImageUrl;
 
   return {
     title: { absolute: title },
@@ -26,7 +32,22 @@ export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstr
     openGraph: {
       title,
       description,
-      ...(imageUrl ? { images: [{ url: imageUrl }] } : {}),
+      ...(imageUrl
+        ? {
+            images: [
+              {
+                url: imageUrl,
+                ...(socialMedia?.url === imageUrl
+                  ? {
+                      width: socialMedia.width,
+                      height: socialMedia.height,
+                      alt: socialMedia.altText,
+                    }
+                  : {}),
+              },
+            ],
+          }
+        : {}),
     },
     twitter: {
       card: imageUrl ? 'summary_large_image' : 'summary',

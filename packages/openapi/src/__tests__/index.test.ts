@@ -63,7 +63,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-01-01');
+    expect(openApiSpec.info.version).toBe('2026-07-12');
   });
 
   it('publishes the authoritative API-key permission scope catalog', () => {
@@ -1191,6 +1191,12 @@ describe('openApiSpec', () => {
     ).toEqual({
       $ref: '#/components/schemas/PublicMarketingIntegration',
     });
+    expect(openApiSpec.components.schemas.PublicEvent.properties.mediaAssets.items).toEqual({
+      $ref: '#/components/schemas/PublicEventMediaAsset',
+    });
+    expect(
+      openApiSpec.components.schemas.PublicEventMediaAsset.properties.renditions.items,
+    ).toEqual({ $ref: '#/components/schemas/PublicEventMediaRendition' });
     expect(openApiSpec.components.schemas.PublicMarketingIntegration.properties).not.toHaveProperty(
       'tenantId',
     );

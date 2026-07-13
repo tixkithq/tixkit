@@ -359,7 +359,7 @@ describe('TixkitClient', () => {
     const client = new TixkitClient({
       apiKey: 'tk_test_123',
       apiBaseUrl: 'https://custom.api.com',
-      apiVersion: '2026-01-01',
+      apiVersion: '2026-07-12',
       timeout: 5000,
       maxRetries: 1,
     });

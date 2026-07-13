@@ -32,6 +32,7 @@ import {
   type PublicEventPageTicket,
 } from '@tixkit/content-event-page-react/puck';
 import { RefreshNotifier } from '@/components/refresh-notifier';
+import { resolveEventPageMedia } from '@/lib/event-media';
 
 type Props = {
   eventId?: string;
@@ -198,6 +199,7 @@ export default function EventPageClient({
 
   const pageDocument = useMemo(() => {
     if (!event) return undefined;
+    const pageMedia = resolveEventPageMedia(event);
     const input = {
       eventId: event.id,
       eventTitle: event.title,
@@ -215,8 +217,8 @@ export default function EventPageClient({
           }
         : undefined,
       brandName: brand.fallback ? undefined : brand.name,
-      coverImageUrl: event.coverImageUrl,
-      coverImageAlt: event.title,
+      coverImageUrl: pageMedia?.url ?? event.coverImageUrl,
+      coverImageAlt: pageMedia?.altText ?? event.title,
       publicUrl: `/e/${event.id}`,
       locale: 'en',
     };

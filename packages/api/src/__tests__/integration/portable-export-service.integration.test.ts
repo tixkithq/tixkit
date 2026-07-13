@@ -20,6 +20,7 @@ import {
   type PortableExportArtifactStore,
   type PortableExportMediaStore,
 } from '../../services/portable-export.js';
+import { loadPublicEventMedia } from '../../routes/modules/public.js';
 import sharp from 'sharp';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
@@ -225,6 +226,38 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         updated_at: now,
       })
       .execute();
+    await db
+      .insertInto('event_media_renditions')
+      .values({
+        id: `emr_media_${driver}`,
+        asset_id: assetId,
+        variant: 'page',
+        width: 1600,
+        height: 900,
+        format: 'webp',
+        content_type: 'image/webp',
+        bucket: 'media',
+        object_key: `event-media/${event.id}/${assetId}/page.webp`,
+        checksum_sha256: 'b'.repeat(64),
+        size_bytes: 1024,
+        created_at: now,
+      })
+      .execute();
+    expect(await loadPublicEventMedia(db, event.id)).toEqual([
+      {
+        role: 'cover',
+        altText: 'Purple event cover',
+        focalPoint: { x: 0.5, y: 0.5 },
+        renditions: [
+          {
+            variant: 'page',
+            width: 1600,
+            height: 900,
+            url: `/v1/public/event-media/renditions/emr_media_${driver}`,
+          },
+        ],
+      },
+    ]);
     const mediaStore: PortableExportMediaStore = {
       async read(bucket, objectKey, maximumBytes) {
         expect({ bucket, objectKey, maximumBytes }).toEqual({

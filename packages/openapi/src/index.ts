@@ -414,7 +414,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-01-01',
+    version: '2026-07-12',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -1595,6 +1595,36 @@ const rawOpenApiSpec = {
         },
         required: ['provider', 'config', 'consentRequired', 'status'],
       },
+      PublicEventMediaRendition: {
+        type: 'object',
+        properties: {
+          variant: { type: 'string', enum: ['thumbnail', 'page', 'social'] },
+          width: { type: 'integer', minimum: 1 },
+          height: { type: 'integer', minimum: 1 },
+          url: { type: 'string', format: 'uri-reference' },
+        },
+        required: ['variant', 'width', 'height', 'url'],
+      },
+      PublicEventMediaAsset: {
+        type: 'object',
+        properties: {
+          role: { type: 'string', enum: ['poster', 'cover', 'social'] },
+          altText: { type: 'string', minLength: 1, maxLength: 500 },
+          focalPoint: {
+            type: 'object',
+            properties: {
+              x: { type: 'number', minimum: 0, maximum: 1 },
+              y: { type: 'number', minimum: 0, maximum: 1 },
+            },
+            required: ['x', 'y'],
+          },
+          renditions: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PublicEventMediaRendition' },
+          },
+        },
+        required: ['role', 'altText', 'focalPoint', 'renditions'],
+      },
       PublicEvent: {
         type: 'object',
         properties: {
@@ -1609,6 +1639,11 @@ const rawOpenApiSpec = {
           venue: { type: ['object', 'null'], additionalProperties: true },
           brandId: { type: 'string' },
           coverImageUrl: { type: 'string', format: 'uri' },
+          mediaAssets: {
+            type: 'array',
+            maxItems: 3,
+            items: { $ref: '#/components/schemas/PublicEventMediaAsset' },
+          },
           minimumAge: { type: ['integer', 'null'], minimum: 0, maximum: 120 },
           marketingIntegrations: {
             type: 'array',

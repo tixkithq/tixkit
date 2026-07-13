@@ -6,15 +6,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const root = resolve(import.meta.dirname, '../..');
+const currentVersion = '2026-07-12';
 
 test('builds a complete, checksummed, non-publishable API release', () => {
   execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
     cwd: root,
     stdio: 'pipe',
   });
-  const directory = resolve(root, 'artifacts/api/2026-01-01');
+  const directory = resolve(root, `artifacts/api/${currentVersion}`);
   const manifest = JSON.parse(readFileSync(resolve(directory, 'release-manifest.json'), 'utf8'));
-  assert.equal(manifest.apiVersion, '2026-01-01');
+  assert.equal(manifest.apiVersion, currentVersion);
   assert.equal(manifest.publication, 'approval-required');
   assert.match(manifest.provenance.sourceTreeHash, /^[a-f0-9]{64}$/u);
   assert.equal(manifest.provenance.reproducible, true);
@@ -53,7 +54,7 @@ test('builds a complete, checksummed, non-publishable API release', () => {
 });
 
 test('uses the checked-in same-version baseline instead of a mutable generated artifact', () => {
-  const path = resolve(root, 'artifacts/api/2026-01-01/openapi.json');
+  const path = resolve(root, `artifacts/api/${currentVersion}/openapi.json`);
   const original = readFileSync(path, 'utf8');
   const baseline = JSON.parse(original);
   baseline.paths['/__compatibility_fixture'] = {
@@ -85,7 +86,7 @@ test('rebuilds identical artifacts and never reuses stale provenance', () => {
     cwd: root,
     stdio: 'pipe',
   });
-  const directory = resolve(root, 'artifacts/api/2026-01-01');
+  const directory = resolve(root, `artifacts/api/${currentVersion}`);
   const manifestPath = resolve(directory, 'release-manifest.json');
   const originalManifest = readFileSync(manifestPath, 'utf8');
   const manifest = JSON.parse(originalManifest);
@@ -121,7 +122,7 @@ test('rebuilds identical artifacts and never reuses stale provenance', () => {
 });
 
 test('provenance closes over generated-type and compatibility implementation inputs', () => {
-  const manifestPath = resolve(root, 'artifacts/api/2026-01-01/release-manifest.json');
+  const manifestPath = resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`);
   const inputs = [
     resolve(root, 'packages/openapi/src/generate-types.ts'),
     resolve(root, 'scripts/lib/openapi-compatibility.ts'),
@@ -151,7 +152,7 @@ test('provenance closes over generated-type and compatibility implementation inp
 });
 
 test('untracked source inputs make release provenance non-publishable and enter its hash', () => {
-  const manifestPath = resolve(root, 'artifacts/api/2026-01-01/release-manifest.json');
+  const manifestPath = resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`);
   const input = resolve(root, 'packages/openapi/src/__untracked_provenance_fixture.ts');
   execFileSync('bun', ['run', 'scripts/build-api-release.ts'], { cwd: root, stdio: 'pipe' });
   const cleanHash = JSON.parse(readFileSync(manifestPath, 'utf8')).provenance.sourceTreeHash;
@@ -170,7 +171,7 @@ test('untracked source inputs make release provenance non-publishable and enter 
 });
 
 test('provenance validation rejects an invented source hash and manifest version drift', () => {
-  const directory = resolve(root, 'artifacts/api/2026-01-01');
+  const directory = resolve(root, `artifacts/api/${currentVersion}`);
   const manifestPath = resolve(directory, 'release-manifest.json');
   const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
   const distributionPath = resolve(root, `artifacts/api-distribution-drift-${process.pid}.json`);

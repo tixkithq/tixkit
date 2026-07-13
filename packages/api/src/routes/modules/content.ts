@@ -69,6 +69,7 @@ import {
   createPublicAvailabilityMetadataCache,
   loadPublicAvailability,
   loadPublicEventById,
+  loadPublicEventMedia,
   loadPublicMarketingIntegrations,
   loadPublicResaleListings,
   serializePublicEvent,
@@ -1599,21 +1600,23 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
     locale?: string,
     host?: string,
   ): Promise<PublicEventPageBootstrap> {
-    const [marketingIntegrations, contentPage, availability, resaleListings] = await Promise.all([
-      loadPublicMarketingIntegrations(db, event.id),
-      loadOptionalPublicPage(event, locale, host),
-      loadPublicAvailability(
-        db,
-        app.context.inventoryService,
-        event.id,
-        [],
-        availabilityMetadataCache,
-      ),
-      loadPublicResaleListings(db, event, { limit: 50 }),
-    ]);
+    const [marketingIntegrations, mediaAssets, contentPage, availability, resaleListings] =
+      await Promise.all([
+        loadPublicMarketingIntegrations(db, event.id),
+        loadPublicEventMedia(db, event.id),
+        loadOptionalPublicPage(event, locale, host),
+        loadPublicAvailability(
+          db,
+          app.context.inventoryService,
+          event.id,
+          [],
+          availabilityMetadataCache,
+        ),
+        loadPublicResaleListings(db, event, { limit: 50 }),
+      ]);
 
     return {
-      event: serializePublicEvent(event, marketingIntegrations),
+      event: serializePublicEvent(event, marketingIntegrations, mediaAssets),
       contentPage,
       availability,
       resaleListings,

@@ -2165,6 +2165,25 @@ describe('content routes', () => {
       ],
       products: [],
       marketing_integrations: [],
+      event_media_assets: [
+        {
+          id: 'ema_cover',
+          event_id: 'evt_1',
+          role: 'cover',
+          alt_text: 'Audience watching the stage',
+          focal_x: '0.5',
+          focal_y: '0.4',
+        },
+      ],
+      event_media_renditions: [
+        {
+          id: 'emr_page',
+          asset_id: 'ema_cover',
+          variant: 'page',
+          width: 1600,
+          height: 900,
+        },
+      ],
       content_documents: [
         documentRow({
           id: 'cdoc_public',
@@ -2206,7 +2225,25 @@ describe('content routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      event: { id: 'evt_1', title: 'Published page' },
+      event: {
+        id: 'evt_1',
+        title: 'Published page',
+        mediaAssets: [
+          {
+            role: 'cover',
+            altText: 'Audience watching the stage',
+            focalPoint: { x: 0.5, y: 0.4 },
+            renditions: [
+              {
+                variant: 'page',
+                width: 1600,
+                height: 900,
+                url: '/v1/public/event-media/renditions/emr_page',
+              },
+            ],
+          },
+        ],
+      },
       availability: [{ ticketTypeId: 'tt_ga', available: 11, status: 'active' }],
       contentPage: {
         document: { eventId: 'evt_1', channel: 'event_page' },

@@ -85,4 +85,48 @@ describe('eventPageMetadataFromBootstrap', () => {
       description: 'The public event description.',
     });
   });
+
+  it('uses deterministic owned-media role fallbacks for social metadata', () => {
+    const metadata = eventPageMetadataFromBootstrap(
+      bootstrap({
+        event: {
+          ...bootstrap().event,
+          coverImageUrl: 'https://legacy.example/cover.jpg',
+          mediaAssets: [
+            {
+              role: 'cover',
+              altText: 'Crowd facing the stage',
+              focalPoint: { x: 0.5, y: 0.4 },
+              renditions: [
+                {
+                  variant: 'social',
+                  width: 1200,
+                  height: 630,
+                  url: 'https://media.example/cover-social.webp',
+                },
+              ],
+            },
+            {
+              role: 'social',
+              altText: 'Festival social card',
+              focalPoint: { x: 0.5, y: 0.5 },
+              renditions: [
+                {
+                  variant: 'social',
+                  width: 1200,
+                  height: 630,
+                  url: 'https://media.example/social.webp',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(metadata.openGraph).toMatchObject({
+      images: [{ url: 'https://media.example/social.webp' }],
+    });
+    expect(metadata.twitter).toMatchObject({ images: ['https://media.example/social.webp'] });
+  });
 });
