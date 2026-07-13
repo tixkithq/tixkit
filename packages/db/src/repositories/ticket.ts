@@ -1,8 +1,15 @@
 import { BaseRepository, insertReturning } from './base.js';
 import { ulid } from 'ulid';
+import { sql } from 'kysely';
 import type { Database } from '../client.js';
 
 type TicketListingTerminalStatus = 'delisted' | 'expired';
+
+function assertTransactionOwned(database: Database): void {
+  if ((database as Database & { isTransaction?: boolean }).isTransaction !== true) {
+    throw new Error('CHECK_IN_TRANSACTION_REQUIRED');
+  }
+}
 
 export class TicketRepository extends BaseRepository {
   async create(input: {
@@ -95,33 +102,46 @@ export class TicketRepository extends BaseRepository {
    */
   async checkInIfValid(id: string, deviceId: string, checkedInAt: Date): Promise<boolean> {
     return this.db.transaction().execute(async (trx) => {
-      const now = new Date();
-      const result = await trx
-        .updateTable('tickets')
+      return new TicketRepository(trx as Database).checkInIfValidInTransaction(
+        id,
+        deviceId,
+        checkedInAt,
+      );
+    });
+  }
+
+  async checkInIfValidInTransaction(
+    id: string,
+    deviceId: string,
+    checkedInAt: Date,
+  ): Promise<boolean> {
+    assertTransactionOwned(this.db);
+    const now = new Date();
+    const result = await this.db
+      .updateTable('tickets')
+      .set({
+        status: 'checked_in',
+        checked_in_at: checkedInAt,
+        checked_in_by_device_id: deviceId,
+        updated_at: now,
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'valid')
+      .executeTakeFirst();
+    const updated = Number(result.numUpdatedRows ?? 0) === 1;
+    if (updated) {
+      await this.db
+        .updateTable('attendees')
         .set({
           status: 'checked_in',
           checked_in_at: checkedInAt,
-          checked_in_by_device_id: deviceId,
+          check_in_device_id: deviceId,
           updated_at: now,
         })
-        .where('id', '=', id)
-        .where('status', '=', 'valid')
-        .executeTakeFirst();
-      const updated = Number(result.numUpdatedRows ?? 0) === 1;
-      if (updated) {
-        await trx
-          .updateTable('attendees')
-          .set({
-            status: 'checked_in',
-            checked_in_at: checkedInAt,
-            check_in_device_id: deviceId,
-            updated_at: now,
-          })
-          .where('ticket_id', '=', id)
-          .execute();
-      }
-      return updated;
-    });
+        .where('ticket_id', '=', id)
+        .execute();
+    }
+    return updated;
   }
 }
 
@@ -376,6 +396,16 @@ export class CheckInListRepository extends BaseRepository {
     return this.db.selectFrom('check_in_lists').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
+  async findByIdForUpdate(id: string) {
+    assertTransactionOwned(this.db);
+    return this.db
+      .selectFrom('check_in_lists')
+      .selectAll()
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
   async findByEvent(eventId: string, limit?: number, cursor?: string) {
     let query = this.db
       .selectFrom('check_in_lists')
@@ -400,42 +430,56 @@ export class ScanLogRepository extends BaseRepository {
     offline: boolean;
     metadata?: Record<string, unknown>;
   }) {
-    const id = `scan_${ulid()}`;
     return this.db.transaction().execute(async (trx) => {
-      const transactionDb = trx as Database;
-      const list = await transactionDb
-        .selectFrom('check_in_lists')
-        .select('next_activity_sequence')
-        .where('id', '=', input.checkInListId)
-        .forUpdate()
-        .executeTakeFirstOrThrow();
-      const activitySequence = Number(list.next_activity_sequence ?? 0) + 1;
-      await transactionDb
-        .updateTable('check_in_lists')
-        .set({ next_activity_sequence: activitySequence })
-        .where('id', '=', input.checkInListId)
-        .execute();
-      return insertReturning(
-        transactionDb,
-        'scan_logs',
-        {
-          id,
-          tenant_id: input.tenantId,
-          check_in_list_id: input.checkInListId,
-          device_id: input.deviceId,
-          ticket_id: input.ticketId ?? null,
-          qr_hash: input.qrHash,
-          outcome: input.outcome,
-          scanned_at: input.scannedAt,
-          synced_at: input.offline ? null : new Date(),
-          offline: input.offline,
-          metadata: input.metadata ? JSON.stringify(input.metadata) : null,
-          created_at: new Date(),
-          activity_sequence: activitySequence,
-        },
-        id,
-      );
+      return new ScanLogRepository(trx as Database).createInTransaction(input);
     });
+  }
+
+  async createInTransaction(input: {
+    tenantId: string;
+    checkInListId: string;
+    deviceId: string;
+    ticketId?: string;
+    qrHash: string;
+    outcome: string;
+    scannedAt: Date;
+    offline: boolean;
+    metadata?: Record<string, unknown>;
+  }) {
+    assertTransactionOwned(this.db);
+    const id = `scan_${ulid()}`;
+    const list = await this.db
+      .selectFrom('check_in_lists')
+      .select(sql<string>`concat('', next_activity_sequence)`.as('next_activity_sequence_exact'))
+      .where('id', '=', input.checkInListId)
+      .forUpdate()
+      .executeTakeFirstOrThrow();
+    const activitySequence = (BigInt(list.next_activity_sequence_exact) + 1n).toString();
+    await this.db
+      .updateTable('check_in_lists')
+      .set({ next_activity_sequence: activitySequence })
+      .where('id', '=', input.checkInListId)
+      .execute();
+    return insertReturning(
+      this.db,
+      'scan_logs',
+      {
+        id,
+        tenant_id: input.tenantId,
+        check_in_list_id: input.checkInListId,
+        device_id: input.deviceId,
+        ticket_id: input.ticketId ?? null,
+        qr_hash: input.qrHash,
+        outcome: input.outcome,
+        scanned_at: input.scannedAt,
+        synced_at: input.offline ? null : new Date(),
+        offline: input.offline,
+        metadata: input.metadata ? JSON.stringify(input.metadata) : null,
+        created_at: new Date(),
+        activity_sequence: activitySequence,
+      },
+      id,
+    );
   }
 
   async findByList(listId: string, limit = 100) {

@@ -1002,8 +1002,6 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     const qrService = app.context.qrService;
     const idempotencyKey = request.headers['idempotency-key'];
 
-    const ticketRepo = new TicketRepository(db);
-    const scanRepo = new ScanLogRepository(db);
     const listRepo = new CheckInListRepository(db);
 
     if (!body.checkInListId) throw new ValidationError('checkInListId is required');
@@ -1026,27 +1024,39 @@ export const checkInRoutes: FastifyPluginAsync = async (app) => {
     });
 
     const handler = async () => {
-      const result = await processScan({
-        ticketRepo,
-        tenantId: principal.tenantId,
-        list,
-        qrHash: qrService.hashPayload(body.qrPayload!),
-        verification: qrService.getQrPayload(body.qrPayload!),
-        deviceId: effectiveDeviceId,
-        scannedAt: normalizedScannedAt.scannedAt,
-        requireVerifiedTicketId: true,
-      });
-
-      const scanLog = await scanRepo.create({
-        tenantId: principal.tenantId,
-        checkInListId: body.checkInListId!,
-        deviceId: effectiveDeviceId,
-        ticketId: result.ticketId,
-        qrHash: result.qrHash,
-        outcome: result.outcome,
-        scannedAt: normalizedScannedAt.scannedAt,
-        offline: body.offline ?? false,
-        metadata: metadataWithClockWarning(result.metadata, normalizedScannedAt),
+      const { result, scanLog } = await db.transaction().execute(async (transaction) => {
+        const transactionDb = transaction as Database;
+        const lockedList = await new CheckInListRepository(transactionDb).findByIdForUpdate(
+          body.checkInListId!,
+        );
+        if (!lockedList) throw new NotFoundError('CheckInList', body.checkInListId!);
+        if (lockedList.event_id !== list.event_id)
+          throw new ValidationError('Check-in list event changed during scan');
+        if (lockedList.status !== 'active')
+          throw new ValidationError('Check-in list is not active');
+        const result = await processScan({
+          ticketRepo: new TicketRepository(transactionDb),
+          tenantId: principal.tenantId,
+          list: lockedList,
+          qrHash: qrService.hashPayload(body.qrPayload!),
+          verification: qrService.getQrPayload(body.qrPayload!),
+          deviceId: effectiveDeviceId,
+          scannedAt: normalizedScannedAt.scannedAt,
+          requireVerifiedTicketId: true,
+          transactionOwned: true,
+        });
+        const scanLog = await new ScanLogRepository(transactionDb).createInTransaction({
+          tenantId: principal.tenantId,
+          checkInListId: body.checkInListId!,
+          deviceId: effectiveDeviceId,
+          ticketId: result.ticketId,
+          qrHash: result.qrHash,
+          outcome: result.outcome,
+          scannedAt: normalizedScannedAt.scannedAt,
+          offline: body.offline ?? false,
+          metadata: metadataWithClockWarning(result.metadata, normalizedScannedAt),
+        });
+        return { result, scanLog };
       });
       void publishCheckInActivityEvent(body.checkInListId!, scanLog.id);
 
@@ -2470,6 +2480,7 @@ export async function processScan(input: {
   scannedAt: Date;
   verification?: { valid: boolean; ticketId?: string };
   requireVerifiedTicketId: boolean;
+  transactionOwned?: boolean;
 }): Promise<{
   outcome: string;
   ticketId?: string;
@@ -2536,7 +2547,13 @@ export async function processScan(input: {
     return { outcome: 'revoked', ticketId: ticket.id, qrHash: input.qrHash };
   }
   if (ticket.status === 'valid') {
-    const won = await input.ticketRepo.checkInIfValid(ticket.id, input.deviceId, input.scannedAt);
+    const won = input.transactionOwned
+      ? await input.ticketRepo.checkInIfValidInTransaction(
+          ticket.id,
+          input.deviceId,
+          input.scannedAt,
+        )
+      : await input.ticketRepo.checkInIfValid(ticket.id, input.deviceId, input.scannedAt);
     return {
       outcome: won ? 'accepted' : 'duplicate',
       ticketId: ticket.id,
