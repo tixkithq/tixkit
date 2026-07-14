@@ -19,6 +19,12 @@ const eventScopeGuards = new Set([
   'requireReportEventAccess',
   'scopedEvent',
 ]);
+const orderScopeGuards = [
+  'ClerkAuthService.requireResourceTenant',
+  'ClerkAuthService.requireOrganizationScope',
+  'ClerkAuthService.requireBrandScope',
+  'ClerkAuthService.requireEventScope',
+] as const;
 const signedWebhookRejections: Readonly<Record<string, { code: string; status: number }>> = {
   EmailProviderSignature: { code: 'INVALID_SIGNATURE', status: 400 },
   StripeSignature: { code: 'WEBHOOK_SIGNATURE_INVALID', status: 400 },
@@ -129,6 +135,20 @@ describe('API route access inventory (C-123)', () => {
       .map((route) => `${route.method} ${route.path} (${route.operationId})`);
 
     expect(missingEventScope).toEqual([]);
+  });
+
+  it('requires every tenant and delegated scope guard on authenticated order routes', async () => {
+    const inventory = await buildRouteAccessInventory();
+    const incompleteOrderScope = inventory.routes
+      .filter(
+        (route) =>
+          route.access === 'authenticated' &&
+          route.path.startsWith('/orders/{orderId}') &&
+          orderScopeGuards.some((guard) => !route.guardEvidence.includes(guard)),
+      )
+      .map((route) => `${route.method} ${route.path} (${route.operationId})`);
+
+    expect(incompleteOrderScope).toEqual([]);
   });
 
   it('rejects missing credentials on every authenticated runtime route', async () => {

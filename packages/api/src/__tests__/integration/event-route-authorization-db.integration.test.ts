@@ -44,6 +44,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
   let app: FastifyInstance;
   let db: Database;
   let previousDriver: string | undefined;
+  let basePrincipal: Principal;
   let principal: Principal;
 
   const suffix = ulid().slice(-10).toLowerCase();
@@ -152,13 +153,14 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
     eventB = (await createEvent(tenantB, organizationB, brandB, 'Foreign Event')).id;
     createdEventIds.push(eventB);
 
-    principal = {
+    basePrincipal = {
       type: 'user',
       id: `usr_auth_${suffix}`,
       tenantId: tenantA,
       organizationIds: [organizationA],
       scopes: [...ALL_PERMISSIONS],
     };
+    principal = basePrincipal;
 
     app = Fastify({ logger: false });
     app.decorate('context', {
@@ -252,7 +254,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       {
         name: 'cross-tenant principal',
         principal: {
-          ...principal,
+          ...basePrincipal,
           organizationIds: [organizationA],
           tenantId: tenantA,
         },
@@ -261,7 +263,7 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       {
         name: 'event-scoped principal',
         principal: {
-          ...principal,
+          ...basePrincipal,
           eventIds: [eventA],
           organizationIds: [organizationA, organizationAScoped],
         },
