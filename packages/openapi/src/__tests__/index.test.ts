@@ -77,7 +77,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-19');
+    expect(openApiSpec.info.version).toBe('2026-07-20');
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {
@@ -411,6 +411,64 @@ describe('openApiSpec', () => {
     expect(grantSchema.properties.resourceScopes.uniqueItems).toBe(true);
     expect(openApiSpec.components.schemas.AgentPrincipal.required).toContain('protocolVersion');
     expect(openApiSpec.components.schemas.AgentDelegation.required).toContain('permissionSnapshot');
+  });
+
+  it('documents organizer-controlled agent memory without writable ownership fields', () => {
+    const create = openApiSpec.paths['/agent-memory'].post;
+    const inspect = openApiSpec.paths['/agent-memory/inspect'].post;
+    const exportMemory = openApiSpec.paths['/agent-memory/export'].post;
+    const correct = openApiSpec.paths['/agent-memory/{id}'].patch;
+    const remove = openApiSpec.paths['/agent-memory/{id}/delete'].post;
+
+    for (const operation of [create, inspect, exportMemory, correct, remove]) {
+      expect(operation.security).toEqual([{ BearerAuth: [] }]);
+      expect(operation.security).not.toContainEqual({ ApiKey: [] });
+      expect(operation.tags).toEqual(['Agent platform']);
+      expect('x-required-permissions' in operation).toBe(false);
+      expect(operation.parameters).toContainEqual({
+        $ref: '#/components/parameters/AgentMemoryIdempotencyKey',
+      });
+    }
+    expect(openApiSpec.components.parameters.AgentMemoryIdempotencyKey.schema).toMatchObject({
+      minLength: 16,
+      maxLength: 255,
+    });
+    const namespace = openApiSpec.components.schemas.AgentMemoryNamespaceRequest;
+    expect(namespace.oneOf).toHaveLength(2);
+    expect(namespace.oneOf[0]).toMatchObject({
+      additionalProperties: false,
+      properties: { scopeType: { const: 'workspace' } },
+      required: ['scopeType', 'purpose'],
+    });
+    expect(namespace.oneOf[0].properties).not.toHaveProperty('scopeId');
+    expect(namespace.oneOf[1]).toMatchObject({
+      additionalProperties: false,
+      properties: { scopeType: { const: 'event' } },
+      required: ['scopeType', 'scopeId', 'purpose'],
+    });
+    const createBranches = openApiSpec.components.schemas.AgentMemoryCreateRequest.oneOf;
+    expect(createBranches).toHaveLength(2);
+    expect(createBranches[0].properties.content.$ref).toContain('AgentMemoryOrganizerPreferences');
+    expect(createBranches[0].properties.namespace.allOf[1].properties.purpose.const).toBe(
+      'organizer_preferences',
+    );
+    expect(createBranches[1].properties.content.$ref).toContain('AgentMemoryProjectContext');
+    expect(createBranches[1].properties.namespace.allOf[1].properties.purpose.const).toBe(
+      'project_context',
+    );
+    expect(createBranches[0].properties.retentionExpiresAt.example).toBe(
+      '2026-08-20T12:00:00.000Z',
+    );
+    expect(openApiSpec.components.schemas.AgentMemoryCorrectRequest.properties).not.toHaveProperty(
+      'provenance',
+    );
+    expect(openApiSpec.components.schemas.AgentMemoryEntry.required).toEqual(
+      expect.arrayContaining(['contentSha256', 'provenance', 'retentionExpiresAt', 'version']),
+    );
+    expect(openApiSpec.components.schemas.AgentMemoryExportBundle.required).toContain('sha256');
+    expect(remove.requestBody.content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/AgentMemoryDeleteRequest',
+    });
   });
 
   it('documents API-key authentication on scoped developer and audit automation routes', () => {

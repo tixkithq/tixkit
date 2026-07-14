@@ -1,4 +1,11 @@
-import { continueAsNew, patched, proxyActivities, sleep } from '@temporalio/workflow';
+import {
+  ActivityFailure,
+  continueAsNew,
+  isCancellation,
+  patched,
+  proxyActivities,
+  sleep,
+} from '@temporalio/workflow';
 import type { WorkflowActivityResult } from '../shared/types.js';
 
 const {
@@ -23,6 +30,17 @@ const {
   cleanupMigrationMediaObjectsActivity(): Promise<
     WorkflowActivityResult<{ completed: number; retained: number; failed: number }>
   >;
+}>({
+  startToCloseTimeout: '60 seconds',
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: '5 seconds',
+    backoffCoefficient: 2,
+  },
+});
+
+const { eraseExpiredAgentMemoryActivity } = proxyActivities<{
+  eraseExpiredAgentMemoryActivity(): Promise<{ erasedCount: number }>;
 }>({
   startToCloseTimeout: '60 seconds',
   retry: {
@@ -85,6 +103,16 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
       // eslint-disable-next-line no-await-in-loop -- durable media cleanup runs once per deterministic maintenance tick.
       const mediaCleanupResult = await cleanupMigrationMediaObjectsActivity();
       throwIfMaintenanceFailed('Portable media cleanup', mediaCleanupResult);
+    }
+    if (patched('agent-memory-retention-v1')) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- durable memory erasure runs once per deterministic maintenance tick.
+        await eraseExpiredAgentMemoryActivity();
+      } catch (error) {
+        if (isCancellation(error) || !(error instanceof ActivityFailure)) throw error;
+        // Exhausted activity retries must not terminate the only recurring maintenance workflow.
+        // The next deterministic tick invokes a fresh activity run and preserves eventual erasure.
+      }
     }
     iterations += 1;
     if (maxIterations !== undefined && iterations >= maxIterations) {

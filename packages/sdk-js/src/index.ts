@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-19';
+export const TIXKIT_API_VERSION = '2026-07-20';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1565,6 +1565,90 @@ export type GrantAgentDelegationInput = {
   idempotencyKey: string;
 };
 
+export type AgentMemoryNamespaceInput =
+  | {
+      scopeType: 'workspace';
+      purpose: 'organizer_preferences' | 'project_context';
+    }
+  | {
+      scopeType: 'event';
+      scopeId: string;
+      purpose: 'organizer_preferences' | 'project_context';
+    };
+
+export type AgentMemoryNamespace = AgentMemoryNamespaceInput & {
+  tenantId: string;
+  sponsorPrincipalId: string;
+};
+
+export type AgentMemoryContent =
+  | {
+      kind: 'organizer_preferences';
+      summary: string;
+      tone?: 'concise' | 'warm' | 'formal' | 'direct';
+      verbosity?: 'brief' | 'standard' | 'detailed';
+      locale?: string;
+      timezone?: string;
+      currency?: string;
+    }
+  | {
+      kind: 'project_context';
+      summary: string;
+      facts?: Array<{
+        kind: 'objective' | 'constraint' | 'decision';
+        text: string;
+      }>;
+    };
+
+export type AgentMemoryEntry = {
+  id: string;
+  namespace: AgentMemoryNamespace;
+  key: string;
+  content: AgentMemoryContent;
+  contentSha256: string;
+  provenance: {
+    type: 'organizer' | 'agent_observation' | 'import';
+    actorPrincipalId: string;
+    agentPrincipalId?: string;
+    sourceReference?: string;
+    observedAt: string;
+  };
+  version: number;
+  retentionExpiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentMemoryExportBundle = {
+  schemaVersion: 1;
+  exportedAt: string;
+  namespace: AgentMemoryNamespace;
+  entries: AgentMemoryEntry[];
+  sha256: string;
+};
+
+export type CreateAgentMemoryInput = {
+  key: string;
+  retentionExpiresAt: string;
+  idempotencyKey: string;
+} & (
+  | {
+      namespace: AgentMemoryNamespaceInput & { purpose: 'organizer_preferences' };
+      content: Extract<AgentMemoryContent, { kind: 'organizer_preferences' }>;
+    }
+  | {
+      namespace: AgentMemoryNamespaceInput & { purpose: 'project_context' };
+      content: Extract<AgentMemoryContent, { kind: 'project_context' }>;
+    }
+);
+
+export type CorrectAgentMemoryInput = {
+  expectedVersion: number;
+  content: AgentMemoryContent;
+  retentionExpiresAt: string;
+  idempotencyKey: string;
+};
+
 export type ScannerDevice = {
   id: string;
   tenantId: string;
@@ -2638,6 +2722,7 @@ export class TixkitClient {
   readonly checkIns: CheckInResource;
   readonly apiKeys: ApiKeyResource;
   readonly agentControl: AgentControlResource;
+  readonly agentMemory: AgentMemoryResource;
   readonly scannerDevices: ScannerDeviceResource;
   readonly reports: ReportResource;
   readonly exports: ExportResource;
@@ -2687,6 +2772,7 @@ export class TixkitClient {
     this.checkIns = new CheckInResource(this);
     this.apiKeys = new ApiKeyResource(this);
     this.agentControl = new AgentControlResource(this);
+    this.agentMemory = new AgentMemoryResource(this);
     this.scannerDevices = new ScannerDeviceResource(this);
     this.reports = new ReportResource(this);
     this.exports = new ExportResource(this);
@@ -3975,6 +4061,52 @@ class AgentControlResource {
     idempotencyKey: string,
   ): Promise<{ id: string; revoked: true }> {
     return this.client.request('POST', `/agent-delegations/${delegationId}/revoke`, {
+      idempotencyKey,
+    });
+  }
+}
+
+class AgentMemoryResource {
+  constructor(private client: TixkitClient) {}
+
+  async create(input: CreateAgentMemoryInput): Promise<AgentMemoryEntry> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent-memory', { body, idempotencyKey });
+  }
+
+  async inspect(
+    namespace: AgentMemoryNamespaceInput,
+    idempotencyKey: string,
+  ): Promise<{ entries: AgentMemoryEntry[] }> {
+    return this.client.request('POST', '/agent-memory/inspect', {
+      body: { namespace },
+      idempotencyKey,
+    });
+  }
+
+  async export(
+    namespace: AgentMemoryNamespaceInput,
+    idempotencyKey: string,
+  ): Promise<AgentMemoryExportBundle> {
+    return this.client.request('POST', '/agent-memory/export', {
+      body: { namespace },
+      idempotencyKey,
+    });
+  }
+
+  async correct(id: string, input: CorrectAgentMemoryInput): Promise<AgentMemoryEntry> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('PATCH', `/agent-memory/${id}`, { body, idempotencyKey });
+  }
+
+  async remove(
+    id: string,
+    namespace: AgentMemoryNamespaceInput,
+    expectedVersion: number,
+    idempotencyKey: string,
+  ): Promise<{ id: string; deleted: true }> {
+    return this.client.request('POST', `/agent-memory/${id}/delete`, {
+      body: { namespace, expectedVersion },
       idempotencyKey,
     });
   }

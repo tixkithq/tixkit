@@ -12,6 +12,7 @@ const mockState = vi.hoisted(() => ({
 }));
 
 vi.mock('@temporalio/workflow', () => ({
+  ActivityFailure: class ActivityFailure extends Error {},
   ParentClosePolicy: {
     PARENT_CLOSE_POLICY_ABANDON: 'PARENT_CLOSE_POLICY_ABANDON',
   },
@@ -37,6 +38,7 @@ vi.mock('@temporalio/workflow', () => ({
   },
   condition: async (fn: () => boolean, _timeout?: string) => fn() || mockState.conditionResult,
   patched: () => mockState.patchedResult,
+  isCancellation: (error: unknown) => error instanceof Error && error.name === 'CancelledFailure',
   sleep: async (duration: string | number) => {
     mockState.sleeps.push(duration);
   },
@@ -54,6 +56,7 @@ vi.mock('@temporalio/workflow', () => ({
 }));
 
 import { checkoutSessionWorkflow } from '../workflows/checkout.js';
+import { ActivityFailure } from '@temporalio/workflow';
 import { refundWorkflow } from '../workflows/refund.js';
 import { exportWorkflow } from '../workflows/export.js';
 import { webhookDeliveryWorkflow } from '../workflows/webhook-delivery.js';
@@ -85,6 +88,12 @@ function resetState() {
   mockState.sleeps = [];
   mockState.childStarts = [];
   mockState.continueAsNewInputs = [];
+}
+
+function exhaustedActivityFailure(message: string): ActivityFailure {
+  const error = new Error(message);
+  Object.setPrototypeOf(error, ActivityFailure.prototype);
+  return error as ActivityFailure;
 }
 
 function makeCheckoutInput(overrides: Record<string, unknown> = {}) {
@@ -245,6 +254,7 @@ const defaultActivities = {
     okResult({ expiredCount: 0, offeredCount: 0, queuedEmailCount: 0 }),
   enforcePrivacyRetentionActivity: async () =>
     okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 }),
+  eraseExpiredAgentMemoryActivity: async () => ({ erasedCount: 0 }),
   reconcilePaymentActivity: async () => okResult({ orderId: 'ord_1', status: 'paid' }),
   reconcileRefundActivity: async () => okResult({ orderId: 'ord_1', status: 'refunded' }),
   reconcileDisputeActivity: async () => okResult({ orderId: 'ord_1', status: 'disputed' }),
@@ -2059,6 +2069,10 @@ describe('holdExpirationWorkflow', () => {
       calls.push('privacy');
       return okResult({ inspectedCount: 1, repairedCount: 1, skippedCount: 0 });
     });
+    setActivity('eraseExpiredAgentMemoryActivity', async () => {
+      calls.push('memory');
+      return { erasedCount: 1 };
+    });
 
     await holdExpirationWorkflow({ maxIterations: 2, tickIntervalSeconds: 15 });
 
@@ -2067,10 +2081,12 @@ describe('holdExpirationWorkflow', () => {
       'sessions',
       'waitlist',
       'privacy',
+      'memory',
       'holds',
       'sessions',
       'waitlist',
       'privacy',
+      'memory',
     ]);
     expect(mockState.sleeps).toEqual(['15 seconds']);
     expect(mockState.continueAsNewInputs).toEqual([]);
@@ -2140,6 +2156,10 @@ describe('holdExpirationWorkflow', () => {
       calls.push('privacy');
       return okResult({ inspectedCount: 1, repairedCount: 1, skippedCount: 0 });
     });
+    setActivity('eraseExpiredAgentMemoryActivity', async () => {
+      calls.push('memory');
+      return { erasedCount: 1 };
+    });
 
     await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
       'Waitlist offer processing failed (waitlist_offers_failed): database unavailable',
@@ -2167,6 +2187,10 @@ describe('holdExpirationWorkflow', () => {
       calls.push('privacy');
       return okResult({ inspectedCount: 1, repairedCount: 1, skippedCount: 0 });
     });
+    setActivity('eraseExpiredAgentMemoryActivity', async () => {
+      calls.push('memory');
+      return { erasedCount: 1 };
+    });
 
     await holdExpirationWorkflow({
       version: 1,
@@ -2179,10 +2203,12 @@ describe('holdExpirationWorkflow', () => {
       'sessions',
       'waitlist',
       'privacy',
+      'memory',
       'holds',
       'sessions',
       'waitlist',
       'privacy',
+      'memory',
     ]);
     expect(mockState.sleeps).toEqual(['15 seconds']);
     expect(mockState.continueAsNewInputs).toEqual([
@@ -2222,6 +2248,43 @@ describe('holdExpirationWorkflow', () => {
 
     await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
       'Privacy retention repair failed (privacy_retention_failed): database unavailable',
+    );
+  });
+
+  it('survives exhausted memory activity retries and invokes retention on the next tick', async () => {
+    let attempts = 0;
+    setActivity('eraseExpiredAgentMemoryActivity', async () => {
+      attempts += 1;
+      if (attempts === 1) throw exhaustedActivityFailure('database unavailable');
+      return { erasedCount: 1 };
+    });
+
+    await expect(
+      holdExpirationWorkflow({ maxIterations: 2, tickIntervalSeconds: 15 }),
+    ).resolves.toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(mockState.sleeps).toEqual(['15 seconds']);
+  });
+
+  it('propagates workflow cancellation during memory retention', async () => {
+    setActivity('eraseExpiredAgentMemoryActivity', async () => {
+      const error = new Error('cancelled');
+      error.name = 'CancelledFailure';
+      throw error;
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toMatchObject({
+      name: 'CancelledFailure',
+    });
+  });
+
+  it('propagates unexpected non-activity failures during memory retention', async () => {
+    setActivity('eraseExpiredAgentMemoryActivity', async () => {
+      throw new TypeError('unexpected workflow boundary failure');
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'unexpected workflow boundary failure',
     );
   });
 });

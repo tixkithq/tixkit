@@ -41,6 +41,8 @@ const delegatedAuthorizationGuards = new Set([
   'loadAuthorizedEvent',
   'report',
   'requireHumanAgentAdministrator',
+  'requireHumanMemoryActor',
+  'requireHumanMemorySponsor',
   'requireContentListPermission',
   'requireContentPermission',
   'requireEventAccess',

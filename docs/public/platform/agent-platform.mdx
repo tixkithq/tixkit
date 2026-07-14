@@ -7,14 +7,14 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-07-19
+last_verified: 2026-07-20
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
 related:
   - /platform
   - /reference/api
-  - /reference/migrations/2026-07-18-to-2026-07-19
+  - /reference/migrations/2026-07-19-to-2026-07-20
 keywords:
   - agents
   - delegation
@@ -30,13 +30,14 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-07-19` supports these sponsor-controlled operations:
+API version `2026-07-20` supports these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
 - revoke a principal and its active delegations atomically;
-- grant time-bounded event delegations; and
-- revoke a delegation.
+- grant time-bounded event delegations;
+- revoke a delegation; and
+- create, inspect, correct, export and delete separately retained organizer memory.
 
 The initial capabilities are `events.read`, `readiness.read`, `events.prepare` and `events.execute`. Consequential execution still requires a typed action, an immutable plan digest and fresh approval. The registration API does not grant unrestricted delegated autonomy, campaign sending or buyer purchasing.
 
@@ -64,10 +65,12 @@ Inside the transaction, Tixkit rechecks the sponsor's current permission grants,
 
 The sponsor can inspect only their own principal and can revoke their own principals or delegations. Cross-sponsor resources are returned as not found. Principal revocation cascades to active delegations. Every mutation is idempotent, audited and reauthorizes the human actor before replay.
 
-The shared protocol requires approval to bind to an immutable digest. Material action or plan changes invalidate approval, and consequential actions require fresh approval in the initial release. Execution, approval, memory inspection/export/deletion and third-party conformance endpoints are still being completed; do not treat registration as proof that those later surfaces are available.
+The shared protocol requires approval to bind to an immutable digest. Material action or plan changes invalidate approval, and consequential actions require fresh approval in the initial release. Typed action execution, approval and third-party conformance endpoints are still being completed; do not treat registration or memory administration as proof that those later surfaces are available.
 
 ## Memory and managed tools
 
-Agent memory is required to be tenant- and principal-scoped, inspectable, correctable, exportable, deletable and separately retained. Those guarantees are part of the shared protocol, but no public memory HTTP endpoint is available in this beta slice.
+Human sponsors manage shared memory through `tixkit.agentMemory` or the `/v1/agent-memory` operations. Namespace ownership and organizer provenance are server-derived. Reads and exports are audited, corrections and deletions are version-aware, and each export contains a checksum over that exact timestamped bundle. Deletion removes content while retaining digest-only audit evidence. The durable maintenance workflow physically erases expired content in bounded, retryable batches. Workspace and event scopes recheck current database authorization; project scope remains unavailable until a durable project resource exists.
+
+Memory content accepts only the typed `organizer_preferences` and `project_context` shapes. Credentials, payment data, buyer data and personal contact data fail closed. Agent retrieval remains delegation-bound through the shared repository and is not a generic HTTP read capability.
 
 Managed messaging may become an agent tool only with consent and suppression evaluation plus exact content and audience approval. Natural-language orchestration and managed memory remain Cloud capabilities; self-hosters may bring an orchestrator through the shared protocol when conformance support is available.

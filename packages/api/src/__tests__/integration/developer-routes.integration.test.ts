@@ -1864,7 +1864,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-07-19',
+        apiVersion: '2026-07-20',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'order.paid',
@@ -1991,7 +1991,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-07-19',
+        apiVersion: '2026-07-20',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'test.ping',
@@ -1999,7 +1999,7 @@ describe('developer routes integration', () => {
         payload: expect.objectContaining({
           type: 'test.ping',
           test: true,
-          apiVersion: '2026-07-19',
+          apiVersion: '2026-07-20',
           data: { endpointId: 'wh_1' },
         }),
         replayNonce: expect.any(String),

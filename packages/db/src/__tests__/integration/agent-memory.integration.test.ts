@@ -205,9 +205,19 @@ describe.sequential.each(cases)('agent memory lifecycle: $driver', ({ driver, ur
     };
     const creates = await Promise.all(Array.from({ length: 8 }, () => memory.create(createInput)));
     expect(new Set(creates.map((entry) => entry?.id))).toEqual(new Set(['memory_primary']));
+    expect(creates[0]?.provenance.observedAt).not.toBe(createInput.provenance.observedAt);
+    expect(
+      Math.abs(Date.now() - new Date(creates[0]!.provenance.observedAt).getTime()),
+    ).toBeLessThan(30_000);
     expect((await memory.inspect(namespace(), audit('inspect_primary')))[0]?.content).toMatchObject(
       { tone: 'warm' },
     );
+    expect(
+      await memory.inspect(namespace(), {
+        ...audit('inspect_long_key'),
+        idempotencyKey: 'x'.repeat(255),
+      }),
+    ).toHaveLength(1);
     const corrected = await memory.correct({
       tenantId,
       entryId: 'memory_primary',
@@ -265,6 +275,159 @@ describe.sequential.each(cases)('agent memory lifecycle: $driver', ({ driver, ur
     await expect(
       db.deleteFrom('agent_memory_events').where('entry_id', '=', 'memory_primary').execute(),
     ).rejects.toThrow(/immutable/u);
+  });
+
+  it('reauthorizes every mutation replay and keeps corrections sponsor-bound', async () => {
+    const memory = new AgentMemoryRepository(db);
+    const replaySponsor = 'user_memory_replay';
+    const otherDeveloper = 'user_memory_other_developer';
+    const workspace: AgentMemoryNamespace = {
+      tenantId,
+      sponsorPrincipalId: replaySponsor,
+      scopeType: 'workspace',
+      purpose: 'organizer_preferences',
+    };
+    const now = new Date();
+    await db
+      .insertInto('user_profiles')
+      .values([
+        {
+          id: replaySponsor,
+          tenant_id: tenantId,
+          clerk_user_id: `clerk_memory_replay_${driver}`,
+          email: `memory-replay-${driver}@example.test`,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'active',
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: otherDeveloper,
+          tenant_id: tenantId,
+          clerk_user_id: `clerk_memory_other_${driver}`,
+          email: `memory-other-${driver}@example.test`,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'active',
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+    const replayGrant = {
+      id: 'pg_memory_replay',
+      tenant_id: tenantId,
+      principal_type: 'user' as const,
+      principal_id: replaySponsor,
+      permission: 'settings.write',
+      scope_type: 'tenant' as const,
+      scope_id: null,
+      created_at: now,
+      updated_at: now,
+    };
+    await db
+      .insertInto('permission_grants')
+      .values([
+        replayGrant,
+        {
+          id: 'pg_memory_other_developer',
+          tenant_id: tenantId,
+          principal_type: 'user',
+          principal_id: otherDeveloper,
+          permission: 'developers.write',
+          scope_type: 'tenant',
+          scope_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+    const replayAudit = (suffix: string) => ({
+      id: `mem_evt_${suffix}`,
+      actorPrincipalId: replaySponsor,
+      reasonCode: 'ORGANIZER_REQUEST',
+      idempotencyKey: `agent-memory-replay-${suffix}-2026`,
+    });
+    const baseCreate = (id: string, auditInput: ReturnType<typeof replayAudit>) => ({
+      id,
+      namespace: workspace,
+      key: `preference.${id}`,
+      content: { kind: 'organizer_preferences' as const, summary: 'Prefer concise updates' },
+      provenance: {
+        type: 'organizer' as const,
+        actorPrincipalId: replaySponsor,
+        observedAt: new Date(Date.now() - 1_000).toISOString(),
+      },
+      retentionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      audit: auditInput,
+    });
+
+    const createReplay = baseCreate('memory_replay_create', replayAudit('create_live_auth'));
+    await memory.create(createReplay);
+    await db
+      .updateTable('user_profiles')
+      .set({ status: 'suspended', updated_at: new Date() })
+      .where('id', '=', replaySponsor)
+      .execute();
+    await expect(memory.create(createReplay)).rejects.toThrow('AGENT_MEMORY_ACTOR_DENIED');
+    await db
+      .updateTable('user_profiles')
+      .set({ status: 'active', updated_at: new Date() })
+      .where('id', '=', replaySponsor)
+      .execute();
+
+    const correctTarget = await memory.create(
+      baseCreate('memory_replay_correct', replayAudit('create_correct_target')),
+    );
+    const correctInput = {
+      tenantId,
+      entryId: correctTarget!.id,
+      expectedVersion: 1,
+      content: { kind: 'organizer_preferences' as const, summary: 'Prefer direct updates' },
+      retentionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      audit: replayAudit('correct_live_auth'),
+    };
+    await memory.correct(correctInput);
+    await db.deleteFrom('permission_grants').where('id', '=', replayGrant.id).execute();
+    await expect(memory.correct(correctInput)).rejects.toThrow('AGENT_MEMORY_ACTOR_DENIED');
+    await db
+      .insertInto('permission_grants')
+      .values({ ...replayGrant, updated_at: new Date() })
+      .execute();
+
+    const deleteTarget = await memory.create(
+      baseCreate('memory_replay_delete', replayAudit('create_delete_target')),
+    );
+    const removeInput = {
+      namespace: workspace,
+      entryId: deleteTarget!.id,
+      expectedVersion: 1,
+      audit: replayAudit('delete_live_auth'),
+    };
+    await expect(memory.remove(removeInput)).resolves.toBe(true);
+    await db.deleteFrom('permission_grants').where('id', '=', replayGrant.id).execute();
+    await expect(memory.remove(removeInput)).rejects.toThrow('AGENT_MEMORY_ACTOR_DENIED');
+
+    await expect(
+      memory.correct({
+        tenantId,
+        entryId: correctTarget!.id,
+        expectedVersion: 2,
+        content: { kind: 'organizer_preferences', summary: 'Unauthorized rewrite' },
+        retentionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        audit: {
+          id: 'mem_evt_cross_sponsor',
+          actorPrincipalId: otherDeveloper,
+          reasonCode: 'ORGANIZER_REQUEST',
+          idempotencyKey: 'agent-memory-cross-sponsor-2026',
+        },
+      }),
+    ).rejects.toThrow('AGENT_MEMORY_ACTOR_DENIED');
   });
 
   it('expires content using separate retention while preserving only digest audit', async () => {

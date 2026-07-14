@@ -15,7 +15,7 @@ import (
 
 const (
 	// APIVersion is the Tixkit API contract version used by this SDK.
-	APIVersion = "2026-07-19"
+	APIVersion = "2026-07-20"
 
 	defaultBaseURL    = "https://api.tixkit.com"
 	defaultTimeout    = 30 * time.Second

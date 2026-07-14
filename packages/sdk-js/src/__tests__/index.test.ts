@@ -3008,6 +3008,75 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(calls[3]!.body)).not.toHaveProperty('issuedAt');
   });
 
+  it('agentMemory binds inspectable, correctable, exportable, and deletable memory to audited requests', async () => {
+    const fm = mockFetch(200, {});
+    const c = new TixkitClient({
+      accessToken: 'human-bearer-token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const namespace = {
+      scopeType: 'event' as const,
+      scopeId: 'evt_1',
+      purpose: 'project_context' as const,
+    };
+    const content = {
+      kind: 'project_context' as const,
+      summary: 'Keep the event family friendly',
+      facts: [{ kind: 'constraint' as const, text: 'Doors open at six' }],
+    };
+
+    await c.agentMemory.create({
+      namespace,
+      key: 'event_context',
+      content,
+      retentionExpiresAt: '2026-08-20T00:00:00.000Z',
+      idempotencyKey: 'memory-create-000001',
+    });
+    await c.agentMemory.inspect(namespace, 'memory-inspect-00001');
+    await c.agentMemory.export(namespace, 'memory-export-000001');
+    await c.agentMemory.correct('mem_1', {
+      expectedVersion: 1,
+      content,
+      retentionExpiresAt: '2026-09-20T00:00:00.000Z',
+      idempotencyKey: 'memory-correct-00001',
+    });
+    await c.agentMemory.remove('mem_1', namespace, 2, 'memory-delete-000001');
+
+    const calls = fm.mock.calls.map((_, index) => getCall(fm, index));
+    expect(calls).toMatchObject([
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-memory',
+        headers: { 'Idempotency-Key': 'memory-create-000001' },
+      },
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-memory/inspect',
+        headers: { 'Idempotency-Key': 'memory-inspect-00001' },
+      },
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-memory/export',
+        headers: { 'Idempotency-Key': 'memory-export-000001' },
+      },
+      {
+        method: 'PATCH',
+        url: 'https://api.test/v1/agent-memory/mem_1',
+        headers: { 'Idempotency-Key': 'memory-correct-00001' },
+      },
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-memory/mem_1/delete',
+        headers: { 'Idempotency-Key': 'memory-delete-000001' },
+      },
+    ]);
+    expect(JSON.parse(calls[0]!.body)).not.toHaveProperty('tenantId');
+    expect(JSON.parse(calls[0]!.body)).not.toHaveProperty('sponsorPrincipalId');
+    expect(JSON.parse(calls[3]!.body)).toMatchObject({ expectedVersion: 1 });
+    expect(JSON.parse(calls[4]!.body)).toMatchObject({ expectedVersion: 2, namespace });
+  });
+
   it('webhookEndpoints.create returns a required one-time signing secret', async () => {
     const fm = mockFetch(201, {
       id: 'wh_1',

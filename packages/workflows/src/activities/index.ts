@@ -5,6 +5,7 @@ export * from './notification.js';
 export * from './webhook-delivery.js';
 export * from './webhook-event.js';
 export * from './hold-expiration.js';
+export * from './agent-memory-retention.js';
 export * from './clerk-identity-sync.js';
 export * from './export.js';
 export * from './privacy.js';

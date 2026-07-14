@@ -130,8 +130,12 @@ export class AgentMemoryRepository {
       const clock = await now(tx);
       const resource = await this.resolveScope(tx, input.namespace);
       const normalized = normalizeAgentMemoryContent(input.content);
-      const provenance = normalizeAgentMemoryProvenance(input.provenance);
-      this.assertUserProvenance(provenance, input.audit.actorPrincipalId);
+      const submittedProvenance = normalizeAgentMemoryProvenance(input.provenance);
+      this.assertUserProvenance(submittedProvenance, input.audit.actorPrincipalId);
+      const provenance =
+        submittedProvenance.type === 'organizer'
+          ? { ...submittedProvenance, observedAt: clock.toISOString() }
+          : submittedProvenance;
       const sha = validateAgentMemoryWrite({
         ...input,
         content: normalized,
@@ -144,15 +148,18 @@ export class AgentMemoryRepository {
         namespace: input.namespace,
         key: input.key,
         contentSha256: sha,
-        provenance,
+        provenance:
+          provenance.type === 'organizer'
+            ? { type: provenance.type, actorPrincipalId: provenance.actorPrincipalId }
+            : provenance,
         retentionExpiresAt: input.retentionExpiresAt,
         actor: input.audit.actorPrincipalId,
         reason: input.audit.reasonCode,
         resourceAuthorizationSha256: resource.authorizationSha256,
       });
+      await this.authorizeUser(tx, input.namespace, input.audit.actorPrincipalId);
       const replay = await this.replay(tx, input.namespace.tenantId, input.audit, fingerprint);
       if (replay) return this.findById(tx, input.namespace.tenantId, input.id);
-      await this.authorizeUser(tx, input.namespace, input.audit.actorPrincipalId);
       await tx
         .insertInto('agent_memory_entries')
         .values({
@@ -208,6 +215,8 @@ export class AgentMemoryRepository {
         .forUpdate()
         .executeTakeFirst();
       if (!row) return undefined;
+      if (row.sponsor_principal_id !== input.audit.actorPrincipalId)
+        throw new Error('AGENT_MEMORY_ACTOR_DENIED');
       const namespace = rowToEntry(row).namespace;
       const clock = await now(tx);
       const resource = await this.resolveScope(tx, namespace);
@@ -235,9 +244,9 @@ export class AgentMemoryRepository {
         reason: input.audit.reasonCode,
         resourceAuthorizationSha256: resource.authorizationSha256,
       });
+      await this.authorizeUser(tx, namespace, input.audit.actorPrincipalId);
       const replay = await this.replay(tx, input.tenantId, input.audit, fingerprint);
       if (replay) return this.findById(tx, input.tenantId, input.entryId);
-      await this.authorizeUser(tx, namespace, input.audit.actorPrincipalId);
       if (Number(row.version) !== input.expectedVersion)
         throw new Error('AGENT_MEMORY_VERSION_CONFLICT');
       await tx
@@ -289,9 +298,9 @@ export class AgentMemoryRepository {
         reason: input.audit.reasonCode,
         resourceAuthorizationSha256: resource.authorizationSha256,
       });
+      await this.authorizeUser(tx, input.namespace, input.audit.actorPrincipalId);
       const replay = await this.replay(tx, input.namespace.tenantId, input.audit, fingerprint);
       if (replay) return replay === 'applied';
-      await this.authorizeUser(tx, input.namespace, input.audit.actorPrincipalId);
       const row = await tx
         .selectFrom('agent_memory_entries')
         .selectAll()
@@ -408,7 +417,11 @@ export class AgentMemoryRepository {
         const itemAudit = {
           ...audit,
           id: `mem_evt_${ulid()}`,
-          idempotencyKey: `${audit.idempotencyKey}:${row.id}`,
+          idempotencyKey: `memq_${agentSha256({
+            domain: 'tixkit-agent-memory-query-item-v1',
+            parentIdempotencyKey: audit.idempotencyKey,
+            entryId: row.id,
+          })}`,
         };
         const fingerprint = agentSha256({
           operation,

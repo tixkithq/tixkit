@@ -1,0 +1,33 @@
+---
+title: API migration from 2026-07-19 to 2026-07-20
+description: Adopt organizer-controlled, separately retained agent memory.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-20
+prerequisites:
+  - An integration using API version 2026-07-19
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-20` adds the experimental, private-beta organizer memory surface. Existing `2026-07-19` operations remain compatible; this is an additive contract release.
+
+## Organizer memory
+
+Human sponsors can create, inspect, correct, export and delete workspace- or event-scoped memory through `/v1/agent-memory`. The service derives the tenant, sponsor, identifier, organizer provenance time and content digest. Clients cannot submit those ownership or integrity fields.
+
+Every operation, including reads and exports, requires a 16–255 character `Idempotency-Key` because access is audited. Corrections and deletions require the current `expectedVersion`. Deletion physically removes the retained content while immutable audit rows preserve digests rather than memory text. The recurring Temporal maintenance workflow erases expired entries in bounded, retryable and idempotent batches.
+
+Workspace memory requires `settings.write` or tenant-wide `developers.write`. Event memory requires `events.write` or tenant-wide `developers.write`, and resource-scoped users can address only an event in their current scope. The repository rechecks live user state, permission grants, sponsor ownership and resource identity inside its transaction.
+
+The supported content kinds are `organizer_preferences` and `project_context`. Credential-like values, personal contact data and other prohibited sensitive content fail closed. Retention is explicit and bounded by the shared protocol.
+
+The JavaScript SDK exposes these methods under `tixkit.agentMemory`: `create`, `inspect`, `export`, `correct` and `remove`. Use the authenticated human sponsor's `accessToken`; do not pass an API key or the sponsor credential to an agent process.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-20`.

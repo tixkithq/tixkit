@@ -125,6 +125,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-07-19 agent controls',
         routeId: 'apiMigration20260718To20260719',
       },
+      {
+        label: 'Adopt 2026-07-20 agent memory',
+        routeId: 'apiMigration20260719To20260720',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

@@ -203,6 +203,7 @@ function tagForPath(path: string): string {
     'api-keys': 'Developer',
     'agent-principals': 'Agent platform',
     'agent-delegations': 'Agent platform',
+    'agent-memory': 'Agent platform',
     'scanner-devices': 'Developer',
     'webhook-endpoints': 'Webhooks',
     'migration-jobs': 'Migrations',
@@ -484,7 +485,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-19',
+    version: '2026-07-20',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -535,6 +536,14 @@ const rawOpenApiSpec = {
         schema: { type: 'string', minLength: 16, maxLength: 255 },
         description:
           'Required for agent-control mutations. Use 16-255 characters with no surrounding whitespace and preserve the same key only for identical intent.',
+      },
+      AgentMemoryIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: { type: 'string', minLength: 16, maxLength: 255 },
+        description:
+          'Required for agent-memory reads, exports, and mutations because every access is audited. Preserve the same key only for identical intent.',
       },
       CheckoutSessionToken: {
         name: 'X-Checkout-Session-Token',
@@ -5093,6 +5102,238 @@ const rawOpenApiSpec = {
           'expiresAt',
         ],
         additionalProperties: false,
+      },
+      AgentMemoryNamespaceRequest: {
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              scopeType: { type: 'string', const: 'workspace' },
+              purpose: {
+                type: 'string',
+                enum: ['organizer_preferences', 'project_context'],
+              },
+            },
+            required: ['scopeType', 'purpose'],
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              scopeType: { type: 'string', const: 'event' },
+              scopeId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+              purpose: {
+                type: 'string',
+                enum: ['organizer_preferences', 'project_context'],
+              },
+            },
+            required: ['scopeType', 'scopeId', 'purpose'],
+          },
+        ],
+        discriminator: { propertyName: 'scopeType' },
+      },
+      AgentMemoryNamespace: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          tenantId: { type: 'string' },
+          sponsorPrincipalId: { type: 'string' },
+          scopeType: { type: 'string', enum: ['workspace', 'event'] },
+          scopeId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+          purpose: {
+            type: 'string',
+            enum: ['organizer_preferences', 'project_context'],
+          },
+        },
+        required: ['tenantId', 'sponsorPrincipalId', 'scopeType', 'purpose'],
+      },
+      AgentMemoryOrganizerPreferences: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { type: 'string', const: 'organizer_preferences' },
+          summary: { type: 'string', minLength: 1, maxLength: 2_000 },
+          tone: { type: 'string', enum: ['concise', 'warm', 'formal', 'direct'] },
+          verbosity: { type: 'string', enum: ['brief', 'standard', 'detailed'] },
+          locale: { type: 'string' },
+          timezone: { type: 'string' },
+          currency: { type: 'string' },
+        },
+        required: ['kind', 'summary'],
+      },
+      AgentMemoryProjectContext: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { type: 'string', const: 'project_context' },
+          summary: { type: 'string', minLength: 1, maxLength: 2_000 },
+          facts: {
+            type: 'array',
+            maxItems: 25,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                kind: { type: 'string', enum: ['objective', 'constraint', 'decision'] },
+                text: { type: 'string', minLength: 1, maxLength: 2_000 },
+              },
+              required: ['kind', 'text'],
+            },
+          },
+        },
+        required: ['kind', 'summary'],
+      },
+      AgentMemoryContent: {
+        oneOf: [
+          { $ref: '#/components/schemas/AgentMemoryOrganizerPreferences' },
+          { $ref: '#/components/schemas/AgentMemoryProjectContext' },
+        ],
+        discriminator: { propertyName: 'kind' },
+      },
+      AgentMemoryProvenance: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          type: { type: 'string', enum: ['organizer', 'agent_observation', 'import'] },
+          actorPrincipalId: { type: 'string' },
+          agentPrincipalId: { type: 'string' },
+          sourceReference: { type: 'string' },
+          observedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['type', 'actorPrincipalId', 'observedAt'],
+      },
+      AgentMemoryCreateRequest: {
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              namespace: {
+                allOf: [
+                  { $ref: '#/components/schemas/AgentMemoryNamespaceRequest' },
+                  {
+                    type: 'object',
+                    properties: { purpose: { const: 'organizer_preferences' } },
+                    required: ['purpose'],
+                  },
+                ],
+              },
+              key: {
+                type: 'string',
+                pattern: '^[a-z][a-z0-9_.-]{1,63}$',
+                example: 'copy_preferences',
+              },
+              content: { $ref: '#/components/schemas/AgentMemoryOrganizerPreferences' },
+              retentionExpiresAt: {
+                type: 'string',
+                format: 'date-time',
+                example: '2026-08-20T12:00:00.000Z',
+              },
+            },
+            required: ['namespace', 'key', 'content', 'retentionExpiresAt'],
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              namespace: {
+                allOf: [
+                  { $ref: '#/components/schemas/AgentMemoryNamespaceRequest' },
+                  {
+                    type: 'object',
+                    properties: { purpose: { const: 'project_context' } },
+                    required: ['purpose'],
+                  },
+                ],
+              },
+              key: {
+                type: 'string',
+                pattern: '^[a-z][a-z0-9_.-]{1,63}$',
+                example: 'event_context',
+              },
+              content: { $ref: '#/components/schemas/AgentMemoryProjectContext' },
+              retentionExpiresAt: {
+                type: 'string',
+                format: 'date-time',
+                example: '2026-08-20T12:00:00.000Z',
+              },
+            },
+            required: ['namespace', 'key', 'content', 'retentionExpiresAt'],
+          },
+        ],
+      },
+      AgentMemoryNamespaceRequestBody: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          namespace: { $ref: '#/components/schemas/AgentMemoryNamespaceRequest' },
+        },
+        required: ['namespace'],
+      },
+      AgentMemoryCorrectRequest: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          expectedVersion: { type: 'integer', minimum: 1 },
+          content: { $ref: '#/components/schemas/AgentMemoryContent' },
+          retentionExpiresAt: {
+            type: 'string',
+            format: 'date-time',
+            example: '2026-08-20T12:00:00.000Z',
+            description: 'Must remain within the shared maximum retention window.',
+          },
+        },
+        required: ['expectedVersion', 'content', 'retentionExpiresAt'],
+      },
+      AgentMemoryDeleteRequest: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          namespace: { $ref: '#/components/schemas/AgentMemoryNamespaceRequest' },
+          expectedVersion: { type: 'integer', minimum: 1 },
+        },
+        required: ['namespace', 'expectedVersion'],
+      },
+      AgentMemoryEntry: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^mem_[A-Za-z0-9_-]+$' },
+          namespace: { $ref: '#/components/schemas/AgentMemoryNamespace' },
+          key: { type: 'string', pattern: '^[a-z][a-z0-9_.-]{1,63}$' },
+          content: { $ref: '#/components/schemas/AgentMemoryContent' },
+          contentSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          provenance: { $ref: '#/components/schemas/AgentMemoryProvenance' },
+          version: { type: 'integer', minimum: 1 },
+          retentionExpiresAt: { type: 'string', format: 'date-time' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'namespace',
+          'key',
+          'content',
+          'contentSha256',
+          'provenance',
+          'version',
+          'retentionExpiresAt',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
+      AgentMemoryExportBundle: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          schemaVersion: { type: 'integer', const: 1 },
+          exportedAt: { type: 'string', format: 'date-time' },
+          namespace: { $ref: '#/components/schemas/AgentMemoryNamespace' },
+          entries: { type: 'array', items: { $ref: '#/components/schemas/AgentMemoryEntry' } },
+          sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: ['schemaVersion', 'exportedAt', 'namespace', 'entries', 'sha256'],
       },
       OAuthApplication: {
         type: 'object',
@@ -9892,6 +10133,180 @@ const rawOpenApiSpec = {
           '403': { description: 'Human sponsor authorization changed' },
           '404': { description: 'Agent delegation not found for this sponsor' },
           '409': { description: 'Idempotency conflict' },
+        },
+      },
+    },
+    '/agent-memory': {
+      post: {
+        summary: 'Create organizer-controlled agent memory',
+        description:
+          'Experimental/private beta. Creates a workspace- or event-scoped memory entry for the authenticated human sponsor. Workspace scope requires `settings.write` or tenant-wide `developers.write`; event scope requires `events.write` or tenant-wide `developers.write`. Tenant, sponsor, identifier, provenance time, and digest are server-owned. Sensitive personal data and credential-like content are rejected.',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentMemoryIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AgentMemoryCreateRequest' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Agent memory entry created',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentMemoryEntry' } },
+            },
+          },
+          '400': { description: 'Invalid namespace, retention, content, or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor lacks current authority' },
+          '404': { description: 'Event scope not found or outside the sponsor scope' },
+          '409': { description: 'Idempotency or resource-binding conflict' },
+        },
+      },
+    },
+    '/agent-memory/inspect': {
+      post: {
+        summary: 'Inspect organizer-controlled agent memory',
+        description:
+          'Returns unexpired entries in one exact sponsor-owned namespace and records both namespace-level and digest-only per-entry audit events. Workspace scope requires `settings.write` or tenant-wide `developers.write`; event scope requires `events.write` or tenant-wide `developers.write`.',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentMemoryIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AgentMemoryNamespaceRequestBody' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Inspectable memory entries',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    entries: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/AgentMemoryEntry' },
+                    },
+                  },
+                  required: ['entries'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid namespace or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor lacks current authority' },
+          '404': { description: 'Event scope not found or outside the sponsor scope' },
+          '409': { description: 'Idempotency or resource-binding conflict' },
+        },
+      },
+    },
+    '/agent-memory/export': {
+      post: {
+        summary: 'Export organizer-controlled agent memory',
+        description:
+          'Returns a checksummed logical export of one exact sponsor-owned namespace. Workspace scope requires `settings.write` or tenant-wide `developers.write`; event scope requires `events.write` or tenant-wide `developers.write`. This endpoint exports memory content only; broader portable bundles apply their own signed bundle and compatibility contract.',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentMemoryIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AgentMemoryNamespaceRequestBody' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Checksummed agent memory export',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentMemoryExportBundle' },
+              },
+            },
+          },
+          '400': { description: 'Invalid namespace or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor lacks current authority' },
+          '404': { description: 'Event scope not found or outside the sponsor scope' },
+          '409': { description: 'Idempotency or resource-binding conflict' },
+        },
+      },
+    },
+    '/agent-memory/{id}': {
+      patch: {
+        summary: 'Correct organizer-controlled agent memory',
+        description:
+          'Corrects an entry only when its current version matches and content kind matches the immutable stored purpose. The repository loads the stored namespace and rechecks the exact human sponsor plus live database authorization before applying the correction.',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentMemoryIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AgentMemoryCorrectRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Corrected agent memory entry',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentMemoryEntry' } },
+            },
+          },
+          '400': { description: 'Invalid correction, retention, content, or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor authorization changed' },
+          '404': { description: 'Agent memory entry not found' },
+          '409': { description: 'Version, idempotency, or resource-binding conflict' },
+        },
+      },
+    },
+    '/agent-memory/{id}/delete': {
+      post: {
+        summary: 'Delete organizer-controlled agent memory',
+        description:
+          'Physically deletes memory content at the expected version while preserving immutable digest-only audit evidence. Requires the exact sponsor-owned namespace and rechecks its namespace-dependent live permission.',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentMemoryIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AgentMemoryDeleteRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Agent memory entry deleted',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: 'string' },
+                    deleted: { type: 'boolean', const: true },
+                  },
+                  required: ['id', 'deleted'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid namespace, version, or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor authorization changed' },
+          '404': { description: 'Agent memory entry or scope not found' },
+          '409': { description: 'Version, idempotency, or resource-binding conflict' },
         },
       },
     },
