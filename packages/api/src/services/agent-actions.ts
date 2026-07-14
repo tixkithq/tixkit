@@ -5,6 +5,7 @@ import {
   authorizeAgentAction,
   canonicalAgentJson,
   type AgentAction,
+  type AgentApproval,
   type AgentDelegationGrant,
   type AgentPrincipal,
 } from '@tixkit/agent-protocol';
@@ -16,6 +17,7 @@ import { ReadinessService, resolvePaymentMode } from './readiness.js';
 
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
 const ACTION_TTL_MILLISECONDS = 15 * 60 * 1000;
+const APPROVAL_TTL_MILLISECONDS = 5 * 60 * 1000;
 
 export interface PreparedAgentAction {
   action: AgentAction;
@@ -78,7 +80,7 @@ async function databaseNow(db: Executor): Promise<Date> {
   return new Date(row.now);
 }
 
-function stableId(prefix: 'act' | 'aevt', ...parts: readonly string[]): string {
+function stableId(prefix: 'act' | 'aevt' | 'apr', ...parts: readonly string[]): string {
   const digest = createHash('sha256').update(parts.join('\0')).digest('hex');
   return `${prefix}_${digest.slice(0, 48)}`;
 }
@@ -413,6 +415,363 @@ export class AgentActionService {
       .where('id', '=', input.actionId)
       .executeTakeFirst();
     return row ? this.fromRow(row) : undefined;
+  }
+
+  async getForSponsor(input: {
+    tenantId: string;
+    sponsorPrincipalId: string;
+    actionId: string;
+  }): Promise<PreparedAgentAction | undefined> {
+    const row = await this.db
+      .selectFrom('agent_actions')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('sponsor_principal_id', '=', input.sponsorPrincipalId)
+      .where('id', '=', input.actionId)
+      .executeTakeFirst();
+    if (!row) return undefined;
+    const action = this.fromRow(row);
+    const authorized = await this.hasLiveSponsorAuthority(
+      this.db,
+      input.tenantId,
+      input.sponsorPrincipalId,
+      action.action.target.resourceId,
+    );
+    return authorized ? action : undefined;
+  }
+
+  async approve(input: {
+    tenantId: string;
+    approverPrincipalId: string;
+    actionId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<AgentApproval> {
+    const fingerprint = agentSha256({
+      actionId: input.actionId,
+      actionDigest: input.actionDigest,
+    });
+    return this.db
+      .transaction()
+      .setIsolationLevel('serializable')
+      .execute(async (tx) => {
+        await tx
+          .selectFrom('tenants')
+          .select('id')
+          .where('id', '=', input.tenantId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        const row = await tx
+          .selectFrom('agent_actions')
+          .selectAll()
+          .where('tenant_id', '=', input.tenantId)
+          .where('id', '=', input.actionId)
+          .where('sponsor_principal_id', '=', input.approverPrincipalId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!row) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+        const prepared = this.fromRow(row);
+        if (prepared.actionDigest !== input.actionDigest)
+          throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
+        const replay = await tx
+          .selectFrom('agent_action_events')
+          .selectAll()
+          .where('tenant_id', '=', input.tenantId)
+          .where('actor_principal_id', '=', input.approverPrincipalId)
+          .where('phase', '=', 'approved')
+          .where('idempotency_key', '=', input.idempotencyKey)
+          .forUpdate()
+          .executeTakeFirst();
+        if (replay) {
+          if (
+            replay.request_fingerprint !== fingerprint ||
+            replay.action_id !== input.actionId ||
+            replay.action_digest !== input.actionDigest ||
+            !replay.approval_id
+          )
+            throw new Error('AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT');
+          const approval = await tx
+            .selectFrom('agent_approvals')
+            .selectAll()
+            .where('tenant_id', '=', input.tenantId)
+            .where('id', '=', replay.approval_id)
+            .where('action_id', '=', input.actionId)
+            .executeTakeFirstOrThrow();
+          const replayed = this.approvalFromRow(approval);
+          if (
+            replayed.actionDigest !== input.actionDigest ||
+            replayed.approverPrincipalId !== input.approverPrincipalId ||
+            replayed.policyVersion !== prepared.action.expectedPolicyVersion ||
+            replayed.approverPermissionSnapshot.length !== 1 ||
+            replayed.approverPermissionSnapshot[0] !== 'events:publish'
+          )
+            throw new Error('persisted agent approval binding is invalid');
+          return replayed;
+        }
+        const now = await databaseNow(tx);
+        const authorizationSha256 = await this.assertCurrentlyApprovable(
+          tx,
+          prepared,
+          input.approverPrincipalId,
+          now,
+        );
+        const existing = await tx
+          .selectFrom('agent_approvals')
+          .select('id')
+          .where('tenant_id', '=', input.tenantId)
+          .where('action_id', '=', input.actionId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (existing) throw new Error('AGENT_ACTION_ALREADY_APPROVED');
+        const expiresAt = new Date(
+          Math.min(
+            now.getTime() + APPROVAL_TTL_MILLISECONDS,
+            new Date(prepared.expiresAt).getTime(),
+          ),
+        );
+        const approval: AgentApproval = {
+          id: stableId(
+            'apr',
+            input.tenantId,
+            input.approverPrincipalId,
+            input.actionId,
+            input.idempotencyKey,
+          ),
+          tenantId: input.tenantId,
+          actionDigest: input.actionDigest,
+          approverPrincipalId: input.approverPrincipalId,
+          approverPermissionSnapshot: ['events:publish'],
+          policyVersion: prepared.action.expectedPolicyVersion,
+          approvedAt: now.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+        };
+        await tx
+          .insertInto('agent_approvals')
+          .values({
+            id: approval.id,
+            tenant_id: approval.tenantId,
+            action_id: input.actionId,
+            action_digest: approval.actionDigest,
+            plan_sha256: null,
+            approver_principal_id: approval.approverPrincipalId,
+            approver_permission_snapshot: canonicalAgentJson(approval.approverPermissionSnapshot),
+            policy_version: approval.policyVersion,
+            approved_at: now,
+            expires_at: expiresAt,
+            revoked_at: null,
+            consumed_at: null,
+            consumed_execution_id: null,
+          })
+          .execute();
+        await tx
+          .insertInto('agent_action_events')
+          .values({
+            id: stableId('aevt', input.actionId, 'approved'),
+            tenant_id: input.tenantId,
+            action_id: input.actionId,
+            action_digest: input.actionDigest,
+            agent_principal_id: prepared.action.agentPrincipalId,
+            sponsor_principal_id: prepared.action.sponsorPrincipalId,
+            actor_type: 'user',
+            actor_principal_id: input.approverPrincipalId,
+            phase: 'approved',
+            approval_id: approval.id,
+            execution_id: null,
+            idempotency_key: input.idempotencyKey,
+            request_fingerprint: fingerprint,
+            authorization_sha256: authorizationSha256,
+            outcome: 'approved',
+            occurred_at: now,
+          })
+          .execute();
+        return approval;
+      });
+  }
+
+  private async hasLiveSponsorAuthority(
+    db: Executor,
+    tenantId: string,
+    sponsorPrincipalId: string,
+    eventId: string,
+  ): Promise<boolean> {
+    const event = await db
+      .selectFrom('events')
+      .select('organization_id')
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', eventId)
+      .executeTakeFirst();
+    if (!event) return false;
+    const [sponsor, membership, permission] = await Promise.all([
+      db
+        .selectFrom('user_profiles')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', sponsorPrincipalId)
+        .where('status', '=', 'active')
+        .executeTakeFirst(),
+      db
+        .selectFrom('organization_members')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('organization_id', '=', event.organization_id)
+        .where('user_id', '=', sponsorPrincipalId)
+        .where('accepted_at', 'is not', null)
+        .executeTakeFirst(),
+      db
+        .selectFrom('permission_grants')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('principal_type', '=', 'user')
+        .where('principal_id', '=', sponsorPrincipalId)
+        .where('permission', '=', 'events.write')
+        .where('scope_type', '=', 'tenant')
+        .where('scope_id', 'is', null)
+        .executeTakeFirst(),
+    ]);
+    return Boolean(sponsor && membership && permission);
+  }
+
+  private async assertCurrentlyApprovable(
+    tx: Transaction<import('@tixkit/db').DB>,
+    prepared: PreparedAgentAction,
+    approverPrincipalId: string,
+    now: Date,
+  ): Promise<string> {
+    const { action } = prepared;
+    if (
+      !prepared.authorization.eligibleForApproval ||
+      action.sponsorPrincipalId !== approverPrincipalId ||
+      new Date(prepared.expiresAt).getTime() <= now.getTime()
+    )
+      throw new Error('AGENT_ACTION_NOT_APPROVABLE');
+    const principalRow = await tx
+      .selectFrom('agent_principals')
+      .selectAll()
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('id', '=', action.agentPrincipalId)
+      .forUpdate()
+      .executeTakeFirst();
+    const delegationRow = await tx
+      .selectFrom('agent_delegations')
+      .selectAll()
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('id', '=', action.delegationGrantId)
+      .forUpdate()
+      .executeTakeFirst();
+    const event = await tx
+      .selectFrom('events')
+      .select(['id', 'organization_id', 'brand_id', 'version'])
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('id', '=', action.target.resourceId)
+      .forUpdate()
+      .executeTakeFirst();
+    const policy = await tx
+      .selectFrom('agent_action_policies')
+      .selectAll()
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('action_kind', '=', action.kind)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!principalRow || !delegationRow || !event || !policy)
+      throw new Error('AGENT_ACTION_NOT_APPROVABLE');
+    const principal = toPrincipal(principalRow);
+    const delegation = toDelegation(delegationRow);
+    const sponsor = await tx
+      .selectFrom('user_profiles')
+      .select(['id', 'status', 'updated_at'])
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('id', '=', approverPrincipalId)
+      .forUpdate()
+      .executeTakeFirst();
+    const membership = await tx
+      .selectFrom('organization_members')
+      .select(['id', 'updated_at'])
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('organization_id', '=', event.organization_id)
+      .where('user_id', '=', approverPrincipalId)
+      .where('accepted_at', 'is not', null)
+      .forUpdate()
+      .executeTakeFirst();
+    const permission = await tx
+      .selectFrom('permission_grants')
+      .select(['id', 'updated_at'])
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('principal_type', '=', 'user')
+      .where('principal_id', '=', approverPrincipalId)
+      .where('permission', '=', 'events.write')
+      .where('scope_type', '=', 'tenant')
+      .where('scope_id', 'is', null)
+      .forUpdate()
+      .executeTakeFirst();
+    if (sponsor?.status !== 'active' || !membership || !permission)
+      throw new Error('AGENT_ACTION_NOT_APPROVABLE');
+    const readiness = await new ReadinessService(
+      tx as Database,
+      resolvePaymentMode(),
+    ).getEventLaunchReadiness({
+      tenantId: action.target.tenantId,
+      organizationId: event.organization_id,
+      brandId: event.brand_id,
+      eventId: event.id,
+      permissions: new Set(['events.write']),
+    });
+    const readinessSnapshotSha256 = eventPublishReadinessSnapshotSha256(readiness);
+    const decision = authorizeAgentAction({
+      principal,
+      delegation,
+      action,
+      actionDigest: prepared.actionDigest,
+      sponsorPermissions: ['events:publish'],
+      tenantAllowedActions: policy.allowed && policy.risk_allowed ? ['event.publish'] : [],
+      currentResourceVersion: safeInteger(event.version, 'event version'),
+      currentPolicyVersion: safeInteger(policy.policy_version, 'agent policy version'),
+      now: now.toISOString(),
+    });
+    if (
+      !readiness.launchable ||
+      readinessSnapshotSha256 !== action.payload.readinessSnapshotSha256 ||
+      decision.reasons.length !== 1 ||
+      decision.reasons[0] !== 'approval_required'
+    )
+      throw new Error('AGENT_ACTION_NOT_APPROVABLE');
+    return agentSha256({
+      actionDigest: prepared.actionDigest,
+      principal,
+      delegation,
+      sponsor: { id: sponsor.id, status: sponsor.status, updatedAt: iso(sponsor.updated_at) },
+      membership: { id: membership.id, updatedAt: iso(membership.updated_at) },
+      permission: { id: permission.id, updatedAt: iso(permission.updated_at) },
+      policy: {
+        allowed: Boolean(policy.allowed),
+        riskAllowed: Boolean(policy.risk_allowed),
+        version: safeInteger(policy.policy_version, 'agent policy version'),
+      },
+      resourceVersion: safeInteger(event.version, 'event version'),
+      readinessSnapshotSha256,
+      checkedAt: now.toISOString(),
+    });
+  }
+
+  private approvalFromRow(
+    row: Selectable<import('@tixkit/db').DB['agent_approvals']>,
+  ): AgentApproval {
+    const permissions = parseStrings(
+      row.approver_permission_snapshot,
+      'approver permission snapshot',
+    );
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      actionDigest: row.action_digest,
+      ...(row.plan_sha256 ? { planSha256: row.plan_sha256 } : {}),
+      approverPrincipalId: row.approver_principal_id,
+      approverPermissionSnapshot: permissions,
+      policyVersion: safeInteger(row.policy_version, 'approval policy version'),
+      approvedAt: iso(row.approved_at),
+      expiresAt: iso(row.expires_at),
+      ...(row.revoked_at ? { revokedAt: iso(row.revoked_at) } : {}),
+      ...(row.consumed_at ? { consumedAt: iso(row.consumed_at) } : {}),
+    };
   }
 
   private fromRow(row: Selectable<import('@tixkit/db').DB['agent_actions']>): PreparedAgentAction {

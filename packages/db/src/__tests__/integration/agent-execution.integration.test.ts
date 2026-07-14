@@ -46,6 +46,27 @@ function approval(tenantId: string): AgentApproval {
   };
 }
 
+async function persistApproval(db: Database, value: AgentApproval): Promise<void> {
+  await db
+    .insertInto('agent_approvals')
+    .values({
+      id: value.id,
+      tenant_id: value.tenantId,
+      action_id: null,
+      action_digest: value.actionDigest,
+      plan_sha256: value.planSha256 ?? null,
+      approver_principal_id: value.approverPrincipalId,
+      approver_permission_snapshot: JSON.stringify(value.approverPermissionSnapshot),
+      policy_version: value.policyVersion,
+      approved_at: new Date(value.approvedAt),
+      expires_at: new Date(value.expiresAt),
+      revoked_at: value.revokedAt ? new Date(value.revokedAt) : null,
+      consumed_at: value.consumedAt ? new Date(value.consumedAt) : null,
+      consumed_execution_id: null,
+    })
+    .execute();
+}
+
 function principal(tenantId: string): AgentPrincipal {
   return {
     id: 'agent_test',
@@ -563,7 +584,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         .where('tenant_id', '=', tenantId)
         .execute(),
     ).toHaveLength(5);
-    await repository.recordApproval(approved);
+    await persistApproval(db, approved);
     const results = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
         repository.reserveAndConsume({
@@ -729,7 +750,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       approvalId: revokedApproval.id,
       idempotencyKey: 'agent-execution-approval-revoked',
     };
-    await repository.recordApproval(revokedApproval);
+    await persistApproval(db, revokedApproval);
     await repository.reserveAndConsume({
       execution: approvalExecution,
       approval: revokedApproval,
@@ -769,7 +790,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       approvalId: delegationApproval.id,
       idempotencyKey: 'agent-execution-delegation-revoked',
     };
-    await repository.recordApproval(delegationApproval);
+    await persistApproval(db, delegationApproval);
     await repository.reserveAndConsume({
       execution: delegationExecution,
       approval: delegationApproval,
@@ -819,7 +840,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       approvalId: secondApproval.id,
       idempotencyKey: 'agent-execution-revocation',
     };
-    await repository.recordApproval(secondApproval);
+    await persistApproval(db, secondApproval);
     await repository.reserveAndConsume({
       execution: secondExecution,
       approval: secondApproval,

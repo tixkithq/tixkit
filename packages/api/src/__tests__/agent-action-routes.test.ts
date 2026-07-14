@@ -53,7 +53,7 @@ function principal(type: Principal['type'] = 'agent'): Principal {
     organizationIds: [],
     brandIds: [],
     eventIds: [],
-    scopes: [],
+    scopes: type === 'user' ? ['events.write'] : [],
   };
 }
 
@@ -67,6 +67,17 @@ async function setup(
   const service: AgentActionRouteService = {
     prepare: vi.fn(async () => prepared),
     getForAgent: vi.fn(async () => prepared),
+    getForSponsor: vi.fn(async () => prepared),
+    approve: vi.fn(async (input) => ({
+      id: `apr_${'e'.repeat(48)}`,
+      tenantId: input.tenantId,
+      actionDigest: input.actionDigest,
+      approverPrincipalId: input.approverPrincipalId,
+      approverPermissionSnapshot: ['events:publish'],
+      policyVersion: 3,
+      approvedAt: '2026-07-14T12:01:00.000Z',
+      expiresAt: '2026-07-14T12:06:00.000Z',
+    })),
     ...input.service,
   };
   app.decorate('context', { db: {} } as never);
@@ -113,6 +124,87 @@ describe('agent action routes', () => {
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.json()).toEqual(JSON.parse(JSON.stringify(prepared)));
     await app.close();
+  });
+
+  it('lets the human sponsor load the exact action through live sponsor authorization', async () => {
+    const getForSponsor = vi.fn(async () => prepared);
+    const { app } = await setup({ actor: principal('user'), service: { getForSponsor } });
+    const actionId = `act_${'d'.repeat(48)}`;
+    const response = await app.inject({ method: 'GET', url: `/agent/actions/${actionId}` });
+    expect(response.statusCode).toBe(200);
+    expect(getForSponsor).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      sponsorPrincipalId: 'user_primary',
+      actionId,
+    });
+    await app.close();
+  });
+
+  it('requires a human, exact digest confirmation and idempotency for approval', async () => {
+    const approve = vi.fn(async (input) => ({
+      id: `apr_${'e'.repeat(48)}`,
+      tenantId: input.tenantId,
+      actionDigest: input.actionDigest,
+      approverPrincipalId: input.approverPrincipalId,
+      approverPermissionSnapshot: ['events:publish'],
+      policyVersion: 3,
+      approvedAt: '2026-07-14T12:01:00.000Z',
+      expiresAt: '2026-07-14T12:06:00.000Z',
+    }));
+    const { app } = await setup({ actor: principal('user'), service: { approve } });
+    const actionId = `act_${'d'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/approvals`,
+      headers: {
+        'idempotency-key': 'agent-action-approval-0001',
+        'x-tixkit-confirmation': `approve:${actionId}:${actionDigest}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(approve).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      approverPrincipalId: 'user_primary',
+      actionId,
+      actionDigest,
+      idempotencyKey: 'agent-action-approval-0001',
+    });
+    await app.close();
+  });
+
+  it('rejects agent approval and mismatched human confirmation before the service', async () => {
+    const approve = vi.fn();
+    const agentSetup = await setup({ service: { approve } });
+    const actionId = `act_${'d'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const agentResponse = await agentSetup.app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/approvals`,
+      headers: {
+        'idempotency-key': 'agent-action-approval-0001',
+        'x-tixkit-confirmation': `approve:${actionId}:${actionDigest}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(agentResponse.statusCode).toBe(403);
+    await agentSetup.app.close();
+
+    const humanSetup = await setup({ actor: principal('user'), service: { approve } });
+    const humanResponse = await humanSetup.app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/approvals`,
+      headers: {
+        'idempotency-key': 'agent-action-approval-0001',
+        'x-tixkit-confirmation': `approve:${actionId}:${'c'.repeat(64)}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(humanResponse.statusCode).toBe(400);
+    expect(approve).not.toHaveBeenCalled();
+    await humanSetup.app.close();
   });
 
   it('rejects human callers and never invokes preparation', async () => {

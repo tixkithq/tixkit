@@ -77,14 +77,17 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-22');
+    expect(openApiSpec.info.version).toBe('2026-07-23');
   });
 
   it('publishes agent-only immutable action preparation without caller-owned bindings', () => {
     const prepare = openApiSpec.paths['/agent/actions'].post;
     const get = openApiSpec.paths['/agent/actions/{actionId}'].get;
+    const approve = openApiSpec.paths['/agent/actions/{actionId}/approvals'].post;
     expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
-    expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(approve.security).toEqual([{ BearerAuth: [] }]);
+    expect(approve.security).not.toContainEqual({ AgentOAuth: ['agent.invoke'] });
     expect(prepare.security).not.toContainEqual({ BearerAuth: [] });
     expect(prepare.security).not.toContainEqual({ ApiKey: [] });
     const body = prepare.requestBody.content['application/json'].schema;
@@ -108,6 +111,17 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.PreparedAgentAction.description).toMatch(
       /fresh human approval remains mandatory/u,
     );
+    expect(approve.parameters).toEqual(
+      expect.arrayContaining([
+        { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
+        { $ref: '#/components/parameters/AgentApprovalConfirmation' },
+      ]),
+    );
+    expect(approve.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['actionDigest'],
+    });
+    expect(openApiSpec.components.schemas.AgentApproval.required).toContain('actionDigest');
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

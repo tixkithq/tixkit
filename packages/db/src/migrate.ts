@@ -83,6 +83,7 @@ import { PortableRebindingAuthoritiesMigration } from './migrations/0079_portabl
 import { PortableImportLineageCheckpointsMigration } from './migrations/0080_portable_import_lineage_checkpoints.js';
 import { AgentOAuthCredentialsMigration } from './migrations/0081_agent_oauth_credentials.js';
 import { AgentActionsMigration } from './migrations/0082_agent_actions.js';
+import { AgentApprovalActionUniqueMigration } from './migrations/0083_agent_approval_action_unique.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -337,6 +338,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0080_portable_import_lineage_checkpoints': PortableImportLineageCheckpointsMigration,
       '0081_agent_oauth_credentials': AgentOAuthCredentialsMigration,
       '0082_agent_actions': AgentActionsMigration,
+      '0083_agent_approval_action_unique': AgentApprovalActionUniqueMigration,
     };
   }
 }

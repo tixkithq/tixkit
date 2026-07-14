@@ -4,9 +4,11 @@ import {
   IdempotencyConflictError,
   NotFoundError,
   ValidationError,
+  type Principal,
 } from '@tixkit/domain';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { ClerkAuthService } from '../../auth/clerk.js';
 import { parseBody } from '../../http/schemas.js';
 import { AgentActionService, type PreparedAgentAction } from '../../services/agent-actions.js';
 
@@ -19,6 +21,7 @@ const prepareActionSchema = z
   })
   .strict();
 const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{48}$/u) }).strict();
+const approvalSchema = z.object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
 
 export interface AgentActionRouteService {
   prepare(input: {
@@ -34,6 +37,18 @@ export interface AgentActionRouteService {
     agentPrincipalId: string;
     actionId: string;
   }): Promise<PreparedAgentAction | undefined>;
+  getForSponsor(input: {
+    tenantId: string;
+    sponsorPrincipalId: string;
+    actionId: string;
+  }): Promise<PreparedAgentAction | undefined>;
+  approve(input: {
+    tenantId: string;
+    approverPrincipalId: string;
+    actionId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<import('@tixkit/agent-protocol').AgentApproval>;
 }
 
 export interface AgentActionRouteOptions {
@@ -45,6 +60,14 @@ function requireAgent(
 ): asserts requestPrincipal is NonNullable<import('@tixkit/domain').Principal> & { type: 'agent' } {
   if (requestPrincipal.type !== 'agent')
     throw new ForbiddenError('An explicit agent principal is required');
+}
+
+function requireHumanApprover(principal: Principal): asserts principal is Principal & {
+  type: 'user';
+} {
+  if (principal.type !== 'user')
+    throw new ForbiddenError('Only an authenticated human sponsor can approve an agent action');
+  ClerkAuthService.requirePermission(principal, 'events.write');
 }
 
 function idempotencyKey(headers: Record<string, unknown>): string {
@@ -73,6 +96,16 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new NotFoundError('AgentActionScope', 'requested');
   if (message === 'AGENT_ACTION_POLICY_UNAVAILABLE')
     throw new ConflictError('Agent action policy is not configured');
+  if (message === 'AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT')
+    throw new IdempotencyConflictError(key);
+  if (message === 'AGENT_ACTION_APPROVAL_SCOPE_DENIED')
+    throw new NotFoundError('AgentAction', 'requested');
+  if (message === 'AGENT_ACTION_APPROVAL_DIGEST_MISMATCH')
+    throw new ConflictError('Agent action digest no longer matches the reviewed action');
+  if (message === 'AGENT_ACTION_NOT_APPROVABLE')
+    throw new ConflictError('Agent action is no longer eligible for approval');
+  if (message === 'AGENT_ACTION_ALREADY_APPROVED')
+    throw new ConflictError('Agent action already has an approval');
   throw error;
 }
 
@@ -103,15 +136,49 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
 
   app.get('/agent/actions/:actionId', { config: { agentAccess: true } }, async (request, reply) => {
     const actor = request.principal!;
-    requireAgent(actor);
+    if (actor.type === 'agent') requireAgent(actor);
+    else requireHumanApprover(actor);
     const { actionId } = parseBody(actionParamsSchema, request.params);
-    const action = await service.getForAgent({
-      tenantId: actor.tenantId,
-      agentPrincipalId: actor.id,
-      actionId,
-    });
+    const action =
+      actor.type === 'agent'
+        ? await service.getForAgent({
+            tenantId: actor.tenantId,
+            agentPrincipalId: actor.id,
+            actionId,
+          })
+        : actor.type === 'user'
+          ? await service.getForSponsor({
+              tenantId: actor.tenantId,
+              sponsorPrincipalId: actor.id,
+              actionId,
+            })
+          : undefined;
     if (!action) throw new NotFoundError('AgentAction', actionId);
     reply.header('Cache-Control', 'no-store');
     return action;
+  });
+
+  app.post('/agent/actions/:actionId/approvals', async (request, reply) => {
+    const actor = request.principal!;
+    requireHumanApprover(actor);
+    const key = idempotencyKey(request.headers);
+    const { actionId } = parseBody(actionParamsSchema, request.params);
+    const { actionDigest } = parseBody(approvalSchema, request.body);
+    const expectedConfirmation = `approve:${actionId}:${actionDigest}`;
+    if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
+      throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);
+    try {
+      const approval = await service.approve({
+        tenantId: actor.tenantId,
+        approverPrincipalId: actor.id,
+        actionId,
+        actionDigest,
+        idempotencyKey: key,
+      });
+      reply.header('Cache-Control', 'no-store');
+      return reply.status(201).send(approval);
+    } catch (error) {
+      translateAgentActionError(key, error);
+    }
   });
 };

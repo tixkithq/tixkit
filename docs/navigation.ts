@@ -137,6 +137,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-07-22 agent action preparation',
         routeId: 'apiMigration20260721To20260722',
       },
+      {
+        label: 'Adopt 2026-07-23 human agent approval',
+        routeId: 'apiMigration20260722To20260723',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

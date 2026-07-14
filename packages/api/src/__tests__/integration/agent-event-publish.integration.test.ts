@@ -617,6 +617,211 @@ describe.sequential.each(driverCases)(
       },
     );
 
+    it('issues one short-lived digest-bound human approval and converges exact replay', async () => {
+      const service = new AgentActionService(db);
+      const before = {
+        event: await db
+          .selectFrom('events')
+          .select(['status', 'version'])
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+        executions: await db.selectFrom('agent_executions').select('id').execute(),
+        effects: await db.selectFrom('agent_action_effects').select('execution_id').execute(),
+      };
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-action-for-approval-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const request = {
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `agent-action-approval-${driver}-0001`,
+      };
+      const concurrent = await Promise.all(
+        Array.from({ length: 4 }, () => service.approve(request)),
+      );
+      const first = concurrent[0]!;
+      expect(concurrent).toEqual([first, first, first, first]);
+      const replay = await service.approve(request);
+      expect(replay).toEqual(first);
+      expect(first).toMatchObject({
+        tenantId: action.target.tenantId,
+        actionDigest: prepared.actionDigest,
+        approverPrincipalId: action.sponsorPrincipalId,
+        approverPermissionSnapshot: ['events:publish'],
+        policyVersion: action.expectedPolicyVersion,
+      });
+      expect(
+        new Date(first.expiresAt).getTime() - new Date(first.approvedAt).getTime(),
+      ).toBeLessThanOrEqual(5 * 60 * 1000);
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select(['action_id', 'action_digest', 'consumed_at', 'revoked_at'])
+          .where('id', '=', first.id)
+          .executeTakeFirstOrThrow(),
+      ).toMatchObject({
+        action_id: prepared.action.id,
+        action_digest: prepared.actionDigest,
+        consumed_at: null,
+        revoked_at: null,
+      });
+      expect(
+        await db
+          .selectFrom('agent_action_events')
+          .select(['actor_type', 'phase', 'approval_id', 'outcome'])
+          .where('action_id', '=', prepared.action.id)
+          .where('phase', '=', 'approved')
+          .execute(),
+      ).toEqual([
+        {
+          actor_type: 'user',
+          phase: 'approved',
+          approval_id: first.id,
+          outcome: 'approved',
+        },
+      ]);
+      await expect(
+        service.approve({ ...request, idempotencyKey: `${request.idempotencyKey}-second` }),
+      ).rejects.toThrow('AGENT_ACTION_ALREADY_APPROVED');
+      const competing = await Promise.allSettled(
+        Array.from({ length: 3 }, (_, index) =>
+          service.approve({
+            ...request,
+            idempotencyKey: `${request.idempotencyKey}-competing-${index}`,
+          }),
+        ),
+      );
+      expect(competing.every(({ status }) => status === 'rejected')).toBe(true);
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select('id')
+          .where('action_id', '=', prepared.action.id)
+          .execute(),
+      ).toHaveLength(1);
+      expect(
+        await db
+          .selectFrom('events')
+          .select(['status', 'version'])
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual(before.event);
+      expect(await db.selectFrom('agent_executions').select('id').execute()).toEqual(
+        before.executions,
+      );
+      expect(await db.selectFrom('agent_action_effects').select('execution_id').execute()).toEqual(
+        before.effects,
+      );
+      await db
+        .deleteFrom('permission_grants')
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('principal_id', '=', action.sponsorPrincipalId)
+        .where('permission', '=', 'events.write')
+        .execute();
+      await expect(service.approve(request)).resolves.toEqual(first);
+    });
+
+    it('hides an action from a different sponsor without approval persistence', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-action-cross-sponsor-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      await expect(
+        service.getForSponsor({
+          tenantId: action.target.tenantId,
+          sponsorPrincipalId: 'user_other',
+          actionId: prepared.action.id,
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        service.approve({
+          tenantId: action.target.tenantId,
+          approverPrincipalId: 'user_other',
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `agent-action-cross-sponsor-approval-${driver}-0001`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select('id')
+          .where('action_id', '=', prepared.action.id)
+          .execute(),
+      ).toHaveLength(0);
+    });
+
+    it.each(['resource', 'policy', 'permission'] as const)(
+      'invalidates approval after a material %s change',
+      async (changed) => {
+        const service = new AgentActionService(db);
+        const prepared = await service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-action-stale-${changed}-${driver}-0001`,
+          kind: 'event.publish',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+        });
+        if (changed === 'resource')
+          await db
+            .updateTable('events')
+            .set({ version: action.target.resourceVersion + 1 })
+            .where('id', '=', action.target.resourceId)
+            .execute();
+        if (changed === 'policy')
+          await db
+            .updateTable('agent_action_policies')
+            .set({ policy_version: action.expectedPolicyVersion + 1 })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('action_kind', '=', action.kind)
+            .execute();
+        if (changed === 'permission')
+          await db
+            .deleteFrom('permission_grants')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('principal_id', '=', action.sponsorPrincipalId)
+            .where('permission', '=', 'events.write')
+            .execute();
+        await expect(
+          service.approve({
+            tenantId: action.target.tenantId,
+            approverPrincipalId: action.sponsorPrincipalId,
+            actionId: prepared.action.id,
+            actionDigest: prepared.actionDigest,
+            idempotencyKey: `agent-action-stale-approval-${changed}-${driver}-0001`,
+          }),
+        ).rejects.toThrow('AGENT_ACTION_NOT_APPROVABLE');
+        expect(
+          await db
+            .selectFrom('agent_approvals')
+            .select('id')
+            .where('action_id', '=', prepared.action.id)
+            .execute(),
+        ).toHaveLength(0);
+        expect(
+          await db
+            .selectFrom('agent_action_events')
+            .select('id')
+            .where('action_id', '=', prepared.action.id)
+            .where('phase', '=', 'approved')
+            .execute(),
+        ).toHaveLength(0);
+      },
+    );
+
     it('reloads the complete authorization state and executes an idempotent public operation', async () => {
       const state = await adapter.load({ action, execution });
       expect(new Date(state.observedAt).getTime()).toBeGreaterThanOrEqual(

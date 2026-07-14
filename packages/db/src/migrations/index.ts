@@ -80,3 +80,4 @@ export { PortableRebindingAuthoritiesMigration } from './0079_portable_rebinding
 export { PortableImportLineageCheckpointsMigration } from './0080_portable_import_lineage_checkpoints.js';
 export { AgentOAuthCredentialsMigration } from './0081_agent_oauth_credentials.js';
 export { AgentActionsMigration } from './0082_agent_actions.js';
+export { AgentApprovalActionUniqueMigration } from './0083_agent_approval_action_unique.js';

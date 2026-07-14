@@ -7,7 +7,7 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
@@ -17,6 +17,7 @@ related:
   - /reference/migrations/2026-07-19-to-2026-07-20
   - /reference/migrations/2026-07-20-to-2026-07-21
   - /reference/migrations/2026-07-21-to-2026-07-22
+  - /reference/migrations/2026-07-22-to-2026-07-23
 keywords:
   - agents
   - delegation
@@ -32,7 +33,7 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-07-22` and agent protocol `2026-07-22` support these sponsor-controlled operations:
+API version `2026-07-23` and agent protocol `2026-07-22` support these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
@@ -40,9 +41,10 @@ API version `2026-07-22` and agent protocol `2026-07-22` support these sponsor-c
 - grant time-bounded event delegations;
 - revoke a delegation; and
 - create, inspect, correct, export and delete separately retained organizer memory;
-- create and revoke sponsor-bound OAuth clients for active agents; and
-- exchange client credentials and inspect an explicit, permission-empty agent session.
-- prepare and retrieve an immutable `event.publish` action with a server-authoritative dry run.
+- create and revoke sponsor-bound OAuth clients for active agents;
+- exchange client credentials and inspect an explicit, permission-empty agent session;
+- prepare and retrieve an immutable `event.publish` action with a server-authoritative dry run; and
+- issue a short-lived human approval bound to the exact action digest.
 
 The initial capabilities are `events.read`, `readiness.read`, `events.prepare` and `events.execute`. Consequential execution still requires a typed action, an immutable plan digest and fresh approval. The registration API does not grant unrestricted delegated autonomy, campaign sending or buyer purchasing.
 
@@ -80,7 +82,9 @@ The sponsor can inspect only their own principal and can revoke their own princi
 
 An explicitly authenticated agent prepares an event publish action through `tixkit.agentActions.prepare` or `POST /v1/agent/actions`. The request contains only the action kind, delegation identifier and event identifier. The server derives identity, sponsor, tenant, resource and policy versions, exact readiness digest, operation and preparation time under a serializable transaction. The resulting action and dry-run evidence are immutable, expire after at most 15 minutes and converge on exact idempotent replay. Cross-agent reads fail closed.
 
-Preparation never authorizes execution. `eligibleForApproval` means only that the live authorization intersection and event readiness passed except for the mandatory approval. The shared protocol requires approval to bind to the returned immutable `actionDigest`; material readiness, policy, resource, delegation or action changes invalidate approval, and consequential actions require fresh human approval in the initial release. Human approval issuance, action-bound revocation and public execution lifecycle endpoints are still being completed. Do not treat a prepared action as permission to publish.
+Preparation never authorizes execution. `eligibleForApproval` means only that the live authorization intersection and event readiness passed except for the mandatory approval. A human sponsor with current `events.write` permission issues approval through `tixkit.agentActions.approve` or `POST /v1/agent/actions/{actionId}/approvals`. The request must carry the exact action digest, a unique idempotency key and the explicit confirmation value `approve:<actionId>:<actionDigest>`. Tixkit revalidates the principal, delegation, sponsor, tenant membership, permission, policy, risk, resource version and readiness digest inside the serializable transaction. The resulting approval expires after at most five minutes and cannot be reused for another action.
+
+An exact replay returns the original approval even if authority has since changed, without creating new authority. A new approval request after any material readiness, policy, resource, delegation or permission change fails closed. Action-bound revocation and public execution lifecycle endpoints are still being completed. Do not treat a prepared or approved action as permission to publish until that execution boundary exists.
 
 ## Memory and managed tools
 

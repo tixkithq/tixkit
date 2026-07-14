@@ -649,26 +649,6 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     });
   }
 
-  async recordApproval(approval: AgentApproval): Promise<void> {
-    await this.db
-      .insertInto('agent_approvals')
-      .values({
-        id: approval.id,
-        tenant_id: approval.tenantId,
-        action_digest: approval.actionDigest,
-        plan_sha256: approval.planSha256 ?? null,
-        approver_principal_id: approval.approverPrincipalId,
-        approver_permission_snapshot: JSON.stringify(approval.approverPermissionSnapshot),
-        policy_version: approval.policyVersion,
-        approved_at: new Date(approval.approvedAt),
-        expires_at: new Date(approval.expiresAt),
-        revoked_at: approval.revokedAt ? new Date(approval.revokedAt) : null,
-        consumed_at: approval.consumedAt ? new Date(approval.consumedAt) : null,
-        consumed_execution_id: null,
-      })
-      .execute();
-  }
-
   async registerPrincipal(
     principal: AgentPrincipal,
     audit: AgentControlMutationAudit,

@@ -517,7 +517,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-22',
+    version: '2026-07-23',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -592,6 +592,30 @@ const rawOpenApiSpec = {
         },
         description:
           'Required for agent action preparation. A key is permanently bound to the authenticated agent and exact typed request.',
+      },
+      AgentApprovalConfirmation: {
+        name: 'X-Tixkit-Confirmation',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          pattern: '^approve:act_[a-f0-9]{48}:[a-f0-9]{64}$',
+        },
+        description:
+          'Must exactly equal approve:<actionId>:<actionDigest>. This binds explicit human intent to the immutable reviewed action.',
+      },
+      AgentApprovalIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          minLength: 16,
+          maxLength: 127,
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]+$',
+        },
+        description:
+          'Required for human approval. A key is permanently bound to the authenticated sponsor, action ID and exact action digest.',
       },
       AgentMemoryIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -5250,6 +5274,40 @@ const rawOpenApiSpec = {
           },
         },
         required: ['action', 'actionDigest', 'expiresAt', 'authorization', 'dryRun'],
+      },
+      AgentApproval: {
+        type: 'object',
+        description:
+          'Fresh human approval bound to one immutable action digest and current server-derived permission/policy evidence. Approval does not itself execute the action.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          planSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          approverPrincipalId: { type: 'string' },
+          approverPermissionSnapshot: {
+            type: 'array',
+            minItems: 1,
+            uniqueItems: true,
+            items: { type: 'string', const: 'events:publish' },
+          },
+          policyVersion: { type: 'integer', minimum: 1 },
+          approvedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          revokedAt: { type: 'string', format: 'date-time' },
+          consumedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'actionDigest',
+          'approverPrincipalId',
+          'approverPermissionSnapshot',
+          'policyVersion',
+          'approvedAt',
+          'expiresAt',
+        ],
       },
       AgentDelegation: {
         type: 'object',
@@ -10381,8 +10439,8 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Get an immutable prepared action',
         description:
-          'Requires the exact Agent OAuth principal that prepared the action. Cross-agent and cross-tenant actions are hidden as not found.',
-        security: [{ AgentOAuth: ['agent.invoke'] }],
+          'Requires either the exact Agent OAuth principal that prepared the action or its human sponsor with live event authority. Cross-agent, cross-sponsor and cross-tenant actions are hidden as not found.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
         parameters: [
           {
             name: 'actionId',
@@ -10399,8 +10457,59 @@ const rawOpenApiSpec = {
             },
           },
           '401': { description: 'Valid Agent OAuth authentication required' },
-          '403': { description: 'Authenticated principal is not an agent' },
-          '404': { description: 'Action not found for this agent' },
+          '403': { description: 'Human sponsor lacks current events.write authority' },
+          '404': { description: 'Action not found for this agent or sponsor' },
+        },
+      },
+    },
+    '/agent/actions/{actionId}/approvals': {
+      post: {
+        summary: 'Approve one immutable agent action',
+        description:
+          'Experimental/private beta. Human sponsor only. Rechecks active identity, accepted event membership, tenant events.write, agent/delegation state, policy, event version and readiness under a serializable lock. The server derives the permission snapshot, approval time and expiry. A material change fails closed and requires a newly prepared action.',
+        'x-required-permissions': ['events.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
+          { $ref: '#/components/parameters/AgentApprovalConfirmation' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                },
+                required: ['actionDigest'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Fresh short-lived approval. Exact idempotent replays return the original approval.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentApproval' } },
+            },
+          },
+          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '401': { description: 'Human authentication required' },
+          '403': { description: 'Caller is not a human sponsor with events.write' },
+          '404': { description: 'Action is outside the current sponsor scope' },
+          '409': {
+            description:
+              'Digest, resource, readiness, policy or authorization changed; action already approved; or idempotency conflict',
+          },
         },
       },
     },

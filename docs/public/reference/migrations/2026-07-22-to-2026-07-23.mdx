@@ -1,0 +1,41 @@
+---
+title: API migration from 2026-07-22 to 2026-07-23
+description: Adopt short-lived human approval bound to an immutable agent action digest.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-23
+prerequisites:
+  - An integration using API version 2026-07-22
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-23` adds human approval for an immutable prepared agent action. Existing `2026-07-22` operations remain compatible; this is an additive private-beta release. Agent protocol `2026-07-22` remains current because approval binds to the existing canonical action digest without changing its schema.
+
+## Approve an exact prepared action
+
+Authenticate as the action's human sponsor. The user must have an accepted organization membership and current `events.write` permission for the action's event. Call `POST /v1/agent/actions/{actionId}/approvals` with:
+
+- a unique 16–127 character `Idempotency-Key`;
+- `X-Tixkit-Confirmation: approve:<actionId>:<actionDigest>`; and
+- a strict JSON body containing only the prepared action's exact `actionDigest`.
+
+The JavaScript SDK exposes the operation as `tixkit.agentActions.approve` and derives the confirmation header from those exact inputs.
+
+Inside one serializable transaction, Tixkit locks the tenant and action and revalidates the explicit agent principal, sponsor identity, delegation, tenant membership, event permission, resource version, policy version, action risk and readiness digest. The server derives the approver, permission snapshot, approval time and expiry. The approval expires after at most five minutes and is uniquely bound to one tenant action.
+
+An exact idempotent replay returns the original approval even after authority changes; it does not grant new authority or extend expiry. Reusing a key with different action, digest, actor or permission snapshot conflicts. A new request after any material authorization, policy, resource or readiness change fails closed.
+
+## Execution remains unavailable
+
+Approval is immutable authorization evidence, not direct execution. Action-bound revocation and the public execution lifecycle are not part of this release. Do not publish an event by writing to the database, calling an internal executor or bypassing the existing API/workflow boundary.
+
+Migration `0083_agent_approval_action_unique` enforces at most one action-bound approval per tenant action across supported database drivers. Legacy approvals without an action binding remain readable for compatibility but cannot authorize this agent action flow.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-23`.

@@ -3123,7 +3123,14 @@ describe('TixkitClient new resource methods', () => {
       resourceId: 'evt_1',
       idempotencyKey: 'agent-action-prepare-0001',
     });
-    await c.agentActions.get('act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const actionId = 'act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const actionDigest = 'b'.repeat(64);
+    await c.agentActions.get(actionId);
+    await c.agentActions.approve({
+      actionId,
+      actionDigest,
+      idempotencyKey: 'agent-action-approval-0001',
+    });
 
     const prepare = getCall(fm);
     expect(prepare).toMatchObject({
@@ -3141,8 +3148,17 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(prepare.body)).not.toHaveProperty('payload');
     expect(getCall(fm, 1)).toMatchObject({
       method: 'GET',
-      url: 'https://api.test/v1/agent/actions/act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      url: `https://api.test/v1/agent/actions/${actionId}`,
     });
+    expect(getCall(fm, 2)).toMatchObject({
+      method: 'POST',
+      url: `https://api.test/v1/agent/actions/${actionId}/approvals`,
+      headers: {
+        'Idempotency-Key': 'agent-action-approval-0001',
+        'X-Tixkit-Confirmation': `approve:${actionId}:${actionDigest}`,
+      },
+    });
+    expect(JSON.parse(getCall(fm, 2).body)).toEqual({ actionDigest });
   });
 
   it('agentMemory binds inspectable, correctable, exportable, and deletable memory to audited requests', async () => {

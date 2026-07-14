@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-22';
+export const TIXKIT_API_VERSION = '2026-07-23';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1635,6 +1635,20 @@ export type PreparedAgentAction = {
     readinessSnapshotSha256: string;
     blockingReasonCodes: string[];
   };
+};
+
+export type AgentApproval = {
+  id: string;
+  tenantId: string;
+  actionDigest: string;
+  planSha256?: string;
+  approverPrincipalId: string;
+  approverPermissionSnapshot: Array<'events:publish'>;
+  policyVersion: number;
+  approvedAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  consumedAt?: string;
 };
 
 export type AgentMemoryNamespaceInput =
@@ -4219,6 +4233,20 @@ class AgentActionResource {
 
   async get(actionId: string): Promise<PreparedAgentAction> {
     return this.client.request('GET', `/agent/actions/${actionId}`);
+  }
+
+  async approve(input: {
+    actionId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<AgentApproval> {
+    return this.client.request('POST', `/agent/actions/${input.actionId}/approvals`, {
+      body: { actionDigest: input.actionDigest },
+      idempotencyKey: input.idempotencyKey,
+      headers: {
+        'X-Tixkit-Confirmation': `approve:${input.actionId}:${input.actionDigest}`,
+      },
+    });
   }
 }
 
