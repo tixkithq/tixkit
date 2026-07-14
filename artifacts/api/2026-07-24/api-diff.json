@@ -1,0 +1,18 @@
+{
+  "from": "2026-07-23",
+  "to": "2026-07-24",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 1
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/actions/{actionId}/approvals/{approvalId}/revoke",
+      "message": "Operation was added."
+    }
+  ]
+}
