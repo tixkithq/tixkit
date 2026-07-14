@@ -1,0 +1,30 @@
+{
+  "from": "2026-07-22",
+  "to": "2026-07-23",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 3
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "security-relaxed",
+      "path": "GET /agent/actions/{actionId}",
+      "message": "Authentication alternatives or required scopes became less restrictive."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/actions/{actionId}/approvals",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentApproval",
+      "message": "A named schema was added."
+    }
+  ]
+}
