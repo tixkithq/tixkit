@@ -10,6 +10,15 @@ const signedWebhookSchemes = new Set([
   'TelnyxSignature',
 ]);
 const authenticatedSchemes = new Set(['ApiKey', 'BearerAuth', 'ScannerDeviceAuth']);
+const eventScopeGuards = new Set([
+  'ClerkAuthService.requireEventScope',
+  'loadCampaignProviderEventItems',
+  'loadAuthorizedCampaign',
+  'loadAuthorizedEvent',
+  'requireEventAccess',
+  'requireReportEventAccess',
+  'scopedEvent',
+]);
 const signedWebhookRejections: Readonly<Record<string, { code: string; status: number }>> = {
   EmailProviderSignature: { code: 'INVALID_SIGNATURE', status: 400 },
   StripeSignature: { code: 'WEBHOOK_SIGNATURE_INVALID', status: 400 },
@@ -106,6 +115,20 @@ describe('API route access inventory (C-123)', () => {
 
     expect(new Set(operationIds).size).toBe(operationIds.length);
     expect(new Set(routeKeys).size).toBe(routeKeys.length);
+  });
+
+  it('requires event-scope evidence on every authenticated event route', async () => {
+    const inventory = await buildRouteAccessInventory();
+    const missingEventScope = inventory.routes
+      .filter(
+        (route) =>
+          route.access === 'authenticated' &&
+          route.path.startsWith('/events/{eventId}') &&
+          !route.guardEvidence.some((guard) => eventScopeGuards.has(guard)),
+      )
+      .map((route) => `${route.method} ${route.path} (${route.operationId})`);
+
+    expect(missingEventScope).toEqual([]);
   });
 
   it('rejects missing credentials on every authenticated runtime route', async () => {

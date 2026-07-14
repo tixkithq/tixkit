@@ -35,15 +35,29 @@ const delegatedAuthorizationGuards = new Set([
   'assertPrincipalCanAuthorizeResourceOwnerOAuth',
   'authorizeScope',
   'createPrivacyRequest',
+  'loadCampaignProviderEventItems',
+  'loadAuthorizedCampaign',
   'loadAuthorizedDocument',
+  'loadAuthorizedEvent',
   'report',
   'requireContentListPermission',
   'requireContentPermission',
+  'requireEventAccess',
   'requireHistoricalAuthorizationPrincipal',
   'requireMigrationPermission',
   'requireOrganizationScopedPermission',
+  'requireReportEventAccess',
   'requireUploadArtifactAccess',
+  'scopedEvent',
   'scopedJob',
+]);
+const eventScopeGuards = new Set([
+  'loadCampaignProviderEventItems',
+  'loadAuthorizedCampaign',
+  'loadAuthorizedEvent',
+  'requireEventAccess',
+  'requireReportEventAccess',
+  'scopedEvent',
 ]);
 const callPattern = /\b((?:ClerkAuthService\.)?[A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
 
@@ -84,7 +98,12 @@ function guardEvidenceFromSource(source: string): string[] {
   );
 }
 
-function boundariesFor(access: RouteAccess, path: string, handlerSource: string): string[] {
+function boundariesFor(
+  access: RouteAccess,
+  path: string,
+  handlerSource: string,
+  guardEvidence: readonly string[],
+): string[] {
   const boundaries: string[] = [];
   if (access === 'authenticated') boundaries.push('tenant');
   for (const match of path.matchAll(/\{([^}]+)\}/g)) {
@@ -96,6 +115,9 @@ function boundariesFor(access: RouteAccess, path: string, handlerSource: string)
   if (/requireBrandScope|brandIds|brand_id/.test(handlerSource)) boundaries.push('brand');
   if (/requireEventScope|eventIds|event_id/.test(handlerSource)) boundaries.push('event');
   if (/requireResourceTenant|tenantId|tenant_id/.test(handlerSource)) boundaries.push('tenant');
+  if (guardEvidence.some((guard) => eventScopeGuards.has(guard))) {
+    boundaries.push('tenant', 'organization', 'brand', 'event');
+  }
   return sortedUnique(boundaries);
 }
 
@@ -125,7 +147,7 @@ export async function buildRouteAccessInventory(): Promise<RouteAccessInventory>
 
     routes.push({
       access: route.access,
-      boundaries: boundariesFor(route.access, path, route.handlerSource),
+      boundaries: boundariesFor(route.access, path, route.handlerSource, guardEvidence),
       credentialSchemes: sortedUnique(
         route.access === 'operational' && path === '/metrics'
           ? ['MetricsBearer']
