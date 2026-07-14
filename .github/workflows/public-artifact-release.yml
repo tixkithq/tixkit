@@ -40,6 +40,23 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft >/tmp/tixkit-release.json 2>/tmp/tixkit-release-error; then
             mkdir -p resumed-public-release
             gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir resumed-public-release
+            shopt -s nullglob
+            assets=(resumed-public-release/*)
+            if test "${#assets[@]}" -eq 0; then
+              test "$(jq -r .isDraft /tmp/tixkit-release.json)" = true
+              gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
+              echo "resume=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            signer="${GITHUB_REPOSITORY}/.github/workflows/public-artifact-release.yml"
+            for asset in "${assets[@]}"; do
+              gh attestation verify "$asset" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$signer" \
+                --source-ref "$GITHUB_REF" \
+                --source-digest "$GITHUB_SHA" \
+                --deny-self-hosted-runners
+            done
             classification="$(node scripts/validate-staged-public-release.mjs \
               --directory resumed-public-release --classify)"
             if test "$classification" = incomplete; then
@@ -53,15 +70,6 @@ jobs:
               --directory resumed-public-release \
               --source-commit "$GITHUB_SHA" \
               --release-version "${GITHUB_REF_NAME#v}"
-            signer="${GITHUB_REPOSITORY}/.github/workflows/public-artifact-release.yml"
-            for asset in resumed-public-release/*; do
-              gh attestation verify "$asset" \
-                --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "$signer" \
-                --source-ref "$GITHUB_REF" \
-                --source-digest "$GITHUB_SHA" \
-                --deny-self-hosted-runners
-            done
             jq -r '.[].reference' resumed-public-release/images.json | while read -r reference; do
               gh attestation verify "oci://${reference}" \
                 --repo "$GITHUB_REPOSITORY" \
@@ -273,6 +281,7 @@ jobs:
           subject-path: |
             public-release/CHECKSUMS.sha256
             public-release/images.json
+            public-release/contract-*.json
             public-release/npm-packages.spdx.json
             public-release/image-*.spdx.json
       - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0

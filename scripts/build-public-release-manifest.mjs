@@ -2,9 +2,17 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   jsonSchemaViolations,
@@ -12,6 +20,7 @@ import {
   validatePublicDistribution,
 } from './lib/public-distribution.mjs';
 import { packageContentDigest } from './lib/package-content-digest.mjs';
+import { assertSecureGitProvenanceRoot } from './lib/authoritative-public-repository.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -27,22 +36,26 @@ function digest(algorithm, content) {
     .digest(algorithm === 'sha512' ? 'base64' : 'hex');
 }
 
-function migrationRange() {
-  const migrations = execFileSync('git', ['ls-files', 'packages/db/src/migrations'], {
+function git(arguments_, options = {}) {
+  return execFileSync('/usr/bin/git', arguments_, {
     cwd: root,
-    encoding: 'utf8',
-  })
-    .split('\n')
-    .map((path) => basename(path).match(/^(\d{4}(?:_\d+)?)/u)?.[1])
+    ...options,
+    env: { ...process.env, ...options.env, GIT_NO_REPLACE_OBJECTS: '1' },
+  });
+}
+
+function migrationRange(sourceRoot) {
+  const migrations = readdirSync(resolve(sourceRoot, 'packages/db/src/migrations'))
+    .map((name) => name.match(/^(\d{4}(?:_\d+)?)/u)?.[1])
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
   return { minimum: migrations[0], maximum: migrations.at(-1) };
 }
 
-function contractPins(distribution) {
+export function publicContractPins(distribution, activeApiContract, sourceRoot = root) {
   const pins = [];
   for (const contractPath of distribution.release.contracts) {
-    const absolutePath = resolve(root, contractPath);
+    const absolutePath = resolve(sourceRoot, contractPath);
     if (statSync(absolutePath).isDirectory()) {
       const version = basename(contractPath);
       const checksums = readFileSync(resolve(absolutePath, 'CHECKSUMS.sha256'), 'utf8');
@@ -51,7 +64,11 @@ function contractPins(distribution) {
         .find((line) => line.endsWith('  openapi.json'))
         ?.split(/\s+/u)[0];
       if (!checksum) throw new Error(`${contractPath} has no OpenAPI checksum`);
-      pins.push({ name: 'openapi', version, sha256: checksum });
+      pins.push({
+        name: contractPath === activeApiContract ? 'openapi' : contractPath,
+        version,
+        sha256: checksum,
+      });
       continue;
     }
     const bytes = readFileSync(absolutePath);
@@ -62,6 +79,41 @@ function contractPins(distribution) {
     });
   }
   return pins.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function stagePublicContractArtifacts(
+  distribution,
+  manifest,
+  artifactDirectory,
+  sourceRoot = root,
+) {
+  const apiContract = distribution.release.contracts.find((path) =>
+    path.startsWith('artifacts/api/'),
+  );
+  const sources = new Map(
+    manifest.core.contracts.map((pin) => {
+      const contractPath = pin.name === 'openapi' ? apiContract : pin.name;
+      if (!contractPath || !distribution.release.contracts.includes(contractPath))
+        throw new Error(`public contract pin has no distribution source: ${pin.name}`);
+      const absolutePath = resolve(sourceRoot, contractPath);
+      const sourcePath = statSync(absolutePath).isDirectory()
+        ? resolve(absolutePath, 'openapi.json')
+        : absolutePath;
+      return [pin.sha256, sourcePath];
+    }),
+  );
+  mkdirSync(artifactDirectory, { recursive: true });
+  for (const [sha256, sourcePath] of sources) {
+    const bytes = readFileSync(sourcePath);
+    if (digest('sha256', bytes) !== sha256)
+      throw new Error(`public contract source does not match its pin: ${sourcePath}`);
+    const outputPath = resolve(artifactDirectory, `contract-${sha256}.json`);
+    const existing = statSync(outputPath, { throwIfNoEntry: false });
+    if (existing && !readFileSync(outputPath).equals(bytes))
+      throw new Error(`public contract asset path contains different bytes: ${outputPath}`);
+    writeFileSync(outputPath, bytes);
+  }
+  return [...sources.keys()].sort().map((sha256) => `contract-${sha256}.json`);
 }
 
 function packPublicPackages(distribution, sourceRoot, artifactDirectory) {
@@ -194,13 +246,12 @@ export function publicReleaseContextViolations(
 }
 
 export function assertPublicReleaseContext() {
+  assertSecureGitProvenanceRoot(root);
   const distribution = validatePublicDistribution(loadPublicDistribution(root), root);
-  const origin = execFileSync('git', ['remote', 'get-url', 'origin'], {
-    cwd: root,
+  const origin = git(['remote', 'get-url', 'origin'], {
     encoding: 'utf8',
   }).trim();
-  const status = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
-    cwd: root,
+  const status = git(['status', '--porcelain=v1', '--untracked-files=all'], {
     encoding: 'utf8',
   });
   const violations = publicReleaseContextViolations(distribution, {
@@ -213,21 +264,20 @@ export function assertPublicReleaseContext() {
   return distribution;
 }
 
-export function buildPublicReleaseManifest(images, releaseVersion, packageArtifactDirectory) {
-  const distribution = assertPublicReleaseContext();
+export function buildPublicReleaseManifestFromArchive({
+  distribution,
+  images,
+  releaseVersion,
+  sourceCommit,
+  sourceArchive,
+  packageArtifactDirectory,
+  contractArtifactDirectory,
+  install = true,
+}) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(releaseVersion))
     throw new Error('release version must be an exact semantic version');
   const imageViolations = publicImageViolations(images, distribution);
   if (imageViolations.length > 0) throw new Error(imageViolations.join('\n'));
-  const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: root,
-    encoding: 'utf8',
-  }).trim();
-  const sourceArchive = execFileSync('git', ['archive', '--format=tar', 'HEAD'], {
-    cwd: root,
-    encoding: 'buffer',
-    maxBuffer: 512 * 1024 * 1024,
-  });
   const apiContract = distribution.release.contracts.find((path) =>
     path.startsWith('artifacts/api/'),
   );
@@ -235,29 +285,71 @@ export function buildPublicReleaseManifest(images, releaseVersion, packageArtifa
   const agentContract = distribution.release.contracts.find((path) =>
     path.includes('agent-protocol'),
   );
-  const manifest = {
-    schemaVersion: 1,
+  const sourceRoot = mkdtempSync(join(tmpdir(), 'tixkit-public-release-source-'));
+  try {
+    execFileSync('/usr/bin/tar', ['-xf', '-', '-C', sourceRoot], {
+      input: sourceArchive,
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    if (install)
+      execFileSync('bun', ['install', '--frozen-lockfile'], {
+        cwd: sourceRoot,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        maxBuffer: 32 * 1024 * 1024,
+      });
+    const manifest = {
+      schemaVersion: 1,
+      releaseVersion,
+      core: {
+        sourceCommit,
+        sourceTreeSha256: digest('sha256', sourceArchive),
+        apiVersion: basename(apiContract),
+        migrationRange: migrationRange(sourceRoot),
+        agentProtocol: agentContract
+          ? {
+              status: 'supported',
+              version: basename(agentContract, '.json').replace(/^agent-protocol-/u, ''),
+            }
+          : { status: 'unavailable', version: '' },
+        packages: packPublicPackages(distribution, sourceRoot, packageArtifactDirectory),
+        images: [...images].sort((left, right) => left.name.localeCompare(right.name)),
+        contracts: publicContractPins(distribution, apiContract, sourceRoot),
+      },
+    };
+    const violations = publicReleaseManifestViolations(manifest);
+    if (violations.length > 0)
+      throw new Error(`generated public release manifest is invalid:\n${violations.join('\n')}`);
+    if (contractArtifactDirectory)
+      stagePublicContractArtifacts(distribution, manifest, contractArtifactDirectory, sourceRoot);
+    return manifest;
+  } finally {
+    rmSync(sourceRoot, { recursive: true, force: true });
+  }
+}
+
+export function buildPublicReleaseManifest(
+  images,
+  releaseVersion,
+  packageArtifactDirectory,
+  contractArtifactDirectory,
+) {
+  const distribution = assertPublicReleaseContext();
+  const sourceCommit = git(['rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+  }).trim();
+  const sourceArchive = git(['archive', '--format=tar', sourceCommit], {
+    encoding: 'buffer',
+    maxBuffer: 512 * 1024 * 1024,
+  });
+  return buildPublicReleaseManifestFromArchive({
+    distribution,
+    images,
     releaseVersion,
-    core: {
-      sourceCommit,
-      sourceTreeSha256: digest('sha256', sourceArchive),
-      apiVersion: basename(apiContract),
-      migrationRange: migrationRange(),
-      agentProtocol: agentContract
-        ? {
-            status: 'supported',
-            version: basename(agentContract, '.json').replace(/^agent-protocol-/u, ''),
-          }
-        : { status: 'unavailable', version: '' },
-      packages: packFromSourceArchive(distribution, sourceArchive, packageArtifactDirectory),
-      images: [...images].sort((left, right) => left.name.localeCompare(right.name)),
-      contracts: contractPins(distribution),
-    },
-  };
-  const violations = publicReleaseManifestViolations(manifest);
-  if (violations.length > 0)
-    throw new Error(`generated public release manifest is invalid:\n${violations.join('\n')}`);
-  return manifest;
+    sourceCommit,
+    sourceArchive,
+    packageArtifactDirectory,
+    contractArtifactDirectory,
+  });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
@@ -273,7 +365,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const releaseVersion = process.argv[releaseVersionIndex + 1];
   if (!releaseVersion) throw new Error('--release-version is required');
   const images = JSON.parse(readFileSync(imagesPath, 'utf8'));
-  const manifest = buildPublicReleaseManifest(images, releaseVersion, packageArtifactDirectory);
+  const manifest = buildPublicReleaseManifest(
+    images,
+    releaseVersion,
+    packageArtifactDirectory,
+    dirname(outputPath),
+  );
   writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
   process.stdout.write(`Built public release manifest ${outputPath}.\n`);
 }

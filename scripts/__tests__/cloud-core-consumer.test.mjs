@@ -22,10 +22,13 @@ import { dirname, join, relative, resolve } from 'node:path';
 import test, { after } from 'node:test';
 import {
   assertPublicReleaseContext,
+  buildPublicReleaseManifestFromArchive,
   packFromSourceArchive,
+  publicContractPins,
   publicImageViolations,
   publicReleaseContextViolations,
   publicReleaseManifestViolations,
+  stagePublicContractArtifacts,
 } from '../build-public-release-manifest.mjs';
 import {
   cloudRepositoryReleaseViolations,
@@ -39,7 +42,11 @@ import {
   stagePublicGithubRelease,
 } from '../publish-public-github-release.mjs';
 import { verifyCloudCoreInstall } from '../verify-cloud-core-install.mjs';
-import { classifyStagedPublicRelease } from '../validate-staged-public-release.mjs';
+import {
+  classifyStagedPublicRelease,
+  inspectStagedPackageArchive,
+  validateStagedPublicRelease,
+} from '../validate-staged-public-release.mjs';
 import { SDK_API_VERSION } from '../lib/sdk-parity.mjs';
 import { directoryContentDigest, packageContentDigest } from '../lib/package-content-digest.mjs';
 
@@ -664,6 +671,34 @@ test('public image contract rejects a self-consistent digest in a foreign regist
   );
 });
 
+test('public contract pins distinguish the active OpenAPI from historical releases', () => {
+  const pins = publicContractPins(distribution, activeApiContract);
+  const activePins = pins.filter(({ name }) => name === 'openapi');
+  assert.deepEqual(
+    activePins.map(({ version }) => version),
+    [activeApiVersion],
+  );
+  for (const contract of distribution.release.contracts.filter(
+    (path) => path.startsWith('artifacts/api/') && path !== activeApiContract,
+  )) {
+    assert.ok(
+      pins.some(({ name, version }) => name === contract && version === contract.split('/').at(-1)),
+      contract,
+    );
+  }
+});
+
+test('Cloud accepts the release builder contract inventory without fixture filtering', () => {
+  const manifest = compatibilityManifest();
+  manifest.core.contracts = publicContractPins(distribution, activeApiContract);
+  const cloudRoot = cloudFixture(manifest);
+  try {
+    assert.deepEqual(validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot), []);
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
 test('public packages are packed from the Git archive, excluding stale working outputs', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-public-archive-pack-'));
   const source = resolve(directory, 'source');
@@ -679,6 +714,17 @@ test('public packages are packed from the Git archive, excluding stale working o
       resolve(source, 'packages/example/dist/index.js'),
       'export const clean = true;\n',
     );
+    mkdirSync(resolve(source, 'packages/db/src/migrations'), { recursive: true });
+    writeFileSync(resolve(source, 'packages/db/src/migrations/0001_initial.ts'), 'export {};\n');
+    writeFileSync(resolve(source, 'packages/db/src/migrations/0010_2_current.ts'), 'export {};\n');
+    const apiContract = 'artifacts/api/2026-07-18';
+    mkdirSync(resolve(source, apiContract), { recursive: true });
+    const openApiBytes = Buffer.from('{"info":{"version":"2026-07-18"}}\n');
+    writeFileSync(resolve(source, apiContract, 'openapi.json'), openApiBytes);
+    writeFileSync(
+      resolve(source, apiContract, 'CHECKSUMS.sha256'),
+      `${createHash('sha256').update(openApiBytes).digest('hex')}  openapi.json\n`,
+    );
     const archive = execFileSync('tar', ['-cf', '-', '.'], { cwd: source });
     writeFileSync(resolve(source, 'packages/example/dist/stale.js'), 'throw new Error("stale");\n');
     const packages = packFromSourceArchive(
@@ -688,6 +734,45 @@ test('public packages are packed from the Git archive, excluding stale working o
       archive,
       artifacts,
       { install: false },
+    );
+    const candidateDirectory = resolve(directory, 'candidate');
+    const packageArtifacts = resolve(candidateDirectory, 'packages');
+    const syntheticDistribution = {
+      authority: { publicRepository: 'tixkit/tixkit' },
+      release: {
+        packages: [{ path: 'packages/example', ecosystem: 'npm' }],
+        images: ['admin', 'api', 'checkout', 'worker'].map((name) => ({ name })),
+        contracts: [apiContract],
+      },
+    };
+    const syntheticImages = syntheticDistribution.release.images.map(({ name }, index) => {
+      const imageDigest = `sha256:${String(index + 1).repeat(64)}`;
+      return {
+        name,
+        digest: imageDigest,
+        reference: `ghcr.io/tixkit/tixkit-${name}@${imageDigest}`,
+      };
+    });
+    const assembled = buildPublicReleaseManifestFromArchive({
+      distribution: syntheticDistribution,
+      images: syntheticImages,
+      releaseVersion: '1.0.0',
+      sourceCommit: 'a'.repeat(40),
+      sourceArchive: archive,
+      packageArtifactDirectory: packageArtifacts,
+      contractArtifactDirectory: candidateDirectory,
+      install: false,
+    });
+    assert.deepEqual(assembled.core.migrationRange, { minimum: '0001', maximum: '0010_2' });
+    assert.deepEqual(
+      assembled.core.contracts.map(({ name }) => name),
+      ['openapi'],
+    );
+    assert.equal(
+      readFileSync(
+        resolve(candidateDirectory, `contract-${assembled.core.contracts[0].sha256}.json`),
+      ).toString(),
+      openApiBytes.toString(),
     );
     const tarball = resolve(
       artifacts,
@@ -699,6 +784,17 @@ test('public packages are packed from the Git archive, excluding stale working o
     assert.match(entries, /package\/dist\/index\.js/u);
     assert.doesNotMatch(entries, /stale\.js/u);
     const integrity = `sha512-${createHash('sha512').update(readFileSync(tarball)).digest('base64')}`;
+    assert.throws(
+      () => inspectStagedPackageArchive(tarball, { expandedBytes: 1 }),
+      /expanded byte limit/u,
+    );
+    const unsafePackage = resolve(directory, 'unsafe-package');
+    mkdirSync(resolve(unsafePackage, 'package'), { recursive: true });
+    writeFileSync(resolve(unsafePackage, 'package/target'), 'target\n');
+    symlinkSync('target', resolve(unsafePackage, 'package/link'));
+    const unsafeTarball = resolve(directory, 'unsafe.tgz');
+    execFileSync('/usr/bin/tar', ['-czf', unsafeTarball, '-C', unsafePackage, 'package']);
+    assert.throws(() => inspectStagedPackageArchive(unsafeTarball), /link or unsupported entry/u);
     assert.match(packages[0].contentSha256, /^[a-f0-9]{64}$/u);
     assert.equal(packages[0].fileCount, 2);
     const consumer = resolve(directory, 'consumer');
@@ -744,6 +840,73 @@ test('public packages are packed from the Git archive, excluding stale working o
     const cloudManifest = compatibilityManifest();
     cloudManifest.core.packages = packages;
     bindCloudInstallations(cloudManifest, consumer);
+    const stagedManifest = publicRelease(cloudManifest);
+    writeFileSync(
+      resolve(artifacts, 'public-release-manifest.json'),
+      `${JSON.stringify(stagedManifest)}\n`,
+    );
+    writeFileSync(
+      resolve(artifacts, 'images.json'),
+      `${JSON.stringify(stagedManifest.core.images)}\n`,
+    );
+    const sbom = `${JSON.stringify({ spdxVersion: 'SPDX-2.3', packages: [{}] })}\n`;
+    for (const name of [
+      'npm-packages.spdx.json',
+      'image-admin.spdx.json',
+      'image-api.spdx.json',
+      'image-checkout.spdx.json',
+      'image-worker.spdx.json',
+    ])
+      writeFileSync(resolve(artifacts, name), sbom);
+    const stagedContracts = stagePublicContractArtifacts(distribution, stagedManifest, artifacts);
+    const writeStagedChecksums = () =>
+      writeFileSync(
+        resolve(artifacts, 'CHECKSUMS.sha256'),
+        `${readdirSync(artifacts)
+          .filter((name) => name !== 'CHECKSUMS.sha256')
+          .sort()
+          .map(
+            (name) =>
+              `${createHash('sha256')
+                .update(readFileSync(resolve(artifacts, name)))
+                .digest('hex')}  ${name}`,
+          )
+          .join('\n')}\n`,
+      );
+    writeStagedChecksums();
+    assert.deepEqual(
+      validateStagedPublicRelease(artifacts, stagedManifest.core.sourceCommit, '0.1.0'),
+      [],
+    );
+    const originalContentSha256 = stagedManifest.core.packages[0].contentSha256;
+    stagedManifest.core.packages[0].contentSha256 = 'f'.repeat(64);
+    writeFileSync(
+      resolve(artifacts, 'public-release-manifest.json'),
+      `${JSON.stringify(stagedManifest)}\n`,
+    );
+    writeStagedChecksums();
+    assert.ok(
+      validateStagedPublicRelease(artifacts, stagedManifest.core.sourceCommit, '0.1.0').includes(
+        'staged package content mismatch: @tixkit/example@1.0.0',
+      ),
+    );
+    stagedManifest.core.packages[0].contentSha256 = originalContentSha256;
+    writeFileSync(
+      resolve(artifacts, 'public-release-manifest.json'),
+      `${JSON.stringify(stagedManifest)}\n`,
+    );
+    writeStagedChecksums();
+    const contractPath = resolve(artifacts, stagedContracts[0]);
+    const contractBytes = readFileSync(contractPath);
+    writeFileSync(contractPath, Buffer.concat([contractBytes, Buffer.from('\n')]));
+    writeStagedChecksums();
+    assert.ok(
+      validateStagedPublicRelease(artifacts, stagedManifest.core.sourceCommit, '0.1.0').some(
+        (violation) => violation.startsWith('staged contract checksum mismatch:'),
+      ),
+    );
+    writeFileSync(contractPath, contractBytes);
+    writeStagedChecksums();
     const { releasePath, bin } = attestedReleaseFixture(consumer, publicRelease(cloudManifest));
     const verifiedCommand = runVerifiedCommand({
       manifest: cloudManifest,
@@ -833,11 +996,16 @@ test('release workflow resumes staged bytes instead of rebuilding image candidat
     'utf8',
   );
   assert.match(workflow, /validate-staged-public-release\.mjs/u);
+  assert.ok(
+    workflow.indexOf('gh attestation verify "$asset"') <
+      workflow.indexOf('validate-staged-public-release.mjs'),
+  );
   assert.match(workflow, /if: needs\.validate\.outputs\.resume != 'true'/u);
   assert.match(workflow, /name: resumed-public-release/u);
   assert.match(workflow, /image-\{admin,api,checkout,worker\}\.json/u);
   assert.match(workflow, /validate:public-repository -- --repository \./u);
-  assert.match(workflow, /for asset in resumed-public-release\/\*/u);
+  assert.match(workflow, /assets=\(resumed-public-release\/\*\)/u);
+  assert.match(workflow, /for asset in "\$\{assets\[@\]\}"/u);
   assert.match(workflow, /gh attestation verify "oci:\/\/\$\{reference\}"/u);
   assert.ok(
     workflow.indexOf('subject-path: public-release/public-release-manifest.json') <

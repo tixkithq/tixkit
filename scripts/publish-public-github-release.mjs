@@ -24,6 +24,7 @@ function releaseAssets(directory) {
         name === 'images.json' ||
         name === 'CHECKSUMS.sha256' ||
         name.endsWith('.spdx.json') ||
+        /^contract-[a-f0-9]{64}\.json$/u.test(name) ||
         name.endsWith('.tgz')
       )
         assets.push(candidate);
