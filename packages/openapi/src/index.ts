@@ -10456,7 +10456,7 @@ const rawOpenApiSpec = {
               'application/json': { schema: { $ref: '#/components/schemas/PreparedAgentAction' } },
             },
           },
-          '401': { description: 'Valid Agent OAuth authentication required' },
+          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
           '403': { description: 'Human sponsor lacks current events.write authority' },
           '404': { description: 'Action not found for this agent or sponsor' },
         },

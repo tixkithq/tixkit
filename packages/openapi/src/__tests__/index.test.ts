@@ -86,6 +86,7 @@ describe('openApiSpec', () => {
     const approve = openApiSpec.paths['/agent/actions/{actionId}/approvals'].post;
     expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
     expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(get.responses['401'].description).toMatch(/Agent OAuth or human bearer/u);
     expect(approve.security).toEqual([{ BearerAuth: [] }]);
     expect(approve.security).not.toContainEqual({ AgentOAuth: ['agent.invoke'] });
     expect(prepare.security).not.toContainEqual({ BearerAuth: [] });

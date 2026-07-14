@@ -11780,7 +11780,7 @@ export const apiReferenceOperations = [
         }
       },
       "401": {
-        "description": "Valid Agent OAuth authentication required"
+        "description": "Valid Agent OAuth or human bearer authentication required"
       },
       "403": {
         "description": "Human sponsor lacks current events.write authority"

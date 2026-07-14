@@ -280,15 +280,18 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
           path: operationPath,
           message: 'Stable operationId changed.',
         });
-      if (
-        stable(previousOperation.security) !== stable(currentOperation.security) &&
-        !preservesSecurity(previousOperation.security, currentOperation.security)
-      )
+      if (stable(previousOperation.security) !== stable(currentOperation.security))
         changes.push({
-          severity: 'breaking',
-          category: 'security-changed',
+          severity: preservesSecurity(previousOperation.security, currentOperation.security)
+            ? 'compatible'
+            : 'breaking',
+          category: preservesSecurity(previousOperation.security, currentOperation.security)
+            ? 'security-relaxed'
+            : 'security-changed',
           path: operationPath,
-          message: 'Authentication schemes or scopes changed.',
+          message: preservesSecurity(previousOperation.security, currentOperation.security)
+            ? 'Authentication alternatives or required scopes became less restrictive.'
+            : 'Authentication schemes or scopes changed.',
         });
       const previousBehaviorChange = previousOperation['x-compatibility-breaking-change'];
       const currentBehaviorChange = currentOperation['x-compatibility-breaking-change'];

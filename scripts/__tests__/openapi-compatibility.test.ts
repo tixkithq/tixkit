@@ -57,8 +57,10 @@ describe('OpenAPI compatibility', () => {
       },
     };
 
-    expect(compareOpenApi(base as never, current as never)).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ category: 'security-changed' })]),
+    expect(compareOpenApi(base as never, current as never)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: 'security-relaxed', severity: 'compatible' }),
+      ]),
     );
   });
 
@@ -80,8 +82,10 @@ describe('OpenAPI compatibility', () => {
       },
     };
 
-    expect(compareOpenApi(base as never, lessRestrictive as never)).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ category: 'security-changed' })]),
+    expect(compareOpenApi(base as never, lessRestrictive as never)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: 'security-relaxed', severity: 'compatible' }),
+      ]),
     );
     expect(compareOpenApi(base as never, moreRestrictive as never)).toEqual(
       expect.arrayContaining([
