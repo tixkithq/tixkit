@@ -7,6 +7,7 @@ source "$(dirname "$0")/lib/dr-common.sh"
 : "${DR_RESUME_COMMAND:?DR_RESUME_COMMAND must be an executable that safely resumes writes}"
 : "${DR_TEMPORAL_CHECKPOINT_COMMAND:?DR_TEMPORAL_CHECKPOINT_COMMAND must create immutable checkpoint metadata}"
 : "${DR_TEMPORAL_CHECKPOINT_VERIFY_COMMAND:?DR_TEMPORAL_CHECKPOINT_VERIFY_COMMAND must independently authenticate checkpoint metadata}"
+: "${DR_BACKUP_CONSISTENCY_VERIFY_COMMAND:?DR_BACKUP_CONSISTENCY_VERIFY_COMMAND must prove database, object, and workflow state remained at the signed recovery point}"
 : "${DR_BACKUP_PUBLISH_COMMAND:?DR_BACKUP_PUBLISH_COMMAND must encrypt and publish the bundle}"
 : "${DR_BACKUP_RETRIEVE_COMMAND:?DR_BACKUP_RETRIEVE_COMMAND must retrieve and decrypt the published bundle}"
 : "${DR_BACKUP_RECEIPT_VERIFY_COMMAND:?DR_BACKUP_RECEIPT_VERIFY_COMMAND must cryptographically verify the provider receipt}"
@@ -15,6 +16,7 @@ test -x "${DR_QUIESCE_COMMAND}" || { echo 'DR_QUIESCE_COMMAND is not executable'
 test -x "${DR_RESUME_COMMAND}" || { echo 'DR_RESUME_COMMAND is not executable' >&2; exit 1; }
 test -x "${DR_TEMPORAL_CHECKPOINT_COMMAND}" || { echo 'DR_TEMPORAL_CHECKPOINT_COMMAND is not executable' >&2; exit 1; }
 test -x "${DR_TEMPORAL_CHECKPOINT_VERIFY_COMMAND}" || { echo 'DR_TEMPORAL_CHECKPOINT_VERIFY_COMMAND is not executable' >&2; exit 1; }
+test -x "${DR_BACKUP_CONSISTENCY_VERIFY_COMMAND}" || { echo 'DR_BACKUP_CONSISTENCY_VERIFY_COMMAND is not executable' >&2; exit 1; }
 test -x "${DR_BACKUP_PUBLISH_COMMAND}" || { echo 'DR_BACKUP_PUBLISH_COMMAND is not executable' >&2; exit 1; }
 test -x "${DR_BACKUP_RETRIEVE_COMMAND}" || { echo 'DR_BACKUP_RETRIEVE_COMMAND is not executable' >&2; exit 1; }
 test -x "${DR_BACKUP_RECEIPT_VERIFY_COMMAND}" || { echo 'DR_BACKUP_RECEIPT_VERIFY_COMMAND is not executable' >&2; exit 1; }
@@ -60,7 +62,7 @@ dr_run_isolated_hook "${DR_QUIESCE_COMMAND}"
 export DR_RECOVERY_POINT_AT="${recovery_point_at}"
 export BACKUP_TIMESTAMP="${timestamp}"
 export DR_TEMPORAL_CHECKPOINT_FILE="${workdir}/temporal-checkpoint.json"
-dr_run_isolated_hook "${DR_TEMPORAL_CHECKPOINT_COMMAND}"
+DR_HOOK_TEMPORAL_CHECKPOINT=1 dr_run_isolated_hook "${DR_TEMPORAL_CHECKPOINT_COMMAND}"
 CHECKPOINT_FILE="${DR_TEMPORAL_CHECKPOINT_FILE}" RECOVERY_POINT_AT="${recovery_point_at}" node <<'NODE'
 const { readFileSync } = require('node:fs');
 const checkpoint = JSON.parse(readFileSync(process.env.CHECKPOINT_FILE, 'utf8'));
@@ -69,7 +71,7 @@ if (!checkpoint.immutableId || !checkpoint.namespace || checkpoint.recoveryPoint
 }
 NODE
 checkpoint_sha256="$(dr_sha256 "${DR_TEMPORAL_CHECKPOINT_FILE}")"
-dr_run_isolated_hook "${DR_TEMPORAL_CHECKPOINT_VERIFY_COMMAND}"
+DR_HOOK_TEMPORAL_CHECKPOINT=1 dr_run_isolated_hook "${DR_TEMPORAL_CHECKPOINT_VERIFY_COMMAND}"
 test "$(dr_sha256 "${DR_TEMPORAL_CHECKPOINT_FILE}")" = "${checkpoint_sha256}" || {
   echo 'Temporal checkpoint evidence changed during independent verification' >&2
   exit 1
@@ -93,6 +95,24 @@ case "${DB_DRIVER}" in
 esac
 DR_PRODUCTION_BUNDLE=1 BACKUP_DIR="${workdir}" "$(dirname "$0")/backup-object-storage.sh" >/dev/null
 printf '%s\n' 'Redis is reconstructed from the application database and durable Temporal state; Redis is not a recovery source.' >"${workdir}/redis-recovery-boundary.txt"
+
+consistency_verifier_sha256="$(dr_sha256 "${DR_BACKUP_CONSISTENCY_VERIFY_COMMAND}")"
+case "${DB_DRIVER}" in
+  postgres)
+    DR_HOOK_DATABASE_URL="${DATABASE_URL}" DR_HOOK_S3=1 DR_HOOK_TEMPORAL_CHECKPOINT=1 dr_run_isolated_hook "${DR_BACKUP_CONSISTENCY_VERIFY_COMMAND}"
+    ;;
+  mysql)
+    DR_HOOK_DATABASE_URL_MYSQL="${DATABASE_URL_MYSQL}" DR_HOOK_S3=1 DR_HOOK_TEMPORAL_CHECKPOINT=1 dr_run_isolated_hook "${DR_BACKUP_CONSISTENCY_VERIFY_COMMAND}"
+    ;;
+esac
+test "$(dr_sha256 "${DR_BACKUP_CONSISTENCY_VERIFY_COMMAND}")" = "${consistency_verifier_sha256}" || {
+  echo 'Production backup consistency verifier changed during execution' >&2
+  exit 1
+}
+test "$(dr_sha256 "${DR_TEMPORAL_CHECKPOINT_FILE}")" = "${checkpoint_sha256}" || {
+  echo 'Temporal checkpoint evidence changed during aggregate consistency verification' >&2
+  exit 1
+}
 
 dr_run_isolated_hook "${DR_RESUME_COMMAND}"
 resumed=1

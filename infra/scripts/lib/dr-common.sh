@@ -8,6 +8,10 @@ dr_run_isolated_hook() {
   local allow_mysql_restore_lease="${DR_HOOK_MYSQL_RESTORE_LEASE+x}"
   local allow_object_ownership="${DR_HOOK_OBJECT_OWNERSHIP+x}"
   local allow_object_reconciliation="${DR_HOOK_OBJECT_RECONCILIATION+x}"
+  local allow_temporal_target_receipt="${DR_HOOK_TEMPORAL_TARGET_RECEIPT+x}"
+  local allow_temporal_checkpoint="${DR_HOOK_TEMPORAL_CHECKPOINT+x}"
+  local allow_production_restore_lease="${DR_HOOK_PRODUCTION_RESTORE_LEASE+x}"
+  local allow_production_completed_claim="${DR_HOOK_PRODUCTION_COMPLETED_CLAIM+x}"
   local database_url="${DR_HOOK_DATABASE_URL:-}"
   local database_url_mysql="${DR_HOOK_DATABASE_URL_MYSQL:-}"
   local s3_endpoint="${S3_ENDPOINT:-}"
@@ -32,6 +36,7 @@ dr_run_isolated_hook() {
   local retrieve_checksum_output="${DR_RETRIEVE_CHECKSUM_OUTPUT:-}"
   local temporal_restore_evidence="${DR_TEMPORAL_RESTORE_EVIDENCE:-}"
   local temporal_evidence_file="${DR_TEMPORAL_EVIDENCE_FILE:-}"
+  local temporal_target_receipt="${DR_TEMPORAL_TARGET_RECEIPT:-}"
   local object_metadata_file="${DR_OBJECT_METADATA_FILE:-}"
   local object_inventory_file="${DR_OBJECT_INVENTORY_FILE:-}"
   local object_transfer_directory="${DR_OBJECT_TRANSFER_DIRECTORY:-}"
@@ -48,13 +53,33 @@ dr_run_isolated_hook() {
   local mysql_restore_artifact_sha256="${DR_MYSQL_RESTORE_ARTIFACT_SHA256:-}"
   local mysql_restore_lease_file="${DR_MYSQL_RESTORE_LEASE_FILE:-}"
   local mysql_restore_target_id="${DR_MYSQL_RESTORE_TARGET_ID:-}"
+  local production_target_receipt="${DR_PRODUCTION_TARGET_RECEIPT:-}"
+  local production_restore_attempt_id="${DR_PRODUCTION_RESTORE_ATTEMPT_ID:-}"
+  local production_bundle_sha256="${DR_PRODUCTION_BUNDLE_SHA256:-}"
+  local production_restore_lease_file="${DR_PRODUCTION_RESTORE_LEASE_FILE:-}"
+  local production_lease_holder_pid="${DR_PRODUCTION_LEASE_HOLDER_PID:-}"
+  local production_fencing_generation="${DR_PRODUCTION_FENCING_GENERATION:-}"
+  local production_target_id="${DR_PRODUCTION_TARGET_ID:-}"
+  local production_database_target_id="${DR_DATABASE_TARGET_ID:-}"
+  local production_object_target_id="${DR_OBJECT_TARGET_ID:-}"
+  local production_temporal_immutable_id="${DR_PRODUCTION_TEMPORAL_IMMUTABLE_ID:-}"
+  local production_recovery_point_at="${DR_PRODUCTION_RECOVERY_POINT_AT:-}"
+  local production_target_receipt_sha256="${DR_PRODUCTION_TARGET_RECEIPT_SHA256:-}"
+  local production_publication_receipt_sha256="${DR_PRODUCTION_PUBLICATION_RECEIPT_SHA256:-}"
+  local production_source_release="${DR_PRODUCTION_SOURCE_RELEASE:-}"
+  local production_target_release="${DR_TARGET_RELEASE:-}"
+  local production_restore_evidence_file="${DR_PRODUCTION_RESTORE_EVIDENCE_FILE:-}"
+  local production_restore_evidence_sha256="${DR_PRODUCTION_RESTORE_EVIDENCE_SHA256:-}"
+  local production_target_claim_receipt="${DR_PRODUCTION_TARGET_CLAIM_RECEIPT:-}"
   (
     while IFS= read -r variable; do unset "${variable}"; done < <(compgen -e)
     export PATH="${hook_path}" HOME="${hook_home}" TMPDIR="${hook_tmpdir}"
     export LANG=C LC_ALL=C
     test -z "${hook_context_file}" || export DR_HOOK_CONTEXT_FILE="${hook_context_file}"
     test -z "${recovery_point_at}" || export DR_RECOVERY_POINT_AT="${recovery_point_at}"
-    test -z "${temporal_checkpoint_file}" || export DR_TEMPORAL_CHECKPOINT_FILE="${temporal_checkpoint_file}"
+    if test -n "${allow_temporal_checkpoint}"; then
+      export DR_TEMPORAL_CHECKPOINT_FILE="${temporal_checkpoint_file}"
+    fi
     test -z "${publish_artifact}" || export DR_PUBLISH_ARTIFACT="${publish_artifact}"
     test -z "${publish_manifest}" || export DR_PUBLISH_MANIFEST="${publish_manifest}"
     test -z "${publish_checksum}" || export DR_PUBLISH_CHECKSUM="${publish_checksum}"
@@ -89,6 +114,35 @@ dr_run_isolated_hook() {
     fi
     if test -n "${allow_object_reconciliation}"; then
       export DR_OBJECT_EXPECTED_INVENTORY_SHA256="${object_expected_inventory_sha256}"
+    fi
+    if test -n "${allow_temporal_target_receipt}"; then
+      export DR_TEMPORAL_TARGET_RECEIPT="${temporal_target_receipt}"
+    fi
+    if test -n "${allow_production_restore_lease}"; then
+      export DR_PRODUCTION_TARGET_RECEIPT="${production_target_receipt}"
+      export DR_PRODUCTION_RESTORE_ATTEMPT_ID="${production_restore_attempt_id}"
+      export DR_PRODUCTION_BUNDLE_SHA256="${production_bundle_sha256}"
+      export DR_PRODUCTION_RESTORE_LEASE_FILE="${production_restore_lease_file}"
+      export DR_PRODUCTION_LEASE_HOLDER_PID="${production_lease_holder_pid}"
+      export DR_PRODUCTION_FENCING_GENERATION="${production_fencing_generation}"
+      export DR_PRODUCTION_TARGET_ID="${production_target_id}"
+      export DR_DATABASE_TARGET_ID="${production_database_target_id}"
+      export DR_OBJECT_TARGET_ID="${production_object_target_id}"
+      export DR_PRODUCTION_TEMPORAL_IMMUTABLE_ID="${production_temporal_immutable_id}"
+      export DR_PRODUCTION_RECOVERY_POINT_AT="${production_recovery_point_at}"
+      export DR_PRODUCTION_TARGET_RECEIPT_SHA256="${production_target_receipt_sha256}"
+      export DR_PRODUCTION_PUBLICATION_RECEIPT_SHA256="${production_publication_receipt_sha256}"
+      export DR_PRODUCTION_SOURCE_RELEASE="${production_source_release}"
+      export DR_TARGET_RELEASE="${production_target_release}"
+      test -z "${production_restore_evidence_file}" || export DR_PRODUCTION_RESTORE_EVIDENCE_FILE="${production_restore_evidence_file}"
+      test -z "${production_restore_evidence_sha256}" || export DR_PRODUCTION_RESTORE_EVIDENCE_SHA256="${production_restore_evidence_sha256}"
+    fi
+    if test -n "${allow_production_completed_claim}"; then
+      export DR_PRODUCTION_TARGET_CLAIM_RECEIPT="${production_target_claim_receipt}"
+      export DR_PRODUCTION_RESTORE_EVIDENCE_FILE="${production_restore_evidence_file}"
+      export DR_PRODUCTION_RESTORE_EVIDENCE_SHA256="${production_restore_evidence_sha256}"
+      export DR_PRODUCTION_TARGET_ID="${production_target_id}"
+      export DR_PRODUCTION_BUNDLE_SHA256="${production_bundle_sha256}"
     fi
     if test -n "${allow_database_url}"; then
       export DATABASE_URL="${database_url}"
@@ -543,7 +597,13 @@ dr_record_restore_evidence() {
     TARGET_RELEASE="${DR_TARGET_RELEASE}" \
     ADAPTER_COMMANDS="${DR_RESTORE_ADAPTER_COMMANDS:-}" \
     ADAPTER_EVIDENCE_FILES="${DR_RESTORE_ADAPTER_EVIDENCE_FILES:-}" \
-    TEMPORAL_EVIDENCE_SHA256="${DR_TEMPORAL_EVIDENCE_SHA256:-}" node <<'NODE'
+    TEMPORAL_EVIDENCE_SHA256="${DR_TEMPORAL_EVIDENCE_SHA256:-}" \
+    PRODUCTION_PUBLICATION_RECEIPT="${DR_PRODUCTION_PUBLICATION_RECEIPT:-}" \
+    PRODUCTION_PUBLICATION_VERIFIER_SHA256="${DR_PRODUCTION_PUBLICATION_VERIFIER_SHA256:-}" \
+    PRODUCTION_LEASE_VERIFICATION_FILE="${DR_PRODUCTION_LEASE_VERIFICATION_FILE:-}" \
+    PRODUCTION_TARGET_RECEIPT_SHA256="${DR_PRODUCTION_TARGET_RECEIPT_SHA256:-}" \
+    PRODUCTION_PUBLICATION_RECEIPT_SHA256="${DR_PRODUCTION_PUBLICATION_RECEIPT_SHA256:-}" \
+    PRODUCTION_TEMPORAL_IMMUTABLE_ID="${DR_PRODUCTION_TEMPORAL_IMMUTABLE_ID:-}" node <<'NODE'
 const { createHash, createHmac } = require('node:crypto');
 const { lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } = require('node:fs');
 const { dirname } = require('node:path');
@@ -608,6 +668,81 @@ const componentEvidenceSha256 = componentFiles.map((file) => {
   }
   return { file: name, sha256 };
 });
+let publication;
+let outerTargetClaim;
+if (process.env.KIND === 'production-bundle') {
+  if (!process.env.PRODUCTION_PUBLICATION_RECEIPT || !process.env.PRODUCTION_LEASE_VERIFICATION_FILE) {
+    throw new Error('Production aggregate evidence requires publication and outer target claim evidence');
+  }
+  const publicationReceipt = JSON.parse(readFileSync(process.env.PRODUCTION_PUBLICATION_RECEIPT, 'utf8'));
+  const publicationReceiptSha256 = createHash('sha256')
+    .update(readFileSync(process.env.PRODUCTION_PUBLICATION_RECEIPT))
+    .digest('hex');
+  if (
+    publicationReceipt.schemaVersion !== 1 ||
+    publicationReceipt.immutable !== true ||
+    publicationReceipt.plaintextSha256 !== manifest.sha256 ||
+    publicationReceiptSha256 !== process.env.PRODUCTION_PUBLICATION_RECEIPT_SHA256 ||
+    !publicationReceipt.storageId ||
+    !publicationReceipt.objectVersionId ||
+    !/^[a-f0-9]{64}$/.test(publicationReceipt.ciphertextSha256 || '') ||
+    publicationReceipt.ciphertextSha256 === publicationReceipt.plaintextSha256 ||
+    !Number.isFinite(Date.parse(publicationReceipt.retentionUntil)) ||
+    Date.parse(publicationReceipt.retentionUntil) <= Date.now()
+  ) {
+    throw new Error('Production publication receipt does not bind the restored bundle');
+  }
+  if (!/^[a-f0-9]{64}$/.test(process.env.PRODUCTION_PUBLICATION_VERIFIER_SHA256 || '')) {
+    throw new Error('Production publication verifier hash is missing');
+  }
+  publication = {
+    receiptSha256: publicationReceiptSha256,
+    verifierSha256: process.env.PRODUCTION_PUBLICATION_VERIFIER_SHA256,
+    storageId: publicationReceipt.storageId,
+    objectVersionId: publicationReceipt.objectVersionId,
+    plaintextSha256: publicationReceipt.plaintextSha256,
+    ciphertextSha256: publicationReceipt.ciphertextSha256,
+    retentionUntil: new Date(publicationReceipt.retentionUntil).toISOString(),
+  };
+
+  const leaseFile = process.env.PRODUCTION_LEASE_VERIFICATION_FILE;
+  const leaseContents = readFileSync(leaseFile);
+  const lease = JSON.parse(leaseContents);
+  if (
+    lease.schemaVersion !== 1 || lease.active !== true || lease.renewable !== true ||
+    lease.bundleSha256 !== manifest.sha256 ||
+    lease.publicationReceiptSha256 !== publicationReceiptSha256 ||
+    lease.targetReceiptSha256 !== process.env.PRODUCTION_TARGET_RECEIPT_SHA256 ||
+    lease.productionTargetId !== process.env.DR_RESTORE_TARGET_ID ||
+    lease.databaseTargetId !== process.env.EXPECTED_DATABASE_TARGET_ID ||
+    lease.objectTargetId !== process.env.EXPECTED_OBJECT_TARGET_ID ||
+    lease.temporalImmutableId !== process.env.PRODUCTION_TEMPORAL_IMMUTABLE_ID ||
+    lease.recoveryPointAt !== manifest.recoveryPointAt ||
+    lease.sourceRelease !== manifest.sourceRelease ||
+    lease.targetRelease !== process.env.TARGET_RELEASE ||
+    !/^[a-f0-9]{64,128}$/.test(lease.attemptId || '') ||
+    !/^[a-f0-9]{64,128}$/.test(lease.provisioningNonce || '') ||
+    Date.parse(lease.expiresAt) <= Date.now()
+  ) {
+    throw new Error('Production outer target claim does not bind this restore');
+  }
+  outerTargetClaim = {
+    verificationSha256: createHash('sha256').update(leaseContents).digest('hex'),
+    attemptId: lease.attemptId,
+    bundleSha256: lease.bundleSha256,
+    targetReceiptSha256: lease.targetReceiptSha256,
+    publicationReceiptSha256: lease.publicationReceiptSha256,
+    productionTargetId: lease.productionTargetId,
+    databaseTargetId: lease.databaseTargetId,
+    objectTargetId: lease.objectTargetId,
+    temporalImmutableId: lease.temporalImmutableId,
+    recoveryPointAt: lease.recoveryPointAt,
+    sourceRelease: lease.sourceRelease,
+    targetRelease: lease.targetRelease,
+    provisioningNonce: lease.provisioningNonce,
+    expiresAt: new Date(lease.expiresAt).toISOString(),
+  };
+}
 const payload = {
   schemaVersion: 1,
   kind: process.env.KIND,
@@ -627,6 +762,8 @@ const payload = {
   componentEvidenceSha256,
   adapterSha256,
   adapterEvidenceSha256,
+  ...(publication ? { publication } : {}),
+  ...(outerTargetClaim ? { outerTargetClaim } : {}),
 };
 const signature = createHmac('sha256', process.env.DR_MANIFEST_SIGNING_KEY).update(JSON.stringify(payload)).digest('hex');
 const evidence = { ...payload, signature: { algorithm: 'hmac-sha256', keyId: process.env.DR_MANIFEST_KEY_ID, value: signature } };
@@ -700,6 +837,32 @@ if (process.env.EXPECTED_KIND === 'production-bundle') {
   const components = payload.componentEvidenceSha256.map((component) => component?.file).sort();
   if (JSON.stringify(components) !== JSON.stringify(expectedComponents)) throw new Error('Production restore evidence component set is invalid');
   if (new Set(payload.componentEvidenceSha256.map((component) => component.sha256)).size !== expectedComponents.length || payload.componentEvidenceSha256.some((component) => !/^[a-f0-9]{64}$/.test(component.sha256))) throw new Error('Production restore evidence component hashes are invalid');
+  if (
+    !payload.publication || !payload.outerTargetClaim ||
+    !/^[a-f0-9]{64}$/.test(payload.publication.receiptSha256 || '') ||
+    !/^[a-f0-9]{64}$/.test(payload.publication.verifierSha256 || '') ||
+    !payload.publication.storageId ||
+    !payload.publication.objectVersionId ||
+    !/^[a-f0-9]{64}$/.test(payload.publication.ciphertextSha256 || '') ||
+    !Number.isFinite(Date.parse(payload.publication.retentionUntil)) ||
+    Date.parse(payload.publication.retentionUntil) <= Date.now() ||
+    payload.publication.plaintextSha256 !== payload.artifactSha256 ||
+    payload.outerTargetClaim.bundleSha256 !== payload.artifactSha256 ||
+    payload.outerTargetClaim.publicationReceiptSha256 !== payload.publication.receiptSha256 ||
+    payload.outerTargetClaim.productionTargetId !== payload.restoreTargetId ||
+    !payload.outerTargetClaim.databaseTargetId ||
+    !payload.outerTargetClaim.objectTargetId ||
+    !/^[a-f0-9]{64}$/.test(payload.outerTargetClaim.targetReceiptSha256 || '') ||
+    !/^[a-f0-9]{64}$/.test(payload.outerTargetClaim.temporalImmutableId || '') ||
+    !/^[a-f0-9]{64,128}$/.test(payload.outerTargetClaim.attemptId || '') ||
+    !/^[a-f0-9]{64,128}$/.test(payload.outerTargetClaim.provisioningNonce || '') ||
+    !Number.isFinite(Date.parse(payload.outerTargetClaim.expiresAt)) ||
+    (process.env.DR_ALLOW_HISTORICAL_PRODUCTION_LEASE !== '1' && Date.parse(payload.outerTargetClaim.expiresAt) <= Date.now()) ||
+    payload.outerTargetClaim.recoveryPointAt !== payload.recoveryPointAt ||
+    payload.outerTargetClaim.sourceRelease !== payload.sourceRelease ||
+    payload.outerTargetClaim.targetRelease !== payload.targetRelease ||
+    !/^[a-f0-9]{64}$/.test(payload.outerTargetClaim.verificationSha256 || '')
+  ) throw new Error('Production restore evidence publication or outer target binding is invalid');
 }
 if (signature?.algorithm !== 'hmac-sha256' || signature.keyId !== process.env.DR_MANIFEST_KEY_ID) throw new Error('Restore evidence signature metadata mismatch');
 const expected = createHmac('sha256', process.env.DR_MANIFEST_SIGNING_KEY).update(JSON.stringify(payload)).digest();

@@ -40,7 +40,10 @@ function signArtifact(artifact, kind, env) {
       '-c',
       `source "$DR_COMMON"; dr_write_checksum "$ARTIFACT"; dr_write_backup_manifest "$ARTIFACT" "$KIND" 2026-07-12T00:00:00Z`,
     ],
-    { cwd: root, env: { ...env, DR_COMMON: common, ARTIFACT: artifact, KIND: kind } },
+    {
+      cwd: root,
+      env: { ...env, DR_COMMON: common, ARTIFACT: artifact, KIND: kind },
+    },
   );
 }
 
@@ -56,7 +59,7 @@ function runShell(command, env) {
 }
 
 function productionBackupTest(name, fn) {
-  test(name, { timeout: 30_000 }, fn);
+  test(name, { timeout: 90_000 }, fn);
 }
 
 const productionBackupTestName =
@@ -86,7 +89,11 @@ test('signed backup manifests bind artifact integrity and durability metadata', 
     const result = spawnSync(
       'bash',
       ['-c', `source "$DR_COMMON"; dr_verify_backup_manifest "$ARTIFACT" postgres`],
-      { cwd: root, env: { ...env, DR_COMMON: common, ARTIFACT: artifact }, encoding: 'utf8' },
+      {
+        cwd: root,
+        env: { ...env, DR_COMMON: common, ARTIFACT: artifact },
+        encoding: 'utf8',
+      },
     );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /signature mismatch/);
@@ -148,7 +155,11 @@ test('backup publication is exclusive, symlink-safe, and mode 0600', async () =>
     symlinkSync(target, linkedOutput);
     const linked = spawnSync('bash', ['-c', command], {
       cwd: root,
-      env: { ...env, OUTPUT: linkedOutput, STAGED: existsSync(first) ? first : second },
+      env: {
+        ...env,
+        OUTPUT: linkedOutput,
+        STAGED: existsSync(first) ? first : second,
+      },
       encoding: 'utf8',
     });
     assert.notEqual(linked.status, 0);
@@ -212,7 +223,11 @@ test -z "\${S3_SECRET_ACCESS_KEY:-}"
     const original = readFileSync(evidence, 'utf8');
     assert.match(JSON.parse(original).verifierSha256, /^[a-f0-9]{64}$/u);
 
-    const replay = spawnSync('bash', ['-c', command], { cwd: root, env, encoding: 'utf8' });
+    const replay = spawnSync('bash', ['-c', command], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+    });
     assert.notEqual(replay.status, 0);
     assert.match(replay.stderr, /Refusing existing DR evidence path/u);
     assert.equal(readFileSync(evidence, 'utf8'), original);
@@ -900,7 +915,7 @@ productionBackupTest(productionBackupTestName, () => {
       checkpoint,
       `#!/usr/bin/env bash
 test -z "\${TIXKIT_TEST_SECRET:-}"
-node -e 'require("node:fs").writeFileSync(process.env.DR_TEMPORAL_CHECKPOINT_FILE, JSON.stringify({immutableId:"temporal-123",namespace:"tixkit",recoveryPointAt:process.env.DR_RECOVERY_POINT_AT,verified:true}))'
+node -e 'require("node:fs").writeFileSync(process.env.DR_TEMPORAL_CHECKPOINT_FILE, JSON.stringify({immutableId:"${'1'.repeat(64)}",namespace:"tixkit",recoveryPointAt:process.env.DR_RECOVERY_POINT_AT,verified:true}))'
 `,
     );
     writeFileSync(
@@ -913,7 +928,7 @@ const plain=readFileSync(process.env.DR_PUBLISH_ARTIFACT); const cipher=Buffer.f
 writeFileSync(${JSON.stringify(ciphertext)},cipher);
 writeFileSync(${JSON.stringify(`${ciphertext}.manifest.json`)},readFileSync(process.env.DR_PUBLISH_MANIFEST));
 writeFileSync(${JSON.stringify(`${ciphertext}.sha256`)},readFileSync(process.env.DR_PUBLISH_CHECKSUM));
-const payload={schemaVersion:1,immutable:true,storageId:'independent://backup-123',retentionUntil:'2099-01-01T00:00:00Z',plaintextSha256:createHash('sha256').update(plain).digest('hex'),ciphertextSha256:createHash('sha256').update(cipher).digest('hex')};
+const payload={schemaVersion:1,immutable:true,storageId:'independent://backup-123',objectVersionId:'version-123',retentionUntil:'2099-01-01T00:00:00Z',plaintextSha256:createHash('sha256').update(plain).digest('hex'),ciphertextSha256:createHash('sha256').update(cipher).digest('hex')};
 payload.providerSignature=createHmac('sha256','test-provider-key').update(JSON.stringify(payload)).digest('hex');
 writeFileSync(process.env.DR_PUBLISH_RECEIPT,JSON.stringify(payload));
 NODE
@@ -925,7 +940,7 @@ NODE
 set -euo pipefail
 test -z "\${DR_MANIFEST_SIGNING_KEY:-}"
 test -z "\${TIXKIT_TEST_SECRET:-}"
-node -e 'const f=require("node:fs"); const value=JSON.parse(f.readFileSync(process.env.DR_TEMPORAL_CHECKPOINT_FILE)); if(value.immutableId!=="temporal-123"||value.verified!==true) process.exit(1)'
+node -e 'const f=require("node:fs"); const value=JSON.parse(f.readFileSync(process.env.DR_TEMPORAL_CHECKPOINT_FILE)); if(value.immutableId!=="${'1'.repeat(64)}"||value.verified!==true) process.exit(1)'
 `,
     );
     writeFileSync(
@@ -939,6 +954,7 @@ node -e 'const f=require("node:fs"); f.writeFileSync(process.env.DR_RETRIEVE_OUT
       receiptVerifier,
       `#!/usr/bin/env bash
 test -z "\${TIXKIT_TEST_SECRET:-}"
+test -z "\${DR_TEMPORAL_CHECKPOINT_FILE:-}"
 node - <<'NODE'
 const {createHmac,timingSafeEqual}=require('node:crypto'); const {readFileSync}=require('node:fs');
 const receipt=JSON.parse(readFileSync(process.env.DR_RECEIPT_FILE)); const {providerSignature,...payload}=receipt;
@@ -1049,6 +1065,7 @@ fi
       DR_RESUME_COMMAND: resume,
       DR_TEMPORAL_CHECKPOINT_COMMAND: checkpoint,
       DR_TEMPORAL_CHECKPOINT_VERIFY_COMMAND: checkpointVerifier,
+      DR_BACKUP_CONSISTENCY_VERIFY_COMMAND: checkpointVerifier,
       DR_BACKUP_PUBLISH_COMMAND: publisher,
       DR_BACKUP_RETRIEVE_COMMAND: retriever,
       DR_BACKUP_RECEIPT_VERIFY_COMMAND: receiptVerifier,
@@ -1061,7 +1078,7 @@ fi
       env: backupEnv,
       encoding: 'utf8',
     });
-    const receipt = output.trim();
+    let receipt = output.trim();
     assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), ['quiesce', 'resume']);
     assert.equal(JSON.parse(readFileSync(receipt, 'utf8')).immutable, true);
     assert.equal(statSync(receipt).mode & 0o777, 0o600);
@@ -1089,6 +1106,15 @@ fi
       assert.notEqual(result.status, 0);
       assert.deepEqual(readdirSync(failureOutput), []);
     }
+    receipt = execFileSync(resolve(root, 'infra/scripts/production-backup.sh'), {
+      cwd: root,
+      env: {
+        ...backupEnv,
+        BACKUP_DIR: join(directory, 'fresh-output'),
+        BACKUP_TIMESTAMP: '20260712T000010Z',
+      },
+      encoding: 'utf8',
+    }).trim();
     const forgedReceipt = join(directory, 'forged-receipt.json');
     const forgedPayload = JSON.parse(readFileSync(receipt, 'utf8'));
     forgedPayload.storageId = 'independent://attacker-substitution';
@@ -1113,7 +1139,9 @@ fi
         DR_RETRIEVE_CHECKSUM_OUTPUT: `${retrieved}.sha256`,
       },
     });
-    const listing = execFileSync('tar', ['-tzf', retrieved], { encoding: 'utf8' });
+    const listing = execFileSync('tar', ['-tzf', retrieved], {
+      encoding: 'utf8',
+    });
     assert.match(listing, /temporal-checkpoint\.json/);
     assert.match(listing, /redis-recovery-boundary\.txt/);
     assert.match(listing, /tixkit-postgres-.+\.manifest\.json/);
@@ -1124,6 +1152,118 @@ fi
     const finalVerifier = join(directory, 'verify-final');
     const temporalRestore = join(directory, 'restore-temporal');
     const temporalEvidenceVerifier = join(directory, 'verify-temporal-evidence');
+    const productionTargetReceipt = join(directory, 'production-target-receipt.json');
+    const productionLeaseHolder = join(directory, 'production-lease-holder');
+    const productionLeaseVerifier = join(directory, 'production-lease-verifier');
+    const productionClaimCompleter = join(directory, 'production-claim-completer');
+    const productionClaimVerifier = join(directory, 'production-claim-verifier');
+    const productionClaimQuarantiner = join(directory, 'production-claim-quarantiner');
+    const productionClaimFailBeforeCommit = join(directory, 'production-claim-fail-before-commit');
+    const productionClaimCommitThenFail = join(directory, 'production-claim-commit-then-fail');
+    const productionClaimCommitAndOutput = join(directory, 'production-claim-commit-and-output');
+    const productionClaimVerifierFailure = join(directory, 'production-claim-verifier-failure');
+    const providerCompletedClaim = join(directory, 'provider-completed-claim.json');
+    const quarantineMarker = join(directory, 'production-claim-quarantined');
+    const productionLeaseLock = join(directory, 'production-target.lock');
+    const forceProductionLeaseExit = join(directory, 'force-production-lease-exit');
+    writeFileSync(
+      productionTargetReceipt,
+      JSON.stringify({
+        schemaVersion: 1,
+        target: 'production-staging',
+        nonce: 'a'.repeat(64),
+      }),
+    );
+    writeFileSync(
+      productionLeaseHolder,
+      `#!/usr/bin/env bash
+set -euo pipefail
+test -z "\${DR_TEMPORAL_CHECKPOINT_FILE:-}"
+mkdir ${JSON.stringify(productionLeaseLock)}
+cleanup() { rm -rf ${JSON.stringify(productionLeaseLock)}; }
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+HOLDER_PID="$$" node <<'NODE'
+const { writeFileSync } = require('node:fs');
+const lease = {
+  schemaVersion: 1,
+  active: true,
+  renewable: true,
+  holderPid: Number(process.env.HOLDER_PID),
+  fencingGeneration: 1,
+  attemptId: process.env.DR_PRODUCTION_RESTORE_ATTEMPT_ID,
+  bundleSha256: process.env.DR_PRODUCTION_BUNDLE_SHA256,
+  targetReceiptSha256: process.env.DR_PRODUCTION_TARGET_RECEIPT_SHA256,
+  publicationReceiptSha256: process.env.DR_PRODUCTION_PUBLICATION_RECEIPT_SHA256,
+  productionTargetId: process.env.DR_PRODUCTION_TARGET_ID,
+  databaseTargetId: process.env.DR_DATABASE_TARGET_ID,
+  objectTargetId: process.env.DR_OBJECT_TARGET_ID,
+  temporalImmutableId: process.env.DR_PRODUCTION_TEMPORAL_IMMUTABLE_ID,
+  recoveryPointAt: process.env.DR_PRODUCTION_RECOVERY_POINT_AT,
+  sourceRelease: process.env.DR_PRODUCTION_SOURCE_RELEASE,
+  targetRelease: process.env.DR_TARGET_RELEASE,
+  provisioningNonce: 'b'.repeat(64),
+  expiresAt: '2099-01-01T00:00:00Z',
+};
+writeFileSync(process.env.DR_PRODUCTION_RESTORE_LEASE_FILE, JSON.stringify(lease), { flag: 'wx', mode: 0o600 });
+NODE
+while ! test -f ${JSON.stringify(forceProductionLeaseExit)}; do sleep 0.1; done
+exit 91
+`,
+    );
+    writeFileSync(
+      productionLeaseVerifier,
+      '#!/usr/bin/env bash\nset -euo pipefail\ntest -z "${DR_TEMPORAL_CHECKPOINT_FILE:-}"\ntest -f "$DR_PRODUCTION_TARGET_RECEIPT"\ncat "$DR_PRODUCTION_RESTORE_LEASE_FILE"\n',
+    );
+    writeFileSync(
+      productionClaimCompleter,
+      `#!/usr/bin/env bash
+set -euo pipefail
+test -z "\${DR_TEMPORAL_CHECKPOINT_FILE:-}"
+if test -f ${JSON.stringify(providerCompletedClaim)}; then cat ${JSON.stringify(providerCompletedClaim)}; exit 0; fi
+node - <<'NODE'
+const claim={schemaVersion:1,status:'completed',active:false,restoreEvidenceSha256:process.env.DR_PRODUCTION_RESTORE_EVIDENCE_SHA256,bundleSha256:process.env.DR_PRODUCTION_BUNDLE_SHA256,productionTargetId:process.env.DR_PRODUCTION_TARGET_ID,fencingGeneration:1,completedAt:new Date().toISOString(),providerSignature:'d'.repeat(64)}; process.stdout.write(JSON.stringify(claim));
+NODE
+`,
+    );
+    writeFileSync(
+      productionClaimVerifier,
+      `#!/usr/bin/env bash
+set -euo pipefail
+test -z "\${DR_TEMPORAL_CHECKPOINT_FILE:-}"
+node - <<'NODE'
+const {createHash}=require('node:crypto'); const {readFileSync}=require('node:fs'); const claim=JSON.parse(readFileSync(process.env.DR_PRODUCTION_TARGET_CLAIM_RECEIPT)); const evidenceHash=createHash('sha256').update(readFileSync(process.env.DR_PRODUCTION_RESTORE_EVIDENCE_FILE)).digest('hex'); if(claim.status!=='completed'||claim.restoreEvidenceSha256!==evidenceHash||evidenceHash!==process.env.DR_PRODUCTION_RESTORE_EVIDENCE_SHA256) process.exit(1);
+NODE
+`,
+    );
+    writeFileSync(
+      productionClaimQuarantiner,
+      `#!/usr/bin/env bash
+set -euo pipefail
+test -z "\${DR_TEMPORAL_CHECKPOINT_FILE:-}"
+test -f ${JSON.stringify(providerCompletedClaim)} || printf '%s' "$DR_PRODUCTION_RESTORE_ATTEMPT_ID" >${JSON.stringify(quarantineMarker)}
+`,
+    );
+    writeFileSync(productionClaimFailBeforeCommit, '#!/usr/bin/env bash\nexit 41\n');
+    const providerCommitScript = `node - <<'NODE'
+const {writeFileSync}=require('node:fs'); const claim={schemaVersion:1,status:'completed',active:false,restoreEvidenceSha256:process.env.DR_PRODUCTION_RESTORE_EVIDENCE_SHA256,bundleSha256:process.env.DR_PRODUCTION_BUNDLE_SHA256,productionTargetId:process.env.DR_PRODUCTION_TARGET_ID,fencingGeneration:1,completedAt:new Date().toISOString(),providerSignature:'d'.repeat(64)}; writeFileSync(${JSON.stringify(providerCompletedClaim)},JSON.stringify(claim),{flag:'wx',mode:0o600}); process.stdout.write(JSON.stringify(claim));
+NODE`;
+    writeFileSync(
+      productionClaimCommitThenFail,
+      `#!/usr/bin/env bash
+set -euo pipefail
+${providerCommitScript}
+exit 42
+`,
+    );
+    writeFileSync(
+      productionClaimCommitAndOutput,
+      `#!/usr/bin/env bash
+set -euo pipefail
+${providerCommitScript}
+`,
+    );
+    writeFileSync(productionClaimVerifierFailure, '#!/usr/bin/env bash\nexit 43\n');
     for (const file of [
       databaseVerifier,
       objectVerifier,
@@ -1133,6 +1273,15 @@ fi
       writeFileSync(file, '#!/usr/bin/env bash\ntest -z "${TIXKIT_TEST_SECRET:-}"\n');
       chmodSync(file, 0o755);
     }
+    chmodSync(productionLeaseHolder, 0o755);
+    chmodSync(productionLeaseVerifier, 0o755);
+    chmodSync(productionClaimCompleter, 0o755);
+    chmodSync(productionClaimVerifier, 0o755);
+    chmodSync(productionClaimQuarantiner, 0o755);
+    chmodSync(productionClaimFailBeforeCommit, 0o755);
+    chmodSync(productionClaimCommitThenFail, 0o755);
+    chmodSync(productionClaimCommitAndOutput, 0o755);
+    chmodSync(productionClaimVerifierFailure, 0o755);
     writeFileSync(
       temporalRestore,
       `#!/usr/bin/env bash
@@ -1163,6 +1312,14 @@ node -e 'const f=require("node:fs"); const c=JSON.parse(f.readFileSync(process.e
       DR_TEMPORAL_RESTORE_COMMAND: temporalRestore,
       DR_TEMPORAL_EVIDENCE_VERIFY_COMMAND: temporalEvidenceVerifier,
       DR_FINAL_VERIFY_COMMAND: finalVerifier,
+      DR_PRODUCTION_RETRIEVAL_RECEIPT: receipt,
+      DR_BACKUP_RECEIPT_VERIFY_COMMAND: receiptVerifier,
+      DR_PRODUCTION_TARGET_RECEIPT: productionTargetReceipt,
+      DR_PRODUCTION_TARGET_LEASE_COMMAND: productionLeaseHolder,
+      DR_PRODUCTION_TARGET_LEASE_VERIFY_COMMAND: productionLeaseVerifier,
+      DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimCompleter,
+      DR_PRODUCTION_TARGET_CLAIM_VERIFY_COMMAND: productionClaimVerifier,
+      DR_PRODUCTION_TARGET_CLAIM_QUARANTINE_COMMAND: productionClaimQuarantiner,
       DR_DATABASE_TARGET_ID: 'postgres-staging',
       DR_OBJECT_TARGET_ID: 'object-staging',
       DR_PRODUCTION_TARGET_ID: 'production-staging',
@@ -1188,6 +1345,195 @@ node -e 'const f=require("node:fs"); const c=JSON.parse(f.readFileSync(process.e
     );
     assert.equal(JSON.parse(aggregateEvidence).kind, 'production-bundle');
     assert.doesNotMatch(aggregateEvidence, /postgres:\/\/|password|secret/i);
+
+    const failedBeforeProviderCommitEvidence = join(directory, 'claim-failed-before-commit');
+    const failedBeforeProviderCommit = spawnSync(
+      resolve(root, 'infra/scripts/production-restore.sh'),
+      {
+        cwd: root,
+        env: {
+          ...restoreEnv,
+          DR_EVIDENCE_DIR: failedBeforeProviderCommitEvidence,
+          DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimFailBeforeCommit,
+        },
+        encoding: 'utf8',
+      },
+    );
+    assert.notEqual(failedBeforeProviderCommit.status, 0);
+    assert.match(failedBeforeProviderCommit.stderr, /failed with status 41/u);
+    assert.equal(existsSync(join(failedBeforeProviderCommitEvidence, 'production.json')), true);
+    assert.equal(
+      existsSync(join(failedBeforeProviderCommitEvidence, 'production-target-claim.json')),
+      false,
+    );
+    assert.equal(existsSync(quarantineMarker), true);
+    rmSync(quarantineMarker);
+
+    const failedAfterProviderCommitEvidence = join(directory, 'claim-failed-after-commit');
+    const failedAfterProviderCommit = spawnSync(
+      resolve(root, 'infra/scripts/production-restore.sh'),
+      {
+        cwd: root,
+        env: {
+          ...restoreEnv,
+          DR_EVIDENCE_DIR: failedAfterProviderCommitEvidence,
+          DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimCommitThenFail,
+        },
+        encoding: 'utf8',
+      },
+    );
+    assert.notEqual(failedAfterProviderCommit.status, 0);
+    assert.match(failedAfterProviderCommit.stderr, /failed with status 42/u);
+    assert.equal(existsSync(join(failedAfterProviderCommitEvidence, 'production.json')), true);
+    assert.equal(
+      existsSync(join(failedAfterProviderCommitEvidence, 'production-target-claim.json')),
+      false,
+    );
+    assert.equal(existsSync(quarantineMarker), false);
+    const delayedLeasePath = join(
+      failedAfterProviderCommitEvidence,
+      'production-target-lease.json',
+    );
+    const delayedLease = JSON.parse(readFileSync(delayedLeasePath, 'utf8'));
+    delayedLease.expiresAt = '2026-07-12T00:01:00.000Z';
+    writeFileSync(delayedLeasePath, JSON.stringify(delayedLease));
+    const delayedEvidencePath = join(failedAfterProviderCommitEvidence, 'production.json');
+    const delayedEvidence = JSON.parse(readFileSync(delayedEvidencePath, 'utf8'));
+    delayedEvidence.outerTargetClaim.expiresAt = delayedLease.expiresAt;
+    const delayedLeaseSha256 = createHash('sha256')
+      .update(readFileSync(delayedLeasePath))
+      .digest('hex');
+    delayedEvidence.outerTargetClaim.verificationSha256 = delayedLeaseSha256;
+    delayedEvidence.adapterEvidenceSha256.find(
+      ({ file }) => file === 'production-target-lease.json',
+    ).sha256 = delayedLeaseSha256;
+    const { signature: _delayedSignature, ...delayedPayload } = delayedEvidence;
+    delayedEvidence.signature = {
+      algorithm: 'hmac-sha256',
+      keyId: env.DR_MANIFEST_KEY_ID,
+      value: createHmac('sha256', env.DR_MANIFEST_SIGNING_KEY)
+        .update(JSON.stringify(delayedPayload))
+        .digest('hex'),
+    };
+    writeFileSync(delayedEvidencePath, JSON.stringify(delayedEvidence));
+    const delayedEvidenceSha256 = createHash('sha256')
+      .update(readFileSync(delayedEvidencePath))
+      .digest('hex');
+    const delayedProviderClaim = JSON.parse(readFileSync(providerCompletedClaim, 'utf8'));
+    delayedProviderClaim.restoreEvidenceSha256 = delayedEvidenceSha256;
+    writeFileSync(providerCompletedClaim, JSON.stringify(delayedProviderClaim));
+    execFileSync(resolve(root, 'infra/scripts/finalize-production-restore-claim.sh'), {
+      cwd: root,
+      env: {
+        ...restoreEnv,
+        DR_EVIDENCE_DIR: failedAfterProviderCommitEvidence,
+        DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimCompleter,
+      },
+    });
+    assert.equal(
+      existsSync(join(failedAfterProviderCommitEvidence, 'production-target-claim.json')),
+      true,
+    );
+    rmSync(providerCompletedClaim);
+
+    const failedAfterLocalReceiptEvidence = join(directory, 'claim-failed-after-local-receipt');
+    const failedAfterLocalReceipt = spawnSync(
+      resolve(root, 'infra/scripts/production-restore.sh'),
+      {
+        cwd: root,
+        env: {
+          ...restoreEnv,
+          DR_EVIDENCE_DIR: failedAfterLocalReceiptEvidence,
+          DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimCommitAndOutput,
+          DR_PRODUCTION_TARGET_CLAIM_VERIFY_COMMAND: productionClaimVerifierFailure,
+        },
+        encoding: 'utf8',
+      },
+    );
+    assert.notEqual(failedAfterLocalReceipt.status, 0);
+    assert.equal(
+      existsSync(join(failedAfterLocalReceiptEvidence, 'production-target-claim.json')),
+      true,
+    );
+    assert.equal(existsSync(quarantineMarker), false);
+    execFileSync(resolve(root, 'infra/scripts/finalize-production-restore-claim.sh'), {
+      cwd: root,
+      env: {
+        ...restoreEnv,
+        DR_EVIDENCE_DIR: failedAfterLocalReceiptEvidence,
+        DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimCompleter,
+      },
+    });
+    rmSync(providerCompletedClaim);
+
+    const leaseKillingFinalVerifier = join(directory, 'lease-killing-final-verifier');
+    const escapedFinalVerifierMutation = join(directory, 'escaped-final-verifier-mutation');
+    writeFileSync(
+      leaseKillingFinalVerifier,
+      `#!/usr/bin/env bash
+set -euo pipefail
+(trap '' TERM; sleep 1; printf escaped >${JSON.stringify(escapedFinalVerifierMutation)}) &
+printf lost >${JSON.stringify(forceProductionLeaseExit)}
+wait
+`,
+    );
+    chmodSync(leaseKillingFinalVerifier, 0o755);
+    const leaseLossEvidence = join(directory, 'lease-loss-evidence');
+    const leaseLoss = spawnSync(resolve(root, 'infra/scripts/production-restore.sh'), {
+      cwd: root,
+      env: {
+        ...restoreEnv,
+        DR_FINAL_VERIFY_COMMAND: leaseKillingFinalVerifier,
+        DR_EVIDENCE_DIR: leaseLossEvidence,
+      },
+      encoding: 'utf8',
+    });
+    assert.notEqual(leaseLoss.status, 0);
+    assert.match(leaseLoss.stderr, /lease (holder exited|was lost during final-verification)/u);
+    assert.equal(existsSync(join(leaseLossEvidence, 'production.json')), false);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);
+    assert.equal(existsSync(escapedFinalVerifierMutation), false);
+    rmSync(forceProductionLeaseExit, { force: true });
+
+    const checkpointMutatingTemporalRestore = join(
+      directory,
+      'checkpoint-mutating-temporal-restore',
+    );
+    const forgedCheckpointTargetMutation = join(directory, 'forged-checkpoint-target-mutation');
+    writeFileSync(
+      checkpointMutatingTemporalRestore,
+      `#!/usr/bin/env bash
+set -euo pipefail
+original="$(cat "$DR_TEMPORAL_CHECKPOINT_FILE")"
+export DR_TEMPORAL_CHECKPOINT_JSON="$original"
+bash -euo pipefail -c '
+  export DR_TEMPORAL_CHECKPOINT_JSON="{\\"verified\\":true,\\"immutableId\\":\\"forged\\"}"
+'
+test "$DR_TEMPORAL_CHECKPOINT_JSON" = "$original"
+bash -euo pipefail -c '
+  chmod 600 "$DR_TEMPORAL_CHECKPOINT_FILE"
+  printf "%s" "{\\"verified\\":true,\\"immutableId\\":\\"forged\\"}" >"$DR_TEMPORAL_CHECKPOINT_FILE"
+  printf mutated >${JSON.stringify(forgedCheckpointTargetMutation)}
+'
+`,
+    );
+    chmodSync(checkpointMutatingTemporalRestore, 0o755);
+    const checkpointMutationEvidence = join(directory, 'checkpoint-mutation-evidence');
+    const checkpointMutation = spawnSync(resolve(root, 'infra/scripts/production-restore.sh'), {
+      cwd: root,
+      env: {
+        ...restoreEnv,
+        DR_TEMPORAL_RESTORE_COMMAND: checkpointMutatingTemporalRestore,
+        DR_EVIDENCE_DIR: checkpointMutationEvidence,
+      },
+      encoding: 'utf8',
+    });
+    assert.notEqual(checkpointMutation.status, 0);
+    assert.match(checkpointMutation.stderr, /Permission denied|Read-only file system/u);
+    assert.equal(existsSync(forgedCheckpointTargetMutation), false);
+    assert.equal(existsSync(join(checkpointMutationEvidence, 'temporal.json')), false);
+    assert.equal(existsSync(join(checkpointMutationEvidence, 'production.json')), false);
+    rmSync(quarantineMarker, { force: true });
 
     const mutatingMetadata = join(directory, 'mutating-metadata');
     const objectCleanup = join(directory, 'object-cleanup');
@@ -1365,10 +1711,28 @@ printf '{"verified":true,"inventorySha256":"forged"}' >"$(dirname "$DR_OBJECT_IN
       env: { ...process.env, COPYFILE_DISABLE: '1' },
     });
     signArtifact(tamperedBundle, 'production-bundle', env);
+    const tamperedReceipt = join(directory, 'tampered-receipt.json');
+    const tamperedReceiptPayload = {
+      schemaVersion: 1,
+      immutable: true,
+      storageId: 'independent://tampered-archive-gate',
+      retentionUntil: '2099-01-01T00:00:00Z',
+      plaintextSha256: createHash('sha256').update(readFileSync(tamperedBundle)).digest('hex'),
+      ciphertextSha256: 'f'.repeat(64),
+    };
+    writeFileSync(
+      tamperedReceipt,
+      JSON.stringify({
+        ...tamperedReceiptPayload,
+        providerSignature: createHmac('sha256', 'test-provider-key')
+          .update(JSON.stringify(tamperedReceiptPayload))
+          .digest('hex'),
+      }),
+    );
     const restoreGateEnv = {
-      ...env,
+      ...restoreEnv,
       PRODUCTION_BUNDLE_FILE: tamperedBundle,
-      DB_DRIVER: 'postgres',
+      DR_PRODUCTION_RETRIEVAL_RECEIPT: tamperedReceipt,
       DR_TEMPORAL_RESTORE_COMMAND: checkpoint,
       DR_TEMPORAL_EVIDENCE_VERIFY_COMMAND: checkpoint,
       DR_FINAL_VERIFY_COMMAND: checkpoint,
@@ -1393,7 +1757,12 @@ printf '{"verified":true,"inventorySha256":"forged"}' >"$(dirname "$DR_OBJECT_IN
     ]) {
       const limited = spawnSync(resolve(root, 'infra/scripts/production-restore.sh'), {
         cwd: root,
-        env: { ...restoreGateEnv, PRODUCTION_BUNDLE_FILE: retrieved, [limit]: value },
+        env: {
+          ...restoreGateEnv,
+          PRODUCTION_BUNDLE_FILE: retrieved,
+          DR_PRODUCTION_RETRIEVAL_RECEIPT: receipt,
+          [limit]: value,
+        },
         encoding: 'utf8',
       });
       assert.notEqual(limited.status, 0);
@@ -1519,6 +1888,9 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
       schemaVersion: 1,
       kind: 'production-bundle',
       verification: 'command-completed',
+      artifactSha256: '4'.repeat(64),
+      sourceRelease: 'v1.0.0',
+      recoveryPointAt: '2026-07-12T00:00:00.000Z',
       restoreTargetId: 'production-staging',
       targetRelease: 'v1.1.0',
       verifierSha256: 'abc123',
@@ -1527,6 +1899,31 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
         { file: 'object-storage.json', sha256: '2'.repeat(64) },
         { file: 'temporal.json', sha256: '3'.repeat(64) },
       ],
+      publication: {
+        receiptSha256: '5'.repeat(64),
+        verifierSha256: '6'.repeat(64),
+        storageId: 'independent://production-backup',
+        objectVersionId: 'version-123',
+        plaintextSha256: '4'.repeat(64),
+        ciphertextSha256: '8'.repeat(64),
+        retentionUntil: '2099-01-01T00:00:00.000Z',
+      },
+      outerTargetClaim: {
+        verificationSha256: '7'.repeat(64),
+        attemptId: '9'.repeat(64),
+        bundleSha256: '4'.repeat(64),
+        targetReceiptSha256: 'a'.repeat(64),
+        publicationReceiptSha256: '5'.repeat(64),
+        productionTargetId: 'production-staging',
+        databaseTargetId: 'postgres-staging',
+        objectTargetId: 'object-staging',
+        temporalImmutableId: 'b'.repeat(64),
+        recoveryPointAt: '2026-07-12T00:00:00.000Z',
+        sourceRelease: 'v1.0.0',
+        targetRelease: 'v1.1.0',
+        provisioningNonce: 'c'.repeat(64),
+        expiresAt: '2026-07-12T00:01:00.000Z',
+      },
     };
     const signature = createHmac('sha256', 'test-signing-key-not-for-production')
       .update(JSON.stringify(payload))
@@ -1535,11 +1932,19 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
       evidence,
       JSON.stringify({
         ...payload,
-        signature: { algorithm: 'hmac-sha256', keyId: 'test-key-1', value: signature },
+        signature: {
+          algorithm: 'hmac-sha256',
+          keyId: 'test-key-1',
+          value: signature,
+        },
       }),
     );
     const invalidComponentSets = [
-      { label: 'missing', components: undefined, error: /bind exactly three component results/ },
+      {
+        label: 'missing',
+        components: undefined,
+        error: /bind exactly three component results/,
+      },
       {
         label: 'duplicate',
         components: [
@@ -1584,13 +1989,44 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
         ['-c', 'source "$DR_COMMON"; dr_verify_restore_evidence "$EVIDENCE" production-bundle'],
         {
           cwd: root,
-          env: { ...environment(directory), DR_COMMON: common, EVIDENCE: invalidEvidence },
+          env: {
+            ...environment(directory),
+            DR_COMMON: common,
+            EVIDENCE: invalidEvidence,
+          },
           encoding: 'utf8',
         },
       );
       assert.notEqual(invalidResult.status, 0);
       assert.match(invalidResult.stderr, invalid.error);
     }
+    const completedClaim = join(directory, 'production-target-claim.json');
+    const completedClaimVerifier = join(directory, 'verify-production-target-claim');
+    const restoreEvidenceSha256 = createHash('sha256').update(readFileSync(evidence)).digest('hex');
+    writeFileSync(
+      completedClaim,
+      JSON.stringify({
+        schemaVersion: 1,
+        status: 'completed',
+        active: false,
+        restoreEvidenceSha256,
+        bundleSha256: payload.artifactSha256,
+        productionTargetId: payload.restoreTargetId,
+        fencingGeneration: 1,
+        completedAt: '2026-07-12T00:05:00.000Z',
+        providerSignature: 'd'.repeat(64),
+      }),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      completedClaimVerifier,
+      `#!/usr/bin/env bash
+set -euo pipefail
+test -f "$DR_PRODUCTION_TARGET_CLAIM_RECEIPT"
+test "$(shasum -a 256 "$DR_PRODUCTION_RESTORE_EVIDENCE_FILE" | awk '{print $1}')" = "$DR_PRODUCTION_RESTORE_EVIDENCE_SHA256"
+`,
+      { mode: 0o755 },
+    );
     const commands = {};
     for (const [name, status] of [
       ['cutover', 0],
@@ -1619,6 +2055,8 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
         DR_ROLLBACK_COMMAND: commands.rollback,
         DR_ROLLBACK_VERIFY_COMMAND: commands['verify-rollback'],
         DR_PROMOTION_EVIDENCE_FILE: promotionEvidence,
+        DR_PRODUCTION_TARGET_CLAIM_RECEIPT: completedClaim,
+        DR_PRODUCTION_TARGET_CLAIM_VERIFY_COMMAND: completedClaimVerifier,
       },
       encoding: 'utf8',
     });
@@ -1633,6 +2071,16 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
     assert.equal(promotion.outcome, 'rolled-back');
     assert.match(promotion.restoreEvidenceSha256, /^[a-f0-9]{64}$/);
     assert.match(promotion.cutoverCommandSha256, /^[a-f0-9]{64}$/);
+    assert.equal(
+      promotion.completedClaim.receiptSha256,
+      createHash('sha256').update(readFileSync(completedClaim)).digest('hex'),
+    );
+    assert.equal(
+      promotion.completedClaim.verifierSha256,
+      createHash('sha256').update(readFileSync(completedClaimVerifier)).digest('hex'),
+    );
+    assert.equal(promotion.completedClaim.productionTargetId, payload.restoreTargetId);
+    assert.equal(promotion.completedClaim.fencingGeneration, 1);
 
     writeFileSync(
       commands.cutover,
@@ -1651,6 +2099,8 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
         DR_ROLLBACK_COMMAND: commands.rollback,
         DR_ROLLBACK_VERIFY_COMMAND: commands['verify-rollback'],
         DR_PROMOTION_EVIDENCE_FILE: join(directory, 'partial-cutover.json'),
+        DR_PRODUCTION_TARGET_CLAIM_RECEIPT: completedClaim,
+        DR_PRODUCTION_TARGET_CLAIM_VERIFY_COMMAND: completedClaimVerifier,
       },
       encoding: 'utf8',
     });
@@ -1660,6 +2110,69 @@ test('restore promotion rolls the binding back when the promoted runtime fails v
       'rollback',
       'verify-rollback',
     ]);
+
+    const originalEvidence = readFileSync(evidence, 'utf8');
+    const originalCompletedClaim = readFileSync(completedClaim, 'utf8');
+    const runIntegrityFailure = (
+      label,
+      verifyBody,
+      outputPath = join(directory, `${label}.json`),
+    ) => {
+      writeFileSync(
+        commands.cutover,
+        `#!/usr/bin/env bash\nprintf 'cutover\\n' >>${JSON.stringify(log)}\nexit 0\n`,
+      );
+      writeFileSync(
+        commands['verify-cutover'],
+        `#!/usr/bin/env bash\nprintf 'verify-cutover\\n' >>${JSON.stringify(log)}\n${verifyBody}\n`,
+      );
+      chmodSync(commands.cutover, 0o755);
+      chmodSync(commands['verify-cutover'], 0o755);
+      writeFileSync(log, '');
+      const integrityResult = spawnSync(resolve(root, 'infra/scripts/promote-restored-target.sh'), {
+        cwd: root,
+        env: {
+          ...process.env,
+          DR_MANIFEST_SIGNING_KEY: 'test-signing-key-not-for-production',
+          DR_MANIFEST_KEY_ID: 'test-key-1',
+          DR_RESTORE_EVIDENCE_FILE: evidence,
+          DR_CUTOVER_COMMAND: commands.cutover,
+          DR_CUTOVER_VERIFY_COMMAND: commands['verify-cutover'],
+          DR_ROLLBACK_COMMAND: commands.rollback,
+          DR_ROLLBACK_VERIFY_COMMAND: commands['verify-rollback'],
+          DR_PROMOTION_EVIDENCE_FILE: outputPath,
+          DR_PRODUCTION_TARGET_CLAIM_RECEIPT: completedClaim,
+          DR_PRODUCTION_TARGET_CLAIM_VERIFY_COMMAND: completedClaimVerifier,
+        },
+        encoding: 'utf8',
+      });
+      assert.notEqual(integrityResult.status, 0);
+      assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [
+        'cutover',
+        'verify-cutover',
+        'rollback',
+        'verify-rollback',
+      ]);
+      return integrityResult;
+    };
+
+    runIntegrityFailure(
+      'mutated-command',
+      `printf '\\n# changed after cutover\\n' >>${JSON.stringify(commands.cutover)}`,
+    );
+    writeFileSync(completedClaim, originalCompletedClaim);
+    runIntegrityFailure('mutated-claim', `printf ' ' >>${JSON.stringify(completedClaim)}`);
+    writeFileSync(completedClaim, originalCompletedClaim);
+    writeFileSync(evidence, originalEvidence);
+    runIntegrityFailure('mutated-restore-evidence', `printf ' ' >>${JSON.stringify(evidence)}`);
+    writeFileSync(evidence, originalEvidence);
+    const writeFailurePath = join(directory, 'promotion-write-failure');
+    runIntegrityFailure(
+      'promotion-write-failure',
+      `mkdir ${JSON.stringify(writeFailurePath)}`,
+      writeFailurePath,
+    );
+    assert.equal(existsSync(`${writeFailurePath}.in-progress`), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

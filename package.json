@@ -86,7 +86,7 @@
     "typecheck": "turbo run typecheck",
     "test": "bun run test:unit && bun run test:integration",
     "test:scripts": "bun run --filter @tixkit/docs-core build && node --test scripts/__tests__/*.test.mjs && bun run validate:typescript-version && bun run validate:completion-backlog && bun run validate:final-evidence-checklist && bun run validate:high-care-ledger && bun run validate:public-distribution && node scripts/public-npm-release-dry-run.mjs --check && bun run validate:public-remote-guardrails && bun run validate:user-story-matrix && bun run validate:validation-runbook && bun run validate:widget-public && bun run validate:embed-fixtures && node scripts/test-contract-test-consumers.mjs",
-    "test:production-dr:integration": "TIXKIT_RUN_PRODUCTION_DR_INTEGRATION=1 node --test --test-concurrency=1 scripts/__tests__/production-dr.integration.test.mjs scripts/__tests__/production-temporal-dr.integration.test.mjs",
+    "test:production-dr:integration": "TIXKIT_RUN_PRODUCTION_DR_INTEGRATION=1 node --test --test-concurrency=1 scripts/__tests__/production-dr.integration.test.mjs scripts/__tests__/production-temporal-dr.integration.test.mjs scripts/__tests__/production-bundle.integration.test.mjs",
     "test:unit": "turbo run test:unit --concurrency=2 && bun run test:scripts",
     "test:integration": "turbo run test:integration --concurrency=1",
     "test:integration:serial": "turbo run test:integration --concurrency=1",
@@ -118,6 +118,7 @@
     "dr:backup:production": "infra/scripts/production-backup.sh",
     "dr:restore:object-storage": "infra/scripts/restore-object-storage.sh",
     "dr:restore:production": "infra/scripts/production-restore.sh",
+    "dr:finalize-production-restore-claim": "infra/scripts/finalize-production-restore-claim.sh",
     "dr:promote-restored-target": "infra/scripts/promote-restored-target.sh",
     "dr:migration-rehearsal": "infra/scripts/migration-rehearsal.sh",
     "clean": "turbo run clean && rm -rf node_modules"
