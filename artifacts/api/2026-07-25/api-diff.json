@@ -1,0 +1,24 @@
+{
+  "from": "2026-07-24",
+  "to": "2026-07-25",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/actions/{actionId}/executions",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentExecution",
+      "message": "A named schema was added."
+    }
+  ]
+}
