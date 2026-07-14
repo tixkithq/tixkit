@@ -9,9 +9,16 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../../client.js';
 import { runMigrations, truncateAllData } from '../../migrate.js';
-import { AgentExecutionRepository, TenantRepository } from '../../repositories/index.js';
+import {
+  AgentExecutionRepository,
+  BrandRepository,
+  EventRepository,
+  OrganizationRepository,
+  TenantRepository,
+} from '../../repositories/index.js';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
+let scopedEventId = 'event_test';
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
 const driverCases: DriverCase[] = [
   { driver: 'postgres', url: process.env.DATABASE_URL ?? '' },
@@ -42,7 +49,7 @@ function principal(tenantId: string): AgentPrincipal {
     id: 'agent_test',
     tenantId,
     kind: 'third_party',
-    sponsorPrincipalId: 'organizer_test',
+    sponsorPrincipalId: 'user_actor',
     capabilities: ['events.execute'],
     maximumAutonomy: 'execute_with_approval',
     protocolVersion: AGENT_PROTOCOL_VERSION,
@@ -56,9 +63,9 @@ function delegation(tenantId: string): AgentDelegationGrant {
     id: 'delegation_test',
     tenantId,
     agentPrincipalId: 'agent_test',
-    sponsorPrincipalId: 'organizer_test',
+    sponsorPrincipalId: 'user_actor',
     capabilities: ['events.execute'],
-    resourceScopes: ['event:event_test'],
+    resourceScopes: [`event:${scopedEventId}`],
     permissionSnapshot: ['events:write'],
     issuedAt: new Date(Date.now() - 60_000).toISOString(),
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -73,7 +80,7 @@ function execution(tenantId: string, id = 'execution_test'): AgentExecution {
     actionId: 'action_test',
     actionDigest: 'a'.repeat(64),
     agentPrincipalId: 'agent_test',
-    sponsorPrincipalId: 'organizer_test',
+    sponsorPrincipalId: 'user_actor',
     delegationGrantId: 'delegation_test',
     approvalId: 'approval_test',
     idempotencyKey: 'agent-execution-test',
@@ -128,33 +135,98 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     db = createDb(url);
     await truncateAllData(db);
     tenantId = (await new TenantRepository(db).create({ name: `Agent ${driver}` })).id;
+    const organization = await new OrganizationRepository(db).create({
+      tenantId,
+      name: `Agent ${driver} organization`,
+      slug: `agent-${driver}-organization`,
+    });
+    const brand = await new BrandRepository(db).create({
+      tenantId,
+      organizationId: organization.id,
+      name: `Agent ${driver} brand`,
+      slug: `agent-${driver}-brand`,
+    });
+    scopedEventId = (
+      await new EventRepository(db).create({
+        tenantId,
+        organizationId: organization.id,
+        brandId: brand.id,
+        slug: `agent-${driver}-event`,
+        title: `Agent ${driver} event`,
+        currency: 'USD',
+        timezone: 'America/Chicago',
+        startsAt: new Date('2027-01-01T18:00:00.000Z'),
+      })
+    ).id;
     const now = new Date();
     await db
       .insertInto('user_profiles')
-      .values({
-        id: 'user_actor',
-        tenant_id: tenantId,
-        clerk_user_id: `clerk_agent_${driver}`,
-        email: `agent-${driver}@example.test`,
-        first_name: null,
-        last_name: null,
-        avatar_url: null,
-        status: 'active',
-        last_seen_at: null,
-        created_at: now,
-        updated_at: now,
-      })
+      .values([
+        {
+          id: 'user_actor',
+          tenant_id: tenantId,
+          clerk_user_id: `clerk_agent_${driver}`,
+          email: `agent-${driver}@example.test`,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'active' as const,
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: 'user_other',
+          tenant_id: tenantId,
+          clerk_user_id: `clerk_agent_other_${driver}`,
+          email: `agent-other-${driver}@example.test`,
+          first_name: null,
+          last_name: null,
+          avatar_url: null,
+          status: 'active' as const,
+          last_seen_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
       .execute();
     await db
       .insertInto('permission_grants')
+      .values([
+        ...['developers.write', 'events.read', 'events.write'].map((permission, index) => ({
+          id: `pg_agent_control_${index}`,
+          tenant_id: tenantId,
+          principal_type: 'user' as const,
+          principal_id: 'user_actor',
+          permission,
+          scope_type: 'tenant' as const,
+          scope_id: null,
+          created_at: now,
+          updated_at: now,
+        })),
+        {
+          id: 'pg_agent_control_other',
+          tenant_id: tenantId,
+          principal_type: 'user' as const,
+          principal_id: 'user_other',
+          permission: 'developers.write',
+          scope_type: 'tenant' as const,
+          scope_id: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+    await db
+      .insertInto('organization_members')
       .values({
-        id: 'pg_agent_control',
+        id: 'member_agent_control',
         tenant_id: tenantId,
-        principal_type: 'user',
-        principal_id: 'user_actor',
-        permission: 'developers.write',
-        scope_type: 'tenant',
-        scope_id: null,
+        organization_id: organization.id,
+        user_id: 'user_actor',
+        role: 'owner',
+        invited_at: now,
+        accepted_at: now,
         created_at: now,
         updated_at: now,
       })
@@ -171,14 +243,90 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     const reserved = execution(tenantId);
     const registeredPrincipal = principal(tenantId);
     const grantedDelegation = delegation(tenantId);
-    await repository.registerPrincipal(registeredPrincipal, controlAudit('register_test'));
-    await repository.grantDelegation(grantedDelegation, controlAudit('grant_test'));
+    const persistedPrincipal = await repository.registerPrincipal(
+      registeredPrincipal,
+      controlAudit('register_test'),
+    );
+    const persistedDelegation = await repository.grantDelegation(
+      grantedDelegation,
+      controlAudit('grant_test'),
+    );
+    expect(persistedPrincipal.registeredAt).not.toBe(registeredPrincipal.registeredAt);
+    expect(persistedDelegation.issuedAt).not.toBe(grantedDelegation.issuedAt);
+    expect(persistedDelegation.permissionSnapshot).toEqual(['events:publish', 'events:write']);
+    await expect(repository.getDelegation(tenantId, grantedDelegation.id)).resolves.toEqual(
+      persistedDelegation,
+    );
     await expect(
       repository.registerPrincipal(registeredPrincipal, controlAudit('register_test')),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual(persistedPrincipal);
+    await expect(
+      repository.registerPrincipal(registeredPrincipal, controlAudit('register_duplicate_ref')),
+    ).rejects.toThrow('AGENT_CONTROL_REFERENCE_CONFLICT');
     await expect(
       repository.grantDelegation(grantedDelegation, controlAudit('grant_test')),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual(persistedDelegation);
+    await expect(
+      repository.grantDelegation(grantedDelegation, controlAudit('grant_duplicate_ref')),
+    ).rejects.toThrow('AGENT_CONTROL_REFERENCE_CONFLICT');
+    await expect(
+      repository.grantDelegation(
+        {
+          ...delegation(tenantId),
+          id: 'delegation_excessive_ttl',
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000 + 5_000).toISOString(),
+        },
+        controlAudit('grant_excessive_ttl'),
+      ),
+    ).rejects.toThrow('AGENT_DELEGATION_EXPIRY_INVALID');
+    await expect(
+      repository.grantDelegation(
+        {
+          ...delegation(tenantId),
+          id: 'delegation_foreign_scope',
+          resourceScopes: ['event:event_from_another_tenant'],
+        },
+        controlAudit('grant_foreign_scope'),
+      ),
+    ).rejects.toThrow('AGENT_DELEGATION_SCOPE_DENIED');
+    await db
+      .updateTable('organization_members')
+      .set({ accepted_at: null })
+      .where('id', '=', 'member_agent_control')
+      .execute();
+    await expect(
+      repository.grantDelegation(
+        { ...delegation(tenantId), id: 'delegation_without_membership' },
+        controlAudit('grant_without_membership'),
+      ),
+    ).rejects.toThrow('AGENT_DELEGATION_SCOPE_DENIED');
+    await db
+      .updateTable('organization_members')
+      .set({ accepted_at: new Date() })
+      .where('id', '=', 'member_agent_control')
+      .execute();
+    await db
+      .updateTable('permission_grants')
+      .set({ permission: 'reports.read' })
+      .where('id', '=', 'pg_agent_control_2')
+      .execute();
+    await expect(
+      repository.grantDelegation(
+        { ...delegation(tenantId), id: 'delegation_without_live_permission' },
+        controlAudit('grant_without_live_permission'),
+      ),
+    ).rejects.toThrow('AGENT_CONTROL_SPONSOR_PERMISSION_DENIED');
+    await db
+      .updateTable('permission_grants')
+      .set({ permission: 'events.write' })
+      .where('id', '=', 'pg_agent_control_2')
+      .execute();
+    await expect(
+      repository.registerPrincipal(
+        { ...principal(tenantId), id: 'agent_wrong_sponsor', sponsorPrincipalId: 'user_other' },
+        controlAudit('register_wrong_sponsor'),
+      ),
+    ).rejects.toThrow('AGENT_CONTROL_SPONSOR_MISMATCH');
     await expect(
       repository.registerPrincipal(
         { ...principal(tenantId), id: 'agent_substitution' },
@@ -194,7 +342,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     await db
       .updateTable('permission_grants')
       .set({ permission: 'reports.read' })
-      .where('id', '=', 'pg_agent_control')
+      .where('id', '=', 'pg_agent_control_0')
       .execute();
     await expect(
       repository.registerPrincipal(
@@ -202,10 +350,16 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         controlAudit('register_permission_denied'),
       ),
     ).rejects.toThrow('AGENT_CONTROL_ACTOR_DENIED');
+    await expect(
+      repository.registerPrincipal(registeredPrincipal, controlAudit('register_test')),
+    ).rejects.toThrow('AGENT_CONTROL_ACTOR_DENIED');
+    await expect(
+      repository.grantDelegation(grantedDelegation, controlAudit('grant_test')),
+    ).rejects.toThrow('AGENT_CONTROL_ACTOR_DENIED');
     await db
       .updateTable('permission_grants')
       .set({ permission: 'developers.write' })
-      .where('id', '=', 'pg_agent_control')
+      .where('id', '=', 'pg_agent_control_0')
       .execute();
     const concurrentPrincipal = { ...principal(tenantId), id: 'agent_concurrent' };
     await expect(
@@ -242,7 +396,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         { ...delegation(tenantId), id: 'delegation_excess', capabilities: ['refunds.execute'] },
         controlAudit('grant_excess'),
       ),
-    ).rejects.toThrow('agent delegation is invalid');
+    ).rejects.toThrow('AGENT_DELEGATION_CAPABILITY_UNSUPPORTED');
     expect(
       await db
         .selectFrom('agent_control_events')
@@ -292,6 +446,48 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       .select('id')
       .where('tenant_id', '=', tenantId)
       .executeTakeFirstOrThrow();
+    const claimAuthority = await db
+      .selectFrom('agent_executions as execution')
+      .innerJoin('agent_principals as principal', (join) =>
+        join
+          .onRef('principal.tenant_id', '=', 'execution.tenant_id')
+          .onRef('principal.id', '=', 'execution.agent_principal_id'),
+      )
+      .innerJoin('agent_delegations as delegation', (join) =>
+        join
+          .onRef('delegation.tenant_id', '=', 'execution.tenant_id')
+          .onRef('delegation.id', '=', 'execution.delegation_grant_id'),
+      )
+      .innerJoin('agent_approvals as approval', (join) =>
+        join
+          .onRef('approval.tenant_id', '=', 'execution.tenant_id')
+          .onRef('approval.id', '=', 'execution.approval_id'),
+      )
+      .select([
+        'principal.state as principal_state',
+        'principal.sponsor_principal_id as principal_sponsor_id',
+        'delegation.agent_principal_id as delegation_principal_id',
+        'delegation.sponsor_principal_id as delegation_sponsor_id',
+        'delegation.revoked_at as delegation_revoked_at',
+        'delegation.issued_at as delegation_issued_at',
+        'delegation.expires_at as delegation_expires_at',
+        'approval.revoked_at as approval_revoked_at',
+        'approval.consumed_execution_id as approval_execution_id',
+      ])
+      .where('execution.tenant_id', '=', tenantId)
+      .where('execution.id', '=', persisted.id)
+      .executeTakeFirstOrThrow();
+    expect(claimAuthority).toMatchObject({
+      principal_state: 'active',
+      principal_sponsor_id: 'user_actor',
+      delegation_principal_id: 'agent_test',
+      delegation_sponsor_id: 'user_actor',
+      delegation_revoked_at: null,
+      approval_revoked_at: null,
+      approval_execution_id: persisted.id,
+    });
+    expect(new Date(claimAuthority.delegation_issued_at).getTime()).toBeLessThanOrEqual(Date.now());
+    expect(new Date(claimAuthority.delegation_expires_at).getTime()).toBeGreaterThan(Date.now());
     const source = execution(tenantId, persisted.id);
     const claimed = await repository.claim({
       tenantId,
@@ -448,6 +644,16 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
 
   it('revokes principals and all delegations atomically before execution claim', async () => {
     const repository = new AgentExecutionRepository(db);
+    await expect(
+      repository.revokeDelegation({
+        tenantId,
+        delegationId: 'delegation_test',
+        audit: {
+          ...controlAudit('revoke_delegation_wrong_sponsor'),
+          actorPrincipalId: 'user_other',
+        },
+      }),
+    ).rejects.toThrow('AGENT_CONTROL_SPONSOR_MISMATCH');
     const secondApproval = { ...approval(tenantId), id: 'approval_revocation' };
     const secondExecution = {
       ...execution(tenantId, 'execution_revocation'),

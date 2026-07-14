@@ -1,0 +1,73 @@
+---
+title: Connect an agent through the Platform API
+description: Register explicit agent identities and grant bounded, sponsor-controlled authority.
+audience:
+  - developer
+product_area: platform
+content_type: how-to
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-19
+prerequisites:
+  - An experimental private-beta environment
+  - A human administrator with tenant-wide developers.write
+related:
+  - /platform
+  - /reference/api
+  - /reference/migrations/2026-07-18-to-2026-07-19
+keywords:
+  - agents
+  - delegation
+  - approval
+  - audit
+adoption_paths:
+  - platform
+---
+
+> **Experimental private beta:** the shared identity and delegation contract is public for evaluation. Hosted agent access, managed models, natural-language orchestration, managed prompts, evaluations and managed memory are not generally available. Use only an invited environment and its supplied support channel.
+
+Tixkit agents use explicit principals. An agent does not impersonate its organizer sponsor and cannot write directly to a database. Authorization is evaluated through the existing API and workflow boundaries.
+
+## Current beta surface
+
+API version `2026-07-19` supports these sponsor-controlled operations:
+
+- register an agent principal;
+- read a principal sponsored by the current user;
+- revoke a principal and its active delegations atomically;
+- grant time-bounded event delegations; and
+- revoke a delegation.
+
+The initial capabilities are `events.read`, `readiness.read`, `events.prepare` and `events.execute`. Consequential execution still requires a typed action, an immutable plan digest and fresh approval. The registration API does not grant unrestricted delegated autonomy, campaign sending or buyer purchasing.
+
+## Authenticate the sponsor
+
+Agent administration accepts only a human bearer principal with tenant-wide `developers.write`. API keys, mobile principals, system principals and users restricted to selected brands or events fail closed. The sponsor must also hold the current event permission implied by every requested capability.
+
+Do not give the agent the sponsor's session. Register the agent while acting as the human sponsor, then use the returned principal identifier in later delegation requests.
+
+## Register an explicit principal
+
+Send a stable caller reference, the agent kind, requested capabilities and maximum autonomy to `POST /v1/agent-principals`. Every mutation requires a unique `Idempotency-Key` of 16–255 characters.
+
+The server derives the tenant, sponsor, protocol version, active state, registration time and tenant-namespaced identifier. Managed Cloud currently accepts `third_party`; Self-Hosted may additionally enable `self_hosted` for a bring-your-own orchestrator.
+
+Store the returned `agt_...` identifier. Reusing an idempotency key with different intent returns a conflict.
+
+## Grant bounded authority
+
+Send the returned principal identifier, capabilities, explicit `event:<id>` scopes and a future expiry to `POST /v1/agent-delegations`. A grant may cover at most 100 unique event scopes and 30 days.
+
+Inside the transaction, Tixkit rechecks the sponsor's current permission grants, accepted organization membership, event ownership and active principal state. The service derives `issuedAt` and `permissionSnapshot`; clients cannot submit either field. A material authorization change requires a new grant or approval.
+
+## Revoke and inspect
+
+The sponsor can inspect only their own principal and can revoke their own principals or delegations. Cross-sponsor resources are returned as not found. Principal revocation cascades to active delegations. Every mutation is idempotent, audited and reauthorizes the human actor before replay.
+
+The shared protocol requires approval to bind to an immutable digest. Material action or plan changes invalidate approval, and consequential actions require fresh approval in the initial release. Execution, approval, memory inspection/export/deletion and third-party conformance endpoints are still being completed; do not treat registration as proof that those later surfaces are available.
+
+## Memory and managed tools
+
+Agent memory is required to be tenant- and principal-scoped, inspectable, correctable, exportable, deletable and separately retained. Those guarantees are part of the shared protocol, but no public memory HTTP endpoint is available in this beta slice.
+
+Managed messaging may become an agent tool only with consent and suppression evaluation plus exact content and audience approval. Natural-language orchestration and managed memory remain Cloud capabilities; self-hosters may bring an orchestrator through the shared protocol when conformance support is available.

@@ -12,7 +12,7 @@ Node.js services, server frameworks, tooling, and trusted browser calls limited 
 
 ## Status
 
-Public SDK at version 0.1.0 and API version `2026-07-18`; pre-1.0 exports may evolve with release notes.
+Public SDK at version 0.1.0 and API version `2026-07-19`; pre-1.0 exports may evolve with release notes.
 
 ## Installation
 
@@ -32,7 +32,7 @@ TypeScript ES modules; build and runtime peers are declared in `package.json`.
 
 ## Configuration
 
-Pass `apiKey` and optional `baseUrl` explicitly. Use `TIXKIT_API_KEY` and `TIXKIT_API_BASE_URL` in server environment configuration.
+Pass either `apiKey` or `accessToken` and an optional `apiBaseUrl` explicitly. Agent-control operations require a human bearer `accessToken`; the API rejects API-key principals for those tenant-wide sponsor mutations. Use server environment configuration for secret API keys.
 
 ## Security
 
@@ -44,7 +44,7 @@ bun run --filter @tixkit/js typecheck && bun run --filter @tixkit/js lint && bun
 
 ## Compatibility
 
-Tracks API version `2026-07-18`; framework peer versions and subpath exports are the compatibility boundary.
+Tracks API version `2026-07-19`; framework peer versions and subpath exports are the compatibility boundary.
 
 ## Related guides
 

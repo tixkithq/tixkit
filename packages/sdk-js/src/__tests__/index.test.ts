@@ -130,6 +130,20 @@ describe('TixkitClient', () => {
     expect(client.tickets).toBeDefined();
   });
 
+  it('supports human bearer access tokens without ambiguous dual credentials', async () => {
+    const fetchMock = mockFetch(200, { id: 'agt_1' });
+    const client = new TixkitClient({
+      accessToken: 'human-session-token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await client.agentControl.getPrincipal('agt_1');
+    expect(getCall(fetchMock).headers.Authorization).toBe('Bearer human-session-token');
+    expect(
+      () => new TixkitClient({ apiKey: 'tk_test', accessToken: 'human-session-token' }),
+    ).toThrow('Configure either apiKey or accessToken, not both');
+  });
+
   it('covers every migration file, mapping, and report route with typed methods', async () => {
     const fetchMock = mockFetch(200, { items: [] });
     const client = new TixkitClient({
@@ -2936,6 +2950,62 @@ describe('TixkitClient new resource methods', () => {
     expectTypeOf(created.apiKey).toEqualTypeOf<string>();
     expect(call.method).toBe('POST');
     expect(call.url).toBe('https://api.test/v1/api-keys');
+  });
+
+  it('agentControl binds mutation intent to idempotency keys and server-owned fields', async () => {
+    const fm = mockFetch(201, { id: 'agt_1' });
+    const c = new TixkitClient({
+      accessToken: 'human-bearer-token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.agentControl.registerPrincipal({
+      id: 'external_agent_1',
+      kind: 'third_party',
+      capabilities: ['events.read'],
+      maximumAutonomy: 'read',
+      idempotencyKey: 'agent-register-0001',
+    });
+    await c.agentControl.getPrincipal('agt_1');
+    await c.agentControl.revokePrincipal('agt_1', 'agent-revoke-000001');
+    await c.agentControl.grantDelegation({
+      id: 'external_delegation_1',
+      agentPrincipalId: 'agt_1',
+      capabilities: ['events.execute'],
+      resourceScopes: ['event:evt_1'],
+      expiresAt: '2026-08-01T00:00:00.000Z',
+      idempotencyKey: 'agent-delegate-0001',
+    });
+    await c.agentControl.revokeDelegation('dlg_1', 'agent-delegation-revoke-0001');
+
+    const calls = fm.mock.calls.map((_, index) => getCall(fm, index));
+    expect(calls).toMatchObject([
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-principals',
+        headers: { 'Idempotency-Key': 'agent-register-0001' },
+      },
+      { method: 'GET', url: 'https://api.test/v1/agent-principals/agt_1' },
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-principals/agt_1/revoke',
+        headers: { 'Idempotency-Key': 'agent-revoke-000001' },
+      },
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-delegations',
+        headers: { 'Idempotency-Key': 'agent-delegate-0001' },
+      },
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-delegations/dlg_1/revoke',
+        headers: { 'Idempotency-Key': 'agent-delegation-revoke-0001' },
+      },
+    ]);
+    expect(JSON.parse(calls[0]!.body)).not.toHaveProperty('tenantId');
+    expect(JSON.parse(calls[3]!.body)).not.toHaveProperty('permissionSnapshot');
+    expect(JSON.parse(calls[3]!.body)).not.toHaveProperty('issuedAt');
   });
 
   it('webhookEndpoints.create returns a required one-time signing secret', async () => {

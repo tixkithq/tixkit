@@ -3,6 +3,7 @@ import type {
   AgentAction,
   AgentActionResult,
   AgentAuditRecord,
+  AgentCapability,
   AgentDelegationGrant,
   AgentExecution,
   AgentExecutionStore,
@@ -23,6 +24,84 @@ type Executor = Kysely<DB> | Transaction<DB>;
 const LEASE_MILLISECONDS = 5 * 60 * 1000;
 const CONTROL_TOKEN = /^[A-Z0-9_]{3,64}$/u;
 const CONTROL_ID = /^[a-z0-9][a-z0-9_-]{1,62}$/u;
+const MAX_DELEGATION_TTL_MILLISECONDS = 30 * 24 * 60 * 60 * 1000;
+
+function delegationPermissionSnapshot(capabilities: readonly AgentCapability[]): string[] {
+  const permissions = new Set<string>();
+  for (const capability of capabilities) {
+    if (capability === 'events.read' || capability === 'readiness.read')
+      permissions.add('events:read');
+    else if (capability === 'events.prepare') permissions.add('events:write');
+    else if (capability === 'events.execute') {
+      permissions.add('events:write');
+      permissions.add('events:publish');
+    } else throw new Error('AGENT_DELEGATION_CAPABILITY_UNSUPPORTED');
+  }
+  return [...permissions].sort();
+}
+
+async function assertDelegationAuthority(
+  db: Executor,
+  delegation: AgentDelegationGrant,
+  now: Date,
+): Promise<string[]> {
+  const permissionSnapshot = delegationPermissionSnapshot(delegation.capabilities);
+  const requiredProductPermissions = new Set(
+    permissionSnapshot.map((permission) =>
+      permission === 'events:read' ? 'events.read' : 'events.write',
+    ),
+  );
+  const grants = await db
+    .selectFrom('permission_grants')
+    .select(['permission'])
+    .where('tenant_id', '=', delegation.tenantId)
+    .where('principal_type', '=', 'user')
+    .where('principal_id', '=', delegation.sponsorPrincipalId)
+    .where('permission', 'in', [...requiredProductPermissions])
+    .where('scope_type', '=', 'tenant')
+    .where('scope_id', 'is', null)
+    .forUpdate()
+    .execute();
+  const granted = new Set(grants.map(({ permission }) => permission));
+  if ([...requiredProductPermissions].some((permission) => !granted.has(permission)))
+    throw new Error('AGENT_CONTROL_SPONSOR_PERMISSION_DENIED');
+
+  const eventIds = delegation.resourceScopes.map((scope) => {
+    if (!scope.startsWith('event:')) throw new Error('AGENT_DELEGATION_SCOPE_UNSUPPORTED');
+    return scope.slice('event:'.length);
+  });
+  if (new Set(eventIds).size !== eventIds.length) throw new Error('AGENT_DELEGATION_SCOPE_INVALID');
+  const events = await db
+    .selectFrom('events')
+    .select(['id', 'organization_id'])
+    .where('tenant_id', '=', delegation.tenantId)
+    .where('id', 'in', eventIds)
+    .forUpdate()
+    .execute();
+  if (events.length !== eventIds.length) throw new Error('AGENT_DELEGATION_SCOPE_DENIED');
+  const organizationIds = [...new Set(events.map(({ organization_id }) => organization_id))];
+  const memberships = await db
+    .selectFrom('organization_members')
+    .select(['organization_id'])
+    .where('tenant_id', '=', delegation.tenantId)
+    .where('user_id', '=', delegation.sponsorPrincipalId)
+    .where('organization_id', 'in', organizationIds)
+    .where('accepted_at', 'is not', null)
+    .forUpdate()
+    .execute();
+  const memberOrganizations = new Set(memberships.map(({ organization_id }) => organization_id));
+  if (organizationIds.some((organizationId) => !memberOrganizations.has(organizationId)))
+    throw new Error('AGENT_DELEGATION_SCOPE_DENIED');
+
+  const expiresAt = new Date(delegation.expiresAt).getTime();
+  if (
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= now.getTime() ||
+    expiresAt - now.getTime() > MAX_DELEGATION_TTL_MILLISECONDS
+  )
+    throw new Error('AGENT_DELEGATION_EXPIRY_INVALID');
+  return permissionSnapshot;
+}
 
 export interface AgentControlMutationAudit {
   id: string;
@@ -83,10 +162,28 @@ function toExecution(row: Selectable<DB['agent_executions']>): AgentExecution {
   };
 }
 
+function toDelegation(row: Selectable<DB['agent_delegations']>): AgentDelegationGrant {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    agentPrincipalId: row.agent_principal_id,
+    sponsorPrincipalId: row.sponsor_principal_id,
+    capabilities: parseStrings(
+      row.capabilities,
+      'delegation capabilities',
+    ) as AgentDelegationGrant['capabilities'],
+    resourceScopes: parseStrings(row.resource_scopes, 'delegation resource scopes'),
+    permissionSnapshot: parseStrings(row.permission_snapshot, 'delegation permission snapshot'),
+    issuedAt: iso(row.issued_at),
+    expiresAt: iso(row.expires_at),
+    ...(row.revoked_at ? { revokedAt: iso(row.revoked_at) } : {}),
+  };
+}
+
 async function databaseNow(db: Executor): Promise<Date> {
   const expression =
     process.env.DB_DRIVER === 'mysql'
-      ? sql<Date>`current_timestamp(3)`
+      ? sql<Date>`current_timestamp`
       : process.env.DB_DRIVER === 'mssql'
         ? sql<Date>`sysdatetime()`
         : sql<Date>`clock_timestamp()`;
@@ -310,6 +407,13 @@ function assertAudit(
 export class AgentExecutionRepository implements AgentExecutionStore {
   constructor(private readonly db: Kysely<DB>) {}
 
+  async assertControlActor(tenantId: string, actorPrincipalId: string): Promise<void> {
+    await executeControlTransaction(this.db, async (tx) => {
+      await lockControlTenant(tx, tenantId);
+      await authorizeControlActor(tx, tenantId, actorPrincipalId);
+    });
+  }
+
   async recordApproval(approval: AgentApproval): Promise<void> {
     await this.db
       .insertInto('agent_approvals')
@@ -333,61 +437,111 @@ export class AgentExecutionRepository implements AgentExecutionStore {
   async registerPrincipal(
     principal: AgentPrincipal,
     audit: AgentControlMutationAudit,
-  ): Promise<void> {
-    validateAgentPrincipal(principal);
-    const fingerprint = controlFingerprint(audit, 'principal', principal.id, 'register', principal);
-    await executeControlTransaction(this.db, async (tx) => {
+  ): Promise<AgentPrincipal> {
+    const { registeredAt: _registeredAt, ...requestedPrincipal } = principal;
+    const fingerprint = controlFingerprint(
+      audit,
+      'principal',
+      principal.id,
+      'register',
+      requestedPrincipal,
+    );
+    return executeControlTransaction(this.db, async (tx) => {
       await lockControlTenant(tx, principal.tenantId);
-      if (await controlReplay(tx, principal.tenantId, audit, fingerprint)) return;
       const actorAuthorizationSha256 = await authorizeControlActor(
         tx,
         principal.tenantId,
         audit.actorPrincipalId,
       );
+      if (principal.sponsorPrincipalId !== audit.actorPrincipalId)
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
       const now = await databaseNow(tx);
+      const persistedPrincipal: AgentPrincipal = {
+        ...principal,
+        registeredAt: now.toISOString(),
+      };
+      validateAgentPrincipal(persistedPrincipal);
+      if (await controlReplay(tx, principal.tenantId, audit, fingerprint)) {
+        const existing = await tx
+          .selectFrom('agent_principals')
+          .selectAll()
+          .where('tenant_id', '=', principal.tenantId)
+          .where('id', '=', principal.id)
+          .executeTakeFirstOrThrow();
+        return this.getPrincipalFrom(tx, existing);
+      }
+      const conflictingPrincipal = await tx
+        .selectFrom('agent_principals')
+        .select('id')
+        .where('tenant_id', '=', principal.tenantId)
+        .where('id', '=', principal.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (conflictingPrincipal) throw new Error('AGENT_CONTROL_REFERENCE_CONFLICT');
       await tx
         .insertInto('agent_principals')
         .values({
-          id: principal.id,
-          tenant_id: principal.tenantId,
-          kind: principal.kind,
-          sponsor_principal_id: principal.sponsorPrincipalId,
-          capabilities: JSON.stringify(principal.capabilities),
-          maximum_autonomy: principal.maximumAutonomy,
-          protocol_version: principal.protocolVersion,
-          state: principal.state,
-          registered_at: new Date(principal.registeredAt),
-          updated_at: new Date(principal.registeredAt),
+          id: persistedPrincipal.id,
+          tenant_id: persistedPrincipal.tenantId,
+          kind: persistedPrincipal.kind,
+          sponsor_principal_id: persistedPrincipal.sponsorPrincipalId,
+          capabilities: JSON.stringify(persistedPrincipal.capabilities),
+          maximum_autonomy: persistedPrincipal.maximumAutonomy,
+          protocol_version: persistedPrincipal.protocolVersion,
+          state: persistedPrincipal.state,
+          registered_at: now,
+          updated_at: now,
         })
         .execute();
+      const insertedPrincipal = await tx
+        .selectFrom('agent_principals')
+        .selectAll()
+        .where('tenant_id', '=', principal.tenantId)
+        .where('id', '=', principal.id)
+        .executeTakeFirstOrThrow();
+      const canonicalPrincipal = await this.getPrincipalFrom(tx, insertedPrincipal);
       await appendControlEvent(tx, {
         ...audit,
         tenantId: principal.tenantId,
         targetType: 'principal',
         targetId: principal.id,
         operation: 'register',
-        newState: principal,
+        newState: canonicalPrincipal,
         occurredAt: now,
         requestFingerprint: fingerprint,
         actorAuthorizationSha256,
         outcome: 'applied',
       });
+      return canonicalPrincipal;
     });
   }
 
   async grantDelegation(
     delegation: AgentDelegationGrant,
     audit: AgentControlMutationAudit,
-  ): Promise<void> {
-    const fingerprint = controlFingerprint(audit, 'delegation', delegation.id, 'grant', delegation);
-    await executeControlTransaction(this.db, async (tx) => {
+  ): Promise<AgentDelegationGrant> {
+    const {
+      issuedAt: _issuedAt,
+      revokedAt: _revokedAt,
+      permissionSnapshot: _permissionSnapshot,
+      ...requestedDelegation
+    } = delegation;
+    const fingerprint = controlFingerprint(
+      audit,
+      'delegation',
+      delegation.id,
+      'grant',
+      requestedDelegation,
+    );
+    return executeControlTransaction(this.db, async (tx) => {
       await lockControlTenant(tx, delegation.tenantId);
-      if (await controlReplay(tx, delegation.tenantId, audit, fingerprint)) return;
       const actorAuthorizationSha256 = await authorizeControlActor(
         tx,
         delegation.tenantId,
         audit.actorPrincipalId,
       );
+      if (delegation.sponsorPrincipalId !== audit.actorPrincipalId || delegation.revokedAt)
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
       const principal = await tx
         .selectFrom('agent_principals')
         .selectAll()
@@ -402,8 +556,33 @@ export class AgentExecutionRepository implements AgentExecutionStore {
       )
         throw new Error('AGENT_PRINCIPAL_INACTIVE');
       const persistedPrincipal = await this.getPrincipalFrom(tx, principal);
-      validateAgentDelegation(delegation, persistedPrincipal);
       const now = await databaseNow(tx);
+      const permissionSnapshot = await assertDelegationAuthority(tx, delegation, now);
+      const persistedDelegation: AgentDelegationGrant = {
+        ...delegation,
+        issuedAt: now.toISOString(),
+        permissionSnapshot,
+      };
+      validateAgentDelegation(persistedDelegation, persistedPrincipal);
+      if (await controlReplay(tx, delegation.tenantId, audit, fingerprint)) {
+        const row = await tx
+          .selectFrom('agent_delegations')
+          .selectAll()
+          .where('tenant_id', '=', delegation.tenantId)
+          .where('id', '=', delegation.id)
+          .executeTakeFirst();
+        const existing = row ? toDelegation(row) : undefined;
+        if (!existing) throw new Error('AGENT_CONTROL_REPLAY_STATE_MISSING');
+        return existing;
+      }
+      const conflictingDelegation = await tx
+        .selectFrom('agent_delegations')
+        .select('id')
+        .where('tenant_id', '=', delegation.tenantId)
+        .where('id', '=', delegation.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (conflictingDelegation) throw new Error('AGENT_CONTROL_REFERENCE_CONFLICT');
       await tx
         .insertInto('agent_delegations')
         .values({
@@ -413,25 +592,33 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           sponsor_principal_id: delegation.sponsorPrincipalId,
           capabilities: JSON.stringify(delegation.capabilities),
           resource_scopes: JSON.stringify(delegation.resourceScopes),
-          permission_snapshot: JSON.stringify(delegation.permissionSnapshot),
-          issued_at: new Date(delegation.issuedAt),
+          permission_snapshot: JSON.stringify(permissionSnapshot),
+          issued_at: now,
           expires_at: new Date(delegation.expiresAt),
-          revoked_at: delegation.revokedAt ? new Date(delegation.revokedAt) : null,
+          revoked_at: null,
           created_at: now,
         })
         .execute();
+      const insertedDelegation = await tx
+        .selectFrom('agent_delegations')
+        .selectAll()
+        .where('tenant_id', '=', delegation.tenantId)
+        .where('id', '=', delegation.id)
+        .executeTakeFirstOrThrow();
+      const canonicalDelegation = toDelegation(insertedDelegation);
       await appendControlEvent(tx, {
         ...audit,
         tenantId: delegation.tenantId,
         targetType: 'delegation',
         targetId: delegation.id,
         operation: 'grant',
-        newState: delegation,
+        newState: canonicalDelegation,
         occurredAt: now,
         requestFingerprint: fingerprint,
         actorAuthorizationSha256,
         outcome: 'applied',
       });
+      return canonicalDelegation;
     });
   }
 
@@ -450,8 +637,6 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     );
     return executeControlTransaction(this.db, async (tx) => {
       await lockControlTenant(tx, input.tenantId);
-      const replay = await controlReplay(tx, input.tenantId, input.audit, fingerprint);
-      if (replay) return replay === 'applied';
       const actorAuthorizationSha256 = await authorizeControlActor(
         tx,
         input.tenantId,
@@ -465,6 +650,10 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .where('id', '=', input.principalId)
         .forUpdate()
         .executeTakeFirst();
+      if (previous && previous.sponsor_principal_id !== input.audit.actorPrincipalId)
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      const replay = await controlReplay(tx, input.tenantId, input.audit, fingerprint);
+      if (replay) return replay === 'applied';
       if (!previous || previous.state === 'revoked') {
         await appendControlEvent(tx, {
           ...input.audit,
@@ -527,8 +716,6 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     );
     return executeControlTransaction(this.db, async (tx) => {
       await lockControlTenant(tx, input.tenantId);
-      const replay = await controlReplay(tx, input.tenantId, input.audit, fingerprint);
-      if (replay) return replay === 'applied';
       const actorAuthorizationSha256 = await authorizeControlActor(
         tx,
         input.tenantId,
@@ -542,6 +729,10 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .forUpdate()
         .executeTakeFirst();
       const now = await databaseNow(tx);
+      if (previous && previous.sponsor_principal_id !== input.audit.actorPrincipalId)
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      const replay = await controlReplay(tx, input.tenantId, input.audit, fingerprint);
+      if (replay) return replay === 'applied';
       if (!previous || previous.revoked_at) {
         await appendControlEvent(tx, {
           ...input.audit,
@@ -595,8 +786,6 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     );
     return executeControlTransaction(this.db, async (tx) => {
       await lockControlTenant(tx, input.tenantId);
-      const replay = await controlReplay(tx, input.tenantId, input.audit, fingerprint);
-      if (replay) return replay === 'applied';
       const actorAuthorizationSha256 = await authorizeControlActor(
         tx,
         input.tenantId,
@@ -610,6 +799,8 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .forUpdate()
         .executeTakeFirst();
       const now = await databaseNow(tx);
+      const replay = await controlReplay(tx, input.tenantId, input.audit, fingerprint);
+      if (replay) return replay === 'applied';
       if (!previous || previous.revoked_at) {
         await appendControlEvent(tx, {
           ...input.audit,
@@ -657,6 +848,19 @@ export class AgentExecutionRepository implements AgentExecutionStore {
       .executeTakeFirst();
     if (!row) return undefined;
     return this.getPrincipalFrom(this.db, row);
+  }
+
+  async getDelegation(
+    tenantId: string,
+    delegationId: string,
+  ): Promise<AgentDelegationGrant | undefined> {
+    const row = await this.db
+      .selectFrom('agent_delegations')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', delegationId)
+      .executeTakeFirst();
+    return row ? toDelegation(row) : undefined;
   }
 
   private async getPrincipalFrom(

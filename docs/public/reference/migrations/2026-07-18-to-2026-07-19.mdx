@@ -1,0 +1,31 @@
+---
+title: API migration from 2026-07-18 to 2026-07-19
+description: Adopt sponsor-bound agent principal and delegation controls.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-19
+prerequisites:
+  - An integration using API version 2026-07-18
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-19` adds the experimental, private-beta agent principal and delegation control surface. Existing `2026-07-18` operations remain compatible; this is an additive contract release.
+
+## Agent identity and delegation
+
+The new bearer-authenticated operations register and inspect explicitly sponsored agent principals, grant bounded event delegations, and revoke principals or delegations. They require a human principal with tenant-wide `developers.write`. API keys, mobile principals, system principals and brand- or event-scoped users cannot administer agents.
+
+Registration accepts a caller-owned stable reference, agent kind, capabilities and maximum autonomy. The service returns a tenant-namespaced principal identifier and derives the tenant, sponsor, protocol version, active state and registration time. Managed Cloud accepts `third_party` agents in this beta; a Self-Hosted deployment may additionally enable `self_hosted` agents.
+
+Delegations accept the returned principal identifier, one or more supported capabilities, explicit `event:<id>` scopes and an expiry no more than 30 days in the future. The service rechecks the sponsor's current permissions and accepted organization membership inside the database transaction. It derives the issue time and permission snapshot; clients cannot supply either value.
+
+Every mutation requires an `Idempotency-Key` containing 16–255 characters. Reusing a key with different intent returns a conflict. Principal revocation atomically revokes active delegations. Consequential execution remains approval-gated and is outside these registration operations.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-19`.

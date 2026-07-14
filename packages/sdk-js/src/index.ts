@@ -2,13 +2,14 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-18';
+export const TIXKIT_API_VERSION = '2026-07-19';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
 
 export type TixkitConfig = {
   apiKey?: string;
+  accessToken?: string;
   apiBaseUrl?: string;
   apiVersion?: string;
   timeout?: number;
@@ -1516,6 +1517,54 @@ export type ApiKeyCreated = ApiKey & {
   apiKey: string;
 };
 
+export type AgentCapability =
+  | 'events.read'
+  | 'events.prepare'
+  | 'events.execute'
+  | 'readiness.read';
+
+export type AgentPrincipal = {
+  id: string;
+  tenantId: string;
+  kind: 'third_party' | 'self_hosted';
+  sponsorPrincipalId: string;
+  capabilities: AgentCapability[];
+  maximumAutonomy: 'read' | 'recommend' | 'prepare' | 'execute_with_approval';
+  protocolVersion: string;
+  state: 'active' | 'suspended' | 'revoked';
+  registeredAt: string;
+};
+
+export type AgentDelegation = {
+  id: string;
+  tenantId: string;
+  agentPrincipalId: string;
+  sponsorPrincipalId: string;
+  capabilities: AgentCapability[];
+  resourceScopes: string[];
+  permissionSnapshot: string[];
+  issuedAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+};
+
+export type RegisterAgentPrincipalInput = {
+  id: string;
+  kind: 'third_party' | 'self_hosted';
+  capabilities: AgentCapability[];
+  maximumAutonomy: 'read' | 'recommend' | 'prepare' | 'execute_with_approval';
+  idempotencyKey: string;
+};
+
+export type GrantAgentDelegationInput = {
+  id: string;
+  agentPrincipalId: string;
+  capabilities: AgentCapability[];
+  resourceScopes: string[];
+  expiresAt: string;
+  idempotencyKey: string;
+};
+
 export type ScannerDevice = {
   id: string;
   tenantId: string;
@@ -2569,7 +2618,7 @@ export type CreatePortableExportInput =
     };
 
 export class TixkitClient {
-  private readonly apiKey?: string;
+  private readonly authorizationCredential?: string;
   private readonly apiBaseUrl: string;
   private readonly apiVersion: string;
   private readonly timeout: number;
@@ -2588,6 +2637,7 @@ export class TixkitClient {
   readonly checkInLists: CheckInListResource;
   readonly checkIns: CheckInResource;
   readonly apiKeys: ApiKeyResource;
+  readonly agentControl: AgentControlResource;
   readonly scannerDevices: ScannerDeviceResource;
   readonly reports: ReportResource;
   readonly exports: ExportResource;
@@ -2605,11 +2655,19 @@ export class TixkitClient {
   readonly auth: AuthResource;
 
   constructor(config: TixkitConfig) {
-    if (isBrowserRuntime() && config.apiKey && looksLikeSecretApiKey(config.apiKey)) {
+    if (config.apiKey && config.accessToken) {
+      throw new Error('Configure either apiKey or accessToken, not both');
+    }
+    const authorizationCredential = config.accessToken ?? config.apiKey;
+    if (
+      isBrowserRuntime() &&
+      authorizationCredential &&
+      looksLikeSecretApiKey(authorizationCredential)
+    ) {
       throw new Error('Secret Tixkit API keys are server-only and cannot be used in browser SDKs');
     }
 
-    this.apiKey = config.apiKey;
+    this.authorizationCredential = authorizationCredential;
     this.apiBaseUrl = normalizeApiBaseUrl(config.apiBaseUrl ?? 'https://api.tixkit.com');
     this.apiVersion = config.apiVersion ?? TIXKIT_API_VERSION;
     this.timeout = config.timeout ?? 30000;
@@ -2628,6 +2686,7 @@ export class TixkitClient {
     this.checkInLists = new CheckInListResource(this);
     this.checkIns = new CheckInResource(this);
     this.apiKeys = new ApiKeyResource(this);
+    this.agentControl = new AgentControlResource(this);
     this.scannerDevices = new ScannerDeviceResource(this);
     this.reports = new ReportResource(this);
     this.exports = new ExportResource(this);
@@ -2668,8 +2727,8 @@ export class TixkitClient {
       'X-Tixkit-Version': this.apiVersion,
     };
 
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
+    if (this.authorizationCredential) {
+      headers.Authorization = `Bearer ${this.authorizationCredential}`;
     }
     if (hasBody) {
       headers['Content-Type'] = 'application/json';
@@ -2763,8 +2822,8 @@ export class TixkitClient {
       'X-Tixkit-Version': this.apiVersion,
     };
 
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
+    if (this.authorizationCredential) {
+      headers.Authorization = `Bearer ${this.authorizationCredential}`;
     }
     if (hasBody) {
       headers['Content-Type'] = 'application/json';
@@ -3882,6 +3941,42 @@ class ApiKeyResource {
   }
   async revoke(keyId: string): Promise<void> {
     return this.client.request('DELETE', `/api-keys/${keyId}`);
+  }
+}
+
+class AgentControlResource {
+  constructor(private client: TixkitClient) {}
+
+  async registerPrincipal(input: RegisterAgentPrincipalInput): Promise<AgentPrincipal> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent-principals', { body, idempotencyKey });
+  }
+
+  async getPrincipal(principalId: string): Promise<AgentPrincipal> {
+    return this.client.request('GET', `/agent-principals/${principalId}`);
+  }
+
+  async revokePrincipal(
+    principalId: string,
+    idempotencyKey: string,
+  ): Promise<{ id: string; state: 'revoked' }> {
+    return this.client.request('POST', `/agent-principals/${principalId}/revoke`, {
+      idempotencyKey,
+    });
+  }
+
+  async grantDelegation(input: GrantAgentDelegationInput): Promise<AgentDelegation> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent-delegations', { body, idempotencyKey });
+  }
+
+  async revokeDelegation(
+    delegationId: string,
+    idempotencyKey: string,
+  ): Promise<{ id: string; revoked: true }> {
+    return this.client.request('POST', `/agent-delegations/${delegationId}/revoke`, {
+      idempotencyKey,
+    });
   }
 }
 

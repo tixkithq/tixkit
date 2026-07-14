@@ -77,7 +77,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-18');
+    expect(openApiSpec.info.version).toBe('2026-07-19');
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {
@@ -365,6 +365,52 @@ describe('openApiSpec', () => {
     oauthApplicationFields.sort();
     expect(oauthApplicationFields).toEqual(['name', 'organizationId', 'redirectUris', 'scopes']);
     expect(openApiSpec.paths).not.toHaveProperty('/developer/api-keys');
+  });
+
+  it('documents the sponsor-bound experimental agent control surface', () => {
+    const register = openApiSpec.paths['/agent-principals'].post;
+    const getPrincipal = openApiSpec.paths['/agent-principals/{id}'].get;
+    const revokePrincipal = openApiSpec.paths['/agent-principals/{id}/revoke'].post;
+    const grant = openApiSpec.paths['/agent-delegations'].post;
+    const revokeDelegation = openApiSpec.paths['/agent-delegations/{id}/revoke'].post;
+
+    for (const operation of [register, getPrincipal, revokePrincipal, grant, revokeDelegation]) {
+      expect(operation.security).toEqual([{ BearerAuth: [] }]);
+      expect(operation.security).not.toContainEqual({ ApiKey: [] });
+      expect(operation.tags).toEqual(['Agent platform']);
+      expect(operation['x-required-permissions']).toEqual(['developers.write']);
+    }
+    for (const mutation of [register, revokePrincipal, grant, revokeDelegation]) {
+      expect(mutation.parameters).toContainEqual({
+        $ref: '#/components/parameters/AgentControlIdempotencyKey',
+      });
+    }
+    expect(openApiSpec.components.parameters.AgentControlIdempotencyKey.schema).toMatchObject({
+      minLength: 16,
+      maxLength: 255,
+    });
+
+    const registerSchema = register.requestBody.content['application/json'].schema;
+    expect(registerSchema.additionalProperties).toBe(false);
+    expect(Object.keys(registerSchema.properties).sort()).toEqual([
+      'capabilities',
+      'id',
+      'kind',
+      'maximumAutonomy',
+    ]);
+    expect(registerSchema.properties).not.toHaveProperty('tenantId');
+    expect(registerSchema.properties).not.toHaveProperty('sponsorPrincipalId');
+    expect(registerSchema.properties).not.toHaveProperty('registeredAt');
+
+    const grantSchema = grant.requestBody.content['application/json'].schema;
+    expect(grantSchema.additionalProperties).toBe(false);
+    expect(grantSchema.properties).not.toHaveProperty('permissionSnapshot');
+    expect(grantSchema.properties).not.toHaveProperty('issuedAt');
+    expect(grantSchema.properties).not.toHaveProperty('sponsorPrincipalId');
+    expect(grantSchema.properties.capabilities.uniqueItems).toBe(true);
+    expect(grantSchema.properties.resourceScopes.uniqueItems).toBe(true);
+    expect(openApiSpec.components.schemas.AgentPrincipal.required).toContain('protocolVersion');
+    expect(openApiSpec.components.schemas.AgentDelegation.required).toContain('permissionSnapshot');
   });
 
   it('documents API-key authentication on scoped developer and audit automation routes', () => {

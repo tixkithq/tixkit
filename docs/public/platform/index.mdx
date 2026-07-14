@@ -7,12 +7,13 @@ product_area: platform
 content_type: overview
 status: experimental
 owner: developer-experience
-last_verified: 2026-07-12
+last_verified: 2026-07-19
 prerequisites: []
 related:
   - /getting-started/first-api-call
   - /developers/api-fundamentals
   - /developers/webhooks/setup
+  - /platform/agent-platform
 keywords:
   - platform api
   - ticketing api
@@ -36,7 +37,7 @@ The Tixkit Platform API is the developer-facing capability inside Tixkit Cloud. 
 
 ## Agent connections
 
-Third-party agents will connect through the same Platform API. The shared protocol will require explicit agent principals, bounded delegation, typed actions, dry-run plans, digest-bound approval, audit, revocation, and scoped memory. Those contracts are not yet advertised as production-ready.
+Third-party agents connect through the same Platform API. API version `2026-07-19` exposes the experimental sponsor-bound principal and delegation surface; typed actions, dry-run plans, digest-bound approval, execution, audit, revocation and scoped memory remain governed by the shared protocol. Read the [agent Platform API guide](/platform/agent-platform) for the implemented boundary and current private-beta limitations.
 
 ## Continue
 

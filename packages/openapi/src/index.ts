@@ -201,6 +201,8 @@ function tagForPath(path: string): string {
     exports: 'Reports and exports',
     reports: 'Reports and exports',
     'api-keys': 'Developer',
+    'agent-principals': 'Agent platform',
+    'agent-delegations': 'Agent platform',
     'scanner-devices': 'Developer',
     'webhook-endpoints': 'Webhooks',
     'migration-jobs': 'Migrations',
@@ -482,7 +484,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-18',
+    version: '2026-07-19',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -525,6 +527,14 @@ const rawOpenApiSpec = {
         required: true,
         schema: { type: 'string' },
         description: 'Required for idempotent mutations',
+      },
+      AgentControlIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: { type: 'string', minLength: 16, maxLength: 255 },
+        description:
+          'Required for agent-control mutations. Use 16-255 characters with no surrounding whitespace and preserve the same key only for identical intent.',
       },
       CheckoutSessionToken: {
         name: 'X-Checkout-Session-Token',
@@ -4999,6 +5009,90 @@ const rawOpenApiSpec = {
           message: { type: 'string' },
         },
         required: ['orderId', 'refundAmount', 'status', 'message'],
+      },
+      AgentPrincipal: {
+        type: 'object',
+        description:
+          'Explicit agent identity sponsored by the current human administrator. Agent principals never impersonate their sponsor.',
+        properties: {
+          id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          kind: { type: 'string', enum: ['third_party', 'self_hosted'] },
+          sponsorPrincipalId: { type: 'string' },
+          capabilities: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 4,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              enum: ['events.read', 'events.prepare', 'events.execute', 'readiness.read'],
+            },
+          },
+          maximumAutonomy: {
+            type: 'string',
+            enum: ['read', 'recommend', 'prepare', 'execute_with_approval'],
+          },
+          protocolVersion: { type: 'string' },
+          state: { type: 'string', enum: ['active', 'suspended', 'revoked'] },
+          registeredAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'kind',
+          'sponsorPrincipalId',
+          'capabilities',
+          'maximumAutonomy',
+          'protocolVersion',
+          'state',
+          'registeredAt',
+        ],
+        additionalProperties: false,
+      },
+      AgentDelegation: {
+        type: 'object',
+        description:
+          'Time-bounded authority grant. The server derives the sponsor, issue time, and permission snapshot from live authorization state.',
+        properties: {
+          id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          agentPrincipalId: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          sponsorPrincipalId: { type: 'string' },
+          capabilities: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 4,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              enum: ['events.read', 'events.prepare', 'events.execute', 'readiness.read'],
+            },
+          },
+          resourceScopes: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            uniqueItems: true,
+            items: { type: 'string', pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+          },
+          permissionSnapshot: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+          issuedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          revokedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'capabilities',
+          'resourceScopes',
+          'permissionSnapshot',
+          'issuedAt',
+          'expiresAt',
+        ],
+        additionalProperties: false,
       },
       OAuthApplication: {
         type: 'object',
@@ -9587,6 +9681,218 @@ const rawOpenApiSpec = {
         summary: 'Revoke API key',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         responses: { '204': { description: 'API key revoked' } },
+      },
+    },
+    '/agent-principals': {
+      post: {
+        summary: 'Register an agent principal',
+        description:
+          'Experimental/private beta. Requires a human bearer principal with tenant-wide `developers.write` and the live permissions implied by every requested capability. The server binds the principal to the authenticated sponsor and derives tenant, protocol version, state, identifier, and registration time. Managed Cloud accepts third-party agents; Self-Hosted deployments may also accept self-hosted agents.',
+        'x-required-permissions': ['developers.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                    description:
+                      'Caller-chosen stable registration reference. The response contains its tenant-namespaced platform identifier.',
+                  },
+                  kind: { type: 'string', enum: ['third_party', 'self_hosted'] },
+                  capabilities: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 4,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      enum: ['events.read', 'events.prepare', 'events.execute', 'readiness.read'],
+                    },
+                  },
+                  maximumAutonomy: {
+                    type: 'string',
+                    enum: ['read', 'recommend', 'prepare', 'execute_with_approval'],
+                  },
+                },
+                required: ['id', 'kind', 'capabilities', 'maximumAutonomy'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Agent principal registered',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentPrincipal' } },
+            },
+          },
+          '400': { description: 'Invalid registration or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor lacks live authority or kind is unavailable' },
+          '409': { description: 'Idempotency conflict' },
+        },
+      },
+    },
+    '/agent-principals/{id}': {
+      get: {
+        summary: 'Get a sponsored agent principal',
+        description:
+          'Requires the human bearer sponsor with tenant-wide `developers.write`. Principals sponsored by another user are hidden as not found.',
+        'x-required-permissions': ['developers.write'],
+        security: [{ BearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Sponsored agent principal',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentPrincipal' } },
+            },
+          },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor lacks tenant-wide agent administration authority' },
+          '404': { description: 'Agent principal not found for this sponsor' },
+        },
+      },
+    },
+    '/agent-principals/{id}/revoke': {
+      post: {
+        summary: 'Revoke an agent principal',
+        description:
+          'Revokes the sponsored principal and its active delegations atomically. Requires fresh human sponsor authorization and is idempotent for an identical request.',
+        'x-required-permissions': ['developers.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
+        responses: {
+          '200': {
+            description: 'Principal revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+                    state: { type: 'string', const: 'revoked' },
+                  },
+                  required: ['id', 'state'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor authorization changed' },
+          '404': { description: 'Agent principal not found for this sponsor' },
+          '409': { description: 'Idempotency conflict' },
+        },
+      },
+    },
+    '/agent-delegations': {
+      post: {
+        summary: 'Grant an agent delegation',
+        description:
+          'Experimental/private beta. Grants an active sponsored agent a bounded set of event capabilities for one to 100 event scopes and at most 30 days. The server rechecks sponsor permissions and resource membership under lock, then derives the immutable permission snapshot and issue time.',
+        'x-required-permissions': ['developers.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  id: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                    description:
+                      'Caller-chosen stable grant reference. The response contains its tenant-namespaced platform identifier.',
+                  },
+                  agentPrincipalId: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+                  capabilities: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 4,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      enum: ['events.read', 'events.prepare', 'events.execute', 'readiness.read'],
+                    },
+                  },
+                  resourceScopes: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 100,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                    },
+                  },
+                  expiresAt: {
+                    type: 'string',
+                    format: 'date-time',
+                    description: 'Future expiry no more than 30 days from the database clock.',
+                  },
+                },
+                required: ['id', 'agentPrincipalId', 'capabilities', 'resourceScopes', 'expiresAt'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Agent delegation granted',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentDelegation' } },
+            },
+          },
+          '400': { description: 'Invalid delegation or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor lacks current authority' },
+          '404': { description: 'Sponsored principal or event scope not found' },
+          '409': { description: 'Principal unavailable or idempotency conflict' },
+        },
+      },
+    },
+    '/agent-delegations/{id}/revoke': {
+      post: {
+        summary: 'Revoke an agent delegation',
+        description:
+          'Revokes an active delegation using fresh human sponsor authorization. Delegations sponsored by another user are hidden as not found.',
+        'x-required-permissions': ['developers.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentControlIdempotencyKey' }],
+        responses: {
+          '200': {
+            description: 'Delegation revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
+                    revoked: { type: 'boolean', const: true },
+                  },
+                  required: ['id', 'revoked'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human sponsor authorization changed' },
+          '404': { description: 'Agent delegation not found for this sponsor' },
+          '409': { description: 'Idempotency conflict' },
+        },
       },
     },
     '/scanner-devices': {

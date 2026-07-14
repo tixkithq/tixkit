@@ -54,6 +54,7 @@ for (const item of matrix) {
     if (!checkOnly)
       execFileSync('bun', ['run', '--filter', item.workspace, task], {
         cwd: root,
+        env: task === 'build' ? { ...process.env, NODE_ENV: 'production' } : process.env,
         stdio: 'inherit',
       });
   }

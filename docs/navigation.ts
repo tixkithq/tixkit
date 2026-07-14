@@ -64,6 +64,7 @@ export const documentationNavigation = [
       { label: 'Errors and retries', routeId: 'apiErrors' },
       { label: 'Pagination', routeId: 'apiPagination' },
       { label: 'Idempotency', routeId: 'apiIdempotency' },
+      { label: 'Agent Platform API', routeId: 'platformAgents' },
       { label: 'Configure webhooks', routeId: 'webhookSetup' },
       { label: 'Verify signatures', routeId: 'webhookVerification' },
       { label: 'Test webhooks', routeId: 'webhookTesting' },
@@ -119,6 +120,10 @@ export const documentationNavigation = [
       {
         label: 'Adopt 2026-07-18 import intake',
         routeId: 'apiMigration20260717To20260718',
+      },
+      {
+        label: 'Adopt 2026-07-19 agent controls',
+        routeId: 'apiMigration20260718To20260719',
       },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },

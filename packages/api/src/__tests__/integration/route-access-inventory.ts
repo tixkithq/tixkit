@@ -40,6 +40,7 @@ const delegatedAuthorizationGuards = new Set([
   'loadAuthorizedDocument',
   'loadAuthorizedEvent',
   'report',
+  'requireHumanAgentAdministrator',
   'requireContentListPermission',
   'requireContentPermission',
   'requireEventAccess',

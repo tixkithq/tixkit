@@ -1471,6 +1471,59 @@
     ]
   },
   {
+    "url": "/platform/agent-platform",
+    "title": "Connect an agent through the Platform API",
+    "description": "Register explicit agent identities and grant bounded, sponsor-controlled authority.",
+    "headings": [
+      {
+        "id": "current-beta-surface",
+        "text": "Current beta surface",
+        "level": 2
+      },
+      {
+        "id": "authenticate-the-sponsor",
+        "text": "Authenticate the sponsor",
+        "level": 2
+      },
+      {
+        "id": "register-an-explicit-principal",
+        "text": "Register an explicit principal",
+        "level": 2
+      },
+      {
+        "id": "grant-bounded-authority",
+        "text": "Grant bounded authority",
+        "level": 2
+      },
+      {
+        "id": "revoke-and-inspect",
+        "text": "Revoke and inspect",
+        "level": 2
+      },
+      {
+        "id": "memory-and-managed-tools",
+        "text": "Memory and managed tools",
+        "level": 2
+      }
+    ],
+    "body": "Experimental private beta: the shared identity and delegation contract is public for evaluation. Hosted agent access, managed models, natural language orchestration, managed prompts, evaluations and managed memory are not generally available. Use only an invited environment and its supplied support channel. Tixkit agents use explicit principals. An agent does not impersonate its organizer sponsor and cannot write directly to a database. Authorization is evaluated through the existing API and workflow boundaries. Current beta surface API version 2026 07 19 supports these sponsor controlled operations: register an agent principal; read a principal sponsored by the current user; revoke a principal and its active delegations atomically; grant time bounded event delegations; and revoke a delegation. The initial capabilities are events.read , readiness.read , events.prepare and events.execute . Consequential execution still requires a typed action, an immutable plan digest and fresh approval. The registration API does not grant unrestricted delegated autonomy, campaign sending or buyer purchasing. Authenticate the sponsor Agent administration accepts only a human bearer principal with tenant wide developers.write . API keys, mobile principals, system principals and users restricted to selected brands or events fail closed. The sponsor must also hold the current event permission implied by every requested capability. Do not give the agent the sponsor's session. Register the agent while acting as the human sponsor, then use the returned principal identifier in later delegation requests. Register an explicit principal Send a stable caller reference, the agent kind, requested capabilities and maximum autonomy to POST /v1/agent principals . Every mutation requires a unique Idempotency Key of 16–255 characters. The server derives the tenant, sponsor, protocol version, active state, registration time and tenant namespaced identifier. Managed Cloud currently accepts third party ; Self Hosted may additionally enable self hosted for a bring your own orchestrator. Store the returned agt ... identifier. Reusing an idempotency key with different intent returns a conflict. Grant bounded authority Send the returned principal identifier, capabilities, explicit event: scopes and a future expiry to POST /v1/agent delegations . A grant may cover at most 100 unique event scopes and 30 days. Inside the transaction, Tixkit rechecks the sponsor's current permission grants, accepted organization membership, event ownership and active principal state. The service derives issuedAt and permissionSnapshot ; clients cannot submit either field. A material authorization change requires a new grant or approval. Revoke and inspect The sponsor can inspect only their own principal and can revoke their own principals or delegations. Cross sponsor resources are returned as not found. Principal revocation cascades to active delegations. Every mutation is idempotent, audited and reauthorizes the human actor before replay. The shared protocol requires approval to bind to an immutable digest. Material action or plan changes invalidate approval, and consequential actions require fresh approval in the initial release. Execution, approval, memory inspection/export/deletion and third party conformance endpoints are still being completed; do not treat registration as proof that those later surfaces are available. Memory and managed tools Agent memory is required to be tenant and principal scoped, inspectable, correctable, exportable, deletable and separately retained. Those guarantees are part of the shared protocol, but no public memory HTTP endpoint is available in this beta slice. Managed messaging may become an agent tool only with consent and suppression evaluation plus exact content and audience approval. Natural language orchestration and managed memory remain Cloud capabilities; self hosters may bring an orchestrator through the shared protocol when conformance support is available.",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "platform",
+    "contentType": "how-to",
+    "status": "experimental",
+    "keywords": [
+      "agents",
+      "delegation",
+      "approval",
+      "audit"
+    ],
+    "adoptionPaths": [
+      "platform"
+    ]
+  },
+  {
     "url": "/platform",
     "title": "Add ticketing to my product",
     "description": "Integrate ticketing through the Tixkit Platform API, SDKs, webhooks, and embeds.",
@@ -1491,7 +1544,7 @@
         "level": 2
       }
     ],
-    "body": "The Tixkit Platform API is the developer facing capability inside Tixkit Cloud. It shares the same event, inventory, checkout, order, attendee, webhook, workflow, migration, OpenAPI, and SDK contracts as the rest of Tixkit. Availability: hosted Platform API access is planned for an experimental private beta. Public API contracts and SDK source are available for evaluation, but production Cloud credentials and support terms are not generally available. Make a safe first integration 1. Follow the hosted Platform API quickstart /platform/quickstart if you have a private beta invitation, or read it to understand the intended credential and environment flow. 2. Read the API fundamentals /developers/api fundamentals , including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries. 3. Make the first API call /getting started/first api call with the narrowest useful credential scope. 4. Choose a supported SDK /sdks/javascript or use the generated OpenAPI contract directly. 5. Configure webhooks /developers/webhooks/setup , verify every signature, and make consumers idempotent. 6. Add the embedded widget /developers/widget/embedding only after the server side contract and failure behavior are understood. Agent connections Third party agents will connect through the same Platform API. The shared protocol will require explicit agent principals, bounded delegation, typed actions, dry run plans, digest bound approval, audit, revocation, and scoped memory. Those contracts are not yet advertised as production ready. Continue Make the first API call /getting started/first api call , browse the API reference /reference/api , or choose an SDK guide /sdks/javascript .",
+    "body": "The Tixkit Platform API is the developer facing capability inside Tixkit Cloud. It shares the same event, inventory, checkout, order, attendee, webhook, workflow, migration, OpenAPI, and SDK contracts as the rest of Tixkit. Availability: hosted Platform API access is planned for an experimental private beta. Public API contracts and SDK source are available for evaluation, but production Cloud credentials and support terms are not generally available. Make a safe first integration 1. Follow the hosted Platform API quickstart /platform/quickstart if you have a private beta invitation, or read it to understand the intended credential and environment flow. 2. Read the API fundamentals /developers/api fundamentals , including tenant scope, authentication, permissions, idempotency, pagination, errors, and retries. 3. Make the first API call /getting started/first api call with the narrowest useful credential scope. 4. Choose a supported SDK /sdks/javascript or use the generated OpenAPI contract directly. 5. Configure webhooks /developers/webhooks/setup , verify every signature, and make consumers idempotent. 6. Add the embedded widget /developers/widget/embedding only after the server side contract and failure behavior are understood. Agent connections Third party agents connect through the same Platform API. API version 2026 07 19 exposes the experimental sponsor bound principal and delegation surface; typed actions, dry run plans, digest bound approval, execution, audit, revocation and scoped memory remain governed by the shared protocol. Read the agent Platform API guide /platform/agent platform for the implemented boundary and current private beta limitations. Continue Make the first API call /getting started/first api call , browse the API reference /reference/api , or choose an SDK guide /sdks/javascript .",
     "audience": [
       "developer"
     ],
@@ -1538,7 +1591,7 @@
         "level": 2
       }
     ],
-    "body": "Experimental private beta: hosted Platform API access is not generally available. Use only the environment identifier, API origin, credential flow, and support channel supplied in an invitation. Public examples do not grant access. Confirm the invited environment Sign in through the invitation and verify the expected organization, environment, region, and permissions. Keep sandbox and production credentials separate. If any identifier differs from the invitation, stop before creating a key. Create a read only credential Create a server side credential with the narrowest scope needed to list events. Copy its secret once into a secret manager or an ephemeral shell. Never place it in browser code, URLs, screenshots, analytics, support messages, or client visible environment variables. Set the exact origin from the invitation; this guide intentionally provides no default hosted origin: Paste the secret only at the silent prompt, then run unset TIXKIT API KEY when the session ends. The secret must never appear in shell history, command arguments, or a committed environment file. Make a read only request config reads the expanded header from standard input, so the secret is not placed in curl's process arguments or a temporary file. An empty event list is valid. Treat 401 as a credential problem, 403 as a permission or tenant scope denial, 404 as an environment or path mismatch, and 429 as a signal to honor the supplied retry policy. Do not broaden scopes to bypass a denial. Add webhook verification Create a test endpoint, store its signing secret separately from the API key, verify signatures before parsing /developers/webhooks/verify signatures , reject stale timestamps, and make processing idempotent. Revoke the credential immediately if it appeared in client code or logs. Continue Review API fundamentals /developers/api fundamentals , the generated reference /reference/api , and the SDK guides /sdks/javascript . Third party agent access remains pending the shared principal, delegation, approval, audit, revocation, and memory protocol.",
+    "body": "Experimental private beta: hosted Platform API access is not generally available. Use only the environment identifier, API origin, credential flow, and support channel supplied in an invitation. Public examples do not grant access. Confirm the invited environment Sign in through the invitation and verify the expected organization, environment, region, and permissions. Keep sandbox and production credentials separate. If any identifier differs from the invitation, stop before creating a key. Create a read only credential Create a server side credential with the narrowest scope needed to list events. Copy its secret once into a secret manager or an ephemeral shell. Never place it in browser code, URLs, screenshots, analytics, support messages, or client visible environment variables. Set the exact origin from the invitation; this guide intentionally provides no default hosted origin: Paste the secret only at the silent prompt, then run unset TIXKIT API KEY when the session ends. The secret must never appear in shell history, command arguments, or a committed environment file. Make a read only request config reads the expanded header from standard input, so the secret is not placed in curl's process arguments or a temporary file. An empty event list is valid. Treat 401 as a credential problem, 403 as a permission or tenant scope denial, 404 as an environment or path mismatch, and 429 as a signal to honor the supplied retry policy. Do not broaden scopes to bypass a denial. Add webhook verification Create a test endpoint, store its signing secret separately from the API key, verify signatures before parsing /developers/webhooks/verify signatures , reject stale timestamps, and make processing idempotent. Revoke the credential immediately if it appeared in client code or logs. Continue Review API fundamentals /developers/api fundamentals , the generated reference /reference/api , and the SDK guides /sdks/javascript . Invited agent integrators should also read the agent Platform API guide /platform/agent platform ; principal registration and delegation are implemented, while execution, approval, memory and conformance availability remains explicitly limited.",
     "audience": [
       "developer"
     ],
@@ -1605,7 +1658,7 @@
     "title": "API versions and compatibility",
     "description": "Understand the current lifecycle version, URL version, SDK parity, and breaking-change policy.",
     "headings": [],
-    "body": "The current HTTP/OpenAPI/SDK contract release is 2026 07 18 . HTTP routes use the /v1 URL prefix. Durable domain webhook envelopes remain independently versioned as 2026 01 01 ; an HTTP contract release does not silently change their payload schema. The synthetic test.ping envelope and the X Tixkit API Version delivery attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train. The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under /contracts/ / . Migration guidance is published separately for 2026 01 01 to 2026 07 12 /reference/migrations/2026 01 01 to 2026 07 12 , 2026 07 13 to 2026 07 14 /reference/migrations/2026 07 13 to 2026 07 14 , 2026 07 14 to 2026 07 15 /reference/migrations/2026 07 14 to 2026 07 15 , 2026 07 15 to 2026 07 16 /reference/migrations/2026 07 15 to 2026 07 16 , 2026 07 16 to 2026 07 17 /reference/migrations/2026 07 16 to 2026 07 17 , and 2026 07 17 to 2026 07 18 /reference/migrations/2026 07 17 to 2026 07 18 . Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period. SDK parity validation checks the declared API version across supported packages and guides.",
+    "body": "The current HTTP/OpenAPI/SDK contract release is 2026 07 19 . HTTP routes use the /v1 URL prefix. Durable domain webhook envelopes remain independently versioned as 2026 01 01 ; an HTTP contract release does not silently change their payload schema. The synthetic test.ping envelope and the X Tixkit API Version delivery attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train. The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under /contracts/ / . Migration guidance is published separately for 2026 01 01 to 2026 07 12 /reference/migrations/2026 01 01 to 2026 07 12 , 2026 07 13 to 2026 07 14 /reference/migrations/2026 07 13 to 2026 07 14 , 2026 07 14 to 2026 07 15 /reference/migrations/2026 07 14 to 2026 07 15 , 2026 07 15 to 2026 07 16 /reference/migrations/2026 07 15 to 2026 07 16 , 2026 07 16 to 2026 07 17 /reference/migrations/2026 07 16 to 2026 07 17 , 2026 07 17 to 2026 07 18 /reference/migrations/2026 07 17 to 2026 07 18 , and 2026 07 18 to 2026 07 19 /reference/migrations/2026 07 18 to 2026 07 19 . Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period. SDK parity validation checks the declared API version across supported packages and guides.",
     "audience": [
       "developer"
     ],
@@ -1773,6 +1826,31 @@
       }
     ],
     "body": "API version 2026 07 18 adds authenticated portable import upload contracts. Export, delta lineage and final cutover request shapes from 2026 07 17 remain compatible. The upload request is intentionally breaking for clients that used the previously open ended migration import purpose: destination organization scope is now mandatory and unrelated resource scopes are rejected. The candidate remains unpublished and requires protected release approval. Portable import uploads Portable bundle upload tickets now use purpose migration import . The request must include organizationId and sizeBytes ; brandId and eventId are rejected. The caller needs migrations.write , and the service resolves the tenant and organization before issuing a signed upload. The maximum portable artifact size is 50 MiB. Clients must send one of the documented portable bundle media types and preserve the exact byte length and checksum through upload completion. Import registration accepts only the completed, clean artifact selected by the signed manifest and consumes it once while creating the job file link and audit event atomically. Use the upload lifecycle in this order: 1. Request a migration import upload ticket for the destination organization. 2. Upload the exact artifact bytes to the returned signed URL. 3. Complete scanning and checksum verification. 4. Register the artifact with the portable import job. 5. Start preparation only after registration succeeds. Artifact retention is lease based. Active preparation and commit may renew a recently active artifact, but no new work starts after the absolute 90 day retention ceiling. A missing, substituted or inconsistently linked artifact fails closed and enters retention hold where applicable. Durable domain webhook payloads remain at envelope version 2026 01 01 . Synthetic test.ping.apiVersion , SDK version headers and the X Tixkit API Version delivery attempt header report 2026 07 18 .",
+    "audience": [
+      "developer"
+    ],
+    "productArea": "api",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": [],
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
+  },
+  {
+    "url": "/reference/migrations/2026-07-18-to-2026-07-19",
+    "title": "API migration from 2026-07-18 to 2026-07-19",
+    "description": "Adopt sponsor-bound agent principal and delegation controls.",
+    "headings": [
+      {
+        "id": "agent-identity-and-delegation",
+        "text": "Agent identity and delegation",
+        "level": 2
+      }
+    ],
+    "body": "API version 2026 07 19 adds the experimental, private beta agent principal and delegation control surface. Existing 2026 07 18 operations remain compatible; this is an additive contract release. Agent identity and delegation The new bearer authenticated operations register and inspect explicitly sponsored agent principals, grant bounded event delegations, and revoke principals or delegations. They require a human principal with tenant wide developers.write . API keys, mobile principals, system principals and brand or event scoped users cannot administer agents. Registration accepts a caller owned stable reference, agent kind, capabilities and maximum autonomy. The service returns a tenant namespaced principal identifier and derives the tenant, sponsor, protocol version, active state and registration time. Managed Cloud accepts third party agents in this beta; a Self Hosted deployment may additionally enable self hosted agents. Delegations accept the returned principal identifier, one or more supported capabilities, explicit event: scopes and an expiry no more than 30 days in the future. The service rechecks the sponsor's current permissions and accepted organization membership inside the database transaction. It derives the issue time and permission snapshot; clients cannot supply either value. Every mutation requires an Idempotency Key containing 16–255 characters. Reusing a key with different intent returns a conflict. Principal revocation atomically revokes active delegations. Consequential execution remains approval gated and is outside these registration operations. Durable domain webhook payloads remain at envelope version 2026 01 01 . Synthetic test.ping.apiVersion , SDK version headers and the X Tixkit API Version delivery attempt header report 2026 07 19 .",
     "audience": [
       "developer"
     ],
@@ -2093,7 +2171,7 @@
         "level": 2
       }
     ],
-    "body": "Install the core SDK: The client rejects secret looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer safe public data to client components. The package declares API version 2026 07 18 ; keep SDK and server compatibility aligned. Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry. javascript Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
+    "body": "Install the core SDK: The client rejects secret looking API keys in a browser runtime. Keep initialization in a server process and pass only buyer safe public data to client components. The package declares API version 2026 07 19 ; keep SDK and server compatibility aligned. Agent control methods are available under tixkit.agentControl . Configure accessToken with the authenticated human sponsor's bearer token for those calls; do not pass an API key, and do not give the sponsor token to the agent process. See the agent Platform API guide /platform/agent platform for the private beta authorization boundary. Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry. javascript Install Install the supported SDK package with the platform package manager. Configure securely Configure credentials in server or platform secure storage without URLs, logs, analytics, browser storage, or application bundles. Make the first request Make a typed first request and verify the expected event page or scanner decision output. Troubleshoot Diagnose unauthorized credentials, connection failure, version mismatch, type mismatch, and unavailable mobile scanner storage. Verify and continue Run the executable fixture, then continue to errors, retries, and the generated API reference.",
     "audience": [
       "developer"
     ],
