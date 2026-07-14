@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest, type RouteOptions } from 'fastify';
 import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -20,34 +20,13 @@ import type {
   PortableCutoverTrustConfiguration,
   PortableDryRunAttestationConfiguration,
 } from './services/portable-import-control.js';
-import { tenantRoutes } from './routes/modules/tenant.js';
-import { eventRoutes } from './routes/modules/events.js';
-import { eventMediaRoutes } from './routes/modules/event-media.js';
-import { readinessRoutes } from './routes/modules/readiness.js';
-import { ticketingRoutes } from './routes/modules/ticketing.js';
-import { checkoutRoutes } from './routes/modules/checkout.js';
-import { orderRoutes } from './routes/modules/orders.js';
-import { checkInRoutes } from './routes/modules/checkin.js';
-import { webhookRoutes } from './routes/modules/webhooks.js';
-import { developerRoutes } from './routes/modules/developer.js';
-import { oauthAuthorizeRoutes, oauthTokenRoutes } from './routes/modules/oauth.js';
-import { messagingRoutes } from './routes/modules/messaging.js';
-import { contentRoutes, publicContentRoutes } from './routes/modules/content.js';
-import { shortLinkRoutes, shortLinkRedirectRoutes } from './routes/modules/short-links.js';
-import { reportingRoutes } from './routes/modules/reporting.js';
-import { privacyRoutes } from './routes/modules/privacy.js';
-import { clerkWebhookRoutes } from './routes/modules/clerk-webhooks.js';
-import { stripeWebhookRoutes } from './routes/modules/stripe-webhooks.js';
 import { closeCheckInActivityPublisher } from './services/check-in-activity-events.js';
-import { telnyxWebhookRoutes } from './routes/modules/telnyx-webhooks.js';
-import { emailWebhookRoutes } from './routes/modules/email-webhooks.js';
-import { publicRoutes } from './routes/modules/public.js';
-import { questionRoutes } from './routes/modules/questions.js';
-import { authRoutes } from './routes/modules/auth.js';
-import { publicUploadRoutes, uploadRoutes } from './routes/modules/uploads.js';
-import { publicWaitlistRoutes, waitlistRoutes } from './routes/modules/waitlist.js';
-import { migrationRoutes } from './routes/modules/migrations.js';
-import { portabilityRoutes } from './routes/modules/portability.js';
+import {
+  publicRouteModules,
+  registerAuthenticatedRouteGroup,
+  registerRouteModules,
+  signedWebhookRouteModules,
+} from './routes/registry.js';
 import {
   createApiObservability,
   registerMetricsRoute,
@@ -338,6 +317,72 @@ export async function createRateLimitRedisClient(): Promise<Redis | undefined> {
   }
 }
 
+export type ApplicationRouteAccess = 'operational' | 'public' | 'signed-webhook' | 'authenticated';
+
+export type ApplicationRouteRegistrationOptions = {
+  authService: Parameters<typeof createAuthMiddleware>[0];
+  dbProvider: () => Database;
+  metrics?: {
+    bearerToken?: string;
+    requireBearerToken?: boolean;
+  };
+  observability: Awaited<ReturnType<typeof createApiObservability>>;
+  onRoute?: Partial<Record<ApplicationRouteAccess, (route: RouteOptions) => void>>;
+  rateLimitRedis?: RateLimitPluginOptions['redis'];
+  registerRateLimits?: boolean;
+};
+
+export async function registerApplicationRoutes(
+  app: FastifyInstance,
+  options: ApplicationRouteRegistrationOptions,
+): Promise<void> {
+  const rateLimitsEnabled = options.registerRateLimits !== false;
+
+  await app.register(async (operational) => {
+    if (options.onRoute?.operational) {
+      operational.addHook('onRoute', options.onRoute.operational);
+    }
+    registerHealthRoute(operational);
+    registerMetricsRoute(operational, options.observability, options.dbProvider, options.metrics);
+  });
+
+  await app.register(async (signedWebhooks) => {
+    if (options.onRoute?.['signed-webhook']) {
+      signedWebhooks.addHook('onRoute', options.onRoute['signed-webhook']);
+    }
+    if (rateLimitsEnabled) {
+      await registerIpRateLimit(signedWebhooks, { redis: options.rateLimitRedis });
+    }
+    registerJsonBodyParser(signedWebhooks, { captureRawBody: true });
+    await registerRouteModules(signedWebhooks, signedWebhookRouteModules);
+  });
+
+  await app.register(async (publicGroup) => {
+    if (options.onRoute?.public) {
+      publicGroup.addHook('onRoute', options.onRoute.public);
+    }
+    if (rateLimitsEnabled) {
+      await registerIpRateLimit(publicGroup, { redis: options.rateLimitRedis });
+    }
+    const authenticateTestCheckout = createAuthMiddleware(options.authService);
+    publicGroup.addHook('onRequest', async (request, reply) => {
+      if (request.headers['x-tixkit-test-order'] === '1') {
+        await authenticateTestCheckout(request, reply);
+      }
+    });
+    await registerRouteModules(publicGroup, publicRouteModules);
+  });
+
+  await registerAuthenticatedRouteGroup(app, options.authService, async (authenticated) => {
+    if (options.onRoute?.authenticated) {
+      authenticated.addHook('onRoute', options.onRoute.authenticated);
+    }
+    if (rateLimitsEnabled) {
+      await registerTenantRateLimit(authenticated, { redis: options.rateLimitRedis });
+    }
+  });
+}
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     bodyLimit: API_JSON_BODY_LIMIT_BYTES,
@@ -407,73 +452,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.decorate('context', ctx);
   registerErrorHandler(app);
 
-  // Health check
-  registerHealthRoute(app);
-  registerMetricsRoute(app, observability, () => db);
-
-  // Public webhook routes (no auth, signature-verified)
-  await app.register(async (publicWebhooks) => {
-    await registerIpRateLimit(publicWebhooks, { redis: rateLimitRedis });
-    registerJsonBodyParser(publicWebhooks, { captureRawBody: true });
-    await publicWebhooks.register(clerkWebhookRoutes, {
-      prefix: '/v1/webhooks/clerk',
-    });
-    await publicWebhooks.register(stripeWebhookRoutes, {
-      prefix: '/v1/webhooks/stripe',
-    });
-    await publicWebhooks.register(telnyxWebhookRoutes, {
-      prefix: '/v1/webhooks/telnyx',
-    });
-    await publicWebhooks.register(emailWebhookRoutes, {
-      prefix: '/v1/webhooks/email',
-    });
-  });
-
-  // Public buyer-facing routes (no admin auth). Checkout is intentionally public:
-  // buyers are anonymous and tenancy is resolved from the published event.
-  await app.register(async (publicGroup) => {
-    await registerIpRateLimit(publicGroup, { redis: rateLimitRedis });
-    const authenticateTestCheckout = createAuthMiddleware(authService);
-    publicGroup.addHook('onRequest', async (request, reply) => {
-      if (request.headers['x-tixkit-test-order'] === '1') {
-        await authenticateTestCheckout(request, reply);
-      }
-    });
-    await publicGroup.register(publicRoutes, { prefix: '/v1' });
-    await publicGroup.register(checkoutRoutes, { prefix: '/v1' });
-    await publicGroup.register(publicUploadRoutes, { prefix: '/v1' });
-    await publicGroup.register(publicWaitlistRoutes, { prefix: '/v1' });
-    await publicGroup.register(oauthTokenRoutes, { prefix: '/v1' });
-    await publicGroup.register(shortLinkRedirectRoutes, { prefix: '/v1' });
-    await publicGroup.register(publicContentRoutes, { prefix: '/v1' });
-  });
-
-  // Authenticated admin/integration routes (Clerk user, API key, or scanner device)
-  await app.register(async (authenticated) => {
-    authenticated.addHook('onRequest', createAuthMiddleware(authService));
-    await registerTenantRateLimit(authenticated, { redis: rateLimitRedis });
-
-    await authenticated.register(tenantRoutes, { prefix: '/v1' });
-    await authenticated.register(eventRoutes, { prefix: '/v1' });
-    await authenticated.register(eventMediaRoutes, { prefix: '/v1' });
-    await authenticated.register(readinessRoutes, { prefix: '/v1' });
-    await authenticated.register(ticketingRoutes, { prefix: '/v1' });
-    await authenticated.register(orderRoutes, { prefix: '/v1' });
-    await authenticated.register(checkInRoutes, { prefix: '/v1' });
-    await authenticated.register(webhookRoutes, { prefix: '/v1' });
-    await authenticated.register(developerRoutes, { prefix: '/v1' });
-    await authenticated.register(oauthAuthorizeRoutes, { prefix: '/v1' });
-    await authenticated.register(messagingRoutes, { prefix: '/v1' });
-    await authenticated.register(contentRoutes, { prefix: '/v1' });
-    await authenticated.register(shortLinkRoutes, { prefix: '/v1' });
-    await authenticated.register(reportingRoutes, { prefix: '/v1' });
-    await authenticated.register(privacyRoutes, { prefix: '/v1' });
-    await authenticated.register(questionRoutes, { prefix: '/v1' });
-    await authenticated.register(authRoutes, { prefix: '/v1' });
-    await authenticated.register(uploadRoutes, { prefix: '/v1' });
-    await authenticated.register(waitlistRoutes, { prefix: '/v1' });
-    await authenticated.register(migrationRoutes, { prefix: '/v1' });
-    await authenticated.register(portabilityRoutes, { prefix: '/v1' });
+  await registerApplicationRoutes(app, {
+    authService,
+    dbProvider: () => db,
+    observability,
+    rateLimitRedis,
   });
 
   return app;

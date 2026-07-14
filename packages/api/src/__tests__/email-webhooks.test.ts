@@ -35,7 +35,7 @@ function signedEmailRequest(payload: Record<string, unknown>, secret = 'whsec_em
     url: '/postmark',
     headers: {
       'content-type': 'application/json',
-      'tixkit-signature': `sha256=${signature}`,
+      'x-tixkit-provider-signature': `sha256=${signature}`,
     },
     payload: rawBody,
   };

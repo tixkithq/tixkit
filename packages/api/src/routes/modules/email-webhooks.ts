@@ -30,6 +30,7 @@ export const emailWebhookRoutes: FastifyPluginAsync = async (app) => {
     const verification = verifyEmailFeedbackWebhookRequest({
       rawBody,
       signature:
+        request.headers['x-tixkit-provider-signature'] ??
         request.headers['tixkit-signature'] ??
         request.headers['x-tixkit-signature'] ??
         request.headers['x-email-webhook-signature'],
