@@ -763,6 +763,214 @@ describe.sequential.each(driverCases)(
       ).toHaveLength(0);
     });
 
+    it('revokes one exact approval after permission loss with convergent replay', async () => {
+      const service = new AgentActionService(db);
+      const beforeExecutions = await db.selectFrom('agent_executions').select('id').execute();
+      const beforeEffects = await db
+        .selectFrom('agent_action_effects')
+        .select('execution_id')
+        .execute();
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-action-for-revocation-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `agent-action-revocation-approval-${driver}-0001`,
+      });
+      await db
+        .deleteFrom('permission_grants')
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('principal_id', '=', action.sponsorPrincipalId)
+        .where('permission', '=', 'events.write')
+        .execute();
+      const request = {
+        tenantId: action.target.tenantId,
+        sponsorPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        approvalId: approval.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `agent-action-revocation-${driver}-0001`,
+      };
+      const concurrent = await Promise.all(
+        Array.from({ length: 4 }, () => service.revokeApproval(request)),
+      );
+      expect(concurrent).toEqual([concurrent[0], concurrent[0], concurrent[0], concurrent[0]]);
+      expect(concurrent[0]).toMatchObject({ id: approval.id, revokedAt: expect.any(String) });
+      await expect(service.revokeApproval(request)).resolves.toEqual(concurrent[0]);
+      await expect(
+        service.revokeApproval({
+          ...request,
+          approvalId: `apr_${'f'.repeat(48)}`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT');
+      await expect(
+        service.revokeApproval({
+          ...request,
+          sponsorPrincipalId: 'user_other',
+          idempotencyKey: `${request.idempotencyKey}-other`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+      await expect(
+        service.revokeApproval({
+          ...request,
+          idempotencyKey: `${request.idempotencyKey}-second`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_APPROVAL_ALREADY_REVOKED');
+      expect(
+        await db
+          .selectFrom('agent_action_events')
+          .select(['approval_id', 'phase', 'outcome'])
+          .where('action_id', '=', prepared.action.id)
+          .where('phase', '=', 'revoked')
+          .execute(),
+      ).toEqual([{ approval_id: approval.id, phase: 'revoked', outcome: 'revoked' }]);
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select('revoked_at')
+          .where('id', '=', approval.id)
+          .executeTakeFirstOrThrow(),
+      ).toMatchObject({ revoked_at: expect.any(Date) });
+      expect(await db.selectFrom('agent_executions').select('id').execute()).toEqual(
+        beforeExecutions,
+      );
+      expect(await db.selectFrom('agent_action_effects').select('execution_id').execute()).toEqual(
+        beforeEffects,
+      );
+    });
+
+    it('allows exactly one competing revocation key and rejects invalid bindings without effects', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-action-revocation-race-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `agent-action-revocation-race-approval-${driver}-0001`,
+      });
+      const beforeExecutions = await db.selectFrom('agent_executions').select('id').execute();
+      const beforeEffects = await db
+        .selectFrom('agent_action_effects')
+        .select('execution_id')
+        .execute();
+      const base = {
+        tenantId: action.target.tenantId,
+        sponsorPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        approvalId: approval.id,
+        actionDigest: prepared.actionDigest,
+      };
+      for (const invalid of [
+        { ...base, approvalId: `apr_${'f'.repeat(48)}` },
+        { ...base, actionId: `act_${'f'.repeat(48)}` },
+        { ...base, actionDigest: 'f'.repeat(64) },
+        { ...base, tenantId: 'tenant_other' },
+      ]) {
+        await expect(
+          service.revokeApproval({
+            ...invalid,
+            idempotencyKey: `agent-action-invalid-revocation-${driver}-${invalid.approvalId.slice(-4)}-${invalid.actionDigest.slice(0, 4)}-${invalid.tenantId}`,
+          }),
+        ).rejects.toThrow();
+      }
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select('revoked_at')
+          .where('id', '=', approval.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ revoked_at: null });
+      const competing = await Promise.allSettled(
+        Array.from({ length: 4 }, (_, index) =>
+          service.revokeApproval({
+            ...base,
+            idempotencyKey: `agent-action-competing-revocation-${driver}-000${index}`,
+          }),
+        ),
+      );
+      expect(competing.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+      expect(competing.filter(({ status }) => status === 'rejected')).toHaveLength(3);
+      expect(
+        await db
+          .selectFrom('agent_action_events')
+          .select('id')
+          .where('action_id', '=', prepared.action.id)
+          .where('phase', '=', 'revoked')
+          .execute(),
+      ).toHaveLength(1);
+      expect(await db.selectFrom('agent_executions').select('id').execute()).toEqual(
+        beforeExecutions,
+      );
+      expect(await db.selectFrom('agent_action_effects').select('execution_id').execute()).toEqual(
+        beforeEffects,
+      );
+    });
+
+    it('refuses to revoke a consumed action approval without lifecycle mutation', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-action-consumed-revocation-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `agent-action-consumed-approval-${driver}-0001`,
+      });
+      await db
+        .updateTable('agent_approvals')
+        .set({ consumed_at: new Date() })
+        .where('id', '=', approval.id)
+        .executeTakeFirstOrThrow();
+      await expect(
+        service.revokeApproval({
+          tenantId: action.target.tenantId,
+          sponsorPrincipalId: action.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          approvalId: approval.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `agent-action-consumed-revocation-${driver}-0002`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_APPROVAL_ALREADY_CONSUMED');
+      expect(
+        await db
+          .selectFrom('agent_action_events')
+          .select('id')
+          .where('action_id', '=', prepared.action.id)
+          .where('phase', '=', 'revoked')
+          .execute(),
+      ).toHaveLength(0);
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select('revoked_at')
+          .where('id', '=', approval.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ revoked_at: null });
+    });
+
     it.each(['resource', 'policy', 'permission'] as const)(
       'invalidates approval after a material %s change',
       async (changed) => {

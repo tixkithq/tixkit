@@ -517,7 +517,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-23',
+    version: '2026-07-24',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -616,6 +616,17 @@ const rawOpenApiSpec = {
         },
         description:
           'Required for human approval. A key is permanently bound to the authenticated sponsor, action ID and exact action digest.',
+      },
+      AgentApprovalRevocationConfirmation: {
+        name: 'X-Tixkit-Confirmation',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          pattern: '^revoke:act_[a-f0-9]{48}:apr_[a-f0-9]{48}:[a-f0-9]{64}$',
+        },
+        description:
+          'Must exactly equal revoke:<actionId>:<approvalId>:<actionDigest>. This binds explicit human intent to one immutable approval.',
       },
       AgentMemoryIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -10509,6 +10520,61 @@ const rawOpenApiSpec = {
           '409': {
             description:
               'Digest, resource, readiness, policy or authorization changed; action already approved; or idempotency conflict',
+          },
+        },
+      },
+    },
+    '/agent/actions/{actionId}/approvals/{approvalId}/revoke': {
+      post: {
+        summary: 'Revoke one agent action approval',
+        description:
+          'Experimental/private beta. The exact human sponsor may revoke an unconsumed approval even after losing event permission. The action, approval and digest are re-bound under a serializable lock. Exact idempotent replay returns the original revoked approval.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          {
+            name: 'approvalId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
+          },
+          { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
+          { $ref: '#/components/parameters/AgentApprovalRevocationConfirmation' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                },
+                required: ['actionDigest'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Revoked approval with immutable revocation timestamp',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentApproval' } },
+            },
+          },
+          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '401': { description: 'Human authentication required' },
+          '403': { description: 'Caller is not a human principal' },
+          '404': { description: 'Action or approval is outside the sponsor scope' },
+          '409': {
+            description:
+              'Digest mismatch, approval already revoked or consumed, or idempotency conflict',
           },
         },
       },

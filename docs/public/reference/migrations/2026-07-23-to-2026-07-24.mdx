@@ -1,0 +1,35 @@
+---
+title: API migration from 2026-07-23 to 2026-07-24
+description: Adopt action-bound revocation for unconsumed agent approvals.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-24
+prerequisites:
+  - An integration using API version 2026-07-23
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-24` adds revocation for an unconsumed agent action approval. Existing `2026-07-23` operations remain compatible. Agent protocol `2026-07-22` remains current because revocation references the existing immutable action and approval contracts.
+
+## Revoke one exact approval
+
+Authenticate as the action's original human sponsor and call `POST /v1/agent/actions/{actionId}/approvals/{approvalId}/revoke` with:
+
+- a unique 16–127 character `Idempotency-Key`;
+- `X-Tixkit-Confirmation: revoke:<actionId>:<approvalId>:<actionDigest>`; and
+- a strict JSON body containing only the exact `actionDigest`.
+
+The JavaScript SDK exposes this as `tixkit.agentActions.revokeApproval`. Revocation remains available after the sponsor loses event permission so authority can always be reduced. It never expands authority.
+
+Tixkit serializably locks the tenant, action and approval, then binds the tenant, sponsor, action, approval and digest. Cross-sponsor, cross-tenant, changed-binding and consumed-approval requests fail closed. Exact replays return the original revoked approval; competing keys cannot create a second lifecycle event.
+
+Revocation sets only the approval's server-derived `revokedAt` and appends immutable audit evidence. It does not publish the event, create an execution or produce an action effect. Public execution remains unavailable in this release.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-24`.

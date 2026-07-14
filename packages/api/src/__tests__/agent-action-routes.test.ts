@@ -78,6 +78,17 @@ async function setup(
       approvedAt: '2026-07-14T12:01:00.000Z',
       expiresAt: '2026-07-14T12:06:00.000Z',
     })),
+    revokeApproval: vi.fn(async (input) => ({
+      id: input.approvalId,
+      tenantId: input.tenantId,
+      actionDigest: input.actionDigest,
+      approverPrincipalId: input.sponsorPrincipalId,
+      approverPermissionSnapshot: ['events:publish'],
+      policyVersion: 3,
+      approvedAt: '2026-07-14T12:01:00.000Z',
+      expiresAt: '2026-07-14T12:06:00.000Z',
+      revokedAt: '2026-07-14T12:02:00.000Z',
+    })),
     ...input.service,
   };
   app.decorate('context', { db: {} } as never);
@@ -204,6 +215,78 @@ describe('agent action routes', () => {
     });
     expect(humanResponse.statusCode).toBe(400);
     expect(approve).not.toHaveBeenCalled();
+    await humanSetup.app.close();
+  });
+
+  it('lets the exact human sponsor revoke after permission loss with bound confirmation', async () => {
+    const actor = { ...principal('user'), scopes: [] };
+    const revokeApproval = vi.fn(async (input) => ({
+      id: input.approvalId,
+      tenantId: input.tenantId,
+      actionDigest: input.actionDigest,
+      approverPrincipalId: input.sponsorPrincipalId,
+      approverPermissionSnapshot: ['events:publish'] as const,
+      policyVersion: 3,
+      approvedAt: '2026-07-14T12:01:00.000Z',
+      expiresAt: '2026-07-14T12:06:00.000Z',
+      revokedAt: '2026-07-14T12:02:00.000Z',
+    }));
+    const { app } = await setup({ actor, service: { revokeApproval } });
+    const actionId = `act_${'d'.repeat(48)}`;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/approvals/${approvalId}/revoke`,
+      headers: {
+        'idempotency-key': 'agent-action-revocation-0001',
+        'x-tixkit-confirmation': `revoke:${actionId}:${approvalId}:${actionDigest}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(revokeApproval).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      sponsorPrincipalId: 'user_primary',
+      actionId,
+      approvalId,
+      actionDigest,
+      idempotencyKey: 'agent-action-revocation-0001',
+    });
+    await app.close();
+  });
+
+  it('rejects agent revocation and mismatched confirmation before the service', async () => {
+    const revokeApproval = vi.fn();
+    const actionId = `act_${'d'.repeat(48)}`;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const agentSetup = await setup({ service: { revokeApproval } });
+    const denied = await agentSetup.app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/approvals/${approvalId}/revoke`,
+      headers: {
+        'idempotency-key': 'agent-action-revocation-0001',
+        'x-tixkit-confirmation': `revoke:${actionId}:${approvalId}:${actionDigest}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(denied.statusCode).toBe(403);
+    await agentSetup.app.close();
+
+    const humanSetup = await setup({ actor: principal('user'), service: { revokeApproval } });
+    const invalid = await humanSetup.app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/approvals/${approvalId}/revoke`,
+      headers: {
+        'idempotency-key': 'agent-action-revocation-0001',
+        'x-tixkit-confirmation': `revoke:${actionId}:${approvalId}:${'c'.repeat(64)}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(revokeApproval).not.toHaveBeenCalled();
     await humanSetup.app.close();
   });
 

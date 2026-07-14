@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-23';
+export const TIXKIT_API_VERSION = '2026-07-24';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -4247,6 +4247,25 @@ class AgentActionResource {
         'X-Tixkit-Confirmation': `approve:${input.actionId}:${input.actionDigest}`,
       },
     });
+  }
+
+  async revokeApproval(input: {
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<AgentApproval> {
+    return this.client.request(
+      'POST',
+      `/agent/actions/${input.actionId}/approvals/${input.approvalId}/revoke`,
+      {
+        body: { actionDigest: input.actionDigest },
+        idempotencyKey: input.idempotencyKey,
+        headers: {
+          'X-Tixkit-Confirmation': `revoke:${input.actionId}:${input.approvalId}:${input.actionDigest}`,
+        },
+      },
+    );
   }
 }
 

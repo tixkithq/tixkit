@@ -3131,6 +3131,13 @@ describe('TixkitClient new resource methods', () => {
       actionDigest,
       idempotencyKey: 'agent-action-approval-0001',
     });
+    const approvalId = 'apr_cccccccccccccccccccccccccccccccccccccccccccccccc';
+    await c.agentActions.revokeApproval({
+      actionId,
+      approvalId,
+      actionDigest,
+      idempotencyKey: 'agent-action-revocation-0001',
+    });
 
     const prepare = getCall(fm);
     expect(prepare).toMatchObject({
@@ -3159,6 +3166,15 @@ describe('TixkitClient new resource methods', () => {
       },
     });
     expect(JSON.parse(getCall(fm, 2).body)).toEqual({ actionDigest });
+    expect(getCall(fm, 3)).toMatchObject({
+      method: 'POST',
+      url: `https://api.test/v1/agent/actions/${actionId}/approvals/${approvalId}/revoke`,
+      headers: {
+        'Idempotency-Key': 'agent-action-revocation-0001',
+        'X-Tixkit-Confirmation': `revoke:${actionId}:${approvalId}:${actionDigest}`,
+      },
+    });
+    expect(JSON.parse(getCall(fm, 3).body)).toEqual({ actionDigest });
   });
 
   it('agentMemory binds inspectable, correctable, exportable, and deletable memory to audited requests', async () => {

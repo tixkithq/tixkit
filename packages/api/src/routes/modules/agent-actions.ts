@@ -21,6 +21,9 @@ const prepareActionSchema = z
   })
   .strict();
 const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{48}$/u) }).strict();
+const approvalParamsSchema = actionParamsSchema
+  .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
+  .strict();
 const approvalSchema = z.object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
 
 export interface AgentActionRouteService {
@@ -49,6 +52,14 @@ export interface AgentActionRouteService {
     actionDigest: string;
     idempotencyKey: string;
   }): Promise<import('@tixkit/agent-protocol').AgentApproval>;
+  revokeApproval(input: {
+    tenantId: string;
+    sponsorPrincipalId: string;
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<import('@tixkit/agent-protocol').AgentApproval>;
 }
 
 export interface AgentActionRouteOptions {
@@ -68,6 +79,13 @@ function requireHumanApprover(principal: Principal): asserts principal is Princi
   if (principal.type !== 'user')
     throw new ForbiddenError('Only an authenticated human sponsor can approve an agent action');
   ClerkAuthService.requirePermission(principal, 'events.write');
+}
+
+function requireHumanSponsor(
+  principal: Principal,
+): asserts principal is Principal & { type: 'user' } {
+  if (principal.type !== 'user')
+    throw new ForbiddenError('Only the authenticated human sponsor can revoke an approval');
 }
 
 function idempotencyKey(headers: Record<string, unknown>): string {
@@ -106,6 +124,10 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new ConflictError('Agent action is no longer eligible for approval');
   if (message === 'AGENT_ACTION_ALREADY_APPROVED')
     throw new ConflictError('Agent action already has an approval');
+  if (message === 'AGENT_ACTION_APPROVAL_ALREADY_CONSUMED')
+    throw new ConflictError('A consumed agent approval cannot be revoked');
+  if (message === 'AGENT_ACTION_APPROVAL_ALREADY_REVOKED')
+    throw new ConflictError('Agent action approval is already revoked');
   throw error;
 }
 
@@ -177,6 +199,31 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
       });
       reply.header('Cache-Control', 'no-store');
       return reply.status(201).send(approval);
+    } catch (error) {
+      translateAgentActionError(key, error);
+    }
+  });
+
+  app.post('/agent/actions/:actionId/approvals/:approvalId/revoke', async (request, reply) => {
+    const actor = request.principal!;
+    requireHumanSponsor(actor);
+    const key = idempotencyKey(request.headers);
+    const { actionId, approvalId } = parseBody(approvalParamsSchema, request.params);
+    const { actionDigest } = parseBody(approvalSchema, request.body);
+    const expectedConfirmation = `revoke:${actionId}:${approvalId}:${actionDigest}`;
+    if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
+      throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);
+    try {
+      const approval = await service.revokeApproval({
+        tenantId: actor.tenantId,
+        sponsorPrincipalId: actor.id,
+        actionId,
+        approvalId,
+        actionDigest,
+        idempotencyKey: key,
+      });
+      reply.header('Cache-Control', 'no-store');
+      return reply.send(approval);
     } catch (error) {
       translateAgentActionError(key, error);
     }

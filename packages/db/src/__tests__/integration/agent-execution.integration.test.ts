@@ -67,6 +67,15 @@ async function persistApproval(db: Database, value: AgentApproval): Promise<void
     .execute();
 }
 
+async function revokePersistedApproval(db: Database, tenantId: string, approvalId: string) {
+  await db
+    .updateTable('agent_approvals')
+    .set({ revoked_at: new Date() })
+    .where('tenant_id', '=', tenantId)
+    .where('id', '=', approvalId)
+    .executeTakeFirstOrThrow();
+}
+
 function principal(tenantId: string): AgentPrincipal {
   return {
     id: 'agent_test',
@@ -761,17 +770,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         audit(approvalExecution, 'authorized_approval_revoked', 'authorized'),
       ],
     });
-    await expect(
-      Promise.all(
-        Array.from({ length: 8 }, () =>
-          repository.revokeApproval({
-            tenantId,
-            approvalId: revokedApproval.id,
-            audit: controlAudit('revoke_approval'),
-          }),
-        ),
-      ),
-    ).resolves.toEqual(Array(8).fill(true));
+    await revokePersistedApproval(db, tenantId, revokedApproval.id);
     await expect(
       repository.claim({
         tenantId,

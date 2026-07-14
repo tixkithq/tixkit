@@ -42,6 +42,7 @@ const delegatedAuthorizationGuards = new Set([
   'report',
   'requireAgent',
   'requireHumanApprover',
+  'requireHumanSponsor',
   'requireHumanAgentAdministrator',
   'requireHumanMemoryActor',
   'requireHumanMemorySponsor',

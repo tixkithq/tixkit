@@ -588,6 +588,129 @@ export class AgentActionService {
       });
   }
 
+  async revokeApproval(input: {
+    tenantId: string;
+    sponsorPrincipalId: string;
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<AgentApproval> {
+    const fingerprint = agentSha256({
+      actionId: input.actionId,
+      approvalId: input.approvalId,
+      actionDigest: input.actionDigest,
+      operation: 'revoke',
+    });
+    return this.db
+      .transaction()
+      .setIsolationLevel('serializable')
+      .execute(async (tx) => {
+        await tx
+          .selectFrom('tenants')
+          .select('id')
+          .where('id', '=', input.tenantId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        const action = await tx
+          .selectFrom('agent_actions')
+          .selectAll()
+          .where('tenant_id', '=', input.tenantId)
+          .where('id', '=', input.actionId)
+          .where('sponsor_principal_id', '=', input.sponsorPrincipalId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!action) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+        const prepared = this.fromRow(action);
+        if (prepared.actionDigest !== input.actionDigest)
+          throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
+        const replay = await tx
+          .selectFrom('agent_action_events')
+          .selectAll()
+          .where('tenant_id', '=', input.tenantId)
+          .where('actor_principal_id', '=', input.sponsorPrincipalId)
+          .where('phase', '=', 'revoked')
+          .where('idempotency_key', '=', input.idempotencyKey)
+          .forUpdate()
+          .executeTakeFirst();
+        if (replay) {
+          if (
+            replay.request_fingerprint !== fingerprint ||
+            replay.action_id !== input.actionId ||
+            replay.action_digest !== input.actionDigest ||
+            replay.approval_id !== input.approvalId
+          )
+            throw new Error('AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT');
+          const approval = await tx
+            .selectFrom('agent_approvals')
+            .selectAll()
+            .where('tenant_id', '=', input.tenantId)
+            .where('id', '=', input.approvalId)
+            .where('action_id', '=', input.actionId)
+            .executeTakeFirstOrThrow();
+          const replayed = this.approvalFromRow(approval);
+          if (
+            replayed.actionDigest !== input.actionDigest ||
+            replayed.approverPrincipalId !== input.sponsorPrincipalId ||
+            !replayed.revokedAt
+          )
+            throw new Error('persisted agent approval revocation binding is invalid');
+          return replayed;
+        }
+        const approval = await tx
+          .selectFrom('agent_approvals')
+          .selectAll()
+          .where('tenant_id', '=', input.tenantId)
+          .where('id', '=', input.approvalId)
+          .where('action_id', '=', input.actionId)
+          .where('action_digest', '=', input.actionDigest)
+          .where('approver_principal_id', '=', input.sponsorPrincipalId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!approval) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+        if (approval.consumed_at) throw new Error('AGENT_ACTION_APPROVAL_ALREADY_CONSUMED');
+        if (approval.revoked_at) throw new Error('AGENT_ACTION_APPROVAL_ALREADY_REVOKED');
+        const now = await databaseNow(tx);
+        await tx
+          .updateTable('agent_approvals')
+          .set({ revoked_at: now })
+          .where('tenant_id', '=', input.tenantId)
+          .where('id', '=', input.approvalId)
+          .where('revoked_at', 'is', null)
+          .where('consumed_at', 'is', null)
+          .executeTakeFirstOrThrow();
+        const revoked = this.approvalFromRow({ ...approval, revoked_at: now });
+        await tx
+          .insertInto('agent_action_events')
+          .values({
+            id: stableId('aevt', input.actionId, input.approvalId, 'revoked'),
+            tenant_id: input.tenantId,
+            action_id: input.actionId,
+            action_digest: input.actionDigest,
+            agent_principal_id: prepared.action.agentPrincipalId,
+            sponsor_principal_id: prepared.action.sponsorPrincipalId,
+            actor_type: 'user',
+            actor_principal_id: input.sponsorPrincipalId,
+            phase: 'revoked',
+            approval_id: input.approvalId,
+            execution_id: null,
+            idempotency_key: input.idempotencyKey,
+            request_fingerprint: fingerprint,
+            authorization_sha256: agentSha256({
+              tenantId: input.tenantId,
+              sponsorPrincipalId: input.sponsorPrincipalId,
+              actionId: input.actionId,
+              approvalId: input.approvalId,
+              actionDigest: input.actionDigest,
+            }),
+            outcome: 'revoked',
+            occurred_at: now,
+          })
+          .execute();
+        return revoked;
+      });
+  }
+
   private async hasLiveSponsorAuthority(
     db: Executor,
     tenantId: string,

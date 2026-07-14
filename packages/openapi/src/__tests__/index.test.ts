@@ -77,18 +77,22 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-23');
+    expect(openApiSpec.info.version).toBe('2026-07-24');
   });
 
   it('publishes agent-only immutable action preparation without caller-owned bindings', () => {
     const prepare = openApiSpec.paths['/agent/actions'].post;
     const get = openApiSpec.paths['/agent/actions/{actionId}'].get;
     const approve = openApiSpec.paths['/agent/actions/{actionId}/approvals'].post;
+    const revoke =
+      openApiSpec.paths['/agent/actions/{actionId}/approvals/{approvalId}/revoke'].post;
     expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
     expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
     expect(get.responses['401'].description).toMatch(/Agent OAuth or human bearer/u);
     expect(approve.security).toEqual([{ BearerAuth: [] }]);
     expect(approve.security).not.toContainEqual({ AgentOAuth: ['agent.invoke'] });
+    expect(revoke.security).toEqual([{ BearerAuth: [] }]);
+    expect(revoke.description).toMatch(/even after losing event permission/u);
     expect(prepare.security).not.toContainEqual({ BearerAuth: [] });
     expect(prepare.security).not.toContainEqual({ ApiKey: [] });
     const body = prepare.requestBody.content['application/json'].schema;
@@ -123,6 +127,16 @@ describe('openApiSpec', () => {
       required: ['actionDigest'],
     });
     expect(openApiSpec.components.schemas.AgentApproval.required).toContain('actionDigest');
+    expect(revoke.parameters).toEqual(
+      expect.arrayContaining([
+        { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
+        { $ref: '#/components/parameters/AgentApprovalRevocationConfirmation' },
+      ]),
+    );
+    expect(revoke.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['actionDigest'],
+    });
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {
