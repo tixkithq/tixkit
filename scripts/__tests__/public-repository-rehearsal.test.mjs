@@ -6,21 +6,15 @@ import {
 } from '../rehearse-public-repository.mjs';
 
 test('defines the complete independent public repository validation sequence', () => {
-  const commonTail = [
+  const commonPrefix = [
     ['node', ['scripts/validate-public-distribution.mjs']],
     ['bun', ['install', '--frozen-lockfile']],
     ['bun', ['run', 'format:check']],
     ['bun', ['run', 'lint', '--force']],
     ['bun', ['run', 'typecheck', '--force']],
     ['bun', ['run', 'test:unit']],
-    [
-      'bun',
-      [
-        'scripts/validate-api-release-provenance.ts',
-        '--allow-recorded-source',
-        '--allow-derived-export',
-      ],
-    ],
+  ];
+  const commonSuffix = [
     ['git', ['restore', '--worktree', '--', 'artifacts/api', 'apps/docs/public/contracts']],
     ['bun', ['run', 'build']],
     ['node', ['packages/cli/dist/index.js', '--help']],
@@ -43,13 +37,24 @@ test('defines the complete independent public repository validation sequence', (
         'Public repository rehearsal snapshot',
       ],
     ],
-    ...commonTail,
+    ...commonPrefix,
+    [
+      'bun',
+      [
+        'scripts/validate-api-release-provenance.ts',
+        '--allow-recorded-source',
+        '--allow-derived-export',
+      ],
+    ],
+    ...commonSuffix,
   ]);
   assert.deepEqual(publicRepositoryValidationCommands(), [
     ['git', ['rev-parse', '--verify', 'HEAD']],
     ['git', ['diff', '--quiet', 'HEAD', '--']],
     ['git', ['diff', '--cached', '--quiet', 'HEAD', '--']],
-    ...commonTail,
+    ...commonPrefix,
+    ['bun', ['scripts/validate-api-release-provenance.ts']],
+    ...commonSuffix,
   ]);
 });
 

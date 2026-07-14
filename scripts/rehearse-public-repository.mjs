@@ -5,6 +5,16 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  API_PROVENANCE_EXCLUSIONS,
+  canonicalJson,
+  collectCommittedApiReleaseProvenance,
+  sha256,
+} from './lib/api-release-provenance.ts';
+import {
+  assertAuthoritativePublicRepository,
+  authoritativeApiVersion,
+} from './lib/authoritative-public-repository.mjs';
 
 function valueAfter(args, name) {
   const index = args.indexOf(name);
@@ -38,6 +48,16 @@ export function publicRepositoryValidationCommands({ createSnapshot = false } = 
         ['git', ['diff', '--quiet', 'HEAD', '--']],
         ['git', ['diff', '--cached', '--quiet', 'HEAD', '--']],
       ];
+  const provenanceValidation = createSnapshot
+    ? [
+        'bun',
+        [
+          'scripts/validate-api-release-provenance.ts',
+          '--allow-recorded-source',
+          '--allow-derived-export',
+        ],
+      ]
+    : ['bun', ['scripts/validate-api-release-provenance.ts']];
   return [
     ...repositoryPreparation,
     ['node', ['scripts/validate-public-distribution.mjs']],
@@ -46,20 +66,123 @@ export function publicRepositoryValidationCommands({ createSnapshot = false } = 
     ['bun', ['run', 'lint', '--force']],
     ['bun', ['run', 'typecheck', '--force']],
     ['bun', ['run', 'test:unit']],
-    [
-      'bun',
-      [
-        'scripts/validate-api-release-provenance.ts',
-        '--allow-recorded-source',
-        '--allow-derived-export',
-      ],
-    ],
+    provenanceValidation,
     ['git', ['restore', '--worktree', '--', 'artifacts/api', 'apps/docs/public/contracts']],
     ['bun', ['run', 'build']],
     ['node', ['packages/cli/dist/index.js', '--help']],
     ['git', ['diff', '--exit-code', 'HEAD', '--']],
     ['git', ['diff', '--cached', '--exit-code', 'HEAD', '--']],
   ];
+}
+
+export function rebindPublicApiReleaseProvenance(repository) {
+  assertAuthoritativePublicRepository(repository);
+  const distribution = JSON.parse(
+    readFileSync(resolve(repository, 'distribution/public-distribution.json'), 'utf8'),
+  );
+  const version = authoritativeApiVersion(repository);
+  const contract = `artifacts/api/${version}`;
+  if (!distribution.release.contracts.includes(contract))
+    throw new Error(`authoritative public distribution omits its active API contract: ${contract}`);
+  const provenance = collectCommittedApiReleaseProvenance(repository, 'HEAD');
+  const artifactDirectory = resolve(repository, contract);
+  const docsDirectory = resolve(repository, 'apps/docs/public/contracts', version);
+  const artifactManifest = JSON.parse(
+    readFileSync(resolve(artifactDirectory, 'release-manifest.json'), 'utf8'),
+  );
+  const docsManifest = JSON.parse(
+    readFileSync(resolve(docsDirectory, 'release-manifest.json'), 'utf8'),
+  );
+  if (canonicalJson(artifactManifest) !== canonicalJson(docsManifest))
+    throw new Error('API provenance rebinding requires identical artifact and docs manifests');
+  if (artifactManifest.apiVersion !== version || artifactManifest.releaseVersion !== version)
+    throw new Error('API provenance rebinding contract version does not match its manifest');
+  for (const name of [
+    ...artifactManifest.artifacts.map(({ name }) => name),
+    'release-manifest.json',
+    'CHECKSUMS.sha256',
+  ])
+    if (
+      !readFileSync(resolve(artifactDirectory, name)).equals(
+        readFileSync(resolve(docsDirectory, name)),
+      )
+    )
+      throw new Error(`API provenance rebinding found artifact/docs drift: ${name}`);
+  const reboundManifest = {
+    ...artifactManifest,
+    commit: provenance.headCommit,
+    timestamp: provenance.headTimestamp,
+    provenance: {
+      sourceCommit: provenance.headCommit,
+      headTreeHash: provenance.headTreeHash,
+      sourceTreeHash: provenance.sourceTreeHash,
+      trackedFileCount: provenance.inputCount,
+      excludedGeneratedPaths: API_PROVENANCE_EXCLUSIONS,
+      worktreeState: 'clean',
+      reproducible: true,
+      publishable: true,
+    },
+  };
+  const manifestBytes = canonicalJson(reboundManifest);
+  const checksums = [
+    ...artifactManifest.artifacts.map(({ name, sha256: digest }) => `${digest}  ${name}`),
+    `${sha256(manifestBytes)}  release-manifest.json`,
+  ].join('\n');
+  for (const directory of [artifactDirectory, docsDirectory]) {
+    writeFileSync(resolve(directory, 'release-manifest.json'), manifestBytes);
+    writeFileSync(resolve(directory, 'CHECKSUMS.sha256'), `${checksums}\n`);
+  }
+  const changedPaths = execFileSync(
+    '/usr/bin/git',
+    ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+    { cwd: repository },
+  )
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean)
+    .map((entry) => entry.slice(3));
+  const bindings = new Map();
+  for (const path of changedPaths) {
+    const match = path.match(
+      /^(artifacts\/api|apps\/docs\/public\/contracts)\/(\d{4}-\d{2}-\d{2})\/(release-manifest\.json|CHECKSUMS\.sha256)$/u,
+    );
+    if (!match) throw new Error(`API provenance rebinding changed an unauthorized path: ${path}`);
+    const [, root, version, name] = match;
+    const key = `${version}/${name}`;
+    const paths = bindings.get(key) ?? new Set();
+    paths.add(root);
+    bindings.set(key, paths);
+  }
+  if (
+    bindings.size !== 2 ||
+    [...bindings.values()].some(
+      (paths) =>
+        paths.size !== 2 || !paths.has('artifacts/api') || !paths.has('apps/docs/public/contracts'),
+    )
+  )
+    throw new Error('API provenance rebinding did not update one exact release manifest pair');
+  execFileSync('/usr/bin/git', ['add', '--', ...changedPaths], { cwd: repository });
+  execFileSync(
+    '/usr/bin/git',
+    [
+      '-c',
+      'user.name=Tixkit Public Cutover',
+      '-c',
+      'user.email=public-cutover@tixkit.invalid',
+      'commit',
+      '-qm',
+      'Bind API release provenance to authoritative public root',
+    ],
+    { cwd: repository },
+  );
+  execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
+    cwd: repository,
+    stdio: 'inherit',
+  });
+  return execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], {
+    cwd: repository,
+    encoding: 'utf8',
+  }).trim();
 }
 
 export function verifyPackedNpmRelease(repository, environment = process.env) {

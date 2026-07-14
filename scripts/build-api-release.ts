@@ -12,6 +12,7 @@ import {
   collectApiReleaseProvenance,
   sha256,
 } from './lib/api-release-provenance.js';
+import { assertAuthoritativePublicRepository } from './lib/authoritative-public-repository.mjs';
 
 type JsonObject = Record<string, unknown>;
 
@@ -22,6 +23,8 @@ const output = join(releaseRoot, version);
 const provenance = await collectApiReleaseProvenance(root);
 const { headCommit, headTimestamp, headTreeHash, sourceTreeHash, inputCount, worktreeState } =
   provenance;
+const rebindPublicProvenance = process.env.REBIND_PUBLIC_API_PROVENANCE === '1';
+if (rebindPublicProvenance) assertAuthoritativePublicRepository(root);
 
 const canonical = canonicalJson;
 
@@ -214,27 +217,30 @@ if (committedManifest && canonical(committedManifest.artifacts) !== canonical(ar
     'Committed API release artifacts are not reproducible. Choose a newer API version.',
   );
 }
-const manifest = committedManifest
-  ? canonical(committedManifest)
-  : canonical({
-      releaseVersion: version,
-      apiVersion: version,
-      commit,
-      timestamp,
-      provenance: {
-        sourceCommit: headCommit,
-        headTreeHash,
-        sourceTreeHash,
-        trackedFileCount: inputCount,
-        excludedGeneratedPaths: API_PROVENANCE_EXCLUSIONS,
-        worktreeState,
-        reproducible: true,
-        publishable: worktreeState === 'clean',
-      },
-      artifacts,
-      breaking: apiDiff.breaking,
-      publication: 'approval-required',
-    });
+const currentProvenance = {
+  sourceCommit: headCommit,
+  headTreeHash,
+  sourceTreeHash,
+  trackedFileCount: inputCount,
+  excludedGeneratedPaths: API_PROVENANCE_EXCLUSIONS,
+  worktreeState,
+  reproducible: true,
+  publishable: worktreeState === 'clean',
+};
+const manifest =
+  committedManifest && !rebindPublicProvenance
+    ? canonical(committedManifest)
+    : canonical({
+        ...(committedManifest ?? {}),
+        releaseVersion: version,
+        apiVersion: version,
+        commit,
+        timestamp,
+        provenance: currentProvenance,
+        artifacts,
+        breaking: apiDiff.breaking,
+        publication: 'approval-required',
+      });
 const checksumLines = [...artifacts, { name: 'release-manifest.json', sha256: sha256(manifest) }]
   .map((artifact) => `${artifact.sha256}  ${artifact.name}`)
   .join('\n');

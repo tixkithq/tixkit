@@ -2,6 +2,15 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { assertSecureGitProvenanceRoot } from './authoritative-public-repository.mjs';
+
+function git(root: string, arguments_: string[], options: Record<string, unknown> = {}) {
+  return execFileSync('/usr/bin/git', arguments_, {
+    cwd: root,
+    ...options,
+    env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
+  });
+}
 
 export const API_PROVENANCE_EXCLUSIONS = [
   'apps/docs/public/contracts/',
@@ -21,28 +30,23 @@ export const isApiProvenanceOutput = (name: string): boolean =>
   );
 
 export async function collectApiReleaseProvenance(root: string) {
-  const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: root,
+  assertSecureGitProvenanceRoot(root);
+  const headCommit = git(root, ['rev-parse', 'HEAD'], {
     encoding: 'utf8',
   }).trim();
-  const headTimestamp = execFileSync('git', ['show', '-s', '--format=%cI', 'HEAD'], {
-    cwd: root,
+  const headTimestamp = git(root, ['show', '-s', '--format=%cI', 'HEAD'], {
     encoding: 'utf8',
   }).trim();
-  const headTreeHash = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
-    cwd: root,
+  const headTreeHash = git(root, ['rev-parse', 'HEAD^{tree}'], {
     encoding: 'utf8',
   }).trim();
-  const inputs = execFileSync(
-    'git',
-    ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
-    { cwd: root, encoding: 'utf8' },
-  )
+  const inputs = git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+    encoding: 'utf8',
+  })
     .split('\0')
     .filter((name) => name && !isApiProvenanceOutput(name))
     .sort();
-  const changes = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
-    cwd: root,
+  const changes = git(root, ['status', '--porcelain=v1', '--untracked-files=all'], {
     encoding: 'utf8',
   })
     .split('\n')
@@ -71,21 +75,18 @@ export async function collectApiReleaseProvenance(root: string) {
 }
 
 export function collectCommittedApiReleaseProvenance(root: string, commit: string) {
-  const headCommit = execFileSync('git', ['rev-parse', '--verify', `${commit}^{commit}`], {
-    cwd: root,
+  assertSecureGitProvenanceRoot(root);
+  const headCommit = git(root, ['rev-parse', '--verify', `${commit}^{commit}`], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
-  const headTimestamp = execFileSync('git', ['show', '-s', '--format=%cI', headCommit], {
-    cwd: root,
+  const headTimestamp = git(root, ['show', '-s', '--format=%cI', headCommit], {
     encoding: 'utf8',
   }).trim();
-  const headTreeHash = execFileSync('git', ['rev-parse', `${headCommit}^{tree}`], {
-    cwd: root,
+  const headTreeHash = git(root, ['rev-parse', `${headCommit}^{tree}`], {
     encoding: 'utf8',
   }).trim();
-  const tree = execFileSync('git', ['ls-tree', '-rz', '--full-tree', headCommit], {
-    cwd: root,
+  const tree = git(root, ['ls-tree', '-rz', '--full-tree', headCommit], {
     maxBuffer: 256 * 1024 * 1024,
   });
   const entries = tree
@@ -98,8 +99,7 @@ export function collectCommittedApiReleaseProvenance(root: string, commit: strin
       return { type, object, name: entry.slice(separator + 1) };
     })
     .filter(({ name, type }) => type === 'blob' && !isApiProvenanceOutput(name));
-  const objects = execFileSync('git', ['cat-file', '--batch'], {
-    cwd: root,
+  const objects = git(root, ['cat-file', '--batch'], {
     input: `${entries.map(({ object }) => object).join('\n')}\n`,
     maxBuffer: 256 * 1024 * 1024,
   });

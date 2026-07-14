@@ -51,6 +51,18 @@ function assertReleaseSnapshot(expected) {
   }
 }
 
+test('refuses to rebind API provenance outside the authoritative public repository', () => {
+  assert.throws(
+    () =>
+      execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+        cwd: root,
+        env: { ...process.env, REBIND_PUBLIC_API_PROVENANCE: '1' },
+        stdio: 'pipe',
+      }),
+    /may be rebound only in github\.com\/tixkit\/tixkit/u,
+  );
+});
+
 test(
   'builds a complete, checksummed API release with truthful compatibility metadata',
   { skip: currentReleaseIsDerivedExport },
@@ -284,8 +296,11 @@ test(
   { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
   () => {
     const directory = resolve(root, `artifacts/api/${currentVersion}`);
+    const docsDirectory = resolve(root, `apps/docs/public/contracts/${currentVersion}`);
     const manifestPath = resolve(directory, 'release-manifest.json');
     const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+    const docsManifestPath = resolve(docsDirectory, 'release-manifest.json');
+    const docsChecksumsPath = resolve(docsDirectory, 'CHECKSUMS.sha256');
     const originalManifest = readFileSync(manifestPath, 'utf8');
     const originalChecksums = readFileSync(checksumsPath, 'utf8');
     const unavailableCommit = 'f'.repeat(40);
@@ -301,13 +316,13 @@ test(
         }),
       );
       writeFileSync(manifestPath, serialized);
-      writeFileSync(
-        checksumsPath,
-        originalChecksums.replace(
-          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
-          createHash('sha256').update(serialized).digest('hex'),
-        ),
+      writeFileSync(docsManifestPath, serialized);
+      const unavailableChecksums = originalChecksums.replace(
+        /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+        createHash('sha256').update(serialized).digest('hex'),
       );
+      writeFileSync(checksumsPath, unavailableChecksums);
+      writeFileSync(docsChecksumsPath, unavailableChecksums);
       assert.throws(
         () =>
           execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
@@ -331,13 +346,13 @@ test(
       manifest.provenance.sourceCommit = blob;
       const blobSerialized = `${JSON.stringify(manifest, null, 2)}\n`;
       writeFileSync(manifestPath, blobSerialized);
-      writeFileSync(
-        checksumsPath,
-        originalChecksums.replace(
-          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
-          createHash('sha256').update(blobSerialized).digest('hex'),
-        ),
+      writeFileSync(docsManifestPath, blobSerialized);
+      const blobChecksums = originalChecksums.replace(
+        /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+        createHash('sha256').update(blobSerialized).digest('hex'),
       );
+      writeFileSync(checksumsPath, blobChecksums);
+      writeFileSync(docsChecksumsPath, blobChecksums);
       assert.throws(
         () =>
           execFileSync(
@@ -350,6 +365,8 @@ test(
     } finally {
       writeFileSync(manifestPath, originalManifest);
       writeFileSync(checksumsPath, originalChecksums);
+      writeFileSync(docsManifestPath, originalManifest);
+      writeFileSync(docsChecksumsPath, originalChecksums);
     }
   },
 );
@@ -359,8 +376,11 @@ test(
   { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
   () => {
     const directory = resolve(root, `artifacts/api/${currentVersion}`);
+    const docsDirectory = resolve(root, `apps/docs/public/contracts/${currentVersion}`);
     const manifestPath = resolve(directory, 'release-manifest.json');
     const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+    const docsManifestPath = resolve(docsDirectory, 'release-manifest.json');
+    const docsChecksumsPath = resolve(docsDirectory, 'CHECKSUMS.sha256');
     const distributionPath = resolve(
       root,
       `artifacts/api-derived-distribution-${process.pid}.json`,
@@ -389,13 +409,13 @@ test(
     const writeManifest = () => {
       const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
       writeFileSync(manifestPath, serialized);
-      writeFileSync(
-        checksumsPath,
-        originalChecksums.replace(
-          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
-          createHash('sha256').update(serialized).digest('hex'),
-        ),
+      writeFileSync(docsManifestPath, serialized);
+      const serializedChecksums = originalChecksums.replace(
+        /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+        createHash('sha256').update(serialized).digest('hex'),
       );
+      writeFileSync(checksumsPath, serializedChecksums);
+      writeFileSync(docsChecksumsPath, serializedChecksums);
     };
 
     try {
@@ -443,6 +463,8 @@ test(
     } finally {
       writeFileSync(manifestPath, originalManifest);
       writeFileSync(checksumsPath, originalChecksums);
+      writeFileSync(docsManifestPath, originalManifest);
+      writeFileSync(docsChecksumsPath, originalChecksums);
       rmSync(distributionPath, { force: true });
     }
   },
@@ -476,6 +498,24 @@ test('provenance validation binds checksums to manifest artifact metadata', () =
   } finally {
     writeFileSync(artifactPath, originalArtifact);
     writeFileSync(checksumsPath, originalChecksums);
+  }
+});
+
+test('provenance validation binds every documentation contract mirror byte', () => {
+  const path = resolve(root, `apps/docs/public/contracts/${currentVersion}/openapi.json`);
+  const original = readFileSync(path);
+  const args = ['scripts/validate-api-release-provenance.ts'];
+  if (currentReleaseIsDerivedExport) {
+    args.push('--allow-recorded-source', '--allow-derived-export');
+  }
+  try {
+    writeFileSync(path, Buffer.concat([original, Buffer.from('\n')]));
+    assert.throws(
+      () => execFileSync('bun', args, { cwd: root, stdio: 'pipe' }),
+      /documentation contract mirror differs for openapi\.json/u,
+    );
+  } finally {
+    writeFileSync(path, original);
   }
 });
 

@@ -2,14 +2,14 @@
 
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openApiSpec } from '../packages/openapi/src/index.js';
 import {
   API_PROVENANCE_EXCLUSIONS,
   collectCommittedApiReleaseProvenance,
 } from './lib/api-release-provenance.js';
+import { authoritativeApiVersion } from './lib/authoritative-public-repository.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const distributionArgument = process.argv.indexOf('--distribution');
@@ -20,10 +20,10 @@ const distributionPath =
 const distribution = JSON.parse(readFileSync(distributionPath, 'utf8'));
 const allowRecordedSource = process.argv.includes('--allow-recorded-source');
 const allowDerivedExport = process.argv.includes('--allow-derived-export');
-const activeVersion = openApiSpec.info.version;
 const declaredApiContracts = distribution.release.contracts.filter((path: string) =>
   path.startsWith('artifacts/api/'),
 );
+const activeVersion = authoritativeApiVersion(root);
 const activeContract = `artifacts/api/${activeVersion}`;
 const violations: string[] = [];
 if (!declaredApiContracts.includes(activeContract)) {
@@ -199,6 +199,25 @@ for (const contract of declaredApiContracts) {
   const manifestDigest = createHash('sha256').update(manifestBytes).digest('hex');
   if (checksums.get('release-manifest.json') !== manifestDigest)
     violations.push('release-manifest.json checksum does not match');
+  const docsDirectory = resolve(root, 'apps/docs/public/contracts', contractVersion);
+  const mirroredNames = [...expectedArtifactNames, 'CHECKSUMS.sha256'].sort();
+  if (!existsSync(docsDirectory)) {
+    violations.push(`${contract}: documentation contract mirror does not exist`);
+  } else {
+    const docsNames = readdirSync(docsDirectory).sort();
+    if (JSON.stringify(docsNames) !== JSON.stringify(mirroredNames))
+      violations.push(`${contract}: documentation contract mirror inventory differs`);
+    for (const name of mirroredNames) {
+      const docsPath = resolve(docsDirectory, name);
+      const artifactPath = resolve(releaseDirectory, name);
+      if (
+        !existsSync(docsPath) ||
+        !existsSync(artifactPath) ||
+        !readFileSync(docsPath).equals(readFileSync(artifactPath))
+      )
+        violations.push(`${contract}: documentation contract mirror differs for ${name}`);
+    }
+  }
 }
 
 if (violations.length > 0) {
