@@ -2192,12 +2192,12 @@ describe('openApiSpec', () => {
   it('documents migration credential references as write-only and scoped revocation inputs', () => {
     const create = openApiSpec.paths['/migration-credentials'].post;
     const schema = create.requestBody.content['application/json'].schema;
+    const secretReferencePattern = new RegExp(schema.properties.secretReference.pattern, 'u');
     expect(schema.properties.secretReference).toMatchObject({
       type: 'string',
       writeOnly: true,
       pattern: expect.stringContaining('secretmanager'),
     });
-    const secretReferencePattern = new RegExp(schema.properties.secretReference.pattern, 'u');
     expect(secretReferencePattern.test('vault://team/migrations/source_api')).toBe(true);
     expect(secretReferencePattern.test('vault://team//source_api')).toBe(false);
     expect(secretReferencePattern.test('vault://team/../source_api')).toBe(false);
