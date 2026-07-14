@@ -30,6 +30,7 @@ import {
   publicReleaseManifestViolations,
   stagePublicContractArtifacts,
 } from '../build-public-release-manifest.mjs';
+import { buildCloudCoreCompatibility } from '../build-cloud-core-compatibility.mjs';
 import {
   cloudRepositoryReleaseViolations,
   parseBunLock,
@@ -430,6 +431,128 @@ test('verified Cloud commands reject private workspace shadows at public package
     });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /public package install path is shadowed: @tixkit\/domain/u);
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('builds the private compatibility manifest from one attested public release and install', () => {
+  const fixtureManifest = compatibilityManifest();
+  fixtureManifest.cloudRelease.consumedPackages = ['@tixkit/domain'];
+  const cloudRoot = cloudFixture(fixtureManifest);
+  try {
+    installFixturePackages(cloudRoot, fixtureManifest);
+    const release = publicRelease(fixtureManifest);
+    const built = buildCloudCoreCompatibility({
+      publicRelease: release,
+      cloudRoot,
+      cloudVersion: '0.1.0-private.2',
+    });
+    assert.deepEqual(built.core, release.core);
+    assert.deepEqual(built.cloudRelease.consumedPackages, ['@tixkit/domain']);
+    assert.equal(built.cloudRelease.sourceCommit, fixtureManifest.cloudRelease.sourceCommit);
+    assert.deepEqual(validateCloudCoreConsumer(built, release, cloudRoot), []);
+
+    const { releasePath, bin } = attestedReleaseFixture(cloudRoot, release);
+    const outputPath = resolve(cloudRoot, 'generated-cloud-core-compatibility.json');
+    const buildResult = spawnSync(
+      process.execPath,
+      [
+        resolve(root, 'scripts/build-cloud-core-compatibility.mjs'),
+        '--public-release-manifest',
+        releasePath,
+        '--cloud-root',
+        cloudRoot,
+        '--cloud-version',
+        '0.1.0-private.2',
+        '--out',
+        outputPath,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+    assert.equal(buildResult.status, 0, buildResult.stderr);
+    assert.equal(statSync(outputPath).mode & 0o777, 0o600);
+    assert.deepEqual(JSON.parse(readFileSync(outputPath, 'utf8')), built);
+
+    const verifiedResult = spawnSync(
+      process.execPath,
+      [
+        resolve(root, 'scripts/verify-cloud-core-install.mjs'),
+        '--manifest',
+        outputPath,
+        '--public-release-manifest',
+        releasePath,
+        '--cloud-root',
+        cloudRoot,
+        '--',
+        process.execPath,
+        '--version',
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+    assert.equal(verifiedResult.status, 0, verifiedResult.stderr);
+
+    const replacement = spawnSync(
+      process.execPath,
+      [
+        resolve(root, 'scripts/build-cloud-core-compatibility.mjs'),
+        '--public-release-manifest',
+        releasePath,
+        '--cloud-root',
+        cloudRoot,
+        '--cloud-version',
+        '0.1.0-private.2',
+        '--out',
+        outputPath,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+    assert.equal(replacement.status, 1);
+    assert.match(replacement.stderr, /refusing to replace an existing compatibility manifest/u);
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('compatibility generation rejects a nested directory as the private repository root', () => {
+  const fixtureManifest = compatibilityManifest();
+  fixtureManifest.cloudRelease.consumedPackages = ['@tixkit/domain'];
+  const cloudRoot = cloudFixture(fixtureManifest);
+  try {
+    const nestedRoot = resolve(cloudRoot, 'packages/control-plane');
+    const release = publicRelease(fixtureManifest);
+    const { releasePath, bin } = attestedReleaseFixture(cloudRoot, release);
+    const outputPath = resolve(cloudRoot, 'nested-root-compatibility.json');
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve(root, 'scripts/build-cloud-core-compatibility.mjs'),
+        '--public-release-manifest',
+        releasePath,
+        '--cloud-root',
+        nestedRoot,
+        '--cloud-version',
+        '0.1.0-private.2',
+        '--out',
+        outputPath,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /private Cloud release root must equal Git worktree top level/u);
+    assert.equal(existsSync(outputPath), false);
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
   }
@@ -2483,6 +2606,30 @@ test('Cloud consumer CLIs fail before consumption when release attestation is no
       assert.equal(result.status, 1, script);
       assert.match(result.stderr, /status: 17/u, script);
     }
+    const buildResult = spawnSync(
+      process.execPath,
+      [
+        resolve(root, 'scripts/build-cloud-core-compatibility.mjs'),
+        '--public-release-manifest',
+        releasePath,
+        '--cloud-root',
+        directory,
+        '--cloud-version',
+        '0.1.0-private.1',
+        '--out',
+        resolve(directory, 'generated-compatibility.json'),
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GH_ARGUMENTS: ghArguments,
+          PATH: `${directory}:${process.env.PATH}`,
+        },
+      },
+    );
+    assert.equal(buildResult.status, 1, 'build-cloud-core-compatibility.mjs');
+    assert.match(buildResult.stderr, /status: 17/u, 'build-cloud-core-compatibility.mjs');
     const argumentsUsed = readFileSync(ghArguments, 'utf8');
     assert.match(
       argumentsUsed,

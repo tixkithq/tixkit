@@ -69,6 +69,7 @@
     "audit:repository-history": "node scripts/audit-repository-history.mjs",
     "validate:cloud-core-consumer": "node scripts/validate-cloud-core-consumer.mjs",
     "verify:cloud-core-install": "node scripts/verify-cloud-core-install.mjs",
+    "build:cloud-core-compatibility": "node scripts/build-cloud-core-compatibility.mjs",
     "build:public-release-manifest": "node scripts/build-public-release-manifest.mjs",
     "publish:public-npm-artifacts": "node scripts/publish-public-npm-artifacts.mjs",
     "publish:public-github-release": "node scripts/publish-public-github-release.mjs",

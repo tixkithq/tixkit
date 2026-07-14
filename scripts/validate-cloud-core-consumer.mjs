@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,6 +100,14 @@ export function cloudRepositoryReleaseViolations(
 ) {
   const violations = [];
   const permittedPaths = repositoryRelativeReleasePaths(cloudRoot, allowedPaths);
+  try {
+    const canonicalRoot = realpathSync(cloudRoot);
+    const worktreeRoot = realpathSync(gitCloud(cloudRoot, ['rev-parse', '--show-toplevel']));
+    if (canonicalRoot !== worktreeRoot)
+      return ['private Cloud release root must equal Git worktree top level'];
+  } catch {
+    return ['private Cloud release root must be a readable Git worktree'];
+  }
   let head;
   try {
     head = gitCloud(cloudRoot, ['rev-parse', '--verify', 'HEAD^{commit}']);
@@ -263,7 +271,7 @@ function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
 }
 
-function resolvedPackageTuple(entry) {
+export function resolvedPackageTuple(entry) {
   if (!Array.isArray(entry) || typeof entry[0] !== 'string') return undefined;
   const separator = entry[0].lastIndexOf('@');
   if (separator <= 0) return undefined;

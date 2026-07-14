@@ -205,6 +205,12 @@ function installationInventory(cloudRoot, nodeModulesRoots) {
     .sort((left, right) => left.path.localeCompare(right.path));
 }
 
+export function cloudCoreInstallationInventory(manifest, cloudRoot) {
+  const installedRoots = packageRoots(manifest, cloudRoot);
+  snapshot(manifest, installedRoots);
+  return installationInventory(cloudRoot, installedRoots.nodeModulesRoots);
+}
+
 function assertInstallationInventory(manifest, cloudRoot, nodeModulesRoots) {
   const actual = installationInventory(cloudRoot, nodeModulesRoots);
   const expected = [...manifest.cloudRelease.installations].sort((left, right) =>
