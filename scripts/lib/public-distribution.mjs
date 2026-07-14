@@ -2,6 +2,8 @@ import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'no
 import { execFileSync } from 'node:child_process';
 import { basename, join, relative, resolve, sep } from 'node:path';
 
+const gitExecutable = '/usr/bin/git';
+
 const boundaryControlPaths = new Set([
   'distribution/public-distribution.json',
   'distribution/public-distribution.schema.json',
@@ -122,7 +124,7 @@ function validateExistingPath(root, candidate, label, violations, options = {}) 
 function trackedInventory(root) {
   try {
     const output = execFileSync(
-      'git',
+      gitExecutable,
       ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
       { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
@@ -143,7 +145,7 @@ function trackedInventory(root) {
 }
 
 function assertCompleteAncestry(root, mode) {
-  const shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+  const shallow = execFileSync(gitExecutable, ['rev-parse', '--is-shallow-repository'], {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -153,12 +155,16 @@ function assertCompleteAncestry(root, mode) {
 
 function historicalInventory(root) {
   assertCompleteAncestry(root, 'full');
-  const output = execFileSync('git', ['log', 'HEAD', '--tags', '--name-only', '--format=', '-z'], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const output = execFileSync(
+    gitExecutable,
+    ['log', 'HEAD', '--tags', '--name-only', '--format=', '-z'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
   return [...new Set(output.split('\0').filter(Boolean))].sort();
 }
 
@@ -183,7 +189,7 @@ export function historicalClassificationViolations(manifest, root) {
       violations.push('snapshot history classification must not contain historical paths');
     assertCompleteAncestry(root, 'snapshot');
     const commitCount = Number.parseInt(
-      execFileSync('git', ['rev-list', '--all', '--count'], {
+      execFileSync(gitExecutable, ['rev-list', '--all', '--count'], {
         cwd: root,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -200,11 +206,15 @@ export function historicalClassificationViolations(manifest, root) {
   const current = trackedInventory(root);
   if (current) {
     const currentFiles = new Set(
-      execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-        cwd: root,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
+      execFileSync(
+        gitExecutable,
+        ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      )
         .split('\0')
         .filter(Boolean),
     );

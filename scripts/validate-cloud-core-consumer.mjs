@@ -13,6 +13,7 @@ import {
 import { verifyPublicReleaseAttestation } from './lib/public-release-attestation.mjs';
 
 const publicRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const gitExecutable = '/usr/bin/git';
 const sourceExtension =
   /\.(?:c|cc|cpp|cs|dart|go|java|js|jsx|kt|kts|mjs|mts|py|rb|rs|svelte|swift|ts|tsx|vue)$/u;
 let cachedSourceFingerprints;
@@ -64,6 +65,137 @@ function canonical(value) {
         .map(([key, entry]) => [key, canonical(entry)]),
     );
   return value;
+}
+
+function gitCloud(cloudRoot, args, options = {}) {
+  const result = execFileSync(gitExecutable, args, {
+    cwd: cloudRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...options,
+    env: { ...process.env, ...options.env, GIT_NO_REPLACE_OBJECTS: '1' },
+  });
+  return typeof result === 'string' ? result.trim() : result;
+}
+
+function releasePathAllowed(path, allowedPaths) {
+  const normalized = path.replaceAll('\\', '/').replace(/^\.\//u, '');
+  if (allowedPaths.has(normalized)) return true;
+  return /(?:^|\/)node_modules(?:\/|$)/u.test(normalized);
+}
+
+function repositoryRelativeReleasePaths(cloudRoot, paths) {
+  return new Set(
+    paths.flatMap((path) => {
+      const relativePath = relative(cloudRoot, resolve(cloudRoot, path)).replaceAll('\\', '/');
+      return relativePath === '..' || relativePath.startsWith('../') ? [] : [relativePath];
+    }),
+  );
+}
+
+export function cloudRepositoryReleaseViolations(
+  cloudRoot,
+  sourceCommit,
+  { allowedPaths = [] } = {},
+) {
+  const violations = [];
+  const permittedPaths = repositoryRelativeReleasePaths(cloudRoot, allowedPaths);
+  let head;
+  try {
+    head = gitCloud(cloudRoot, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  } catch {
+    return ['private Cloud release root must have a readable Git commit'];
+  }
+  try {
+    gitCloud(cloudRoot, ['rev-parse', '--verify', `${sourceCommit}^{commit}`]);
+  } catch {
+    violations.push('cloudRelease.sourceCommit is not a commit in the private Cloud repository');
+  }
+  if (sourceCommit !== head) {
+    violations.push(`cloudRelease.sourceCommit must equal private Cloud HEAD ${head}`);
+  }
+  try {
+    const replacementReferences = gitCloud(cloudRoot, [
+      'for-each-ref',
+      '--format=%(refname)',
+      'refs/replace',
+    ]);
+    if (replacementReferences)
+      violations.push('private Cloud repository must not contain Git replacement references');
+  } catch {
+    violations.push('private Cloud repository replacement references could not be inspected');
+  }
+  try {
+    const flaggedPaths = gitCloud(cloudRoot, ['ls-files', '-v', '-z'], {
+      encoding: 'buffer',
+    })
+      .toString('utf8')
+      .split('\0')
+      .filter(Boolean)
+      .filter((entry) => entry[0] === 'S' || entry[0] === entry[0].toLowerCase())
+      .map((entry) => entry.slice(2));
+    if (flaggedPaths.length > 0)
+      violations.push(
+        `private Cloud repository has assume-unchanged or skip-worktree paths: ${flaggedPaths.join(', ')}`,
+      );
+  } catch {
+    violations.push('private Cloud repository index flags could not be inspected');
+  }
+  try {
+    const gitlinks = gitCloud(cloudRoot, ['ls-files', '--stage', '-z'], {
+      encoding: 'buffer',
+    })
+      .toString('utf8')
+      .split('\0')
+      .filter((entry) => entry.startsWith('160000 '))
+      .map((entry) => entry.slice(entry.indexOf('\t') + 1));
+    if (gitlinks.length > 0)
+      violations.push(
+        `private Cloud release tree cannot contain submodules: ${gitlinks.join(', ')}`,
+      );
+  } catch {
+    violations.push('private Cloud repository gitlinks could not be inspected');
+  }
+  try {
+    const entries = gitCloud(
+      cloudRoot,
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=none'],
+      { encoding: 'buffer' },
+    )
+      .toString('utf8')
+      .split('\0')
+      .filter(Boolean);
+    const trackedDirty = entries.some((entry) => !entry.startsWith('?? '));
+    if (trackedDirty) violations.push('private Cloud release tree has uncommitted tracked changes');
+    const untracked = entries
+      .filter((entry) => entry.startsWith('?? '))
+      .map((entry) => entry.slice(3))
+      .filter((path) => !releasePathAllowed(path, permittedPaths));
+    if (untracked.length > 0)
+      violations.push(
+        `private Cloud release tree has unbound untracked paths: ${untracked.join(', ')}`,
+      );
+  } catch {
+    violations.push('private Cloud repository worktree state could not be inspected');
+  }
+  try {
+    const ignored = gitCloud(
+      cloudRoot,
+      ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'],
+      { encoding: 'buffer' },
+    )
+      .toString('utf8')
+      .split('\0')
+      .filter(Boolean)
+      .filter((path) => !releasePathAllowed(path, permittedPaths));
+    if (ignored.length > 0)
+      violations.push(
+        `private Cloud release tree has unbound ignored paths: ${ignored.join(', ')}`,
+      );
+  } catch {
+    violations.push('private Cloud repository ignored inventory could not be inspected');
+  }
+  return violations;
 }
 
 export function parseBunLock(content) {
@@ -187,7 +319,7 @@ function acquiresPublicRepository(value) {
 
 function trackedCloudPaths(cloudRoot, violations) {
   try {
-    return execFileSync('git', ['ls-files', '-z'], {
+    return execFileSync(gitExecutable, ['ls-files', '-z'], {
       cwd: cloudRoot,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -215,7 +347,7 @@ export function normalizedSource(content) {
 function publicTrackedSourceFiles(paths) {
   if (cachedTrackedPublicSources) return cachedTrackedPublicSources;
   const prefixes = [...paths].map((path) => `${path}/`);
-  cachedTrackedPublicSources = execFileSync('git', ['ls-files', '-z'], {
+  cachedTrackedPublicSources = execFileSync(gitExecutable, ['ls-files', '-z'], {
     cwd: publicRoot,
     encoding: 'buffer',
     maxBuffer: 32 * 1024 * 1024,
@@ -341,7 +473,7 @@ export function privateCloudSourceBoundaryViolations(cloudRoot) {
   return violations;
 }
 
-export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoot) {
+export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoot, options = {}) {
   const violations = [];
   const distribution = validatePublicDistribution(loadPublicDistribution(publicRoot), publicRoot);
   const schema = JSON.parse(
@@ -364,6 +496,13 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
     ),
   );
   if (violations.length > 0) return violations;
+  violations.push(
+    ...cloudRepositoryReleaseViolations(
+      cloudRoot,
+      compatibility.cloudRelease.sourceCommit,
+      options,
+    ),
+  );
   if (
     JSON.stringify(canonical(compatibility.core)) !== JSON.stringify(canonical(publicRelease.core))
   )
@@ -632,7 +771,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const cloudRoot = argument(process.argv.slice(2), '--cloud-root');
   const publicRelease = verifyPublicReleaseAttestation(publicRoot, publicReleasePath);
   const compatibility = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const violations = validateCloudCoreConsumer(compatibility, publicRelease, cloudRoot);
+  const violations = validateCloudCoreConsumer(compatibility, publicRelease, cloudRoot, {
+    allowedPaths: [manifestPath, publicReleasePath],
+  });
   if (violations.length > 0) {
     throw new Error(`Cloud/core compatibility validation failed:\n${violations.join('\n')}`);
   }

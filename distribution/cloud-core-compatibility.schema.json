@@ -7,10 +7,23 @@
     "schemaVersion": { "const": 1 },
     "cloudRelease": {
       "type": "object",
-      "required": ["version", "sourceCommit"],
+      "required": ["version", "sourceCommit", "installations"],
       "properties": {
         "version": { "type": "string", "minLength": 1 },
-        "sourceCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+        "sourceCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "installations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "contentSha256", "entryCount"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^(?:[^./][^/]*)(?:/[^./][^/]*)*/node_modules$|^node_modules$" },
+              "contentSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "entryCount": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": false
     },

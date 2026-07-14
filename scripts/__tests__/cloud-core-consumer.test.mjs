@@ -18,8 +18,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
-import test from 'node:test';
+import { dirname, join, relative, resolve } from 'node:path';
+import test, { after } from 'node:test';
 import {
   assertPublicReleaseContext,
   packFromSourceArchive,
@@ -28,6 +28,7 @@ import {
   publicReleaseManifestViolations,
 } from '../build-public-release-manifest.mjs';
 import {
+  cloudRepositoryReleaseViolations,
   parseBunLock,
   privateCloudSourceBoundaryViolations,
   validateCloudCoreConsumer,
@@ -40,7 +41,7 @@ import {
 import { verifyCloudCoreInstall } from '../verify-cloud-core-install.mjs';
 import { classifyStagedPublicRelease } from '../validate-staged-public-release.mjs';
 import { SDK_API_VERSION } from '../lib/sdk-parity.mjs';
-import { packageContentDigest } from '../lib/package-content-digest.mjs';
+import { directoryContentDigest, packageContentDigest } from '../lib/package-content-digest.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const distribution = JSON.parse(
@@ -64,6 +65,10 @@ const currentMigrationRange = {
   minimum: migrationIds[0],
   maximum: migrationIds.at(-1),
 };
+const externalAttestationRoots = [];
+after(() => {
+  for (const path of externalAttestationRoots) rmSync(path, { recursive: true, force: true });
+});
 
 function compatibilityManifest() {
   const agentContract = distribution.release.contracts.find((path) =>
@@ -89,7 +94,11 @@ function compatibilityManifest() {
     });
   return {
     schemaVersion: 1,
-    cloudRelease: { version: '0.1.0-private.1', sourceCommit: 'a'.repeat(40) },
+    cloudRelease: {
+      version: '0.1.0-private.1',
+      sourceCommit: 'a'.repeat(40),
+      installations: [],
+    },
     core: {
       sourceCommit: 'b'.repeat(40),
       sourceTreeSha256: 'c'.repeat(64),
@@ -178,9 +187,71 @@ function cloudFixture(releaseManifest = compatibilityManifest()) {
     resolve(directory, 'bunfig.toml'),
     '[install]\nlinker = "isolated"\nbackend = "copyfile"\n',
   );
+  writeFileSync(
+    resolve(directory, '.gitignore'),
+    'node_modules/\ndist/\nbuild/\ncoverage/\n.env\n.env.*\n',
+  );
   execFileSync('git', ['init', '-q'], { cwd: directory });
   execFileSync('git', ['add', '-A'], { cwd: directory });
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.name=Tixkit Cloud Test',
+      '-c',
+      'user.email=cloud-test@tixkit.invalid',
+      'commit',
+      '-qm',
+      'Cloud fixture',
+    ],
+    { cwd: directory },
+  );
+  bindCloudRelease(releaseManifest, directory);
   return directory;
+}
+
+function bindCloudRelease(manifest, cloudRoot) {
+  manifest.cloudRelease.sourceCommit = execFileSync(
+    'git',
+    ['rev-parse', '--verify', 'HEAD^{commit}'],
+    { cwd: cloudRoot, encoding: 'utf8' },
+  ).trim();
+  return manifest;
+}
+
+function commitCloudFixture(cloudRoot) {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
+      cwd: cloudRoot,
+      stdio: 'ignore',
+    });
+  } catch {
+    execFileSync('git', ['add', '-u'], { cwd: cloudRoot });
+  }
+  const changed = spawnSync('git', ['diff', '--quiet', 'HEAD', '--'], {
+    cwd: cloudRoot,
+    stdio: 'ignore',
+  }).status;
+  const staged = spawnSync('git', ['diff', '--cached', '--quiet', 'HEAD', '--'], {
+    cwd: cloudRoot,
+    stdio: 'ignore',
+  }).status;
+  if (changed !== 0 || staged !== 0) {
+    execFileSync('git', ['add', '-u'], { cwd: cloudRoot });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Cloud Test',
+        '-c',
+        'user.email=cloud-test@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Cloud fixture mutation',
+      ],
+      { cwd: cloudRoot },
+    );
+  }
 }
 
 function publicRelease(manifest) {
@@ -202,12 +273,31 @@ function installFixturePackages(directory, manifest) {
     );
     Object.assign(pin, packageContentDigest(packagePath));
   }
+  bindCloudInstallations(manifest, directory);
 }
 
-function attestedReleaseFixture(directory, release) {
-  const releasePath = resolve(directory, 'public-release.json');
+function bindCloudInstallations(manifest, cloudRoot) {
+  const lock = parseBunLock(readFileSync(resolve(cloudRoot, 'bun.lock'), 'utf8'));
+  const roots = [
+    resolve(cloudRoot, 'node_modules'),
+    ...Object.keys(lock.workspaces ?? {})
+      .filter(Boolean)
+      .map((workspace) => resolve(cloudRoot, workspace, 'node_modules')),
+  ].filter((path) => lstatSync(path, { throwIfNoEntry: false })?.isDirectory());
+  manifest.cloudRelease.installations = roots
+    .map((path) => ({
+      path: relative(cloudRoot, path).replaceAll('\\', '/'),
+      ...directoryContentDigest(path, cloudRoot),
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function attestedReleaseFixture(_directory, release) {
+  const externalRoot = mkdtempSync(join(tmpdir(), 'tixkit-cloud-attestation-'));
+  externalAttestationRoots.push(externalRoot);
+  const releasePath = resolve(externalRoot, 'public-release.json');
   writeFileSync(releasePath, `${JSON.stringify(release)}\n`);
-  const bin = resolve(directory, '.test-bin');
+  const bin = resolve(externalRoot, '.test-bin');
   mkdirSync(bin);
   const gh = resolve(bin, 'gh');
   writeFileSync(
@@ -224,6 +314,8 @@ process.stdout.write(JSON.stringify([{verificationResult:{statement:{subject:[{d
 }
 
 function runVerifiedCommand({ manifest, releasePath, cloudRoot, bin, command, writable = [] }) {
+  commitCloudFixture(cloudRoot);
+  bindCloudRelease(manifest, cloudRoot);
   const manifestPath = resolve(cloudRoot, 'cloud-core-compatibility.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
   return spawnSync(
@@ -251,9 +343,252 @@ test('accepts immutable public pins without copied or patched core source', () =
   const cloudRoot = cloudFixture();
   try {
     const manifest = compatibilityManifest();
+    bindCloudRelease(manifest, cloudRoot);
     assert.deepEqual(validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot), []);
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('binds the Cloud release identity to the clean private repository commit', () => {
+  const manifest = compatibilityManifest();
+  const cloudRoot = cloudFixture(manifest);
+  try {
+    assert.deepEqual(
+      cloudRepositoryReleaseViolations(cloudRoot, manifest.cloudRelease.sourceCommit),
+      [],
+    );
+    const blob = execFileSync('git', ['hash-object', 'bunfig.toml'], {
+      cwd: cloudRoot,
+      encoding: 'utf8',
+    }).trim();
+    const nonCommit = cloudRepositoryReleaseViolations(cloudRoot, blob);
+    assert.ok(
+      nonCommit.includes(
+        'cloudRelease.sourceCommit is not a commit in the private Cloud repository',
+      ),
+    );
+    assert.ok(nonCommit.some((violation) => violation.includes('must equal private Cloud HEAD')));
+
+    writeFileSync(
+      resolve(cloudRoot, 'packages/control-plane/package.json'),
+      '{"name":"@tixkit-cloud/changed","private":true}\n',
+    );
+    assert.ok(
+      cloudRepositoryReleaseViolations(cloudRoot, manifest.cloudRelease.sourceCommit).includes(
+        'private Cloud release tree has uncommitted tracked changes',
+      ),
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('rejects staged, untracked, ignored, and index-hidden private release changes', () => {
+  const cases = [
+    {
+      expected: 'private Cloud release tree has uncommitted tracked changes',
+      mutate(cloudRoot) {
+        writeFileSync(resolve(cloudRoot, 'bunfig.toml'), '[install]\nlinker = "hoisted"\n');
+        execFileSync('git', ['add', 'bunfig.toml'], { cwd: cloudRoot });
+      },
+    },
+    {
+      expected: 'private Cloud release tree has unbound untracked paths',
+      mutate(cloudRoot) {
+        mkdirSync(resolve(cloudRoot, 'packages/control-plane/src'), { recursive: true });
+        writeFileSync(
+          resolve(cloudRoot, 'packages/control-plane/src/untracked.ts'),
+          'export const unboundPrivateReleaseCode = true;\n',
+        );
+      },
+    },
+    {
+      expected: 'private Cloud release tree has unbound ignored paths',
+      mutate(cloudRoot) {
+        mkdirSync(resolve(cloudRoot, 'dist'));
+        writeFileSync(
+          resolve(cloudRoot, 'dist/unbound-wrapper.js'),
+          'export const unboundGeneratedWrapper = true;\n',
+        );
+      },
+    },
+    {
+      expected: 'private Cloud release tree has unbound ignored paths',
+      mutate(cloudRoot, manifest) {
+        writeFileSync(
+          resolve(cloudRoot, '.gitignore'),
+          `${readFileSync(resolve(cloudRoot, '.gitignore'), 'utf8')}private-cache/\n`,
+        );
+        execFileSync('git', ['add', '.gitignore'], { cwd: cloudRoot });
+        execFileSync(
+          'git',
+          [
+            '-c',
+            'user.name=Tixkit Cloud Test',
+            '-c',
+            'user.email=cloud-test@tixkit.invalid',
+            'commit',
+            '-qm',
+            'Ignore private cache',
+          ],
+          { cwd: cloudRoot },
+        );
+        bindCloudRelease(manifest, cloudRoot);
+        mkdirSync(resolve(cloudRoot, 'private-cache'));
+        writeFileSync(
+          resolve(cloudRoot, 'private-cache/rogue.ts'),
+          'export const ignoredPrivateReleaseCode = true;\n',
+        );
+      },
+    },
+    {
+      expected: 'private Cloud repository has assume-unchanged or skip-worktree paths',
+      mutate(cloudRoot) {
+        execFileSync('git', ['update-index', '--assume-unchanged', 'bunfig.toml'], {
+          cwd: cloudRoot,
+        });
+        writeFileSync(resolve(cloudRoot, 'bunfig.toml'), '[install]\nlinker = "hoisted"\n');
+      },
+    },
+    {
+      expected: 'private Cloud repository has assume-unchanged or skip-worktree paths',
+      mutate(cloudRoot) {
+        execFileSync('git', ['update-index', '--skip-worktree', 'bunfig.toml'], {
+          cwd: cloudRoot,
+        });
+      },
+    },
+  ];
+  for (const { expected, mutate } of cases) {
+    const manifest = compatibilityManifest();
+    const cloudRoot = cloudFixture(manifest);
+    try {
+      mutate(cloudRoot, manifest);
+      assert.ok(
+        cloudRepositoryReleaseViolations(cloudRoot, manifest.cloudRelease.sourceCommit).some(
+          (violation) => violation.startsWith(expected),
+        ),
+        expected,
+      );
+    } finally {
+      rmSync(cloudRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('rejects pre-existing output and environment files as unbound executable input', () => {
+  const manifest = compatibilityManifest();
+  const cloudRoot = cloudFixture(manifest);
+  try {
+    mkdirSync(resolve(cloudRoot, 'dist'));
+    writeFileSync(resolve(cloudRoot, 'dist/wrapper.js'), 'export const wrapper = true;\n');
+    writeFileSync(resolve(cloudRoot, '.env'), 'SECRET_COMMAND=./dist/wrapper.js\n');
+    const violations = cloudRepositoryReleaseViolations(
+      cloudRoot,
+      manifest.cloudRelease.sourceCommit,
+    );
+    assert.ok(
+      violations.some(
+        (violation) =>
+          violation.includes('unbound ignored paths') &&
+          violation.includes('.env') &&
+          violation.includes('dist/'),
+      ),
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('rejects replacement refs and dirty submodules from the private release tree', () => {
+  const replacementManifest = compatibilityManifest();
+  const replacementRoot = cloudFixture(replacementManifest);
+  try {
+    const replacementCommit = execFileSync(
+      'git',
+      ['commit-tree', 'HEAD^{tree}', '-m', 'replacement'],
+      { cwd: replacementRoot, encoding: 'utf8' },
+    ).trim();
+    execFileSync(
+      'git',
+      ['replace', replacementManifest.cloudRelease.sourceCommit, replacementCommit],
+      { cwd: replacementRoot },
+    );
+    assert.ok(
+      cloudRepositoryReleaseViolations(
+        replacementRoot,
+        replacementManifest.cloudRelease.sourceCommit,
+      ).includes('private Cloud repository must not contain Git replacement references'),
+    );
+  } finally {
+    rmSync(replacementRoot, { recursive: true, force: true });
+  }
+
+  const submoduleSource = mkdtempSync(join(tmpdir(), 'tixkit-cloud-private-submodule-'));
+  const submoduleManifest = compatibilityManifest();
+  const submoduleRoot = cloudFixture(submoduleManifest);
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: submoduleSource });
+    writeFileSync(
+      resolve(submoduleSource, 'index.ts'),
+      'export const managedPrivateCode = true;\n',
+    );
+    execFileSync('git', ['add', 'index.ts'], { cwd: submoduleSource });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Cloud Test',
+        '-c',
+        'user.email=cloud-test@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Private submodule',
+      ],
+      { cwd: submoduleSource },
+    );
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        '-q',
+        submoduleSource,
+        'vendor/private',
+      ],
+      { cwd: submoduleRoot },
+    );
+    execFileSync('git', ['add', '.gitmodules', 'vendor/private'], { cwd: submoduleRoot });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Cloud Test',
+        '-c',
+        'user.email=cloud-test@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Pin private submodule',
+      ],
+      { cwd: submoduleRoot },
+    );
+    bindCloudRelease(submoduleManifest, submoduleRoot);
+    writeFileSync(
+      resolve(submoduleRoot, 'vendor/private/index.ts'),
+      'export const managedPrivateCode = false;\n',
+    );
+    assert.ok(
+      cloudRepositoryReleaseViolations(
+        submoduleRoot,
+        submoduleManifest.cloudRelease.sourceCommit,
+      ).includes('private Cloud release tree has uncommitted tracked changes'),
+    );
+  } finally {
+    rmSync(submoduleRoot, { recursive: true, force: true });
+    rmSync(submoduleSource, { recursive: true, force: true });
   }
 });
 
@@ -408,6 +743,7 @@ test('public packages are packed from the Git archive, excluding stale working o
     execFileSync('git', ['add', 'package.json', 'bunfig.toml', 'bun.lock'], { cwd: consumer });
     const cloudManifest = compatibilityManifest();
     cloudManifest.core.packages = packages;
+    bindCloudInstallations(cloudManifest, consumer);
     const { releasePath, bin } = attestedReleaseFixture(consumer, publicRelease(cloudManifest));
     const verifiedCommand = runVerifiedCommand({
       manifest: cloudManifest,
@@ -656,10 +992,10 @@ test(
       assert.equal(result.status, 1);
       assert.match(
         result.stderr,
-        /installed public package does not match release content: @tixkit\/domain/u,
+        /(?:installed dependency inventory does not match|installed public package does not match release content: @tixkit\/domain)/u,
       );
       chmodSync(domainPath, 0o644);
-      const sharedPath = resolve(directory, 'shared-index.js');
+      const sharedPath = resolve(directory, 'node_modules/shared-index.js');
       writeFileSync(sharedPath, 'export const state = "public";\n');
       rmSync(domainPath);
       linkSync(sharedPath, domainPath);
@@ -685,13 +1021,170 @@ test(
       assert.equal(result.status, 1);
       assert.match(
         result.stderr,
-        /installed public package does not match release content: @tixkit\/domain/u,
+        /(?:installed dependency inventory does not match|installed public package does not match release content: @tixkit\/domain)/u,
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   },
 );
+
+test(
+  'verified Cloud commands bind every installed dependency and executable shim',
+  { timeout: 15_000 },
+  () => {
+    const directory = cloudFixture();
+    try {
+      const manifest = compatibilityManifest();
+      installFixturePackages(directory, manifest);
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      const run = () =>
+        runVerifiedCommand({
+          manifest,
+          releasePath,
+          cloudRoot: directory,
+          bin,
+          command: [process.execPath, '--version'],
+        });
+
+      const extra = resolve(directory, 'node_modules/evil/index.js');
+      mkdirSync(dirname(extra), { recursive: true });
+      writeFileSync(extra, 'export const evil = true;\n');
+      let result = run();
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /installed dependency inventory does not match/u);
+      rmSync(resolve(directory, 'node_modules/evil'), { recursive: true });
+
+      const privateDependency = resolve(directory, 'node_modules/private-dependency/index.js');
+      mkdirSync(dirname(privateDependency), { recursive: true });
+      writeFileSync(privateDependency, 'export const state = "authentic";\n');
+      bindCloudInstallations(manifest, directory);
+      writeFileSync(privateDependency, 'export const state = "patched";\n');
+      result = run();
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /installed dependency inventory does not match/u);
+      writeFileSync(privateDependency, 'export const state = "authentic";\n');
+
+      const executableShim = resolve(directory, 'node_modules/.bin/private-tool');
+      mkdirSync(dirname(executableShim), { recursive: true });
+      writeFileSync(executableShim, '#!/bin/sh\nexit 0\n');
+      chmodSync(executableShim, 0o755);
+      bindCloudInstallations(manifest, directory);
+      writeFileSync(executableShim, '#!/bin/sh\nexit 1\n');
+      result = run();
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /installed dependency inventory does not match/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'verified Cloud commands reject dependency mutation during materialization',
+  { timeout: 15_000 },
+  () => {
+    const directory = cloudFixture();
+    const attackDirectory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-dependency-race-'));
+    let mutationService;
+    try {
+      const manifest = compatibilityManifest();
+      writeFileSync(resolve(directory, 'dependency-copy-marker'), 'exact fixture\n');
+      execFileSync('git', ['add', 'dependency-copy-marker'], { cwd: directory });
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Tixkit Cloud Test',
+          '-c',
+          'user.email=cloud-test@tixkit.invalid',
+          'commit',
+          '-qm',
+          'Add dependency race marker',
+        ],
+        { cwd: directory },
+      );
+      bindCloudRelease(manifest, directory);
+      installFixturePackages(directory, manifest);
+      const payload = resolve(directory, 'node_modules/private-dependency/payload.bin');
+      mkdirSync(dirname(payload), { recursive: true });
+      writeFileSync(payload, Buffer.alloc(8 * 1024 * 1024, 0x61));
+      bindCloudInstallations(manifest, directory);
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      const service = resolve(attackDirectory, 'dependency-service.mjs');
+      writeFileSync(
+        service,
+        `import { readdirSync, writeFileSync } from 'node:fs';
+const [payload, parent, baselineJson] = process.argv.slice(2);
+const baseline = new Set(JSON.parse(baselineJson));
+for (;;) {
+  const ready = readdirSync(parent)
+    .filter((name) => name.startsWith('.tixkit-cloud-source-'))
+    .some((name) => !baseline.has(name));
+  if (ready) break;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+}
+writeFileSync(payload, Buffer.alloc(8 * 1024 * 1024, 0x62));
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+writeFileSync(payload, Buffer.alloc(8 * 1024 * 1024, 0x61));
+`,
+      );
+      const parent = dirname(directory);
+      const baseline = readdirSync(parent).filter((name) =>
+        name.startsWith('.tixkit-cloud-source-'),
+      );
+      mutationService = spawn(
+        process.execPath,
+        [service, payload, parent, JSON.stringify(baseline)],
+        { stdio: 'ignore' },
+      );
+      const result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /installed dependency inventory does not match/u);
+    } finally {
+      mutationService?.kill('SIGTERM');
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(attackDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test('verified Cloud commands use fixed trusted Git and archive tools', () => {
+  const directory = cloudFixture();
+  const evidence = mkdtempSync(join(tmpdir(), 'tixkit-cloud-tool-substitution-'));
+  try {
+    const manifest = compatibilityManifest();
+    installFixturePackages(directory, manifest);
+    const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+    for (const name of ['git', 'tar', 'bwrap']) {
+      const executable = resolve(bin, name);
+      writeFileSync(
+        executable,
+        `#!/bin/sh\ntouch ${JSON.stringify(resolve(evidence, name))}\nexit 99\n`,
+      );
+      chmodSync(executable, 0o755);
+    }
+    const result = runVerifiedCommand({
+      manifest,
+      releasePath,
+      cloudRoot: directory,
+      bin,
+      command: [process.execPath, '--version'],
+    });
+    assert.equal(result.status, 0, result.stderr);
+    for (const name of ['git', 'tar', 'bwrap'])
+      assert.equal(existsSync(resolve(evidence, name)), false, `${name} must not come from PATH`);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(evidence, { recursive: true, force: true });
+  }
+});
 
 test(
   'verified Cloud commands reject a hidden alternate public package installation',
@@ -723,7 +1216,7 @@ test(
       assert.equal(result.status, 1);
       assert.match(
         result.stderr,
-        /installed public package does not match release content: @tixkit\/domain/u,
+        /(?:installed dependency inventory does not match|installed public package does not match release content: @tixkit\/domain)/u,
       );
       rmSync(resolve(directory, 'node_modules/rogue'), { recursive: true, force: true });
       const externalPackage = resolve(externalDirectory, 'rogue');
@@ -858,7 +1351,10 @@ if (kind === 'chmod') {
           writable: ['proof'],
         });
         assert.equal(result.status, 1, result.stderr);
-        assert.match(result.stderr, /Cloud command failed with status/u);
+        assert.match(
+          result.stderr,
+          /Cloud command (?:failed with status|argument references live checkout|contains an undeclared absolute input)/u,
+        );
       }
       assert.equal(readFileSync(domainPath, 'utf8'), 'export const state = "public";\n');
       assert.equal(existsSync(resolve(proof, 'used.txt')), false);
@@ -908,13 +1404,509 @@ socket.on('error', (error) => { throw error; });
         writable: ['proof'],
       });
       assert.equal(serviceEscape.status, 1, serviceEscape.stderr);
-      assert.match(serviceEscape.stderr, /Cloud command failed with status/u);
+      assert.match(
+        serviceEscape.stderr,
+        /Cloud command (?:failed with status|argument references live checkout|contains an undeclared absolute input)/u,
+      );
       assert.equal(readFileSync(domainPath, 'utf8'), 'export const state = "public";\n');
       assert.equal(existsSync(resolve(proof, 'used.txt')), false);
     } finally {
       mutationService?.kill('SIGTERM');
       rmSync(directory, { recursive: true, force: true });
       rmSync(attackDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test('verified Cloud output publication preserves the staged directory inode', () => {
+  const directory = cloudFixture();
+  try {
+    const manifest = compatibilityManifest();
+    writeFileSync(
+      resolve(directory, 'packages/control-plane/inode-output.mjs'),
+      `import { statSync, writeFileSync } from 'node:fs';
+writeFileSync('proof/staged-inode.txt', String(statSync('proof').ino));
+writeFileSync('proof/verified-output.txt', 'verified');
+`,
+    );
+    execFileSync('git', ['add', 'packages/control-plane/inode-output.mjs'], { cwd: directory });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Cloud Test',
+        '-c',
+        'user.email=cloud-test@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Add output inode fixture',
+      ],
+      { cwd: directory },
+    );
+    bindCloudRelease(manifest, directory);
+    installFixturePackages(directory, manifest);
+    const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+    const result = runVerifiedCommand({
+      manifest,
+      releasePath,
+      cloudRoot: directory,
+      bin,
+      command: [process.execPath, 'packages/control-plane/inode-output.mjs'],
+      writable: ['proof'],
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const proof = resolve(directory, 'proof');
+    assert.equal(
+      readFileSync(resolve(proof, 'staged-inode.txt'), 'utf8'),
+      String(statSync(proof).ino),
+    );
+    assert.equal(readFileSync(resolve(proof, 'verified-output.txt'), 'utf8'), 'verified');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  'verified Cloud commands read a materialized commit during tracked patch-use-restore attacks',
+  { timeout: 20_000 },
+  () => {
+    const directory = cloudFixture();
+    const attackDirectory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-source-attack-'));
+    let mutationService;
+    try {
+      const manifest = compatibilityManifest();
+      const trackedSource = resolve(directory, 'packages/control-plane/release-source.txt');
+      const client = resolve(directory, 'packages/control-plane/source-client.mjs');
+      writeFileSync(trackedSource, 'committed-source\n');
+      writeFileSync(
+        client,
+        `import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+mkdirSync('proof', { recursive: true });
+writeFileSync('proof/used.txt', readFileSync('packages/control-plane/release-source.txt'));
+writeFileSync('proof/traversal.txt', readFileSync('proof/../packages/control-plane/release-source.txt'));
+let liveCheckoutRead = 'denied';
+try { liveCheckoutRead = readFileSync(${JSON.stringify(
+          resolve(directory, 'packages/control-plane/release-source.txt'),
+        )}, 'utf8'); } catch {}
+writeFileSync('proof/live-checkout.txt', liveCheckoutRead);
+writeFileSync('proof/environment.json', JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD, initCwd: process.env.INIT_CWD, path: process.env.PATH }));
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);
+`,
+      );
+      execFileSync(
+        'git',
+        [
+          'add',
+          'packages/control-plane/release-source.txt',
+          'packages/control-plane/source-client.mjs',
+        ],
+        { cwd: directory },
+      );
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Tixkit Cloud Test',
+          '-c',
+          'user.email=cloud-test@tixkit.invalid',
+          'commit',
+          '-qm',
+          'Add private release source',
+        ],
+        { cwd: directory },
+      );
+      bindCloudRelease(manifest, directory);
+      installFixturePackages(directory, manifest);
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      const proof = resolve(directory, 'proof');
+      const service = resolve(attackDirectory, 'source-service.mjs');
+      writeFileSync(
+        service,
+        `import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+const [trackedSource, temporaryRoot] = process.argv.slice(2);
+for (;;) {
+  const ready = readdirSync(temporaryRoot)
+    .filter((name) => name.startsWith('.tixkit-cloud-source-'))
+    .some((name) => existsSync(temporaryRoot + '/' + name + '/packages/control-plane/release-source.txt') && existsSync(temporaryRoot + '/' + name + '/proof'));
+  if (ready) break;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+}
+writeFileSync(trackedSource, 'host-patched-source\\n');
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+writeFileSync(trackedSource, 'committed-source\\n');
+`,
+      );
+      mutationService = spawn(process.execPath, [service, trackedSource, tmpdir()], {
+        stdio: 'ignore',
+      });
+      const result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, 'packages/control-plane/source-client.mjs'],
+        writable: ['proof'],
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(readFileSync(resolve(proof, 'used.txt'), 'utf8'), 'committed-source\n');
+      assert.equal(readFileSync(resolve(proof, 'traversal.txt'), 'utf8'), 'committed-source\n');
+      assert.match(
+        readFileSync(resolve(proof, 'live-checkout.txt'), 'utf8'),
+        /^(?:committed-source\n|denied)$/u,
+      );
+      const environment = JSON.parse(readFileSync(resolve(proof, 'environment.json'), 'utf8'));
+      assert.notEqual(environment.cwd, directory);
+      assert.notEqual(environment.pwd, directory);
+      assert.notEqual(environment.initCwd, directory);
+      assert.equal(environment.path.includes(directory), false);
+      assert.equal(readFileSync(trackedSource, 'utf8'), 'committed-source\n');
+    } finally {
+      mutationService?.kill('SIGTERM');
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(attackDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test('verified Cloud commands reject host races against writable output publication', () => {
+  const directory = cloudFixture();
+  const attackDirectory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-output-attack-'));
+  let mutationService;
+  try {
+    const manifest = compatibilityManifest();
+    writeFileSync(resolve(directory, 'output-race-marker'), 'exact fixture\n');
+    writeFileSync(
+      resolve(directory, 'packages/control-plane/output-client.mjs'),
+      `import { writeFileSync } from 'node:fs';
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+writeFileSync('proof/verified-output.txt', 'verified');
+`,
+    );
+    execFileSync('git', ['add', 'output-race-marker', 'packages/control-plane/output-client.mjs'], {
+      cwd: directory,
+    });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Cloud Test',
+        '-c',
+        'user.email=cloud-test@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Add output race marker',
+      ],
+      { cwd: directory },
+    );
+    bindCloudRelease(manifest, directory);
+    installFixturePackages(directory, manifest);
+    const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+    const proof = resolve(directory, 'proof');
+    const service = resolve(attackDirectory, 'output-service.mjs');
+    writeFileSync(
+      service,
+      `import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+const [destination, temporaryRoot] = process.argv.slice(2);
+for (;;) {
+  const ready = readdirSync(temporaryRoot)
+    .filter((name) => name.startsWith('.tixkit-cloud-source-'))
+    .some((name) => existsSync(temporaryRoot + '/' + name + '/output-race-marker') && existsSync(temporaryRoot + '/' + name + '/proof'));
+  if (ready) break;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+}
+mkdirSync(destination);
+writeFileSync(destination + '/host-race.txt', 'unbound');
+`,
+    );
+    mutationService = spawn(process.execPath, [service, proof, tmpdir()], {
+      stdio: 'ignore',
+    });
+    const result = runVerifiedCommand({
+      manifest,
+      releasePath,
+      cloudRoot: directory,
+      bin,
+      command: [process.execPath, 'packages/control-plane/output-client.mjs'],
+      writable: ['proof'],
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /writable path changed before output publication/u);
+    assert.equal(existsSync(resolve(proof, 'verified-output.txt')), false);
+  } finally {
+    mutationService?.kill('SIGTERM');
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(attackDirectory, { recursive: true, force: true });
+  }
+});
+
+test('verified Cloud commands reject unsafe staged output entries', () => {
+  const directory = cloudFixture();
+  try {
+    const manifest = compatibilityManifest();
+    const command = resolve(directory, 'packages/control-plane/unsafe-output.mjs');
+    writeFileSync(
+      command,
+      `import { symlinkSync } from 'node:fs';
+symlinkSync('/etc/passwd', 'proof/leak');
+`,
+    );
+    execFileSync('git', ['add', 'packages/control-plane/unsafe-output.mjs'], { cwd: directory });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Cloud Test',
+        '-c',
+        'user.email=cloud-test@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Add unsafe output command',
+      ],
+      { cwd: directory },
+    );
+    bindCloudRelease(manifest, directory);
+    installFixturePackages(directory, manifest);
+    const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+    const result = runVerifiedCommand({
+      manifest,
+      releasePath,
+      cloudRoot: directory,
+      bin,
+      command: [process.execPath, 'packages/control-plane/unsafe-output.mjs'],
+      writable: ['proof'],
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /writable output contains an unsafe entry/u);
+    assert.equal(existsSync(resolve(directory, 'proof')), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  'verified Cloud output publication never exposes a raced nested symlink',
+  { timeout: 15_000 },
+  () => {
+    const directory = cloudFixture();
+    const attackDirectory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-nested-output-race-'));
+    let mutationService;
+    let observer;
+    try {
+      const manifest = compatibilityManifest();
+      writeFileSync(resolve(directory, 'nested-output-race-marker'), 'exact fixture\n');
+      writeFileSync(
+        resolve(directory, 'packages/control-plane/nested-output.mjs'),
+        `import { mkdirSync, writeFileSync } from 'node:fs';
+mkdirSync('proof/nested', { recursive: true });
+for (let index = 0; index < 2000; index += 1) writeFileSync('proof/nested/' + index + '.txt', 'verified-output');
+writeFileSync('proof/nested/complete.txt', 'verified');
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+`,
+      );
+      execFileSync(
+        'git',
+        ['add', 'nested-output-race-marker', 'packages/control-plane/nested-output.mjs'],
+        { cwd: directory },
+      );
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Tixkit Cloud Test',
+          '-c',
+          'user.email=cloud-test@tixkit.invalid',
+          'commit',
+          '-qm',
+          'Add nested output race fixture',
+        ],
+        { cwd: directory },
+      );
+      bindCloudRelease(manifest, directory);
+      installFixturePackages(directory, manifest);
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      const service = resolve(attackDirectory, 'nested-service.mjs');
+      const observerScript = resolve(attackDirectory, 'observer.mjs');
+      const observedLeak = resolve(attackDirectory, 'observed-leak');
+      writeFileSync(
+        service,
+        `import { existsSync, readdirSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
+const [parent, baselineJson] = process.argv.slice(2);
+const baseline = new Set(JSON.parse(baselineJson));
+let nested;
+for (;;) {
+  const root = readdirSync(parent).find((name) => name.startsWith('.tixkit-cloud-source-') && !baseline.has(name));
+  if (root && existsSync(parent + '/' + root + '/nested-output-race-marker') && existsSync(parent + '/' + root + '/proof/nested/complete.txt')) {
+    nested = parent + '/' + root + '/proof/nested';
+    break;
+  }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+}
+const backup = nested + '.authentic';
+for (let attempt = 0; attempt < 1000; attempt += 1) {
+  try {
+    renameSync(nested, backup);
+    symlinkSync('/etc', nested, 'dir');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    unlinkSync(nested);
+    renameSync(backup, nested);
+  } catch {}
+}
+`,
+      );
+      writeFileSync(
+        observerScript,
+        `import { existsSync, lstatSync, writeFileSync } from 'node:fs';
+const [destination, evidence] = process.argv.slice(2);
+for (let attempt = 0; attempt < 5000; attempt += 1) {
+  const nested = destination + '/nested';
+  if (existsSync(nested) && lstatSync(nested).isSymbolicLink()) {
+    writeFileSync(evidence, 'unsafe output became observable');
+    break;
+  }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+}
+`,
+      );
+      const parent = dirname(directory);
+      const baseline = readdirSync(parent).filter((name) =>
+        name.startsWith('.tixkit-cloud-source-'),
+      );
+      mutationService = spawn(process.execPath, [service, parent, JSON.stringify(baseline)], {
+        stdio: 'ignore',
+      });
+      observer = spawn(
+        process.execPath,
+        [observerScript, resolve(directory, 'proof'), observedLeak],
+        { stdio: 'ignore' },
+      );
+      const result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, 'packages/control-plane/nested-output.mjs'],
+        writable: ['proof'],
+      });
+      mutationService.kill('SIGTERM');
+      observer.kill('SIGTERM');
+      assert.equal(existsSync(observedLeak), false);
+      if (result.status === 0) {
+        const nested = resolve(directory, 'proof/nested');
+        assert.equal(lstatSync(nested).isDirectory(), true);
+        assert.equal(lstatSync(nested).isSymbolicLink(), false);
+        assert.equal(readFileSync(resolve(nested, 'complete.txt'), 'utf8'), 'verified');
+        assert.equal(existsSync(resolve(directory, 'proof/nested/passwd')), false);
+      } else {
+        assert.equal(existsSync(resolve(directory, 'proof')), false);
+      }
+    } finally {
+      mutationService?.kill('SIGTERM');
+      observer?.kill('SIGTERM');
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(attackDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test('verified Cloud commands reject symlink aliases into the live checkout', () => {
+  const directory = cloudFixture();
+  const commandDirectory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-live-alias-'));
+  try {
+    const manifest = compatibilityManifest();
+    const trackedCommand = resolve(directory, 'packages/control-plane/live-command.mjs');
+    writeFileSync(trackedCommand, 'process.stdout.write("live checkout");\n');
+    execFileSync('git', ['add', 'packages/control-plane/live-command.mjs'], { cwd: directory });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Tixkit Cloud Test',
+        '-c',
+        'user.email=cloud-test@tixkit.invalid',
+        'commit',
+        '-qm',
+        'Add private command',
+      ],
+      { cwd: directory },
+    );
+    bindCloudRelease(manifest, directory);
+    installFixturePackages(directory, manifest);
+    const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+    const alias = resolve(commandDirectory, 'live-command-alias.mjs');
+    symlinkSync(trackedCommand, alias);
+    const result = runVerifiedCommand({
+      manifest,
+      releasePath,
+      cloudRoot: directory,
+      bin,
+      command: [process.execPath, alias],
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /command argument references live checkout/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(commandDirectory, { recursive: true, force: true });
+  }
+});
+
+test(
+  'verified Cloud commands reject undeclared external source trees and multiple output roots',
+  { timeout: 10_000 },
+  () => {
+    const directory = cloudFixture();
+    const externalCore = mkdtempSync(join(tmpdir(), 'tixkit-cloud-alternate-core-'));
+    try {
+      const manifest = compatibilityManifest();
+      const alternateModule = resolve(externalCore, 'index.mjs');
+      writeFileSync(alternateModule, 'export const source = "unattested alternate core";\n');
+      const trackedCommand = resolve(directory, 'packages/control-plane/external-core.mjs');
+      writeFileSync(
+        trackedCommand,
+        `await import(${JSON.stringify(`file://${alternateModule}`)});\n`,
+      );
+      execFileSync('git', ['add', 'packages/control-plane/external-core.mjs'], { cwd: directory });
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Tixkit Cloud Test',
+          '-c',
+          'user.email=cloud-test@tixkit.invalid',
+          'commit',
+          '-qm',
+          'Add external core attack',
+        ],
+        { cwd: directory },
+      );
+      bindCloudRelease(manifest, directory);
+      installFixturePackages(directory, manifest);
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      let result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, 'packages/control-plane/external-core.mjs'],
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /Cloud command failed with status/u);
+
+      result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+        writable: ['first-output', 'second-output'],
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /require one common writable output root/u);
+      assert.equal(existsSync(resolve(directory, 'first-output')), false);
+      assert.equal(existsSync(resolve(directory, 'second-output')), false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(externalCore, { recursive: true, force: true });
     }
   },
 );
