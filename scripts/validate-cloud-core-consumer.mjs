@@ -27,7 +27,7 @@ function argument(argv, name) {
 function walk(directory) {
   const output = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (['.git', 'node_modules', 'dist', 'build', 'coverage'].includes(entry.name)) continue;
+    if (['.git', 'node_modules'].includes(entry.name)) continue;
     const path = join(directory, entry.name);
     if (entry.isSymbolicLink()) {
       output.push(path);
@@ -128,6 +128,59 @@ export function parseBunLock(content) {
 
 function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
+}
+
+function resolvedPackageTuple(entry) {
+  if (!Array.isArray(entry) || typeof entry[0] !== 'string') return undefined;
+  const separator = entry[0].lastIndexOf('@');
+  if (separator <= 0) return undefined;
+  return {
+    name: entry[0].slice(0, separator),
+    version: entry[0].slice(separator + 1),
+    integrity: entry[3],
+  };
+}
+
+function forbiddenSourceReference(value) {
+  if (typeof value !== 'string') return false;
+  return (
+    /^(?:git(?:\+[^:]+)?:|github:|https?:|file:|link:)/iu.test(value) ||
+    referencesPublicRepository(value)
+  );
+}
+
+function referencesPublicRepository(value) {
+  return /(?:(?:github\.com[/:]|api\.github\.com\/repos\/)?tixkit\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$)|(?:^|[\s='"])\.\.\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$))/iu.test(
+    value,
+  );
+}
+
+function acquiresPublicRepository(value) {
+  return (
+    referencesPublicRepository(value) &&
+    /(?:actions\/checkout@|\bgit\s+(?:clone|fetch|pull)\b|\bgit\s+submodule\s+add\b|\bgh\s+repo\s+clone\b|\b(?:bunx|npx)\s+degit\b|\bnpm\s+(?:i|install)\b|\bbun\s+add\b|\b(?:curl|wget)\b)/iu.test(
+      value,
+    )
+  );
+}
+
+function trackedCloudPaths(cloudRoot, violations) {
+  try {
+    return execFileSync('git', ['ls-files', '-z'], {
+      cwd: cloudRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\0')
+      .filter(Boolean);
+  } catch {
+    violations.push('private Cloud tree must be a Git repository with readable tracked inventory');
+    return [];
+  }
+}
+
+function isDependencyOutputPath(path) {
+  return /(?:^|\/)node_modules(?:\/|$)/u.test(path.replaceAll('\\', '/'));
 }
 
 export function normalizedSource(content) {
@@ -240,6 +293,10 @@ export function privateCloudSourceBoundaryViolations(cloudRoot) {
   ]);
   const sourceFingerprints = publicSourceFingerprints(publicSourcePaths);
   const sourceSimilarityIndex = publicSourceSimilarityIndex(publicSourcePaths);
+  for (const path of trackedCloudPaths(cloudRoot, violations)) {
+    if (isDependencyOutputPath(path))
+      violations.push(`private Cloud tracks forbidden dependency output: ${path}`);
+  }
   for (const path of publicSourcePaths)
     if (statSync(resolve(cloudRoot, path), { throwIfNoEntry: false }))
       violations.push(`private Cloud tree copies public source path: ${path}`);
@@ -405,21 +462,40 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
   const sourceFingerprints = publicSourceFingerprints(publicSourcePaths);
   const sourceSimilarityIndex = publicSourceSimilarityIndex(publicSourcePaths);
   const publicPackageNames = new Set(publicPackages.keys());
+  for (const path of trackedCloudPaths(cloudRoot, violations)) {
+    if (isDependencyOutputPath(path))
+      violations.push(`private Cloud tracks forbidden dependency output: ${path}`);
+  }
   const lockPath = resolve(cloudRoot, 'bun.lock');
   const lock = statSync(lockPath, { throwIfNoEntry: false })
     ? parseBunLock(readFileSync(lockPath, 'utf8'))
     : undefined;
   if (!lock) violations.push('private Cloud tree must include a frozen bun.lock');
+  const publicLockResolutions = new Map([...publicPackageNames].map((name) => [name, []]));
+  for (const entry of Object.values(lock?.packages ?? {})) {
+    const resolution = resolvedPackageTuple(entry);
+    if (resolution && publicLockResolutions.has(resolution.name)) {
+      publicLockResolutions.get(resolution.name).push(resolution);
+    }
+  }
   for (const pin of compatibility.core.packages) {
-    const resolution = Object.values(lock?.packages ?? {}).find(
-      (entry) => Array.isArray(entry) && entry[0] === `${pin.name}@${pin.version}`,
-    );
-    if (!resolution)
+    const resolutions = publicLockResolutions.get(pin.name) ?? [];
+    if (resolutions.length === 0) {
       violations.push(`bun.lock does not resolve claimed pin ${pin.name}@${pin.version}`);
-    else if (resolution[3] !== pin.integrity)
-      violations.push(
-        `bun.lock integrity for claimed pin ${pin.name} does not match the public release`,
-      );
+      continue;
+    }
+    if (resolutions.length > 1)
+      violations.push(`bun.lock contains multiple resolutions for public package ${pin.name}`);
+    for (const resolution of resolutions) {
+      if (resolution.version !== pin.version)
+        violations.push(
+          `bun.lock resolves public package ${pin.name} at forbidden version ${resolution.version}`,
+        );
+      if (resolution.integrity !== pin.integrity)
+        violations.push(
+          `bun.lock integrity for claimed pin ${pin.name} does not match the public release`,
+        );
+    }
   }
   for (const path of publicSourcePaths) {
     if (statSync(resolve(cloudRoot, path), { throwIfNoEntry: false }))
@@ -455,6 +531,10 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
             : alias && publicPackageNames.has(alias)
               ? alias
               : undefined;
+          if (forbiddenSourceReference(version))
+            violations.push(
+              `${relativePath}: dependency ${name} uses a forbidden mutable or source reference`,
+            );
           if (!publicName) continue;
           if (importer?.[field]?.[name] !== version)
             violations.push(
@@ -499,6 +579,8 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
           /(?:^|&&|\|\|)\s*(?:bash|bun|node|sh)\s+(?:\.\/)?(?:scripts|tools)\//u.test(command)
         )
           violations.push(`${relativePath}: build script ${name} invokes a mutable local helper`);
+        if (typeof command === 'string' && acquiresPublicRepository(command))
+          violations.push(`${relativePath}: script ${name} acquires public Tixkit source`);
         if (
           typeof command === 'string' &&
           [...publicPackageNames].some((packageName) => command.includes(packageName)) &&
@@ -510,6 +592,11 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
       }
       continue;
     }
+    if (relativePath === '.gitmodules') {
+      const content = readFileSync(file, 'utf8');
+      if (referencesPublicRepository(content))
+        violations.push(`${relativePath}: public Tixkit source submodules are forbidden`);
+    }
     if (/\.(?:diff|patch)$/u.test(file)) {
       const content = readFileSync(file, 'utf8');
       if (/@tixkit\/|packages\/(?:api|db|domain|shared|workflows)/u.test(content))
@@ -517,6 +604,8 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
     }
     if (/(?:^|\/)(?:Dockerfile[^/]*|[^/]+\.(?:bash|js|mjs|sh|ts|ya?ml))$/u.test(relativePath)) {
       const content = readFileSync(file, 'utf8');
+      if (acquiresPublicRepository(content))
+        violations.push(`${relativePath}: executable acquires public Tixkit source`);
       if (
         /node_modules\/(?:@tixkit\/|tixkit(?:\/|\b))/u.test(content) &&
         /(?:\b(?:awk|cp|install|mv|patch|perl|python|sed)\b|\bnode\b|(?:^|[^>])>{1,2}[^>])/mu.test(

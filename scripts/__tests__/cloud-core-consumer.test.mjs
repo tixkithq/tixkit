@@ -156,6 +156,8 @@ function cloudFixture() {
       ),
     })}\n`,
   );
+  execFileSync('git', ['init', '-q'], { cwd: directory });
+  execFileSync('git', ['add', '-A'], { cwd: directory });
   return directory;
 }
 
@@ -487,21 +489,45 @@ test('rejects indirect build helpers that can rewrite installed artifacts', () =
 test('verified Cloud commands fail when an installed public package byte changes', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-installed-core-'));
   try {
-    const packagePath = resolve(directory, 'node_modules/@tixkit/domain');
-    mkdirSync(packagePath, { recursive: true });
-    writeFileSync(resolve(packagePath, 'index.js'), 'export const state = "public";\n');
+    const manifest = compatibilityManifest();
+    for (const pin of manifest.core.packages) {
+      const packagePath = resolve(directory, 'node_modules', ...pin.name.split('/'));
+      mkdirSync(packagePath, { recursive: true });
+      writeFileSync(resolve(packagePath, 'index.js'), 'export const state = "public";\n');
+    }
+    const domainPath = resolve(directory, 'node_modules/@tixkit/domain/index.js');
     assert.throws(
       () =>
-        verifyCloudCoreInstall(
-          { core: { packages: [{ name: '@tixkit/domain' }] } },
-          directory,
-          ['malicious-build'],
-          () => {
-            writeFileSync(resolve(packagePath, 'index.js'), 'export const state = "patched";\n');
-            return { status: 0 };
-          },
-        ),
+        verifyCloudCoreInstall(manifest, directory, ['malicious-build'], () => {
+          writeFileSync(domainPath, 'export const state = "patched";\n');
+          return { status: 0 };
+        }),
       /modified installed public artifacts: @tixkit\/domain/u,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('verified Cloud commands reject empty or substituted compatibility manifests', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-invalid-install-manifest-'));
+  try {
+    let executed = false;
+    assert.throws(
+      () =>
+        verifyCloudCoreInstall({ core: { packages: [] } }, directory, ['build'], () => {
+          executed = true;
+          return { status: 0 };
+        }),
+      /Cloud\/core install manifest is invalid/u,
+    );
+    assert.equal(executed, false);
+
+    const manifest = compatibilityManifest();
+    manifest.core.packages.pop();
+    assert.throws(
+      () => verifyCloudCoreInstall(manifest, directory, ['build']),
+      /package pins must exactly cover the public release inventory/u,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -592,6 +618,149 @@ test('rejects missing package pins, peers, aliases, and lockfile integrity drift
     assert.ok(violations.includes('bun.lock does not resolve claimed pin @tixkit/openapi@0.1.0'));
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('rejects every alternate public package resolution in the private lockfile', () => {
+  const cloudRoot = cloudFixture();
+  try {
+    const manifest = compatibilityManifest();
+    const lockPath = resolve(cloudRoot, 'bun.lock');
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+    lock.packages['forked-domain'] = ['@tixkit/domain@9.9.9', '', {}, 'sha512-Zm9ya2Vk'];
+    writeFileSync(lockPath, `${JSON.stringify(lock)}\n`);
+
+    const violations = validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot);
+    assert.ok(
+      violations.includes(
+        'bun.lock contains multiple resolutions for public package @tixkit/domain',
+      ),
+    );
+    assert.ok(
+      violations.includes(
+        'bun.lock resolves public package @tixkit/domain at forbidden version 9.9.9',
+      ),
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('scans generated-looking paths and rejects remote public source acquisition', () => {
+  const cloudRoot = cloudFixture();
+  try {
+    const manifest = compatibilityManifest();
+    const controlPlaneRoot = resolve(cloudRoot, 'packages/control-plane');
+    const copiedSource = readFileSync(resolve(root, 'packages/domain/src/index.ts'));
+    for (const directory of ['build', 'coverage', 'dist']) {
+      mkdirSync(resolve(controlPlaneRoot, directory), { recursive: true });
+      writeFileSync(resolve(controlPlaneRoot, directory, 'fork.ts'), copiedSource);
+    }
+    const controlPlanePath = resolve(controlPlaneRoot, 'package.json');
+    const controlPlane = JSON.parse(readFileSync(controlPlanePath, 'utf8'));
+    controlPlane.dependencies.forked = 'tixkit/tixkit#main';
+    controlPlane.dependencies.localFork = '../tixkit';
+    controlPlane.devDependencies = {
+      snapshot: `https://github.com/tixkit/tixkit/archive/${'a'.repeat(40)}.tar.gz`,
+    };
+    controlPlane.scripts = {
+      build: 'gh repo clone tixkit/tixkit vendor/core',
+      postbuild: 'bun add github:tixkit/tixkit',
+    };
+    writeFileSync(controlPlanePath, `${JSON.stringify(controlPlane, null, 2)}\n`);
+    writeFileSync(
+      resolve(cloudRoot, '.gitmodules'),
+      '[submodule "core"]\n\tpath = vendor/core\n\turl = ../tixkit.git\n',
+    );
+    writeFileSync(
+      resolve(controlPlaneRoot, 'Dockerfile'),
+      'FROM node:24\nRUN git clone https://github.com/tixkit/tixkit.git /src/core\n',
+    );
+    mkdirSync(resolve(cloudRoot, '.github/workflows'), { recursive: true });
+    writeFileSync(
+      resolve(cloudRoot, '.github/workflows/build.yml'),
+      'jobs:\n  core:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          repository: tixkit/tixkit\n',
+    );
+
+    const violations = validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot);
+    for (const directory of ['build', 'coverage', 'dist']) {
+      assert.ok(
+        violations.some((message) =>
+          message.startsWith(`packages/control-plane/${directory}/fork.ts: copies public source`),
+        ),
+      );
+    }
+    assert.ok(
+      violations.includes(
+        'packages/control-plane/package.json: dependency forked uses a forbidden mutable or source reference',
+      ),
+    );
+    assert.ok(
+      violations.includes(
+        'packages/control-plane/package.json: dependency snapshot uses a forbidden mutable or source reference',
+      ),
+    );
+    assert.ok(
+      violations.includes(
+        'packages/control-plane/package.json: dependency localFork uses a forbidden mutable or source reference',
+      ),
+    );
+    assert.ok(
+      violations.includes(
+        'packages/control-plane/package.json: script build acquires public Tixkit source',
+      ),
+    );
+    assert.ok(
+      violations.includes(
+        'packages/control-plane/package.json: script postbuild acquires public Tixkit source',
+      ),
+    );
+    assert.ok(violations.includes('.gitmodules: public Tixkit source submodules are forbidden'));
+    assert.ok(
+      violations.includes(
+        'packages/control-plane/Dockerfile: executable acquires public Tixkit source',
+      ),
+    );
+    assert.ok(
+      violations.includes('.github/workflows/build.yml: executable acquires public Tixkit source'),
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('rejects tracked dependency output even when node_modules is not walked', () => {
+  const cloudRoot = cloudFixture();
+  try {
+    const trackedPath = 'packages/control-plane/node_modules/forked-core/index.ts';
+    const copiedPath = resolve(cloudRoot, trackedPath);
+    mkdirSync(resolve(copiedPath, '..'), { recursive: true });
+    writeFileSync(copiedPath, readFileSync(resolve(root, 'packages/domain/src/index.ts')));
+    execFileSync('git', ['add', '-f', trackedPath], { cwd: cloudRoot });
+
+    const violations = validateCloudCoreConsumer(
+      compatibilityManifest(),
+      publicRelease(compatibilityManifest()),
+      cloudRoot,
+    );
+    assert.ok(
+      violations.includes(`private Cloud tracks forbidden dependency output: ${trackedPath}`),
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('source-boundary validation fails closed without readable Git inventory', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-no-git-'));
+  try {
+    assert.ok(
+      privateCloudSourceBoundaryViolations(directory).includes(
+        'private Cloud tree must be a Git repository with readable tracked inventory',
+      ),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

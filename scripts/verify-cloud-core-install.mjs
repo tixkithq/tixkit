@@ -5,6 +5,13 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  jsonSchemaViolations,
+  loadPublicDistribution,
+  validatePublicDistribution,
+} from './lib/public-distribution.mjs';
+
+const publicRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 function argument(argv, name) {
   const index = argv.indexOf(name);
@@ -44,8 +51,29 @@ function snapshot(manifest, cloudRoot) {
   );
 }
 
+function assertCompleteManifest(manifest) {
+  const schema = JSON.parse(
+    readFileSync(resolve(publicRoot, 'distribution/cloud-core-compatibility.schema.json'), 'utf8'),
+  );
+  const violations = jsonSchemaViolations(manifest, schema);
+  const distribution = validatePublicDistribution(loadPublicDistribution(publicRoot), publicRoot);
+  const expectedPackages = distribution.release.packages
+    .filter(({ ecosystem }) => ecosystem === 'npm' || ecosystem === 'npm-and-cdn')
+    .map(
+      ({ path }) =>
+        JSON.parse(readFileSync(resolve(publicRoot, path, 'package.json'), 'utf8')).name,
+    )
+    .sort();
+  const actualPackages = (manifest?.core?.packages ?? []).map(({ name }) => name).sort();
+  if (JSON.stringify(actualPackages) !== JSON.stringify(expectedPackages))
+    violations.push('core package pins must exactly cover the public release inventory');
+  if (violations.length > 0)
+    throw new Error(`Cloud/core install manifest is invalid:\n${violations.join('\n')}`);
+}
+
 export function verifyCloudCoreInstall(manifest, cloudRoot, command, run = spawnSync) {
   if (command.length === 0) throw new Error('a Cloud build/test command is required');
+  assertCompleteManifest(manifest);
   const before = snapshot(manifest, cloudRoot);
   const result = run(command[0], command.slice(1), { cwd: cloudRoot, stdio: 'inherit' });
   if (result.status !== 0) throw new Error(`Cloud command failed with status ${result.status}`);
