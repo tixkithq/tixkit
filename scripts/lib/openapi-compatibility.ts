@@ -223,6 +223,33 @@ function parameters(value: Json | undefined): Map<string, Record<string, Json>> 
   );
 }
 
+function securityRequirementAccepts(previousValue: Json, currentValue: Json): boolean {
+  const previous = object(previousValue);
+  const current = object(currentValue);
+  return Object.entries(current).every(([scheme, currentScopesValue]) => {
+    if (!(scheme in previous)) return false;
+    const previousScopes = new Set(array(previous[scheme]).map(String));
+    return array(currentScopesValue)
+      .map(String)
+      .every((scope) => previousScopes.has(scope));
+  });
+}
+
+function preservesSecurity(
+  previousValue: Json | undefined,
+  currentValue: Json | undefined,
+): boolean {
+  const previous = array(previousValue);
+  const current = array(currentValue);
+  if (current.length === 0) return true;
+  if (previous.length === 0) return false;
+  return previous.every((previousRequirement) =>
+    current.some((currentRequirement) =>
+      securityRequirementAccepts(previousRequirement, currentRequirement),
+    ),
+  );
+}
+
 export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
   const changes: OpenApiChange[] = [];
   const before = object(previous);
@@ -253,7 +280,10 @@ export function compareOpenApi(previous: Json, current: Json): OpenApiChange[] {
           path: operationPath,
           message: 'Stable operationId changed.',
         });
-      if (stable(previousOperation.security) !== stable(currentOperation.security))
+      if (
+        stable(previousOperation.security) !== stable(currentOperation.security) &&
+        !preservesSecurity(previousOperation.security, currentOperation.security)
+      )
         changes.push({
           severity: 'breaking',
           category: 'security-changed',

@@ -44,6 +44,52 @@ const base = {
 };
 
 describe('OpenAPI compatibility', () => {
+  it('accepts an additional authentication alternative without weakening existing clients', () => {
+    const current = {
+      ...base,
+      paths: {
+        '/things': {
+          post: {
+            ...operation,
+            security: [...operation.security, { BearerAuth: [] }],
+          },
+        },
+      },
+    };
+
+    expect(compareOpenApi(base as never, current as never)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ category: 'security-changed' })]),
+    );
+  });
+
+  it('accepts a less restrictive scope alternative while rejecting a more restrictive one', () => {
+    const lessRestrictive = {
+      ...base,
+      paths: {
+        '/things': {
+          post: { ...operation, security: [{ OAuth: [] }] },
+        },
+      },
+    };
+    const moreRestrictive = {
+      ...base,
+      paths: {
+        '/things': {
+          post: { ...operation, security: [{ OAuth: ['things.write', 'things.admin'] }] },
+        },
+      },
+    };
+
+    expect(compareOpenApi(base as never, lessRestrictive as never)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ category: 'security-changed' })]),
+    );
+    expect(compareOpenApi(base as never, moreRestrictive as never)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: 'security-changed', severity: 'breaking' }),
+      ]),
+    );
+  });
+
   it('records additive request media types and named schemas', () => {
     const previous = {
       paths: {
