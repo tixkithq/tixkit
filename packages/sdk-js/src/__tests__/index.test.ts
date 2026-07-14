@@ -3138,6 +3138,7 @@ describe('TixkitClient new resource methods', () => {
       actionDigest,
       idempotencyKey: 'agent-action-revocation-0001',
     });
+    await c.agentActions.execute({ actionId, approvalId, actionDigest });
 
     const prepare = getCall(fm);
     expect(prepare).toMatchObject({
@@ -3175,6 +3176,67 @@ describe('TixkitClient new resource methods', () => {
       },
     });
     expect(JSON.parse(getCall(fm, 3).body)).toEqual({ actionDigest });
+    expect(getCall(fm, 4)).toMatchObject({
+      method: 'POST',
+      url: `https://api.test/v1/agent/actions/${actionId}/executions`,
+      headers: {
+        'Idempotency-Key': `execute:${actionId}:${approvalId}:${actionDigest}`,
+        'X-Tixkit-Confirmation': `execute:${actionId}:${approvalId}:${actionDigest}`,
+      },
+    });
+    expect(JSON.parse(getCall(fm, 4).body)).toEqual({ approvalId, actionDigest });
+  });
+
+  it('retries approved agent execution with the exact immutable execution key', async () => {
+    const actionId = `act_${'a'.repeat(48)}`;
+    const approvalId = `apr_${'b'.repeat(48)}`;
+    const actionDigest = 'c'.repeat(64);
+    const executionKey = `execute:${actionId}:${approvalId}:${actionDigest}`;
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'SERVICE_UNAVAILABLE',
+              message: 'execution result is temporarily unavailable',
+              requestId: 'req_agent_execute',
+            },
+          }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: `exec_${'d'.repeat(48)}`,
+            actionId,
+            approvalId,
+            actionDigest,
+            state: 'succeeded',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 1,
+    });
+    await expect(
+      client.agentActions.execute({ actionId, approvalId, actionDigest }),
+    ).resolves.toMatchObject({ state: 'succeeded' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (let index = 0; index < 2; index++) {
+      expect(getCall(fetchMock, index)).toMatchObject({
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': executionKey,
+          'X-Tixkit-Confirmation': executionKey,
+        },
+      });
+      expect(JSON.parse(getCall(fetchMock, index).body)).toEqual({ approvalId, actionDigest });
+    }
   });
 
   it('agentMemory binds inspectable, correctable, exportable, and deletable memory to audited requests', async () => {

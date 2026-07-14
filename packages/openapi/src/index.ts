@@ -245,7 +245,27 @@ function explicitSecurity(path: string): readonly Record<string, readonly string
 
 function exampleString(name: string, schema: Record<string, unknown>): string {
   const normalizedName = name.toLowerCase();
+  if (normalizedName === 'secretreference') return 'secret://migration/example';
   if (/(?:secret|password|token|signature)/.test(normalizedName)) return '$REDACTED_SECRET';
+  if (normalizedName === 'currency') return 'USD';
+  const pattern = typeof schema.pattern === 'string' ? schema.pattern : undefined;
+  if (pattern === '^[a-f0-9]{64}$') return 'a'.repeat(64);
+  const hexadecimalId = pattern?.match(/^\^([A-Za-z0-9_]+)\[a-f0-9\]\{(\d+)\}\$$/u);
+  if (hexadecimalId) return `${hexadecimalId[1]}${'a'.repeat(Number(hexadecimalId[2]))}`;
+  if (pattern === '^[A-Z0-9_]{3,64}$') return 'SAFE_CODE';
+  if (pattern === '^[a-z0-9][a-z0-9._-]*$') return 'value_example';
+  if (pattern === '^[a-z][a-z0-9_.-]{1,63}$') return 'value.example';
+  if (pattern === '^[A-Za-z0-9][A-Za-z0-9._:-]*$') return 'value_example';
+  if (pattern === '^[A-Za-z0-9][A-Za-z0-9._:-]+$') return 'value_example';
+  if (pattern === '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$') return 'resource_example';
+  if (pattern === '^\\d{4}-\\d{2}-\\d{2}$') return '2026-07-10';
+  if (pattern === '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$') return 'event:event_example';
+  if (pattern === '^mem_[A-Za-z0-9_-]+$') return 'mem_example';
+  if (pattern?.startsWith('^mcred_')) return 'mcred_example1';
+  if (pattern?.startsWith('^upl_')) return 'upl_example1';
+  if (pattern === '^/kiosk(?:/[^/?#]+)?(?:[?#].*)?$') return '/kiosk';
+  const confirmation = pattern?.match(/^\^([a-z]+):\.\+\$$/u);
+  if (confirmation) return `${confirmation[1]}:example`;
   if (normalizedName.endsWith('id') || normalizedName === 'id') {
     return `${normalizedName.replace(/id$/, '') || 'resource'}_example`;
   }
@@ -367,10 +387,15 @@ function schemaExample(
     : value.type;
   if (declaredType === 'null') return null;
   if (declaredType === 'array') {
+    if (value.maxItems === 0) return [];
     return [schemaExample(value.items, schemas, name.replace(/s$/, '') || 'item', seen)];
   }
   if (declaredType === 'boolean') return true;
-  if (declaredType === 'integer' || declaredType === 'number') return 1;
+  if (declaredType === 'integer' || declaredType === 'number') {
+    if (typeof value.minimum === 'number') return value.minimum;
+    if (typeof value.maximum === 'number' && value.maximum < 1) return value.maximum;
+    return 1;
+  }
   if (declaredType === 'string') return exampleString(name, value);
 
   const properties =
@@ -517,7 +542,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-24',
+    version: '2026-07-25',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -627,6 +652,28 @@ const rawOpenApiSpec = {
         },
         description:
           'Must exactly equal revoke:<actionId>:<approvalId>:<actionDigest>. This binds explicit human intent to one immutable approval.',
+      },
+      AgentExecutionConfirmation: {
+        name: 'X-Tixkit-Confirmation',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          pattern: '^execute:act_[a-f0-9]{48}:apr_[a-f0-9]{48}:[a-f0-9]{64}$',
+        },
+        description:
+          'Must exactly equal execute:<actionId>:<approvalId>:<actionDigest>. This binds the explicit agent request to one approved immutable action.',
+      },
+      AgentExecutionIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          pattern: '^execute:act_[a-f0-9]{48}:apr_[a-f0-9]{48}:[a-f0-9]{64}$',
+        },
+        description:
+          'Must exactly equal execute:<actionId>:<approvalId>:<actionDigest>. Preserve this exact key across transport retries; the server still derives durable execution identity from the immutable action and approval.',
       },
       AgentMemoryIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -5133,7 +5180,7 @@ const rawOpenApiSpec = {
             type: 'string',
             enum: ['read', 'recommend', 'prepare', 'execute_with_approval'],
           },
-          protocolVersion: { type: 'string' },
+          protocolVersion: { type: 'string', const: '2026-07-25' },
           state: { type: 'string', enum: ['active', 'suspended', 'revoked'] },
           registeredAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
@@ -5192,7 +5239,7 @@ const rawOpenApiSpec = {
             required: ['grantType', 'scope', 'productPermissions'],
           },
           delegationRequired: { type: 'boolean', const: true },
-          supportedProtocolVersion: { type: 'string' },
+          supportedProtocolVersion: { type: 'string', const: '2026-07-25' },
         },
         required: ['principal', 'authentication', 'delegationRequired', 'supportedProtocolVersion'],
         additionalProperties: false,
@@ -5204,7 +5251,7 @@ const rawOpenApiSpec = {
         additionalProperties: false,
         properties: {
           id: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
-          protocolVersion: { type: 'string', const: '2026-07-22' },
+          protocolVersion: { type: 'string', const: '2026-07-25' },
           agentPrincipalId: { type: 'string' },
           sponsorPrincipalId: { type: 'string' },
           delegationGrantId: { type: 'string' },
@@ -5318,6 +5365,96 @@ const rawOpenApiSpec = {
           'policyVersion',
           'approvedAt',
           'expiresAt',
+        ],
+      },
+      AgentExecution: {
+        type: 'object',
+        description:
+          'Durable, tenant-scoped execution evidence for one approved immutable action. Terminal exact replays return the same result or bounded failure code without repeating the product effect.',
+        additionalProperties: false,
+        properties: {
+          id: {
+            type: 'string',
+            pattern: '^exec_[a-f0-9]{48}$',
+            example: `exec_${'a'.repeat(48)}`,
+          },
+          tenantId: { type: 'string' },
+          actionId: {
+            type: 'string',
+            pattern: '^act_[a-f0-9]{48}$',
+            example: `act_${'b'.repeat(48)}`,
+          },
+          actionDigest: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+            example: 'c'.repeat(64),
+          },
+          agentPrincipalId: {
+            type: 'string',
+            pattern: '^agt_[a-f0-9]{48}$',
+            example: `agt_${'d'.repeat(48)}`,
+          },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: {
+            type: 'string',
+            pattern: '^dlg_[a-f0-9]{48}$',
+            example: `dlg_${'e'.repeat(48)}`,
+          },
+          approvalId: {
+            type: 'string',
+            pattern: '^apr_[a-f0-9]{48}$',
+            example: `apr_${'f'.repeat(48)}`,
+          },
+          idempotencyKey: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+            example: '1'.repeat(64),
+          },
+          requestFingerprint: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+            example: '2'.repeat(64),
+          },
+          state: {
+            type: 'string',
+            enum: ['reserved', 'running', 'succeeded', 'failed', 'compensated'],
+          },
+          resourceVersion: { type: 'integer', minimum: 0 },
+          policyVersion: { type: 'integer', minimum: 1 },
+          fenceToken: { type: 'integer', minimum: 0 },
+          leaseOwner: { type: 'string' },
+          leaseExpiresAt: { type: 'string', format: 'date-time' },
+          result: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 0 },
+              status: { type: 'string', const: 'published' },
+            },
+            required: ['resourceId', 'resourceVersion', 'status'],
+          },
+          failureCode: { type: 'string', pattern: '^[A-Z0-9_]{3,64}$' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'actionId',
+          'actionDigest',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'approvalId',
+          'idempotencyKey',
+          'requestFingerprint',
+          'state',
+          'resourceVersion',
+          'policyVersion',
+          'fenceToken',
+          'createdAt',
+          'updatedAt',
         ],
       },
       AgentDelegation: {
@@ -10575,6 +10712,65 @@ const rawOpenApiSpec = {
           '409': {
             description:
               'Digest mismatch, approval already revoked or consumed, or idempotency conflict',
+          },
+        },
+      },
+    },
+    '/agent/actions/{actionId}/executions': {
+      post: {
+        summary: 'Execute one approved immutable agent action',
+        description:
+          'Experimental/private beta. Exact Agent OAuth principal only. Atomically consumes the exact unrevoked approval, then rechecks principal, sponsor, delegation, tenant and risk policy, permission, resource version and readiness at the typed event-publish operation boundary. Exact terminal replay returns the same durable execution; concurrent in-flight retries may return conflict and are safe to retry.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          { $ref: '#/components/parameters/AgentExecutionIdempotencyKey' },
+          { $ref: '#/components/parameters/AgentExecutionConfirmation' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  approvalId: {
+                    type: 'string',
+                    pattern: '^apr_[a-f0-9]{48}$',
+                    example: `apr_${'f'.repeat(48)}`,
+                  },
+                  actionDigest: {
+                    type: 'string',
+                    pattern: '^[a-f0-9]{64}$',
+                    example: 'c'.repeat(64),
+                  },
+                },
+                required: ['approvalId', 'actionDigest'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Durable execution evidence. A succeeded action has one idempotent product effect; failed evidence contains only a bounded failure code.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentExecution' } },
+            },
+          },
+          '400': { description: 'Invalid path, approval, digest or confirmation' },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': { description: 'Action or approval is outside the authenticated agent scope' },
+          '409': {
+            description:
+              'Approval, action, authorization, resource, policy or readiness changed; or an execution is currently leased by another worker',
           },
         },
       },

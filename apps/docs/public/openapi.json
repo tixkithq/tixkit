@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tixkit API",
-    "version": "2026-07-24",
+    "version": "2026-07-25",
     "description": "Headless white-label event commerce platform API",
     "license": {
       "name": "MIT"
@@ -169,6 +169,26 @@
           "pattern": "^revoke:act_[a-f0-9]{48}:apr_[a-f0-9]{48}:[a-f0-9]{64}$"
         },
         "description": "Must exactly equal revoke:<actionId>:<approvalId>:<actionDigest>. This binds explicit human intent to one immutable approval."
+      },
+      "AgentExecutionConfirmation": {
+        "name": "X-Tixkit-Confirmation",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^execute:act_[a-f0-9]{48}:apr_[a-f0-9]{48}:[a-f0-9]{64}$"
+        },
+        "description": "Must exactly equal execute:<actionId>:<approvalId>:<actionDigest>. This binds the explicit agent request to one approved immutable action."
+      },
+      "AgentExecutionIdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^execute:act_[a-f0-9]{48}:apr_[a-f0-9]{48}:[a-f0-9]{64}$"
+        },
+        "description": "Must exactly equal execute:<actionId>:<approvalId>:<actionDigest>. Preserve this exact key across transport retries; the server still derives durable execution identity from the immutable action and approval."
       },
       "AgentMemoryIdempotencyKey": {
         "name": "Idempotency-Key",
@@ -9456,7 +9476,8 @@
             ]
           },
           "protocolVersion": {
-            "type": "string"
+            "type": "string",
+            "const": "2026-07-25"
           },
           "state": {
             "type": "string",
@@ -9671,7 +9692,8 @@
             "const": true
           },
           "supportedProtocolVersion": {
-            "type": "string"
+            "type": "string",
+            "const": "2026-07-25"
           }
         },
         "required": [
@@ -9693,7 +9715,7 @@
           },
           "protocolVersion": {
             "type": "string",
-            "const": "2026-07-22"
+            "const": "2026-07-25"
           },
           "agentPrincipalId": {
             "type": "string"
@@ -9927,6 +9949,140 @@
           "policyVersion",
           "approvedAt",
           "expiresAt"
+        ]
+      },
+      "AgentExecution": {
+        "type": "object",
+        "description": "Durable, tenant-scoped execution evidence for one approved immutable action. Terminal exact replays return the same result or bounded failure code without repeating the product effect.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^exec_[a-f0-9]{48}$",
+            "example": "exec_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "actionId": {
+            "type": "string",
+            "pattern": "^act_[a-f0-9]{48}$",
+            "example": "act_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "actionDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "example": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "agentPrincipalId": {
+            "type": "string",
+            "pattern": "^agt_[a-f0-9]{48}$",
+            "example": "agt_dddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "sponsorPrincipalId": {
+            "type": "string"
+          },
+          "delegationGrantId": {
+            "type": "string",
+            "pattern": "^dlg_[a-f0-9]{48}$",
+            "example": "dlg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
+          "approvalId": {
+            "type": "string",
+            "pattern": "^apr_[a-f0-9]{48}$",
+            "example": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "example": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "requestFingerprint": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "example": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "reserved",
+              "running",
+              "succeeded",
+              "failed",
+              "compensated"
+            ]
+          },
+          "resourceVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fenceToken": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leaseOwner": {
+            "type": "string"
+          },
+          "leaseExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "resourceId": {
+                "type": "string"
+              },
+              "resourceVersion": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "status": {
+                "type": "string",
+                "const": "published"
+              }
+            },
+            "required": [
+              "resourceId",
+              "resourceVersion",
+              "status"
+            ]
+          },
+          "failureCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_]{3,64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "actionId",
+          "actionDigest",
+          "agentPrincipalId",
+          "sponsorPrincipalId",
+          "delegationGrantId",
+          "approvalId",
+          "idempotencyKey",
+          "requestFingerprint",
+          "state",
+          "resourceVersion",
+          "policyVersion",
+          "fenceToken",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "AgentDelegation": {
@@ -11650,17 +11806,17 @@
                       "title": "title example",
                       "slug": "slug example",
                       "status": "draft",
-                      "currency": "currency example",
+                      "currency": "USD",
                       "startsAt": "2026-07-10T12:00:00.000Z",
                       "timezone": "timezone example",
-                      "minimumAge": 1,
+                      "minimumAge": 0,
                       "resalePolicy": {
                         "enabled": true,
-                        "maxMultiplier": 1
+                        "maxMultiplier": 0
                       },
-                      "grossSalesCents": 1,
-                      "ticketsSold": 1,
-                      "checkIns": 1,
+                      "grossSalesCents": 0,
+                      "ticketsSold": 0,
+                      "checkIns": 0,
                       "version": 1,
                       "seoUseCoverImage": true,
                       "createdAt": "2026-07-10T12:00:00.000Z",
@@ -11799,7 +11955,7 @@
                 "brandId": "brand_example",
                 "slug": "slug example",
                 "title": "title example",
-                "currency": "currency example",
+                "currency": "USD",
                 "timezone": "timezone example",
                 "startsAt": "2026-07-10T12:00:00.000Z"
               }
@@ -11822,17 +11978,17 @@
                   "title": "title example",
                   "slug": "slug example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "startsAt": "2026-07-10T12:00:00.000Z",
                   "timezone": "timezone example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "resalePolicy": {
                     "enabled": true,
-                    "maxMultiplier": 1
+                    "maxMultiplier": 0
                   },
-                  "grossSalesCents": 1,
-                  "ticketsSold": 1,
-                  "checkIns": 1,
+                  "grossSalesCents": 0,
+                  "ticketsSold": 0,
+                  "checkIns": 0,
                   "version": 1,
                   "seoUseCoverImage": true,
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -11872,17 +12028,17 @@
                   "title": "title example",
                   "slug": "slug example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "startsAt": "2026-07-10T12:00:00.000Z",
                   "timezone": "timezone example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "resalePolicy": {
                     "enabled": true,
-                    "maxMultiplier": 1
+                    "maxMultiplier": 0
                   },
-                  "grossSalesCents": 1,
-                  "ticketsSold": 1,
-                  "checkIns": 1,
+                  "grossSalesCents": 0,
+                  "ticketsSold": 0,
+                  "checkIns": 0,
                   "version": 1,
                   "seoUseCoverImage": true,
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -12044,17 +12200,17 @@
                   "title": "title example",
                   "slug": "slug example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "startsAt": "2026-07-10T12:00:00.000Z",
                   "timezone": "timezone example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "resalePolicy": {
                     "enabled": true,
-                    "maxMultiplier": 1
+                    "maxMultiplier": 0
                   },
-                  "grossSalesCents": 1,
-                  "ticketsSold": 1,
-                  "checkIns": 1,
+                  "grossSalesCents": 0,
+                  "ticketsSold": 0,
+                  "checkIns": 0,
                   "version": 1,
                   "seoUseCoverImage": true,
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -12168,17 +12324,17 @@
                   "title": "title example",
                   "slug": "slug example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "startsAt": "2026-07-10T12:00:00.000Z",
                   "timezone": "timezone example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "resalePolicy": {
                     "enabled": true,
-                    "maxMultiplier": 1
+                    "maxMultiplier": 0
                   },
-                  "grossSalesCents": 1,
-                  "ticketsSold": 1,
-                  "checkIns": 1,
+                  "grossSalesCents": 0,
+                  "ticketsSold": 0,
+                  "checkIns": 0,
                   "version": 1,
                   "seoUseCoverImage": true,
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -12252,17 +12408,17 @@
                   "title": "title example",
                   "slug": "slug example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "startsAt": "2026-07-10T12:00:00.000Z",
                   "timezone": "timezone example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "resalePolicy": {
                     "enabled": true,
-                    "maxMultiplier": 1
+                    "maxMultiplier": 0
                   },
-                  "grossSalesCents": 1,
-                  "ticketsSold": 1,
-                  "checkIns": 1,
+                  "grossSalesCents": 0,
+                  "ticketsSold": 0,
+                  "checkIns": 0,
                   "version": 1,
                   "seoUseCoverImage": true,
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -12540,8 +12696,8 @@
                 },
                 "example": {
                   "eventId": "event_example",
-                  "organizationFailedWebhookDeliveries": 1,
-                  "failedExports": 1,
+                  "organizationFailedWebhookDeliveries": 0,
+                  "failedExports": 0,
                   "checkedAt": "2026-07-10T12:00:00.000Z"
                 }
               }
@@ -12657,7 +12813,7 @@
                   "eventId": "event_example",
                   "stepId": "checkout_consent",
                   "stepVersion": 1,
-                  "subjectFingerprint": "subjectFingerprint example",
+                  "subjectFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "actorId": "actor_example",
                   "acknowledgedAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -12754,17 +12910,17 @@
                   "title": "title example",
                   "slug": "slug example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "startsAt": "2026-07-10T12:00:00.000Z",
                   "timezone": "timezone example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "resalePolicy": {
                     "enabled": true,
-                    "maxMultiplier": 1
+                    "maxMultiplier": 0
                   },
-                  "grossSalesCents": 1,
-                  "ticketsSold": 1,
-                  "checkIns": 1,
+                  "grossSalesCents": 0,
+                  "ticketsSold": 0,
+                  "checkIns": 0,
                   "version": 1,
                   "seoUseCoverImage": true,
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -12831,17 +12987,17 @@
                   "title": "title example",
                   "slug": "slug example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "startsAt": "2026-07-10T12:00:00.000Z",
                   "timezone": "timezone example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "resalePolicy": {
                     "enabled": true,
-                    "maxMultiplier": 1
+                    "maxMultiplier": 0
                   },
-                  "grossSalesCents": 1,
-                  "ticketsSold": 1,
-                  "checkIns": 1,
+                  "grossSalesCents": 0,
+                  "ticketsSold": 0,
+                  "checkIns": 0,
                   "version": 1,
                   "seoUseCoverImage": true,
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -12922,7 +13078,7 @@
                       "id": "resource_example",
                       "name": "name example",
                       "kind": "free",
-                      "currency": "currency example",
+                      "currency": "USD",
                       "priceCents": 1
                     }
                   ],
@@ -13024,7 +13180,7 @@
               "example": {
                 "name": "name example",
                 "kind": "free",
-                "currency": "currency example",
+                "currency": "USD",
                 "priceCents": 1,
                 "inventoryPoolId": "inventorypool_example"
               }
@@ -13043,7 +13199,7 @@
                   "id": "resource_example",
                   "name": "name example",
                   "kind": "free",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "priceCents": 1
                 }
               }
@@ -13085,7 +13241,7 @@
                 "ticketType": {
                   "name": "name example",
                   "kind": "free",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "priceCents": 1
                 }
               }
@@ -13105,7 +13261,7 @@
                     "id": "resource_example",
                     "name": "name example",
                     "kind": "free",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "priceCents": 1
                   },
                   "accessRules": [
@@ -13856,7 +14012,7 @@
                   ],
                   "settings": {
                     "autoOfferEnabled": true,
-                    "offerTtlMinutes": 1
+                    "offerTtlMinutes": 5
                   }
                 }
               }
@@ -14110,7 +14266,7 @@
               },
               "example": {
                 "autoOfferEnabled": true,
-                "offerTtlMinutes": 1
+                "offerTtlMinutes": 5
               }
             }
           }
@@ -14125,7 +14281,7 @@
                 },
                 "example": {
                   "autoOfferEnabled": true,
-                  "offerTtlMinutes": 1
+                  "offerTtlMinutes": 5
                 }
               }
             }
@@ -14324,7 +14480,7 @@
                   "id": "resource_example",
                   "name": "name example",
                   "kind": "free",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "priceCents": 1
                 }
               }
@@ -14386,7 +14542,7 @@
                     "id": "resource_example",
                     "name": "name example",
                     "kind": "free",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "priceCents": 1
                   },
                   "accessRules": [
@@ -14871,7 +15027,7 @@
                       "eventId": "event_example",
                       "name": "name example",
                       "priceCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "maxPerOrder": 1,
                       "status": "active",
                       "sortOrder": 1
@@ -14949,7 +15105,7 @@
               "example": {
                 "name": "name example",
                 "priceCents": 1,
-                "currency": "currency example"
+                "currency": "USD"
               }
             }
           }
@@ -14967,7 +15123,7 @@
                   "eventId": "event_example",
                   "name": "name example",
                   "priceCents": 1,
-                  "currency": "currency example",
+                  "currency": "USD",
                   "maxPerOrder": 1,
                   "status": "active",
                   "sortOrder": 1
@@ -15053,7 +15209,7 @@
                 "name": "name example",
                 "description": "description example",
                 "priceCents": 1,
-                "currency": "currency example"
+                "currency": "USD"
               }
             }
           }
@@ -15071,7 +15227,7 @@
                   "eventId": "event_example",
                   "name": "name example",
                   "priceCents": 1,
-                  "currency": "currency example",
+                  "currency": "USD",
                   "maxPerOrder": 1,
                   "status": "active",
                   "sortOrder": 1
@@ -15166,7 +15322,7 @@
                   "endsAt": "2026-07-10T12:00:00.000Z",
                   "venue": {},
                   "brandId": "brand_example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "marketingIntegrations": [
                     {
                       "provider": "ga4",
@@ -15290,7 +15446,7 @@
                   "endsAt": "2026-07-10T12:00:00.000Z",
                   "venue": {},
                   "brandId": "brand_example",
-                  "minimumAge": 1,
+                  "minimumAge": 0,
                   "marketingIntegrations": [
                     {
                       "provider": "ga4",
@@ -15353,7 +15509,7 @@
                     "name": "name example",
                     "kind": "free",
                     "priceCents": 1,
-                    "currency": "currency example",
+                    "currency": "USD",
                     "minPerOrder": 1,
                     "maxPerOrder": 1,
                     "available": 1,
@@ -15423,7 +15579,7 @@
                     "endsAt": "2026-07-10T12:00:00.000Z",
                     "venue": {},
                     "brandId": "brand_example",
-                    "minimumAge": 1,
+                    "minimumAge": 0,
                     "marketingIntegrations": [
                       {
                         "provider": "ga4",
@@ -15439,7 +15595,7 @@
                       "name": "name example",
                       "kind": "free",
                       "priceCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "minPerOrder": 1,
                       "maxPerOrder": 1,
                       "available": 1,
@@ -15477,9 +15633,9 @@
                     "id": "resource_example",
                     "eventId": "event_example",
                     "status": "listed",
-                    "priceCents": 1,
-                    "currency": "currency example",
-                    "faceValueCents": 1,
+                    "priceCents": 0,
+                    "currency": "USD",
+                    "faceValueCents": 0,
                     "createdAt": "2026-07-10T12:00:00.000Z",
                     "updatedAt": "2026-07-10T12:00:00.000Z"
                   }
@@ -15558,9 +15714,9 @@
                       "id": "resource_example",
                       "eventId": "event_example",
                       "status": "listed",
-                      "priceCents": 1,
-                      "currency": "currency example",
-                      "faceValueCents": 1,
+                      "priceCents": 0,
+                      "currency": "USD",
+                      "faceValueCents": 0,
                       "createdAt": "2026-07-10T12:00:00.000Z",
                       "updatedAt": "2026-07-10T12:00:00.000Z"
                     }
@@ -16521,12 +16677,12 @@
                       "width": 1,
                       "height": 1,
                       "format": "jpeg",
-                      "checksumSha256": "checksumSha256 example",
+                      "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                       "sizeBytes": 1
                     },
                     "focalPoint": {
-                      "x": 1,
-                      "y": 1
+                      "x": 0,
+                      "y": 0
                     },
                     "altText": "altText example",
                     "renditions": [
@@ -16536,7 +16692,7 @@
                         "width": 1,
                         "height": 1,
                         "format": "webp",
-                        "checksumSha256": "checksumSha256 example",
+                        "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                         "sizeBytes": 1,
                         "url": "https://example.test/tixkit"
                       }
@@ -16649,8 +16805,8 @@
                 "uploadArtifactId": "uploadartifact_example",
                 "altText": "altText example",
                 "focalPoint": {
-                  "x": 1,
-                  "y": 1
+                  "x": 0,
+                  "y": 0
                 }
               }
             }
@@ -16672,12 +16828,12 @@
                     "width": 1,
                     "height": 1,
                     "format": "jpeg",
-                    "checksumSha256": "checksumSha256 example",
+                    "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "sizeBytes": 1
                   },
                   "focalPoint": {
-                    "x": 1,
-                    "y": 1
+                    "x": 0,
+                    "y": 0
                   },
                   "altText": "altText example",
                   "renditions": [
@@ -16687,7 +16843,7 @@
                       "width": 1,
                       "height": 1,
                       "format": "webp",
-                      "checksumSha256": "checksumSha256 example",
+                      "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                       "sizeBytes": 1,
                       "url": "https://example.test/tixkit"
                     }
@@ -16960,7 +17116,7 @@
               },
               "example": {
                 "tenderType": "comp",
-                "amountCents": 1,
+                "amountCents": 0,
                 "items": [
                   {
                     "ticketTypeId": "tickettype_example",
@@ -16984,7 +17140,7 @@
                     "id": "resource_example",
                     "orderNumber": "orderNumber example",
                     "status": "draft",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "totalCents": 1,
                     "buyerEmail": "operator@example.test"
                   },
@@ -17327,7 +17483,7 @@
                   "id": "resource_example",
                   "eventId": "event_example",
                   "status": "open",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "quote": {
                     "totalCents": 1,
                     "subtotalCents": 1,
@@ -17784,7 +17940,7 @@
                   "id": "resource_example",
                   "eventId": "event_example",
                   "status": "open",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "quote": {
                     "totalCents": 1,
                     "subtotalCents": 1,
@@ -17851,7 +18007,7 @@
                   "id": "resource_example",
                   "eventId": "event_example",
                   "status": "open",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "quote": {
                     "totalCents": 1,
                     "subtotalCents": 1,
@@ -17983,7 +18139,7 @@
                   "id": "resource_example",
                   "eventId": "event_example",
                   "status": "open",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "quote": {
                     "totalCents": 1,
                     "subtotalCents": 1,
@@ -18077,10 +18233,10 @@
                     {
                       "ticketId": "ticket_example",
                       "ticketCode": "ticketCode example",
-                      "faceValueCents": 1,
-                      "currency": "currency example",
+                      "faceValueCents": 0,
+                      "currency": "USD",
                       "resaleEnabled": true,
-                      "resaleMaxPriceCents": 1
+                      "resaleMaxPriceCents": 0
                     }
                   ]
                 }
@@ -18143,7 +18299,7 @@
                 ]
               },
               "example": {
-                "priceCents": 1
+                "priceCents": 0
               }
             }
           }
@@ -18163,9 +18319,9 @@
                   "ticketId": "ticket_example",
                   "sellerId": "seller_example",
                   "status": "listed",
-                  "priceCents": 1,
-                  "currency": "currency example",
-                  "faceValueCents": 1,
+                  "priceCents": 0,
+                  "currency": "USD",
+                  "faceValueCents": 0,
                   "createdAt": "2026-07-10T12:00:00.000Z",
                   "updatedAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -18304,7 +18460,7 @@
                     "id": "resource_example",
                     "orderNumber": "orderNumber example",
                     "status": "draft",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "totalCents": 1,
                     "buyerEmail": "operator@example.test"
                   },
@@ -18547,7 +18703,7 @@
                       "id": "resource_example",
                       "orderNumber": "orderNumber example",
                       "status": "draft",
-                      "currency": "currency example",
+                      "currency": "USD",
                       "totalCents": 1,
                       "buyerEmail": "operator@example.test"
                     }
@@ -18654,7 +18810,7 @@
                   "id": "resource_example",
                   "orderNumber": "orderNumber example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "totalCents": 1,
                   "buyerEmail": "operator@example.test",
                   "lineItems": [
@@ -18689,7 +18845,7 @@
                       "appliedTo": "ticket",
                       "taxableAmountCents": 1,
                       "taxCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "inclusive": true,
                       "provider": "provider example",
                       "createdAt": "2026-07-10T12:00:00.000Z"
@@ -18705,7 +18861,7 @@
                       "id": "resource_example",
                       "orderId": "order_example",
                       "amountCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "status": "status example",
                       "reason": "reason example"
                     }
@@ -18765,7 +18921,7 @@
                     "orderId": "order_example",
                     "invoiceNumber": "invoiceNumber example",
                     "status": "issued",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "subtotalCents": 1,
                     "discountCents": 1,
                     "taxCents": 1,
@@ -18781,7 +18937,7 @@
                     "id": "resource_example",
                     "orderNumber": "orderNumber example",
                     "status": "draft",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "totalCents": 1,
                     "buyerEmail": "operator@example.test"
                   },
@@ -18806,7 +18962,7 @@
                       "appliedTo": "ticket",
                       "taxableAmountCents": 1,
                       "taxCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "inclusive": true,
                       "provider": "provider example",
                       "createdAt": "2026-07-10T12:00:00.000Z"
@@ -18855,7 +19011,7 @@
                     "orderId": "order_example",
                     "invoiceNumber": "invoiceNumber example",
                     "status": "issued",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "subtotalCents": 1,
                     "discountCents": 1,
                     "taxCents": 1,
@@ -18871,7 +19027,7 @@
                     "id": "resource_example",
                     "orderNumber": "orderNumber example",
                     "status": "draft",
-                    "currency": "currency example",
+                    "currency": "USD",
                     "totalCents": 1,
                     "buyerEmail": "operator@example.test"
                   },
@@ -18896,7 +19052,7 @@
                       "appliedTo": "ticket",
                       "taxableAmountCents": 1,
                       "taxCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "inclusive": true,
                       "provider": "provider example",
                       "createdAt": "2026-07-10T12:00:00.000Z"
@@ -18956,7 +19112,7 @@
                   "id": "resource_example",
                   "orderNumber": "orderNumber example",
                   "status": "draft",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "totalCents": 1,
                   "buyerEmail": "operator@example.test"
                 }
@@ -19543,7 +19699,7 @@
                     {
                       "name": "name example",
                       "type": "percentage",
-                      "value": 1,
+                      "value": 0,
                       "appliedTo": "per_ticket",
                       "absorbIntoPrice": true
                     }
@@ -19589,7 +19745,7 @@
                   {
                     "name": "name example",
                     "type": "percentage",
-                    "value": 1,
+                    "value": 0,
                     "appliedTo": "per_ticket"
                   }
                 ]
@@ -19613,7 +19769,7 @@
                     {
                       "name": "name example",
                       "type": "percentage",
-                      "value": 1,
+                      "value": 0,
                       "appliedTo": "per_ticket",
                       "absorbIntoPrice": true
                     }
@@ -19657,7 +19813,7 @@
                 },
                 "example": {
                   "enabled": true,
-                  "maxMultiplier": 1
+                  "maxMultiplier": 0
                 }
               }
             }
@@ -19694,7 +19850,7 @@
               },
               "example": {
                 "enabled": true,
-                "maxMultiplier": 1
+                "maxMultiplier": 0
               }
             }
           }
@@ -19709,7 +19865,7 @@
                 },
                 "example": {
                   "enabled": true,
-                  "maxMultiplier": 1
+                  "maxMultiplier": 0
                 }
               }
             }
@@ -19772,9 +19928,9 @@
                       "ticketId": "ticket_example",
                       "sellerId": "seller_example",
                       "status": "listed",
-                      "priceCents": 1,
-                      "currency": "currency example",
-                      "faceValueCents": 1,
+                      "priceCents": 0,
+                      "currency": "USD",
+                      "faceValueCents": 0,
                       "createdAt": "2026-07-10T12:00:00.000Z",
                       "updatedAt": "2026-07-10T12:00:00.000Z"
                     }
@@ -19834,7 +19990,7 @@
                 ]
               },
               "example": {
-                "priceCents": 1
+                "priceCents": 0
               }
             }
           }
@@ -19854,9 +20010,9 @@
                   "ticketId": "ticket_example",
                   "sellerId": "seller_example",
                   "status": "listed",
-                  "priceCents": 1,
-                  "currency": "currency example",
-                  "faceValueCents": 1,
+                  "priceCents": 0,
+                  "currency": "USD",
+                  "faceValueCents": 0,
                   "createdAt": "2026-07-10T12:00:00.000Z",
                   "updatedAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -19906,9 +20062,9 @@
                   "ticketId": "ticket_example",
                   "sellerId": "seller_example",
                   "status": "listed",
-                  "priceCents": 1,
-                  "currency": "currency example",
-                  "faceValueCents": 1,
+                  "priceCents": 0,
+                  "currency": "USD",
+                  "faceValueCents": 0,
                   "createdAt": "2026-07-10T12:00:00.000Z",
                   "updatedAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -20021,9 +20177,9 @@
                     "ticketId": "ticket_example",
                     "sellerId": "seller_example",
                     "status": "listed",
-                    "priceCents": 1,
-                    "currency": "currency example",
-                    "faceValueCents": 1,
+                    "priceCents": 0,
+                    "currency": "USD",
+                    "faceValueCents": 0,
                     "createdAt": "2026-07-10T12:00:00.000Z",
                     "updatedAt": "2026-07-10T12:00:00.000Z"
                   },
@@ -21414,7 +21570,7 @@
                   "$ref": "#/components/schemas/AgentPrincipal"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "tenantId": "tenant_example",
                   "kind": "third_party",
                   "sponsorPrincipalId": "sponsorprincipal_example",
@@ -21422,7 +21578,7 @@
                     "events.read"
                   ],
                   "maximumAutonomy": "read",
-                  "protocolVersion": "protocolVersion example",
+                  "protocolVersion": "2026-07-25",
                   "state": "active",
                   "registeredAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -21469,7 +21625,7 @@
                   "$ref": "#/components/schemas/AgentPrincipal"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "tenantId": "tenant_example",
                   "kind": "third_party",
                   "sponsorPrincipalId": "sponsorprincipal_example",
@@ -21477,7 +21633,7 @@
                     "events.read"
                   ],
                   "maximumAutonomy": "read",
-                  "protocolVersion": "protocolVersion example",
+                  "protocolVersion": "2026-07-25",
                   "state": "active",
                   "registeredAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -21559,7 +21715,7 @@
                   ]
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "state": "revoked"
                 }
               }
@@ -21653,12 +21809,12 @@
                   "$ref": "#/components/schemas/AgentOAuthClient"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "oapp_aaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "tenantId": "tenant_example",
                   "organizationId": "organization_example",
-                  "agentPrincipalId": "agentprincipal_example",
+                  "agentPrincipalId": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "name": "name example",
-                  "clientId": "client_example",
+                  "clientId": "tk_agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "scope": "agent.invoke",
                   "status": "active",
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -21683,12 +21839,12 @@
                   "$ref": "#/components/schemas/AgentOAuthClientCreated"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "oapp_aaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "tenantId": "tenant_example",
                   "organizationId": "organization_example",
-                  "agentPrincipalId": "agentprincipal_example",
+                  "agentPrincipalId": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "name": "name example",
-                  "clientId": "client_example",
+                  "clientId": "tk_agent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "scope": "agent.invoke",
                   "status": "active",
                   "createdAt": "2026-07-10T12:00:00.000Z",
@@ -21779,7 +21935,7 @@
                   ]
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "oapp_aaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "status": "revoked"
                 }
               }
@@ -21852,7 +22008,7 @@
               },
               "example": {
                 "kind": "event.publish",
-                "delegationGrantId": "delegationgrant_example",
+                "delegationGrantId": "resource_example",
                 "resourceId": "resource_example"
               }
             }
@@ -21868,8 +22024,8 @@
                 },
                 "example": {
                   "action": {
-                    "id": "resource_example",
-                    "protocolVersion": "2026-07-22",
+                    "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "protocolVersion": "2026-07-25",
                     "agentPrincipalId": "agentprincipal_example",
                     "sponsorPrincipalId": "sponsorprincipal_example",
                     "delegationGrantId": "delegationgrant_example",
@@ -21883,25 +22039,25 @@
                       "apiOperation": "events.publish"
                     },
                     "payload": {
-                      "readinessSnapshotSha256": "readinessSnapshotSha256 example"
+                      "readinessSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                     },
                     "idempotencyKey": "idempotencyKey example",
                     "expectedPolicyVersion": 1,
                     "preparedAt": "2026-07-10T12:00:00.000Z"
                   },
-                  "actionDigest": "actionDigest example",
+                  "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "expiresAt": "2026-07-10T12:00:00.000Z",
                   "authorization": {
                     "eligibleForApproval": true,
                     "reasons": [
                       "reason example"
                     ],
-                    "snapshotSha256": "snapshotSha256 example",
+                    "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "checkedAt": "2026-07-10T12:00:00.000Z"
                   },
                   "dryRun": {
                     "launchable": true,
-                    "readinessSnapshotSha256": "readinessSnapshotSha256 example",
+                    "readinessSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "blockingReasonCodes": [
                       "blockingReasonCode example"
                     ]
@@ -21967,8 +22123,8 @@
                 },
                 "example": {
                   "action": {
-                    "id": "resource_example",
-                    "protocolVersion": "2026-07-22",
+                    "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "protocolVersion": "2026-07-25",
                     "agentPrincipalId": "agentprincipal_example",
                     "sponsorPrincipalId": "sponsorprincipal_example",
                     "delegationGrantId": "delegationgrant_example",
@@ -21982,25 +22138,25 @@
                       "apiOperation": "events.publish"
                     },
                     "payload": {
-                      "readinessSnapshotSha256": "readinessSnapshotSha256 example"
+                      "readinessSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                     },
                     "idempotencyKey": "idempotencyKey example",
                     "expectedPolicyVersion": 1,
                     "preparedAt": "2026-07-10T12:00:00.000Z"
                   },
-                  "actionDigest": "actionDigest example",
+                  "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "expiresAt": "2026-07-10T12:00:00.000Z",
                   "authorization": {
                     "eligibleForApproval": true,
                     "reasons": [
                       "reason example"
                     ],
-                    "snapshotSha256": "snapshotSha256 example",
+                    "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "checkedAt": "2026-07-10T12:00:00.000Z"
                   },
                   "dryRun": {
                     "launchable": true,
-                    "readinessSnapshotSha256": "readinessSnapshotSha256 example",
+                    "readinessSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "blockingReasonCodes": [
                       "blockingReasonCode example"
                     ]
@@ -22072,7 +22228,7 @@
                 ]
               },
               "example": {
-                "actionDigest": "actionDigest example"
+                "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
               }
             }
           }
@@ -22086,9 +22242,9 @@
                   "$ref": "#/components/schemas/AgentApproval"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "apr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "tenantId": "tenant_example",
-                  "actionDigest": "actionDigest example",
+                  "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "approverPrincipalId": "approverprincipal_example",
                   "approverPermissionSnapshot": [
                     "events:publish"
@@ -22175,7 +22331,7 @@
                 ]
               },
               "example": {
-                "actionDigest": "actionDigest example"
+                "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
               }
             }
           }
@@ -22189,9 +22345,9 @@
                   "$ref": "#/components/schemas/AgentApproval"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "apr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "tenantId": "tenant_example",
-                  "actionDigest": "actionDigest example",
+                  "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "approverPrincipalId": "approverprincipal_example",
                   "approverPermissionSnapshot": [
                     "events:publish"
@@ -22225,6 +22381,116 @@
         ]
       }
     },
+    "/agent/actions/{actionId}/executions": {
+      "post": {
+        "summary": "Execute one approved immutable agent action",
+        "description": "Experimental/private beta. Exact Agent OAuth principal only. Atomically consumes the exact unrevoked approval, then rechecks principal, sponsor, delegation, tenant and risk policy, permission, resource version and readiness at the typed event-publish operation boundary. Exact terminal replay returns the same durable execution; concurrent in-flight retries may return conflict and are safe to retry.",
+        "security": [
+          {
+            "AgentOAuth": [
+              "agent.invoke"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^act_[a-f0-9]{48}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/AgentExecutionIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/AgentExecutionConfirmation"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "approvalId": {
+                    "type": "string",
+                    "pattern": "^apr_[a-f0-9]{48}$",
+                    "example": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff"
+                  },
+                  "actionDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$",
+                    "example": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                  }
+                },
+                "required": [
+                  "approvalId",
+                  "actionDigest"
+                ]
+              },
+              "example": {
+                "approvalId": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff",
+                "actionDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Durable execution evidence. A succeeded action has one idempotent product effect; failed evidence contains only a bounded failure code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentExecution"
+                },
+                "example": {
+                  "id": "exec_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "tenantId": "tenant_example",
+                  "actionId": "act_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "actionDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                  "agentPrincipalId": "agt_dddddddddddddddddddddddddddddddddddddddddddddddd",
+                  "sponsorPrincipalId": "sponsorprincipal_example",
+                  "delegationGrantId": "dlg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "approvalId": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "idempotencyKey": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "requestFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+                  "state": "reserved",
+                  "resourceVersion": 0,
+                  "policyVersion": 1,
+                  "fenceToken": 0,
+                  "createdAt": "2026-07-10T12:00:00.000Z",
+                  "updatedAt": "2026-07-10T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path, approval, digest or confirmation"
+          },
+          "401": {
+            "description": "Valid Agent OAuth authentication required"
+          },
+          "403": {
+            "description": "Authenticated principal is not an agent"
+          },
+          "404": {
+            "description": "Action or approval is outside the authenticated agent scope"
+          },
+          "409": {
+            "description": "Approval, action, authorization, resource, policy or readiness changed; or an execution is currently leased by another worker"
+          }
+        },
+        "operationId": "postAgentActionsByActionIdExecutions",
+        "tags": [
+          "Agent platform"
+        ]
+      }
+    },
     "/agent/session": {
       "get": {
         "summary": "Inspect the authenticated agent session",
@@ -22246,7 +22512,7 @@
                 },
                 "example": {
                   "principal": {
-                    "id": "resource_example",
+                    "id": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "tenantId": "tenant_example",
                     "kind": "third_party",
                     "sponsorPrincipalId": "sponsorprincipal_example",
@@ -22254,7 +22520,7 @@
                       "events.read"
                     ],
                     "maximumAutonomy": "read",
-                    "protocolVersion": "protocolVersion example",
+                    "protocolVersion": "2026-07-25",
                     "state": "active",
                     "registeredAt": "2026-07-10T12:00:00.000Z",
                     "updatedAt": "2026-07-10T12:00:00.000Z"
@@ -22262,12 +22528,10 @@
                   "authentication": {
                     "grantType": "client_credentials",
                     "scope": "agent.invoke",
-                    "productPermissions": [
-                      "productPermission example"
-                    ]
+                    "productPermissions": []
                   },
                   "delegationRequired": true,
-                  "supportedProtocolVersion": "supportedProtocolVersion example"
+                  "supportedProtocolVersion": "2026-07-25"
                 }
               }
             }
@@ -22360,12 +22624,12 @@
               },
               "example": {
                 "id": "resource_example",
-                "agentPrincipalId": "agentprincipal_example",
+                "agentPrincipalId": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "capabilities": [
                   "events.read"
                 ],
                 "resourceScopes": [
-                  "resourceScope example"
+                  "event:event_example"
                 ],
                 "expiresAt": "2026-07-10T12:00:00.000Z"
               }
@@ -22381,15 +22645,15 @@
                   "$ref": "#/components/schemas/AgentDelegation"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "dlg_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "tenantId": "tenant_example",
-                  "agentPrincipalId": "agentprincipal_example",
+                  "agentPrincipalId": "agt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "sponsorPrincipalId": "sponsorprincipal_example",
                   "capabilities": [
                     "events.read"
                   ],
                   "resourceScopes": [
-                    "resourceScope example"
+                    "event:event_example"
                   ],
                   "permissionSnapshot": [
                     "permissionSnapshot example"
@@ -22471,7 +22735,7 @@
                   ]
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "dlg_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "revoked": true
                 }
               }
@@ -22544,19 +22808,19 @@
                   "$ref": "#/components/schemas/AgentMemoryEntry"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "mem_example",
                   "namespace": {
                     "tenantId": "tenant_example",
                     "sponsorPrincipalId": "sponsorprincipal_example",
                     "scopeType": "workspace",
                     "purpose": "organizer_preferences"
                   },
-                  "key": "key example",
+                  "key": "value.example",
                   "content": {
                     "kind": "organizer_preferences",
                     "summary": "summary example"
                   },
-                  "contentSha256": "contentSha256 example",
+                  "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "provenance": {
                     "type": "organizer",
                     "actorPrincipalId": "actorprincipal_example",
@@ -22645,19 +22909,19 @@
                 "example": {
                   "entries": [
                     {
-                      "id": "resource_example",
+                      "id": "mem_example",
                       "namespace": {
                         "tenantId": "tenant_example",
                         "sponsorPrincipalId": "sponsorprincipal_example",
                         "scopeType": "workspace",
                         "purpose": "organizer_preferences"
                       },
-                      "key": "key example",
+                      "key": "value.example",
                       "content": {
                         "kind": "organizer_preferences",
                         "summary": "summary example"
                       },
-                      "contentSha256": "contentSha256 example",
+                      "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                       "provenance": {
                         "type": "organizer",
                         "actorPrincipalId": "actorprincipal_example",
@@ -22744,19 +23008,19 @@
                   },
                   "entries": [
                     {
-                      "id": "resource_example",
+                      "id": "mem_example",
                       "namespace": {
                         "tenantId": "tenant_example",
                         "sponsorPrincipalId": "sponsorprincipal_example",
                         "scopeType": "workspace",
                         "purpose": "organizer_preferences"
                       },
-                      "key": "key example",
+                      "key": "value.example",
                       "content": {
                         "kind": "organizer_preferences",
                         "summary": "summary example"
                       },
-                      "contentSha256": "contentSha256 example",
+                      "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                       "provenance": {
                         "type": "organizer",
                         "actorPrincipalId": "actorprincipal_example",
@@ -22768,7 +23032,7 @@
                       "updatedAt": "2026-07-10T12:00:00.000Z"
                     }
                   ],
-                  "sha256": "sha256 example"
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 }
               }
             }
@@ -22844,19 +23108,19 @@
                   "$ref": "#/components/schemas/AgentMemoryEntry"
                 },
                 "example": {
-                  "id": "resource_example",
+                  "id": "mem_example",
                   "namespace": {
                     "tenantId": "tenant_example",
                     "sponsorPrincipalId": "sponsorprincipal_example",
                     "scopeType": "workspace",
                     "purpose": "organizer_preferences"
                   },
-                  "key": "key example",
+                  "key": "value.example",
                   "content": {
                     "kind": "organizer_preferences",
                     "summary": "summary example"
                   },
-                  "contentSha256": "contentSha256 example",
+                  "contentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "provenance": {
                     "type": "organizer",
                     "actorPrincipalId": "actorprincipal_example",
@@ -23220,7 +23484,7 @@
                 },
                 "example": {
                   "eventId": "event_example",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "grossSalesCents": 1,
                   "grossSalesByChannelCents": {
                     "online": 1,
@@ -23329,7 +23593,7 @@
                 },
                 "example": {
                   "eventId": "event_example",
-                  "currency": "currency example",
+                  "currency": "USD",
                   "totalTaxCollectedCents": 1,
                   "breakdown": [
                     {
@@ -26671,7 +26935,7 @@
                 ]
               },
               "example": {
-                "emailTemplateKey": "operator@example.test",
+                "emailTemplateKey": "value_example",
                 "audience": "all",
                 "channel": "email"
               }
@@ -28033,7 +28297,7 @@
                 }
               },
               "example": {
-                "key": "key example",
+                "key": "value_example",
                 "name": "name example"
               }
             }
@@ -28829,7 +29093,7 @@
                     "channel": "event_page",
                     "outputType": "preview",
                     "artifactRef": "artifactRef example",
-                    "checksum": "checksum example",
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "createdAt": "2026-07-10T12:00:00.000Z"
                   }
                 }
@@ -28974,7 +29238,7 @@
                     "endsAt": "2026-07-10T12:00:00.000Z",
                     "venue": {},
                     "brandId": "brand_example",
-                    "minimumAge": 1,
+                    "minimumAge": 0,
                     "marketingIntegrations": [
                       {
                         "provider": "ga4",
@@ -29025,7 +29289,7 @@
                       "name": "name example",
                       "kind": "free",
                       "priceCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "minPerOrder": 1,
                       "maxPerOrder": 1,
                       "available": 1,
@@ -29039,9 +29303,9 @@
                         "id": "resource_example",
                         "eventId": "event_example",
                         "status": "listed",
-                        "priceCents": 1,
-                        "currency": "currency example",
-                        "faceValueCents": 1,
+                        "priceCents": 0,
+                        "currency": "USD",
+                        "faceValueCents": 0,
                         "createdAt": "2026-07-10T12:00:00.000Z",
                         "updatedAt": "2026-07-10T12:00:00.000Z"
                       }
@@ -29316,7 +29580,7 @@
                     "endsAt": "2026-07-10T12:00:00.000Z",
                     "venue": {},
                     "brandId": "brand_example",
-                    "minimumAge": 1,
+                    "minimumAge": 0,
                     "marketingIntegrations": [
                       {
                         "provider": "ga4",
@@ -29367,7 +29631,7 @@
                       "name": "name example",
                       "kind": "free",
                       "priceCents": 1,
-                      "currency": "currency example",
+                      "currency": "USD",
                       "minPerOrder": 1,
                       "maxPerOrder": 1,
                       "available": 1,
@@ -29381,9 +29645,9 @@
                         "id": "resource_example",
                         "eventId": "event_example",
                         "status": "listed",
-                        "priceCents": 1,
-                        "currency": "currency example",
-                        "faceValueCents": 1,
+                        "priceCents": 0,
+                        "currency": "USD",
+                        "faceValueCents": 0,
                         "createdAt": "2026-07-10T12:00:00.000Z",
                         "updatedAt": "2026-07-10T12:00:00.000Z"
                       }
@@ -31221,7 +31485,7 @@
               "example": {
                 "organizationId": "organization_example",
                 "sourceSystem": "sourceSystem example",
-                "secretReference": "$REDACTED_SECRET",
+                "secretReference": "secret://migration/example",
                 "expiresAt": "2026-07-10T12:00:00.000Z"
               }
             }
@@ -32167,7 +32431,7 @@
                   "sourceMode": "official-export",
                   "sourceSystem": "tixkit-portable",
                   "artifactIds": [
-                    "artifact_example"
+                    "upl_example1"
                   ]
                 }
               }
@@ -32580,7 +32844,7 @@
                   "sourceMode": "official-export",
                   "sourceSystem": "generic-csv",
                   "artifactIds": [
-                    "artifact_example"
+                    "upl_example1"
                   ]
                 }
               }
@@ -33031,7 +33295,7 @@
                 }
               },
               "example": {
-                "uploadArtifactId": "uploadartifact_example"
+                "uploadArtifactId": "upl_example1"
               }
             }
           }
@@ -33682,7 +33946,7 @@
                       "portableId": "portable_example",
                       "kind": "custom_domain",
                       "destinationReference": "destinationReference example",
-                      "provenanceSha256": "provenanceSha256 example",
+                      "provenanceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                       "updatedAt": "2026-07-10T12:00:00.000Z"
                     }
                   ],
@@ -33800,7 +34064,7 @@
                   "portableId": "portable_example",
                   "kind": "custom_domain",
                   "destinationReference": "destinationReference example",
-                  "provenanceSha256": "provenanceSha256 example",
+                  "provenanceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "updatedAt": "2026-07-10T12:00:00.000Z"
                 }
               }
@@ -33917,9 +34181,9 @@
                 },
                 "example": {
                   "approvalId": "approval_example",
-                  "approvalDigest": "approvalDigest example",
+                  "approvalDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "expiresAt": "2026-07-10T12:00:00.000Z",
-                  "commitConfirmation": "commitConfirmation example"
+                  "commitConfirmation": "commit:example"
                 }
               }
             }
@@ -34317,13 +34581,13 @@
                   "observedAt": "2026-07-10T12:00:00.000Z",
                   "sourceFrozen": true,
                   "bundleId": "bundle_example",
-                  "manifestSha256": "manifestSha256 example",
+                  "manifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "destinationId": "destination_example",
                   "operationId": "operation_example",
                   "issuedAt": "2026-07-10T12:00:00.000Z",
                   "expiresAt": "2026-07-10T12:00:00.000Z",
                   "nonce": "nonce example",
-                  "receiptSha256": "receiptSha256 example",
+                  "receiptSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "keyId": "key_example",
                   "signature": "$REDACTED_SECRET"
                 }

@@ -2,17 +2,24 @@ import {
   AGENT_PROTOCOL_VERSION,
   agentActionDigest,
   agentSha256,
+  agentExecutionIdempotencyKey,
   authorizeAgentAction,
   canonicalAgentJson,
+  DurableAgentExecutionService,
+  AgentExecutionConflictError,
   type AgentAction,
   type AgentApproval,
   type AgentDelegationGrant,
+  type AgentExecution,
   type AgentPrincipal,
 } from '@tixkit/agent-protocol';
-import { sql, type Database } from '@tixkit/db';
+import { AgentExecutionRepository, sql, type Database } from '@tixkit/db';
 import type { Selectable, Transaction } from 'kysely';
-import { createHash } from 'node:crypto';
-import { eventPublishReadinessSnapshotSha256 } from './agent-event-publish.js';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  eventPublishReadinessSnapshotSha256,
+  EventPublishAgentAdapter,
+} from './agent-event-publish.js';
 import { ReadinessService, resolvePaymentMode } from './readiness.js';
 
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
@@ -80,7 +87,10 @@ async function databaseNow(db: Executor): Promise<Date> {
   return new Date(row.now);
 }
 
-function stableId(prefix: 'act' | 'aevt' | 'apr', ...parts: readonly string[]): string {
+function stableId(
+  prefix: 'act' | 'aevt' | 'apr' | 'exec' | 'aaud' | 'worker',
+  ...parts: readonly string[]
+): string {
   const digest = createHash('sha256').update(parts.join('\0')).digest('hex');
   return `${prefix}_${digest.slice(0, 48)}`;
 }
@@ -709,6 +719,137 @@ export class AgentActionService {
           .execute();
         return revoked;
       });
+  }
+
+  async execute(input: {
+    tenantId: string;
+    agentPrincipalId: string;
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+  }): Promise<AgentExecution> {
+    const prepared = await this.getForAgent({
+      tenantId: input.tenantId,
+      agentPrincipalId: input.agentPrincipalId,
+      actionId: input.actionId,
+    });
+    if (!prepared) throw new Error('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+    if (prepared.actionDigest !== input.actionDigest)
+      throw new Error('AGENT_ACTION_EXECUTION_DIGEST_MISMATCH');
+    const approvalRow = await this.db
+      .selectFrom('agent_approvals')
+      .selectAll()
+      .where('tenant_id', '=', input.tenantId)
+      .where('id', '=', input.approvalId)
+      .where('action_id', '=', input.actionId)
+      .where('action_digest', '=', input.actionDigest)
+      .where('approver_principal_id', '=', prepared.action.sponsorPrincipalId)
+      .executeTakeFirst();
+    if (!approvalRow) throw new Error('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+    const executionId = stableId('exec', input.tenantId, input.actionId, input.approvalId);
+    const now = new Date().toISOString();
+    const probe: AgentExecution = {
+      id: executionId,
+      tenantId: input.tenantId,
+      actionId: input.actionId,
+      actionDigest: input.actionDigest,
+      agentPrincipalId: input.agentPrincipalId,
+      sponsorPrincipalId: prepared.action.sponsorPrincipalId,
+      delegationGrantId: prepared.action.delegationGrantId,
+      approvalId: input.approvalId,
+      idempotencyKey: agentExecutionIdempotencyKey(prepared.action),
+      requestFingerprint: agentSha256({
+        actionDigest: input.actionDigest,
+        idempotencyKey: agentExecutionIdempotencyKey(prepared.action),
+        tenantId: input.tenantId,
+      }),
+      state: 'reserved',
+      resourceVersion: prepared.action.target.resourceVersion,
+      policyVersion: prepared.action.expectedPolicyVersion,
+      fenceToken: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const repository = new AgentExecutionRepository(this.db);
+    const adapter = new EventPublishAgentAdapter(this.db);
+    const executionService = new DurableAgentExecutionService(
+      repository,
+      adapter,
+      { now: () => new Date() },
+      {
+        executionId: () => executionId,
+        auditId: () => stableId('aaud', executionId, randomUUID()),
+      },
+      adapter,
+    );
+    const existing = await repository.getExecution(input.tenantId, executionId);
+    if (existing) {
+      if (
+        existing.actionId !== probe.actionId ||
+        existing.actionDigest !== probe.actionDigest ||
+        existing.agentPrincipalId !== probe.agentPrincipalId ||
+        existing.sponsorPrincipalId !== probe.sponsorPrincipalId ||
+        existing.delegationGrantId !== probe.delegationGrantId ||
+        existing.approvalId !== probe.approvalId ||
+        existing.idempotencyKey !== probe.idempotencyKey ||
+        existing.requestFingerprint !== probe.requestFingerprint ||
+        existing.resourceVersion !== probe.resourceVersion ||
+        existing.policyVersion !== probe.policyVersion ||
+        !approvalRow.consumed_at ||
+        approvalRow.consumed_execution_id !== existing.id ||
+        approvalRow.revoked_at
+      )
+        throw new AgentExecutionConflictError('persisted agent execution binding is invalid');
+      if (['succeeded', 'failed', 'compensated'].includes(existing.state)) return existing;
+      return executionService.run({
+        action: prepared.action,
+        execution: existing,
+        workerId: stableId('worker', executionId),
+      });
+    }
+    let current: Awaited<ReturnType<EventPublishAgentAdapter['load']>>;
+    try {
+      current = await adapter.load({ action: prepared.action, execution: probe });
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+      if (
+        code === 'AGENT_AUTHORIZATION_CHANGED' ||
+        code === 'AGENT_STATE_INVALID' ||
+        code === 'AGENT_OPERATION_DENIED'
+      )
+        throw new AgentExecutionConflictError('agent execution authorization state changed');
+      throw error;
+    }
+    let reserved: AgentExecution;
+    try {
+      reserved = await executionService.reserve({
+        principal: current.principal,
+        delegation: current.delegation,
+        action: prepared.action,
+        actionDigest: prepared.actionDigest,
+        sponsorPermissions: current.sponsorPermissions,
+        tenantAllowedActions: current.riskPolicyAllowed ? current.tenantAllowedActions : [],
+        currentResourceVersion: current.currentResourceVersion,
+        currentPolicyVersion: current.currentPolicyVersion,
+        now: current.observedAt,
+        approval: this.approvalFromRow(approvalRow),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (
+        message === 'AGENT_APPROVAL_INVALID' ||
+        message === 'AGENT_APPROVAL_CONSUMED' ||
+        message === 'AGENT_EXECUTION_IDEMPOTENCY_CONFLICT'
+      )
+        throw new AgentExecutionConflictError('agent execution reservation conflicted');
+      throw error;
+    }
+    return executionService.run({
+      action: prepared.action,
+      execution: reserved,
+      workerId: stableId('worker', executionId),
+    });
   }
 
   private async hasLiveSponsorAuthority(

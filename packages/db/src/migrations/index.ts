@@ -81,3 +81,4 @@ export { PortableImportLineageCheckpointsMigration } from './0080_portable_impor
 export { AgentOAuthCredentialsMigration } from './0081_agent_oauth_credentials.js';
 export { AgentActionsMigration } from './0082_agent_actions.js';
 export { AgentApprovalActionUniqueMigration } from './0083_agent_approval_action_unique.js';
+export { AgentProtocol20260725Migration } from './0084_agent_protocol_2026_07_25.js';

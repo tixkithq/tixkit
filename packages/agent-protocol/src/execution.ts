@@ -182,10 +182,19 @@ export function validateAgentActionResultForAction(
     throw new AgentProtocolValidationError('event publish result is invalid');
 }
 
+export function agentExecutionIdempotencyKey(
+  action: Pick<AgentAction, 'agentPrincipalId' | 'idempotencyKey'>,
+): string {
+  return agentSha256({
+    agentPrincipalId: action.agentPrincipalId,
+    idempotencyKey: action.idempotencyKey,
+  });
+}
+
 function requestFingerprint(action: AgentAction, actionDigest: string): string {
   return agentSha256({
     actionDigest,
-    idempotencyKey: action.idempotencyKey,
+    idempotencyKey: agentExecutionIdempotencyKey(action),
     tenantId: action.target.tenantId,
   });
 }
@@ -230,7 +239,7 @@ export class DurableAgentExecutionService {
       sponsorPrincipalId: input.action.sponsorPrincipalId,
       delegationGrantId: input.action.delegationGrantId,
       approvalId: input.approval.id,
-      idempotencyKey: input.action.idempotencyKey,
+      idempotencyKey: agentExecutionIdempotencyKey(input.action),
       requestFingerprint: fingerprint,
       state: 'reserved',
       resourceVersion: input.currentResourceVersion,
@@ -310,10 +319,23 @@ export class DurableAgentExecutionService {
         throw new AgentExecutionConflictError('effect recovery completion raced');
       return completed;
     }
-    const current = await this.authorizationState.load({
-      action: input.action,
-      execution: claimed,
-    });
+    let current: AgentCurrentAuthorization;
+    try {
+      current = await this.authorizationState.load({
+        action: input.action,
+        execution: claimed,
+      });
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+      if (
+        code === 'AGENT_AUTHORIZATION_CHANGED' ||
+        code === 'AGENT_STATE_INVALID' ||
+        code === 'AGENT_OPERATION_DENIED'
+      )
+        return this.failAuthorization(claimed, [code.toLowerCase()]);
+      throw error;
+    }
     const approval =
       current.approvalExecutionId === claimed.id
         ? { ...current.approval, consumedAt: undefined }

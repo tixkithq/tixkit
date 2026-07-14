@@ -1,0 +1,39 @@
+---
+title: API migration from 2026-07-24 to 2026-07-25
+description: Execute an approved immutable agent action through the durable public boundary.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-25
+prerequisites:
+  - An integration using API version 2026-07-24
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-25` adds durable execution for an approved immutable `event.publish` agent action. Existing `2026-07-24` operations remain compatible. Agent protocol `2026-07-25` scopes durable execution idempotency to the explicit agent principal; immutable `2026-07-22` schemas remain exported for compatibility, but principals must negotiate the new literal before preparing or executing actions.
+
+Migration `0084_agent_protocol_2026_07_25` advances existing server-managed principal records from `2026-07-22`. Agents should inspect `GET /v1/agent/session` and accept only the advertised supported protocol before preparing a new action.
+
+## Execute one approved action
+
+Authenticate as the exact agent principal that prepared the action, then call `POST /v1/agent/actions/{actionId}/executions` with:
+
+- `Idempotency-Key: execute:<actionId>:<approvalId>:<actionDigest>`;
+- `X-Tixkit-Confirmation: execute:<actionId>:<approvalId>:<actionDigest>`; and
+- a strict JSON body containing only `approvalId` and the prepared action's exact `actionDigest`.
+
+The JavaScript SDK exposes this operation as `tixkit.agentActions.execute`. Do not send sponsor identity, tenant, resource version, policy version, operation or readiness data. Those bindings remain server-authoritative.
+
+The operation atomically consumes the exact unrevoked approval and creates durable execution evidence. Before the product effect, Tixkit rechecks the explicit principal, sponsor, delegation, tenant and risk policy, current permission and membership, resource and policy versions, approval binding and readiness digest. Changed authority fails closed.
+
+An exact terminal replay returns the same execution. A concurrent retry may receive `409` while another worker holds the execution lease; retry the identical request. One execution records at most one event-publish effect. Failed responses expose a bounded `failureCode`, not provider or database detail.
+
+Execution idempotency is derived from the authenticated agent and original preparation key. Different agents may safely use the same preparation key without colliding. A consumed approval cannot be revoked or reused for another execution.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-25`.

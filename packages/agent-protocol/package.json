@@ -28,9 +28,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./schema": "./schemas/agent-protocol-2026-07-22.json",
+    "./schema": "./schemas/agent-protocol-2026-07-25.json",
     "./schemas/2026-07-11": "./schemas/agent-protocol-2026-07-11.json",
     "./schemas/2026-07-22": "./schemas/agent-protocol-2026-07-22.json",
+    "./schemas/2026-07-25": "./schemas/agent-protocol-2026-07-25.json",
     "./package.json": "./package.json"
   },
   "publishConfig": {

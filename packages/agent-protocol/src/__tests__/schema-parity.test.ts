@@ -14,6 +14,9 @@ import {
 } from '../protocol.js';
 
 const schema = JSON.parse(
+  readFileSync(new URL('../../schemas/agent-protocol-2026-07-25.json', import.meta.url), 'utf8'),
+) as Record<string, unknown>;
+const previousSchema = JSON.parse(
   readFileSync(new URL('../../schemas/agent-protocol-2026-07-22.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
 const legacySchema = JSON.parse(
@@ -23,6 +26,7 @@ const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 installAgentProtocolSchemaKeywords(ajv);
 const validate = ajv.compile(schema);
+const validatePrevious = ajv.compile(previousSchema);
 const validateLegacy = ajv.compile(legacySchema);
 const campaign: CampaignSendPayload = {
   channel: 'email',
@@ -66,11 +70,17 @@ function action(kind: AgentActionKind): AgentAction {
 
 describe('published agent schema parity', () => {
   it('retains the immutable prior protocol contract beside the current schema', () => {
+    const previous = {
+      ...action('event.publish'),
+      protocolVersion: '2026-07-22',
+    };
     const legacy = {
       ...action('event.publish'),
       protocolVersion: '2026-07-11',
       payload: {},
     };
+    expect(validatePrevious(previous), ajv.errorsText(validatePrevious.errors)).toBe(true);
+    expect(validate(previous)).toBe(false);
     expect(validateLegacy(legacy), ajv.errorsText(validateLegacy.errors)).toBe(true);
     expect(validate(legacy)).toBe(false);
     expect((legacySchema.properties as Record<string, { const?: string }>).protocolVersion).toEqual(
@@ -78,6 +88,9 @@ describe('published agent schema parity', () => {
         const: '2026-07-11',
       },
     );
+    expect(
+      (previousSchema.properties as Record<string, { const?: string }>).protocolVersion,
+    ).toEqual({ const: '2026-07-22' });
   });
 
   it('covers every runtime descriptor and accepts the same valid action corpus', () => {

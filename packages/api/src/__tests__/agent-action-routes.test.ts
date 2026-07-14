@@ -1,4 +1,8 @@
-import { AGENT_PROTOCOL_VERSION, type AgentAction } from '@tixkit/agent-protocol';
+import {
+  AGENT_PROTOCOL_VERSION,
+  AgentExecutionConflictError,
+  type AgentAction,
+} from '@tixkit/agent-protocol';
 import type { Principal } from '@tixkit/domain';
 import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
@@ -88,6 +92,25 @@ async function setup(
       approvedAt: '2026-07-14T12:01:00.000Z',
       expiresAt: '2026-07-14T12:06:00.000Z',
       revokedAt: '2026-07-14T12:02:00.000Z',
+    })),
+    execute: vi.fn(async (input) => ({
+      id: `exec_${'f'.repeat(48)}`,
+      tenantId: input.tenantId,
+      actionId: input.actionId,
+      actionDigest: input.actionDigest,
+      agentPrincipalId: input.agentPrincipalId,
+      sponsorPrincipalId: 'user_sponsor',
+      delegationGrantId: 'dlg_primary',
+      approvalId: input.approvalId,
+      idempotencyKey: 'agent-action-route-0001',
+      requestFingerprint: 'f'.repeat(64),
+      state: 'succeeded' as const,
+      resourceVersion: 8,
+      policyVersion: 3,
+      fenceToken: 1,
+      result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+      createdAt: '2026-07-14T12:02:00.000Z',
+      updatedAt: '2026-07-14T12:02:01.000Z',
     })),
     ...input.service,
   };
@@ -288,6 +311,134 @@ describe('agent action routes', () => {
     expect(invalid.statusCode).toBe(400);
     expect(revokeApproval).not.toHaveBeenCalled();
     await humanSetup.app.close();
+  });
+
+  it('executes only as the exact agent with approval-bound confirmation', async () => {
+    const execute = vi.fn(async (input) => ({
+      id: `exec_${'f'.repeat(48)}`,
+      tenantId: input.tenantId,
+      actionId: input.actionId,
+      actionDigest: input.actionDigest,
+      agentPrincipalId: input.agentPrincipalId,
+      sponsorPrincipalId: 'user_sponsor',
+      delegationGrantId: 'dlg_primary',
+      approvalId: input.approvalId,
+      idempotencyKey: 'agent-action-route-0001',
+      requestFingerprint: 'f'.repeat(64),
+      state: 'succeeded' as const,
+      resourceVersion: 8,
+      policyVersion: 3,
+      fenceToken: 1,
+      result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+      createdAt: '2026-07-14T12:02:00.000Z',
+      updatedAt: '2026-07-14T12:02:01.000Z',
+    }));
+    const { app } = await setup({ service: { execute } });
+    const actionId = `act_${'d'.repeat(48)}`;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/executions`,
+      headers: {
+        'idempotency-key': `execute:${actionId}:${approvalId}:${actionDigest}`,
+        'x-tixkit-confirmation': `execute:${actionId}:${approvalId}:${actionDigest}`,
+      },
+      payload: { approvalId, actionDigest },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(execute).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      actionId,
+      approvalId,
+      actionDigest,
+    });
+    await app.close();
+  });
+
+  it('rejects human execution and changed agent confirmation before the service', async () => {
+    const execute = vi.fn();
+    const actionId = `act_${'d'.repeat(48)}`;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const human = await setup({ actor: principal('user'), service: { execute } });
+    const denied = await human.app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/executions`,
+      headers: {
+        'idempotency-key': `execute:${actionId}:${approvalId}:${actionDigest}`,
+        'x-tixkit-confirmation': `execute:${actionId}:${approvalId}:${actionDigest}`,
+      },
+      payload: { approvalId, actionDigest },
+    });
+    expect(denied.statusCode).toBe(403);
+    await human.app.close();
+    const agent = await setup({ service: { execute } });
+    const invalid = await agent.app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/executions`,
+      headers: {
+        'idempotency-key': `execute:${actionId}:${approvalId}:${actionDigest}`,
+        'x-tixkit-confirmation': `execute:${actionId}:${approvalId}:${'c'.repeat(64)}`,
+      },
+      payload: { approvalId, actionDigest },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(execute).not.toHaveBeenCalled();
+    await agent.app.close();
+  });
+
+  it('rejects missing and mismatched execution idempotency keys before the service', async () => {
+    const execute = vi.fn();
+    const actionId = `act_${'d'.repeat(48)}`;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const confirmation = `execute:${actionId}:${approvalId}:${actionDigest}`;
+    const { app } = await setup({ service: { execute } });
+
+    const missing = await app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/executions`,
+      headers: { 'x-tixkit-confirmation': confirmation },
+      payload: { approvalId, actionDigest },
+    });
+    expect(missing.statusCode).toBe(400);
+
+    const mismatched = await app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/executions`,
+      headers: {
+        'idempotency-key': `${confirmation}-changed`,
+        'x-tixkit-confirmation': confirmation,
+      },
+      payload: { approvalId, actionDigest },
+    });
+    expect(mismatched.statusCode).toBe(400);
+    expect(execute).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns conflict when approval or execution binding changes during reservation', async () => {
+    const execute = vi.fn(async () => {
+      throw new AgentExecutionConflictError('agent execution reservation conflicted');
+    });
+    const { app } = await setup({ service: { execute } });
+    const actionId = `act_${'d'.repeat(48)}`;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/executions`,
+      headers: {
+        'idempotency-key': `execute:${actionId}:${approvalId}:${actionDigest}`,
+        'x-tixkit-confirmation': `execute:${actionId}:${approvalId}:${actionDigest}`,
+      },
+      payload: { approvalId, actionDigest },
+    });
+    expect(response.statusCode).toBe(409);
+    await app.close();
   });
 
   it('rejects human callers and never invokes preparation', async () => {

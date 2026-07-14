@@ -4,6 +4,7 @@ import {
   DurableAgentExecutionService,
   AgentExecutionConflictError,
   agentActionDigest,
+  agentExecutionIdempotencyKey,
   type AgentAction,
   type AgentApproval,
   type AgentAuditRecord,
@@ -205,7 +206,7 @@ describe('durable agent execution service', () => {
       expect.objectContaining({
         operation: 'events.publish',
         expectedResourceVersion: 7,
-        idempotencyKey: action.idempotencyKey,
+        idempotencyKey: agentExecutionIdempotencyKey(action),
         agentPrincipalId: 'agent_primary',
         sponsorPrincipalId: 'user_sponsor',
       }),
@@ -325,6 +326,74 @@ describe('durable agent execution service', () => {
     expect(invocations).toHaveLength(0);
     expect(store.audits.at(-1)).toMatchObject({ phase: 'failed' });
     expect(store.audits.at(-1)?.reasonCodes.length).toBeGreaterThan(0);
+  });
+
+  it('scopes execution idempotency to the agent principal', () => {
+    expect(agentExecutionIdempotencyKey(action)).not.toBe(
+      agentExecutionIdempotencyKey({ ...action, agentPrincipalId: 'agent_other' }),
+    );
+    expect(agentExecutionIdempotencyKey(action)).toBe(agentExecutionIdempotencyKey({ ...action }));
+  });
+
+  it.each(['AGENT_AUTHORIZATION_CHANGED', 'AGENT_STATE_INVALID', 'AGENT_OPERATION_DENIED'])(
+    'persists permanent authorization load failure %s',
+    async (code) => {
+      const store = new MemoryStore();
+      const service = new DurableAgentExecutionService(
+        store,
+        {
+          async invoke() {
+            throw new Error('must not invoke');
+          },
+        },
+        { now: () => now },
+        {
+          executionId: () => 'execution_permanent_load_failure',
+          auditId: () => `agent_audit_${store.audits.length}`,
+        },
+        {
+          async load() {
+            throw Object.assign(new Error('authoritative state is invalid'), { code });
+          },
+        },
+      );
+      const reserved = await service.reserve(authorization);
+      await expect(
+        service.run({ action, execution: reserved, workerId: 'worker_permanent_failure' }),
+      ).resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_AUTHORIZATION_CHANGED' });
+      expect(store.audits.at(-1)).toMatchObject({
+        phase: 'failed',
+        reasonCodes: [code.toLowerCase()],
+      });
+    },
+  );
+
+  it('leaves retryable authorization load failures resumable', async () => {
+    const store = new MemoryStore();
+    const service = new DurableAgentExecutionService(
+      store,
+      {
+        async invoke() {
+          throw new Error('must not invoke');
+        },
+      },
+      { now: () => now },
+      {
+        executionId: () => 'execution_retryable_load_failure',
+        auditId: () => `agent_audit_${store.audits.length}`,
+      },
+      {
+        async load() {
+          throw new Error('connection reset');
+        },
+      },
+    );
+    const reserved = await service.reserve(authorization);
+    await expect(
+      service.run({ action, execution: reserved, workerId: 'worker_retryable_failure' }),
+    ).rejects.toThrow('connection reset');
+    expect(store.execution).toMatchObject({ state: 'running' });
+    expect(store.audits.at(-1)?.phase).toBe('started');
   });
 
   it('rejects provider-shaped results with extra fields instead of persisting them', async () => {

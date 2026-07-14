@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-24';
+export const TIXKIT_API_VERSION = '2026-07-25';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1599,7 +1599,7 @@ export type AgentSession = {
 
 export type AgentAction = {
   id: string;
-  protocolVersion: '2026-07-22';
+  protocolVersion: '2026-07-25';
   agentPrincipalId: string;
   sponsorPrincipalId: string;
   delegationGrantId: string;
@@ -1649,6 +1649,29 @@ export type AgentApproval = {
   expiresAt: string;
   revokedAt?: string;
   consumedAt?: string;
+};
+
+export type AgentExecution = {
+  id: string;
+  tenantId: string;
+  actionId: string;
+  actionDigest: string;
+  agentPrincipalId: string;
+  sponsorPrincipalId: string;
+  delegationGrantId: string;
+  approvalId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  state: 'reserved' | 'running' | 'succeeded' | 'failed' | 'compensated';
+  resourceVersion: number;
+  policyVersion: number;
+  fenceToken: number;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  result?: { resourceId: string; resourceVersion: number; status: 'published' };
+  failureCode?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AgentMemoryNamespaceInput =
@@ -4266,6 +4289,21 @@ class AgentActionResource {
         },
       },
     );
+  }
+
+  async execute(input: {
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+  }): Promise<AgentExecution> {
+    const executionKey = `execute:${input.actionId}:${input.approvalId}:${input.actionDigest}`;
+    return this.client.request('POST', `/agent/actions/${input.actionId}/executions`, {
+      body: { approvalId: input.approvalId, actionDigest: input.actionDigest },
+      idempotencyKey: executionKey,
+      headers: {
+        'X-Tixkit-Confirmation': executionKey,
+      },
+    });
   }
 }
 

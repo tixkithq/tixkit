@@ -422,6 +422,16 @@ function assertAudit(
 export class AgentExecutionRepository implements AgentExecutionStore {
   constructor(private readonly db: Kysely<DB>) {}
 
+  async getExecution(tenantId: string, executionId: string): Promise<AgentExecution | undefined> {
+    const row = await this.db
+      .selectFrom('agent_executions')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', executionId)
+      .executeTakeFirst();
+    return row ? toExecution(row) : undefined;
+  }
+
   async assertControlActor(tenantId: string, actorPrincipalId: string): Promise<void> {
     await executeControlTransaction(this.db, async (tx) => {
       await lockControlTenant(tx, tenantId);
@@ -1045,19 +1055,42 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .where('id', '=', input.approval.id)
         .forUpdate()
         .executeTakeFirst();
-      if (!approval) throw new Error('AGENT_APPROVAL_INVALID');
+      if (
+        !approval ||
+        input.approval.id !== input.execution.approvalId ||
+        approval.id !== input.execution.approvalId ||
+        approval.action_digest !== input.execution.actionDigest ||
+        approval.approver_principal_id !== input.execution.sponsorPrincipalId ||
+        (approval.action_id !== null && approval.action_id !== input.execution.actionId)
+      )
+        throw new Error('AGENT_APPROVAL_INVALID');
       const existing = await tx
         .selectFrom('agent_executions')
         .selectAll()
         .where('tenant_id', '=', input.execution.tenantId)
         .where('idempotency_key', '=', input.execution.idempotencyKey)
         .executeTakeFirst();
-      if (existing) return { created: false, execution: toExecution(existing) };
+      if (existing) {
+        if (
+          existing.action_id !== input.execution.actionId ||
+          existing.action_digest !== input.execution.actionDigest ||
+          existing.agent_principal_id !== input.execution.agentPrincipalId ||
+          existing.sponsor_principal_id !== input.execution.sponsorPrincipalId ||
+          existing.delegation_grant_id !== input.execution.delegationGrantId ||
+          existing.approval_id !== input.execution.approvalId ||
+          existing.request_fingerprint !== input.execution.requestFingerprint ||
+          safeInteger(existing.resource_version, 'execution resource version') !==
+            input.execution.resourceVersion ||
+          safeInteger(existing.policy_version, 'execution policy version') !==
+            input.execution.policyVersion
+        )
+          throw new Error('AGENT_EXECUTION_IDEMPOTENCY_CONFLICT');
+        return { created: false, execution: toExecution(existing) };
+      }
 
       const now = await databaseNow(tx);
       const permissions: unknown = JSON.parse(approval.approver_permission_snapshot);
       if (
-        approval.action_digest !== input.execution.actionDigest ||
         safeInteger(approval.policy_version, 'approval policy version') !==
           input.execution.policyVersion ||
         !Array.isArray(permissions) ||

@@ -1030,6 +1030,346 @@ describe.sequential.each(driverCases)(
       },
     );
 
+    it('executes an approved prepared action once and replays the terminal result', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-action-public-execution-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `agent-action-public-execution-approval-${driver}-0001`,
+      });
+      const request = {
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        actionId: prepared.action.id,
+        approvalId: approval.id,
+        actionDigest: prepared.actionDigest,
+      };
+      await expect(
+        service.execute({ ...request, agentPrincipalId: 'agent_substituted' }),
+      ).rejects.toThrow('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+      await expect(service.execute({ ...request, actionDigest: 'f'.repeat(64) })).rejects.toThrow(
+        'AGENT_ACTION_EXECUTION_DIGEST_MISMATCH',
+      );
+      await expect(
+        service.execute({ ...request, approvalId: `apr_${'f'.repeat(48)}` }),
+      ).rejects.toThrow('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+      expect(await db.selectFrom('agent_executions').select('id').execute()).toHaveLength(1);
+      const concurrent = await Promise.allSettled(
+        Array.from({ length: 4 }, () => service.execute(request)),
+      );
+      const fulfilled = concurrent.filter(
+        (result): result is PromiseFulfilledResult<AgentExecution> => result.status === 'fulfilled',
+      );
+      expect(fulfilled.length).toBeGreaterThanOrEqual(1);
+      expect(
+        concurrent
+          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+          .every((result) => result.reason instanceof AgentExecutionConflictError),
+      ).toBe(true);
+      const executed = fulfilled[0]!.value;
+      expect(executed).toMatchObject({
+        state: 'succeeded',
+        actionId: prepared.action.id,
+        approvalId: approval.id,
+        result: {
+          resourceId: action.target.resourceId,
+          resourceVersion: action.target.resourceVersion + 1,
+          status: 'published',
+        },
+      });
+      await expect(service.execute(request)).resolves.toEqual(executed);
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select(['consumed_at', 'consumed_execution_id', 'revoked_at'])
+          .where('id', '=', approval.id)
+          .executeTakeFirstOrThrow(),
+      ).toMatchObject({
+        consumed_at: expect.any(Date),
+        consumed_execution_id: executed.id,
+        revoked_at: null,
+      });
+      expect(
+        await db
+          .selectFrom('agent_action_effects')
+          .select('execution_id')
+          .where('execution_id', '=', executed.id)
+          .execute(),
+      ).toEqual([{ execution_id: executed.id }]);
+      const auditRows = await db
+        .selectFrom('agent_audit_events')
+        .select(['phase', 'action_id', 'approval_id', 'action_digest'])
+        .where('execution_id', '=', executed.id)
+        .execute();
+      expect(auditRows).toHaveLength(4);
+      expect(auditRows.map(({ phase }) => phase)).toEqual(
+        expect.arrayContaining(['prepared', 'authorized', 'started', 'succeeded']),
+      );
+      expect(auditRows).toEqual(
+        expect.arrayContaining(
+          ['prepared', 'authorized', 'started', 'succeeded'].map((phase) => ({
+            phase,
+            action_id: prepared.action.id,
+            approval_id: approval.id,
+            action_digest: prepared.actionDigest,
+          })),
+        ),
+      );
+    });
+
+    it('serializes execution against approval revocation with one safe winner', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-action-execute-revoke-race-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `agent-action-execute-revoke-race-approval-${driver}-0001`,
+      });
+      const [executionResult, revocationResult] = await Promise.allSettled([
+        service.execute({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: prepared.action.id,
+          approvalId: approval.id,
+          actionDigest: prepared.actionDigest,
+        }),
+        service.revokeApproval({
+          tenantId: action.target.tenantId,
+          sponsorPrincipalId: action.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          approvalId: approval.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `agent-action-execute-revoke-race-revocation-${driver}-0001`,
+        }),
+      ]);
+      expect(
+        [executionResult, revocationResult].filter(({ status }) => status === 'fulfilled'),
+      ).toHaveLength(1);
+      if (executionResult.status === 'rejected')
+        expect(executionResult.reason).toBeInstanceOf(AgentExecutionConflictError);
+      if (revocationResult.status === 'rejected')
+        expect(revocationResult.reason).toMatchObject({
+          message: 'AGENT_ACTION_APPROVAL_ALREADY_CONSUMED',
+        });
+      const storedApproval = await db
+        .selectFrom('agent_approvals')
+        .select(['consumed_at', 'consumed_execution_id', 'revoked_at'])
+        .where('id', '=', approval.id)
+        .executeTakeFirstOrThrow();
+      const executionWon = executionResult.status === 'fulfilled';
+      expect(Boolean(storedApproval.consumed_at)).toBe(executionWon);
+      expect(Boolean(storedApproval.consumed_execution_id)).toBe(executionWon);
+      expect(Boolean(storedApproval.revoked_at)).toBe(!executionWon);
+      expect(
+        await db
+          .selectFrom('agent_action_effects')
+          .select('execution_id')
+          .where('action_digest', '=', prepared.actionDigest)
+          .execute(),
+      ).toHaveLength(executionWon ? 1 : 0);
+      expect(
+        await db
+          .selectFrom('agent_action_events')
+          .select('id')
+          .where('action_id', '=', prepared.action.id)
+          .where('phase', '=', 'revoked')
+          .execute(),
+      ).toHaveLength(executionWon ? 0 : 1);
+    });
+
+    it.each([
+      'execution_idempotency',
+      'execution_fingerprint',
+      'resource_version',
+      'policy_version',
+      'approval_consumed_at',
+      'approval_execution_id',
+      'approval_revoked',
+    ] as const)(
+      'rejects terminal replay after persisted %s binding corruption',
+      async (changed) => {
+        const service = new AgentActionService(db);
+        const prepared = await service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-action-replay-binding-${changed}-${driver}-0001`,
+          kind: 'event.publish',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+        });
+        const approval = await service.approve({
+          tenantId: action.target.tenantId,
+          approverPrincipalId: action.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `agent-action-replay-binding-approval-${changed}-${driver}-0001`,
+        });
+        const request = {
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: prepared.action.id,
+          approvalId: approval.id,
+          actionDigest: prepared.actionDigest,
+        };
+        const executed = await service.execute(request);
+        if (changed === 'execution_idempotency')
+          await db
+            .updateTable('agent_executions')
+            .set({ idempotency_key: 'corrupted-execution-key' })
+            .where('id', '=', executed.id)
+            .execute();
+        if (changed === 'execution_fingerprint')
+          await db
+            .updateTable('agent_executions')
+            .set({ request_fingerprint: 'f'.repeat(64) })
+            .where('id', '=', executed.id)
+            .execute();
+        if (changed === 'resource_version')
+          await db
+            .updateTable('agent_executions')
+            .set({ resource_version: executed.resourceVersion + 1 })
+            .where('id', '=', executed.id)
+            .execute();
+        if (changed === 'policy_version')
+          await db
+            .updateTable('agent_executions')
+            .set({ policy_version: executed.policyVersion + 1 })
+            .where('id', '=', executed.id)
+            .execute();
+        if (changed === 'approval_consumed_at')
+          await db
+            .updateTable('agent_approvals')
+            .set({ consumed_at: null })
+            .where('id', '=', approval.id)
+            .execute();
+        if (changed === 'approval_execution_id')
+          await db
+            .updateTable('agent_approvals')
+            .set({ consumed_execution_id: null })
+            .where('id', '=', approval.id)
+            .execute();
+        if (changed === 'approval_revoked')
+          await db
+            .updateTable('agent_approvals')
+            .set({ revoked_at: new Date() })
+            .where('id', '=', approval.id)
+            .execute();
+        await expect(service.execute(request)).rejects.toBeInstanceOf(AgentExecutionConflictError);
+        expect(
+          await db
+            .selectFrom('agent_action_effects')
+            .select('execution_id')
+            .where('execution_id', '=', executed.id)
+            .execute(),
+        ).toHaveLength(1);
+      },
+    );
+
+    it.each(['resource', 'policy', 'permission', 'delegation', 'principal'] as const)(
+      'refuses execution after a material %s change without consuming approval',
+      async (changed) => {
+        const service = new AgentActionService(db);
+        const prepared = await service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-action-execution-stale-${changed}-${driver}-0001`,
+          kind: 'event.publish',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+        });
+        const approval = await service.approve({
+          tenantId: action.target.tenantId,
+          approverPrincipalId: action.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `agent-action-execution-stale-approval-${changed}-${driver}-0001`,
+        });
+        if (changed === 'resource')
+          await db
+            .updateTable('events')
+            .set({ version: action.target.resourceVersion + 1 })
+            .where('id', '=', action.target.resourceId)
+            .execute();
+        if (changed === 'policy')
+          await db
+            .updateTable('agent_action_policies')
+            .set({ policy_version: action.expectedPolicyVersion + 1 })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('action_kind', '=', action.kind)
+            .execute();
+        if (changed === 'permission')
+          await db
+            .deleteFrom('permission_grants')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('principal_id', '=', action.sponsorPrincipalId)
+            .where('permission', '=', 'events.write')
+            .execute();
+        if (changed === 'delegation')
+          await db
+            .updateTable('agent_delegations')
+            .set({ revoked_at: new Date() })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .execute();
+        if (changed === 'principal')
+          await db
+            .updateTable('agent_principals')
+            .set({ state: 'revoked' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.agentPrincipalId)
+            .execute();
+        await expect(
+          service.execute({
+            tenantId: action.target.tenantId,
+            agentPrincipalId: action.agentPrincipalId,
+            actionId: prepared.action.id,
+            approvalId: approval.id,
+            actionDigest: prepared.actionDigest,
+          }),
+        ).rejects.toBeInstanceOf(AgentExecutionConflictError);
+        expect(
+          await db
+            .selectFrom('agent_approvals')
+            .select(['consumed_at', 'consumed_execution_id'])
+            .where('id', '=', approval.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ consumed_at: null, consumed_execution_id: null });
+        expect(
+          await db
+            .selectFrom('agent_executions')
+            .select('id')
+            .where('action_id', '=', prepared.action.id)
+            .execute(),
+        ).toHaveLength(0);
+        expect(
+          await db
+            .selectFrom('agent_action_effects')
+            .select('execution_id')
+            .where('action_digest', '=', prepared.actionDigest)
+            .execute(),
+        ).toHaveLength(0);
+      },
+    );
+
     it('reloads the complete authorization state and executes an idempotent public operation', async () => {
       const state = await adapter.load({ action, execution });
       expect(new Date(state.observedAt).getTime()).toBeGreaterThanOrEqual(
@@ -1076,6 +1416,36 @@ describe.sequential.each(driverCases)(
         db.deleteFrom('agent_action_effects').where('execution_id', '=', execution.id).execute(),
       ).rejects.toThrow(/immutable/u);
     });
+
+    it.each(['missing_policy', 'invalid_principal_state'] as const)(
+      'classifies permanent authorization load failure %s without invoking',
+      async (failure) => {
+        if (failure === 'missing_policy')
+          await db
+            .deleteFrom('agent_action_policies')
+            .where('tenant_id', '=', execution.tenantId)
+            .where('action_kind', '=', action.kind)
+            .execute();
+        if (failure === 'invalid_principal_state')
+          await db
+            .updateTable('agent_principals')
+            .set({ capabilities: '{invalid-json' })
+            .where('tenant_id', '=', execution.tenantId)
+            .where('id', '=', execution.agentPrincipalId)
+            .execute();
+        await expect(adapter.load({ action, execution })).rejects.toMatchObject({
+          code:
+            failure === 'missing_policy' ? 'AGENT_AUTHORIZATION_CHANGED' : 'AGENT_STATE_INVALID',
+        });
+        expect(
+          await db
+            .selectFrom('agent_action_effects')
+            .select('execution_id')
+            .where('execution_id', '=', execution.id)
+            .execute(),
+        ).toHaveLength(0);
+      },
+    );
 
     it('lets a successor reconcile one committed effect after lease loss and revocation', async () => {
       await db

@@ -7,7 +7,7 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-07-24
+last_verified: 2026-07-25
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
@@ -19,6 +19,7 @@ related:
   - /reference/migrations/2026-07-21-to-2026-07-22
   - /reference/migrations/2026-07-22-to-2026-07-23
   - /reference/migrations/2026-07-23-to-2026-07-24
+  - /reference/migrations/2026-07-24-to-2026-07-25
 keywords:
   - agents
   - delegation
@@ -34,7 +35,7 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-07-24` and agent protocol `2026-07-22` support these sponsor-controlled operations:
+API version `2026-07-25` and agent protocol `2026-07-25` support these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
@@ -46,7 +47,8 @@ API version `2026-07-24` and agent protocol `2026-07-22` support these sponsor-c
 - exchange client credentials and inspect an explicit, permission-empty agent session;
 - prepare and retrieve an immutable `event.publish` action with a server-authoritative dry run; and
 - issue a short-lived human approval bound to the exact action digest; and
-- revoke an unconsumed approval through an action-bound, digest-bound lifecycle event.
+- revoke an unconsumed approval through an action-bound, digest-bound lifecycle event; and
+- execute one approved `event.publish` action through a durable, idempotent typed operation.
 
 The initial capabilities are `events.read`, `readiness.read`, `events.prepare` and `events.execute`. Consequential execution still requires a typed action, an immutable plan digest and fresh approval. The registration API does not grant unrestricted delegated autonomy, campaign sending or buyer purchasing.
 
@@ -88,7 +90,11 @@ Preparation never authorizes execution. `eligibleForApproval` means only that th
 
 An exact replay returns the original approval even if authority has since changed, without creating new authority. A new approval request after any material readiness, policy, resource, delegation or permission change fails closed.
 
-The exact human sponsor revokes an unconsumed approval through `tixkit.agentActions.revokeApproval` or `POST /v1/agent/actions/{actionId}/approvals/{approvalId}/revoke`. Revocation remains available after event permission loss, requires the exact action digest and explicit confirmation, converges under exact replay and records one immutable lifecycle event. Cross-sponsor, cross-tenant, changed-binding and consumed-approval attempts fail closed. Public execution lifecycle endpoints are still being completed. Do not treat a prepared or approved action as permission to publish until that execution boundary exists.
+The exact human sponsor revokes an unconsumed approval through `tixkit.agentActions.revokeApproval` or `POST /v1/agent/actions/{actionId}/approvals/{approvalId}/revoke`. Revocation remains available after event permission loss, requires the exact action digest and explicit confirmation, converges under exact replay and records one immutable lifecycle event. Cross-sponsor, cross-tenant, changed-binding and consumed-approval attempts fail closed.
+
+The exact authenticated agent executes through `tixkit.agentActions.execute` or `POST /v1/agent/actions/{actionId}/executions`. Send only the approval identifier and exact action digest, with both `Idempotency-Key` and `X-Tixkit-Confirmation` equal to `execute:<actionId>:<approvalId>:<actionDigest>`. Tixkit atomically consumes the unrevoked approval and reserves durable execution evidence. The typed event-publish boundary then rechecks the current principal, delegation, sponsor membership and permission, tenant and risk policy, event version, approval binding and readiness digest before changing the event.
+
+One execution can create at most one recorded product effect. An exact retry after a terminal result returns the same evidence. A retry while another worker holds the execution lease may return `409`; retry it without changing the action, approval or digest. Permanent authorization changes are recorded as a bounded failed execution, while retryable infrastructure faults leave the leased execution resumable. Approval consumption is consequential: a consumed approval cannot be revoked or transferred to another execution.
 
 ## Memory and managed tools
 

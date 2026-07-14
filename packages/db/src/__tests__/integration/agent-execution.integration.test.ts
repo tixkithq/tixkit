@@ -1,5 +1,6 @@
 import {
   AGENT_PROTOCOL_VERSION,
+  agentExecutionIdempotencyKey,
   type AgentApproval,
   type AgentAuditRecord,
   type AgentDelegationGrant,
@@ -38,7 +39,7 @@ function approval(tenantId: string): AgentApproval {
     id: 'approval_test',
     tenantId,
     actionDigest: 'a'.repeat(64),
-    approverPrincipalId: 'organizer_test',
+    approverPrincipalId: 'user_actor',
     approverPermissionSnapshot: ['events:write'],
     policyVersion: 7,
     approvedAt: new Date(Date.now() - 60_000).toISOString(),
@@ -429,7 +430,14 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
   it('atomically consumes one approval and converges concurrent idempotent reservations', async () => {
     const repository = new AgentExecutionRepository(db);
     const approved = approval(tenantId);
-    const reserved = execution(tenantId);
+    const sharedPreparationKey = 'shared-agent-preparation-key-2026';
+    const reserved = {
+      ...execution(tenantId),
+      idempotencyKey: agentExecutionIdempotencyKey({
+        agentPrincipalId: 'agent_test',
+        idempotencyKey: sharedPreparationKey,
+      }),
+    };
     const registeredPrincipal = principal(tenantId);
     const grantedDelegation = delegation(tenantId);
     const persistedPrincipal = await repository.registerPrincipal(
@@ -611,6 +619,63 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     const executionIds = new Set(results.map((result) => result.execution.id));
     expect(executionIds.size).toBe(1);
     expect(results.filter((result) => result.created)).toHaveLength(1);
+    const substitutedApproval = { ...approved, id: 'approval_substitution' };
+    const substitutedExecution = {
+      ...reserved,
+      id: 'execution_substitution',
+      approvalId: substitutedApproval.id,
+    };
+    await persistApproval(db, substitutedApproval);
+    await expect(
+      repository.reserveAndConsume({
+        execution: substitutedExecution,
+        approval: substitutedApproval,
+        requiredApproverPermission: 'events:write',
+        now: new Date().toISOString(),
+        audit: [
+          audit(substitutedExecution, 'prepared_substitution', 'prepared'),
+          audit(substitutedExecution, 'authorized_substitution', 'authorized'),
+        ],
+      }),
+    ).rejects.toThrow('AGENT_EXECUTION_IDEMPOTENCY_CONFLICT');
+    expect(
+      await db
+        .selectFrom('agent_approvals')
+        .select('consumed_at')
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', substitutedApproval.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ consumed_at: null });
+    const secondAgentApproval = { ...approved, id: 'approval_second_agent' };
+    const secondAgentExecution = {
+      ...reserved,
+      id: 'execution_second_agent',
+      agentPrincipalId: concurrentPrincipal.id,
+      delegationGrantId: concurrentDelegation.id,
+      approvalId: secondAgentApproval.id,
+      idempotencyKey: agentExecutionIdempotencyKey({
+        agentPrincipalId: concurrentPrincipal.id,
+        idempotencyKey: sharedPreparationKey,
+      }),
+      requestFingerprint: 'c'.repeat(64),
+    };
+    expect(secondAgentExecution.idempotencyKey).not.toBe(reserved.idempotencyKey);
+    await persistApproval(db, secondAgentApproval);
+    await expect(
+      repository.reserveAndConsume({
+        execution: secondAgentExecution,
+        approval: secondAgentApproval,
+        requiredApproverPermission: 'events:write',
+        now: new Date().toISOString(),
+        audit: [
+          audit(secondAgentExecution, 'prepared_second_agent', 'prepared'),
+          audit(secondAgentExecution, 'authorized_second_agent', 'authorized'),
+        ],
+      }),
+    ).resolves.toMatchObject({
+      created: true,
+      execution: { id: secondAgentExecution.id, agentPrincipalId: concurrentPrincipal.id },
+    });
     const storedApproval = await db
       .selectFrom('agent_approvals')
       .selectAll()
@@ -634,6 +699,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       .selectFrom('agent_executions')
       .select('id')
       .where('tenant_id', '=', tenantId)
+      .where('approval_id', '=', 'approval_test')
       .executeTakeFirstOrThrow();
     const claimAuthority = await db
       .selectFrom('agent_executions as execution')

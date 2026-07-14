@@ -32,6 +32,12 @@ function iso(value: Date | string): string {
   return (value instanceof Date ? value : new Date(value)).toISOString();
 }
 
+function authorizationChanged(reason: string): never {
+  throw Object.assign(new Error(`agent authorization state changed: ${reason}`), {
+    code: 'AGENT_AUTHORIZATION_CHANGED',
+  });
+}
+
 export function eventPublishReadinessSnapshotSha256(readiness: EventLaunchReadiness): string {
   const { generatedAt: _generatedAt, ...materialState } = readiness;
   return agentSha256(materialState);
@@ -314,9 +320,8 @@ export class EventPublishAgentAdapter
       .selectAll()
       .where('tenant_id', '=', tenantId)
       .where('id', '=', execution.agentPrincipalId);
-    const principal = await (
-      lock ? principalQuery.forUpdate() : principalQuery
-    ).executeTakeFirstOrThrow();
+    const principal = await (lock ? principalQuery.forUpdate() : principalQuery).executeTakeFirst();
+    if (!principal) authorizationChanged('principal_missing');
     const delegationQuery = db
       .selectFrom('agent_delegations')
       .selectAll()
@@ -324,15 +329,15 @@ export class EventPublishAgentAdapter
       .where('id', '=', execution.delegationGrantId);
     const delegation = await (
       lock ? delegationQuery.forUpdate() : delegationQuery
-    ).executeTakeFirstOrThrow();
+    ).executeTakeFirst();
+    if (!delegation) authorizationChanged('delegation_missing');
     const approvalQuery = db
       .selectFrom('agent_approvals')
       .selectAll()
       .where('tenant_id', '=', tenantId)
       .where('id', '=', execution.approvalId);
-    const approval = await (
-      lock ? approvalQuery.forUpdate() : approvalQuery
-    ).executeTakeFirstOrThrow();
+    const approval = await (lock ? approvalQuery.forUpdate() : approvalQuery).executeTakeFirst();
+    if (!approval) authorizationChanged('approval_missing');
     const permissionQuery = db
       .selectFrom('permission_grants')
       .selectAll()
@@ -356,13 +361,15 @@ export class EventPublishAgentAdapter
       .selectAll()
       .where('tenant_id', '=', tenantId)
       .where('action_kind', '=', 'event.publish');
-    const policy = await (lock ? policyQuery.forUpdate() : policyQuery).executeTakeFirstOrThrow();
+    const policy = await (lock ? policyQuery.forUpdate() : policyQuery).executeTakeFirst();
+    if (!policy) authorizationChanged('policy_missing');
     const eventQuery = db
       .selectFrom('events')
       .select(['id', 'organization_id', 'version'])
       .where('tenant_id', '=', tenantId)
       .where('id', '=', eventId);
-    const event = await (lock ? eventQuery.forUpdate() : eventQuery).executeTakeFirstOrThrow();
+    const event = await (lock ? eventQuery.forUpdate() : eventQuery).executeTakeFirst();
+    if (!event) authorizationChanged('event_missing');
     const membershipQuery = db
       .selectFrom('organization_members')
       .select('id')

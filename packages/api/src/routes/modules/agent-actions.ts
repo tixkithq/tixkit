@@ -6,6 +6,7 @@ import {
   ValidationError,
   type Principal,
 } from '@tixkit/domain';
+import { AgentExecutionConflictError } from '@tixkit/agent-protocol';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { ClerkAuthService } from '../../auth/clerk.js';
@@ -25,6 +26,9 @@ const approvalParamsSchema = actionParamsSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
   .strict();
 const approvalSchema = z.object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+const executionSchema = approvalSchema
+  .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
+  .strict();
 
 export interface AgentActionRouteService {
   prepare(input: {
@@ -60,6 +64,13 @@ export interface AgentActionRouteService {
     actionDigest: string;
     idempotencyKey: string;
   }): Promise<import('@tixkit/agent-protocol').AgentApproval>;
+  execute(input: {
+    tenantId: string;
+    agentPrincipalId: string;
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+  }): Promise<import('@tixkit/agent-protocol').AgentExecution>;
 }
 
 export interface AgentActionRouteOptions {
@@ -104,6 +115,7 @@ function idempotencyKey(headers: Record<string, unknown>): string {
 }
 
 function translateAgentActionError(key: string, error: unknown): never {
+  if (error instanceof AgentExecutionConflictError) throw new ConflictError(error.message);
   const message = error instanceof Error ? error.message : '';
   if (message === 'AGENT_ACTION_IDEMPOTENCY_CONFLICT') throw new IdempotencyConflictError(key);
   if (
@@ -128,6 +140,10 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new ConflictError('A consumed agent approval cannot be revoked');
   if (message === 'AGENT_ACTION_APPROVAL_ALREADY_REVOKED')
     throw new ConflictError('Agent action approval is already revoked');
+  if (message === 'AGENT_ACTION_EXECUTION_SCOPE_DENIED')
+    throw new NotFoundError('AgentActionExecution', 'requested');
+  if (message === 'AGENT_ACTION_EXECUTION_DIGEST_MISMATCH')
+    throw new ConflictError('Agent action digest no longer matches the approved action');
   throw error;
 }
 
@@ -228,4 +244,33 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
       translateAgentActionError(key, error);
     }
   });
+
+  app.post(
+    '/agent/actions/:actionId/executions',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      requireAgent(actor);
+      const { actionId } = parseBody(actionParamsSchema, request.params);
+      const { approvalId, actionDigest } = parseBody(executionSchema, request.body);
+      const expectedConfirmation = `execute:${actionId}:${approvalId}:${actionDigest}`;
+      if (request.headers['idempotency-key'] !== expectedConfirmation)
+        throw new ValidationError(`Idempotency-Key must equal ${expectedConfirmation}`);
+      if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
+        throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);
+      try {
+        const execution = await service.execute({
+          tenantId: actor.tenantId,
+          agentPrincipalId: actor.id,
+          actionId,
+          approvalId,
+          actionDigest,
+        });
+        reply.header('Cache-Control', 'no-store');
+        return reply.send(execution);
+      } catch (error) {
+        translateAgentActionError(actionId, error);
+      }
+    },
+  );
 };

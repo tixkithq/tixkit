@@ -27,10 +27,17 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
   if (schema.enum && !schema.enum.includes(example)) return false;
   const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
   if (example === null) return types.includes('null');
-  if (types.includes('array'))
-    return (
-      Array.isArray(example) && example.every((entry) => exampleMatchesSchema(entry, schema.items))
-    );
+  if (types.includes('array')) {
+    if (!Array.isArray(example)) return false;
+    if (typeof schema.minItems === 'number' && example.length < schema.minItems) return false;
+    if (typeof schema.maxItems === 'number' && example.length > schema.maxItems) return false;
+    if (
+      schema.uniqueItems &&
+      new Set(example.map((entry) => JSON.stringify(entry))).size !== example.length
+    )
+      return false;
+    return example.every((entry) => exampleMatchesSchema(entry, schema.items));
+  }
   if (types.includes('object') || schema.properties) {
     if (!example || typeof example !== 'object' || Array.isArray(example)) return false;
     const record = example as Record<string, unknown>;
@@ -39,10 +46,22 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
       return schema.additionalProperties !== false;
     });
   }
-  if (types.includes('string')) return typeof example === 'string';
+  if (types.includes('string')) {
+    if (typeof example !== 'string') return false;
+    if (typeof schema.minLength === 'number' && example.length < schema.minLength) return false;
+    if (typeof schema.maxLength === 'number' && example.length > schema.maxLength) return false;
+    if (typeof schema.pattern === 'string' && !new RegExp(schema.pattern, 'u').test(example))
+      return false;
+    return true;
+  }
   if (types.includes('boolean')) return typeof example === 'boolean';
-  if (types.includes('integer')) return Number.isInteger(example);
-  if (types.includes('number')) return typeof example === 'number';
+  if (types.includes('integer') || types.includes('number')) {
+    if (typeof example !== 'number' || (types.includes('integer') && !Number.isInteger(example)))
+      return false;
+    if (typeof schema.minimum === 'number' && example < schema.minimum) return false;
+    if (typeof schema.maximum === 'number' && example > schema.maximum) return false;
+    return true;
+  }
   return true;
 }
 
@@ -77,7 +96,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-24');
+    expect(openApiSpec.info.version).toBe('2026-07-25');
   });
 
   it('publishes agent-only immutable action preparation without caller-owned bindings', () => {
@@ -86,6 +105,7 @@ describe('openApiSpec', () => {
     const approve = openApiSpec.paths['/agent/actions/{actionId}/approvals'].post;
     const revoke =
       openApiSpec.paths['/agent/actions/{actionId}/approvals/{approvalId}/revoke'].post;
+    const execute = openApiSpec.paths['/agent/actions/{actionId}/executions'].post;
     expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
     expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
     expect(get.responses['401'].description).toMatch(/Agent OAuth or human bearer/u);
@@ -93,6 +113,8 @@ describe('openApiSpec', () => {
     expect(approve.security).not.toContainEqual({ AgentOAuth: ['agent.invoke'] });
     expect(revoke.security).toEqual([{ BearerAuth: [] }]);
     expect(revoke.description).toMatch(/even after losing event permission/u);
+    expect(execute.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(execute.security).not.toContainEqual({ BearerAuth: [] });
     expect(prepare.security).not.toContainEqual({ BearerAuth: [] });
     expect(prepare.security).not.toContainEqual({ ApiKey: [] });
     const body = prepare.requestBody.content['application/json'].schema;
@@ -101,7 +123,7 @@ describe('openApiSpec', () => {
     expect(Object.keys(body.properties)).toEqual(['kind', 'delegationGrantId', 'resourceId']);
     expect(openApiSpec.components.schemas.AgentAction.properties.protocolVersion).toEqual({
       type: 'string',
-      const: '2026-07-22',
+      const: '2026-07-25',
     });
     expect(openApiSpec.components.schemas.AgentAction.required).toEqual(
       expect.arrayContaining([
@@ -137,6 +159,19 @@ describe('openApiSpec', () => {
       additionalProperties: false,
       required: ['actionDigest'],
     });
+    expect(execute.parameters).toContainEqual({
+      $ref: '#/components/parameters/AgentExecutionConfirmation',
+    });
+    expect(execute.parameters).toContainEqual({
+      $ref: '#/components/parameters/AgentExecutionIdempotencyKey',
+    });
+    expect(execute.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['approvalId', 'actionDigest'],
+    });
+    expect(openApiSpec.components.schemas.AgentExecution.required).toEqual(
+      expect.arrayContaining(['actionId', 'approvalId', 'actionDigest', 'state', 'fenceToken']),
+    );
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {
@@ -212,7 +247,7 @@ describe('openApiSpec', () => {
           }
           if (json?.example !== undefined) {
             const serialized = JSON.stringify(json.example);
-            expect(serialized).not.toMatch(/\btk_[A-Za-z0-9_-]+/);
+            expect(serialized).not.toMatch(/\btk_(?!agent_)[A-Za-z0-9_-]+/);
             expect(serialized).not.toContain('one-time-secret');
             expect(
               exampleMatchesSchema(json.example, json.schema),

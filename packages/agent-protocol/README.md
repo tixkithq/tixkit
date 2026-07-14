@@ -10,7 +10,7 @@ The shared Tixkit API and Self-Hosted runtime, third-party Platform API agents, 
 
 ## Status
 
-Experimental organizer-first protocol at version `2026-07-22`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
+Experimental organizer-first protocol at version `2026-07-25`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
 
 ## Installation
 
@@ -42,7 +42,7 @@ Authorization is the intersection of agent capability, sponsor permission, deleg
 
 ## Compatibility
 
-Managed Cloud releases must pin protocol version `2026-07-22` through their Cloud/core compatibility manifest. Changes to canonical bytes, action digests, authorization inputs, approval semantics, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. The immutable `2026-07-11` schema remains exported for compatibility; `2026-07-22` adds the readiness digest required by `event.publish` actions.
+Managed Cloud releases must pin protocol version `2026-07-25` through their Cloud/core compatibility manifest. Changes to canonical bytes, action digests, execution idempotency, authorization inputs, approval semantics, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. The immutable `2026-07-11` and `2026-07-22` schemas remain exported for compatibility; `2026-07-22` added the readiness digest required by `event.publish` actions, and `2026-07-25` scopes durable execution idempotency to the explicit agent principal.
 
 ## Related guides
 
