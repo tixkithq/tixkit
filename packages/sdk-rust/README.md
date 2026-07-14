@@ -10,7 +10,7 @@ Tokio-based server applications integrating Tixkit.
 
 ## Status
 
-Supported crate version 0.1.0 pinned to API version `2026-07-20`.
+Supported crate version 0.1.0 pinned to API version `2026-07-21`.
 
 ## Installation
 
@@ -42,7 +42,7 @@ Keep credentials server-side, verify webhooks from raw bodies, and redact author
 
 ## Compatibility
 
-Cargo semantic versions track API version `2026-07-20`; public Rust types and behavior are the compatibility boundary.
+Cargo semantic versions track API version `2026-07-21`; public Rust types and behavior are the compatibility boundary.
 
 ## Related guides
 

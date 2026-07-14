@@ -1513,6 +1513,8 @@ export interface OAuthApplicationTable {
   client_secret_hash: string;
   redirect_uris: string;
   scopes: string;
+  subject_type: string;
+  agent_principal_id: string | null;
   status: string;
   created_at: Timestamp;
   updated_at: Timestamp;
@@ -1553,6 +1555,8 @@ export interface OAuthAccessTokenTable {
   organization_id: string;
   token_hash: string;
   scopes: string;
+  subject_type: string;
+  subject_id: string | null;
   expires_at: Timestamp;
   revoked_at: Timestamp | null;
   created_at: Timestamp;

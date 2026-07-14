@@ -38,11 +38,17 @@ function createOAuthDb(tables: Tables): Database {
         selectAll() {
           return query;
         },
+        select() {
+          return query;
+        },
         where(column: string, op: string, value: unknown) {
           wheres.push({ column, op, value });
           return query;
         },
         async executeTakeFirst() {
+          if (table === 'tenants') {
+            return { now: tables.__database_clock?.[0]?.now ?? new Date() };
+          }
           return (tables[table] ?? []).find((row) => matchesWheres(row, wheres));
         },
       };
@@ -109,11 +115,27 @@ function oauthApplicationRow(overrides: Row = {}): Row {
     client_secret_hash: hashSecret('tk_secret_legacy'),
     redirect_uris: JSON.stringify(['https://example.com/callback']),
     scopes: JSON.stringify(['events.read']),
+    subject_type: 'resource_owner',
+    agent_principal_id: null,
     status: 'active',
     created_at: new Date('2026-06-01T00:00:00Z'),
     updated_at: new Date('2026-06-01T00:00:00Z'),
     ...overrides,
   };
+}
+
+function agentOAuthApplicationRow(overrides: Row = {}): Row {
+  return oauthApplicationRow({
+    id: 'oapp_agent_1',
+    name: 'Organizer agent',
+    client_id: 'tk_agent_client_1',
+    client_secret_hash: hashSecret('tk_agent_secret_1'),
+    redirect_uris: '[]',
+    scopes: '["agent.invoke"]',
+    subject_type: 'agent',
+    agent_principal_id: 'agt_agent_1',
+    ...overrides,
+  });
 }
 
 function authorizationCodeRow(overrides: Row = {}): Row {
@@ -549,6 +571,119 @@ describe('OAuth authorization code redemption', () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.json().message).toBe('Invalid or expired refresh token');
+    expect(tables.oauth_access_tokens).toHaveLength(0);
+    await app.close();
+  });
+});
+
+describe('agent OAuth client credentials', () => {
+  it('issues a ten-minute agent token with no refresh token using HTTP Basic form authentication', async () => {
+    const databaseNow = new Date('2026-07-14T12:00:00.000Z');
+    const tables: Tables = {
+      __database_clock: [{ now: databaseNow }],
+      oauth_applications: [agentOAuthApplicationRow()],
+      agent_principals: [
+        {
+          id: 'agt_agent_1',
+          tenant_id: 'tnt_1',
+          state: 'active',
+          protocol_version: '2026-07-01',
+        },
+      ],
+      oauth_access_tokens: [],
+    };
+    const app = await setupOAuthApp(tables);
+    const authorization = Buffer.from('tk_agent_client_1:tk_agent_secret_1').toString('base64');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      headers: {
+        authorization: `Basic ${authorization}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      payload: 'grant_type=client_credentials',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      access_token: expect.stringMatching(/^tk_aat_/u),
+      token_type: 'Bearer',
+      expires_in: 600,
+      scope: 'agent.invoke',
+    });
+    expect(response.json()).not.toHaveProperty('refresh_token');
+    expect(tables.oauth_access_tokens).toHaveLength(1);
+    expect(tables.oauth_access_tokens?.[0]).toMatchObject({
+      oauth_application_id: 'oapp_agent_1',
+      refresh_token_id: null,
+      subject_type: 'agent',
+      subject_id: 'agt_agent_1',
+      scopes: '["agent.invoke"]',
+    });
+    expect(tables.oauth_access_tokens?.[0]?.created_at).toEqual(databaseNow);
+    expect(tables.oauth_access_tokens?.[0]?.expires_at).toEqual(
+      new Date(databaseNow.getTime() + 600_000),
+    );
+    await app.close();
+  });
+
+  it('rejects client credentials for resource-owner apps and inactive agent principals', async () => {
+    const resourceTables: Tables = {
+      oauth_applications: [oauthApplicationRow()],
+      oauth_access_tokens: [],
+    };
+    const resourceApp = await setupOAuthApp(resourceTables);
+    const resourceResponse = await resourceApp.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'client_credentials',
+        client_id: 'tk_oauth_legacy',
+        client_secret: 'tk_secret_legacy',
+      },
+    });
+    expect(resourceResponse.statusCode).toBe(401);
+    expect(resourceTables.oauth_access_tokens).toHaveLength(0);
+    await resourceApp.close();
+
+    const inactiveTables: Tables = {
+      oauth_applications: [agentOAuthApplicationRow()],
+      agent_principals: [{ id: 'agt_agent_1', tenant_id: 'tnt_1', state: 'revoked' }],
+      oauth_access_tokens: [],
+    };
+    const inactiveApp = await setupOAuthApp(inactiveTables);
+    const inactiveResponse = await inactiveApp.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'client_credentials',
+        client_id: 'tk_agent_client_1',
+        client_secret: 'tk_agent_secret_1',
+      },
+    });
+    expect(inactiveResponse.statusCode).toBe(401);
+    expect(inactiveTables.oauth_access_tokens).toHaveLength(0);
+    await inactiveApp.close();
+  });
+
+  it('rejects mixed Basic and body client authentication', async () => {
+    const tables: Tables = {
+      oauth_applications: [agentOAuthApplicationRow()],
+      oauth_access_tokens: [],
+    };
+    const app = await setupOAuthApp(tables);
+    const authorization = Buffer.from('tk_agent_client_1:tk_agent_secret_1').toString('base64');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      headers: { authorization: `Basic ${authorization}` },
+      payload: {
+        grant_type: 'client_credentials',
+        client_id: 'tk_agent_client_1',
+        client_secret: 'tk_agent_secret_1',
+      },
+    });
+    expect(response.statusCode).toBe(401);
     expect(tables.oauth_access_tokens).toHaveLength(0);
     await app.close();
   });

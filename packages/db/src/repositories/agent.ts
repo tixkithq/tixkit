@@ -18,6 +18,7 @@ import {
   validateAgentPrincipal,
 } from '@tixkit/agent-protocol';
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
+import { createHash, randomBytes } from 'node:crypto';
 import type { DB } from '../types/db.js';
 
 type Executor = Kysely<DB> | Transaction<DB>;
@@ -108,6 +109,20 @@ export interface AgentControlMutationAudit {
   actorPrincipalId: string;
   reasonCode: string;
   idempotencyKey: string;
+}
+
+export interface AgentOAuthClient {
+  id: string;
+  tenantId: string;
+  organizationId: string;
+  agentPrincipalId: string;
+  name: string;
+  clientId: string;
+  clientSecret?: string;
+  scope: 'agent.invoke';
+  status: 'active' | 'revoked';
+  createdAt: string;
+  updatedAt: string;
 }
 
 function safeInteger(value: number | string | bigint, field: string): number {
@@ -228,7 +243,7 @@ async function appendControlEvent(
   db: Executor,
   input: AgentControlMutationAudit & {
     tenantId: string;
-    targetType: 'principal' | 'delegation' | 'approval';
+    targetType: 'principal' | 'delegation' | 'approval' | 'oauth_client';
     targetId: string;
     operation: 'register' | 'grant' | 'revoke';
     previousState?: unknown;
@@ -411,6 +426,226 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     await executeControlTransaction(this.db, async (tx) => {
       await lockControlTenant(tx, tenantId);
       await authorizeControlActor(tx, tenantId, actorPrincipalId);
+    });
+  }
+
+  async createAgentOAuthClient(input: {
+    tenantId: string;
+    organizationId: string;
+    agentPrincipalId: string;
+    applicationId: string;
+    clientId: string;
+    name: string;
+    audit: AgentControlMutationAudit;
+  }): Promise<AgentOAuthClient> {
+    const requested = {
+      organizationId: input.organizationId,
+      agentPrincipalId: input.agentPrincipalId,
+      applicationId: input.applicationId,
+      clientId: input.clientId,
+      name: input.name,
+      scope: 'agent.invoke',
+    };
+    const fingerprint = controlFingerprint(
+      input.audit,
+      'oauth_client',
+      input.applicationId,
+      'register',
+      requested,
+    );
+    return executeControlTransaction(this.db, async (tx) => {
+      await lockControlTenant(tx, input.tenantId);
+      const actorAuthorizationSha256 = await authorizeControlActor(
+        tx,
+        input.tenantId,
+        input.audit.actorPrincipalId,
+      );
+      const principal = await tx
+        .selectFrom('agent_principals')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.agentPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (
+        !principal ||
+        principal.state !== 'active' ||
+        principal.sponsor_principal_id !== input.audit.actorPrincipalId
+      )
+        throw new Error('AGENT_PRINCIPAL_INACTIVE');
+      const membership = await tx
+        .selectFrom('organization_members')
+        .select('organization_id')
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('user_id', '=', input.audit.actorPrincipalId)
+        .where('accepted_at', 'is not', null)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!membership) throw new Error('AGENT_CONTROL_ORGANIZATION_DENIED');
+      const now = await databaseNow(tx);
+      if (await controlReplay(tx, input.tenantId, input.audit, fingerprint)) {
+        const existing = await tx
+          .selectFrom('oauth_applications')
+          .selectAll()
+          .where('tenant_id', '=', input.tenantId)
+          .where('id', '=', input.applicationId)
+          .where('subject_type', '=', 'agent')
+          .executeTakeFirst();
+        if (!existing || existing.agent_principal_id !== input.agentPrincipalId)
+          throw new Error('AGENT_CONTROL_REPLAY_STATE_MISSING');
+        return {
+          id: existing.id,
+          tenantId: existing.tenant_id,
+          organizationId: existing.organization_id,
+          agentPrincipalId: input.agentPrincipalId,
+          name: existing.name,
+          clientId: existing.client_id,
+          scope: 'agent.invoke',
+          status: existing.status as AgentOAuthClient['status'],
+          createdAt: iso(existing.created_at),
+          updatedAt: iso(existing.updated_at),
+        };
+      }
+      const conflict = await tx
+        .selectFrom('oauth_applications')
+        .select('id')
+        .where('id', '=', input.applicationId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (conflict) throw new Error('AGENT_CONTROL_REFERENCE_CONFLICT');
+      const clientSecret = `tk_agent_secret_${randomBytes(32).toString('base64url')}`;
+      await tx
+        .insertInto('oauth_applications')
+        .values({
+          id: input.applicationId,
+          tenant_id: input.tenantId,
+          organization_id: input.organizationId,
+          name: input.name,
+          client_id: input.clientId,
+          client_secret_hash: createHash('sha256').update(clientSecret).digest('hex'),
+          redirect_uris: '[]',
+          scopes: '["agent.invoke"]',
+          subject_type: 'agent',
+          agent_principal_id: input.agentPrincipalId,
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const result: AgentOAuthClient = {
+        id: input.applicationId,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        agentPrincipalId: input.agentPrincipalId,
+        name: input.name,
+        clientId: input.clientId,
+        clientSecret,
+        scope: 'agent.invoke',
+        status: 'active',
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      const { clientSecret: _clientSecret, ...auditedResult } = result;
+      await appendControlEvent(tx, {
+        ...input.audit,
+        tenantId: input.tenantId,
+        targetType: 'oauth_client',
+        targetId: input.applicationId,
+        operation: 'register',
+        newState: auditedResult,
+        occurredAt: now,
+        requestFingerprint: fingerprint,
+        actorAuthorizationSha256,
+        outcome: 'applied',
+      });
+      return result;
+    });
+  }
+
+  async revokeAgentOAuthClient(input: {
+    tenantId: string;
+    agentPrincipalId: string;
+    applicationId: string;
+    audit: AgentControlMutationAudit;
+  }): Promise<boolean> {
+    const requested = { status: 'revoked' };
+    const fingerprint = controlFingerprint(
+      input.audit,
+      'oauth_client',
+      input.applicationId,
+      'revoke',
+      requested,
+    );
+    return executeControlTransaction(this.db, async (tx) => {
+      await lockControlTenant(tx, input.tenantId);
+      const actorAuthorizationSha256 = await authorizeControlActor(
+        tx,
+        input.tenantId,
+        input.audit.actorPrincipalId,
+      );
+      const principal = await tx
+        .selectFrom('agent_principals')
+        .select(['sponsor_principal_id'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.agentPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!principal || principal.sponsor_principal_id !== input.audit.actorPrincipalId)
+        throw new Error('AGENT_CONTROL_SPONSOR_MISMATCH');
+      const application = await tx
+        .selectFrom('oauth_applications')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.applicationId)
+        .where('subject_type', '=', 'agent')
+        .where('agent_principal_id', '=', input.agentPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      const replay = await controlReplay(tx, input.tenantId, input.audit, fingerprint);
+      if (replay) return replay === 'applied';
+      const now = await databaseNow(tx);
+      if (!application || application.status === 'revoked') {
+        await appendControlEvent(tx, {
+          ...input.audit,
+          tenantId: input.tenantId,
+          targetType: 'oauth_client',
+          targetId: input.applicationId,
+          operation: 'revoke',
+          newState: requested,
+          occurredAt: now,
+          requestFingerprint: fingerprint,
+          actorAuthorizationSha256,
+          outcome: 'not_found',
+        });
+        return false;
+      }
+      await tx
+        .updateTable('oauth_applications')
+        .set({ status: 'revoked', updated_at: now })
+        .where('id', '=', application.id)
+        .where('status', '=', 'active')
+        .executeTakeFirst();
+      await tx
+        .updateTable('oauth_access_tokens')
+        .set({ revoked_at: now, updated_at: now })
+        .where('oauth_application_id', '=', application.id)
+        .where('revoked_at', 'is', null)
+        .execute();
+      await appendControlEvent(tx, {
+        ...input.audit,
+        tenantId: input.tenantId,
+        targetType: 'oauth_client',
+        targetId: input.applicationId,
+        operation: 'revoke',
+        previousState: application,
+        newState: { ...application, status: 'revoked', updated_at: now },
+        occurredAt: now,
+        requestFingerprint: fingerprint,
+        actorAuthorizationSha256,
+        outcome: 'applied',
+      });
+      return true;
     });
   }
 

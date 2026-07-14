@@ -525,6 +525,8 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
         client_secret_hash: clientSecretHash,
         redirect_uris: JSON.stringify(body.redirectUris),
         scopes: JSON.stringify(body.scopes),
+        subject_type: 'resource_owner',
+        agent_principal_id: null,
         status: 'active',
         created_at: now,
         updated_at: now,
@@ -577,6 +579,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
         'updated_at',
       ])
       .where('tenant_id', '=', principal.tenantId)
+      .where('subject_type', '=', 'resource_owner')
       .orderBy('id', 'asc')
       .limit(pagination.limit + 1);
     if (pagination.cursor) query = query.where('id', '>', pagination.cursor);
@@ -610,6 +613,7 @@ export const developerRoutes: FastifyPluginAsync = async (app) => {
       .selectFrom('oauth_applications')
       .selectAll()
       .where('id', '=', appId)
+      .where('subject_type', '=', 'resource_owner')
       .executeTakeFirst();
     if (!oauthApp) throw new NotFoundError('OAuthApplication', appId);
     ClerkAuthService.requireResourceTenant(principal, oauthApp, 'OAuthApplication', appId);

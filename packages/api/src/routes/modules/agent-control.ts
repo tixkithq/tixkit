@@ -64,6 +64,15 @@ const grantDelegationSchema = z
   .strict();
 
 const idParamsSchema = z.object({ id: agentIdSchema }).strict();
+const oauthClientParamsSchema = z
+  .object({ id: agentIdSchema, clientId: z.string().regex(/^oapp_[a-f0-9]{27}$/u) })
+  .strict();
+const createOAuthClientSchema = z
+  .object({
+    organizationId: z.string().min(3).max(64),
+    name: z.string().trim().min(1).max(120),
+  })
+  .strict();
 
 export type AgentControlStore = Pick<
   AgentExecutionRepository,
@@ -74,7 +83,8 @@ export type AgentControlStore = Pick<
   | 'grantDelegation'
   | 'revokePrincipal'
   | 'revokeDelegation'
->;
+> &
+  Partial<Pick<AgentExecutionRepository, 'createAgentOAuthClient' | 'revokeAgentOAuthClient'>>;
 
 export interface AgentControlRouteOptions {
   repository?: AgentControlStore;
@@ -158,6 +168,8 @@ async function translateControlError<T>(key: string, operation: () => Promise<T>
       throw new ConflictError('Agent stable reference is already in use');
     if (message === 'AGENT_CONTROL_ACTOR_DENIED')
       throw new ForbiddenError('Agent control authorization changed');
+    if (message === 'AGENT_CONTROL_ORGANIZATION_DENIED')
+      throw new ForbiddenError('Agent credential organization authorization changed');
     if (
       message === 'AGENT_CONTROL_SPONSOR_MISMATCH' ||
       message === 'AGENT_CONTROL_SPONSOR_PERMISSION_DENIED'
@@ -255,6 +267,59 @@ export const agentControlRoutes: FastifyPluginAsync<AgentControlRouteOptions> = 
     );
     if (!revoked) throw new NotFoundError('AgentPrincipal', id);
     return { id, state: 'revoked' as const };
+  });
+
+  app.post('/agent-principals/:id/oauth-clients', async (request, reply) => {
+    const actor = request.principal!;
+    requireHumanAgentAdministrator(actor);
+    const key = idempotencyKey(request.headers);
+    const { id } = parseBody(idParamsSchema, request.params);
+    const body = parseBody(createOAuthClientSchema, request.body);
+    ClerkAuthService.requireOrganizationScope(actor, body.organizationId);
+    const createClient = repository.createAgentOAuthClient;
+    if (!createClient) throw new Error('Agent OAuth credential storage is unavailable');
+    const stableReference = createHash('sha256')
+      .update(actor.tenantId)
+      .update('\0')
+      .update(actor.id)
+      .update('\0')
+      .update(id)
+      .update('\0')
+      .update(key)
+      .digest('hex')
+      .slice(0, 48);
+    const credential = await translateControlError(key, () =>
+      createClient.call(repository, {
+        tenantId: actor.tenantId,
+        organizationId: body.organizationId,
+        agentPrincipalId: id,
+        applicationId: `oapp_${stableReference.slice(0, 27)}`,
+        clientId: `tk_agent_${stableReference}`,
+        name: body.name,
+        audit: controlAudit(actor, key, 'PLATFORM_AGENT_OAUTH_CLIENT_CREATE'),
+      }),
+    );
+    if (credential.clientSecret) reply.header('cache-control', 'no-store');
+    return reply.status(credential.clientSecret ? 201 : 200).send(credential);
+  });
+
+  app.post('/agent-principals/:id/oauth-clients/:clientId/revoke', async (request) => {
+    const actor = request.principal!;
+    requireHumanAgentAdministrator(actor);
+    const key = idempotencyKey(request.headers);
+    const { id, clientId } = parseBody(oauthClientParamsSchema, request.params);
+    const revokeClient = repository.revokeAgentOAuthClient;
+    if (!revokeClient) throw new Error('Agent OAuth credential storage is unavailable');
+    const revoked = await translateControlError(key, () =>
+      revokeClient.call(repository, {
+        tenantId: actor.tenantId,
+        agentPrincipalId: id,
+        applicationId: clientId,
+        audit: controlAudit(actor, key, 'PLATFORM_AGENT_OAUTH_CLIENT_REVOKE'),
+      }),
+    );
+    if (!revoked) throw new NotFoundError('AgentOAuthClient', clientId);
+    return { id: clientId, status: 'revoked' as const };
   });
 
   app.post('/agent-delegations', async (request, reply) => {

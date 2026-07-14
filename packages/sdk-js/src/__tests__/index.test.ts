@@ -2969,6 +2969,17 @@ describe('TixkitClient new resource methods', () => {
     });
     await c.agentControl.getPrincipal('agt_1');
     await c.agentControl.revokePrincipal('agt_1', 'agent-revoke-000001');
+    await c.agentControl.createOAuthClient({
+      agentPrincipalId: 'agt_1',
+      organizationId: 'org_1',
+      name: 'Automation client',
+      idempotencyKey: 'agent-oauth-create-0001',
+    });
+    await c.agentControl.revokeOAuthClient(
+      'agt_1',
+      'oapp_aaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'agent-oauth-revoke-0001',
+    );
     await c.agentControl.grantDelegation({
       id: 'external_delegation_1',
       agentPrincipalId: 'agt_1',
@@ -2994,6 +3005,16 @@ describe('TixkitClient new resource methods', () => {
       },
       {
         method: 'POST',
+        url: 'https://api.test/v1/agent-principals/agt_1/oauth-clients',
+        headers: { 'Idempotency-Key': 'agent-oauth-create-0001' },
+      },
+      {
+        method: 'POST',
+        url: 'https://api.test/v1/agent-principals/agt_1/oauth-clients/oapp_aaaaaaaaaaaaaaaaaaaaaaaaaaa/revoke',
+        headers: { 'Idempotency-Key': 'agent-oauth-revoke-0001' },
+      },
+      {
+        method: 'POST',
         url: 'https://api.test/v1/agent-delegations',
         headers: { 'Idempotency-Key': 'agent-delegate-0001' },
       },
@@ -3004,8 +3025,71 @@ describe('TixkitClient new resource methods', () => {
       },
     ]);
     expect(JSON.parse(calls[0]!.body)).not.toHaveProperty('tenantId');
-    expect(JSON.parse(calls[3]!.body)).not.toHaveProperty('permissionSnapshot');
-    expect(JSON.parse(calls[3]!.body)).not.toHaveProperty('issuedAt');
+    expect(JSON.parse(calls[3]!.body)).toEqual({
+      organizationId: 'org_1',
+      name: 'Automation client',
+    });
+    expect(JSON.parse(calls[5]!.body)).not.toHaveProperty('permissionSnapshot');
+    expect(JSON.parse(calls[5]!.body)).not.toHaveProperty('issuedAt');
+  });
+
+  it('agentAuth exchanges server-side credentials and inspects explicit agent identity', async () => {
+    const fm = mockFetch(200, {
+      access_token: 'tk_aat_token',
+      token_type: 'Bearer',
+      expires_in: 600,
+      scope: 'agent.invoke',
+    });
+    const unauthenticated = new TixkitClient({
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await unauthenticated.agentAuth.exchangeClientCredentials({
+      clientId: 'tk_agent_client',
+      clientSecret: 'tk_agent_secret_once',
+    });
+    const credentialCall = getCall(fm);
+    expect(credentialCall).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/oauth/token',
+    });
+    expect(JSON.parse(credentialCall.body)).toEqual({
+      grant_type: 'client_credentials',
+      client_id: 'tk_agent_client',
+      client_secret: 'tk_agent_secret_once',
+    });
+    expect(credentialCall.headers).not.toHaveProperty('Authorization');
+
+    const agentClient = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    await agentClient.agentAuth.session();
+    const sessionCall = getCall(fm, 1);
+    expect(sessionCall).toMatchObject({
+      method: 'GET',
+      url: 'https://api.test/v1/agent/session',
+      headers: { Authorization: 'Bearer tk_aat_token' },
+    });
+  });
+
+  it('agentAuth refuses client-secret exchange in browser runtimes', async () => {
+    const runtime = globalThis as typeof globalThis & { window?: unknown; document?: unknown };
+    runtime.window = {};
+    runtime.document = {};
+    try {
+      const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+      await expect(
+        client.agentAuth.exchangeClientCredentials({
+          clientId: 'tk_agent_client',
+          clientSecret: 'tk_agent_secret_once',
+        }),
+      ).rejects.toThrow('Agent OAuth client secrets are server-only');
+    } finally {
+      delete runtime.window;
+      delete runtime.document;
+    }
   });
 
   it('agentMemory binds inspectable, correctable, exportable, and deletable memory to audited requests', async () => {

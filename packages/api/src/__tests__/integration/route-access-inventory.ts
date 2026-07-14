@@ -29,7 +29,7 @@ export type RouteAccessInventory = {
 };
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
-const credentialOnlyOperations = new Set(['getMe']);
+const credentialOnlyOperations = new Set(['getAgentSession', 'getMe']);
 const delegatedAuthorizationGuards = new Set([
   'assertPrincipalCanAuthorizeOrganizationWideOAuth',
   'assertPrincipalCanAuthorizeResourceOwnerOAuth',

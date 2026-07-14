@@ -77,7 +77,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-20');
+    expect(openApiSpec.info.version).toBe('2026-07-21');
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {
@@ -411,6 +411,65 @@ describe('openApiSpec', () => {
     expect(grantSchema.properties.resourceScopes.uniqueItems).toBe(true);
     expect(openApiSpec.components.schemas.AgentPrincipal.required).toContain('protocolVersion');
     expect(openApiSpec.components.schemas.AgentDelegation.required).toContain('permissionSnapshot');
+  });
+
+  it('documents sponsor-created agent credentials and default-isolated agent authentication', () => {
+    const create = openApiSpec.paths['/agent-principals/{id}/oauth-clients'].post;
+    const revoke = openApiSpec.paths['/agent-principals/{id}/oauth-clients/{clientId}/revoke'].post;
+    const session = openApiSpec.paths['/agent/session'].get;
+    const token = openApiSpec.paths['/oauth/token'].post;
+
+    for (const operation of [create, revoke]) {
+      expect(operation.security).toEqual([{ BearerAuth: [] }]);
+      expect(operation['x-required-permissions']).toEqual(['developers.write']);
+      expect(operation.parameters).toContainEqual({
+        $ref: '#/components/parameters/AgentControlIdempotencyKey',
+      });
+      expect(operation.tags).toEqual(['Agent platform']);
+    }
+    expect(create.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['organizationId', 'name'],
+    });
+    expect(openApiSpec.components.schemas.AgentOAuthClient.properties.clientSecret).toMatchObject({
+      readOnly: true,
+    });
+    expect(openApiSpec.components.schemas.AgentOAuthClient.required).not.toContain('clientSecret');
+    expect(openApiSpec.components.schemas.AgentOAuthClientCreated.required).toContain(
+      'clientSecret',
+    );
+    expect(create.responses['201'].content['application/json'].schema.$ref).toContain(
+      'AgentOAuthClientCreated',
+    );
+    expect(create.responses['200'].content['application/json'].schema.$ref).toContain(
+      'AgentOAuthClient',
+    );
+    expect(session.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(session.tags).toEqual(['Agent platform']);
+    expect(openApiSpec.components.securitySchemes.AgentOAuth.flows.clientCredentials).toMatchObject(
+      {
+        tokenUrl: '/v1/oauth/token',
+        scopes: { 'agent.invoke': expect.any(String) },
+      },
+    );
+    for (const server of openApiSpec.servers) {
+      expect(
+        new URL(
+          openApiSpec.components.securitySchemes.AgentOAuth.flows.clientCredentials.tokenUrl,
+          server.url,
+        ).pathname,
+      ).toBe('/v1/oauth/token');
+    }
+    expect(
+      openApiSpec.components.schemas.AgentSession.properties.authentication.properties
+        .productPermissions.maxItems,
+    ).toBe(0);
+    expect(
+      token.requestBody.content['application/json'].schema.properties.grant_type.enum,
+    ).toContain('client_credentials');
+    expect(token.requestBody.content).toHaveProperty('application/x-www-form-urlencoded');
+    expect(token.requestBody.content['application/json'].schema.required).toEqual(['grant_type']);
+    expect(token.description).toContain('never receive a refresh token');
   });
 
   it('documents organizer-controlled agent memory without writable ownership fields', () => {

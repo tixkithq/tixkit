@@ -7,7 +7,7 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-07-20
+last_verified: 2026-07-21
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
@@ -15,6 +15,7 @@ related:
   - /platform
   - /reference/api
   - /reference/migrations/2026-07-19-to-2026-07-20
+  - /reference/migrations/2026-07-20-to-2026-07-21
 keywords:
   - agents
   - delegation
@@ -30,14 +31,16 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-07-20` supports these sponsor-controlled operations:
+API version `2026-07-21` supports these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
 - revoke a principal and its active delegations atomically;
 - grant time-bounded event delegations;
 - revoke a delegation; and
-- create, inspect, correct, export and delete separately retained organizer memory.
+- create, inspect, correct, export and delete separately retained organizer memory;
+- create and revoke sponsor-bound OAuth clients for active agents; and
+- exchange client credentials and inspect an explicit, permission-empty agent session.
 
 The initial capabilities are `events.read`, `readiness.read`, `events.prepare` and `events.execute`. Consequential execution still requires a typed action, an immutable plan digest and fresh approval. The registration API does not grant unrestricted delegated autonomy, campaign sending or buyer purchasing.
 
@@ -46,6 +49,14 @@ The initial capabilities are `events.read`, `readiness.read`, `events.prepare` a
 Agent administration accepts only a human bearer principal with tenant-wide `developers.write`. API keys, mobile principals, system principals and users restricted to selected brands or events fail closed. The sponsor must also hold the current event permission implied by every requested capability.
 
 Do not give the agent the sponsor's session. Register the agent while acting as the human sponsor, then use the returned principal identifier in later delegation requests.
+
+## Authenticate the agent
+
+Create a credential with `POST /v1/agent-principals/{id}/oauth-clients`. Its organization is credential-administration ownership only; it does not grant event access. Store the returned `clientSecret` immediately because it is shown once and omitted from idempotent replays. Multiple clients are supported so you can create a replacement before revoking the old credential.
+
+Exchange the client ID and secret at `POST /v1/oauth/token` with `grant_type=client_credentials`. Use HTTP Basic or JSON/form fields, never both and never query parameters. The response is a ten-minute `tk_aat_...` token with fixed `agent.invoke` scope and no refresh token. The JavaScript SDK exposes this server-side flow as `tixkit.agentAuth.exchangeClientCredentials`.
+
+Call `GET /v1/agent/session` with that token to verify the live explicit principal. The session has no organization authority or product permissions. Agent authentication never copies sponsor scopes: current delegation and policy checks remain separate and mandatory for every action. All generic authenticated routes deny agent principals unless their route contract explicitly opts in. Client or principal revocation takes effect on the next request.
 
 ## Register an explicit principal
 

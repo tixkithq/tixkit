@@ -5,7 +5,7 @@ export type { Permission } from './permissions.js';
 export { ALL_PERMISSIONS } from './permissions.js';
 export * from './roles.js';
 
-export type PrincipalType = 'user' | 'api_key' | 'mobile_device' | 'system';
+export type PrincipalType = 'user' | 'api_key' | 'mobile_device' | 'agent' | 'system';
 
 export type Principal = {
   type: PrincipalType;
@@ -79,6 +79,8 @@ export type OAuthApplication = TenantScopedEntity & {
   clientSecretHash: string;
   redirectUris: string[];
   scopes: Permission[];
+  subjectType: 'resource_owner' | 'agent';
+  agentPrincipalId?: string;
 };
 
 export type ScannerDevice = TenantScopedEntity & {

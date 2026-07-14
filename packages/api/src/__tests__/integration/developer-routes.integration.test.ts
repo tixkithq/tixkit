@@ -1424,6 +1424,66 @@ describe('developer routes integration', () => {
     await app.close();
   });
 
+  it('hides agent OAuth clients from generic listing and refuses generic revocation', async () => {
+    const principal: Principal = {
+      type: 'user',
+      id: 'usr_other_developer',
+      tenantId: 'tnt_1',
+      organizationIds: ['org_1'],
+      scopes: ['developers.write'],
+    };
+    const now = new Date('2026-07-14T12:00:00.000Z');
+    const tables: Record<string, Record<string, unknown>[]> = {
+      oauth_applications: [
+        {
+          id: 'oapp_resource_owner',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Resource owner app',
+          client_id: 'tk_oauth_resource',
+          redirect_uris: '[]',
+          scopes: '["events.read"]',
+          subject_type: 'resource_owner',
+          agent_principal_id: null,
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: 'oapp_agent_private',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          name: 'Sponsor-bound agent app',
+          client_id: 'tk_agent_private',
+          redirect_uris: '[]',
+          scopes: '["agent.invoke"]',
+          subject_type: 'agent',
+          agent_principal_id: 'agt_private',
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      audit_logs: [],
+    };
+    const app = await setupDeveloperRouteApp(principal, createWebhookDb(tables));
+
+    const list = await app.inject({ method: 'GET', url: '/oauth-applications' });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().items).toHaveLength(1);
+    expect(list.json().items[0].id).toBe('oapp_resource_owner');
+    expect(JSON.stringify(list.json())).not.toContain('oapp_agent_private');
+
+    const revoke = await app.inject({
+      method: 'DELETE',
+      url: '/oauth-applications/oapp_agent_private',
+    });
+    expect(revoke.statusCode).toBe(404);
+    expect(tables.oauth_applications[1]?.status).toBe('active');
+    expect(tables.audit_logs).toHaveLength(0);
+    await app.close();
+  });
+
   it('paginates webhook delivery events in newest-first delivery order', async () => {
     const principal: Principal = {
       type: 'user',
@@ -1864,7 +1924,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-07-20',
+        apiVersion: '2026-07-21',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'order.paid',
@@ -1991,7 +2051,7 @@ describe('developer routes integration', () => {
     expect(startWebhookDelivery).toHaveBeenCalledTimes(1);
     expect(startWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiVersion: '2026-07-20',
+        apiVersion: '2026-07-21',
         endpointId: 'wh_1',
         eventId: 'whe_1',
         eventType: 'test.ping',
@@ -1999,7 +2059,7 @@ describe('developer routes integration', () => {
         payload: expect.objectContaining({
           type: 'test.ping',
           test: true,
-          apiVersion: '2026-07-20',
+          apiVersion: '2026-07-21',
           data: { endpointId: 'wh_1' },
         }),
         replayNonce: expect.any(String),

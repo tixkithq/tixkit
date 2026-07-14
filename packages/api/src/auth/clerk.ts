@@ -10,6 +10,7 @@ import {
 } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { sql } from 'kysely';
 
 export type AuthResult = {
   principal: Principal;
@@ -788,6 +789,78 @@ export class ClerkAuthService {
     };
   }
 
+  async authenticateAgentAccessToken(request: FastifyRequest): Promise<AuthResult> {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer tk_aat_')) {
+      throw new UnauthorizedError('Missing or invalid agent access token');
+    }
+
+    const rawToken = authHeader.substring(7);
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const accessToken = await this.db
+      .selectFrom('oauth_access_tokens')
+      .innerJoin(
+        'oauth_applications',
+        'oauth_applications.id',
+        'oauth_access_tokens.oauth_application_id',
+      )
+      .innerJoin('agent_principals', (join) =>
+        join
+          .onRef('agent_principals.id', '=', 'oauth_access_tokens.subject_id')
+          .onRef('agent_principals.tenant_id', '=', 'oauth_access_tokens.tenant_id'),
+      )
+      .select([
+        'oauth_access_tokens.id as token_id',
+        'oauth_access_tokens.tenant_id as token_tenant_id',
+        'oauth_access_tokens.subject_id as token_subject_id',
+        'oauth_access_tokens.subject_type as token_subject_type',
+        'oauth_access_tokens.revoked_at as token_revoked_at',
+        'oauth_applications.tenant_id as app_tenant_id',
+        'oauth_applications.subject_type as app_subject_type',
+        'oauth_applications.agent_principal_id as app_agent_principal_id',
+        'oauth_applications.status as app_status',
+        'agent_principals.id as agent_principal_id',
+        'agent_principals.tenant_id as agent_tenant_id',
+        'agent_principals.state as agent_state',
+      ])
+      .where('oauth_access_tokens.token_hash', '=', tokenHash)
+      .where('oauth_access_tokens.expires_at', '>', sql<Date>`current_timestamp`)
+      .executeTakeFirst();
+
+    if (
+      !accessToken ||
+      accessToken.token_revoked_at ||
+      accessToken.token_subject_type !== 'agent' ||
+      accessToken.app_subject_type !== 'agent' ||
+      accessToken.app_status !== 'active' ||
+      accessToken.agent_state !== 'active' ||
+      !accessToken.token_subject_id ||
+      accessToken.token_subject_id !== accessToken.app_agent_principal_id ||
+      accessToken.token_subject_id !== accessToken.agent_principal_id ||
+      accessToken.token_tenant_id !== accessToken.app_tenant_id ||
+      accessToken.token_tenant_id !== accessToken.agent_tenant_id
+    ) {
+      throw new UnauthorizedError('Invalid, expired, or revoked agent access token');
+    }
+
+    await this.db
+      .updateTable('oauth_access_tokens')
+      .set({ updated_at: sql<Date>`current_timestamp` })
+      .where('id', '=', accessToken.token_id)
+      .where('revoked_at', 'is', null)
+      .execute();
+
+    return {
+      principal: {
+        type: 'agent',
+        id: accessToken.agent_principal_id,
+        tenantId: accessToken.agent_tenant_id,
+        organizationIds: [],
+        scopes: [],
+      },
+    };
+  }
+
   /**
    * Authenticates a mobile scanner device via the `X-Device-Id` /
    * `X-Device-Secret` headers and maps it to a check-in scoped Principal.
@@ -978,6 +1051,9 @@ export function createAuthMiddleware(authService: AuthMiddlewareProvider) {
     try {
       if (request.headers['x-device-id']) {
         const result = await authService.authenticateScannerDevice(request);
+        request.principal = result.principal;
+      } else if (authHeader?.startsWith('Bearer tk_aat_')) {
+        const result = await authService.authenticateAgentAccessToken(request);
         request.principal = result.principal;
       } else if (authHeader?.startsWith('Bearer tk_oat_')) {
         const result = await authService.authenticateOAuthAccessToken(request);

@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-20';
+export const TIXKIT_API_VERSION = '2026-07-21';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1565,6 +1565,38 @@ export type GrantAgentDelegationInput = {
   idempotencyKey: string;
 };
 
+export type AgentOAuthClient = {
+  id: string;
+  tenantId: string;
+  organizationId: string;
+  agentPrincipalId: string;
+  name: string;
+  clientId: string;
+  clientSecret?: string;
+  scope: 'agent.invoke';
+  status: 'active' | 'revoked';
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentOAuthTokenResponse = {
+  access_token: string;
+  token_type: 'Bearer';
+  expires_in: 600;
+  scope: 'agent.invoke';
+};
+
+export type AgentSession = {
+  principal: AgentPrincipal & { updatedAt: string };
+  authentication: {
+    grantType: 'client_credentials';
+    scope: 'agent.invoke';
+    productPermissions: [];
+  };
+  delegationRequired: true;
+  supportedProtocolVersion: string;
+};
+
 export type AgentMemoryNamespaceInput =
   | {
       scopeType: 'workspace';
@@ -2722,6 +2754,7 @@ export class TixkitClient {
   readonly checkIns: CheckInResource;
   readonly apiKeys: ApiKeyResource;
   readonly agentControl: AgentControlResource;
+  readonly agentAuth: AgentAuthResource;
   readonly agentMemory: AgentMemoryResource;
   readonly scannerDevices: ScannerDeviceResource;
   readonly reports: ReportResource;
@@ -2772,6 +2805,7 @@ export class TixkitClient {
     this.checkIns = new CheckInResource(this);
     this.apiKeys = new ApiKeyResource(this);
     this.agentControl = new AgentControlResource(this);
+    this.agentAuth = new AgentAuthResource(this);
     this.agentMemory = new AgentMemoryResource(this);
     this.scannerDevices = new ScannerDeviceResource(this);
     this.reports = new ReportResource(this);
@@ -4051,6 +4085,31 @@ class AgentControlResource {
     });
   }
 
+  async createOAuthClient(input: {
+    agentPrincipalId: string;
+    organizationId: string;
+    name: string;
+    idempotencyKey: string;
+  }): Promise<AgentOAuthClient> {
+    const { agentPrincipalId, idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/agent-principals/${agentPrincipalId}/oauth-clients`, {
+      body,
+      idempotencyKey,
+    });
+  }
+
+  async revokeOAuthClient(
+    agentPrincipalId: string,
+    oauthClientId: string,
+    idempotencyKey: string,
+  ): Promise<{ id: string; status: 'revoked' }> {
+    return this.client.request(
+      'POST',
+      `/agent-principals/${agentPrincipalId}/oauth-clients/${oauthClientId}/revoke`,
+      { idempotencyKey },
+    );
+  }
+
   async grantDelegation(input: GrantAgentDelegationInput): Promise<AgentDelegation> {
     const { idempotencyKey, ...body } = input;
     return this.client.request('POST', '/agent-delegations', { body, idempotencyKey });
@@ -4063,6 +4122,30 @@ class AgentControlResource {
     return this.client.request('POST', `/agent-delegations/${delegationId}/revoke`, {
       idempotencyKey,
     });
+  }
+}
+
+class AgentAuthResource {
+  constructor(private client: TixkitClient) {}
+
+  async exchangeClientCredentials(input: {
+    clientId: string;
+    clientSecret: string;
+  }): Promise<AgentOAuthTokenResponse> {
+    if (isBrowserRuntime()) {
+      throw new Error('Agent OAuth client secrets are server-only and cannot be used in browsers');
+    }
+    return this.client.request('POST', '/oauth/token', {
+      body: {
+        grant_type: 'client_credentials',
+        client_id: input.clientId,
+        client_secret: input.clientSecret,
+      },
+    });
+  }
+
+  async session(): Promise<AgentSession> {
+    return this.client.request('GET', '/agent/session');
   }
 }
 

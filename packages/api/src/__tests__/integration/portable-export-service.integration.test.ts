@@ -545,6 +545,8 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
           client_secret_hash: 'oauth-secret-hash-must-not-export',
           redirect_uris: JSON.stringify(['https://source.example.test/oauth/callback']),
           scopes: JSON.stringify(['events.read']),
+          subject_type: 'resource_owner',
+          agent_principal_id: null,
           status: 'active',
           created_at: now,
           updated_at: now,

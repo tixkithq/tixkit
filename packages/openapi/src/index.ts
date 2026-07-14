@@ -204,6 +204,7 @@ function tagForPath(path: string): string {
     'agent-principals': 'Agent platform',
     'agent-delegations': 'Agent platform',
     'agent-memory': 'Agent platform',
+    agent: 'Agent platform',
     'scanner-devices': 'Developer',
     'webhook-endpoints': 'Webhooks',
     'migration-jobs': 'Migrations',
@@ -481,11 +482,42 @@ function normalizeOpenApiOperations<const T extends OpenApiDocument>(
   return spec as unknown as NormalizedOpenApiDocument<T>;
 }
 
+const agentOAuthClientProperties = {
+  id: { type: 'string', pattern: '^oapp_[a-f0-9]{27}$' },
+  tenantId: { type: 'string' },
+  organizationId: { type: 'string' },
+  agentPrincipalId: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+  name: { type: 'string' },
+  clientId: { type: 'string', pattern: '^tk_agent_[a-f0-9]{48}$' },
+  clientSecret: {
+    type: 'string',
+    readOnly: true,
+    description: 'One-time secret returned only when the credential is first created.',
+  },
+  scope: { type: 'string', const: 'agent.invoke' },
+  status: { type: 'string', enum: ['active', 'revoked'] },
+  createdAt: { type: 'string', format: 'date-time' },
+  updatedAt: { type: 'string', format: 'date-time' },
+} as const;
+
+const agentOAuthClientRequired = [
+  'id',
+  'tenantId',
+  'organizationId',
+  'agentPrincipalId',
+  'name',
+  'clientId',
+  'scope',
+  'status',
+  'createdAt',
+  'updatedAt',
+] as const;
+
 const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-20',
+    version: '2026-07-21',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -512,6 +544,17 @@ const rawOpenApiSpec = {
         in: 'header',
         name: 'X-Device-Id',
         description: 'Scanner device authentication via X-Device-Id and X-Device-Secret headers',
+      },
+      AgentOAuth: {
+        type: 'oauth2',
+        description:
+          'Short-lived explicit agent identity. Agent tokens do not inherit sponsor permissions and are accepted only by routes that opt in to agent access.',
+        flows: {
+          clientCredentials: {
+            tokenUrl: '/v1/oauth/token',
+            scopes: { 'agent.invoke': 'Authenticate an explicit agent principal' },
+          },
+        },
       },
     },
     parameters: {
@@ -5045,6 +5088,7 @@ const rawOpenApiSpec = {
           protocolVersion: { type: 'string' },
           state: { type: 'string', enum: ['active', 'suspended', 'revoked'] },
           registeredAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
         },
         required: [
           'id',
@@ -5057,6 +5101,52 @@ const rawOpenApiSpec = {
           'state',
           'registeredAt',
         ],
+        additionalProperties: false,
+      },
+      AgentOAuthClient: {
+        type: 'object',
+        description:
+          'Sponsor-owned OAuth credential for one explicit agent principal. clientSecret is returned only on initial creation and omitted from idempotent replays.',
+        properties: agentOAuthClientProperties,
+        required: agentOAuthClientRequired,
+        additionalProperties: false,
+      },
+      AgentOAuthClientCreated: {
+        type: 'object',
+        description: 'New agent OAuth client with its one-time response secret.',
+        properties: agentOAuthClientProperties,
+        required: [...agentOAuthClientRequired, 'clientSecret'],
+        additionalProperties: false,
+      },
+      AgentSession: {
+        type: 'object',
+        description:
+          'Live explicit agent identity. Authentication alone grants no product permission; each action must separately satisfy a current delegation and policy intersection.',
+        properties: {
+          principal: {
+            allOf: [
+              { $ref: '#/components/schemas/AgentPrincipal' },
+              {
+                type: 'object',
+                properties: { updatedAt: { type: 'string', format: 'date-time' } },
+                required: ['updatedAt'],
+              },
+            ],
+          },
+          authentication: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              grantType: { type: 'string', const: 'client_credentials' },
+              scope: { type: 'string', const: 'agent.invoke' },
+              productPermissions: { type: 'array', maxItems: 0, items: { type: 'string' } },
+            },
+            required: ['grantType', 'scope', 'productPermissions'],
+          },
+          delegationRequired: { type: 'boolean', const: true },
+          supportedProtocolVersion: { type: 'string' },
+        },
+        required: ['principal', 'authentication', 'delegationRequired', 'supportedProtocolVersion'],
         additionalProperties: false,
       },
       AgentDelegation: {
@@ -10034,6 +10124,127 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/agent-principals/{id}/oauth-clients': {
+      post: {
+        summary: 'Create an agent OAuth client',
+        description:
+          'Experimental/private beta. A human sponsor with live tenant-wide `developers.write` creates a fixed-scope credential for one active sponsored agent. The organization identifies credential administration ownership only and grants the agent no event authority. The secret is returned once; an identical idempotent replay returns metadata without the secret.',
+        'x-required-permissions': ['developers.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          },
+          { $ref: '#/components/parameters/AgentControlIdempotencyKey' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  organizationId: { type: 'string', minLength: 3, maxLength: 64 },
+                  name: { type: 'string', minLength: 1, maxLength: 120 },
+                },
+                required: ['organizationId', 'name'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Credential created; clientSecret is present exactly once',
+            headers: { 'Cache-Control': { schema: { type: 'string', const: 'no-store' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentOAuthClientCreated' },
+              },
+            },
+          },
+          '200': {
+            description: 'Identical idempotent replay; clientSecret is omitted',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentOAuthClient' } },
+            },
+          },
+          '400': { description: 'Invalid body or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Sponsor or organization authorization changed' },
+          '404': { description: 'Sponsored active agent principal not found' },
+          '409': { description: 'Idempotency or stable-reference conflict' },
+        },
+      },
+    },
+    '/agent-principals/{id}/oauth-clients/{clientId}/revoke': {
+      post: {
+        summary: 'Revoke an agent OAuth client',
+        description:
+          'Revokes the exact sponsor-owned credential and all of its access tokens atomically. Live application and principal checks also make revocation effective on every request.',
+        'x-required-permissions': ['developers.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          },
+          {
+            name: 'clientId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^oapp_[a-f0-9]{27}$' },
+          },
+          { $ref: '#/components/parameters/AgentControlIdempotencyKey' },
+        ],
+        responses: {
+          '200': {
+            description: 'Credential revoked',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: 'string', pattern: '^oapp_[a-f0-9]{27}$' },
+                    status: { type: 'string', const: 'revoked' },
+                  },
+                  required: ['id', 'status'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid path or idempotency key' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Sponsor authorization changed' },
+          '404': { description: 'Credential not found for this sponsored agent' },
+          '409': { description: 'Idempotency conflict' },
+        },
+      },
+    },
+    '/agent/session': {
+      get: {
+        summary: 'Inspect the authenticated agent session',
+        description:
+          'The first agent-enabled route. Returns live explicit agent identity and confirms that authentication grants no product permissions. A current delegation and the full authorization intersection remain mandatory for actions.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        responses: {
+          '200': {
+            description: 'Live agent session',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AgentSession' } },
+            },
+          },
+          '401': { description: 'Agent token is invalid, expired, or revoked' },
+          '404': { description: 'Agent principal is no longer active' },
+        },
+      },
+    },
     '/agent-delegations': {
       post: {
         summary: 'Grant an agent delegation',
@@ -13648,7 +13859,9 @@ const rawOpenApiSpec = {
     },
     '/oauth/token': {
       post: {
-        summary: 'Exchange authorization code or refresh token for OAuth access token',
+        summary: 'Issue a resource-owner or explicit agent OAuth access token',
+        description:
+          'Resource-owner applications use authorization_code or refresh_token. Agent applications use client_credentials, receive a ten-minute tk_aat_ token with fixed agent.invoke scope, and never receive a refresh token. Clients may authenticate with client_secret_basic or JSON/form body fields, but must not mix methods. Credentials are never accepted in the query string.',
         requestBody: {
           required: true,
           content: {
@@ -13658,15 +13871,33 @@ const rawOpenApiSpec = {
                 properties: {
                   grant_type: {
                     type: 'string',
-                    enum: ['authorization_code', 'refresh_token'],
+                    enum: ['authorization_code', 'refresh_token', 'client_credentials'],
                   },
                   client_id: { type: 'string' },
-                  client_secret: { type: 'string' },
+                  client_secret: { type: 'string', writeOnly: true },
                   code: { type: 'string' },
                   redirect_uri: { type: 'string', format: 'uri' },
                   refresh_token: { type: 'string' },
                 },
-                required: ['grant_type', 'client_id', 'client_secret'],
+                required: ['grant_type'],
+              },
+            },
+            'application/x-www-form-urlencoded': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  grant_type: {
+                    type: 'string',
+                    enum: ['authorization_code', 'refresh_token', 'client_credentials'],
+                  },
+                  client_id: { type: 'string' },
+                  client_secret: { type: 'string', writeOnly: true },
+                  code: { type: 'string' },
+                  redirect_uri: { type: 'string', format: 'uri' },
+                  refresh_token: { type: 'string', writeOnly: true },
+                },
+                required: ['grant_type'],
               },
             },
           },
@@ -13674,6 +13905,7 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'OAuth token response',
+            headers: { 'Cache-Control': { schema: { type: 'string', const: 'no-store' } } },
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/OAuthTokenResponse' },

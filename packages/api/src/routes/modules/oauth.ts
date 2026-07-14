@@ -1,8 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getDriver, type Database } from '@tixkit/db';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { ulid } from 'ulid';
+import { sql } from 'kysely';
 import { ClerkAuthService, parseOAuthScopes } from '../../auth/clerk.js';
 import { parseJsonValue } from '../../http/contracts.js';
 import { oauthRedirectUrlSchema, parseBody } from '../../http/schemas.js';
@@ -21,14 +22,16 @@ const authorizeQuerySchema = z
 
 const tokenSchema = z
   .object({
-    grant_type: z.enum(['authorization_code', 'refresh_token']),
-    client_id: z.string().min(1),
-    client_secret: z.string().min(1),
+    grant_type: z.enum(['authorization_code', 'refresh_token', 'client_credentials']),
+    client_id: z.string().min(1).optional(),
+    client_secret: z.string().min(1).optional(),
     code: z.string().optional(),
     redirect_uri: oauthRedirectUrlSchema.optional(),
     refresh_token: z.string().optional(),
   })
   .strict();
+
+type OAuthClientCredentials = { clientId: string; clientSecret: string };
 
 const revokeSchema = z
   .object({
@@ -46,6 +49,43 @@ function newSecret(prefix: string): string {
   return `${prefix}_${randomBytes(32).toString('base64url')}`;
 }
 
+function parseBasicClientCredentials(header: string | undefined): OAuthClientCredentials | null {
+  if (!header?.startsWith('Basic ')) return null;
+  const encoded = header.slice(6);
+  if (
+    encoded.length === 0 ||
+    encoded.length > 2_048 ||
+    encoded.length % 4 === 1 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)
+  )
+    throw new UnauthorizedError('Invalid OAuth client authentication');
+  let decoded: string;
+  try {
+    decoded = Buffer.from(encoded, 'base64').toString('utf8');
+  } catch {
+    throw new UnauthorizedError('Invalid OAuth client authentication');
+  }
+  const separator = decoded.indexOf(':');
+  if (separator < 1) throw new UnauthorizedError('Invalid OAuth client authentication');
+  const clientId = decoded.slice(0, separator);
+  const clientSecret = decoded.slice(separator + 1);
+  if (!clientSecret) throw new UnauthorizedError('Invalid OAuth client authentication');
+  return { clientId, clientSecret };
+}
+
+function resolveClientCredentials(
+  authorization: string | undefined,
+  body: z.infer<typeof tokenSchema>,
+): OAuthClientCredentials {
+  const basic = parseBasicClientCredentials(authorization);
+  if (basic && (body.client_id || body.client_secret))
+    throw new UnauthorizedError('OAuth client credentials must use one authentication method');
+  if (basic) return basic;
+  if (!body.client_id || !body.client_secret)
+    throw new UnauthorizedError('Missing OAuth client credentials');
+  return { clientId: body.client_id, clientSecret: body.client_secret };
+}
+
 function parseStringArray(value: unknown): string[] {
   if (Array.isArray(value))
     return value.filter((entry): entry is string => typeof entry === 'string');
@@ -60,10 +100,26 @@ async function loadClient(db: Database, clientId: string, clientSecret?: string)
     .where('status', '=', 'active')
     .executeTakeFirst();
   if (!app) throw new UnauthorizedError('Invalid OAuth client');
-  if (clientSecret && hashSecret(clientSecret) !== app.client_secret_hash) {
-    throw new UnauthorizedError('Invalid OAuth client');
+  if (clientSecret) {
+    const presented = Buffer.from(hashSecret(clientSecret), 'hex');
+    const expected = Buffer.from(app.client_secret_hash, 'hex');
+    if (presented.length !== expected.length || !timingSafeEqual(presented, expected))
+      throw new UnauthorizedError('Invalid OAuth client');
   }
   return app;
+}
+
+async function oauthDatabaseNow(db: Database, tenantId: string): Promise<Date> {
+  const row = await db
+    .selectFrom('tenants')
+    .select(sql<Date>`current_timestamp`.as('now'))
+    .where('id', '=', tenantId)
+    .executeTakeFirst();
+  if (!row) throw new UnauthorizedError('Invalid OAuth client tenant');
+  const now = new Date(row.now);
+  if (!Number.isFinite(now.getTime()))
+    throw new UnauthorizedError('OAuth database clock unavailable');
+  return now;
 }
 
 function assertScopesAllowed(
@@ -109,6 +165,8 @@ export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
     const principal = request.principal!;
     const query = authorizeQuerySchema.parse(request.query);
     const oauthApp = await loadClient(db, query.client_id);
+    if (oauthApp.subject_type !== 'resource_owner')
+      throw new UnauthorizedError('OAuth client does not support authorization code grants');
     ClerkAuthService.requireResourceTenant(principal, oauthApp, 'OAuthApplication', oauthApp.id);
     ClerkAuthService.requireOrganizationScope(principal, oauthApp.organization_id);
     assertPrincipalCanAuthorizeResourceOwnerOAuth(principal);
@@ -151,10 +209,41 @@ export const oauthAuthorizeRoutes: FastifyPluginAsync = async (app) => {
 export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
 
-  app.post('/oauth/token', async (request) => {
+  if (!app.hasContentTypeParser('application/x-www-form-urlencoded')) {
+    app.addContentTypeParser(
+      'application/x-www-form-urlencoded',
+      { parseAs: 'string', bodyLimit: 16 * 1024 },
+      (_request, body, done) => {
+        const values: Record<string, string> = {};
+        for (const [key, value] of new URLSearchParams(body.toString())) {
+          if (Object.hasOwn(values, key)) {
+            done(new ValidationError(`Duplicate OAuth form field: ${key}`));
+            return;
+          }
+          values[key] = value;
+        }
+        done(null, values);
+      },
+    );
+  }
+
+  app.post('/oauth/token', async (request, reply) => {
     const body = parseBody(tokenSchema, request.body);
-    const oauthApp = await loadClient(db, body.client_id, body.client_secret);
-    const now = new Date();
+    const credentials = resolveClientCredentials(request.headers.authorization, body);
+    const oauthApp = await loadClient(db, credentials.clientId, credentials.clientSecret);
+    const now = await oauthDatabaseNow(db, oauthApp.tenant_id);
+
+    if (body.grant_type === 'client_credentials') {
+      if (oauthApp.subject_type !== 'agent' || !oauthApp.agent_principal_id)
+        throw new UnauthorizedError('OAuth client does not support client credentials');
+      return reply
+        .header('cache-control', 'no-store')
+        .header('pragma', 'no-cache')
+        .send(await issueAgentAccessToken({ db, oauthApp, now }));
+    }
+
+    if (oauthApp.subject_type !== 'resource_owner')
+      throw new UnauthorizedError('OAuth client does not support resource-owner grants');
 
     if (body.grant_type === 'authorization_code') {
       if (!body.code || !body.redirect_uri)
@@ -193,12 +282,17 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
       if (!consumedCode) {
         throw new UnauthorizedError('Invalid or expired authorization code');
       }
-      return issueTokens({
-        db,
-        oauthApp,
-        scopes: codeScopes,
-        now,
-      });
+      return reply
+        .header('cache-control', 'no-store')
+        .header('pragma', 'no-cache')
+        .send(
+          await issueTokens({
+            db,
+            oauthApp,
+            scopes: codeScopes,
+            now,
+          }),
+        );
     }
 
     if (!body.refresh_token) throw new ValidationError('refresh_token is required');
@@ -211,13 +305,18 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
     if (!refresh || refresh.revoked_at || new Date(refresh.expires_at) <= now) {
       throw new UnauthorizedError('Invalid or expired refresh token');
     }
-    return issueAccessToken({
-      db,
-      oauthApp,
-      refreshTokenId: refresh.id,
-      scopes: parseOAuthScopes(refresh.scopes),
-      now,
-    });
+    return reply
+      .header('cache-control', 'no-store')
+      .header('pragma', 'no-cache')
+      .send(
+        await issueAccessToken({
+          db,
+          oauthApp,
+          refreshTokenId: refresh.id,
+          scopes: parseOAuthScopes(refresh.scopes),
+          now,
+        }),
+      );
   });
 
   app.post('/oauth/revoke', async (request, reply) => {
@@ -279,16 +378,19 @@ async function issueAccessToken(input: {
 }) {
   const accessToken = newSecret('tk_oat');
   const expiresIn = 3600;
+  const accessTokenId = `oat_${ulid()}`;
   await input.db
     .insertInto('oauth_access_tokens')
     .values({
-      id: `oat_${ulid()}`,
+      id: accessTokenId,
       oauth_application_id: input.oauthApp.id,
       refresh_token_id: input.refreshTokenId,
       tenant_id: input.oauthApp.tenant_id,
       organization_id: input.oauthApp.organization_id,
       token_hash: hashSecret(accessToken),
       scopes: JSON.stringify(input.scopes),
+      subject_type: 'resource_owner',
+      subject_id: accessTokenId,
       expires_at: new Date(input.now.getTime() + expiresIn * 1000),
       revoked_at: null,
       created_at: input.now,
@@ -300,5 +402,48 @@ async function issueAccessToken(input: {
     token_type: 'Bearer',
     expires_in: expiresIn,
     scope: input.scopes.join(' '),
+  };
+}
+
+async function issueAgentAccessToken(input: {
+  db: Database;
+  oauthApp: Awaited<ReturnType<typeof loadClient>>;
+  now: Date;
+}) {
+  const agentPrincipalId = input.oauthApp.agent_principal_id;
+  if (!agentPrincipalId) throw new UnauthorizedError('Invalid agent OAuth client');
+  const principal = await input.db
+    .selectFrom('agent_principals')
+    .select(['id', 'tenant_id', 'state', 'protocol_version'])
+    .where('tenant_id', '=', input.oauthApp.tenant_id)
+    .where('id', '=', agentPrincipalId)
+    .where('state', '=', 'active')
+    .executeTakeFirst();
+  if (!principal) throw new UnauthorizedError('Invalid or inactive agent OAuth client');
+  const accessToken = newSecret('tk_aat');
+  const expiresIn = 10 * 60;
+  await input.db
+    .insertInto('oauth_access_tokens')
+    .values({
+      id: `oat_${ulid()}`,
+      oauth_application_id: input.oauthApp.id,
+      refresh_token_id: null,
+      tenant_id: input.oauthApp.tenant_id,
+      organization_id: input.oauthApp.organization_id,
+      token_hash: hashSecret(accessToken),
+      scopes: '["agent.invoke"]',
+      subject_type: 'agent',
+      subject_id: principal.id,
+      expires_at: new Date(input.now.getTime() + expiresIn * 1000),
+      revoked_at: null,
+      created_at: input.now,
+      updated_at: input.now,
+    })
+    .execute();
+  return {
+    access_token: accessToken,
+    token_type: 'Bearer',
+    expires_in: expiresIn,
+    scope: 'agent.invoke',
   };
 }

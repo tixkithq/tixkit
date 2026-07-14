@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { authRoutes } from './modules/auth.js';
 import { agentControlRoutes } from './modules/agent-control.js';
 import { agentMemoryRoutes } from './modules/agent-memory.js';
+import { agentSessionRoutes } from './modules/agent-session.js';
 import { checkInRoutes } from './modules/checkin.js';
 import { checkoutRoutes } from './modules/checkout.js';
 import { contentRoutes, publicContentRoutes } from './modules/content.js';
@@ -29,6 +30,7 @@ import { publicUploadRoutes, uploadRoutes } from './modules/uploads.js';
 import { publicWaitlistRoutes, waitlistRoutes } from './modules/waitlist.js';
 import { webhookRoutes } from './modules/webhooks.js';
 import { createAuthMiddleware } from '../auth/clerk.js';
+import { ForbiddenError } from '@tixkit/domain';
 
 export type RouteModuleRegistration = {
   plugin: FastifyPluginAsync;
@@ -53,6 +55,7 @@ export const publicRouteModules: readonly RouteModuleRegistration[] = [
 ];
 
 export const authenticatedRouteModules: readonly RouteModuleRegistration[] = [
+  { plugin: agentSessionRoutes, prefix: '/v1' },
   { plugin: agentControlRoutes, prefix: '/v1' },
   { plugin: agentMemoryRoutes, prefix: '/v1' },
   { plugin: tenantRoutes, prefix: '/v1' },
@@ -94,7 +97,20 @@ export async function registerAuthenticatedRouteGroup(
 ): Promise<void> {
   await app.register(async (authenticated) => {
     authenticated.addHook('onRequest', createAuthMiddleware(authService));
+    authenticated.addHook('onRequest', enforceAgentRouteAccess);
     await setup?.(authenticated);
     await registerRouteModules(authenticated, authenticatedRouteModules);
   });
+}
+
+export async function enforceAgentRouteAccess(request: import('fastify').FastifyRequest) {
+  if (request.principal?.type === 'agent' && request.routeOptions.config.agentAccess !== true) {
+    throw new ForbiddenError('Agent principals cannot access this route');
+  }
+}
+
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    agentAccess?: boolean;
+  }
 }

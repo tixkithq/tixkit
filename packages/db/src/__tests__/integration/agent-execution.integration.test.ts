@@ -9,6 +9,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../../client.js';
 import { runMigrations, truncateAllData } from '../../migrate.js';
+import { AgentOAuthCredentialsMigration } from '../../migrations/0081_agent_oauth_credentials.js';
 import {
   AgentExecutionRepository,
   BrandRepository,
@@ -17,12 +18,13 @@ import {
   TenantRepository,
 } from '../../repositories/index.js';
 
-type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
+type DriverCase = { driver: 'postgres' | 'mysql' | 'mssql'; url: string };
 let scopedEventId = 'event_test';
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
 const driverCases: DriverCase[] = [
   { driver: 'postgres', url: process.env.DATABASE_URL ?? '' },
   { driver: 'mysql', url: process.env.DATABASE_URL_MYSQL ?? '' },
+  { driver: 'mssql', url: process.env.DATABASE_URL_MSSQL ?? '' },
 ].filter(
   (candidate) =>
     candidate.url.length > 0 && (!requestedDriver || candidate.driver === requestedDriver),
@@ -128,6 +130,7 @@ function controlAudit(id: string) {
 describe.sequential.each(driverCases)('agent execution persistence: $driver', ({ driver, url }) => {
   let db: Database;
   let tenantId: string;
+  let organizationId: string;
 
   beforeAll(async () => {
     process.env.DB_DRIVER = driver;
@@ -140,6 +143,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       name: `Agent ${driver} organization`,
       slug: `agent-${driver}-organization`,
     });
+    organizationId = organization.id;
     const brand = await new BrandRepository(db).create({
       tenantId,
       organizationId: organization.id,
@@ -235,6 +239,161 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
 
   afterAll(async () => {
     await db?.destroy();
+  });
+
+  it('creates, replays, and revokes sponsor-bound agent OAuth credentials atomically', async () => {
+    const repository = new AgentExecutionRepository(db);
+    const agentPrincipal = { ...principal(tenantId), id: 'agent_oauth_test' };
+    await repository.registerPrincipal(agentPrincipal, controlAudit('oauth_register'));
+    const input = {
+      tenantId,
+      organizationId,
+      agentPrincipalId: agentPrincipal.id,
+      applicationId: `oapp_${'a'.repeat(27)}`,
+      clientId: `tk_agent_${'a'.repeat(48)}`,
+      name: 'Agent OAuth integration client',
+      audit: controlAudit('oauth_create'),
+    };
+
+    const created = await repository.createAgentOAuthClient(input);
+    expect(created).toMatchObject({
+      id: input.applicationId,
+      agentPrincipalId: agentPrincipal.id,
+      organizationId,
+      scope: 'agent.invoke',
+      status: 'active',
+    });
+    expect(created.clientSecret).toMatch(/^tk_agent_secret_/u);
+    const stored = await db
+      .selectFrom('oauth_applications')
+      .selectAll()
+      .where('id', '=', input.applicationId)
+      .executeTakeFirstOrThrow();
+    expect(stored.client_secret_hash).not.toBe(created.clientSecret);
+    expect(stored).toMatchObject({
+      tenant_id: tenantId,
+      subject_type: 'agent',
+      agent_principal_id: agentPrincipal.id,
+    });
+    expect(typeof stored.scopes === 'string' ? JSON.parse(stored.scopes) : stored.scopes).toEqual([
+      'agent.invoke',
+    ]);
+    expect(
+      typeof stored.redirect_uris === 'string'
+        ? JSON.parse(stored.redirect_uris)
+        : stored.redirect_uris,
+    ).toEqual([]);
+
+    const replay = await repository.createAgentOAuthClient(input);
+    expect(replay).not.toHaveProperty('clientSecret');
+    expect(replay.clientId).toBe(created.clientId);
+    const createAudit = await db
+      .selectFrom('agent_control_events')
+      .select(['target_type', 'target_id', 'operation', 'outcome'])
+      .where('tenant_id', '=', tenantId)
+      .where('idempotency_key', '=', input.audit.idempotencyKey)
+      .executeTakeFirstOrThrow();
+    expect(createAudit).toEqual({
+      target_type: 'oauth_client',
+      target_id: input.applicationId,
+      operation: 'register',
+      outcome: 'applied',
+    });
+
+    const tokenNow = new Date();
+    await db
+      .insertInto('oauth_access_tokens')
+      .values({
+        id: 'oat_agent_revoke_test',
+        oauth_application_id: input.applicationId,
+        refresh_token_id: null,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        token_hash: 'a'.repeat(64),
+        scopes: '["agent.invoke"]',
+        subject_type: 'agent',
+        subject_id: agentPrincipal.id,
+        expires_at: new Date(tokenNow.getTime() + 600_000),
+        revoked_at: null,
+        created_at: tokenNow,
+        updated_at: tokenNow,
+      })
+      .execute();
+    await expect(
+      repository.revokeAgentOAuthClient({
+        tenantId,
+        agentPrincipalId: agentPrincipal.id,
+        applicationId: input.applicationId,
+        audit: controlAudit('oauth_revoke'),
+      }),
+    ).resolves.toBe(true);
+    const revokedToken = await db
+      .selectFrom('oauth_access_tokens')
+      .select('revoked_at')
+      .where('id', '=', 'oat_agent_revoke_test')
+      .executeTakeFirstOrThrow();
+    expect(revokedToken.revoked_at).not.toBeNull();
+
+    await expect(AgentOAuthCredentialsMigration.down!(db)).rejects.toThrow(
+      'AGENT_OAUTH_CREDENTIALS_ROLLBACK_UNSAFE',
+    );
+    await db.deleteFrom('oauth_access_tokens').where('id', '=', 'oat_agent_revoke_test').execute();
+    await db.deleteFrom('oauth_applications').where('id', '=', input.applicationId).execute();
+    await AgentOAuthCredentialsMigration.down!(db);
+    const legacyNow = new Date();
+    await db
+      .insertInto('oauth_applications')
+      .values({
+        id: 'oapp_legacy_backfill',
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        name: 'Legacy OAuth app',
+        client_id: `legacy_backfill_${driver}`,
+        client_secret_hash: 'b'.repeat(64),
+        redirect_uris: '[]',
+        scopes: '["events.read"]',
+        status: 'active',
+        created_at: legacyNow,
+        updated_at: legacyNow,
+      } as never)
+      .execute();
+    await db
+      .insertInto('oauth_access_tokens')
+      .values({
+        id: 'oat_legacy_backfill',
+        oauth_application_id: 'oapp_legacy_backfill',
+        refresh_token_id: null,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        token_hash: 'c'.repeat(64),
+        scopes: '["events.read"]',
+        expires_at: new Date(legacyNow.getTime() + 600_000),
+        revoked_at: null,
+        created_at: legacyNow,
+        updated_at: legacyNow,
+      } as never)
+      .execute();
+    await AgentOAuthCredentialsMigration.up!(db);
+    await expect(
+      db
+        .selectFrom('oauth_applications')
+        .select(['subject_type', 'agent_principal_id'])
+        .where('id', '=', 'oapp_legacy_backfill')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ subject_type: 'resource_owner', agent_principal_id: null });
+    await expect(
+      db
+        .selectFrom('oauth_access_tokens')
+        .select(['id', 'subject_type', 'subject_id'])
+        .where('id', '=', 'oat_legacy_backfill')
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({
+      id: 'oat_legacy_backfill',
+      subject_type: 'resource_owner',
+      subject_id: 'oat_legacy_backfill',
+    });
+    await db.deleteFrom('oauth_access_tokens').where('id', '=', 'oat_legacy_backfill').execute();
+    await db.deleteFrom('oauth_applications').where('id', '=', 'oapp_legacy_backfill').execute();
   });
 
   it('atomically consumes one approval and converges concurrent idempotent reservations', async () => {

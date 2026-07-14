@@ -13,6 +13,7 @@ export interface AuthProvider<Request = unknown> {
   authenticateUser(request: Request): Promise<AuthProviderResult>;
   authenticateApiKey(request: Request): Promise<AuthProviderResult>;
   authenticateOAuthAccessToken(request: Request): Promise<AuthProviderResult>;
+  authenticateAgentAccessToken(request: Request): Promise<AuthProviderResult>;
   authenticateScannerDevice(request: Request): Promise<AuthProviderResult>;
   authenticateLocalDev(): Promise<AuthProviderResult>;
 }

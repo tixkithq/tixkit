@@ -57,6 +57,10 @@ export class ClerkAdapter implements AuthProvider<FastifyRequest> {
     return this.clerk.authenticateOAuthAccessToken(request);
   }
 
+  authenticateAgentAccessToken(request: FastifyRequest): Promise<AuthProviderResult> {
+    return this.clerk.authenticateAgentAccessToken(request);
+  }
+
   authenticateScannerDevice(request: FastifyRequest): Promise<AuthProviderResult> {
     return this.clerk.authenticateScannerDevice(request);
   }

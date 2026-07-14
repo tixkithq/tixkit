@@ -1,0 +1,39 @@
+---
+title: API migration from 2026-07-20 to 2026-07-21
+description: Adopt explicit third-party agent authentication and isolated agent sessions.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-21
+prerequisites:
+  - An integration using API version 2026-07-20
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-21` adds sponsor-created OAuth credentials for explicit agent principals and the first agent-authenticated route. Existing `2026-07-20` operations remain compatible; this is an additive experimental/private-beta release.
+
+## Create an agent credential
+
+A human sponsor with live tenant-wide `developers.write` calls `POST /v1/agent-principals/{id}/oauth-clients` with an organization used only for credential administration, a display name and a 16–255 character `Idempotency-Key`. The agent must be active, belong to the same tenant and be sponsored by the caller. The service rechecks the sponsor's active profile, permission grant and accepted organization membership inside the transaction.
+
+The response contains a `clientId`, fixed `agent.invoke` scope and a `clientSecret` shown exactly once with `Cache-Control: no-store`. An identical replay returns the same credential metadata without the secret. Create another client before revoking an old one to rotate credentials without a shared secret or source fork.
+
+Generic `/v1/oauth-applications` management exposes only resource-owner applications. Agent clients remain behind the sponsor-bound, idempotent and immutable agent-control lifecycle.
+
+## Exchange client credentials
+
+Send `grant_type=client_credentials` to `POST /v1/oauth/token`. Authenticate with HTTP Basic (`client_secret_basic`) or JSON/form `client_id` and `client_secret` fields, never both. Credentials are not accepted in the query string. An active client for an active agent receives a `tk_aat_...` bearer token with exactly ten minutes of database-clock lifetime, fixed `agent.invoke` scope and no refresh token.
+
+Use the token with `GET /v1/agent/session`. The response identifies the agent principal and deliberately reports an empty product-permission set. Authentication is separate from delegation: every typed action must still satisfy the intersection of agent capability, sponsor authority, a current delegation, tenant policy, action risk policy and resource state.
+
+All other authenticated routes deny agent principals unless the route explicitly opts into agent access. Revoking either the client or the principal takes effect on the next request because authentication joins the live token, application and principal records.
+
+The JavaScript SDK exposes sponsor operations through `tixkit.agentControl.createOAuthClient` and `revokeOAuthClient`. Server-side agents use `tixkit.agentAuth.exchangeClientCredentials`, then construct a client with the returned access token and call `tixkit.agentAuth.session`. Agent client secrets are rejected in browser runtimes.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-21`.

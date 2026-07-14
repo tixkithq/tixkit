@@ -45,6 +45,20 @@ function store(overrides: Partial<AgentControlStore> = {}): AgentControlStore {
     })),
     getDelegation: vi.fn(async () => undefined),
     revokeDelegation: vi.fn(async () => true),
+    createAgentOAuthClient: vi.fn(async (input) => ({
+      id: input.applicationId,
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      agentPrincipalId: input.agentPrincipalId,
+      name: input.name,
+      clientId: input.clientId,
+      clientSecret: 'tk_agent_secret_once',
+      scope: 'agent.invoke' as const,
+      status: 'active' as const,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    })),
+    revokeAgentOAuthClient: vi.fn(async () => true),
     ...overrides,
   };
 }
@@ -107,6 +121,94 @@ describe('agent control routes', () => {
         actorPrincipalId: sponsorId,
         reasonCode: 'PLATFORM_AGENT_PRINCIPAL_REGISTER',
         idempotencyKey,
+      }),
+    );
+    await app.close();
+  });
+
+  it('creates a sponsor-bound agent OAuth client with fixed scope and one-time secret', async () => {
+    const repository = store();
+    const app = await testApp(sponsor(), repository);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-principals/agt_existing/oauth-clients',
+      headers: { 'idempotency-key': idempotencyKey },
+      payload: { organizationId: 'org_agent_route_01', name: 'Automation client' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      agentPrincipalId: 'agt_existing',
+      organizationId: 'org_agent_route_01',
+      name: 'Automation client',
+      clientId: expect.stringMatching(/^tk_agent_[a-f0-9]{48}$/u),
+      clientSecret: 'tk_agent_secret_once',
+      scope: 'agent.invoke',
+    });
+    expect(repository.createAgentOAuthClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId,
+        organizationId: 'org_agent_route_01',
+        agentPrincipalId: 'agt_existing',
+        applicationId: expect.stringMatching(/^oapp_[a-f0-9]{27}$/u),
+        clientId: expect.stringMatching(/^tk_agent_[a-f0-9]{48}$/u),
+        audit: expect.objectContaining({
+          actorPrincipalId: sponsorId,
+          reasonCode: 'PLATFORM_AGENT_OAUTH_CLIENT_CREATE',
+          idempotencyKey,
+        }),
+      }),
+    );
+    await app.close();
+  });
+
+  it('returns an idempotent replay without re-exposing the client secret', async () => {
+    const repository = store({
+      createAgentOAuthClient: vi.fn(async (input) => ({
+        id: input.applicationId,
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        agentPrincipalId: input.agentPrincipalId,
+        name: input.name,
+        clientId: input.clientId,
+        scope: 'agent.invoke' as const,
+        status: 'active' as const,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      })),
+    });
+    const app = await testApp(sponsor(), repository);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-principals/agt_existing/oauth-clients',
+      headers: { 'idempotency-key': idempotencyKey },
+      payload: { organizationId: 'org_agent_route_01', name: 'Automation client' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).not.toHaveProperty('clientSecret');
+    await app.close();
+  });
+
+  it('revokes an exact sponsor-owned agent OAuth client', async () => {
+    const repository = store();
+    const app = await testApp(sponsor(), repository);
+    const clientId = `oapp_${'a'.repeat(27)}`;
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-principals/agt_existing/oauth-clients/${clientId}/revoke`,
+      headers: { 'idempotency-key': idempotencyKey },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ id: clientId, status: 'revoked' });
+    expect(repository.revokeAgentOAuthClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId,
+        agentPrincipalId: 'agt_existing',
+        applicationId: clientId,
+        audit: expect.objectContaining({
+          actorPrincipalId: sponsorId,
+          reasonCode: 'PLATFORM_AGENT_OAUTH_CLIENT_REVOKE',
+        }),
       }),
     );
     await app.close();

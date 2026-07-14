@@ -87,6 +87,7 @@ function createAuthDb(initialTables: Tables) {
       if (operator === 'is') return value === null ? actual === null : actual === value;
       if (operator === 'is not') return value === null ? actual !== null : actual !== value;
       if (operator === 'in') return Array.isArray(value) && value.includes(actual);
+      if (operator === '>' && actual instanceof Date) return actual.getTime() > Date.now();
       return false;
     });
 
@@ -1203,6 +1204,83 @@ describe('ClerkAuthService OAuth access-token auth', () => {
   });
 });
 
+describe('ClerkAuthService agent access-token auth', () => {
+  function joinedAgentToken(rawToken: string, overrides: Row = {}): Row {
+    return {
+      id: 'oat_agent_1',
+      token_id: 'oat_agent_1',
+      token_hash: hash(rawToken),
+      expires_at: new Date(Date.now() + 60_000),
+      token_tenant_id: 'tnt_1',
+      token_subject_id: 'agt_1',
+      token_subject_type: 'agent',
+      token_revoked_at: null,
+      app_tenant_id: 'tnt_1',
+      app_subject_type: 'agent',
+      app_agent_principal_id: 'agt_1',
+      app_status: 'active',
+      agent_principal_id: 'agt_1',
+      agent_tenant_id: 'tnt_1',
+      agent_state: 'active',
+      ...overrides,
+    };
+  }
+
+  it('maps the explicit agent subject without sponsor permissions or organization authority', async () => {
+    const rawToken = 'tk_aat_valid';
+    const { db, updates } = createAuthDb({
+      oauth_access_tokens: [joinedAgentToken(rawToken)],
+    });
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+
+    const result = await service.authenticateAgentAccessToken(
+      request({ authorization: `Bearer ${rawToken}` }),
+    );
+
+    expect(result.principal).toEqual({
+      type: 'agent',
+      id: 'agt_1',
+      tenantId: 'tnt_1',
+      organizationIds: [],
+      scopes: [],
+    });
+    expect(updates).toHaveLength(1);
+  });
+
+  it.each([
+    ['revoked token', { token_revoked_at: new Date() }],
+    ['revoked app', { app_status: 'revoked' }],
+    ['revoked principal', { agent_state: 'revoked' }],
+    ['subject substitution', { app_agent_principal_id: 'agt_other' }],
+    ['cross-tenant app', { app_tenant_id: 'tnt_other' }],
+  ])('rejects an agent token after %s', async (_name, overrides) => {
+    const rawToken = `tk_aat_${_name.replace(/\s+/gu, '_')}`;
+    const { db, updates } = createAuthDb({
+      oauth_access_tokens: [joinedAgentToken(rawToken, overrides)],
+    });
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+
+    await expect(
+      service.authenticateAgentAccessToken(request({ authorization: `Bearer ${rawToken}` })),
+    ).rejects.toThrow('Invalid, expired, or revoked agent access token');
+    expect(updates).toHaveLength(0);
+  });
+
+  it('rejects an expired agent token using the database-time predicate', async () => {
+    const rawToken = 'tk_aat_expired';
+    const { db, updates } = createAuthDb({
+      oauth_access_tokens: [
+        joinedAgentToken(rawToken, { expires_at: new Date(Date.now() - 60_000) }),
+      ],
+    });
+    const service = new ClerkAuthService('sk_test_auth', db as never);
+    await expect(
+      service.authenticateAgentAccessToken(request({ authorization: `Bearer ${rawToken}` })),
+    ).rejects.toThrow('Invalid, expired, or revoked agent access token');
+    expect(updates).toHaveLength(0);
+  });
+});
+
 describe('ClerkAuthService scanner device auth', () => {
   it('authenticates active scanner devices and records last seen', async () => {
     const { db, tables, updates } = createAuthDb({
@@ -1488,7 +1566,7 @@ describe('authenticated /v1/me route dispatch', () => {
     }
   });
 
-  it('routes bearer, API key, and scanner credentials to the correct authenticator', async () => {
+  it('routes user, API key, OAuth, agent, and scanner credentials to the correct authenticator', async () => {
     const authService = {
       isLocalDevMode: vi.fn(() => false),
       authenticateLocalDev: vi.fn(),
@@ -1497,6 +1575,17 @@ describe('authenticated /v1/me route dispatch', () => {
       })),
       authenticateApiKey: vi.fn(async () => ({
         principal: makePrincipal({ type: 'api_key', id: 'key_1' }),
+      })),
+      authenticateOAuthAccessToken: vi.fn(async () => ({
+        principal: makePrincipal({ type: 'api_key', id: 'oat_1' }),
+      })),
+      authenticateAgentAccessToken: vi.fn(async () => ({
+        principal: makePrincipal({
+          type: 'agent',
+          id: 'agt_1',
+          organizationIds: [],
+          scopes: [],
+        }),
       })),
       authenticateScannerDevice: vi.fn(async () => ({
         principal: makePrincipal({
@@ -1518,6 +1607,16 @@ describe('authenticated /v1/me route dispatch', () => {
       url: '/v1/me',
       headers: { authorization: 'Bearer tk_raw_key' },
     });
+    const oauth = await app.inject({
+      method: 'GET',
+      url: '/v1/me',
+      headers: { authorization: 'Bearer tk_oat_token' },
+    });
+    const agent = await app.inject({
+      method: 'GET',
+      url: '/v1/me',
+      headers: { authorization: 'Bearer tk_aat_token' },
+    });
     const scanner = await app.inject({
       method: 'GET',
       url: '/v1/me',
@@ -1529,9 +1628,13 @@ describe('authenticated /v1/me route dispatch', () => {
 
     expect(clerk.json().id).toBe('usr_clerk');
     expect(apiKey.json().id).toBe('key_1');
+    expect(oauth.json().id).toBe('oat_1');
+    expect(agent.json().id).toBe('agt_1');
     expect(scanner.json().id).toBe('sd_1');
     expect(authService.authenticateRequest).toHaveBeenCalledTimes(1);
     expect(authService.authenticateApiKey).toHaveBeenCalledTimes(1);
+    expect(authService.authenticateOAuthAccessToken).toHaveBeenCalledTimes(1);
+    expect(authService.authenticateAgentAccessToken).toHaveBeenCalledTimes(1);
     expect(authService.authenticateScannerDevice).toHaveBeenCalledTimes(1);
     await app.close();
   });

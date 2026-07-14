@@ -46,6 +46,9 @@ async function createRouteManifestApp(enforceAuthentication: boolean) {
   const routes: CapturedRoute[] = [];
   const app = Fastify({ logger: false });
   const authService = {
+    authenticateAgentAccessToken: async () => {
+      throw new UnauthorizedError();
+    },
     authenticateApiKey: async () => {
       throw new UnauthorizedError();
     },

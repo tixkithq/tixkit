@@ -9,7 +9,7 @@ const signedWebhookSchemes = new Set([
   'StripeSignature',
   'TelnyxSignature',
 ]);
-const authenticatedSchemes = new Set(['ApiKey', 'BearerAuth', 'ScannerDeviceAuth']);
+const authenticatedSchemes = new Set(['AgentOAuth', 'ApiKey', 'BearerAuth', 'ScannerDeviceAuth']);
 const eventScopeGuards = new Set([
   'ClerkAuthService.requireEventScope',
   'loadCampaignProviderEventItems',
@@ -34,6 +34,7 @@ const signedWebhookRejections: Readonly<Record<string, { code: string; status: n
 
 function invalidCredentialHeaders(scheme: string): Record<string, string> {
   if (scheme === 'ApiKey') return { authorization: 'Bearer tk_invalid' };
+  if (scheme === 'AgentOAuth') return { authorization: 'Bearer tk_aat_invalid' };
   if (scheme === 'BearerAuth') return { authorization: 'Bearer invalid-user-token' };
   if (scheme === 'MetricsBearer') return { authorization: 'Bearer invalid-metrics-token' };
   if (scheme === 'ScannerDeviceAuth') {
