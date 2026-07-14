@@ -1,6 +1,6 @@
-import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import assert from 'node:assert/strict';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
@@ -11,36 +11,36 @@ import {
   rmSync,
   statSync,
   writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import test from "node:test";
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import test from 'node:test';
 
-const root = resolve(import.meta.dirname, "../..");
-const enabled = process.env.TIXKIT_RUN_PRODUCTION_DR_INTEGRATION === "1";
+const root = resolve(import.meta.dirname, '../..');
+const enabled = process.env.TIXKIT_RUN_PRODUCTION_DR_INTEGRATION === '1';
 const postgresImage =
-  "postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb";
+  'postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb';
 const temporalImage =
-  "temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88";
+  'temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88';
 const minioImage =
-  "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e";
+  'minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e';
 const mcImage =
-  "minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727";
-const appPassword = "outer-bundle-app-postgres-password";
-const temporalPassword = "outer-bundle-temporal-postgres-password";
-const minioUser = "outerbundle";
-const minioPassword = "outer-bundle-minio-password";
-const minioApplicationUser = "outerbundleapp";
-const minioApplicationPassword = "outer-bundle-app-writer-password";
-const manifestKey = "outer-bundle-manifest-key";
-const providerKey = "outer-bundle-provider-key";
-const publicationPassword = "outer-bundle-publication-password";
+  'minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727';
+const appPassword = 'outer-bundle-app-postgres-password';
+const temporalPassword = 'outer-bundle-temporal-postgres-password';
+const minioUser = 'outerbundle';
+const minioPassword = 'outer-bundle-minio-password';
+const minioApplicationUser = 'outerbundleapp';
+const minioApplicationPassword = 'outer-bundle-app-writer-password';
+const manifestKey = 'outer-bundle-manifest-key';
+const providerKey = 'outer-bundle-provider-key';
+const publicationPassword = 'outer-bundle-publication-password';
 
 function docker(args, options = {}) {
-  return execFileSync("docker", args, {
+  return execFileSync('docker', args, {
     cwd: root,
-    encoding: "utf8",
-    stdio: options.stdio ?? "pipe",
+    encoding: 'utf8',
+    stdio: options.stdio ?? 'pipe',
     ...options,
   });
 }
@@ -54,34 +54,34 @@ function runProcess(command, args, options) {
   return new Promise((resolveRun) => {
     const child = spawn(command, args, {
       ...options,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.on("close", (status) => resolveRun({ status, stdout, stderr }));
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    child.on('close', (status) => resolveRun({ status, stdout, stderr }));
   });
 }
 
 function waitFor(name, command, timeout = 120_000) {
   const deadline = Date.now() + timeout;
-  let lastError = "";
+  let lastError = '';
   while (Date.now() < deadline) {
-    const result = spawnSync("docker", ["exec", name, ...command], {
+    const result = spawnSync('docker', ['exec', name, ...command], {
       cwd: root,
-      encoding: "utf8",
+      encoding: 'utf8',
     });
     if (result.status === 0) return;
     lastError = result.stderr || result.stdout;
-    const state = spawnSync("docker", ["inspect", "--format", "{{.State.Status}}", name], {
+    const state = spawnSync('docker', ['inspect', '--format', '{{.State.Status}}', name], {
       cwd: root,
-      encoding: "utf8",
+      encoding: 'utf8',
     });
-    if (state.status === 0 && ["dead", "exited"].includes(state.stdout.trim())) {
-      const logs = spawnSync("docker", ["logs", name], {
+    if (state.status === 0 && ['dead', 'exited'].includes(state.stdout.trim())) {
+      const logs = spawnSync('docker', ['logs', name], {
         cwd: root,
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       throw new Error(
         `Container ${name} exited before readiness:\n${logs.stderr || logs.stdout || lastError}`,
@@ -94,30 +94,30 @@ function waitFor(name, command, timeout = 120_000) {
 
 function startPostgres(name, hostname, network, user, password, database, publish = false) {
   docker([
-    "run",
-    "-d",
-    "--name",
+    'run',
+    '-d',
+    '--name',
     name,
-    "--hostname",
+    '--hostname',
     hostname,
-    "--network",
+    '--network',
     network,
-    "--tmpfs",
-    "/var/lib/postgresql/data:rw,noexec,nosuid,size=768m",
-    ...(publish ? ["-p", "127.0.0.1::5432"] : []),
-    "-e",
+    '--tmpfs',
+    '/var/lib/postgresql/data:rw,noexec,nosuid,size=768m',
+    ...(publish ? ['-p', '127.0.0.1::5432'] : []),
+    '-e',
     `POSTGRES_USER=${user}`,
-    "-e",
+    '-e',
     `POSTGRES_PASSWORD=${password}`,
-    "-e",
+    '-e',
     `POSTGRES_DB=${database}`,
     postgresImage,
   ]);
-  waitFor(name, ["pg_isready", "-U", user, "-d", database]);
+  waitFor(name, ['pg_isready', '-U', user, '-d', database]);
 }
 
 function postgresUrl(name, user, password, database) {
-  const port = docker(["port", name, "5432/tcp"])
+  const port = docker(['port', name, '5432/tcp'])
     .trim()
     .match(/:(\d+)$/u)?.[1];
   assert.match(port, /^\d+$/u);
@@ -126,54 +126,54 @@ function postgresUrl(name, user, password, database) {
 
 function createTemporal(name, hostname, network, postgresHostname) {
   docker([
-    "create",
-    "--name",
+    'create',
+    '--name',
     name,
-    "--hostname",
+    '--hostname',
     hostname,
-    "--network",
+    '--network',
     network,
-    "-e",
-    "DB=postgres12",
-    "-e",
-    "DB_PORT=5432",
-    "-e",
-    "POSTGRES_USER=temporal",
-    "-e",
+    '-e',
+    'DB=postgres12',
+    '-e',
+    'DB_PORT=5432',
+    '-e',
+    'POSTGRES_USER=temporal',
+    '-e',
     `POSTGRES_PWD=${temporalPassword}`,
-    "-e",
+    '-e',
     `POSTGRES_SEEDS=${postgresHostname}`,
     temporalImage,
   ]);
 }
 
 function startTemporal(name) {
-  docker(["start", name]);
-  waitFor(name, ["temporal", "operator", "cluster", "health", "--address", `${name}:7233`]);
+  docker(['start', name]);
+  waitFor(name, ['temporal', 'operator', 'cluster', 'health', '--address', `${name}:7233`]);
 }
 
 function temporal(name, args) {
-  return docker(["exec", name, "temporal", ...args]).trim();
+  return docker(['exec', name, 'temporal', ...args]).trim();
 }
 
 function mcShell(network, command, mounts = []) {
   return docker([
-    "run",
-    "--rm",
-    "--network",
+    'run',
+    '--rm',
+    '--network',
     network,
-    ...mcHostOverrides.flatMap(({ hostname, address }) => ["--add-host", `${hostname}:${address}`]),
+    ...mcHostOverrides.flatMap(({ hostname, address }) => ['--add-host', `${hostname}:${address}`]),
     ...(mcCertificateAuthority
-      ? ["-v", `${mcCertificateAuthority}:/root/.mc/certs/CAs/ca.crt:ro`]
+      ? ['-v', `${mcCertificateAuthority}:/root/.mc/certs/CAs/ca.crt:ro`]
       : []),
     ...mounts.flatMap(({ source, target, readOnly = false }) => [
-      "-v",
-      `${source}:${target}${readOnly ? ":ro" : ""}`,
+      '-v',
+      `${source}:${target}${readOnly ? ':ro' : ''}`,
     ]),
-    "--entrypoint",
-    "/bin/sh",
+    '--entrypoint',
+    '/bin/sh',
     mcImage,
-    "-c",
+    '-c',
     command,
   ]);
 }
@@ -192,30 +192,30 @@ function waitForMcShell(network, command, mounts = [], timeout = 30_000) {
   throw lastError;
 }
 
-let mcCertificateAuthority = "";
+let mcCertificateAuthority = '';
 let mcHostOverrides = [];
 
 function createMinioTlsCertificates(directory, names) {
-  const caKey = join(directory, "ca-key.pem");
-  const ca = join(directory, "ca.pem");
+  const caKey = join(directory, 'ca-key.pem');
+  const ca = join(directory, 'ca.pem');
   execFileSync(
-    "openssl",
+    'openssl',
     [
-      "req",
-      "-x509",
-      "-newkey",
-      "rsa:2048",
-      "-nodes",
-      "-keyout",
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
       caKey,
-      "-out",
+      '-out',
       ca,
-      "-days",
-      "2",
-      "-subj",
-      "/CN=Tixkit Outer DR Test CA",
+      '-days',
+      '2',
+      '-subj',
+      '/CN=Tixkit Outer DR Test CA',
     ],
-    { stdio: "ignore" },
+    { stdio: 'ignore' },
   );
   for (const name of names) {
     const key = join(directory, `${name}-key.pem`);
@@ -224,49 +224,49 @@ function createMinioTlsCertificates(directory, names) {
     const extensions = join(directory, `${name}.ext`);
     writeFileSync(extensions, `subjectAltName=DNS:${name}\nextendedKeyUsage=serverAuth\n`);
     execFileSync(
-      "openssl",
+      'openssl',
       [
-        "req",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-keyout",
+        'req',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
         key,
-        "-out",
+        '-out',
         request,
-        "-subj",
+        '-subj',
         `/CN=${name}`,
       ],
-      { stdio: "ignore" },
+      { stdio: 'ignore' },
     );
     execFileSync(
-      "openssl",
+      'openssl',
       [
-        "x509",
-        "-req",
-        "-in",
+        'x509',
+        '-req',
+        '-in',
         request,
-        "-CA",
+        '-CA',
         ca,
-        "-CAkey",
+        '-CAkey',
         caKey,
-        "-CAcreateserial",
-        "-out",
+        '-CAcreateserial',
+        '-out',
         certificate,
-        "-days",
-        "2",
-        "-extfile",
+        '-days',
+        '2',
+        '-extfile',
         extensions,
       ],
-      { stdio: "ignore" },
+      { stdio: 'ignore' },
     );
     const serverDirectory = join(directory, name);
     mkdirSync(serverDirectory);
-    mkdirSync(join(serverDirectory, "CAs"));
-    copyFileSync(certificate, join(serverDirectory, "public.crt"));
-    copyFileSync(key, join(serverDirectory, "private.key"));
-    copyFileSync(ca, join(serverDirectory, "CAs/ca.crt"));
-    chmodSync(join(serverDirectory, "private.key"), 0o644);
+    mkdirSync(join(serverDirectory, 'CAs'));
+    copyFileSync(certificate, join(serverDirectory, 'public.crt'));
+    copyFileSync(key, join(serverDirectory, 'private.key'));
+    copyFileSync(ca, join(serverDirectory, 'CAs/ca.crt'));
+    chmodSync(join(serverDirectory, 'private.key'), 0o644);
   }
   chmodSync(ca, 0o644);
   return ca;
@@ -276,37 +276,37 @@ function baseEnvironment(directory) {
   return {
     ...process.env,
     DR_MANIFEST_SIGNING_KEY: manifestKey,
-    DR_MANIFEST_KEY_ID: "outer-bundle-integration-key",
-    DR_SOURCE_RELEASE: "outer-source@sha256:" + "a".repeat(64),
-    DR_TARGET_RELEASE: "outer-target@sha256:" + "b".repeat(64),
-    DR_BACKUP_ENCRYPTION: "aes-256-gcm",
-    DR_BACKUP_DESTINATION_CLASS: "independent",
+    DR_MANIFEST_KEY_ID: 'outer-bundle-integration-key',
+    DR_SOURCE_RELEASE: 'outer-source@sha256:' + 'a'.repeat(64),
+    DR_TARGET_RELEASE: 'outer-target@sha256:' + 'b'.repeat(64),
+    DR_BACKUP_ENCRYPTION: 'aes-256-gcm',
+    DR_BACKUP_DESTINATION_CLASS: 'independent',
     TEST_DIRECTORY: directory,
   };
 }
 
 test(
-  "Production outer bundle restores PostgreSQL, MinIO, and Temporal with aggregate reconciliation",
+  'Production outer bundle restores PostgreSQL, MinIO, and Temporal with aggregate reconciliation',
   { skip: !enabled, timeout: 600_000 },
   async () => {
-    const directory = mkdtempSync(join(tmpdir(), "tixkit-production-bundle-"));
+    const directory = mkdtempSync(join(tmpdir(), 'tixkit-production-bundle-'));
     chmodSync(directory, 0o700);
-    const adapters = join(directory, "adapters");
-    const snapshots = join(directory, "temporal-snapshots");
-    const provider = join(directory, "independent-provider");
-    const minioCertificates = join(directory, "minio-certificates");
+    const adapters = join(directory, 'adapters');
+    const snapshots = join(directory, 'temporal-snapshots');
+    const provider = join(directory, 'independent-provider');
+    const minioCertificates = join(directory, 'minio-certificates');
     mkdirSync(adapters, { mode: 0o700 });
     mkdirSync(snapshots, { mode: 0o700 });
     mkdirSync(provider, { mode: 0o700 });
     mkdirSync(minioCertificates, { mode: 0o700 });
     const minioCa = createMinioTlsCertificates(minioCertificates, [
-      "minio-source",
-      "minio-target",
-      "minio-provider",
+      'minio-source',
+      'minio-target',
+      'minio-provider',
     ]);
     mcCertificateAuthority = minioCa;
     const mcTlsMount = `-v ${JSON.stringify(minioCa)}:/root/.mc/certs/CAs/ca.crt:ro`;
-    const suffix = randomBytes(5).toString("hex");
+    const suffix = randomBytes(5).toString('hex');
     const network = `tixkit-outer-${suffix}`;
     const appSource = `tixkit-outer-app-source-${suffix}`;
     const appTarget = `tixkit-outer-app-target-${suffix}`;
@@ -335,196 +335,196 @@ test(
     const providerBucket = `tixkit-provider-${suffix}`;
     const serviceExpiry = new Date(Date.now() + 30 * 60_000).toISOString();
     const roleCredential = (prefix) => ({
-      parentAccess: `${prefix}p${randomBytes(7).toString("hex")}`,
-      parentSecret: `${prefix}P${randomBytes(24).toString("base64url")}`,
-      access: `${prefix}s${randomBytes(7).toString("hex")}`,
-      secret: `${prefix}S${randomBytes(24).toString("base64url")}`,
+      parentAccess: `${prefix}p${randomBytes(7).toString('hex')}`,
+      parentSecret: `${prefix}P${randomBytes(24).toString('base64url')}`,
+      access: `${prefix}s${randomBytes(7).toString('hex')}`,
+      secret: `${prefix}S${randomBytes(24).toString('base64url')}`,
     });
-    const sourceReader = roleCredential("src");
-    const targetWriter = roleCredential("dstw");
-    const targetVerifier = roleCredential("dstv");
-    const providerPublisher = roleCredential("pub");
-    const providerRetriever = roleCredential("ret");
-    const providerVerifier = roleCredential("ver");
-    const targetReceipt = join(directory, "temporal-target-receipt.json");
-    const productionTargetReceipt = join(directory, "production-target-receipt.json");
-    const ciphertext = join(provider, "production-bundle.enc");
+    const sourceReader = roleCredential('src');
+    const targetWriter = roleCredential('dstw');
+    const targetVerifier = roleCredential('dstv');
+    const providerPublisher = roleCredential('pub');
+    const providerRetriever = roleCredential('ret');
+    const providerVerifier = roleCredential('ver');
+    const targetReceipt = join(directory, 'temporal-target-receipt.json');
+    const productionTargetReceipt = join(directory, 'production-target-receipt.json');
+    const ciphertext = join(provider, 'production-bundle.enc');
     const env = baseEnvironment(directory);
 
     try {
-      docker(["network", "create", network]);
-      startPostgres(appSource, "app-source", network, "tixkit", appPassword, "tixkit", true);
-      startPostgres(appTarget, "app-target", network, "tixkit", appPassword, "tixkit", true);
+      docker(['network', 'create', network]);
+      startPostgres(appSource, 'app-source', network, 'tixkit', appPassword, 'tixkit', true);
+      startPostgres(appTarget, 'app-target', network, 'tixkit', appPassword, 'tixkit', true);
       startPostgres(
         temporalPostgresSource,
-        "temporal-pg-source",
+        'temporal-pg-source',
         network,
-        "temporal",
+        'temporal',
         temporalPassword,
-        "temporal",
+        'temporal',
       );
       startPostgres(
         temporalPostgresTarget,
-        "temporal-pg-target",
+        'temporal-pg-target',
         network,
-        "temporal",
+        'temporal',
         temporalPassword,
-        "temporal",
+        'temporal',
       );
-      const sourceUrl = postgresUrl(appSource, "tixkit", appPassword, "tixkit");
-      const targetUrl = postgresUrl(appTarget, "tixkit", appPassword, "tixkit");
-      execFileSync("psql", [targetUrl, "-c", "CREATE DATABASE restore_control"], {
+      const sourceUrl = postgresUrl(appSource, 'tixkit', appPassword, 'tixkit');
+      const targetUrl = postgresUrl(appTarget, 'tixkit', appPassword, 'tixkit');
+      execFileSync('psql', [targetUrl, '-c', 'CREATE DATABASE restore_control'], {
         cwd: root,
-        stdio: "pipe",
+        stdio: 'pipe',
       });
-      const targetControlUrl = targetUrl.replace(/\/tixkit\?/, "/restore_control?");
+      const targetControlUrl = targetUrl.replace(/\/tixkit\?/, '/restore_control?');
       execFileSync(
-        "psql",
+        'psql',
         [
           targetControlUrl,
-          "-v",
-          "ON_ERROR_STOP=1",
-          "-c",
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-c',
           "CREATE TABLE production_restore_claims (production_target_id text PRIMARY KEY, attempt_id text NOT NULL UNIQUE, bundle_sha256 char(64) NOT NULL, target_receipt_sha256 char(64) NOT NULL, publication_receipt_sha256 char(64) NOT NULL, holder_pid integer NOT NULL, provider_backend_pid integer NOT NULL, fencing_generation bigint NOT NULL DEFAULT 1, status text NOT NULL DEFAULT 'active', lease_expires_at timestamptz NOT NULL, restore_evidence_sha256 char(64), completed_at timestamptz, quarantined_at timestamptz, claimed_at timestamptz NOT NULL DEFAULT now())",
-          "-c",
-          "CREATE TABLE production_restore_claim_audit (production_target_id text NOT NULL, attempt_id text NOT NULL, fencing_generation bigint NOT NULL, previous_status text, transition text NOT NULL, transitioned_at timestamptz NOT NULL DEFAULT now())",
+          '-c',
+          'CREATE TABLE production_restore_claim_audit (production_target_id text NOT NULL, attempt_id text NOT NULL, fencing_generation bigint NOT NULL, previous_status text, transition text NOT NULL, transitioned_at timestamptz NOT NULL DEFAULT now())',
         ],
-        { cwd: root, stdio: "pipe" },
+        { cwd: root, stdio: 'pipe' },
       );
-      execFileSync("bun", ["--filter", "@tixkit/db", "migrate"], {
+      execFileSync('bun', ['--filter', '@tixkit/db', 'migrate'], {
         cwd: root,
-        env: { ...process.env, DATABASE_URL: sourceUrl, DB_DRIVER: "postgres" },
-        stdio: "pipe",
+        env: { ...process.env, DATABASE_URL: sourceUrl, DB_DRIVER: 'postgres' },
+        stdio: 'pipe',
       });
       execFileSync(
-        "psql",
+        'psql',
         [
           sourceUrl,
-          "-v",
-          "ON_ERROR_STOP=1",
-          "-c",
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-c',
           `INSERT INTO tenants (id,name) VALUES ('ten_outer','Outer tenant');
 INSERT INTO organizations (id,tenant_id,name,slug) VALUES ('org_outer','ten_outer','Outer organization','outer-org');
 INSERT INTO brands (id,tenant_id,organization_id,name,slug,status,theme,legal_urls) VALUES ('brd_outer','ten_outer','org_outer','Outer brand','outer-brand','active','{}','{}');
 INSERT INTO events (id,tenant_id,organization_id,brand_id,slug,title,status,currency,timezone,starts_at,visibility,seo,cover_image_url,cover_image_alt,seo_use_cover_image)
 VALUES ('evt_outer','ten_outer','org_outer','brd_outer','outer-event','Outer bundle proof','published','USD','UTC','2027-01-01T00:00:00Z','public','{}','s3://${sourceBucket}/poster.webp','Accessible outer proof poster',true);`,
         ],
-        { cwd: root, stdio: "pipe" },
+        { cwd: root, stdio: 'pipe' },
       );
 
-      createTemporal(temporalSource, "temporal-source", network, "temporal-pg-source");
-      createTemporal(temporalTarget, "temporal-target", network, "temporal-pg-target");
+      createTemporal(temporalSource, 'temporal-source', network, 'temporal-pg-source');
+      createTemporal(temporalTarget, 'temporal-target', network, 'temporal-pg-target');
       startTemporal(temporalSource);
       temporal(temporalSource, [
-        "operator",
-        "namespace",
-        "create",
-        "--address",
+        'operator',
+        'namespace',
+        'create',
+        '--address',
         `${temporalSource}:7233`,
-        "--namespace",
+        '--namespace',
         namespace,
-        "--retention",
-        "24h",
+        '--retention',
+        '24h',
       ]);
       const startedWorkflow = JSON.parse(
         temporal(temporalSource, [
-          "workflow",
-          "start",
-          "--address",
+          'workflow',
+          'start',
+          '--address',
           `${temporalSource}:7233`,
-          "--namespace",
+          '--namespace',
           namespace,
-          "--workflow-id",
+          '--workflow-id',
           workflowId,
-          "--type",
-          "outerBundleProofWorkflow",
-          "--task-queue",
-          "outer-bundle-unavailable-worker",
-          "--input",
+          '--type',
+          'outerBundleProofWorkflow',
+          '--task-queue',
+          'outer-bundle-unavailable-worker',
+          '--input',
           JSON.stringify({
-            tenantId: "ten_outer",
-            eventId: "evt_outer",
+            tenantId: 'ten_outer',
+            eventId: 'evt_outer',
             mediaObject: `s3://${sourceBucket}/poster.webp`,
           }),
-          "--output",
-          "json",
+          '--output',
+          'json',
         ]),
       );
 
       for (const [name, hostname] of [
-        [minioSource, "minio-source"],
-        [minioTarget, "minio-target"],
-        [minioProvider, "minio-provider"],
+        [minioSource, 'minio-source'],
+        [minioTarget, 'minio-target'],
+        [minioProvider, 'minio-provider'],
       ]) {
         docker([
-          "run",
-          "-d",
-          "--name",
+          'run',
+          '-d',
+          '--name',
           name,
-          "--hostname",
+          '--hostname',
           hostname,
-          "--network",
+          '--network',
           network,
-          "--tmpfs",
-          "/data:rw,noexec,nosuid,size=256m",
-          "-e",
+          '--tmpfs',
+          '/data:rw,noexec,nosuid,size=256m',
+          '-e',
           `MINIO_ROOT_USER=${minioUser}`,
-          "-e",
+          '-e',
           `MINIO_ROOT_PASSWORD=${minioPassword}`,
-          "-v",
+          '-v',
           `${minioCertificates}:/certs:ro`,
           minioImage,
-          "server",
-          "--certs-dir",
+          'server',
+          '--certs-dir',
           `/certs/${hostname}`,
-          "/data",
+          '/data',
         ]);
       }
       for (const [name, hostname] of [
-        [minioSource, "minio-source"],
-        [minioTarget, "minio-target"],
-        [minioProvider, "minio-provider"],
+        [minioSource, 'minio-source'],
+        [minioTarget, 'minio-target'],
+        [minioProvider, 'minio-provider'],
       ])
         waitFor(
           name,
           [
-            "curl",
-            "--cacert",
-            "/certs/ca.pem",
-            "-fsS",
+            'curl',
+            '--cacert',
+            '/certs/ca.pem',
+            '-fsS',
             `https://${hostname}:9000/minio/health/live`,
           ],
           90_000,
         );
       mcHostOverrides = [
-        [minioSource, "minio-source"],
-        [minioTarget, "minio-target"],
-        [minioProvider, "minio-provider"],
+        [minioSource, 'minio-source'],
+        [minioTarget, 'minio-target'],
+        [minioProvider, 'minio-provider'],
       ].map(([name, hostname]) => ({
         hostname,
         address: docker([
-          "inspect",
-          "--format",
+          'inspect',
+          '--format',
           `{{(index .NetworkSettings.Networks ${JSON.stringify(network)}).IPAddress}}`,
           name,
         ]).trim(),
       }));
       const mcHostFlags = mcHostOverrides
         .map(({ hostname, address }) => `--add-host ${hostname}:${address}`)
-        .join(" ");
+        .join(' ');
       mcShell(
         network,
         `mc alias set source-admin https://minio-source:9000 ${minioUser} ${minioPassword} >/dev/null && mc mb source-admin/${sourceBucket} && printf outer-poster-content >/tmp/poster && mc cp --attr 'Content-Type=image/webp;Cache-Control=public,max-age=3600;role=poster' /tmp/poster source-admin/${sourceBucket}/poster.webp`,
       );
-      const applicationObjectPolicy = join(directory, "application-object-policy.json");
+      const applicationObjectPolicy = join(directory, 'application-object-policy.json');
       writeFileSync(
         applicationObjectPolicy,
         JSON.stringify({
-          Version: "2012-10-17",
+          Version: '2012-10-17',
           Statement: [
             {
-              Effect: "Allow",
-              Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
+              Effect: 'Allow',
+              Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject', 's3:ListBucket'],
               Resource: [`arn:aws:s3:::${sourceBucket}`, `arn:aws:s3:::${sourceBucket}/*`],
             },
           ],
@@ -534,7 +534,7 @@ VALUES ('evt_outer','ten_outer','org_outer','brd_outer','outer-event','Outer bun
       mcShell(
         network,
         `mc alias set source-admin https://minio-source:9000 ${minioUser} ${minioPassword} >/dev/null && mc admin user add source-admin ${minioApplicationUser} ${minioApplicationPassword} && mc admin policy create source-admin outer-app-writer /config/application-object-policy.json && mc admin policy attach source-admin outer-app-writer --user ${minioApplicationUser}`,
-        [{ source: directory, target: "/config" }],
+        [{ source: directory, target: '/config' }],
       );
       mcShell(
         network,
@@ -542,55 +542,55 @@ VALUES ('evt_outer','ten_outer','org_outer','brd_outer','outer-event','Outer bun
       );
       const rolePolicies = [
         {
-          name: "outer-source-reader",
-          endpoint: "minio-source",
+          name: 'outer-source-reader',
+          endpoint: 'minio-source',
           bucket: sourceBucket,
           credential: sourceReader,
-          actions: ["s3:GetBucketLocation", "s3:ListBucket", "s3:GetObject"],
+          actions: ['s3:GetBucketLocation', 's3:ListBucket', 's3:GetObject'],
         },
         {
-          name: "outer-target-writer",
-          endpoint: "minio-target",
+          name: 'outer-target-writer',
+          endpoint: 'minio-target',
           bucket: targetBucket,
           credential: targetWriter,
           actions: [
-            "s3:CreateBucket",
-            "s3:DeleteBucket",
-            "s3:GetBucketLocation",
-            "s3:ListBucket",
-            "s3:PutObject",
-            "s3:DeleteObject",
-            "s3:GetBucketTagging",
-            "s3:PutBucketTagging",
+            's3:CreateBucket',
+            's3:DeleteBucket',
+            's3:GetBucketLocation',
+            's3:ListBucket',
+            's3:PutObject',
+            's3:DeleteObject',
+            's3:GetBucketTagging',
+            's3:PutBucketTagging',
           ],
         },
         {
-          name: "outer-target-verifier",
-          endpoint: "minio-target",
+          name: 'outer-target-verifier',
+          endpoint: 'minio-target',
           bucket: targetBucket,
           credential: targetVerifier,
-          actions: ["s3:GetBucketLocation", "s3:ListBucket", "s3:GetObject", "s3:GetBucketTagging"],
+          actions: ['s3:GetBucketLocation', 's3:ListBucket', 's3:GetObject', 's3:GetBucketTagging'],
         },
         {
-          name: "outer-provider-publisher",
-          endpoint: "minio-provider",
+          name: 'outer-provider-publisher',
+          endpoint: 'minio-provider',
           bucket: providerBucket,
           credential: providerPublisher,
-          actions: ["s3:GetBucketLocation", "s3:ListBucket", "s3:PutObject"],
+          actions: ['s3:GetBucketLocation', 's3:ListBucket', 's3:PutObject'],
         },
         {
-          name: "outer-provider-retriever",
-          endpoint: "minio-provider",
+          name: 'outer-provider-retriever',
+          endpoint: 'minio-provider',
           bucket: providerBucket,
           credential: providerRetriever,
-          actions: ["s3:GetBucketLocation", "s3:ListBucket", "s3:GetObject", "s3:GetObjectVersion"],
+          actions: ['s3:GetBucketLocation', 's3:ListBucket', 's3:GetObject', 's3:GetObjectVersion'],
         },
         {
-          name: "outer-provider-verifier",
-          endpoint: "minio-provider",
+          name: 'outer-provider-verifier',
+          endpoint: 'minio-provider',
           bucket: providerBucket,
           credential: providerVerifier,
-          actions: ["s3:GetBucketLocation", "s3:ListBucket", "s3:GetObject", "s3:GetObjectVersion"],
+          actions: ['s3:GetBucketLocation', 's3:ListBucket', 's3:GetObject', 's3:GetObjectVersion'],
         },
       ];
       for (const role of rolePolicies) {
@@ -598,10 +598,10 @@ VALUES ('evt_outer','ten_outer','org_outer','brd_outer','outer-event','Outer bun
         writeFileSync(
           policyFile,
           JSON.stringify({
-            Version: "2012-10-17",
+            Version: '2012-10-17',
             Statement: [
               {
-                Effect: "Allow",
+                Effect: 'Allow',
                 Action: role.actions,
                 Resource: [`arn:aws:s3:::${role.bucket}`, `arn:aws:s3:::${role.bucket}/*`],
               },
@@ -612,7 +612,7 @@ VALUES ('evt_outer','ten_outer','org_outer','brd_outer','outer-event','Outer bun
         waitForMcShell(
           network,
           `mc alias set admin https://${role.endpoint}:9000 ${minioUser} ${minioPassword} >/dev/null && mc admin policy create admin ${role.name} /policy/${role.name}.json && mc admin user add admin ${role.credential.parentAccess} ${role.credential.parentSecret} && mc admin policy attach admin ${role.name} --user ${role.credential.parentAccess} && mc admin user svcacct add admin ${role.credential.parentAccess} --access-key ${role.credential.access} --secret-key ${role.credential.secret} --expiry ${serviceExpiry}`,
-          [{ source: directory, target: "/policy", readOnly: true }],
+          [{ source: directory, target: '/policy', readOnly: true }],
         );
       }
       waitForMcShell(
@@ -645,94 +645,94 @@ VALUES ('evt_outer','ten_outer','org_outer','brd_outer','outer-event','Outer bun
       );
 
       docker([
-        "exec",
+        'exec',
         temporalPostgresTarget,
-        "psql",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        "temporal",
-        "-d",
-        "temporal",
-        "-c",
-        "CREATE DATABASE temporal_restore_control",
+        'psql',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-U',
+        'temporal',
+        '-d',
+        'temporal',
+        '-c',
+        'CREATE DATABASE temporal_restore_control',
       ]);
       docker([
-        "exec",
+        'exec',
         temporalPostgresTarget,
-        "psql",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        "temporal",
-        "-d",
-        "temporal_restore_control",
-        "-c",
-        "CREATE TABLE claims (immutable_id char(64) PRIMARY KEY, target_identity varchar(64) NOT NULL, nonce char(64) NOT NULL UNIQUE)",
+        'psql',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-U',
+        'temporal',
+        '-d',
+        'temporal_restore_control',
+        '-c',
+        'CREATE TABLE claims (immutable_id char(64) PRIMARY KEY, target_identity varchar(64) NOT NULL, nonce char(64) NOT NULL UNIQUE)',
       ]);
       const temporalTargetSystemId = docker([
-        "exec",
+        'exec',
         temporalPostgresTarget,
-        "pg_controldata",
-        "/var/lib/postgresql/data",
+        'pg_controldata',
+        '/var/lib/postgresql/data',
       ]).match(/Database system identifier:\s+(\d+)/u)?.[1];
       assert.match(temporalTargetSystemId, /^\d{10,}$/u);
       const applicationTargetSystemId = docker([
-        "exec",
+        'exec',
         appTarget,
-        "pg_controldata",
-        "/var/lib/postgresql/data",
+        'pg_controldata',
+        '/var/lib/postgresql/data',
       ]).match(/Database system identifier:\s+(\d+)/u)?.[1];
       assert.match(applicationTargetSystemId, /^\d{10,}$/u);
-      const objectTargetSystemId = docker(["inspect", "--format", "{{.Id}}", minioTarget]).trim();
+      const objectTargetSystemId = docker(['inspect', '--format', '{{.Id}}', minioTarget]).trim();
       const productionTargetPayload = {
         schemaVersion: 1,
-        productionTargetId: "outer-production-target",
-        databaseTargetId: "outer-postgres-target",
-        objectTargetId: "outer-object-target",
+        productionTargetId: 'outer-production-target',
+        databaseTargetId: 'outer-postgres-target',
+        objectTargetId: 'outer-object-target',
         applicationDatabaseSystemId: applicationTargetSystemId,
         temporalDatabaseSystemId: temporalTargetSystemId,
         objectSystemId: objectTargetSystemId,
-        provisioningNonce: randomBytes(32).toString("hex"),
+        provisioningNonce: randomBytes(32).toString('hex'),
         expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
       };
       writeFileSync(
         productionTargetReceipt,
         JSON.stringify({
           ...productionTargetPayload,
-          providerSignature: createHmac("sha256", providerKey)
+          providerSignature: createHmac('sha256', providerKey)
             .update(JSON.stringify(productionTargetPayload))
-            .digest("hex"),
+            .digest('hex'),
         }),
         { mode: 0o600 },
       );
 
-      const quiesce = join(adapters, "quiesce");
-      const resume = join(adapters, "resume");
-      const checkpoint = join(adapters, "temporal-checkpoint");
-      const checkpointVerifier = join(adapters, "verify-temporal-checkpoint");
-      const backupConsistencyVerifier = join(adapters, "verify-backup-consistency");
-      const temporalRestore = join(adapters, "restore-temporal");
-      const temporalEvidenceVerifier = join(adapters, "verify-temporal-evidence");
-      const objectCredentials = join(adapters, "object-credentials");
-      const objectDownload = join(adapters, "object-download");
-      const objectMetadataExport = join(adapters, "object-metadata-export");
-      const objectUpload = join(adapters, "object-upload");
-      const objectOwnershipVerifier = join(adapters, "object-ownership-verifier");
-      const objectMetadataRestore = join(adapters, "object-metadata-restore");
-      const objectInventoryVerifier = join(adapters, "object-inventory-verifier");
-      const objectCleanup = join(adapters, "object-cleanup");
-      const objectAbsence = join(adapters, "object-absence");
-      const databaseVerifier = join(adapters, "database-verifier");
-      const objectVerifier = join(adapters, "object-verifier");
-      const finalVerifier = join(adapters, "final-verifier");
-      const publisher = join(adapters, "publisher");
-      const retriever = join(adapters, "retriever");
-      const receiptVerifier = join(adapters, "receipt-verifier");
-      const productionLeaseHolder = join(adapters, "production-lease-holder");
-      const productionLeaseVerifier = join(adapters, "production-lease-verifier");
-      const productionClaimCompleter = join(adapters, "production-claim-completer");
-      const productionClaimVerifier = join(adapters, "production-claim-verifier");
+      const quiesce = join(adapters, 'quiesce');
+      const resume = join(adapters, 'resume');
+      const checkpoint = join(adapters, 'temporal-checkpoint');
+      const checkpointVerifier = join(adapters, 'verify-temporal-checkpoint');
+      const backupConsistencyVerifier = join(adapters, 'verify-backup-consistency');
+      const temporalRestore = join(adapters, 'restore-temporal');
+      const temporalEvidenceVerifier = join(adapters, 'verify-temporal-evidence');
+      const objectCredentials = join(adapters, 'object-credentials');
+      const objectDownload = join(adapters, 'object-download');
+      const objectMetadataExport = join(adapters, 'object-metadata-export');
+      const objectUpload = join(adapters, 'object-upload');
+      const objectOwnershipVerifier = join(adapters, 'object-ownership-verifier');
+      const objectMetadataRestore = join(adapters, 'object-metadata-restore');
+      const objectInventoryVerifier = join(adapters, 'object-inventory-verifier');
+      const objectCleanup = join(adapters, 'object-cleanup');
+      const objectAbsence = join(adapters, 'object-absence');
+      const databaseVerifier = join(adapters, 'database-verifier');
+      const objectVerifier = join(adapters, 'object-verifier');
+      const finalVerifier = join(adapters, 'final-verifier');
+      const publisher = join(adapters, 'publisher');
+      const retriever = join(adapters, 'retriever');
+      const receiptVerifier = join(adapters, 'receipt-verifier');
+      const productionLeaseHolder = join(adapters, 'production-lease-holder');
+      const productionLeaseVerifier = join(adapters, 'production-lease-verifier');
+      const productionClaimCompleter = join(adapters, 'production-claim-completer');
+      const productionClaimVerifier = join(adapters, 'production-claim-verifier');
 
       executable(
         quiesce,
@@ -1132,7 +1132,7 @@ const {createHmac}=require('node:crypto'); const payload={schemaVersion:1,status
 NODE
 `,
       );
-      const productionClaimQuarantiner = join(adapters, "production-claim-quarantiner");
+      const productionClaimQuarantiner = join(adapters, 'production-claim-quarantiner');
       executable(
         productionClaimQuarantiner,
         `#!/usr/bin/env bash
@@ -1155,15 +1155,15 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
 `,
       );
 
-      const backupDirectory = join(directory, "backup-output");
+      const backupDirectory = join(directory, 'backup-output');
       const backupEnv = {
         ...env,
-        DB_DRIVER: "postgres",
+        DB_DRIVER: 'postgres',
         DATABASE_URL: sourceUrl,
-        POSTGRES_GLOBALS_BACKUP_REFERENCE: "vault://outer/postgres-roles/v1",
-        S3_ENDPOINT: "https://minio-source:9000",
+        POSTGRES_GLOBALS_BACKUP_REFERENCE: 'vault://outer/postgres-roles/v1',
+        S3_ENDPOINT: 'https://minio-source:9000',
         S3_BUCKET: sourceBucket,
-        S3_AUTH_MODE: "workload-identity",
+        S3_AUTH_MODE: 'workload-identity',
         S3_CREDENTIAL_SETUP_COMMAND: objectCredentials,
         S3_DOWNLOAD_COMMAND: objectDownload,
         DR_OBJECT_METADATA_EXPORT_COMMAND: objectMetadataExport,
@@ -1176,23 +1176,23 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
         DR_BACKUP_RETRIEVE_COMMAND: retriever,
         DR_BACKUP_RECEIPT_VERIFY_COMMAND: receiptVerifier,
         BACKUP_DIR: backupDirectory,
-        BACKUP_TIMESTAMP: "20260713T220000Z",
+        BACKUP_TIMESTAMP: '20260713T220000Z',
       };
-      const backupOutput = execFileSync(resolve(root, "infra/scripts/production-backup.sh"), {
+      const backupOutput = execFileSync(resolve(root, 'infra/scripts/production-backup.sh'), {
         cwd: root,
         env: backupEnv,
-        encoding: "utf8",
+        encoding: 'utf8',
       }).trim();
-      const receipt = backupOutput.split("\n").at(-1);
+      const receipt = backupOutput.split('\n').at(-1);
       assert.ok(receipt);
       assert.equal(existsSync(receipt), true);
       assert.equal(statSync(receipt).mode & 0o777, 0o600);
       waitFor(temporalSource, [
-        "temporal",
-        "operator",
-        "cluster",
-        "health",
-        "--address",
+        'temporal',
+        'operator',
+        'cluster',
+        'health',
+        '--address',
         `${temporalSource}:7233`,
       ]);
       for (const sourceContainer of [
@@ -1201,9 +1201,9 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
         temporalPostgresSource,
         minioSource,
       ])
-        docker(["rm", "-f", sourceContainer]);
+        docker(['rm', '-f', sourceContainer]);
 
-      const retrieved = join(directory, "retrieved-production-bundle.tar.gz");
+      const retrieved = join(directory, 'retrieved-production-bundle.tar.gz');
       execFileSync(retriever, {
         cwd: root,
         env: {
@@ -1214,17 +1214,17 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
           DR_RETRIEVE_CHECKSUM_OUTPUT: `${retrieved}.sha256`,
         },
       });
-      const primaryEvidenceDirectory = join(directory, "restore-evidence-primary");
-      const competingEvidenceDirectory = join(directory, "restore-evidence-competing");
+      const primaryEvidenceDirectory = join(directory, 'restore-evidence-primary');
+      const competingEvidenceDirectory = join(directory, 'restore-evidence-competing');
       const restoreEnv = {
         ...env,
         PRODUCTION_BUNDLE_FILE: retrieved,
-        DB_DRIVER: "postgres",
+        DB_DRIVER: 'postgres',
         DATABASE_URL: targetUrl,
-        S3_ENDPOINT: "https://minio-target:9000",
+        S3_ENDPOINT: 'https://minio-target:9000',
         S3_BUCKET: sourceBucket,
         RESTORE_S3_BUCKET: targetBucket,
-        S3_AUTH_MODE: "workload-identity",
+        S3_AUTH_MODE: 'workload-identity',
         S3_CREDENTIAL_SETUP_COMMAND: objectCredentials,
         S3_UPLOAD_COMMAND: objectUpload,
         DR_OBJECT_BUCKET_OWNERSHIP_VERIFY_COMMAND: objectOwnershipVerifier,
@@ -1246,48 +1246,48 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
         DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimCompleter,
         DR_PRODUCTION_TARGET_CLAIM_VERIFY_COMMAND: productionClaimVerifier,
         DR_PRODUCTION_TARGET_CLAIM_QUARANTINE_COMMAND: productionClaimQuarantiner,
-        DR_DATABASE_TARGET_ID: "outer-postgres-target",
-        DR_OBJECT_TARGET_ID: "outer-object-target",
-        DR_PRODUCTION_TARGET_ID: "outer-production-target",
+        DR_DATABASE_TARGET_ID: 'outer-postgres-target',
+        DR_OBJECT_TARGET_ID: 'outer-object-target',
+        DR_PRODUCTION_TARGET_ID: 'outer-production-target',
         DR_EVIDENCE_DIR: primaryEvidenceDirectory,
         DR_INCIDENT_AT: new Date().toISOString(),
       };
-      const restoreCommand = resolve(root, "infra/scripts/production-restore.sh");
-      const orphanLeaseDirectory = join(directory, "orphan-provider-lease");
+      const restoreCommand = resolve(root, 'infra/scripts/production-restore.sh');
+      const orphanLeaseDirectory = join(directory, 'orphan-provider-lease');
       mkdirSync(orphanLeaseDirectory, { mode: 0o700 });
-      const orphanLeaseFile = join(orphanLeaseDirectory, "lease.json");
-      const orphanHolderLog = join(orphanLeaseDirectory, "holder.log");
-      const orphanAttemptId = randomBytes(32).toString("hex");
+      const orphanLeaseFile = join(orphanLeaseDirectory, 'lease.json');
+      const orphanHolderLog = join(orphanLeaseDirectory, 'holder.log');
+      const orphanAttemptId = randomBytes(32).toString('hex');
       const orphanHolder = spawn(
-        "bash",
-        ["-c", 'exec "$1" >"$2" 2>&1', "_", productionLeaseHolder, orphanHolderLog],
+        'bash',
+        ['-c', 'exec "$1" >"$2" 2>&1', '_', productionLeaseHolder, orphanHolderLog],
         {
           cwd: root,
           env: {
             ...env,
             DR_PRODUCTION_TARGET_RECEIPT: productionTargetReceipt,
             DR_PRODUCTION_RESTORE_ATTEMPT_ID: orphanAttemptId,
-            DR_PRODUCTION_BUNDLE_SHA256: createHash("sha256")
+            DR_PRODUCTION_BUNDLE_SHA256: createHash('sha256')
               .update(readFileSync(retrieved))
-              .digest("hex"),
+              .digest('hex'),
             DR_PRODUCTION_RESTORE_LEASE_FILE: orphanLeaseFile,
             DR_PRODUCTION_TARGET_ID: restoreEnv.DR_PRODUCTION_TARGET_ID,
             DR_DATABASE_TARGET_ID: restoreEnv.DR_DATABASE_TARGET_ID,
             DR_OBJECT_TARGET_ID: restoreEnv.DR_OBJECT_TARGET_ID,
-            DR_PRODUCTION_TEMPORAL_IMMUTABLE_ID: "f".repeat(64),
+            DR_PRODUCTION_TEMPORAL_IMMUTABLE_ID: 'f'.repeat(64),
             DR_PRODUCTION_RECOVERY_POINT_AT: JSON.parse(
-              readFileSync(`${retrieved}.manifest.json`, "utf8"),
+              readFileSync(`${retrieved}.manifest.json`, 'utf8'),
             ).recoveryPointAt,
-            DR_PRODUCTION_TARGET_RECEIPT_SHA256: createHash("sha256")
+            DR_PRODUCTION_TARGET_RECEIPT_SHA256: createHash('sha256')
               .update(readFileSync(productionTargetReceipt))
-              .digest("hex"),
-            DR_PRODUCTION_PUBLICATION_RECEIPT_SHA256: createHash("sha256")
+              .digest('hex'),
+            DR_PRODUCTION_PUBLICATION_RECEIPT_SHA256: createHash('sha256')
               .update(readFileSync(receipt))
-              .digest("hex"),
+              .digest('hex'),
             DR_PRODUCTION_SOURCE_RELEASE: env.DR_SOURCE_RELEASE,
             DR_TARGET_RELEASE: env.DR_TARGET_RELEASE,
           },
-          stdio: "ignore",
+          stdio: 'ignore',
         },
       );
       const orphanDeadline = Date.now() + 10_000;
@@ -1297,58 +1297,58 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
         existsSync(orphanLeaseFile),
         true,
         existsSync(orphanHolderLog)
-          ? readFileSync(orphanHolderLog, "utf8")
-          : "holder produced no log",
+          ? readFileSync(orphanHolderLog, 'utf8')
+          : 'holder produced no log',
       );
-      orphanHolder.kill("SIGKILL");
+      orphanHolder.kill('SIGKILL');
       execFileSync(
-        "psql",
+        'psql',
         [
           targetControlUrl,
-          "-v",
-          "ON_ERROR_STOP=1",
-          "-c",
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-c',
           `SELECT pg_terminate_backend(provider_backend_pid) FROM production_restore_claims WHERE production_target_id='outer-production-target'; UPDATE production_restore_claims SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE production_target_id='outer-production-target' AND status='active';`,
         ],
-        { stdio: "ignore" },
+        { stdio: 'ignore' },
       );
       assert.equal(
         execFileSync(
-          "psql",
+          'psql',
           [
             targetControlUrl,
-            "-Atqc",
+            '-Atqc',
             "SELECT status FROM production_restore_claims WHERE production_target_id='outer-production-target'",
           ],
-          { encoding: "utf8" },
+          { encoding: 'utf8' },
         ).trim(),
-        "active",
+        'active',
       );
 
-      const orphanRetryEvidence = join(directory, "orphan-retry-evidence");
+      const orphanRetryEvidence = join(directory, 'orphan-retry-evidence');
       const orphanRetry = spawnSync(restoreCommand, [], {
         cwd: root,
         env: {
           ...restoreEnv,
-          DATABASE_URL: "postgres://postgres:unreachable@127.0.0.1:1/tixkit?connect_timeout=1",
+          DATABASE_URL: 'postgres://postgres:unreachable@127.0.0.1:1/tixkit?connect_timeout=1',
           DR_EVIDENCE_DIR: orphanRetryEvidence,
           DR_INCIDENT_AT: new Date().toISOString(),
         },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(orphanRetry.status, 0);
-      assert.equal(existsSync(join(orphanRetryEvidence, "database.json")), false);
+      assert.equal(existsSync(join(orphanRetryEvidence, 'database.json')), false);
       assert.equal(
         execFileSync(
-          "psql",
+          'psql',
           [
             targetControlUrl,
-            "-Atqc",
+            '-Atqc',
             "SELECT status||'|'||fencing_generation FROM production_restore_claims WHERE production_target_id='outer-production-target'",
           ],
-          { encoding: "utf8" },
+          { encoding: 'utf8' },
         ).trim(),
-        "quarantined|2",
+        'quarantined|2',
       );
 
       const restoreAttempts = await Promise.all([
@@ -1365,26 +1365,26 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
       assert.deepEqual(
         restoreAttempts.map(({ status }) => status).sort(),
         [0, 1],
-        restoreAttempts.map(({ stderr }) => stderr).join("\n---\n"),
+        restoreAttempts.map(({ stderr }) => stderr).join('\n---\n'),
       );
       const winnerIndex = restoreAttempts.findIndex(({ status }) => status === 0);
       const evidenceDirectory =
         winnerIndex === 0 ? primaryEvidenceDirectory : competingEvidenceDirectory;
       const loserDirectory =
         winnerIndex === 0 ? competingEvidenceDirectory : primaryEvidenceDirectory;
-      assert.equal(existsSync(join(loserDirectory, "database.json")), false);
+      assert.equal(existsSync(join(loserDirectory, 'database.json')), false);
       assert.match(
         restoreAttempts[1 - winnerIndex].stderr,
         /duplicate key|lease acquisition failed|Timed out acquiring/u,
       );
       for (const name of [
-        "database.json",
-        "object-storage.json",
-        "temporal.json",
-        "production.json",
+        'database.json',
+        'object-storage.json',
+        'temporal.json',
+        'production.json',
       ])
         assert.equal(existsSync(join(evidenceDirectory, name)), true);
-      const aggregateEvidence = readFileSync(join(evidenceDirectory, "production.json"), "utf8");
+      const aggregateEvidence = readFileSync(join(evidenceDirectory, 'production.json'), 'utf8');
       for (const secret of [appPassword, temporalPassword, minioPassword, manifestKey, providerKey])
         assert.equal(aggregateEvidence.includes(secret), false);
       assert.equal(JSON.parse(aggregateEvidence).componentEvidenceSha256.length, 3);
@@ -1399,22 +1399,22 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
       );
       assert.equal(
         parsedAggregateEvidence.outerTargetClaim.productionTargetId,
-        "outer-production-target",
+        'outer-production-target',
       );
       for (const name of [
-        "database.json",
-        "object-storage.json",
-        "temporal.json",
-        "production-target-lease.json",
-        "production.json",
-        "production-target-claim.json",
+        'database.json',
+        'object-storage.json',
+        'temporal.json',
+        'production-target-lease.json',
+        'production.json',
+        'production-target-claim.json',
       ])
         assert.equal(statSync(join(evidenceDirectory, name)).mode & 0o777, 0o600);
       const completedClaim = JSON.parse(
-        readFileSync(join(evidenceDirectory, "production-target-claim.json"), "utf8"),
+        readFileSync(join(evidenceDirectory, 'production-target-claim.json'), 'utf8'),
       );
       const completedLease = JSON.parse(
-        readFileSync(join(evidenceDirectory, "production-target-lease.json"), "utf8"),
+        readFileSync(join(evidenceDirectory, 'production-target-lease.json'), 'utf8'),
       );
       const completionRecoveryEnv = {
         ...env,
@@ -1423,26 +1423,26 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
         DR_PRODUCTION_BUNDLE_SHA256: completedLease.bundleSha256,
         DR_PRODUCTION_LEASE_HOLDER_PID: String(completedLease.holderPid),
         DR_PRODUCTION_FENCING_GENERATION: String(completedLease.fencingGeneration),
-        DR_PRODUCTION_RESTORE_EVIDENCE_SHA256: createHash("sha256")
+        DR_PRODUCTION_RESTORE_EVIDENCE_SHA256: createHash('sha256')
           .update(aggregateEvidence)
-          .digest("hex"),
+          .digest('hex'),
       };
       const recoveredAfterProviderCommit = JSON.parse(
         execFileSync(productionClaimCompleter, [], {
           env: completionRecoveryEnv,
-          encoding: "utf8",
+          encoding: 'utf8',
         }),
       );
       const recoveredAgain = JSON.parse(
         execFileSync(productionClaimCompleter, [], {
           env: completionRecoveryEnv,
-          encoding: "utf8",
+          encoding: 'utf8',
         }),
       );
       assert.deepEqual(recoveredAfterProviderCommit, completedClaim);
       assert.deepEqual(recoveredAgain, completedClaim);
       assert.match(
-        execFileSync(resolve(root, "infra/scripts/finalize-production-restore-claim.sh"), [], {
+        execFileSync(resolve(root, 'infra/scripts/finalize-production-restore-claim.sh'), [], {
           cwd: root,
           env: {
             ...env,
@@ -1450,54 +1450,54 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
             DR_PRODUCTION_TARGET_CLAIM_COMPLETE_COMMAND: productionClaimCompleter,
             DR_PRODUCTION_TARGET_CLAIM_VERIFY_COMMAND: productionClaimVerifier,
           },
-          encoding: "utf8",
+          encoding: 'utf8',
         }),
         /Production restore claim finalized/u,
       );
-      assert.equal(existsSync(join(snapshots, "temporal.dump")), false);
-      assert.equal(existsSync(join(snapshots, "temporal_visibility.dump")), false);
+      assert.equal(existsSync(join(snapshots, 'temporal.dump')), false);
+      assert.equal(existsSync(join(snapshots, 'temporal_visibility.dump')), false);
 
-      const replay = spawnSync(resolve(root, "infra/scripts/production-restore.sh"), [], {
+      const replay = spawnSync(resolve(root, 'infra/scripts/production-restore.sh'), [], {
         cwd: root,
         env: {
           ...restoreEnv,
-          DR_EVIDENCE_DIR: join(directory, "replay-evidence"),
+          DR_EVIDENCE_DIR: join(directory, 'replay-evidence'),
           DR_INCIDENT_AT: new Date().toISOString(),
         },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(replay.status, 0);
       assert.match(replay.stderr, /duplicate key|lease acquisition failed|Timed out acquiring/u);
-      assert.equal(existsSync(join(directory, "replay-evidence/database.json")), false);
+      assert.equal(existsSync(join(directory, 'replay-evidence/database.json')), false);
       assert.equal(
         execFileSync(
-          "psql",
-          [targetControlUrl, "-Atqc", "SELECT count(*) FROM production_restore_claims"],
+          'psql',
+          [targetControlUrl, '-Atqc', 'SELECT count(*) FROM production_restore_claims'],
           {
-            encoding: "utf8",
+            encoding: 'utf8',
           },
         ).trim(),
-        "1",
+        '1',
       );
       assert.equal(
         execFileSync(
-          "psql",
+          'psql',
           [
             targetControlUrl,
-            "-Atqc",
+            '-Atqc',
             "SELECT count(*) FROM production_restore_claim_audit WHERE production_target_id='outer-production-target' AND transition='authorized-retry'",
           ],
-          { encoding: "utf8" },
+          { encoding: 'utf8' },
         ).trim(),
-        "2",
+        '2',
       );
 
-      const wrongKeyRetriever = join(adapters, "wrong-key-retriever");
+      const wrongKeyRetriever = join(adapters, 'wrong-key-retriever');
       executable(
         wrongKeyRetriever,
-        readFileSync(retriever, "utf8").replaceAll(
+        readFileSync(retriever, 'utf8').replaceAll(
           publicationPassword,
-          "incorrect-publication-password",
+          'incorrect-publication-password',
         ),
       );
       const wrongKeyResult = spawnSync(wrongKeyRetriever, [], {
@@ -1505,32 +1505,32 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
         env: {
           ...env,
           DR_RETRIEVE_RECEIPT: receipt,
-          DR_RETRIEVE_OUTPUT: join(directory, "wrong-key.tar.gz"),
-          DR_RETRIEVE_MANIFEST_OUTPUT: join(directory, "wrong-key.manifest.json"),
-          DR_RETRIEVE_CHECKSUM_OUTPUT: join(directory, "wrong-key.sha256"),
+          DR_RETRIEVE_OUTPUT: join(directory, 'wrong-key.tar.gz'),
+          DR_RETRIEVE_MANIFEST_OUTPUT: join(directory, 'wrong-key.manifest.json'),
+          DR_RETRIEVE_CHECKSUM_OUTPUT: join(directory, 'wrong-key.sha256'),
         },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(wrongKeyResult.status, 0);
       assert.match(wrongKeyResult.stderr, /authenticate data|Unsupported state/u);
 
-      const forgedReceipt = join(directory, "forged-publication-receipt.json");
-      const forgedReceiptPayload = JSON.parse(readFileSync(receipt, "utf8"));
-      forgedReceiptPayload.storageId = "independent://substituted-outer-bundle";
+      const forgedReceipt = join(directory, 'forged-publication-receipt.json');
+      const forgedReceiptPayload = JSON.parse(readFileSync(receipt, 'utf8'));
+      forgedReceiptPayload.storageId = 'independent://substituted-outer-bundle';
       writeFileSync(forgedReceipt, JSON.stringify(forgedReceiptPayload), {
         mode: 0o600,
       });
       const forgedReceiptResult = spawnSync(receiptVerifier, [], {
         cwd: root,
         env: { ...env, DR_RECEIPT_FILE: forgedReceipt },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(forgedReceiptResult.status, 0);
 
       mcShell(
         network,
         `mc alias set provider https://minio-provider:9000 ${providerRetriever.access} ${providerRetriever.secret} >/dev/null && mc cp provider/${providerBucket}/production-bundle.enc /provider/production-bundle.enc`,
-        [{ source: provider, target: "/provider" }],
+        [{ source: provider, target: '/provider' }],
       );
       const originalCiphertext = readFileSync(ciphertext);
       const corruptedCiphertext = Buffer.from(originalCiphertext);
@@ -1539,27 +1539,27 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
       mcShell(
         network,
         `mc alias set provider https://minio-provider:9000 ${providerPublisher.access} ${providerPublisher.secret} >/dev/null && mc cp /provider/production-bundle.enc provider/${providerBucket}/production-bundle.enc`,
-        [{ source: provider, target: "/provider" }],
+        [{ source: provider, target: '/provider' }],
       );
       const corruptedRetrieval = spawnSync(retriever, [], {
         cwd: root,
         env: {
           ...env,
           DR_RETRIEVE_RECEIPT: receipt,
-          DR_RETRIEVE_OUTPUT: join(directory, "corrupted.tar.gz"),
-          DR_RETRIEVE_MANIFEST_OUTPUT: join(directory, "corrupted.manifest.json"),
-          DR_RETRIEVE_CHECKSUM_OUTPUT: join(directory, "corrupted.sha256"),
+          DR_RETRIEVE_OUTPUT: join(directory, 'corrupted.tar.gz'),
+          DR_RETRIEVE_MANIFEST_OUTPUT: join(directory, 'corrupted.manifest.json'),
+          DR_RETRIEVE_CHECKSUM_OUTPUT: join(directory, 'corrupted.sha256'),
         },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.equal(corruptedRetrieval.status, 0, corruptedRetrieval.stderr);
       assert.equal(
-        createHash("sha256")
-          .update(readFileSync(join(directory, "corrupted.tar.gz")))
-          .digest("hex"),
-        createHash("sha256").update(readFileSync(retrieved)).digest("hex"),
+        createHash('sha256')
+          .update(readFileSync(join(directory, 'corrupted.tar.gz')))
+          .digest('hex'),
+        createHash('sha256').update(readFileSync(retrieved)).digest('hex'),
       );
-      const signedProviderVersion = JSON.parse(readFileSync(receipt, "utf8")).objectVersionId;
+      const signedProviderVersion = JSON.parse(readFileSync(receipt, 'utf8')).objectVersionId;
       assert.throws(
         () =>
           mcShell(
@@ -1571,49 +1571,49 @@ test "$generation" = "$(node -e 'process.stdout.write(String(JSON.parse(require(
       writeFileSync(ciphertext, originalCiphertext);
       assert.equal(
         execFileSync(
-          "psql",
-          [targetUrl, "-Atqc", "SELECT title FROM events WHERE id='evt_outer'"],
+          'psql',
+          [targetUrl, '-Atqc', "SELECT title FROM events WHERE id='evt_outer'"],
           {
-            encoding: "utf8",
+            encoding: 'utf8',
           },
         ).trim(),
-        "Outer bundle proof",
+        'Outer bundle proof',
       );
       assert.equal(
         mcShell(
           network,
           `mc alias set target https://minio-target:9000 ${targetVerifier.access} ${targetVerifier.secret} >/dev/null && mc cat target/${targetBucket}/poster.webp`,
         ),
-        "outer-poster-content",
+        'outer-poster-content',
       );
       assert.equal(
         JSON.parse(
           temporal(temporalTarget, [
-            "workflow",
-            "describe",
-            "--address",
+            'workflow',
+            'describe',
+            '--address',
             `${temporalTarget}:7233`,
-            "--namespace",
+            '--namespace',
             namespace,
-            "--workflow-id",
+            '--workflow-id',
             workflowId,
-            "--output",
-            "json",
+            '--output',
+            'json',
           ]),
         ).workflowExecutionInfo.execution.runId,
         startedWorkflow.runId,
       );
     } finally {
-      mcCertificateAuthority = "";
+      mcCertificateAuthority = '';
       mcHostOverrides = [];
       for (const container of containers)
-        spawnSync("docker", ["rm", "-f", container], {
+        spawnSync('docker', ['rm', '-f', container], {
           cwd: root,
-          stdio: "ignore",
+          stdio: 'ignore',
         });
-      spawnSync("docker", ["network", "rm", network], {
+      spawnSync('docker', ['network', 'rm', network], {
         cwd: root,
-        stdio: "ignore",
+        stdio: 'ignore',
       });
       rmSync(directory, { recursive: true, force: true });
     }

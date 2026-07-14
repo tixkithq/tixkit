@@ -1,6 +1,6 @@
-import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import assert from 'node:assert/strict';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
@@ -11,25 +11,25 @@ import {
   rmSync,
   statSync,
   writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import test from "node:test";
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import test from 'node:test';
 
-const root = resolve(import.meta.dirname, "../..");
-const enabled = process.env.TIXKIT_RUN_PRODUCTION_DR_INTEGRATION === "1";
+const root = resolve(import.meta.dirname, '../..');
+const enabled = process.env.TIXKIT_RUN_PRODUCTION_DR_INTEGRATION === '1';
 const postgresImage =
-  "postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb";
+  'postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb';
 const temporalImage =
-  "temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88";
-const postgresPassword = "production-temporal-dr-password";
-const providerKey = "production-temporal-dr-provider-key";
+  'temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88';
+const postgresPassword = 'production-temporal-dr-password';
+const providerKey = 'production-temporal-dr-provider-key';
 
 function docker(args, options = {}) {
-  return execFileSync("docker", args, {
+  return execFileSync('docker', args, {
     cwd: root,
-    encoding: "utf8",
-    stdio: options.stdio ?? "pipe",
+    encoding: 'utf8',
+    stdio: options.stdio ?? 'pipe',
     ...options,
   });
 }
@@ -41,29 +41,22 @@ function executable(path, contents) {
 
 function waitFor(name, command, timeout = 120_000) {
   const deadline = Date.now() + timeout;
-  let lastError = "";
+  let lastError = '';
   while (Date.now() < deadline) {
-    const result = spawnSync("docker", ["exec", name, ...command], {
+    const result = spawnSync('docker', ['exec', name, ...command], {
       cwd: root,
-      encoding: "utf8",
+      encoding: 'utf8',
     });
     if (result.status === 0) return result.stdout;
     lastError = result.stderr || result.stdout;
-    const state = spawnSync(
-      "docker",
-      ["inspect", "--format", "{{.State.Status}}", name],
-      {
+    const state = spawnSync('docker', ['inspect', '--format', '{{.State.Status}}', name], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    if (state.status === 0 && ['dead', 'exited'].includes(state.stdout.trim())) {
+      const logs = spawnSync('docker', ['logs', name], {
         cwd: root,
-        encoding: "utf8",
-      },
-    );
-    if (
-      state.status === 0 &&
-      ["dead", "exited"].includes(state.stdout.trim())
-    ) {
-      const logs = spawnSync("docker", ["logs", name], {
-        cwd: root,
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       throw new Error(
         `Container ${name} exited before readiness:\n${logs.stderr || logs.stdout || lastError}`,
@@ -75,65 +68,58 @@ function waitFor(name, command, timeout = 120_000) {
 }
 
 function temporal(name, args, options = {}) {
-  return docker(["exec", name, "temporal", ...args], options).trim();
+  return docker(['exec', name, 'temporal', ...args], options).trim();
 }
 
 function startPostgres(name, hostname, network, snapshotDirectory) {
   docker([
-    "run",
-    "-d",
-    "--name",
+    'run',
+    '-d',
+    '--name',
     name,
-    "--hostname",
+    '--hostname',
     hostname,
-    "--network",
+    '--network',
     network,
-    "--tmpfs",
-    "/var/lib/postgresql/data:rw,noexec,nosuid,size=768m",
-    "-e",
-    "POSTGRES_USER=temporal",
-    "-e",
+    '--tmpfs',
+    '/var/lib/postgresql/data:rw,noexec,nosuid,size=768m',
+    '-e',
+    'POSTGRES_USER=temporal',
+    '-e',
     `POSTGRES_PASSWORD=${postgresPassword}`,
-    "-v",
+    '-v',
     `${snapshotDirectory}:/snapshots`,
     postgresImage,
   ]);
-  waitFor(name, ["pg_isready", "-U", "temporal"]);
+  waitFor(name, ['pg_isready', '-U', 'temporal']);
 }
 
 function createTemporal(name, hostname, network, postgresHostname) {
   docker([
-    "create",
-    "--name",
+    'create',
+    '--name',
     name,
-    "--hostname",
+    '--hostname',
     hostname,
-    "--network",
+    '--network',
     network,
-    "-e",
-    "DB=postgres12",
-    "-e",
-    "DB_PORT=5432",
-    "-e",
-    "POSTGRES_USER=temporal",
-    "-e",
+    '-e',
+    'DB=postgres12',
+    '-e',
+    'DB_PORT=5432',
+    '-e',
+    'POSTGRES_USER=temporal',
+    '-e',
     `POSTGRES_PWD=${postgresPassword}`,
-    "-e",
+    '-e',
     `POSTGRES_SEEDS=${postgresHostname}`,
     temporalImage,
   ]);
 }
 
 function startTemporal(name) {
-  docker(["start", name]);
-  waitFor(name, [
-    "temporal",
-    "operator",
-    "cluster",
-    "health",
-    "--address",
-    `${name}:7233`,
-  ]);
+  docker(['start', name]);
+  waitFor(name, ['temporal', 'operator', 'cluster', 'health', '--address', `${name}:7233`]);
 }
 
 function assertPrivate(path) {
@@ -141,188 +127,168 @@ function assertPrivate(path) {
 }
 
 function workflowRunId(description) {
-  return (
-    description.execution?.runId ??
-    description.workflowExecutionInfo?.execution?.runId
-  );
+  return description.execution?.runId ?? description.workflowExecutionInfo?.execution?.runId;
 }
 
 function runProcess(command, env) {
   return new Promise((resolveResult) => {
     const child = spawn(command, [], { cwd: root, env });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (data) => (stdout += data));
-    child.stderr.on("data", (data) => (stderr += data));
-    child.on("close", (status) => resolveResult({ status, stdout, stderr }));
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data) => (stdout += data));
+    child.stderr.on('data', (data) => (stderr += data));
+    child.on('close', (status) => resolveResult({ status, stdout, stderr }));
   });
 }
 
 function historyNodeIdentity(postgresContainer) {
   const rows = docker([
-    "exec",
+    'exec',
     postgresContainer,
-    "psql",
-    "-U",
-    "temporal",
-    "-d",
-    "temporal",
-    "-Atq",
-    "-c",
-    "COPY (SELECT row_to_json(t)::text FROM history_node t ORDER BY row_to_json(t)::text) TO STDOUT",
+    'psql',
+    '-U',
+    'temporal',
+    '-d',
+    'temporal',
+    '-Atq',
+    '-c',
+    'COPY (SELECT row_to_json(t)::text FROM history_node t ORDER BY row_to_json(t)::text) TO STDOUT',
   ]);
   const count = Number(
     docker([
-      "exec",
+      'exec',
       postgresContainer,
-      "psql",
-      "-U",
-      "temporal",
-      "-d",
-      "temporal",
-      "-Atq",
-      "-c",
-      "SELECT count(*) FROM history_node",
+      'psql',
+      '-U',
+      'temporal',
+      '-d',
+      'temporal',
+      '-Atq',
+      '-c',
+      'SELECT count(*) FROM history_node',
     ]).trim(),
   );
-  return { count, sha256: createHash("sha256").update(rows).digest("hex") };
+  return { count, sha256: createHash('sha256').update(rows).digest('hex') };
 }
 
 test(
-  "Production Temporal checkpoint restores durable workflow state into an isolated service",
+  'Production Temporal checkpoint restores durable workflow state into an isolated service',
   { skip: !enabled, timeout: 420_000 },
   async () => {
-    const directory = mkdtempSync(
-      join(tmpdir(), "tixkit-production-temporal-dr-"),
-    );
+    const directory = mkdtempSync(join(tmpdir(), 'tixkit-production-temporal-dr-'));
     chmodSync(directory, 0o700);
-    const snapshots = join(directory, "snapshots");
-    const adapters = join(directory, "adapters");
+    const snapshots = join(directory, 'snapshots');
+    const adapters = join(directory, 'adapters');
     mkdirSync(snapshots, { mode: 0o777 });
     mkdirSync(adapters, { mode: 0o700 });
-    const suffix = randomBytes(5).toString("hex");
+    const suffix = randomBytes(5).toString('hex');
     const network = `tixkit-temporal-dr-${suffix}`;
     const sourcePostgres = `tixkit-temporal-pg-source-${suffix}`;
     const sourceTemporal = `tixkit-temporal-source-${suffix}`;
     const targetPostgres = `tixkit-temporal-pg-target-${suffix}`;
     const targetTemporal = `tixkit-temporal-target-${suffix}`;
-    const containers = [
-      sourceTemporal,
-      targetTemporal,
-      sourcePostgres,
-      targetPostgres,
-    ];
-    const checkpoint = join(directory, "temporal-checkpoint.json");
-    const evidence = join(directory, "temporal-evidence.json");
-    const providerReceipt = join(directory, "temporal-target-receipt.json");
+    const containers = [sourceTemporal, targetTemporal, sourcePostgres, targetPostgres];
+    const checkpoint = join(directory, 'temporal-checkpoint.json');
+    const evidence = join(directory, 'temporal-evidence.json');
+    const providerReceipt = join(directory, 'temporal-target-receipt.json');
     const workflowId = `production-dr-proof-${suffix}`;
     const namespace = `tixkit-dr-${suffix}`;
-    const recoveryPointAt = "2026-07-13T19:00:00Z";
+    const recoveryPointAt = '2026-07-13T19:00:00Z';
 
     try {
-      docker(["network", "create", network]);
-      startPostgres(sourcePostgres, "temporal-pg-source", network, snapshots);
-      createTemporal(
-        sourceTemporal,
-        "temporal-source",
-        network,
-        "temporal-pg-source",
-      );
+      docker(['network', 'create', network]);
+      startPostgres(sourcePostgres, 'temporal-pg-source', network, snapshots);
+      createTemporal(sourceTemporal, 'temporal-source', network, 'temporal-pg-source');
       startTemporal(sourceTemporal);
       temporal(sourceTemporal, [
-        "operator",
-        "namespace",
-        "create",
-        "--address",
+        'operator',
+        'namespace',
+        'create',
+        '--address',
         `${sourceTemporal}:7233`,
-        "--namespace",
+        '--namespace',
         namespace,
-        "--retention",
-        "24h",
+        '--retention',
+        '24h',
       ]);
       const started = JSON.parse(
         temporal(sourceTemporal, [
-          "workflow",
-          "start",
-          "--address",
+          'workflow',
+          'start',
+          '--address',
           `${sourceTemporal}:7233`,
-          "--namespace",
+          '--namespace',
           namespace,
-          "--workflow-id",
+          '--workflow-id',
           workflowId,
-          "--type",
-          "productionDrProofWorkflow",
-          "--task-queue",
-          "intentionally-unavailable-during-dr-proof",
-          "--input",
-          JSON.stringify({ proof: "durable-temporal-history" }),
-          "--output",
-          "json",
+          '--type',
+          'productionDrProofWorkflow',
+          '--task-queue',
+          'intentionally-unavailable-during-dr-proof',
+          '--input',
+          JSON.stringify({ proof: 'durable-temporal-history' }),
+          '--output',
+          'json',
         ]),
       );
       assert.match(started.runId, /^[0-9a-f-]{36}$/u);
       const sourceDescription = JSON.parse(
         temporal(sourceTemporal, [
-          "workflow",
-          "describe",
-          "--address",
+          'workflow',
+          'describe',
+          '--address',
           `${sourceTemporal}:7233`,
-          "--namespace",
+          '--namespace',
           namespace,
-          "--workflow-id",
+          '--workflow-id',
           workflowId,
-          "--output",
-          "json",
+          '--output',
+          'json',
         ]),
       );
       assert.equal(workflowRunId(sourceDescription), started.runId);
-      startPostgres(targetPostgres, "temporal-pg-target", network, snapshots);
-      createTemporal(
-        targetTemporal,
-        "temporal-target",
-        network,
-        "temporal-pg-target",
-      );
+      startPostgres(targetPostgres, 'temporal-pg-target', network, snapshots);
+      createTemporal(targetTemporal, 'temporal-target', network, 'temporal-pg-target');
       const targetSystemId = docker([
-        "exec",
+        'exec',
         targetPostgres,
-        "pg_controldata",
-        "/var/lib/postgresql/data",
+        'pg_controldata',
+        '/var/lib/postgresql/data',
       ]).match(/Database system identifier:\s+(\d+)/u)?.[1];
       assert.match(targetSystemId, /^\d{10,}$/u);
       docker([
-        "exec",
+        'exec',
         targetPostgres,
-        "psql",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        "temporal",
-        "-d",
-        "temporal",
-        "-c",
-        "CREATE DATABASE temporal_restore_control",
+        'psql',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-U',
+        'temporal',
+        '-d',
+        'temporal',
+        '-c',
+        'CREATE DATABASE temporal_restore_control',
       ]);
       docker([
-        "exec",
+        'exec',
         targetPostgres,
-        "psql",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        "temporal",
-        "-d",
-        "temporal_restore_control",
-        "-c",
-        "CREATE TABLE claims (immutable_id char(64) NOT NULL, target_identity varchar(64) NOT NULL, provisioning_nonce varchar(64) NOT NULL UNIQUE, claimed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (immutable_id, target_identity))",
+        'psql',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-U',
+        'temporal',
+        '-d',
+        'temporal_restore_control',
+        '-c',
+        'CREATE TABLE claims (immutable_id char(64) NOT NULL, target_identity varchar(64) NOT NULL, provisioning_nonce varchar(64) NOT NULL UNIQUE, claimed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (immutable_id, target_identity))',
       ]);
-      const quiesce = join(adapters, "quiesce");
-      const resume = join(adapters, "resume");
-      const checkpointCommand = join(adapters, "checkpoint");
-      const checkpointVerifier = join(adapters, "verify-checkpoint");
-      const restoreCommand = join(adapters, "restore");
-      const evidenceVerifier = join(adapters, "verify-evidence");
-      const persistenceVerifier = join(adapters, "verify-persistence");
+      const quiesce = join(adapters, 'quiesce');
+      const resume = join(adapters, 'resume');
+      const checkpointCommand = join(adapters, 'checkpoint');
+      const checkpointVerifier = join(adapters, 'verify-checkpoint');
+      const restoreCommand = join(adapters, 'restore');
+      const evidenceVerifier = join(adapters, 'verify-evidence');
+      const persistenceVerifier = join(adapters, 'verify-persistence');
       executable(
         quiesce,
         `#!/usr/bin/env bash\nset -euo pipefail\ndocker stop ${sourceTemporal} >/dev/null\n`,
@@ -469,13 +435,13 @@ test "$actual_count" = "$expected_count"
       execFileSync(quiesce, { cwd: root, env: isolatedEnv });
       execFileSync(checkpointCommand, { cwd: root, env: isolatedEnv });
       execFileSync(checkpointVerifier, { cwd: root, env: isolatedEnv });
-      const checkpointPayload = JSON.parse(readFileSync(checkpoint, "utf8"));
+      const checkpointPayload = JSON.parse(readFileSync(checkpoint, 'utf8'));
       const writeReceipt = (path, overrides = {}, sign = true) => {
         const receiptPayload = {
           schemaVersion: 1,
           targetSystemId,
           targetService: targetTemporal,
-          provisioningNonce: randomBytes(32).toString("hex"),
+          provisioningNonce: randomBytes(32).toString('hex'),
           immutableId: checkpointPayload.immutableId,
           recoveryPointAt: checkpointPayload.recoveryPointAt,
           namespace: checkpointPayload.namespace,
@@ -488,10 +454,10 @@ test "$actual_count" = "$expected_count"
           JSON.stringify({
             ...receiptPayload,
             providerSignature: sign
-              ? createHmac("sha256", providerKey)
+              ? createHmac('sha256', providerKey)
                   .update(JSON.stringify(receiptPayload))
-                  .digest("hex")
-              : "0".repeat(64),
+                  .digest('hex')
+              : '0'.repeat(64),
           }),
           { mode: 0o600 },
         );
@@ -499,27 +465,27 @@ test "$actual_count" = "$expected_count"
       writeReceipt(providerReceipt);
       execFileSync(resume, { cwd: root, env: isolatedEnv });
       waitFor(sourceTemporal, [
-        "temporal",
-        "operator",
-        "cluster",
-        "health",
-        "--address",
+        'temporal',
+        'operator',
+        'cluster',
+        'health',
+        '--address',
         `${sourceTemporal}:7233`,
       ]);
       assert.equal(
         workflowRunId(
           JSON.parse(
             temporal(sourceTemporal, [
-              "workflow",
-              "describe",
-              "--address",
+              'workflow',
+              'describe',
+              '--address',
               `${sourceTemporal}:7233`,
-              "--namespace",
+              '--namespace',
               namespace,
-              "--workflow-id",
+              '--workflow-id',
               workflowId,
-              "--output",
-              "json",
+              '--output',
+              'json',
             ]),
           ),
         ),
@@ -527,18 +493,14 @@ test "$actual_count" = "$expected_count"
       );
 
       for (const [name, overrides, sign] of [
-        ["signature", {}, false],
-        [
-          "expired",
-          { expiresAt: new Date(Date.now() - 60_000).toISOString() },
-          true,
-        ],
-        ["missing-expiry", { expiresAt: undefined }, true],
-        ["invalid-expiry", { expiresAt: "not-a-timestamp" }, true],
-        ["schema", { schemaVersion: 2 }, true],
-        ["nonce", { provisioningNonce: "short" }, true],
-        ["system", { targetSystemId: `${targetSystemId}0` }, true],
-        ["service", { targetService: `${targetTemporal}-other` }, true],
+        ['signature', {}, false],
+        ['expired', { expiresAt: new Date(Date.now() - 60_000).toISOString() }, true],
+        ['missing-expiry', { expiresAt: undefined }, true],
+        ['invalid-expiry', { expiresAt: 'not-a-timestamp' }, true],
+        ['schema', { schemaVersion: 2 }, true],
+        ['nonce', { provisioningNonce: 'short' }, true],
+        ['system', { targetSystemId: `${targetSystemId}0` }, true],
+        ['service', { targetService: `${targetTemporal}-other` }, true],
       ]) {
         const path = join(directory, `invalid-receipt-${name}.json`);
         writeReceipt(path, overrides, sign);
@@ -547,30 +509,27 @@ test "$actual_count" = "$expected_count"
           env: {
             ...isolatedEnv,
             DR_TEMPORAL_TARGET_RECEIPT: path,
-            DR_TEMPORAL_RESTORE_EVIDENCE: join(
-              directory,
-              `denied-${name}.json`,
-            ),
+            DR_TEMPORAL_RESTORE_EVIDENCE: join(directory, `denied-${name}.json`),
           },
-          encoding: "utf8",
+          encoding: 'utf8',
         });
         assert.notEqual(denial.status, 0);
         assert.match(denial.stderr, /provisioning receipt is invalid/u);
       }
-      const alternateCheckpoint = join(directory, "alternate-checkpoint.json");
+      const alternateCheckpoint = join(directory, 'alternate-checkpoint.json');
       const alternatePayload = { ...checkpointPayload };
       delete alternatePayload.providerSignature;
       alternatePayload.files = [...alternatePayload.files].reverse();
-      alternatePayload.immutableId = createHash("sha256")
-        .update(alternatePayload.files.map((file) => file.sha256).join(":"))
-        .digest("hex");
+      alternatePayload.immutableId = createHash('sha256')
+        .update(alternatePayload.files.map((file) => file.sha256).join(':'))
+        .digest('hex');
       writeFileSync(
         alternateCheckpoint,
         JSON.stringify({
           ...alternatePayload,
-          providerSignature: createHmac("sha256", providerKey)
+          providerSignature: createHmac('sha256', providerKey)
             .update(JSON.stringify(alternatePayload))
-            .digest("hex"),
+            .digest('hex'),
         }),
         { mode: 0o600 },
       );
@@ -587,42 +546,36 @@ test "$actual_count" = "$expected_count"
           ...isolatedEnv,
           DR_TEMPORAL_CHECKPOINT_FILE: alternateCheckpoint,
           DR_TEMPORAL_TARGET_RECEIPT: providerReceipt,
-          DR_TEMPORAL_RESTORE_EVIDENCE: join(
-            directory,
-            "denied-checkpoint.json",
-          ),
+          DR_TEMPORAL_RESTORE_EVIDENCE: join(directory, 'denied-checkpoint.json'),
         },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(substitutedCheckpoint.status, 0);
-      assert.match(
-        substitutedCheckpoint.stderr,
-        /provisioning receipt is invalid/u,
-      );
+      assert.match(substitutedCheckpoint.stderr, /provisioning receipt is invalid/u);
       assert.equal(
         docker([
-          "exec",
+          'exec',
           targetPostgres,
-          "psql",
-          "-U",
-          "temporal",
-          "-d",
-          "temporal_restore_control",
-          "-Atc",
-          "SELECT count(*) FROM claims",
+          'psql',
+          '-U',
+          'temporal',
+          '-d',
+          'temporal_restore_control',
+          '-Atc',
+          'SELECT count(*) FROM claims',
         ]).trim(),
-        "0",
+        '0',
       );
 
-      for (const dumpName of ["temporal.dump", "temporal_visibility.dump"]) {
+      for (const dumpName of ['temporal.dump', 'temporal_visibility.dump']) {
         const dumpPath = join(snapshots, dumpName);
         const pristinePath = join(directory, `${dumpName}.pristine`);
         copyFileSync(dumpPath, pristinePath);
-        writeFileSync(dumpPath, "tamper", { flag: "a" });
+        writeFileSync(dumpPath, 'tamper', { flag: 'a' });
         const dumpTamper = spawnSync(checkpointVerifier, {
           cwd: root,
           env: isolatedEnv,
-          encoding: "utf8",
+          encoding: 'utf8',
         });
         assert.notEqual(dumpTamper.status, 0);
         assert.match(dumpTamper.stderr, /snapshot checksum mismatch/u);
@@ -631,22 +584,15 @@ test "$actual_count" = "$expected_count"
         execFileSync(checkpointVerifier, { cwd: root, env: isolatedEnv });
       }
 
-      const competingEvidence = join(
-        directory,
-        "temporal-evidence-competing.json",
-      );
-      const attemptEnvironments = [evidence, competingEvidence].map(
-        (evidencePath) => ({
-          ...isolatedEnv,
-          DR_TEMPORAL_TARGET_RECEIPT: providerReceipt,
-          DR_TEMPORAL_RESTORE_EVIDENCE: evidencePath,
-          DR_TEMPORAL_EVIDENCE_FILE: evidencePath,
-        }),
-      );
+      const competingEvidence = join(directory, 'temporal-evidence-competing.json');
+      const attemptEnvironments = [evidence, competingEvidence].map((evidencePath) => ({
+        ...isolatedEnv,
+        DR_TEMPORAL_TARGET_RECEIPT: providerReceipt,
+        DR_TEMPORAL_RESTORE_EVIDENCE: evidencePath,
+        DR_TEMPORAL_EVIDENCE_FILE: evidencePath,
+      }));
       const attempts = await Promise.all(
-        attemptEnvironments.map((attemptEnv) =>
-          runProcess(restoreCommand, attemptEnv),
-        ),
+        attemptEnvironments.map((attemptEnv) => runProcess(restoreCommand, attemptEnv)),
       );
       assert.equal(
         attempts.filter((attempt) => attempt.status === 0).length,
@@ -655,44 +601,38 @@ test "$actual_count" = "$expected_count"
       );
       const winner = attempts.findIndex((attempt) => attempt.status === 0);
       const loser = attempts[1 - winner];
-      assert.match(
-        loser.stderr,
-        /duplicate key value violates unique constraint/u,
-      );
+      assert.match(loser.stderr, /duplicate key value violates unique constraint/u);
       const successfulEnv = attemptEnvironments[winner];
       const successfulEvidence = successfulEnv.DR_TEMPORAL_RESTORE_EVIDENCE;
       execFileSync(evidenceVerifier, { cwd: root, env: successfulEnv });
       assertPrivate(checkpoint);
-      assertPrivate(join(snapshots, "temporal.dump"));
-      assertPrivate(join(snapshots, "temporal_visibility.dump"));
+      assertPrivate(join(snapshots, 'temporal.dump'));
+      assertPrivate(join(snapshots, 'temporal_visibility.dump'));
       assertPrivate(providerReceipt);
       assertPrivate(successfulEvidence);
       for (const secret of [postgresPassword, providerKey]) {
-        assert.equal(readFileSync(checkpoint, "utf8").includes(secret), false);
-        assert.equal(
-          readFileSync(successfulEvidence, "utf8").includes(secret),
-          false,
-        );
+        assert.equal(readFileSync(checkpoint, 'utf8').includes(secret), false);
+        assert.equal(readFileSync(successfulEvidence, 'utf8').includes(secret), false);
       }
       assert.equal(
         docker([
-          "exec",
+          'exec',
           targetPostgres,
-          "psql",
-          "-U",
-          "temporal",
-          "-d",
-          "temporal_restore_control",
-          "-Atc",
-          "SELECT count(*) FROM claims",
+          'psql',
+          '-U',
+          'temporal',
+          '-d',
+          'temporal_restore_control',
+          '-Atc',
+          'SELECT count(*) FROM claims',
         ]).trim(),
-        "1",
+        '1',
       );
 
-      const tamperedCheckpoint = join(directory, "tampered-checkpoint.json");
+      const tamperedCheckpoint = join(directory, 'tampered-checkpoint.json');
       copyFileSync(checkpoint, tamperedCheckpoint);
-      const tampered = JSON.parse(readFileSync(tamperedCheckpoint, "utf8"));
-      tampered.runId = randomBytes(16).toString("hex");
+      const tampered = JSON.parse(readFileSync(tamperedCheckpoint, 'utf8'));
+      tampered.runId = randomBytes(16).toString('hex');
       writeFileSync(tamperedCheckpoint, JSON.stringify(tampered), {
         mode: 0o600,
       });
@@ -702,19 +642,16 @@ test "$actual_count" = "$expected_count"
           ...isolatedEnv,
           DR_TEMPORAL_CHECKPOINT_FILE: tamperedCheckpoint,
         },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(tamperResult.status, 0);
       assert.match(tamperResult.stderr, /signature mismatch/u);
 
-      for (const mutation of ["payload", "signature"]) {
-        const tamperedEvidence = join(
-          directory,
-          `tampered-evidence-${mutation}.json`,
-        );
-        const value = JSON.parse(readFileSync(successfulEvidence, "utf8"));
-        if (mutation === "payload") value.historySha256 = "0".repeat(64);
-        else value.providerSignature = "0".repeat(64);
+      for (const mutation of ['payload', 'signature']) {
+        const tamperedEvidence = join(directory, `tampered-evidence-${mutation}.json`);
+        const value = JSON.parse(readFileSync(successfulEvidence, 'utf8'));
+        if (mutation === 'payload') value.historySha256 = '0'.repeat(64);
+        else value.providerSignature = '0'.repeat(64);
         writeFileSync(tamperedEvidence, JSON.stringify(value), { mode: 0o600 });
         const evidenceTamper = spawnSync(evidenceVerifier, {
           cwd: root,
@@ -722,7 +659,7 @@ test "$actual_count" = "$expected_count"
             ...successfulEnv,
             DR_TEMPORAL_EVIDENCE_FILE: tamperedEvidence,
           },
-          encoding: "utf8",
+          encoding: 'utf8',
         });
         assert.notEqual(evidenceTamper.status, 0);
         assert.match(evidenceTamper.stderr, /authentication failed/u);
@@ -732,32 +669,29 @@ test "$actual_count" = "$expected_count"
         cwd: root,
         env: {
           ...isolatedEnv,
-          DR_TEMPORAL_RESTORE_EVIDENCE: join(directory, "replay.json"),
+          DR_TEMPORAL_RESTORE_EVIDENCE: join(directory, 'replay.json'),
         },
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(replayResult.status, 0);
-      assert.match(
-        replayResult.stderr,
-        /duplicate key value violates unique constraint/u,
-      );
-      assert.equal(existsSync(join(directory, "replay.json")), false);
+      assert.match(replayResult.stderr, /duplicate key value violates unique constraint/u);
+      assert.equal(existsSync(join(directory, 'replay.json')), false);
 
-      docker(["stop", targetTemporal]);
+      docker(['stop', targetTemporal]);
       for (const [database, dump] of [
-        ["temporal", "/snapshots/temporal.dump"],
-        ["temporal_visibility", "/snapshots/temporal_visibility.dump"],
+        ['temporal', '/snapshots/temporal.dump'],
+        ['temporal_visibility', '/snapshots/temporal_visibility.dump'],
       ]) {
         docker([
-          "exec",
+          'exec',
           targetPostgres,
-          "pg_restore",
-          "--exit-on-error",
-          "--clean",
-          "--if-exists",
-          "-U",
-          "temporal",
-          "-d",
+          'pg_restore',
+          '--exit-on-error',
+          '--clean',
+          '--if-exists',
+          '-U',
+          'temporal',
+          '-d',
           database,
           dump,
         ]);
@@ -768,42 +702,36 @@ test "$actual_count" = "$expected_count"
         sha256: checkpointPayload.persistence.historyNodeSha256,
       });
       docker([
-        "exec",
+        'exec',
         targetPostgres,
-        "psql",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        "temporal",
-        "-d",
-        "temporal",
-        "-c",
-        "DELETE FROM history_node WHERE ctid IN (SELECT ctid FROM history_node LIMIT 1)",
+        'psql',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-U',
+        'temporal',
+        '-d',
+        'temporal',
+        '-c',
+        'DELETE FROM history_node WHERE ctid IN (SELECT ctid FROM history_node LIMIT 1)',
       ]);
       const incompleteHistory = historyNodeIdentity(targetPostgres);
-      assert.equal(
-        incompleteHistory.count,
-        checkpointPayload.persistence.historyNodeCount - 1,
-      );
-      assert.notEqual(
-        incompleteHistory.sha256,
-        checkpointPayload.persistence.historyNodeSha256,
-      );
+      assert.equal(incompleteHistory.count, checkpointPayload.persistence.historyNodeCount - 1);
+      assert.notEqual(incompleteHistory.sha256, checkpointPayload.persistence.historyNodeSha256);
       const incompleteReconciliation = spawnSync(persistenceVerifier, {
         cwd: root,
         env: successfulEnv,
-        encoding: "utf8",
+        encoding: 'utf8',
       });
       assert.notEqual(incompleteReconciliation.status, 0);
     } finally {
       for (const container of containers)
-        spawnSync("docker", ["rm", "-f", container], {
+        spawnSync('docker', ['rm', '-f', container], {
           cwd: root,
-          stdio: "ignore",
+          stdio: 'ignore',
         });
-      spawnSync("docker", ["network", "rm", network], {
+      spawnSync('docker', ['network', 'rm', network], {
         cwd: root,
-        stdio: "ignore",
+        stdio: 'ignore',
       });
       rmSync(directory, { recursive: true, force: true });
     }
