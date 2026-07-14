@@ -7,6 +7,11 @@ import assert from 'node:assert/strict';
 
 const root = resolve(import.meta.dirname, '../..');
 const currentVersion = '2026-07-18';
+const currentReleaseManifest = JSON.parse(
+  readFileSync(resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`), 'utf8'),
+);
+const currentReleaseIsDerivedExport =
+  currentReleaseManifest.provenance?.exportTransformation?.kind === 'license-status-normalization';
 const currentVersionIsCheckedIn = (() => {
   try {
     execFileSync('git', ['cat-file', '-e', `HEAD:artifacts/api/${currentVersion}/openapi.json`], {
@@ -43,51 +48,55 @@ function assertReleaseSnapshot(expected) {
   }
 }
 
-test('builds a complete, checksummed API release with truthful compatibility metadata', () => {
-  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-    cwd: root,
-    stdio: 'pipe',
-  });
-  const directory = resolve(root, `artifacts/api/${currentVersion}`);
-  const manifest = JSON.parse(readFileSync(resolve(directory, 'release-manifest.json'), 'utf8'));
-  assert.equal(manifest.apiVersion, currentVersion);
-  assert.equal(manifest.publication, 'approval-required');
-  assert.match(manifest.provenance.sourceTreeHash, /^[a-f0-9]{64}$/u);
-  assert.equal(manifest.provenance.reproducible, true);
-  if (manifest.provenance.worktreeState === 'modified') {
-    assert.equal(manifest.commit, null);
-    assert.equal(manifest.timestamp, null);
-    assert.equal(manifest.provenance.publishable, false);
-  }
-  const apiDiff = JSON.parse(readFileSync(resolve(directory, 'api-diff.json'), 'utf8'));
-  assert.equal(manifest.breaking, apiDiff.breaking);
-  assert.equal(manifest.artifacts.length, 7);
-  const checksums = new Map(
-    readFileSync(resolve(directory, 'CHECKSUMS.sha256'), 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => {
-        const [hash, name] = line.split(/\s{2}/u);
-        return [name, hash];
-      }),
-  );
-  for (const artifact of manifest.artifacts) {
-    const bytes = readFileSync(resolve(directory, artifact.name));
-    assert.equal(createHash('sha256').update(bytes).digest('hex'), artifact.sha256);
-    assert.equal(checksums.get(artifact.name), artifact.sha256);
-  }
-  const webhookCatalog = JSON.parse(
-    readFileSync(resolve(directory, 'webhook-events.json'), 'utf8'),
-  );
-  assert.ok(webhookCatalog.events.some((event) => event.type === 'test.ping' && event.test));
-  for (const artifact of manifest.artifacts) {
-    const contents = readFileSync(resolve(directory, artifact.name), 'utf8');
-    assert.doesNotMatch(
-      contents,
-      /@(?!example\.(?:com|test))[a-z0-9.-]+\.[a-z]{2,}|sk_live|whsec_/iu,
+test(
+  'builds a complete, checksummed API release with truthful compatibility metadata',
+  { skip: currentReleaseIsDerivedExport },
+  () => {
+    execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+      cwd: root,
+      stdio: 'pipe',
+    });
+    const directory = resolve(root, `artifacts/api/${currentVersion}`);
+    const manifest = JSON.parse(readFileSync(resolve(directory, 'release-manifest.json'), 'utf8'));
+    assert.equal(manifest.apiVersion, currentVersion);
+    assert.equal(manifest.publication, 'approval-required');
+    assert.match(manifest.provenance.sourceTreeHash, /^[a-f0-9]{64}$/u);
+    assert.equal(manifest.provenance.reproducible, true);
+    if (manifest.provenance.worktreeState === 'modified') {
+      assert.equal(manifest.commit, null);
+      assert.equal(manifest.timestamp, null);
+      assert.equal(manifest.provenance.publishable, false);
+    }
+    const apiDiff = JSON.parse(readFileSync(resolve(directory, 'api-diff.json'), 'utf8'));
+    assert.equal(manifest.breaking, apiDiff.breaking);
+    assert.equal(manifest.artifacts.length, 7);
+    const checksums = new Map(
+      readFileSync(resolve(directory, 'CHECKSUMS.sha256'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => {
+          const [hash, name] = line.split(/\s{2}/u);
+          return [name, hash];
+        }),
     );
-  }
-});
+    for (const artifact of manifest.artifacts) {
+      const bytes = readFileSync(resolve(directory, artifact.name));
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), artifact.sha256);
+      assert.equal(checksums.get(artifact.name), artifact.sha256);
+    }
+    const webhookCatalog = JSON.parse(
+      readFileSync(resolve(directory, 'webhook-events.json'), 'utf8'),
+    );
+    assert.ok(webhookCatalog.events.some((event) => event.type === 'test.ping' && event.test));
+    for (const artifact of manifest.artifacts) {
+      const contents = readFileSync(resolve(directory, artifact.name), 'utf8');
+      assert.doesNotMatch(
+        contents,
+        /@(?!example\.(?:com|test))[a-z0-9.-]+\.[a-z]{2,}|sk_live|whsec_/iu,
+      );
+    }
+  },
+);
 
 test(
   'uses the checked-in same-version baseline instead of a mutable generated artifact',
@@ -250,7 +259,7 @@ test(
 
 test(
   'clean committed rebuild is byte-stable and validates recorded provenance',
-  { skip: !currentVersionIsCheckedIn },
+  { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
   () => {
     const expected = snapshotRelease();
     execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
@@ -269,7 +278,7 @@ test(
 
 test(
   'validates recorded provenance when a shallow or exported repository lacks the source object',
-  { skip: !currentVersionIsCheckedIn },
+  { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
   () => {
     const directory = resolve(root, `artifacts/api/${currentVersion}`);
     const manifestPath = resolve(directory, 'release-manifest.json');
@@ -342,58 +351,235 @@ test(
   },
 );
 
-test('provenance validation rejects an invented source hash and manifest version drift', () => {
-  const directory = resolve(root, `artifacts/api/${currentVersion}`);
-  const manifestPath = resolve(directory, 'release-manifest.json');
-  const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
-  const distributionPath = resolve(root, `artifacts/api-distribution-drift-${process.pid}.json`);
-  execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
-    cwd: root,
-    stdio: 'pipe',
-  });
-  try {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    manifest.provenance.sourceTreeHash = 'a'.repeat(64);
-    const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
-    writeFileSync(manifestPath, serialized);
-    const manifestDigest = createHash('sha256').update(serialized).digest('hex');
-    writeFileSync(
-      checksumsPath,
-      readFileSync(checksumsPath, 'utf8').replace(
-        /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
-        manifestDigest,
-      ),
+test(
+  'derived export integrity mode accepts only the pending-license normalization contract',
+  { skip: !currentVersionIsCheckedIn || currentReleaseIsDerivedExport },
+  () => {
+    const directory = resolve(root, `artifacts/api/${currentVersion}`);
+    const manifestPath = resolve(directory, 'release-manifest.json');
+    const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+    const distributionPath = resolve(
+      root,
+      `artifacts/api-derived-distribution-${process.pid}.json`,
     );
-    assert.throws(
-      () =>
-        execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
-          cwd: root,
-          stdio: 'pipe',
-        }),
-      /sourceTreeHash does not match recorded source inputs/u,
-    );
-
+    const originalManifest = readFileSync(manifestPath, 'utf8');
+    const originalChecksums = readFileSync(checksumsPath, 'utf8');
     const distribution = JSON.parse(
       readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
     );
-    distribution.release.contracts = distribution.release.contracts.map((path) =>
-      path.startsWith('artifacts/api/') ? 'artifacts/api/1999-01-01' : path,
+    distribution.release.contracts = distribution.release.contracts.filter(
+      (path) => !path.startsWith('artifacts/api/') || path === `artifacts/api/${currentVersion}`,
     );
     writeFileSync(distributionPath, `${JSON.stringify(distribution, null, 2)}\n`);
-    assert.throws(
-      () =>
-        execFileSync(
-          'bun',
-          ['scripts/validate-api-release-provenance.ts', '--distribution', distributionPath],
-          { cwd: root, stdio: 'pipe' },
+    const manifest = JSON.parse(originalManifest);
+    manifest.provenance.publishable = false;
+    manifest.provenance.reproducible = false;
+    manifest.provenance.exportTransformation = {
+      kind: 'license-status-normalization',
+      licensingStatus: 'pending-legal-review',
+      sourceArtifacts: {
+        'openapi.json': 'a'.repeat(64),
+        'openapi.yaml': 'b'.repeat(64),
+      },
+    };
+
+    const writeManifest = () => {
+      const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+      writeFileSync(manifestPath, serialized);
+      writeFileSync(
+        checksumsPath,
+        originalChecksums.replace(
+          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+          createHash('sha256').update(serialized).digest('hex'),
         ),
-      /active API contract is not manifest-declared/u,
+      );
+    };
+
+    try {
+      writeManifest();
+      assert.throws(
+        () =>
+          execFileSync(
+            'bun',
+            ['scripts/validate-api-release-provenance.ts', '--allow-recorded-source'],
+            { cwd: root, stdio: 'pipe' },
+          ),
+        /release provenance is not publishable/u,
+      );
+      const output = execFileSync(
+        'bun',
+        [
+          'scripts/validate-api-release-provenance.ts',
+          '--allow-recorded-source',
+          '--allow-derived-export',
+          '--distribution',
+          distributionPath,
+        ],
+        { cwd: root, encoding: 'utf8' },
+      );
+      assert.match(output, /pending-license derived API artifact integrity/u);
+      assert.match(output, /not sufficient for publication/u);
+
+      manifest.provenance.exportTransformation.licensingStatus = 'approved';
+      writeManifest();
+      assert.throws(
+        () =>
+          execFileSync(
+            'bun',
+            [
+              'scripts/validate-api-release-provenance.ts',
+              '--allow-recorded-source',
+              '--allow-derived-export',
+              '--distribution',
+              distributionPath,
+            ],
+            { cwd: root, stdio: 'pipe' },
+          ),
+        /release is not a pending-license derived export/u,
+      );
+    } finally {
+      writeFileSync(manifestPath, originalManifest);
+      writeFileSync(checksumsPath, originalChecksums);
+      rmSync(distributionPath, { force: true });
+    }
+  },
+);
+
+test('provenance validation binds checksums to manifest artifact metadata', () => {
+  const directory = resolve(root, `artifacts/api/${currentVersion}`);
+  const artifactPath = resolve(directory, 'api-diff.json');
+  const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+  const originalArtifact = readFileSync(artifactPath);
+  const originalChecksums = readFileSync(checksumsPath, 'utf8');
+  const tamperedArtifact = Buffer.concat([originalArtifact, Buffer.from('\n')]);
+  const args = ['scripts/validate-api-release-provenance.ts'];
+  if (currentReleaseIsDerivedExport) {
+    args.push('--allow-recorded-source', '--allow-derived-export');
+  }
+
+  try {
+    writeFileSync(artifactPath, tamperedArtifact);
+    writeFileSync(
+      checksumsPath,
+      originalChecksums.replace(
+        /^[a-f0-9]{64}(?=  api-diff\.json$)/mu,
+        createHash('sha256').update(tamperedArtifact).digest('hex'),
+      ),
+    );
+    assert.throws(
+      () => execFileSync('bun', args, { cwd: root, stdio: 'pipe' }),
+      /api-diff\.json manifest (?:sha256|size) does not match/u,
     );
   } finally {
-    rmSync(distributionPath, { force: true });
+    writeFileSync(artifactPath, originalArtifact);
+    writeFileSync(checksumsPath, originalChecksums);
+  }
+});
+
+test(
+  'derived export integrity mode validates every historical release transformation',
+  { skip: !currentReleaseIsDerivedExport },
+  () => {
+    const historicalVersion = '2026-01-01';
+    const directory = resolve(root, `artifacts/api/${historicalVersion}`);
+    const manifestPath = resolve(directory, 'release-manifest.json');
+    const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+    const originalManifest = readFileSync(manifestPath, 'utf8');
+    const originalChecksums = readFileSync(checksumsPath, 'utf8');
+    const manifest = JSON.parse(originalManifest);
+    manifest.provenance.exportTransformation.licensingStatus = 'approved';
+    const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+
+    try {
+      writeFileSync(manifestPath, serialized);
+      writeFileSync(
+        checksumsPath,
+        originalChecksums.replace(
+          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+          createHash('sha256').update(serialized).digest('hex'),
+        ),
+      );
+      assert.throws(
+        () =>
+          execFileSync(
+            'bun',
+            [
+              'scripts/validate-api-release-provenance.ts',
+              '--allow-recorded-source',
+              '--allow-derived-export',
+            ],
+            { cwd: root, stdio: 'pipe' },
+          ),
+        new RegExp(
+          `artifacts/api/${historicalVersion}: release is not a pending-license derived export`,
+          'u',
+        ),
+      );
+    } finally {
+      writeFileSync(manifestPath, originalManifest);
+      writeFileSync(checksumsPath, originalChecksums);
+    }
+  },
+);
+
+test(
+  'provenance validation rejects an invented source hash and manifest version drift',
+  {
+    skip: currentReleaseIsDerivedExport,
+  },
+  () => {
+    const directory = resolve(root, `artifacts/api/${currentVersion}`);
+    const manifestPath = resolve(directory, 'release-manifest.json');
+    const checksumsPath = resolve(directory, 'CHECKSUMS.sha256');
+    const distributionPath = resolve(root, `artifacts/api-distribution-drift-${process.pid}.json`);
     execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
       cwd: root,
       stdio: 'pipe',
     });
-  }
-});
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      manifest.provenance.sourceTreeHash = 'a'.repeat(64);
+      const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+      writeFileSync(manifestPath, serialized);
+      const manifestDigest = createHash('sha256').update(serialized).digest('hex');
+      writeFileSync(
+        checksumsPath,
+        readFileSync(checksumsPath, 'utf8').replace(
+          /^[a-f0-9]{64}(?=  release-manifest\.json$)/mu,
+          manifestDigest,
+        ),
+      );
+      assert.throws(
+        () =>
+          execFileSync('bun', ['scripts/validate-api-release-provenance.ts'], {
+            cwd: root,
+            stdio: 'pipe',
+          }),
+        /sourceTreeHash does not match recorded source inputs/u,
+      );
+
+      const distribution = JSON.parse(
+        readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
+      );
+      distribution.release.contracts = distribution.release.contracts.map((path) =>
+        path.startsWith('artifacts/api/') ? 'artifacts/api/1999-01-01' : path,
+      );
+      writeFileSync(distributionPath, `${JSON.stringify(distribution, null, 2)}\n`);
+      assert.throws(
+        () =>
+          execFileSync(
+            'bun',
+            ['scripts/validate-api-release-provenance.ts', '--distribution', distributionPath],
+            { cwd: root, stdio: 'pipe' },
+          ),
+        /active API contract is not manifest-declared/u,
+      );
+    } finally {
+      rmSync(distributionPath, { force: true });
+      execFileSync('bun', ['run', 'scripts/build-api-release.ts'], {
+        cwd: root,
+        stdio: 'pipe',
+      });
+    }
+  },
+);

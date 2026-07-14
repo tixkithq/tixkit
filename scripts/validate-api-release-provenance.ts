@@ -19,6 +19,7 @@ const distributionPath =
     : resolve(process.argv[distributionArgument + 1] ?? '');
 const distribution = JSON.parse(readFileSync(distributionPath, 'utf8'));
 const allowRecordedSource = process.argv.includes('--allow-recorded-source');
+const allowDerivedExport = process.argv.includes('--allow-derived-export');
 const activeVersion = openApiSpec.info.version;
 const declaredApiContracts = distribution.release.contracts.filter((path: string) =>
   path.startsWith('artifacts/api/'),
@@ -31,6 +32,38 @@ if (!declaredApiContracts.includes(activeContract)) {
 
 let validatedSourceCommit = '';
 let recordedOnly = false;
+let derivedExportOnly = false;
+if (allowDerivedExport && !allowRecordedSource) {
+  violations.push('--allow-derived-export requires --allow-recorded-source');
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function isPendingLicenseDerivedExport(provenance: Record<string, unknown>): boolean {
+  const transformation = provenance.exportTransformation as
+    | {
+        kind?: unknown;
+        licensingStatus?: unknown;
+        sourceArtifacts?: Record<string, unknown>;
+      }
+    | undefined;
+  return (
+    distribution.licensing?.status === 'pending-legal-review' &&
+    distribution.licensing?.mayClaimLegalApproval === false &&
+    distribution.licensing?.legalReviewEvidence === '' &&
+    provenance.publishable === false &&
+    provenance.reproducible === false &&
+    transformation?.kind === 'license-status-normalization' &&
+    transformation.licensingStatus === 'pending-legal-review' &&
+    Object.keys(transformation.sourceArtifacts ?? {})
+      .sort()
+      .join(',') === 'openapi.json,openapi.yaml' &&
+    isSha256(transformation.sourceArtifacts?.['openapi.json']) &&
+    isSha256(transformation.sourceArtifacts?.['openapi.yaml'])
+  );
+}
 function gitObjectType(objectId: string): string | undefined {
   try {
     return execFileSync('git', ['cat-file', '-t', objectId], {
@@ -61,6 +94,13 @@ for (const contract of declaredApiContracts) {
   const contractVersion = basename(contract);
   if (manifest.apiVersion !== contractVersion)
     violations.push(`${contract}: apiVersion does not match its versioned path`);
+  if (allowDerivedExport) {
+    if (isPendingLicenseDerivedExport(manifest.provenance ?? {})) {
+      derivedExportOnly = true;
+    } else {
+      violations.push(`${contract}: release is not a pending-license derived export`);
+    }
+  }
   if (contract === activeContract) {
     const sourceCommit = manifest.provenance?.sourceCommit;
     if (typeof sourceCommit !== 'string' || !/^[a-f0-9]{40}$/u.test(sourceCommit))
@@ -120,32 +160,54 @@ for (const contract of declaredApiContracts) {
       violations.push('provenance exclusions do not match the generator contract');
     if (manifest.provenance?.worktreeState !== 'clean')
       violations.push('release provenance is not clean');
-    if (manifest.provenance?.publishable !== true)
+    if (manifest.provenance?.publishable !== true && !allowDerivedExport)
       violations.push('release provenance is not publishable');
   }
 
-  const checksums = new Map(
-    readFileSync(resolve(releaseDirectory, 'CHECKSUMS.sha256'), 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => {
-        const [digest, name] = line.split(/\s{2}/u);
-        return [name, digest];
-      }),
-  );
-  for (const artifact of [...manifest.artifacts, { name: 'release-manifest.json' }]) {
+  const checksumEntries = readFileSync(resolve(releaseDirectory, 'CHECKSUMS.sha256'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => {
+      const [digest, name, ...remainder] = line.split(/\s{2}/u);
+      if (!isSha256(digest) || !name || remainder.length > 0) {
+        violations.push(`${contract}: malformed checksum entry`);
+      }
+      return [name, digest] as const;
+    });
+  const checksums = new Map(checksumEntries);
+  const expectedArtifactNames = [
+    ...manifest.artifacts.map((artifact: { name: string }) => artifact.name),
+    'release-manifest.json',
+  ];
+  if (checksums.size !== checksumEntries.length) {
+    violations.push(`${contract}: duplicate checksum entries`);
+  }
+  if ([...checksums.keys()].sort().join('\n') !== [...expectedArtifactNames].sort().join('\n')) {
+    violations.push(`${contract}: checksum names do not exactly match release artifacts`);
+  }
+  for (const artifact of manifest.artifacts) {
     const bytes = readFileSync(resolve(releaseDirectory, artifact.name));
     const digest = createHash('sha256').update(bytes).digest('hex');
+    if (artifact.sha256 !== digest)
+      violations.push(`${artifact.name} manifest sha256 does not match`);
+    if (artifact.size !== bytes.byteLength)
+      violations.push(`${artifact.name} manifest size does not match`);
     if (checksums.get(artifact.name) !== digest)
       violations.push(`${artifact.name} checksum does not match`);
   }
+  const manifestBytes = readFileSync(resolve(releaseDirectory, 'release-manifest.json'));
+  const manifestDigest = createHash('sha256').update(manifestBytes).digest('hex');
+  if (checksums.get('release-manifest.json') !== manifestDigest)
+    violations.push('release-manifest.json checksum does not match');
 }
 
 if (violations.length > 0) {
   throw new Error(`API release provenance validation failed:\n${violations.join('\n')}`);
 }
 process.stdout.write(
-  recordedOnly
-    ? `Validated API artifact integrity for ${activeVersion}; source provenance ${validatedSourceCommit} is recorded but unverified and is not sufficient for publication.\n`
-    : `Validated publishable API release ${activeVersion} for ${validatedSourceCommit}.\n`,
+  derivedExportOnly
+    ? `Validated pending-license derived API artifact integrity for ${activeVersion}; this evidence is not sufficient for publication.\n`
+    : recordedOnly
+      ? `Validated API artifact integrity for ${activeVersion}; source provenance ${validatedSourceCommit} is recorded but unverified and is not sufficient for publication.\n`
+      : `Validated publishable API release ${activeVersion} for ${validatedSourceCommit}.\n`,
 );

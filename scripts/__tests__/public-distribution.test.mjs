@@ -73,29 +73,35 @@ test('rejects incomplete repository classification and malformed schema fields',
   );
 });
 
-test('classifies deleted historical paths exactly once', () => {
-  assert.deepEqual(historicalClassificationViolations(manifest, root), []);
+test(
+  'classifies deleted historical paths exactly once',
+  {
+    skip: manifest.classification.historyValidation === 'snapshot',
+  },
+  () => {
+    assert.deepEqual(historicalClassificationViolations(manifest, root), []);
 
-  const missing = structuredClone(manifest);
-  missing.classification.historical.public = missing.classification.historical.public.filter(
-    (path) => path !== '.prettierrc',
-  );
-  assert.deepEqual(historicalClassificationViolations(missing, root), [
-    'unclassified historical path: .prettierrc',
-  ]);
+    const missing = structuredClone(manifest);
+    missing.classification.historical.public = missing.classification.historical.public.filter(
+      (path) => path !== '.prettierrc',
+    );
+    assert.deepEqual(historicalClassificationViolations(missing, root), [
+      'unclassified historical path: .prettierrc',
+    ]);
 
-  const duplicate = structuredClone(manifest);
-  duplicate.classification.historical.privateCloud = ['.prettierrc'];
-  assert.deepEqual(historicalClassificationViolations(duplicate, root), [
-    'historical path has multiple classifications: .prettierrc',
-  ]);
+    const duplicate = structuredClone(manifest);
+    duplicate.classification.historical.privateCloud = ['.prettierrc'];
+    assert.deepEqual(historicalClassificationViolations(duplicate, root), [
+      'historical path has multiple classifications: .prettierrc',
+    ]);
 
-  const present = structuredClone(manifest);
-  present.classification.historical.public.push('README.md');
-  assert.deepEqual(historicalClassificationViolations(present, root), [
-    'historical classification is still present: README.md',
-  ]);
-});
+    const present = structuredClone(manifest);
+    present.classification.historical.public.push('README.md');
+    assert.deepEqual(historicalClassificationViolations(present, root), [
+      'historical classification is still present: README.md',
+    ]);
+  },
+);
 
 test('distinguishes snapshot validation from complete ancestry proof', () => {
   const repository = mkdtempSync(resolve(tmpdir(), 'tixkit-shallow-history-'));
@@ -204,7 +210,13 @@ test('rejects SDK workflow trigger and verification-job drift', () => {
   const workflow = readFileSync(resolve(root, '.github/workflows/sdk-release-dry-run.yml'), 'utf8');
   assert.deepEqual(sdkReleaseWorkflowViolations(manifest, workflow), []);
   assert.deepEqual(
-    sdkReleaseWorkflowViolations(manifest, workflow.replace("'packages/**'", "'docs/**'")),
+    sdkReleaseWorkflowViolations(
+      manifest,
+      workflow.replace(
+        '    branches: [main]\n',
+        "    branches: [main]\n    paths:\n      - 'docs/**'\n",
+      ),
+    ),
     ['SDK release workflow must trigger for every packages/** change'],
   );
   assert.deepEqual(

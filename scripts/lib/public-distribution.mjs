@@ -494,7 +494,11 @@ function validateNpmReleaseMetadata(entry, manifest, root, violations) {
 
 export function sdkReleaseWorkflowViolations(manifest, workflow) {
   const violations = [];
-  if (!/^\s+- ['"]packages\/\*\*['"]$/mu.test(workflow)) {
+  const pullRequestBlock = workflow.match(/^  pull_request:\s*\n((?: {4}.*\n)*)/mu)?.[1];
+  const runsForEveryPullRequest =
+    pullRequestBlock !== undefined && !/^    paths(?:-ignore)?:/mu.test(pullRequestBlock);
+  const explicitlyCoversEveryPackage = /^\s+- ['"]packages\/\*\*['"]$/mu.test(workflow);
+  if (!runsForEveryPullRequest && !explicitlyCoversEveryPackage) {
     violations.push('SDK release workflow must trigger for every packages/** change');
   }
   for (const entry of manifest.release.packages.filter(({ path }) =>

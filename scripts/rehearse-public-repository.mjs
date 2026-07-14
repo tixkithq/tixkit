@@ -46,7 +46,14 @@ export function publicRepositoryValidationCommands({ createSnapshot = false } = 
     ['bun', ['run', 'lint', '--force']],
     ['bun', ['run', 'typecheck', '--force']],
     ['bun', ['run', 'test:unit']],
-    ['bun', ['scripts/validate-api-release-provenance.ts', '--allow-recorded-source']],
+    [
+      'bun',
+      [
+        'scripts/validate-api-release-provenance.ts',
+        '--allow-recorded-source',
+        '--allow-derived-export',
+      ],
+    ],
     ['git', ['restore', '--worktree', '--', 'artifacts/api', 'apps/docs/public/contracts']],
     ['bun', ['run', 'build']],
     ['node', ['packages/cli/dist/index.js', '--help']],

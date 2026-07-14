@@ -2,18 +2,7 @@ name: SDK Release Dry Run
 
 on:
   pull_request:
-    paths:
-      - 'packages/**'
-      - 'apps/sdk-*-demo/**'
-      - 'docs/public/guides/sdks/**'
-      - 'packages/docs-core/src/sdk-snippets.ts'
-      - 'scripts/lib/sdk-parity.mjs'
-      - 'scripts/sdk-demo-matrix.mjs'
-      - 'scripts/sdk-parity-matrix.mjs'
-      - 'scripts/public-npm-release-dry-run.mjs'
-      - 'scripts/lib/public-distribution.mjs'
-      - 'distribution/**'
-      - '.github/workflows/sdk-release-dry-run.yml'
+    branches: [main]
   workflow_dispatch:
 
 permissions:
