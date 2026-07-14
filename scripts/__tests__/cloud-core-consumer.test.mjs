@@ -558,6 +558,162 @@ test('compatibility generation rejects a nested directory as the private reposit
   }
 });
 
+test(
+  'clean private consumer generates compatibility from a real packed public artifact',
+  { timeout: 60_000 },
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-real-public-artifact-'));
+    const publicArtifacts = resolve(directory, 'public-artifacts');
+    const cloudRoot = resolve(directory, 'cloud');
+    try {
+      const sourceCommit = execFileSync(
+        '/usr/bin/git',
+        ['rev-parse', '--verify', 'HEAD^{commit}'],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
+        },
+      ).trim();
+      const sourceArchive = execFileSync(
+        '/usr/bin/git',
+        ['archive', '--format=tar', sourceCommit],
+        {
+          cwd: root,
+          maxBuffer: 512 * 1024 * 1024,
+          env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
+        },
+      );
+      const realDistribution = {
+        authority: { publicRepository: 'tixkit/tixkit' },
+        release: {
+          packages: [{ path: 'packages/domain', ecosystem: 'npm' }],
+          images: distribution.release.images,
+          contracts: [activeApiContract],
+        },
+      };
+      const images = realDistribution.release.images.map(({ name }, index) => {
+        const digest = `sha256:${String(index + 1).repeat(64)}`;
+        return {
+          name,
+          digest,
+          reference: `ghcr.io/tixkit/tixkit-${name}@${digest}`,
+        };
+      });
+      const release = buildPublicReleaseManifestFromArchive({
+        distribution: realDistribution,
+        images,
+        releaseVersion: '0.1.0',
+        sourceCommit,
+        sourceArchive,
+        packageArtifactDirectory: publicArtifacts,
+        install: true,
+      });
+      const domainPin = release.core.packages.find(({ name }) => name === '@tixkit/domain');
+      assert.ok(domainPin);
+      const tarballName = readdirSync(publicArtifacts).find((name) => name.endsWith('.tgz'));
+      assert.ok(tarballName);
+      const tarball = resolve(publicArtifacts, tarballName);
+
+      mkdirSync(cloudRoot);
+      writeFileSync(
+        resolve(cloudRoot, 'package.json'),
+        `${JSON.stringify({ name: '@tixkit-cloud/artifact-proof', private: true, type: 'module' })}\n`,
+      );
+      writeFileSync(
+        resolve(cloudRoot, 'bunfig.toml'),
+        '[install]\nlinker = "isolated"\nbackend = "copyfile"\n',
+      );
+      writeFileSync(resolve(cloudRoot, '.gitignore'), 'node_modules/\n');
+      writeFileSync(
+        resolve(cloudRoot, 'verify-artifact.mjs'),
+        "await import('@tixkit/domain');\nprocess.stdout.write('public artifact loaded');\n",
+      );
+      execFileSync('bun', ['add', '--ignore-scripts', tarball], {
+        cwd: cloudRoot,
+        stdio: 'pipe',
+      });
+      const packagePath = resolve(cloudRoot, 'package.json');
+      const privatePackage = JSON.parse(readFileSync(packagePath, 'utf8'));
+      privatePackage.dependencies = { '@tixkit/domain': domainPin.version };
+      writeFileSync(packagePath, `${JSON.stringify(privatePackage, null, 2)}\n`);
+      const lockPath = resolve(cloudRoot, 'bun.lock');
+      const lock = parseBunLock(readFileSync(lockPath, 'utf8'));
+      lock.workspaces[''].dependencies['@tixkit/domain'] = domainPin.version;
+      const resolution = Object.values(lock.packages).find(
+        (entry) => Array.isArray(entry) && entry[0].startsWith('@tixkit/domain@'),
+      );
+      assert.ok(resolution);
+      resolution[0] = `@tixkit/domain@${domainPin.version}`;
+      resolution[3] = domainPin.integrity;
+      writeFileSync(lockPath, `${JSON.stringify(lock)}\n`);
+      execFileSync('/usr/bin/git', ['init', '-q'], { cwd: cloudRoot });
+      execFileSync('/usr/bin/git', ['add', '-A'], { cwd: cloudRoot });
+      execFileSync(
+        '/usr/bin/git',
+        [
+          '-c',
+          'user.name=Tixkit Cloud Test',
+          '-c',
+          'user.email=cloud-test@tixkit.invalid',
+          'commit',
+          '-qm',
+          'Consume real public artifact',
+        ],
+        { cwd: cloudRoot },
+      );
+
+      const { releasePath, bin } = attestedReleaseFixture(cloudRoot, release);
+      const outputPath = resolve(cloudRoot, 'cloud-core-compatibility.json');
+      const buildResult = spawnSync(
+        process.execPath,
+        [
+          resolve(root, 'scripts/build-cloud-core-compatibility.mjs'),
+          '--public-release-manifest',
+          releasePath,
+          '--cloud-root',
+          cloudRoot,
+          '--cloud-version',
+          '0.1.0-private.1',
+          '--out',
+          outputPath,
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        },
+      );
+      assert.equal(buildResult.status, 0, buildResult.stderr);
+      const compatibility = JSON.parse(readFileSync(outputPath, 'utf8'));
+      assert.deepEqual(compatibility.core, release.core);
+      assert.deepEqual(compatibility.cloudRelease.consumedPackages, ['@tixkit/domain']);
+      const verified = spawnSync(
+        process.execPath,
+        [
+          resolve(root, 'scripts/verify-cloud-core-install.mjs'),
+          '--manifest',
+          outputPath,
+          '--public-release-manifest',
+          releasePath,
+          '--cloud-root',
+          cloudRoot,
+          '--',
+          process.execPath,
+          'verify-artifact.mjs',
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        },
+      );
+      assert.equal(verified.status, 0, verified.stderr);
+      assert.match(verified.stdout, /public artifact loaded/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test('binds the Cloud release identity to the clean private repository commit', () => {
   const manifest = compatibilityManifest();
   const cloudRoot = cloudFixture(manifest);
