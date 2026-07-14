@@ -1,0 +1,61 @@
+{
+  "releaseVersion": "2026-07-22",
+  "apiVersion": "2026-07-22",
+  "commit": null,
+  "timestamp": null,
+  "provenance": {
+    "sourceCommit": "0a4f44a0e85a867b38321a0b50d577221b59e5e7",
+    "headTreeHash": "312aa1df68f9ad7af4a548a86d070b3532552ff1",
+    "sourceTreeHash": "266cec4e76c0c501bc1d4adead2ce011c1d06976df6a3b6cc6d10e96430809c2",
+    "trackedFileCount": 1893,
+    "excludedGeneratedPaths": [
+      "apps/docs/public/contracts/",
+      "apps/docs/public/openapi.json",
+      "apps/docs/src/generated/",
+      "artifacts/api/",
+      "graphify-out/"
+    ],
+    "worktreeState": "modified",
+    "reproducible": true,
+    "publishable": false
+  },
+  "artifacts": [
+    {
+      "name": "openapi.json",
+      "sha256": "ba7d28ddda49da8e895c056578913be29a28f5d20f3c134c09efed77332d7df9",
+      "size": 1008606
+    },
+    {
+      "name": "openapi.yaml",
+      "sha256": "5f3c2ca9c7c9c3fcd25faad4c1084f051a99037decc05d396f25d479a72b1bfe",
+      "size": 697298
+    },
+    {
+      "name": "openapi.d.ts",
+      "sha256": "963dda1258bbc0fbd39621352dfc7bbed311d7e528f00bcbba6af29289ee39a2",
+      "size": 502098
+    },
+    {
+      "name": "webhook-events.json",
+      "sha256": "1ed335bb636f2680bc0f3a967c0dd891d816d359ca49e6734b90a611f8d05d4f",
+      "size": 13246
+    },
+    {
+      "name": "examples.json",
+      "sha256": "cf970a5b8414915efe7e7201cbe3998424d5c281740c1938c1911700d23e3326",
+      "size": 420
+    },
+    {
+      "name": "api-diff.json",
+      "sha256": "eb2ed5b182c3e3e2da56f5b48f3f4aa205e9b741315c383d152dfab70eabab9f",
+      "size": 855
+    },
+    {
+      "name": "CHANGELOG.md",
+      "sha256": "a98886e2dc332ef73bbc3a0daf211ac5ab10a6f0147a3e2ae625861aac32296e",
+      "size": 253
+    }
+  ],
+  "breaking": false,
+  "publication": "approval-required"
+}

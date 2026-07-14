@@ -1,0 +1,36 @@
+{
+  "from": "2026-07-21",
+  "to": "2026-07-22",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 4
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/actions",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/actions/{actionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PreparedAgentAction",
+      "message": "A named schema was added."
+    }
+  ]
+}
