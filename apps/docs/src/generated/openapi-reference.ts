@@ -11186,7 +11186,7 @@ export const apiReferenceOperations = [
                 "events.read"
               ],
               "maximumAutonomy": "read",
-              "protocolVersion": "2026-07-25",
+              "protocolVersion": "protocolVersion example",
               "state": "active",
               "registeredAt": "2026-07-10T12:00:00.000Z"
             }
@@ -11252,7 +11252,7 @@ export const apiReferenceOperations = [
                 "events.read"
               ],
               "maximumAutonomy": "read",
-              "protocolVersion": "2026-07-25",
+              "protocolVersion": "protocolVersion example",
               "state": "active",
               "registeredAt": "2026-07-10T12:00:00.000Z"
             }
@@ -11637,7 +11637,7 @@ export const apiReferenceOperations = [
             "example": {
               "action": {
                 "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "protocolVersion": "2026-07-25",
+                "protocolVersion": "2026-07-22",
                 "agentPrincipalId": "agentprincipal_example",
                 "sponsorPrincipalId": "sponsorprincipal_example",
                 "delegationGrantId": "delegationgrant_example",
@@ -11738,7 +11738,7 @@ export const apiReferenceOperations = [
             "example": {
               "action": {
                 "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "protocolVersion": "2026-07-25",
+                "protocolVersion": "2026-07-22",
                 "agentPrincipalId": "agentprincipal_example",
                 "sponsorPrincipalId": "sponsorprincipal_example",
                 "delegationGrantId": "delegationgrant_example",
@@ -12139,7 +12139,7 @@ export const apiReferenceOperations = [
                   "events.read"
                 ],
                 "maximumAutonomy": "read",
-                "protocolVersion": "2026-07-25",
+                "protocolVersion": "protocolVersion example",
                 "state": "active",
                 "registeredAt": "2026-07-10T12:00:00.000Z",
                 "updatedAt": "2026-07-10T12:00:00.000Z"
@@ -12150,7 +12150,7 @@ export const apiReferenceOperations = [
                 "productPermissions": []
               },
               "delegationRequired": true,
-              "supportedProtocolVersion": "2026-07-25"
+              "supportedProtocolVersion": "supportedProtocolVersion example"
             }
           }
         }

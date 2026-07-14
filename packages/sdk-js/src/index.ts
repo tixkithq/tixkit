@@ -1599,7 +1599,7 @@ export type AgentSession = {
 
 export type AgentAction = {
   id: string;
-  protocolVersion: '2026-07-25';
+  protocolVersion: '2026-07-22';
   agentPrincipalId: string;
   sponsorPrincipalId: string;
   delegationGrantId: string;

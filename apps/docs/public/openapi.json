@@ -9476,8 +9476,7 @@
             ]
           },
           "protocolVersion": {
-            "type": "string",
-            "const": "2026-07-25"
+            "type": "string"
           },
           "state": {
             "type": "string",
@@ -9692,8 +9691,7 @@
             "const": true
           },
           "supportedProtocolVersion": {
-            "type": "string",
-            "const": "2026-07-25"
+            "type": "string"
           }
         },
         "required": [
@@ -9715,7 +9713,7 @@
           },
           "protocolVersion": {
             "type": "string",
-            "const": "2026-07-25"
+            "const": "2026-07-22"
           },
           "agentPrincipalId": {
             "type": "string"
@@ -21578,7 +21576,7 @@
                     "events.read"
                   ],
                   "maximumAutonomy": "read",
-                  "protocolVersion": "2026-07-25",
+                  "protocolVersion": "protocolVersion example",
                   "state": "active",
                   "registeredAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -21633,7 +21631,7 @@
                     "events.read"
                   ],
                   "maximumAutonomy": "read",
-                  "protocolVersion": "2026-07-25",
+                  "protocolVersion": "protocolVersion example",
                   "state": "active",
                   "registeredAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -22025,7 +22023,7 @@
                 "example": {
                   "action": {
                     "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "protocolVersion": "2026-07-25",
+                    "protocolVersion": "2026-07-22",
                     "agentPrincipalId": "agentprincipal_example",
                     "sponsorPrincipalId": "sponsorprincipal_example",
                     "delegationGrantId": "delegationgrant_example",
@@ -22124,7 +22122,7 @@
                 "example": {
                   "action": {
                     "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "protocolVersion": "2026-07-25",
+                    "protocolVersion": "2026-07-22",
                     "agentPrincipalId": "agentprincipal_example",
                     "sponsorPrincipalId": "sponsorprincipal_example",
                     "delegationGrantId": "delegationgrant_example",
@@ -22520,7 +22518,7 @@
                       "events.read"
                     ],
                     "maximumAutonomy": "read",
-                    "protocolVersion": "2026-07-25",
+                    "protocolVersion": "protocolVersion example",
                     "state": "active",
                     "registeredAt": "2026-07-10T12:00:00.000Z",
                     "updatedAt": "2026-07-10T12:00:00.000Z"
@@ -22531,7 +22529,7 @@
                     "productPermissions": []
                   },
                   "delegationRequired": true,
-                  "supportedProtocolVersion": "2026-07-25"
+                  "supportedProtocolVersion": "supportedProtocolVersion example"
                 }
               }
             }

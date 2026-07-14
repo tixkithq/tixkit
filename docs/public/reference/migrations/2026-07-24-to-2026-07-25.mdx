@@ -16,9 +16,9 @@ related:
   - /platform/agent-platform
 ---
 
-API version `2026-07-25` adds durable execution for an approved immutable `event.publish` agent action. Existing `2026-07-24` operations remain compatible. Agent protocol `2026-07-25` scopes durable execution idempotency to the explicit agent principal; immutable `2026-07-22` schemas remain exported for compatibility, but principals must negotiate the new literal before preparing or executing actions.
+API version `2026-07-25` adds durable execution for an approved immutable `event.publish` agent action. Existing `2026-07-24` operations remain compatible. The serialized agent protocol remains `2026-07-22`; the new HTTP operation scopes durable execution idempotency to the explicit agent principal without requiring principals to negotiate a new protocol literal.
 
-Migration `0084_agent_protocol_2026_07_25` advances existing server-managed principal records from `2026-07-22`. Agents should inspect `GET /v1/agent/session` and accept only the advertised supported protocol before preparing a new action.
+No database or agent-protocol migration is required for this additive operation. Agents should continue to inspect `GET /v1/agent/session` and accept only the advertised supported protocol before preparing a new action.
 
 ## Execute one approved action
 

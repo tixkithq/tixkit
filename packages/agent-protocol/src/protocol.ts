@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-export const AGENT_PROTOCOL_VERSION = '2026-07-25' as const;
+export const AGENT_PROTOCOL_VERSION = '2026-07-22' as const;
 export type AgentAutonomy = 'read' | 'recommend' | 'prepare' | 'execute_with_approval';
 export type AgentKind = 'managed_cloud' | 'third_party' | 'self_hosted';
 export type AgentCapability =

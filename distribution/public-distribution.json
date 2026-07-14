@@ -304,7 +304,6 @@
       "distribution/cloud-core-compatibility.schema.json",
       "distribution/public-release-manifest.schema.json",
       "packages/agent-protocol/schemas/agent-protocol-2026-07-22.json",
-      "packages/agent-protocol/schemas/agent-protocol-2026-07-25.json",
       "packages/agent-protocol/schemas/agent-protocol-2026-07-11.json",
       "packages/portability/schemas/portable-bundle-2026-07-12.json",
       "packages/portability/schemas/portable-bundle-2026-07-14.json",
