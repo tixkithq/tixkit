@@ -56,7 +56,7 @@ function action(overrides: Partial<AgentAction> = {}): AgentAction {
       resourceVersion: 7,
       apiOperation: 'events.publish',
     },
-    payload: { publication: { visibility: 'public' } },
+    payload: { readinessSnapshotSha256: 'a'.repeat(64) },
     idempotencyKey: 'agent-action-2026-07-12-0001',
     expectedPolicyVersion: 3,
     preparedAt: now,
@@ -112,14 +112,25 @@ describe('agent protocol', () => {
     expect(canonicalAgentJson({ z: 1, nested: { b: 2, a: 1 }, a: 3 })).toBe(
       '{"a":3,"nested":{"a":1,"b":2},"z":1}',
     );
-    const first = action({ payload: { b: 2, a: 1 } });
-    const reordered = action({ payload: { a: 1, b: 2 } });
+    const preparedTarget = { ...action().target, apiOperation: 'events.prepare' };
+    const first = action({
+      kind: 'event.prepare',
+      autonomy: 'prepare',
+      target: preparedTarget,
+      payload: { b: 2, a: 1 },
+    });
+    const reordered = action({
+      kind: 'event.prepare',
+      autonomy: 'prepare',
+      target: preparedTarget,
+      payload: { a: 1, b: 2 },
+    });
     expect(agentActionDigest(first)).toBe(agentActionDigest(reordered));
     expect(
       agentActionDigest(action({ target: { ...action().target, resourceVersion: 8 } })),
     ).not.toBe(agentActionDigest(action()));
     expect(
-      agentActionDigest(action({ payload: { publication: { visibility: 'private' } } })),
+      agentActionDigest(action({ payload: { readinessSnapshotSha256: 'b'.repeat(64) } })),
     ).not.toBe(agentActionDigest(action()));
   });
 
@@ -146,7 +157,7 @@ describe('agent protocol', () => {
     expect(authorizeAgentAction({ ...base, now: '2026-07-12T12:05:00.000Z' }).reasons).toContain(
       'approval_expired',
     );
-    const changed = action({ payload: { publication: { visibility: 'private' } } });
+    const changed = action({ payload: { readinessSnapshotSha256: 'b'.repeat(64) } });
     expect(authorizeAgentAction({ ...base, action: changed }).reasons).toContain(
       'approval_invalid',
     );

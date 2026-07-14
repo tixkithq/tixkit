@@ -6,6 +6,7 @@ export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 export interface AgentApprovalTable {
   id: string;
   tenant_id: string;
+  action_id: Generated<string | null>;
   action_digest: string;
   plan_sha256: string | null;
   approver_principal_id: string;
@@ -85,6 +86,48 @@ export interface AgentActionEffectTable {
   result: string;
   result_sha256: string;
   created_at: Timestamp;
+}
+
+export interface AgentActionTable {
+  id: string;
+  tenant_id: string;
+  agent_principal_id: string;
+  sponsor_principal_id: string;
+  delegation_grant_id: string;
+  action_kind: string;
+  action_digest: string;
+  action_json: string;
+  resource_type: string;
+  resource_id: string;
+  resource_version: number | string | bigint;
+  policy_version: number | string | bigint;
+  idempotency_key: string;
+  request_fingerprint: string;
+  authorization_snapshot_sha256: string;
+  authorization_reasons: string;
+  dry_run_json: string;
+  eligible_for_approval: boolean | number;
+  prepared_at: Timestamp;
+  expires_at: Timestamp;
+}
+
+export interface AgentActionEventTable {
+  id: string;
+  tenant_id: string;
+  action_id: string;
+  action_digest: string;
+  agent_principal_id: string;
+  sponsor_principal_id: string;
+  actor_type: string;
+  actor_principal_id: string;
+  phase: string;
+  approval_id: string | null;
+  execution_id: string | null;
+  idempotency_key: string;
+  request_fingerprint: string;
+  authorization_sha256: string;
+  outcome: string;
+  occurred_at: Timestamp;
 }
 
 export interface AgentMemoryEntryTable {
@@ -2088,6 +2131,8 @@ export interface DB {
   agent_principals: AgentPrincipalTable;
   agent_delegations: AgentDelegationTable;
   agent_control_events: AgentControlEventTable;
+  agent_actions: AgentActionTable;
+  agent_action_events: AgentActionEventTable;
   agent_action_policies: AgentActionPolicyTable;
   agent_action_effects: AgentActionEffectTable;
   agent_memory_entries: AgentMemoryEntryTable;

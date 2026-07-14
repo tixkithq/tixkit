@@ -517,7 +517,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-21',
+    version: '2026-07-22',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -579,6 +579,19 @@ const rawOpenApiSpec = {
         schema: { type: 'string', minLength: 16, maxLength: 255 },
         description:
           'Required for agent-control mutations. Use 16-255 characters with no surrounding whitespace and preserve the same key only for identical intent.',
+      },
+      AgentActionIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          minLength: 16,
+          maxLength: 127,
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]+$',
+        },
+        description:
+          'Required for agent action preparation. A key is permanently bound to the authenticated agent and exact typed request.',
       },
       AgentMemoryIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -5085,7 +5098,7 @@ const rawOpenApiSpec = {
             type: 'string',
             enum: ['read', 'recommend', 'prepare', 'execute_with_approval'],
           },
-          protocolVersion: { type: 'string' },
+          protocolVersion: { type: 'string', const: '2026-07-22' },
           state: { type: 'string', enum: ['active', 'suspended', 'revoked'] },
           registeredAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
@@ -5144,10 +5157,99 @@ const rawOpenApiSpec = {
             required: ['grantType', 'scope', 'productPermissions'],
           },
           delegationRequired: { type: 'boolean', const: true },
-          supportedProtocolVersion: { type: 'string' },
+          supportedProtocolVersion: { type: 'string', const: '2026-07-22' },
         },
         required: ['principal', 'authentication', 'delegationRequired', 'supportedProtocolVersion'],
         additionalProperties: false,
+      },
+      AgentAction: {
+        type: 'object',
+        description:
+          'Server-derived immutable action envelope. Caller identity, sponsor, tenant, versions, operation, payload and preparation time cannot be supplied by the agent.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          protocolVersion: { type: 'string', const: '2026-07-22' },
+          agentPrincipalId: { type: 'string' },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: { type: 'string' },
+          kind: { type: 'string', const: 'event.publish' },
+          autonomy: { type: 'string', const: 'execute_with_approval' },
+          target: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              tenantId: { type: 'string' },
+              resourceType: { type: 'string', const: 'event' },
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 1 },
+              apiOperation: { type: 'string', const: 'events.publish' },
+            },
+            required: ['tenantId', 'resourceType', 'resourceId', 'resourceVersion', 'apiOperation'],
+          },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            },
+            required: ['readinessSnapshotSha256'],
+          },
+          idempotencyKey: { type: 'string', minLength: 16, maxLength: 127 },
+          expectedPolicyVersion: { type: 'integer', minimum: 1 },
+          preparedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'protocolVersion',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'kind',
+          'autonomy',
+          'target',
+          'payload',
+          'idempotencyKey',
+          'expectedPolicyVersion',
+          'preparedAt',
+        ],
+      },
+      PreparedAgentAction: {
+        type: 'object',
+        description:
+          'Immutable typed action plus server-authoritative dry-run evidence. eligibleForApproval does not grant execution authority; fresh human approval remains mandatory.',
+        additionalProperties: false,
+        properties: {
+          action: { $ref: '#/components/schemas/AgentAction' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          authorization: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              eligibleForApproval: { type: 'boolean' },
+              reasons: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+              snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              checkedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
+          },
+          dryRun: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              launchable: { type: 'boolean' },
+              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              blockingReasonCodes: {
+                type: 'array',
+                items: { type: 'string' },
+                uniqueItems: true,
+              },
+            },
+            required: ['launchable', 'readinessSnapshotSha256', 'blockingReasonCodes'],
+          },
+        },
+        required: ['action', 'actionDigest', 'expiresAt', 'authorization', 'dryRun'],
       },
       AgentDelegation: {
         type: 'object',
@@ -10224,6 +10326,81 @@ const rawOpenApiSpec = {
           '403': { description: 'Sponsor authorization changed' },
           '404': { description: 'Credential not found for this sponsored agent' },
           '409': { description: 'Idempotency conflict' },
+        },
+      },
+    },
+    '/agent/actions': {
+      post: {
+        summary: 'Prepare and dry-run a typed agent action',
+        description:
+          'Experimental/private beta. Requires Agent OAuth. The server derives the authenticated agent, tenant, sponsor, protocol, action identifier, exact event operation, current resource and policy versions, readiness snapshot, payload, digest and timestamps. Only event.publish is enabled. This operation has no product effect and never grants approval.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [{ $ref: '#/components/parameters/AgentActionIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  kind: { type: 'string', const: 'event.publish' },
+                  delegationGrantId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  resourceId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                },
+                required: ['kind', 'delegationGrantId', 'resourceId'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Immutable prepared action and no-effect authorization/readiness dry-run. Exact replays return identical evidence.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PreparedAgentAction' } },
+            },
+          },
+          '400': { description: 'Invalid typed request or idempotency key' },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': {
+            description: 'Agent, delegation or resource is outside the authenticated scope',
+          },
+          '409': { description: 'Idempotency conflict or action policy is unavailable' },
+        },
+      },
+    },
+    '/agent/actions/{actionId}': {
+      get: {
+        summary: 'Get an immutable prepared action',
+        description:
+          'Requires the exact Agent OAuth principal that prepared the action. Cross-agent and cross-tenant actions are hidden as not found.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Immutable action and original dry-run evidence',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PreparedAgentAction' } },
+            },
+          },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': { description: 'Action not found for this agent' },
         },
       },
     },

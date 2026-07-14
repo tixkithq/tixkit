@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-export const AGENT_PROTOCOL_VERSION = '2026-07-11' as const;
+export const AGENT_PROTOCOL_VERSION = '2026-07-22' as const;
 export type AgentAutonomy = 'read' | 'recommend' | 'prepare' | 'execute_with_approval';
 export type AgentKind = 'managed_cloud' | 'third_party' | 'self_hosted';
 export type AgentCapability =
@@ -102,6 +102,10 @@ export interface CampaignSendPayload extends Readonly<Record<string, unknown>> {
   scheduledAt: string;
   estimatedCostMinor: number;
   currency: string;
+}
+
+export interface EventPublishPayload extends Readonly<Record<string, unknown>> {
+  readinessSnapshotSha256: string;
 }
 
 export interface AgentPlan {
@@ -534,8 +538,18 @@ function validateAction(action: AgentAction): void {
   if (Buffer.byteLength(canonicalAgentJson(action.payload)) > 256 * 1024)
     throw new AgentProtocolValidationError('action payload exceeds 256 KiB');
   if (action.kind === 'campaign.send') validateCampaignSendPayload(action.payload);
+  if (action.kind === 'event.publish') validateEventPublishPayload(action.payload);
   if (CONSEQUENTIAL.has(action.kind) && action.autonomy !== 'execute_with_approval')
     throw new AgentProtocolValidationError('consequential action must execute with approval');
+}
+
+function validateEventPublishPayload(payload: Readonly<Record<string, unknown>>): void {
+  if (
+    JSON.stringify(Object.keys(payload).sort()) !== JSON.stringify(['readinessSnapshotSha256']) ||
+    typeof payload.readinessSnapshotSha256 !== 'string' ||
+    !SHA256.test(payload.readinessSnapshotSha256)
+  )
+    throw new AgentProtocolValidationError('event publish payload is invalid');
 }
 
 function validateCampaignSendPayload(payload: Readonly<Record<string, unknown>>): void {

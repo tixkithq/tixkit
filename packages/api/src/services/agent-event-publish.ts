@@ -15,6 +15,7 @@ import {
 import { EventRepository, sql, type Database } from '@tixkit/db';
 import type { Transaction } from 'kysely';
 import { ReadinessService, resolvePaymentMode } from './readiness.js';
+import type { EventLaunchReadiness } from '@tixkit/domain';
 
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
 
@@ -29,6 +30,25 @@ function parseStrings(value: string): string[] {
 
 function iso(value: Date | string): string {
   return (value instanceof Date ? value : new Date(value)).toISOString();
+}
+
+export function eventPublishReadinessSnapshotSha256(readiness: EventLaunchReadiness): string {
+  const { generatedAt: _generatedAt, ...materialState } = readiness;
+  return agentSha256(materialState);
+}
+
+function readinessDigestFromPayload(payload: Readonly<Record<string, unknown>>): string {
+  const keys = Object.keys(payload);
+  if (
+    keys.length !== 1 ||
+    keys[0] !== 'readinessSnapshotSha256' ||
+    typeof payload.readinessSnapshotSha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(payload.readinessSnapshotSha256)
+  )
+    throw Object.assign(new Error('invalid event publish payload'), {
+      code: 'AGENT_OPERATION_DENIED',
+    });
+  return payload.readinessSnapshotSha256;
 }
 
 async function databaseNow(db: Executor): Promise<string> {
@@ -69,6 +89,7 @@ export class EventPublishAgentAdapter
 
   async invoke(input: Parameters<AgentActionInvoker['invoke']>[0]) {
     this.assertEventPublish(input.actionKind, input.operation, input.resourceType);
+    const approvedReadinessDigest = readinessDigestFromPayload(input.payload);
     return this.db
       .transaction()
       .setIsolationLevel('serializable')
@@ -233,6 +254,10 @@ export class EventPublishAgentAdapter
         });
         if (!readiness.launchable)
           throw Object.assign(new Error('event readiness blocked'), { code: 'EVENT_NOT_READY' });
+        if (eventPublishReadinessSnapshotSha256(readiness) !== approvedReadinessDigest)
+          throw Object.assign(new Error('event readiness changed after approval'), {
+            code: 'AGENT_AUTHORIZATION_CHANGED',
+          });
         const published = await new EventRepository(tx as Database).publishIfVersion(
           event.id,
           input.expectedResourceVersion,
@@ -320,6 +345,12 @@ export class EventPublishAgentAdapter
     const permission = await (
       lock ? permissionQuery.forUpdate() : permissionQuery
     ).executeTakeFirst();
+    const sponsorQuery = db
+      .selectFrom('user_profiles')
+      .select('status')
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', execution.sponsorPrincipalId);
+    const sponsor = await (lock ? sponsorQuery.forUpdate() : sponsorQuery).executeTakeFirst();
     const policyQuery = db
       .selectFrom('agent_action_policies')
       .selectAll()
@@ -328,10 +359,20 @@ export class EventPublishAgentAdapter
     const policy = await (lock ? policyQuery.forUpdate() : policyQuery).executeTakeFirstOrThrow();
     const eventQuery = db
       .selectFrom('events')
-      .select(['id', 'version'])
+      .select(['id', 'organization_id', 'version'])
       .where('tenant_id', '=', tenantId)
       .where('id', '=', eventId);
     const event = await (lock ? eventQuery.forUpdate() : eventQuery).executeTakeFirstOrThrow();
+    const membershipQuery = db
+      .selectFrom('organization_members')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', event.organization_id)
+      .where('user_id', '=', execution.sponsorPrincipalId)
+      .where('accepted_at', 'is not', null);
+    const membership = await (
+      lock ? membershipQuery.forUpdate() : membershipQuery
+    ).executeTakeFirst();
     return {
       principal: {
         id: principal.id,
@@ -370,7 +411,8 @@ export class EventPublishAgentAdapter
         ...(approval.consumed_at ? { consumedAt: iso(approval.consumed_at) } : {}),
       } as AgentApproval,
       approvalExecutionId: approval.consumed_execution_id ?? '',
-      sponsorPermissions: permission ? ['events:publish'] : [],
+      sponsorPermissions:
+        permission && sponsor?.status === 'active' && membership ? ['events:publish'] : [],
       tenantAllowedActions: policy.allowed ? ['event.publish'] : [],
       currentResourceVersion: Number(event.version),
       currentPolicyVersion: Number(policy.policy_version),

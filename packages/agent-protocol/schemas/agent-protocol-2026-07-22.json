@@ -1,0 +1,373 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/agent-protocol/2026-07-22",
+  "title": "Tixkit Agent Action Protocol",
+  "type": "object",
+  "required": [
+    "id",
+    "protocolVersion",
+    "agentPrincipalId",
+    "sponsorPrincipalId",
+    "delegationGrantId",
+    "kind",
+    "autonomy",
+    "target",
+    "payload",
+    "idempotencyKey",
+    "expectedPolicyVersion",
+    "preparedAt"
+  ],
+  "properties": {
+    "id": { "$ref": "#/$defs/id" },
+    "protocolVersion": { "const": "2026-07-22" },
+    "agentPrincipalId": { "$ref": "#/$defs/id" },
+    "sponsorPrincipalId": { "$ref": "#/$defs/id" },
+    "delegationGrantId": { "$ref": "#/$defs/id" },
+    "kind": {
+      "enum": [
+        "event.read",
+        "readiness.read",
+        "report.read",
+        "event.prepare",
+        "content.prepare",
+        "campaign.prepare",
+        "event.update",
+        "event.publish",
+        "inventory.change",
+        "campaign.send",
+        "refund.issue",
+        "permission.change",
+        "personal_data.export",
+        "credential.change",
+        "domain.change",
+        "provider.change",
+        "migration.execute",
+        "resource.delete"
+      ]
+    },
+    "autonomy": { "enum": ["read", "recommend", "prepare", "execute_with_approval"] },
+    "target": {
+      "type": "object",
+      "required": ["tenantId", "resourceType", "resourceId", "resourceVersion", "apiOperation"],
+      "properties": {
+        "tenantId": { "$ref": "#/$defs/id" },
+        "resourceType": { "$ref": "#/$defs/id" },
+        "resourceId": { "$ref": "#/$defs/id" },
+        "resourceVersion": { "type": "integer", "minimum": 1 },
+        "apiOperation": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" }
+      },
+      "additionalProperties": false
+    },
+    "payload": {
+      "$ref": "#/$defs/canonicalObject",
+      "x-tixkit-maxCanonicalBytes": 262144,
+      "x-tixkit-maxDepth": 24
+    },
+    "idempotencyKey": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$" },
+    "expectedPolicyVersion": { "type": "integer", "minimum": 1 },
+    "preparedAt": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "event.read" } } },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "events.get" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "readiness.read" } } },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "events.readiness.get" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "report.read" } } },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resourceType": { "enum": ["event", "tenant"] },
+              "apiOperation": { "const": "reports.get" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "event.prepare" } } },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "events.prepare" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "content.prepare" } } },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "content.prepare" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "campaign.prepare" } } },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "campaigns.prepare" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "event.update" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "events.update" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "event.publish" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "events.publish" }
+            }
+          },
+          "payload": {
+            "type": "object",
+            "required": ["readinessSnapshotSha256"],
+            "properties": {
+              "readinessSnapshotSha256": { "$ref": "#/$defs/sha256" }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "inventory.change" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "enum": ["event", "ticket_type"] },
+              "apiOperation": { "const": "inventory.update" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "refund.issue" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "order" },
+              "apiOperation": { "const": "refunds.issue" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "permission.change" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "tenant" },
+              "apiOperation": { "const": "permissions.update" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "personal_data.export" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "enum": ["tenant", "event"] },
+              "apiOperation": { "const": "exports.create" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "credential.change" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "tenant" },
+              "apiOperation": { "const": "settings.credentials.update" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "domain.change" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "enum": ["tenant", "event"] },
+              "apiOperation": { "const": "settings.domains.update" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "provider.change" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "tenant" },
+              "apiOperation": { "const": "settings.providers.update" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "migration.execute" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "tenant" },
+              "apiOperation": { "const": "migrations.execute" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "resource.delete" } } },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "enum": ["event", "tenant"] },
+              "apiOperation": { "const": "resources.delete" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "campaign.send" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "autonomy": { "const": "execute_with_approval" },
+          "target": {
+            "properties": {
+              "resourceType": { "const": "event" },
+              "apiOperation": { "const": "campaigns.send" }
+            }
+          },
+          "payload": {
+            "type": "object",
+            "required": [
+              "channel",
+              "contentVersion",
+              "audienceSnapshotSha256",
+              "exclusionSnapshotSha256",
+              "complianceResultSha256",
+              "scheduledAt",
+              "estimatedCostMinor",
+              "currency"
+            ],
+            "properties": {
+              "channel": {
+                "enum": ["email", "sms", "whatsapp", "rcs", "apple_messages_for_business"]
+              },
+              "contentVersion": { "$ref": "#/$defs/id" },
+              "audienceSnapshotSha256": { "$ref": "#/$defs/sha256" },
+              "exclusionSnapshotSha256": { "$ref": "#/$defs/sha256" },
+              "complianceResultSha256": { "$ref": "#/$defs/sha256" },
+              "scheduledAt": { "type": "string", "format": "date-time" },
+              "estimatedCostMinor": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "canonicalObject": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$" },
+      "additionalProperties": { "$ref": "#/$defs/canonicalValue" }
+    },
+    "canonicalValue": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "integer" },
+        { "type": "string", "maxLength": 262144 },
+        { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/canonicalValue" } },
+        { "$ref": "#/$defs/canonicalObject" }
+      ]
+    }
+  }
+}

@@ -28,7 +28,7 @@ const action: AgentAction = {
     resourceVersion: 7,
     apiOperation: 'events.publish',
   },
-  payload: { visibility: 'public' },
+  payload: { readinessSnapshotSha256: 'a'.repeat(64) },
   idempotencyKey: 'agent-execution-2026-07-12-0001',
   expectedPolicyVersion: 3,
   preparedAt: now.toISOString(),
@@ -181,7 +181,7 @@ describe('durable agent execution service', () => {
   it('rejects an idempotency replay bound to another action digest', async () => {
     const { service } = harness();
     await service.reserve(authorization);
-    const changed = { ...action, payload: { visibility: 'private' } };
+    const changed = { ...action, payload: { readinessSnapshotSha256: 'b'.repeat(64) } };
     await expect(
       service.reserve({
         ...authorization,
@@ -274,7 +274,11 @@ describe('durable agent execution service', () => {
   it('rejects a forged execution shell after authoritative claim without invocation', async () => {
     const { service, store, invocations } = harness();
     const reserved = await service.reserve(authorization);
-    const forgedAction = { ...action, id: 'action_forged', payload: { visibility: 'private' } };
+    const forgedAction = {
+      ...action,
+      id: 'action_forged',
+      payload: { readinessSnapshotSha256: 'b'.repeat(64) },
+    };
     const forged = {
       ...reserved,
       actionDigest: agentActionDigest(forgedAction),

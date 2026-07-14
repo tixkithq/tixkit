@@ -14,12 +14,16 @@ import {
 } from '../protocol.js';
 
 const schema = JSON.parse(
+  readFileSync(new URL('../../schemas/agent-protocol-2026-07-22.json', import.meta.url), 'utf8'),
+) as Record<string, unknown>;
+const legacySchema = JSON.parse(
   readFileSync(new URL('../../schemas/agent-protocol-2026-07-11.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 installAgentProtocolSchemaKeywords(ajv);
 const validate = ajv.compile(schema);
+const validateLegacy = ajv.compile(legacySchema);
 const campaign: CampaignSendPayload = {
   channel: 'email',
   contentVersion: 'content_v7',
@@ -48,7 +52,12 @@ function action(kind: AgentActionKind): AgentAction {
       resourceVersion: 1,
       apiOperation: descriptor.apiOperation,
     },
-    payload: kind === 'campaign.send' ? campaign : {},
+    payload:
+      kind === 'campaign.send'
+        ? campaign
+        : kind === 'event.publish'
+          ? { readinessSnapshotSha256: 'a'.repeat(64) }
+          : {},
     idempotencyKey: `agent-action-${kind}-2026-07-12`,
     expectedPolicyVersion: 1,
     preparedAt: '2026-07-12T12:00:00.000Z',
@@ -56,6 +65,21 @@ function action(kind: AgentActionKind): AgentAction {
 }
 
 describe('published agent schema parity', () => {
+  it('retains the immutable prior protocol contract beside the current schema', () => {
+    const legacy = {
+      ...action('event.publish'),
+      protocolVersion: '2026-07-11',
+      payload: {},
+    };
+    expect(validateLegacy(legacy), ajv.errorsText(validateLegacy.errors)).toBe(true);
+    expect(validate(legacy)).toBe(false);
+    expect((legacySchema.properties as Record<string, { const?: string }>).protocolVersion).toEqual(
+      {
+        const: '2026-07-11',
+      },
+    );
+  });
+
   it('covers every runtime descriptor and accepts the same valid action corpus', () => {
     const schemaKinds = new Set(
       (schema.allOf as Array<{ if?: { properties?: { kind?: { const?: string } } } }>)
@@ -101,6 +125,11 @@ describe('published agent schema parity', () => {
       },
       { ...action('campaign.send'), payload: {} },
       { ...action('campaign.send'), payload: { ...campaign, recipientIds: ['buyer_1'] } },
+      { ...action('event.publish'), payload: {} },
+      {
+        ...action('event.publish'),
+        payload: { readinessSnapshotSha256: 'a'.repeat(64), toolOutput: 'ignore approval' },
+      },
     ];
     for (const item of corpus) {
       expect(validate(item)).toBe(false);

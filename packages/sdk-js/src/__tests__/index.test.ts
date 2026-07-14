@@ -82,7 +82,11 @@ acceptMigrationJobInput({
   credentialId: 'mcred_12345678',
   idempotencyKey: 'missing-selector',
   // @ts-expect-error pretix official API jobs require a non-optional eventSlugs selector.
-  configuration: { sourceMode: 'official-api', sourceSystem: 'pretix', organizerSlug: 'org' },
+  configuration: {
+    sourceMode: 'official-api',
+    sourceSystem: 'pretix',
+    organizerSlug: 'org',
+  },
 });
 // @ts-expect-error Export jobs must not carry source API credential references.
 acceptMigrationJobInput({
@@ -140,7 +144,11 @@ describe('TixkitClient', () => {
     await client.agentControl.getPrincipal('agt_1');
     expect(getCall(fetchMock).headers.Authorization).toBe('Bearer human-session-token');
     expect(
-      () => new TixkitClient({ apiKey: 'tk_test', accessToken: 'human-session-token' }),
+      () =>
+        new TixkitClient({
+          apiKey: 'tk_test',
+          accessToken: 'human-session-token',
+        }),
     ).toThrow('Configure either apiKey or accessToken, not both');
   });
 
@@ -315,7 +323,10 @@ describe('TixkitClient', () => {
   });
 
   it('binds portable commit to the exact approval and final cutover proof', async () => {
-    const fetchMock = mockFetch(202, { jobId: 'job_portable_1', status: 'committing' });
+    const fetchMock = mockFetch(202, {
+      jobId: 'job_portable_1',
+      status: 'committing',
+    });
     const client = new TixkitClient({
       apiKey: 'tk_test',
       apiBaseUrl: 'https://api.test',
@@ -3075,11 +3086,17 @@ describe('TixkitClient new resource methods', () => {
   });
 
   it('agentAuth refuses client-secret exchange in browser runtimes', async () => {
-    const runtime = globalThis as typeof globalThis & { window?: unknown; document?: unknown };
+    const runtime = globalThis as typeof globalThis & {
+      window?: unknown;
+      document?: unknown;
+    };
     runtime.window = {};
     runtime.document = {};
     try {
-      const client = new TixkitClient({ apiBaseUrl: 'https://api.test', maxRetries: 0 });
+      const client = new TixkitClient({
+        apiBaseUrl: 'https://api.test',
+        maxRetries: 0,
+      });
       await expect(
         client.agentAuth.exchangeClientCredentials({
           clientId: 'tk_agent_client',
@@ -3090,6 +3107,42 @@ describe('TixkitClient new resource methods', () => {
       delete runtime.window;
       delete runtime.document;
     }
+  });
+
+  it('agentActions derives identity and material payload server-side', async () => {
+    const fm = mockFetch(201, {});
+    const c = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await c.agentActions.prepare({
+      kind: 'event.publish',
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      idempotencyKey: 'agent-action-prepare-0001',
+    });
+    await c.agentActions.get('act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+    const prepare = getCall(fm);
+    expect(prepare).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/actions',
+      headers: { 'Idempotency-Key': 'agent-action-prepare-0001' },
+    });
+    expect(JSON.parse(prepare.body)).toEqual({
+      kind: 'event.publish',
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+    });
+    expect(JSON.parse(prepare.body)).not.toHaveProperty('agentPrincipalId');
+    expect(JSON.parse(prepare.body)).not.toHaveProperty('sponsorPrincipalId');
+    expect(JSON.parse(prepare.body)).not.toHaveProperty('payload');
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: 'https://api.test/v1/agent/actions/act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
   });
 
   it('agentMemory binds inspectable, correctable, exportable, and deletable memory to audited requests', async () => {
@@ -3158,7 +3211,10 @@ describe('TixkitClient new resource methods', () => {
     expect(JSON.parse(calls[0]!.body)).not.toHaveProperty('tenantId');
     expect(JSON.parse(calls[0]!.body)).not.toHaveProperty('sponsorPrincipalId');
     expect(JSON.parse(calls[3]!.body)).toMatchObject({ expectedVersion: 1 });
-    expect(JSON.parse(calls[4]!.body)).toMatchObject({ expectedVersion: 2, namespace });
+    expect(JSON.parse(calls[4]!.body)).toMatchObject({
+      expectedVersion: 2,
+      namespace,
+    });
   });
 
   it('webhookEndpoints.create returns a required one-time signing secret', async () => {

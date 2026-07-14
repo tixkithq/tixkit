@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-21';
+export const TIXKIT_API_VERSION = '2026-07-22';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1530,7 +1530,7 @@ export type AgentPrincipal = {
   sponsorPrincipalId: string;
   capabilities: AgentCapability[];
   maximumAutonomy: 'read' | 'recommend' | 'prepare' | 'execute_with_approval';
-  protocolVersion: string;
+  protocolVersion: '2026-07-22';
   state: 'active' | 'suspended' | 'revoked';
   registeredAt: string;
 };
@@ -1594,7 +1594,47 @@ export type AgentSession = {
     productPermissions: [];
   };
   delegationRequired: true;
-  supportedProtocolVersion: string;
+  supportedProtocolVersion: '2026-07-22';
+};
+
+export type AgentAction = {
+  id: string;
+  protocolVersion: '2026-07-22';
+  agentPrincipalId: string;
+  sponsorPrincipalId: string;
+  delegationGrantId: string;
+  kind: 'event.publish';
+  autonomy: 'execute_with_approval';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'events.publish';
+  };
+  payload: {
+    readinessSnapshotSha256: string;
+  };
+  idempotencyKey: string;
+  expectedPolicyVersion: number;
+  preparedAt: string;
+};
+
+export type PreparedAgentAction = {
+  action: AgentAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    eligibleForApproval: boolean;
+    reasons: string[];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  dryRun: {
+    launchable: boolean;
+    readinessSnapshotSha256: string;
+    blockingReasonCodes: string[];
+  };
 };
 
 export type AgentMemoryNamespaceInput =
@@ -1665,7 +1705,9 @@ export type CreateAgentMemoryInput = {
   idempotencyKey: string;
 } & (
   | {
-      namespace: AgentMemoryNamespaceInput & { purpose: 'organizer_preferences' };
+      namespace: AgentMemoryNamespaceInput & {
+        purpose: 'organizer_preferences';
+      };
       content: Extract<AgentMemoryContent, { kind: 'organizer_preferences' }>;
     }
   | {
@@ -2755,6 +2797,7 @@ export class TixkitClient {
   readonly apiKeys: ApiKeyResource;
   readonly agentControl: AgentControlResource;
   readonly agentAuth: AgentAuthResource;
+  readonly agentActions: AgentActionResource;
   readonly agentMemory: AgentMemoryResource;
   readonly scannerDevices: ScannerDeviceResource;
   readonly reports: ReportResource;
@@ -2806,6 +2849,7 @@ export class TixkitClient {
     this.apiKeys = new ApiKeyResource(this);
     this.agentControl = new AgentControlResource(this);
     this.agentAuth = new AgentAuthResource(this);
+    this.agentActions = new AgentActionResource(this);
     this.agentMemory = new AgentMemoryResource(this);
     this.scannerDevices = new ScannerDeviceResource(this);
     this.reports = new ReportResource(this);
@@ -3257,7 +3301,9 @@ class EventResource {
       focalPoint: { x: number; y: number };
     },
   ): Promise<EventMediaAsset> {
-    return this.client.request('PUT', `/events/${eventId}/media/${role}`, { body: input });
+    return this.client.request('PUT', `/events/${eventId}/media/${role}`, {
+      body: input,
+    });
   }
 
   async removeMedia(eventId: string, role: EventMediaRole): Promise<void> {
@@ -4069,7 +4115,10 @@ class AgentControlResource {
 
   async registerPrincipal(input: RegisterAgentPrincipalInput): Promise<AgentPrincipal> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', '/agent-principals', { body, idempotencyKey });
+    return this.client.request('POST', '/agent-principals', {
+      body,
+      idempotencyKey,
+    });
   }
 
   async getPrincipal(principalId: string): Promise<AgentPrincipal> {
@@ -4112,7 +4161,10 @@ class AgentControlResource {
 
   async grantDelegation(input: GrantAgentDelegationInput): Promise<AgentDelegation> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', '/agent-delegations', { body, idempotencyKey });
+    return this.client.request('POST', '/agent-delegations', {
+      body,
+      idempotencyKey,
+    });
   }
 
   async revokeDelegation(
@@ -4149,12 +4201,36 @@ class AgentAuthResource {
   }
 }
 
+class AgentActionResource {
+  constructor(private client: TixkitClient) {}
+
+  async prepare(input: {
+    kind: 'event.publish';
+    delegationGrantId: string;
+    resourceId: string;
+    idempotencyKey: string;
+  }): Promise<PreparedAgentAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/actions', {
+      body,
+      idempotencyKey,
+    });
+  }
+
+  async get(actionId: string): Promise<PreparedAgentAction> {
+    return this.client.request('GET', `/agent/actions/${actionId}`);
+  }
+}
+
 class AgentMemoryResource {
   constructor(private client: TixkitClient) {}
 
   async create(input: CreateAgentMemoryInput): Promise<AgentMemoryEntry> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', '/agent-memory', { body, idempotencyKey });
+    return this.client.request('POST', '/agent-memory', {
+      body,
+      idempotencyKey,
+    });
   }
 
   async inspect(
@@ -4179,7 +4255,10 @@ class AgentMemoryResource {
 
   async correct(id: string, input: CorrectAgentMemoryInput): Promise<AgentMemoryEntry> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('PATCH', `/agent-memory/${id}`, { body, idempotencyKey });
+    return this.client.request('PATCH', `/agent-memory/${id}`, {
+      body,
+      idempotencyKey,
+    });
   }
 
   async remove(
@@ -4498,7 +4577,9 @@ class PortabilityResource {
     organizationId: string;
     expiresAt: string;
   }): Promise<PortableHistoricalExportAuthorization> {
-    return this.client.request('POST', '/portable-export-authorizations', { body: input });
+    return this.client.request('POST', '/portable-export-authorizations', {
+      body: input,
+    });
   }
 
   async revokeHistoricalExportAuthorization(
@@ -4649,7 +4730,10 @@ class MigrationResource {
     jobId: string,
     confirmation: `commit:${string}`,
     cutoverProof: PortableCutoverProof,
-  ): Promise<{ jobId: string; status: 'committing' | 'committed' | 'activated' }> {
+  ): Promise<{
+    jobId: string;
+    status: 'committing' | 'committed' | 'activated';
+  }> {
     return this.client.request('POST', `/migration-jobs/${jobId}/commit`, {
       headers: { 'x-tixkit-confirmation': confirmation },
       body: { cutoverProof },

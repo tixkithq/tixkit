@@ -286,6 +286,7 @@
       { "name": "checkout", "dockerfile": "Dockerfile.checkout" }
     ],
     "contracts": [
+      "artifacts/api/2026-07-22",
       "artifacts/api/2026-07-21",
       "artifacts/api/2026-07-20",
       "artifacts/api/2026-07-19",
@@ -299,6 +300,7 @@
       "artifacts/api/2026-01-01",
       "distribution/cloud-core-compatibility.schema.json",
       "distribution/public-release-manifest.schema.json",
+      "packages/agent-protocol/schemas/agent-protocol-2026-07-22.json",
       "packages/agent-protocol/schemas/agent-protocol-2026-07-11.json",
       "packages/portability/schemas/portable-bundle-2026-07-12.json",
       "packages/portability/schemas/portable-bundle-2026-07-14.json",

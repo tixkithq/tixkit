@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { authRoutes } from './modules/auth.js';
 import { agentControlRoutes } from './modules/agent-control.js';
+import { agentActionRoutes } from './modules/agent-actions.js';
 import { agentMemoryRoutes } from './modules/agent-memory.js';
 import { agentSessionRoutes } from './modules/agent-session.js';
 import { checkInRoutes } from './modules/checkin.js';
@@ -56,6 +57,7 @@ export const publicRouteModules: readonly RouteModuleRegistration[] = [
 
 export const authenticatedRouteModules: readonly RouteModuleRegistration[] = [
   { plugin: agentSessionRoutes, prefix: '/v1' },
+  { plugin: agentActionRoutes, prefix: '/v1' },
   { plugin: agentControlRoutes, prefix: '/v1' },
   { plugin: agentMemoryRoutes, prefix: '/v1' },
   { plugin: tenantRoutes, prefix: '/v1' },

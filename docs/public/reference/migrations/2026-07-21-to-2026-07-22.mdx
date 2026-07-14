@@ -1,0 +1,47 @@
+---
+title: API migration from 2026-07-21 to 2026-07-22
+description: Adopt immutable agent action preparation and server-authoritative event publish dry runs.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-22
+prerequisites:
+  - An integration using API version 2026-07-21
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-22` adds immutable typed action preparation for experimental agent integrations. Existing `2026-07-21` operations remain compatible; this is an additive private-beta release.
+
+The agent protocol advances from `2026-07-11` to `2026-07-22` because `event.publish` now requires an exact readiness snapshot digest in its canonical payload. The prior schema remains immutable and available at the versioned package export. Migration `0082_agent_actions` advances existing server-managed principal records to the new protocol version; agents should inspect `GET /v1/agent/session` and accept only the advertised literal before preparing actions.
+
+## Prepare an event publish action
+
+Authenticate with an explicit `tk_aat_...` agent access token, then call `POST /v1/agent/actions` with a 16–127 character `Idempotency-Key` and exactly these fields:
+
+```json
+{
+  "kind": "event.publish",
+  "delegationGrantId": "dlg_...",
+  "resourceId": "evt_..."
+}
+```
+
+Do not send an agent or sponsor identifier, tenant, resource version, policy version, API operation, readiness payload or timestamp. The server derives those bindings from current database state inside a serializable transaction. Unknown or cross-tenant resources return not found without exposing their existence.
+
+The response contains the canonical typed action, its SHA-256 digest, expiry, authorization evidence and an event-readiness dry run. Persist the entire response. An exact idempotent replay returns the original action and evidence; changing intent under the same key returns an idempotency conflict. Retrieve the same immutable evidence with `GET /v1/agent/actions/{actionId}` using the same agent identity.
+
+The JavaScript SDK exposes these operations as `tixkit.agentActions.prepare` and `tixkit.agentActions.get`.
+
+## Approval remains mandatory
+
+`authorization.eligibleForApproval` is not execution authority. It means the live intersection of agent capability, sponsor permission, delegation, tenant policy, action risk policy, resource version and readiness passed except for the mandatory human approval. A later approval must bind to the exact `actionDigest`; any material change requires a newly prepared action and fresh approval.
+
+Public approval, revocation and execution lifecycle endpoints are not part of this release. Do not invoke an internal executor or publish an event based only on preparation evidence.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-22`.

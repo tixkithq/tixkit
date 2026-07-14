@@ -77,7 +77,44 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-21');
+    expect(openApiSpec.info.version).toBe('2026-07-22');
+  });
+
+  it('publishes agent-only immutable action preparation without caller-owned bindings', () => {
+    const prepare = openApiSpec.paths['/agent/actions'].post;
+    const get = openApiSpec.paths['/agent/actions/{actionId}'].get;
+    expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(prepare.security).not.toContainEqual({ BearerAuth: [] });
+    expect(prepare.security).not.toContainEqual({ ApiKey: [] });
+    const body = prepare.requestBody.content['application/json'].schema;
+    expect(body.additionalProperties).toBe(false);
+    expect(body.required).toEqual(['kind', 'delegationGrantId', 'resourceId']);
+    expect(Object.keys(body.properties)).toEqual(['kind', 'delegationGrantId', 'resourceId']);
+    expect(openApiSpec.components.schemas.AgentPrincipal.properties.protocolVersion).toEqual({
+      type: 'string',
+      const: '2026-07-22',
+    });
+    expect(openApiSpec.components.schemas.AgentSession.properties.supportedProtocolVersion).toEqual(
+      { type: 'string', const: '2026-07-22' },
+    );
+    expect(openApiSpec.components.schemas.AgentAction.properties.protocolVersion).toEqual({
+      type: 'string',
+      const: '2026-07-22',
+    });
+    expect(openApiSpec.components.schemas.AgentAction.required).toEqual(
+      expect.arrayContaining([
+        'agentPrincipalId',
+        'sponsorPrincipalId',
+        'target',
+        'payload',
+        'expectedPolicyVersion',
+        'preparedAt',
+      ]),
+    );
+    expect(openApiSpec.components.schemas.PreparedAgentAction.description).toMatch(
+      /fresh human approval remains mandatory/u,
+    );
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

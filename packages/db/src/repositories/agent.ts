@@ -1353,7 +1353,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         new Date(row.lease_expires_at).getTime() <= now.getTime()
       )
         return false;
-      await tx
+      const completed = await tx
         .updateTable('agent_executions')
         .set({
           state: input.execution.state,
@@ -1368,7 +1368,8 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .where('state', '=', 'running')
         .where('fence_token', '=', input.expectedRevision.fenceToken)
         .where('lease_owner', '=', input.expectedRevision.leaseOwner)
-        .execute();
+        .executeTakeFirst();
+      if (Number(completed.numUpdatedRows) !== 1) return false;
       await appendAudit(tx, input.execution.id, { ...input.audit, occurredAt: now.toISOString() });
       return true;
     });
