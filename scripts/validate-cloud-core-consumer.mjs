@@ -559,6 +559,12 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
   }
   for (const name of publicPackages.keys())
     if (!packagePins.has(name)) violations.push(`missing core package pin: ${name}`);
+  const consumedPackageNames = compatibility.cloudRelease.consumedPackages;
+  for (const duplicate of duplicateValues(consumedPackageNames))
+    violations.push(`duplicate consumed public package: ${duplicate}`);
+  const consumedPackages = new Set(consumedPackageNames);
+  for (const name of consumedPackages)
+    if (!packagePins.has(name)) violations.push(`unknown consumed public package: ${name}`);
 
   const expectedImages = new Set(publicRelease.core.images.map(({ name }) => name));
   const actualImages = compatibility.core.images.map(({ name }) => name);
@@ -596,7 +602,7 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
       publicLockResolutions.get(resolution.name).push(resolution);
     }
   }
-  for (const pin of compatibility.core.packages) {
+  for (const pin of compatibility.core.packages.filter(({ name }) => consumedPackages.has(name))) {
     const resolutions = publicLockResolutions.get(pin.name) ?? [];
     if (resolutions.length === 0) {
       violations.push(`bun.lock does not resolve claimed pin ${pin.name}@${pin.version}`);
@@ -615,6 +621,9 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
         );
     }
   }
+  for (const [name, resolutions] of publicLockResolutions)
+    if (!consumedPackages.has(name) && resolutions.length > 0)
+      violations.push(`bun.lock resolves undeclared consumed public package ${name}`);
   for (const path of publicSourcePaths) {
     if (statSync(resolve(cloudRoot, path), { throwIfNoEntry: false }))
       violations.push(`private Cloud tree copies public source path: ${path}`);
@@ -654,6 +663,8 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
               `${relativePath}: dependency ${name} uses a forbidden mutable or source reference`,
             );
           if (!publicName) continue;
+          if (!consumedPackages.has(publicName))
+            violations.push(`${relativePath}: ${publicName} is not declared as consumed`);
           if (importer?.[field]?.[name] !== version)
             violations.push(
               `${relativePath}: bun.lock importer does not bind ${name} to ${version}`,

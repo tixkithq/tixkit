@@ -105,12 +105,34 @@ function packageRoots(manifest, cloudRoot) {
     ...new Set(nodeModulesRoots.map((path) => realpathSync(path))),
   ];
   const workspaceRoots = new Set(workspacePaths.map(({ canonical }) => canonical));
-  const pins = new Map(manifest.core.packages.map((pin) => [pin.name, pin]));
-  const roots = new Map(manifest.core.packages.map((pin) => [pin.name, new Set()]));
+  const consumedPackages = new Set(manifest.cloudRelease.consumedPackages);
+  const consumedPins = manifest.core.packages.filter(({ name }) => consumedPackages.has(name));
+  const pins = new Map(consumedPins.map((pin) => [pin.name, pin]));
+  const roots = new Map(consumedPins.map((pin) => [pin.name, new Set()]));
   const visited = new Set();
   const publicName = (name) => name === 'tixkit' || name?.startsWith('@tixkit/');
   const withinInstall = (path) =>
     canonicalNodeModulesRoots.some((nodeModules) => isWithin(nodeModules, path));
+  const logicalPublicPackageName = (path) => {
+    for (const nodeModulesRoot of canonicalNodeModulesRoots) {
+      const logical = relative(nodeModulesRoot, path).split(sep).join('/');
+      const match = logical.match(/(?:^|\/)(@tixkit\/[^/]+|tixkit)$/u);
+      if (match) return match[1];
+    }
+    return undefined;
+  };
+  const assertLogicalPublicPackage = (logicalPath, target) => {
+    const name = logicalPublicPackageName(logicalPath);
+    if (!name) return;
+    const pin = pins.get(name);
+    if (!pin) throw new Error(`unattested public package occupies install path: ${name}`);
+    const packageManifestPath = resolve(target, 'package.json');
+    if (!lstatSync(packageManifestPath, { throwIfNoEntry: false })?.isFile())
+      throw new Error(`public package install path has no package manifest: ${name}`);
+    const packageManifest = JSON.parse(readFileSync(packageManifestPath, 'utf8'));
+    if (packageManifest.name !== name || packageManifest.version !== pin.version)
+      throw new Error(`public package install path is shadowed: ${name}`);
+  };
   const visit = (directory) => {
     const actual = realpathSync(directory);
     if (visited.has(actual)) return;
@@ -133,9 +155,12 @@ function packageRoots(manifest, cloudRoot) {
     for (const name of readdirSync(actual)) {
       const child = resolve(actual, name);
       const metadata = lstatSync(child);
-      if (metadata.isDirectory()) visit(child);
-      else if (metadata.isSymbolicLink()) {
+      if (metadata.isDirectory()) {
+        assertLogicalPublicPackage(child, child);
+        visit(child);
+      } else if (metadata.isSymbolicLink()) {
         const target = realpathSync(child);
+        if (statSync(target).isDirectory()) assertLogicalPublicPackage(child, target);
         if (statSync(target).isDirectory() && withinInstall(target)) visit(target);
         else if (statSync(target).isDirectory() && !workspaceRoots.has(target))
           throw new Error(
@@ -154,16 +179,19 @@ function packageRoots(manifest, cloudRoot) {
 }
 
 function snapshot(manifest, installedRoots) {
+  const consumedPackages = new Set(manifest.cloudRelease.consumedPackages);
   return new Map(
-    manifest.core.packages.map((pin) => {
-      const digests = installedRoots.roots.get(pin.name).map((packageRoot) => {
-        const content = packageContentDigest(packageRoot);
-        if (content.contentSha256 !== pin.contentSha256 || content.fileCount !== pin.fileCount)
-          throw new Error(`installed public package does not match release content: ${pin.name}`);
-        return content.contentSha256;
-      });
-      return [pin.name, digests];
-    }),
+    manifest.core.packages
+      .filter(({ name }) => consumedPackages.has(name))
+      .map((pin) => {
+        const digests = installedRoots.roots.get(pin.name).map((packageRoot) => {
+          const content = packageContentDigest(packageRoot);
+          if (content.contentSha256 !== pin.contentSha256 || content.fileCount !== pin.fileCount)
+            throw new Error(`installed public package does not match release content: ${pin.name}`);
+          return content.contentSha256;
+        });
+        return [pin.name, digests];
+      }),
   );
 }
 

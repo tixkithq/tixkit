@@ -104,6 +104,7 @@ function compatibilityManifest() {
     cloudRelease: {
       version: '0.1.0-private.1',
       sourceCommit: 'a'.repeat(40),
+      consumedPackages: packages.map(({ name }) => name),
       installations: [],
     },
     core: {
@@ -183,10 +184,9 @@ function cloudFixture(releaseManifest = compatibilityManifest()) {
         },
       },
       packages: Object.fromEntries(
-        releaseManifest.core.packages.map((pin) => [
-          pin.name,
-          [`${pin.name}@${pin.version}`, '', {}, pin.integrity],
-        ]),
+        releaseManifest.core.packages
+          .filter(({ name }) => releaseManifest.cloudRelease.consumedPackages.includes(name))
+          .map((pin) => [pin.name, [`${pin.name}@${pin.version}`, '', {}, pin.integrity]]),
       ),
     })}\n`,
   );
@@ -270,7 +270,9 @@ function publicRelease(manifest) {
 }
 
 function installFixturePackages(directory, manifest) {
-  for (const pin of manifest.core.packages) {
+  for (const pin of manifest.core.packages.filter(({ name }) =>
+    manifest.cloudRelease.consumedPackages.includes(name),
+  )) {
     const packagePath = resolve(directory, 'node_modules', ...pin.name.split('/'));
     mkdirSync(packagePath, { recursive: true });
     writeFileSync(resolve(packagePath, 'index.js'), 'export const state = "public";\n');
@@ -352,6 +354,82 @@ test('accepts immutable public pins without copied or patched core source', () =
     const manifest = compatibilityManifest();
     bindCloudRelease(manifest, cloudRoot);
     assert.deepEqual(validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot), []);
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('Cloud verifies an explicit consumed subset while retaining the full public inventory', () => {
+  const manifest = compatibilityManifest();
+  manifest.cloudRelease.consumedPackages = ['@tixkit/domain'];
+  const cloudRoot = cloudFixture(manifest);
+  try {
+    assert.ok(manifest.core.packages.length > manifest.cloudRelease.consumedPackages.length);
+    assert.deepEqual(validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot), []);
+    installFixturePackages(cloudRoot, manifest);
+    const { releasePath, bin } = attestedReleaseFixture(cloudRoot, publicRelease(manifest));
+    const result = runVerifiedCommand({
+      manifest,
+      releasePath,
+      cloudRoot,
+      bin,
+      command: [process.execPath, '--version'],
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const duplicate = structuredClone(manifest);
+    duplicate.cloudRelease.consumedPackages.push('@tixkit/domain');
+    assert.ok(
+      validateCloudCoreConsumer(duplicate, publicRelease(manifest), cloudRoot).includes(
+        'duplicate consumed public package: @tixkit/domain',
+      ),
+    );
+    const empty = structuredClone(manifest);
+    empty.cloudRelease.consumedPackages = [];
+    assert.ok(
+      validateCloudCoreConsumer(empty, publicRelease(manifest), cloudRoot).some((violation) =>
+        violation.includes('cloudRelease.consumedPackages'),
+      ),
+    );
+    const unknown = structuredClone(manifest);
+    unknown.cloudRelease.consumedPackages.push('@tixkit/not-released');
+    assert.ok(
+      validateCloudCoreConsumer(unknown, publicRelease(manifest), cloudRoot).includes(
+        'unknown consumed public package: @tixkit/not-released',
+      ),
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('verified Cloud commands reject private workspace shadows at public package paths', () => {
+  const manifest = compatibilityManifest();
+  manifest.cloudRelease.consumedPackages = ['@tixkit/domain'];
+  const cloudRoot = cloudFixture(manifest);
+  try {
+    installFixturePackages(cloudRoot, manifest);
+    const publicInstall = resolve(cloudRoot, 'node_modules/@tixkit/domain');
+    const nestedPublicInstall = resolve(
+      cloudRoot,
+      'node_modules/.bun/authentic/node_modules/@tixkit/domain',
+    );
+    mkdirSync(dirname(nestedPublicInstall), { recursive: true });
+    cpSync(publicInstall, nestedPublicInstall, { recursive: true });
+    rmSync(publicInstall, { recursive: true });
+    symlinkSync('../../packages/control-plane', publicInstall);
+    bindCloudInstallations(manifest, cloudRoot);
+
+    const { releasePath, bin } = attestedReleaseFixture(cloudRoot, publicRelease(manifest));
+    const result = runVerifiedCommand({
+      manifest,
+      releasePath,
+      cloudRoot,
+      bin,
+      command: [process.execPath, '--version'],
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /public package install path is shadowed: @tixkit\/domain/u);
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
   }
@@ -839,6 +917,7 @@ test('public packages are packed from the Git archive, excluding stale working o
     execFileSync('git', ['add', 'package.json', 'bunfig.toml', 'bun.lock'], { cwd: consumer });
     const cloudManifest = compatibilityManifest();
     cloudManifest.core.packages = packages;
+    cloudManifest.cloudRelease.consumedPackages = packages.map(({ name }) => name);
     bindCloudInstallations(cloudManifest, consumer);
     const stagedManifest = publicRelease(cloudManifest);
     writeFileSync(
