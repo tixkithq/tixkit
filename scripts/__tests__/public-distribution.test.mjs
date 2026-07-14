@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
+  jsonSchemaViolations,
   publicDependencyBoundaryViolations,
   historicalClassificationViolations,
   sdkReleaseWorkflowViolations,
@@ -19,6 +20,13 @@ const manifest = JSON.parse(
 const generatedOpenApiVersion = JSON.parse(
   readFileSync(resolve(root, 'apps/docs/public/openapi.json'), 'utf8'),
 ).info.version;
+
+test('validates integer schema types and numeric minimums', () => {
+  const schema = { type: 'integer', minimum: 1 };
+  assert.deepEqual(jsonSchemaViolations(2, schema), []);
+  assert.deepEqual(jsonSchemaViolations(0, schema), ['$ must be at least 1']);
+  assert.deepEqual(jsonSchemaViolations(1.5, schema), ['$ must be integer']);
+});
 
 test('validates the authoritative public distribution and every SDK release path', () => {
   assert.deepEqual(validatePublicDistribution(structuredClone(manifest), root), manifest);
@@ -116,7 +124,11 @@ test('distinguishes snapshot validation from complete ancestry proof', () => {
     );
     const snapshot = structuredClone(manifest);
     snapshot.classification.historyValidation = 'snapshot';
-    snapshot.classification.historical = { public: [], privateCloud: [], internalPlanning: [] };
+    snapshot.classification.historical = {
+      public: [],
+      privateCloud: [],
+      internalPlanning: [],
+    };
     assert.deepEqual(historicalClassificationViolations(snapshot, repository), []);
     snapshot.classification.historical.public = ['deleted.md'];
     assert.deepEqual(historicalClassificationViolations(snapshot, repository), [
@@ -146,7 +158,12 @@ test('distinguishes snapshot validation from complete ancestry proof', () => {
       classification: {
         historyValidation: 'full',
         historical: { public: [], privateCloud: [], internalPlanning: [] },
-        topLevel: { public: ['README.md'], privateCloud: [], internalPlanning: [], mixed: [] },
+        topLevel: {
+          public: ['README.md'],
+          privateCloud: [],
+          internalPlanning: [],
+          mixed: [],
+        },
         docs: { public: [], internalPlanning: [] },
         generatedRoots: [],
       },

@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  cpSync,
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import test from 'node:test';
 import {
   assertPublicReleaseContext,
@@ -34,6 +40,7 @@ import {
 import { verifyCloudCoreInstall } from '../verify-cloud-core-install.mjs';
 import { classifyStagedPublicRelease } from '../validate-staged-public-release.mjs';
 import { SDK_API_VERSION } from '../lib/sdk-parity.mjs';
+import { packageContentDigest } from '../lib/package-content-digest.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const distribution = JSON.parse(
@@ -53,7 +60,10 @@ const migrationIds = readdirSync(resolve(root, 'packages/db/src/migrations'))
   .map((name) => name.match(/^(\d{4}(?:_\d+)?)/u)?.[1])
   .filter(Boolean)
   .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
-const currentMigrationRange = { minimum: migrationIds[0], maximum: migrationIds.at(-1) };
+const currentMigrationRange = {
+  minimum: migrationIds[0],
+  maximum: migrationIds.at(-1),
+};
 
 function compatibilityManifest() {
   const agentContract = distribution.release.contracts.find((path) =>
@@ -69,7 +79,13 @@ function compatibilityManifest() {
     .filter(({ ecosystem }) => ecosystem === 'npm' || ecosystem === 'npm-and-cdn')
     .map((entry) => {
       const manifest = JSON.parse(readFileSync(resolve(root, entry.path, 'package.json'), 'utf8'));
-      return { name: manifest.name, version: manifest.version, integrity: 'sha512-YQ==' };
+      return {
+        name: manifest.name,
+        version: manifest.version,
+        integrity: 'sha512-YQ==',
+        contentSha256: 'e'.repeat(64),
+        fileCount: 2,
+      };
     });
   return {
     schemaVersion: 1,
@@ -119,7 +135,7 @@ function compatibilityManifest() {
   };
 }
 
-function cloudFixture() {
+function cloudFixture(releaseManifest = compatibilityManifest()) {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-consumer-'));
   mkdirSync(resolve(directory, 'packages/control-plane'), { recursive: true });
   writeFileSync(
@@ -128,15 +144,17 @@ function cloudFixture() {
       {
         name: '@tixkit-cloud/control-plane',
         private: true,
-        dependencies: { '@tixkit/domain': '0.1.0' },
+        dependencies: {
+          '@tixkit/domain': releaseManifest.core.packages.find(
+            ({ name }) => name === '@tixkit/domain',
+          ).version,
+        },
       },
       null,
       2,
     )}\n`,
   );
-  const domainPin = compatibilityManifest().core.packages.find(
-    ({ name }) => name === '@tixkit/domain',
-  );
+  const domainPin = releaseManifest.core.packages.find(({ name }) => name === '@tixkit/domain');
   writeFileSync(
     resolve(directory, 'bun.lock'),
     `${JSON.stringify({
@@ -149,12 +167,16 @@ function cloudFixture() {
         },
       },
       packages: Object.fromEntries(
-        compatibilityManifest().core.packages.map((pin) => [
+        releaseManifest.core.packages.map((pin) => [
           pin.name,
           [`${pin.name}@${pin.version}`, '', {}, pin.integrity],
         ]),
       ),
     })}\n`,
+  );
+  writeFileSync(
+    resolve(directory, 'bunfig.toml'),
+    '[install]\nlinker = "isolated"\nbackend = "copyfile"\n',
   );
   execFileSync('git', ['init', '-q'], { cwd: directory });
   execFileSync('git', ['add', '-A'], { cwd: directory });
@@ -162,7 +184,67 @@ function cloudFixture() {
 }
 
 function publicRelease(manifest) {
-  return { schemaVersion: 1, releaseVersion: '0.1.0', core: structuredClone(manifest.core) };
+  return {
+    schemaVersion: 1,
+    releaseVersion: '0.1.0',
+    core: structuredClone(manifest.core),
+  };
+}
+
+function installFixturePackages(directory, manifest) {
+  for (const pin of manifest.core.packages) {
+    const packagePath = resolve(directory, 'node_modules', ...pin.name.split('/'));
+    mkdirSync(packagePath, { recursive: true });
+    writeFileSync(resolve(packagePath, 'index.js'), 'export const state = "public";\n');
+    writeFileSync(
+      resolve(packagePath, 'package.json'),
+      `${JSON.stringify({ name: pin.name, version: pin.version, type: 'module' })}\n`,
+    );
+    Object.assign(pin, packageContentDigest(packagePath));
+  }
+}
+
+function attestedReleaseFixture(directory, release) {
+  const releasePath = resolve(directory, 'public-release.json');
+  writeFileSync(releasePath, `${JSON.stringify(release)}\n`);
+  const bin = resolve(directory, '.test-bin');
+  mkdirSync(bin);
+  const gh = resolve(bin, 'gh');
+  writeFileSync(
+    gh,
+    `#!/usr/bin/env node
+const { createHash } = require('node:crypto');
+const { readFileSync } = require('node:fs');
+const digest = createHash('sha256').update(readFileSync(process.argv[4])).digest('hex');
+process.stdout.write(JSON.stringify([{verificationResult:{statement:{subject:[{digest:{sha256:digest}}]}}}]));
+`,
+  );
+  chmodSync(gh, 0o755);
+  return { releasePath, bin };
+}
+
+function runVerifiedCommand({ manifest, releasePath, cloudRoot, bin, command, writable = [] }) {
+  const manifestPath = resolve(cloudRoot, 'cloud-core-compatibility.json');
+  writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+  return spawnSync(
+    process.execPath,
+    [
+      resolve(root, 'scripts/verify-cloud-core-install.mjs'),
+      '--manifest',
+      manifestPath,
+      '--public-release-manifest',
+      releasePath,
+      '--cloud-root',
+      cloudRoot,
+      ...writable.flatMap((path) => ['--writable-path', path]),
+      '--',
+      ...command,
+    ],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    },
+  );
 }
 
 test('accepts immutable public pins without copied or patched core source', () => {
@@ -187,7 +269,9 @@ test('standalone private extraction boundary rejects renamed public source copie
   const cloudRoot = cloudFixture();
   try {
     const copied = resolve(cloudRoot, 'packages/control-plane/src/copied-domain.ts');
-    mkdirSync(resolve(cloudRoot, 'packages/control-plane/src'), { recursive: true });
+    mkdirSync(resolve(cloudRoot, 'packages/control-plane/src'), {
+      recursive: true,
+    });
     writeFileSync(copied, readFileSync(resolve(root, 'packages/domain/src/index.ts')));
     assert.ok(
       privateCloudSourceBoundaryViolations(cloudRoot).some((violation) =>
@@ -201,8 +285,11 @@ test('standalone private extraction boundary rejects renamed public source copie
 
 test('public release schema rejects an unconstrained core envelope', () => {
   assert.ok(
-    publicReleaseManifestViolations({ schemaVersion: 1, releaseVersion: '0.1.0', core: {} })
-      .length > 0,
+    publicReleaseManifestViolations({
+      schemaVersion: 1,
+      releaseVersion: '0.1.0',
+      core: {},
+    }).length > 0,
   );
 });
 
@@ -259,8 +346,10 @@ test('public packages are packed from the Git archive, excluding stale working o
     );
     const archive = execFileSync('tar', ['-cf', '-', '.'], { cwd: source });
     writeFileSync(resolve(source, 'packages/example/dist/stale.js'), 'throw new Error("stale");\n');
-    packFromSourceArchive(
-      { release: { packages: [{ path: 'packages/example', ecosystem: 'npm' }] } },
+    const packages = packFromSourceArchive(
+      {
+        release: { packages: [{ path: 'packages/example', ecosystem: 'npm' }] },
+      },
       archive,
       artifacts,
       { install: false },
@@ -269,13 +358,66 @@ test('public packages are packed from the Git archive, excluding stale working o
       artifacts,
       readdirSync(artifacts).find((name) => name.endsWith('.tgz')),
     );
-    const entries = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' });
+    const entries = execFileSync('tar', ['-tzf', tarball], {
+      encoding: 'utf8',
+    });
     assert.match(entries, /package\/dist\/index\.js/u);
     assert.doesNotMatch(entries, /stale\.js/u);
     const integrity = `sha512-${createHash('sha512').update(readFileSync(tarball)).digest('base64')}`;
-    const release = {
-      core: { packages: [{ name: '@tixkit/example', version: '1.0.0', integrity }] },
-    };
+    assert.match(packages[0].contentSha256, /^[a-f0-9]{64}$/u);
+    assert.equal(packages[0].fileCount, 2);
+    const consumer = resolve(directory, 'consumer');
+    mkdirSync(consumer);
+    writeFileSync(resolve(consumer, 'package.json'), '{"name":"consumer","private":true}\n');
+    writeFileSync(
+      resolve(consumer, 'bunfig.toml'),
+      '[install]\nlinker = "isolated"\nbackend = "copyfile"\n',
+    );
+    execFileSync('bun', ['add', '--ignore-scripts', tarball], {
+      cwd: consumer,
+      stdio: 'pipe',
+    });
+    const installedPackage = resolve(consumer, 'node_modules/@tixkit/example');
+    assert.equal(lstatSync(installedPackage).isSymbolicLink(), true);
+    assert.equal(statSync(resolve(installedPackage, 'dist/index.js')).nlink, 1);
+    assert.deepEqual(packageContentDigest(installedPackage), {
+      contentSha256: packages[0].contentSha256,
+      fileCount: packages[0].fileCount,
+    });
+    chmodSync(resolve(installedPackage, 'dist/index.js'), 0o755);
+    assert.notEqual(
+      packageContentDigest(installedPackage).contentSha256,
+      packages[0].contentSha256,
+    );
+    chmodSync(resolve(installedPackage, 'dist/index.js'), 0o644);
+    const consumerManifestPath = resolve(consumer, 'package.json');
+    const consumerManifest = JSON.parse(readFileSync(consumerManifestPath, 'utf8'));
+    consumerManifest.dependencies = { '@tixkit/example': packages[0].version };
+    writeFileSync(consumerManifestPath, `${JSON.stringify(consumerManifest)}\n`);
+    const lockPath = resolve(consumer, 'bun.lock');
+    const lock = parseBunLock(readFileSync(lockPath, 'utf8'));
+    lock.workspaces[''].dependencies['@tixkit/example'] = packages[0].version;
+    const lockEntry = Object.values(lock.packages).find(
+      (entry) => Array.isArray(entry) && entry[0].startsWith('@tixkit/example@'),
+    );
+    assert.ok(lockEntry);
+    lockEntry[0] = `@tixkit/example@${packages[0].version}`;
+    lockEntry[3] = packages[0].integrity;
+    writeFileSync(lockPath, `${JSON.stringify(lock)}\n`);
+    execFileSync('git', ['init', '-q'], { cwd: consumer });
+    execFileSync('git', ['add', 'package.json', 'bunfig.toml', 'bun.lock'], { cwd: consumer });
+    const cloudManifest = compatibilityManifest();
+    cloudManifest.core.packages = packages;
+    const { releasePath, bin } = attestedReleaseFixture(consumer, publicRelease(cloudManifest));
+    const verifiedCommand = runVerifiedCommand({
+      manifest: cloudManifest,
+      releasePath,
+      cloudRoot: consumer,
+      bin,
+      command: [process.execPath, '--version'],
+    });
+    assert.equal(verifiedCommand.status, 0, verifiedCommand.stderr);
+    const release = { core: { packages } };
     assert.deepEqual(
       publishPublicNpmArtifacts(release, artifacts, () => ({
         status: 0,
@@ -389,8 +531,11 @@ test('rejects ranges, copied core source, private patches, and inconsistent imag
     const controlPlanePath = resolve(cloudRoot, 'packages/control-plane/package.json');
     const controlPlane = JSON.parse(readFileSync(controlPlanePath, 'utf8'));
     controlPlane.dependencies['@tixkit/domain'] = 'workspace:*';
-    controlPlane.patchedDependencies = { '@tixkit/domain': 'patches/domain.patch' };
+    controlPlane.patchedDependencies = {
+      '@tixkit/domain': 'patches/domain.patch',
+    };
     writeFileSync(controlPlanePath, `${JSON.stringify(controlPlane, null, 2)}\n`);
+    writeFileSync(resolve(cloudRoot, 'bunfig.toml'), '[install]\nlinker = "hoisted"\n');
     mkdirSync(resolve(cloudRoot, 'packages/domain'), { recursive: true });
     manifest.core.images[0].reference = `ghcr.io/tixkit/tixkit-api@sha256:${'f'.repeat(64)}`;
 
@@ -411,6 +556,10 @@ test('rejects ranges, copied core source, private patches, and inconsistent imag
       ),
     );
     assert.ok(violations.some((message) => message.endsWith('reference and digest disagree')));
+    assert.ok(violations.includes('private Cloud bunfig.toml must set install.linker to isolated'));
+    assert.ok(
+      violations.includes('private Cloud bunfig.toml must set install.backend to copyfile'),
+    );
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
   }
@@ -453,9 +602,7 @@ test('rejects renamed source copies, artifact rewriting, and API contract drift'
       ),
     );
     assert.ok(
-      violations.includes(
-        `openapi@${activeApiVersion} checksum does not match the public contract`,
-      ),
+      violations.includes('core pins must exactly match the verified public release manifest'),
     );
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
@@ -470,7 +617,9 @@ test('rejects indirect build helpers that can rewrite installed artifacts', () =
     const controlPlane = JSON.parse(readFileSync(controlPlanePath, 'utf8'));
     controlPlane.scripts = { build: 'node scripts/setup.mjs' };
     writeFileSync(controlPlanePath, `${JSON.stringify(controlPlane, null, 2)}\n`);
-    mkdirSync(resolve(cloudRoot, 'packages/control-plane/scripts'), { recursive: true });
+    mkdirSync(resolve(cloudRoot, 'packages/control-plane/scripts'), {
+      recursive: true,
+    });
     writeFileSync(
       resolve(cloudRoot, 'packages/control-plane/scripts/setup.mjs'),
       "import { writeFileSync } from 'node:fs';\nwriteFileSync(['node_modules', '@tixkit', 'domain', 'dist', 'index.js'].join('/'), 'patched');\n",
@@ -486,60 +635,332 @@ test('rejects indirect build helpers that can rewrite installed artifacts', () =
   }
 });
 
-test('verified Cloud commands fail when an installed public package byte changes', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-installed-core-'));
-  try {
-    const manifest = compatibilityManifest();
-    for (const pin of manifest.core.packages) {
-      const packagePath = resolve(directory, 'node_modules', ...pin.name.split('/'));
-      mkdirSync(packagePath, { recursive: true });
-      writeFileSync(resolve(packagePath, 'index.js'), 'export const state = "public";\n');
+test(
+  'verified Cloud commands reject preinstalled byte and mode changes',
+  { timeout: 15_000 },
+  () => {
+    const directory = cloudFixture();
+    try {
+      const manifest = compatibilityManifest();
+      installFixturePackages(directory, manifest);
+      const domainPath = resolve(directory, 'node_modules/@tixkit/domain/index.js');
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      writeFileSync(domainPath, 'export const state = "patched";\n');
+      let result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+      });
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /installed public package does not match release content: @tixkit\/domain/u,
+      );
+      chmodSync(domainPath, 0o644);
+      const sharedPath = resolve(directory, 'shared-index.js');
+      writeFileSync(sharedPath, 'export const state = "public";\n');
+      rmSync(domainPath);
+      linkSync(sharedPath, domainPath);
+      result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /does not use the required copyfile backend: @tixkit\/domain/u);
+      rmSync(domainPath);
+      writeFileSync(domainPath, 'export const state = "public";\n');
+      chmodSync(domainPath, 0o755);
+      result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+      });
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /installed public package does not match release content: @tixkit\/domain/u,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
-    const domainPath = resolve(directory, 'node_modules/@tixkit/domain/index.js');
-    assert.throws(
-      () =>
-        verifyCloudCoreInstall(manifest, directory, ['malicious-build'], () => {
-          writeFileSync(domainPath, 'export const state = "patched";\n');
-          return { status: 0 };
-        }),
-      /modified installed public artifacts: @tixkit\/domain/u,
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  },
+);
+
+test(
+  'verified Cloud commands reject a hidden alternate public package installation',
+  { timeout: 15_000 },
+  () => {
+    const directory = cloudFixture();
+    const externalDirectory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-hidden-install-'));
+    try {
+      const manifest = compatibilityManifest();
+      installFixturePackages(directory, manifest);
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      const hiddenPackage = resolve(directory, 'node_modules/rogue/node_modules/@tixkit/domain');
+      cpSync(resolve(directory, 'node_modules/@tixkit/domain'), hiddenPackage, { recursive: true });
+      writeFileSync(
+        resolve(hiddenPackage, 'index.js'),
+        'export const state = "hidden-private-patch";\n',
+      );
+      const result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [
+          process.execPath,
+          '-e',
+          `import(${JSON.stringify(resolve(hiddenPackage, 'index.js'))})`,
+        ],
+      });
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /installed public package does not match release content: @tixkit\/domain/u,
+      );
+      rmSync(resolve(directory, 'node_modules/rogue'), { recursive: true, force: true });
+      const externalPackage = resolve(externalDirectory, 'rogue');
+      mkdirSync(externalPackage);
+      writeFileSync(
+        resolve(externalPackage, 'package.json'),
+        '{"name":"rogue","version":"1.0.0"}\n',
+      );
+      cpSync(
+        resolve(directory, 'node_modules/@tixkit/domain'),
+        resolve(externalPackage, 'node_modules/@tixkit/domain'),
+        { recursive: true },
+      );
+      writeFileSync(
+        resolve(externalPackage, 'node_modules/@tixkit/domain/index.js'),
+        'export const state = "external-private-patch";\n',
+      );
+      symlinkSync(externalPackage, resolve(directory, 'node_modules/rogue'), 'dir');
+      const symlinkResult = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [
+          process.execPath,
+          '-e',
+          `import(${JSON.stringify(resolve(directory, 'node_modules/rogue/node_modules/@tixkit/domain/index.js'))})`,
+        ],
+      });
+      assert.equal(symlinkResult.status, 1);
+      assert.match(symlinkResult.stderr, /unexpected directory symlink/u);
+      const lockPath = resolve(directory, 'bun.lock');
+      const lock = parseBunLock(readFileSync(lockPath, 'utf8'));
+      lock.workspaces[relative(directory, externalPackage)] = { name: 'rogue' };
+      writeFileSync(lockPath, `${JSON.stringify(lock)}\n`);
+      const forgedWorkspaceResult = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+      });
+      assert.equal(forgedWorkspaceResult.status, 1);
+      assert.match(forgedWorkspaceResult.stderr, /lockfile declares an invalid workspace/u);
+
+      delete lock.workspaces[relative(directory, externalPackage)];
+      lock.workspaces['packages/control-plane'].name = '@tixkit/domain';
+      writeFileSync(lockPath, `${JSON.stringify(lock)}\n`);
+      const controlPlanePath = resolve(directory, 'packages/control-plane/package.json');
+      const controlPlane = JSON.parse(readFileSync(controlPlanePath, 'utf8'));
+      controlPlane.name = '@tixkit/domain';
+      writeFileSync(controlPlanePath, `${JSON.stringify(controlPlane)}\n`);
+      unlinkSync(resolve(directory, 'node_modules/rogue'));
+      symlinkSync(
+        resolve(directory, 'packages/control-plane'),
+        resolve(directory, 'node_modules/rogue'),
+        'dir',
+      );
+      const publicWorkspaceResult = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+      });
+      assert.equal(publicWorkspaceResult.status, 1);
+      assert.match(
+        publicWorkspaceResult.stderr,
+        /public package identity cannot be a private workspace/u,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(externalDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'immutable command sandbox rejects direct and host-service patch-use-restore attacks',
+  { timeout: 25_000 },
+  () => {
+    const directory = cloudFixture();
+    const attackDirectory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-install-attack-'));
+    let mutationService;
+    try {
+      const manifest = compatibilityManifest();
+      installFixturePackages(directory, manifest);
+      const { releasePath, bin } = attestedReleaseFixture(directory, publicRelease(manifest));
+      const domainPath = resolve(directory, 'node_modules/@tixkit/domain/index.js');
+      const domainRoot = resolve(domainPath, '..');
+      const proof = resolve(directory, 'proof');
+      const attack = resolve(attackDirectory, 'attack.mjs');
+      writeFileSync(
+        attack,
+        `import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+const [kind, domainPath, domainRoot, proof] = process.argv.slice(2);
+if (kind === 'chmod') {
+  chmodSync(domainPath, 0o644);
+  writeFileSync(domainPath, 'export const state = "temporary";\\n');
+  mkdirSync(proof, { recursive: true });
+  writeFileSync(proof + '/used.txt', readFileSync(domainPath));
+  writeFileSync(domainPath, 'export const state = "public";\\n');
+} else {
+  const backup = domainRoot + '.authentic';
+  renameSync(domainRoot, backup);
+  mkdirSync(domainRoot);
+  writeFileSync(domainRoot + '/index.js', 'export const state = "temporary";\\n');
+  mkdirSync(proof, { recursive: true });
+  writeFileSync(proof + '/used.txt', readFileSync(domainRoot + '/index.js'));
+  rmSync(domainRoot, { recursive: true });
+  renameSync(backup, domainRoot);
+}
+`,
+      );
+      const unsafeWritable = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, '--version'],
+        writable: ['node_modules'],
+      });
+      assert.equal(unsafeWritable.status, 1);
+      assert.match(unsafeWritable.stderr, /writable path overlaps installed dependencies/u);
+      for (const kind of ['chmod', 'swap']) {
+        const result = runVerifiedCommand({
+          manifest,
+          releasePath,
+          cloudRoot: directory,
+          bin,
+          command: [process.execPath, attack, kind, domainPath, domainRoot, proof],
+          writable: ['proof'],
+        });
+        assert.equal(result.status, 1, result.stderr);
+        assert.match(result.stderr, /Cloud command failed with status/u);
+      }
+      assert.equal(readFileSync(domainPath, 'utf8'), 'export const state = "public";\n');
+      assert.equal(existsSync(resolve(proof, 'used.txt')), false);
+
+      const controlSocket = resolve(attackDirectory, 'mutation.sock');
+      const service = resolve(attackDirectory, 'service.mjs');
+      const client = resolve(attackDirectory, 'client.mjs');
+      writeFileSync(
+        service,
+        `import { writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
+const [socketPath, domainPath] = process.argv.slice(2);
+const server = createServer((socket) => {
+  writeFileSync(domainPath, 'export const state = "daemon-patch";\\n');
+  socket.end('patched');
+  writeFileSync(domainPath, 'export const state = "public";\\n');
 });
+server.listen(socketPath);
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+`,
+      );
+      writeFileSync(
+        client,
+        `import { mkdirSync, writeFileSync } from 'node:fs';
+import { createConnection } from 'node:net';
+const [socketPath, proof] = process.argv.slice(2);
+const socket = createConnection(socketPath);
+socket.on('data', (data) => {
+  mkdirSync(proof, { recursive: true });
+  writeFileSync(proof + '/used.txt', data);
+});
+socket.on('error', (error) => { throw error; });
+`,
+      );
+      mutationService = spawn(process.execPath, [service, controlSocket, domainPath], {
+        stdio: 'ignore',
+      });
+      for (let attempt = 0; attempt < 200 && !existsSync(controlSocket); attempt += 1)
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      assert.equal(existsSync(controlSocket), true);
+      const serviceEscape = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot: directory,
+        bin,
+        command: [process.execPath, client, controlSocket, proof],
+        writable: ['proof'],
+      });
+      assert.equal(serviceEscape.status, 1, serviceEscape.stderr);
+      assert.match(serviceEscape.stderr, /Cloud command failed with status/u);
+      assert.equal(readFileSync(domainPath, 'utf8'), 'export const state = "public";\n');
+      assert.equal(existsSync(resolve(proof, 'used.txt')), false);
+    } finally {
+      mutationService?.kill('SIGTERM');
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(attackDirectory, { recursive: true, force: true });
+    }
+  },
+);
 
 test('verified Cloud commands reject empty or substituted compatibility manifests', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-invalid-install-manifest-'));
   try {
-    let executed = false;
     assert.throws(
       () =>
-        verifyCloudCoreInstall({ core: { packages: [] } }, directory, ['build'], () => {
-          executed = true;
-          return { status: 0 };
-        }),
+        verifyCloudCoreInstall({ core: { packages: [] } }, 'untrusted.json', directory, ['build']),
       /Cloud\/core install manifest is invalid/u,
     );
-    assert.equal(executed, false);
 
     const manifest = compatibilityManifest();
+    const cloudRoot = cloudFixture(manifest);
+    installFixturePackages(cloudRoot, manifest);
+    const { releasePath, bin } = attestedReleaseFixture(cloudRoot, publicRelease(manifest));
     manifest.core.packages.pop();
-    assert.throws(
-      () => verifyCloudCoreInstall(manifest, directory, ['build']),
-      /package pins must exactly cover the public release inventory/u,
-    );
+    try {
+      const result = runVerifiedCommand({
+        manifest,
+        releasePath,
+        cloudRoot,
+        bin,
+        command: [process.execPath, '--version'],
+      });
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /core pins must exactly match the verified public release manifest/u,
+      );
+    } finally {
+      rmSync(cloudRoot, { recursive: true, force: true });
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test('fails closed on missing agent support and migration or schema drift', () => {
+test('fails closed on internally inconsistent release contracts and schema drift', () => {
   const cloudRoot = cloudFixture();
   try {
     const manifest = compatibilityManifest();
-    manifest.core.agentProtocol = { status: 'unavailable', version: '' };
-    manifest.core.migrationRange.maximum = '0063';
+    manifest.core.agentProtocol = { status: 'supported', version: '' };
+    manifest.core.contracts.find(({ name }) => name === 'openapi').version = '2000-01-01';
+    manifest.core.migrationRange.minimum = '9999';
     manifest.unreviewed = true;
     const violations = validateCloudCoreConsumer(
       manifest,
@@ -554,12 +975,28 @@ test('fails closed on missing agent support and migration or schema drift', () =
       publicRelease(compatibilityManifest()),
       cloudRoot,
     );
+    assert.ok(semanticViolations.includes('OpenAPI contract version must equal core.apiVersion'));
+    assert.ok(semanticViolations.includes('core migration range minimum must not exceed maximum'));
+    assert.ok(semanticViolations.includes('agent protocol status and version are inconsistent'));
     assert.ok(
-      semanticViolations.includes(`migration maximum must equal ${currentMigrationRange.maximum}`),
+      semanticViolations.includes(
+        'supported agent protocol must match exactly one released contract',
+      ),
     );
-    assert.ok(
-      semanticViolations.includes('released agent protocol requires a supported pinned version'),
-    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
+  }
+});
+
+test('validates an older attested core inventory without requiring the current checkout versions', () => {
+  const manifest = compatibilityManifest();
+  manifest.core.apiVersion = '2025-01-01';
+  manifest.core.migrationRange.maximum = '0063';
+  manifest.core.contracts.find(({ name }) => name === 'openapi').version = '2025-01-01';
+  for (const pin of manifest.core.packages) pin.version = '0.0.9';
+  const cloudRoot = cloudFixture(manifest);
+  try {
+    assert.deepEqual(validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot), []);
   } finally {
     rmSync(cloudRoot, { recursive: true, force: true });
   }
@@ -575,7 +1012,11 @@ test('rejects package, image, source, and contract pins that differ from the pub
     manifest.core.packages[0].integrity = 'sha512-Zg==';
     manifest.core.images[0].digest = `sha256:${'8'.repeat(64)}`;
     manifest.core.images[0].reference = `${manifest.core.images[0].reference.split('@')[0]}@${manifest.core.images[0].digest}`;
-    manifest.core.contracts.push({ name: 'invented', version: '1', sha256: '7'.repeat(64) });
+    manifest.core.contracts.push({
+      name: 'invented',
+      version: '1',
+      sha256: '7'.repeat(64),
+    });
     const violations = validateCloudCoreConsumer(manifest, release, cloudRoot);
     assert.ok(
       violations.includes('core pins must exactly match the verified public release manifest'),
@@ -764,7 +1205,7 @@ test('source-boundary validation fails closed without readable Git inventory', (
   }
 });
 
-test('CLI fails before consumption when public release attestation is not verified', () => {
+test('Cloud consumer CLIs fail before consumption when release attestation is not verified', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tixkit-cloud-attestation-'));
   try {
     const gh = resolve(directory, 'gh');
@@ -776,28 +1217,33 @@ test('CLI fails before consumption when public release attestation is not verifi
     const manifest = compatibilityManifest();
     writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
     writeFileSync(releasePath, `${JSON.stringify(publicRelease(manifest))}\n`);
-    const result = spawnSync(
-      process.execPath,
-      [
-        resolve(root, 'scripts/validate-cloud-core-consumer.mjs'),
-        '--manifest',
-        manifestPath,
-        '--public-release-manifest',
-        releasePath,
-        '--cloud-root',
-        directory,
-      ],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          GH_ARGUMENTS: ghArguments,
-          PATH: `${directory}:${process.env.PATH}`,
+    const commonArguments = [
+      '--manifest',
+      manifestPath,
+      '--public-release-manifest',
+      releasePath,
+      '--cloud-root',
+      directory,
+    ];
+    for (const [script, trailingArguments] of [
+      ['validate-cloud-core-consumer.mjs', []],
+      ['verify-cloud-core-install.mjs', ['--', process.execPath, '--version']],
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [resolve(root, 'scripts', script), ...commonArguments, ...trailingArguments],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            GH_ARGUMENTS: ghArguments,
+            PATH: `${directory}:${process.env.PATH}`,
+          },
         },
-      },
-    );
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /status: 17/u);
+      );
+      assert.equal(result.status, 1, script);
+      assert.match(result.stderr, /status: 17/u, script);
+    }
     const argumentsUsed = readFileSync(ghArguments, 'utf8');
     assert.match(
       argumentsUsed,
@@ -807,5 +1253,62 @@ test('CLI fails before consumption when public release attestation is not verifi
     assert.match(argumentsUsed, new RegExp(`--source-digest\\n${'b'.repeat(40)}`, 'u'));
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Cloud consumption uses the exact release bytes bound by attestation after a path swap', () => {
+  const cloudRoot = cloudFixture();
+  try {
+    const manifest = compatibilityManifest();
+    const releasePath = resolve(cloudRoot, 'public-release.json');
+    writeFileSync(releasePath, `${JSON.stringify(publicRelease(manifest))}\n`);
+    const verifiedRelease = publicRelease(manifest);
+    verifiedRelease.core.packages[0].version = '9.9.9';
+    const verifiedReleasePath = resolve(cloudRoot, 'verified-public-release.json');
+    writeFileSync(verifiedReleasePath, `${JSON.stringify(verifiedRelease)}\n`);
+    const manifestPath = resolve(cloudRoot, 'compatibility.json');
+    writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+    const bin = resolve(cloudRoot, '.swap-bin');
+    mkdirSync(bin);
+    const gh = resolve(bin, 'gh');
+    writeFileSync(
+      gh,
+      `#!/usr/bin/env node
+const { copyFileSync, readFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const artifact = process.argv[4];
+copyFileSync(process.env.VERIFIED_RELEASE, artifact);
+const digest = createHash('sha256').update(readFileSync(artifact)).digest('hex');
+process.stdout.write(JSON.stringify([{verificationResult:{statement:{subject:[{digest:{sha256:digest}}]}}}]));
+`,
+    );
+    chmodSync(gh, 0o755);
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve(root, 'scripts/validate-cloud-core-consumer.mjs'),
+        '--manifest',
+        manifestPath,
+        '--public-release-manifest',
+        releasePath,
+        '--cloud-root',
+        cloudRoot,
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          VERIFIED_RELEASE: verifiedReleasePath,
+        },
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /core pins must exactly match the verified public release manifest/u,
+    );
+  } finally {
+    rmSync(cloudRoot, { recursive: true, force: true });
   }
 });

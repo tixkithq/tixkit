@@ -11,6 +11,7 @@ import {
   loadPublicDistribution,
   validatePublicDistribution,
 } from './lib/public-distribution.mjs';
+import { packageContentDigest } from './lib/package-content-digest.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -54,7 +55,11 @@ function contractPins(distribution) {
       continue;
     }
     const bytes = readFileSync(absolutePath);
-    pins.push({ name: contractPath, version: '1', sha256: digest('sha256', bytes) });
+    pins.push({
+      name: contractPath,
+      version: '1',
+      sha256: digest('sha256', bytes),
+    });
   }
   return pins.sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -83,7 +88,23 @@ function packPublicPackages(distribution, sourceRoot, artifactDirectory) {
         const integrity = `sha512-${digest('sha512', bytes)}`;
         if (result.integrity !== integrity)
           throw new Error(`${packageManifest.name} npm integrity does not match packed bytes`);
-        return { name: packageManifest.name, version: packageManifest.version, integrity };
+        const extractedPackage = mkdtempSync(join(tmpdir(), 'tixkit-packed-package-'));
+        try {
+          execFileSync(
+            'tar',
+            ['-xzf', resolve(outputDirectory, result.filename), '-C', extractedPackage],
+            { stdio: ['ignore', 'ignore', 'pipe'] },
+          );
+          const content = packageContentDigest(resolve(extractedPackage, 'package'));
+          return {
+            name: packageManifest.name,
+            version: packageManifest.version,
+            integrity,
+            ...content,
+          };
+        } finally {
+          rmSync(extractedPackage, { recursive: true, force: true });
+        }
       })
       .sort((left, right) => left.name.localeCompare(right.name));
   } finally {

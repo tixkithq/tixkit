@@ -402,9 +402,21 @@ export function jsonSchemaViolations(value, schema, path = '$', rootSchema = sch
     violations.push(`${path} must be one of ${schema.enum.join(', ')}`);
     return violations;
   }
-  if (schema.type && valueType(value) !== schema.type) {
+  const actualType = valueType(value);
+  const matchesType =
+    schema.type === 'integer'
+      ? actualType === 'number' && Number.isInteger(value)
+      : !schema.type || actualType === schema.type;
+  if (!matchesType) {
     violations.push(`${path} must be ${schema.type}`);
     return violations;
+  }
+  if (
+    (schema.type === 'integer' || schema.type === 'number') &&
+    schema.minimum !== undefined &&
+    value < schema.minimum
+  ) {
+    violations.push(`${path} must be at least ${schema.minimum}`);
   }
   if (schema.type === 'object') {
     for (const required of schema.required ?? []) {
@@ -707,7 +719,9 @@ export function validatePublicDistribution(manifest, root, schema) {
       `first release API contract must be the generated active contract: ${expectedActiveApiContract}`,
     );
   }
-  for (const entry of readdirSync(resolve(root, 'artifacts/api'), { withFileTypes: true })) {
+  for (const entry of readdirSync(resolve(root, 'artifacts/api'), {
+    withFileTypes: true,
+  })) {
     if (!entry.isDirectory() || !/^\d{4}-\d{2}-\d{2}$/u.test(entry.name)) continue;
     const contract = `artifacts/api/${entry.name}`;
     if (!declaredApiContracts.has(contract)) {

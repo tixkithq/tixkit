@@ -56,14 +56,25 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["name", "version", "integrity"],
+            "required": ["name", "version", "integrity", "contentSha256", "fileCount"],
             "properties": {
-              "name": { "type": "string", "pattern": "^@?[-a-z0-9]+(?:/[-a-z0-9]+)?$" },
+              "name": {
+                "type": "string",
+                "pattern": "^@?[-a-z0-9]+(?:/[-a-z0-9]+)?$"
+              },
               "version": {
                 "type": "string",
                 "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$"
               },
-              "integrity": { "type": "string", "pattern": "^sha512-[A-Za-z0-9+/=]+$" }
+              "integrity": {
+                "type": "string",
+                "pattern": "^sha512-[A-Za-z0-9+/=]+$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "fileCount": { "type": "integer", "minimum": 1 }
             },
             "additionalProperties": false
           }

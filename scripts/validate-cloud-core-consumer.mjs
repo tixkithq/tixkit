@@ -3,13 +3,14 @@
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   jsonSchemaViolations,
   loadPublicDistribution,
   validatePublicDistribution,
 } from './lib/public-distribution.mjs';
+import { verifyPublicReleaseAttestation } from './lib/public-release-attestation.mjs';
 
 const publicRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const sourceExtension =
@@ -149,6 +150,26 @@ function forbiddenSourceReference(value) {
   );
 }
 
+function bunInstallConfigurationViolations(cloudRoot) {
+  const path = resolve(cloudRoot, 'bunfig.toml');
+  const content = statSync(path, { throwIfNoEntry: false }) ? readFileSync(path, 'utf8') : '';
+  const lines = content.split('\n');
+  const sectionStart = lines.findIndex((line) => /^\s*\[install\]\s*(?:#.*)?$/u.test(line));
+  const sectionEnd = lines.findIndex(
+    (line, index) => index > sectionStart && /^\s*\[[^\]]+\]\s*(?:#.*)?$/u.test(line),
+  );
+  const installSection =
+    sectionStart === -1
+      ? ''
+      : lines.slice(sectionStart + 1, sectionEnd === -1 ? undefined : sectionEnd).join('\n');
+  const violations = [];
+  if (!/^\s*linker\s*=\s*['"]isolated['"]\s*(?:#.*)?$/mu.test(installSection))
+    violations.push('private Cloud bunfig.toml must set install.linker to isolated');
+  if (!/^\s*backend\s*=\s*['"]copyfile['"]\s*(?:#.*)?$/mu.test(installSection))
+    violations.push('private Cloud bunfig.toml must set install.backend to copyfile');
+  return violations;
+}
+
 function referencesPublicRepository(value) {
   return /(?:(?:github\.com[/:]|api\.github\.com\/repos\/)?tixkit\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$)|(?:^|[\s='"])\.\.\/tixkit(?:\.git)?(?:[#/?\s'"\]]|$))/iu.test(
     value,
@@ -268,22 +289,6 @@ function publicSourceFingerprints(paths) {
   return cachedSourceFingerprints;
 }
 
-function checksumFor(contractDirectory, fileName) {
-  const primary = resolve(contractDirectory, 'CHECKSUMS.sha256');
-  const docsMirror = resolve(
-    publicRoot,
-    'apps/docs/public/contracts',
-    basename(contractDirectory),
-    'CHECKSUMS.sha256',
-  );
-  const checksums = readFileSync(
-    statSync(primary, { throwIfNoEntry: false }) ? primary : docsMirror,
-    'utf8',
-  );
-  const line = checksums.split('\n').find((candidate) => candidate.endsWith(`  ${fileName}`));
-  return line?.split(/\s+/u)[0];
-}
-
 export function privateCloudSourceBoundaryViolations(cloudRoot) {
   const violations = [];
   const distribution = validatePublicDistribution(loadPublicDistribution(publicRoot), publicRoot);
@@ -336,14 +341,6 @@ export function privateCloudSourceBoundaryViolations(cloudRoot) {
   return violations;
 }
 
-function currentMigrationRange() {
-  const ids = readdirSync(resolve(publicRoot, 'packages/db/src/migrations'))
-    .map((name) => name.match(/^(\d{4}(?:_\d+)?)/u)?.[1])
-    .filter(Boolean)
-    .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
-  return { minimum: ids[0], maximum: ids.at(-1) };
-}
-
 export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoot) {
   const violations = [];
   const distribution = validatePublicDistribution(loadPublicDistribution(publicRoot), publicRoot);
@@ -372,63 +369,44 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
   )
     violations.push('core pins must exactly match the verified public release manifest');
 
-  const activeApiContract = distribution.release.contracts.find((path) =>
-    path.startsWith('artifacts/api/'),
-  );
-  if (!activeApiContract) {
-    violations.push('public distribution does not declare an active API contract');
-    return violations;
-  }
-  const activeApiVersion = basename(activeApiContract);
-  if (compatibility.core.apiVersion !== activeApiVersion)
-    violations.push(`core.apiVersion must equal ${activeApiVersion}`);
-  const contractPins = new Map(
-    compatibility.core.contracts.map((entry) => [`${entry.name}@${entry.version}`, entry.sha256]),
-  );
   for (const duplicate of duplicateValues(
     compatibility.core.contracts.map(({ name, version }) => `${name}@${version}`),
   ))
     violations.push(`duplicate core contract pin: ${duplicate}`);
-  const expectedOpenApiChecksum = checksumFor(
-    resolve(publicRoot, activeApiContract),
-    'openapi.json',
-  );
-  const openApiPin = contractPins.get(`openapi@${activeApiVersion}`);
-  if (!openApiPin) violations.push(`missing openapi@${activeApiVersion} contract pin`);
-  else if (openApiPin !== expectedOpenApiChecksum)
-    violations.push(`openapi@${activeApiVersion} checksum does not match the public contract`);
+  const openApiPins = compatibility.core.contracts.filter(({ name }) => name === 'openapi');
+  if (openApiPins.length !== 1)
+    violations.push('core release must contain exactly one OpenAPI contract pin');
+  else if (openApiPins[0].version !== compatibility.core.apiVersion)
+    violations.push('OpenAPI contract version must equal core.apiVersion');
 
-  const expectedMigrationRange = currentMigrationRange();
-  if (compatibility.core.migrationRange.minimum !== expectedMigrationRange.minimum)
-    violations.push(`migration minimum must equal ${expectedMigrationRange.minimum}`);
-  if (compatibility.core.migrationRange.maximum !== expectedMigrationRange.maximum)
-    violations.push(`migration maximum must equal ${expectedMigrationRange.maximum}`);
+  if (
+    compatibility.core.migrationRange.minimum.localeCompare(
+      compatibility.core.migrationRange.maximum,
+      'en',
+      { numeric: true },
+    ) > 0
+  )
+    violations.push('core migration range minimum must not exceed maximum');
 
-  const agentContracts = distribution.release.contracts.filter((path) =>
-    path.includes('agent-protocol'),
-  );
-  if (agentContracts.length === 0) {
-    if (
-      compatibility.core.agentProtocol.status !== 'unavailable' ||
-      compatibility.core.agentProtocol.version !== ''
-    )
-      violations.push('agent protocol must remain unavailable until a public contract is released');
-  } else if (
-    compatibility.core.agentProtocol.status !== 'supported' ||
-    compatibility.core.agentProtocol.version === ''
-  ) {
-    violations.push('released agent protocol requires a supported pinned version');
-  }
+  const { agentProtocol } = compatibility.core;
+  const agentContractVersions = compatibility.core.contracts
+    .map(({ name }) => name.match(/agent-protocol-([0-9A-Za-z.-]+)\.json$/u)?.[1])
+    .filter(Boolean);
+  if (
+    (agentProtocol.status === 'supported' && agentProtocol.version === '') ||
+    (agentProtocol.status === 'unavailable' && agentProtocol.version !== '')
+  )
+    violations.push('agent protocol status and version are inconsistent');
+  if (
+    agentProtocol.status === 'supported' &&
+    (agentContractVersions.length !== 1 || agentContractVersions[0] !== agentProtocol.version)
+  )
+    violations.push('supported agent protocol must match exactly one released contract');
+  if (agentProtocol.status === 'unavailable' && agentContractVersions.length > 0)
+    violations.push('unavailable agent protocol must not include a released contract');
 
   const publicPackages = new Map(
-    distribution.release.packages
-      .filter(({ ecosystem }) => ecosystem === 'npm' || ecosystem === 'npm-and-cdn')
-      .map((entry) => {
-        const manifest = JSON.parse(
-          readFileSync(resolve(publicRoot, entry.path, 'package.json'), 'utf8'),
-        );
-        return [manifest.name, manifest.version];
-      }),
+    publicRelease.core.packages.map((entry) => [entry.name, entry.version]),
   );
   const packagePins = new Map(
     compatibility.core.packages.map((entry) => [entry.name, entry.version]),
@@ -443,7 +421,7 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
   for (const name of publicPackages.keys())
     if (!packagePins.has(name)) violations.push(`missing core package pin: ${name}`);
 
-  const expectedImages = new Set(distribution.release.images.map(({ name }) => name));
+  const expectedImages = new Set(publicRelease.core.images.map(({ name }) => name));
   const actualImages = compatibility.core.images.map(({ name }) => name);
   for (const duplicate of duplicateValues(actualImages))
     violations.push(`duplicate core image pin: ${duplicate}`);
@@ -467,6 +445,7 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
       violations.push(`private Cloud tracks forbidden dependency output: ${path}`);
   }
   const lockPath = resolve(cloudRoot, 'bun.lock');
+  violations.push(...bunInstallConfigurationViolations(cloudRoot));
   const lock = statSync(lockPath, { throwIfNoEntry: false })
     ? parseBunLock(readFileSync(lockPath, 'utf8'))
     : undefined;
@@ -651,29 +630,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const manifestPath = argument(process.argv.slice(2), '--manifest');
   const publicReleasePath = argument(process.argv.slice(2), '--public-release-manifest');
   const cloudRoot = argument(process.argv.slice(2), '--cloud-root');
-  const publicRelease = JSON.parse(readFileSync(publicReleasePath, 'utf8'));
-  const authority = loadPublicDistribution(publicRoot).authority.publicRepository;
-  const releaseTag = publicRelease.releaseVersion?.startsWith('v')
-    ? publicRelease.releaseVersion
-    : `v${publicRelease.releaseVersion}`;
-  execFileSync(
-    'gh',
-    [
-      'attestation',
-      'verify',
-      publicReleasePath,
-      '--repo',
-      authority,
-      '--signer-workflow',
-      `${authority}/.github/workflows/public-artifact-release.yml`,
-      '--source-ref',
-      `refs/tags/${releaseTag}`,
-      '--source-digest',
-      publicRelease.core?.sourceCommit,
-      '--deny-self-hosted-runners',
-    ],
-    { stdio: 'inherit' },
-  );
+  const publicRelease = verifyPublicReleaseAttestation(publicRoot, publicReleasePath);
   const compatibility = JSON.parse(readFileSync(manifestPath, 'utf8'));
   const violations = validateCloudCoreConsumer(compatibility, publicRelease, cloudRoot);
   if (violations.length > 0) {

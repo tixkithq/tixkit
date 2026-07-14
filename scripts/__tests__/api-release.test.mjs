@@ -2,10 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+import { acquireRepositoryMutationLock } from './helpers/repository-mutation-lock.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
+const releaseRepositoryMutationLock = await acquireRepositoryMutationLock(root);
+after(releaseRepositoryMutationLock);
 const currentVersion = '2026-07-18';
 const currentReleaseManifest = JSON.parse(
   readFileSync(resolve(root, `artifacts/api/${currentVersion}/release-manifest.json`), 'utf8'),
