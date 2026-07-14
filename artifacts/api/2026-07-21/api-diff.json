@@ -1,0 +1,66 @@
+{
+  "from": "2026-07-20",
+  "to": "2026-07-21",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 9
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /oauth/token.requestBody.content.application/json.schema.properties.grant_type",
+      "message": "Enum value client_credentials was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "media-type-added",
+      "path": "POST /oauth/token.requestBody.content.application/x-www-form-urlencoded",
+      "message": "A media type was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent-principals/{id}/oauth-clients",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent-principals/{id}/oauth-clients/{clientId}/revoke",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/session",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.AgentPrincipal.properties.updatedAt",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentOAuthClient",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentOAuthClientCreated",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentSession",
+      "message": "A named schema was added."
+    }
+  ]
+}
