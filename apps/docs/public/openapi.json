@@ -9424,8 +9424,7 @@
             ]
           },
           "protocolVersion": {
-            "type": "string",
-            "const": "2026-07-22"
+            "type": "string"
           },
           "state": {
             "type": "string",
@@ -9640,8 +9639,7 @@
             "const": true
           },
           "supportedProtocolVersion": {
-            "type": "string",
-            "const": "2026-07-22"
+            "type": "string"
           }
         },
         "required": [
@@ -21328,7 +21326,7 @@
                     "events.read"
                   ],
                   "maximumAutonomy": "read",
-                  "protocolVersion": "2026-07-22",
+                  "protocolVersion": "protocolVersion example",
                   "state": "active",
                   "registeredAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -21383,7 +21381,7 @@
                     "events.read"
                   ],
                   "maximumAutonomy": "read",
-                  "protocolVersion": "2026-07-22",
+                  "protocolVersion": "protocolVersion example",
                   "state": "active",
                   "registeredAt": "2026-07-10T12:00:00.000Z"
                 }
@@ -21957,7 +21955,7 @@
                       "events.read"
                     ],
                     "maximumAutonomy": "read",
-                    "protocolVersion": "2026-07-22",
+                    "protocolVersion": "protocolVersion example",
                     "state": "active",
                     "registeredAt": "2026-07-10T12:00:00.000Z",
                     "updatedAt": "2026-07-10T12:00:00.000Z"
@@ -21970,7 +21968,7 @@
                     ]
                   },
                   "delegationRequired": true,
-                  "supportedProtocolVersion": "2026-07-22"
+                  "supportedProtocolVersion": "supportedProtocolVersion example"
                 }
               }
             }

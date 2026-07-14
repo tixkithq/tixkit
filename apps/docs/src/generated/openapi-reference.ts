@@ -11186,7 +11186,7 @@ export const apiReferenceOperations = [
                 "events.read"
               ],
               "maximumAutonomy": "read",
-              "protocolVersion": "2026-07-22",
+              "protocolVersion": "protocolVersion example",
               "state": "active",
               "registeredAt": "2026-07-10T12:00:00.000Z"
             }
@@ -11252,7 +11252,7 @@ export const apiReferenceOperations = [
                 "events.read"
               ],
               "maximumAutonomy": "read",
-              "protocolVersion": "2026-07-22",
+              "protocolVersion": "protocolVersion example",
               "state": "active",
               "registeredAt": "2026-07-10T12:00:00.000Z"
             }
@@ -11824,7 +11824,7 @@ export const apiReferenceOperations = [
                   "events.read"
                 ],
                 "maximumAutonomy": "read",
-                "protocolVersion": "2026-07-22",
+                "protocolVersion": "protocolVersion example",
                 "state": "active",
                 "registeredAt": "2026-07-10T12:00:00.000Z",
                 "updatedAt": "2026-07-10T12:00:00.000Z"
@@ -11837,7 +11837,7 @@ export const apiReferenceOperations = [
                 ]
               },
               "delegationRequired": true,
-              "supportedProtocolVersion": "2026-07-22"
+              "supportedProtocolVersion": "supportedProtocolVersion example"
             }
           }
         }

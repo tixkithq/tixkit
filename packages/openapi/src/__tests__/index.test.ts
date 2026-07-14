@@ -91,13 +91,6 @@ describe('openApiSpec', () => {
     expect(body.additionalProperties).toBe(false);
     expect(body.required).toEqual(['kind', 'delegationGrantId', 'resourceId']);
     expect(Object.keys(body.properties)).toEqual(['kind', 'delegationGrantId', 'resourceId']);
-    expect(openApiSpec.components.schemas.AgentPrincipal.properties.protocolVersion).toEqual({
-      type: 'string',
-      const: '2026-07-22',
-    });
-    expect(openApiSpec.components.schemas.AgentSession.properties.supportedProtocolVersion).toEqual(
-      { type: 'string', const: '2026-07-22' },
-    );
     expect(openApiSpec.components.schemas.AgentAction.properties.protocolVersion).toEqual({
       type: 'string',
       const: '2026-07-22',

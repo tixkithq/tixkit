@@ -1530,7 +1530,7 @@ export type AgentPrincipal = {
   sponsorPrincipalId: string;
   capabilities: AgentCapability[];
   maximumAutonomy: 'read' | 'recommend' | 'prepare' | 'execute_with_approval';
-  protocolVersion: '2026-07-22';
+  protocolVersion: string;
   state: 'active' | 'suspended' | 'revoked';
   registeredAt: string;
 };
@@ -1594,7 +1594,7 @@ export type AgentSession = {
     productPermissions: [];
   };
   delegationRequired: true;
-  supportedProtocolVersion: '2026-07-22';
+  supportedProtocolVersion: string;
 };
 
 export type AgentAction = {
