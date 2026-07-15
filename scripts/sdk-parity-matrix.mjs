@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { validateSdkParity } from './lib/sdk-parity.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
-const apiVersion = '2026-07-26';
+const apiVersion = '2026-07-27';
 const distribution = JSON.parse(
   readFileSync(new URL('../distribution/public-distribution.json', import.meta.url), 'utf8'),
 );

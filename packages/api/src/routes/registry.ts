@@ -3,6 +3,7 @@ import { authRoutes } from './modules/auth.js';
 import { agentControlRoutes } from './modules/agent-control.js';
 import { agentActionRoutes } from './modules/agent-actions.js';
 import { agentMemoryRoutes } from './modules/agent-memory.js';
+import { agentPlanRoutes } from './modules/agent-plans.js';
 import { agentSessionRoutes } from './modules/agent-session.js';
 import { checkInRoutes } from './modules/checkin.js';
 import { checkoutRoutes } from './modules/checkout.js';
@@ -60,6 +61,7 @@ export const authenticatedRouteModules: readonly RouteModuleRegistration[] = [
   { plugin: agentActionRoutes, prefix: '/v1' },
   { plugin: agentControlRoutes, prefix: '/v1' },
   { plugin: agentMemoryRoutes, prefix: '/v1' },
+  { plugin: agentPlanRoutes, prefix: '/v1' },
   { plugin: tenantRoutes, prefix: '/v1' },
   { plugin: eventRoutes, prefix: '/v1' },
   { plugin: eventMediaRoutes, prefix: '/v1' },

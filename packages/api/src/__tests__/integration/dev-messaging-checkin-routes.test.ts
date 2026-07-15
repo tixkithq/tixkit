@@ -8263,18 +8263,25 @@ describe('checkout pricing tamper resistance', () => {
   });
 
   it('creates a scoped draft test session in capture mode and persists classification', async () => {
+    const previousSecret = process.env.STRIPE_SECRET_KEY;
+    delete process.env.STRIPE_SECRET_KEY;
     const tables = pricingTables({
       events: [{ ...baseEvent, status: 'draft' }],
       checkout_sessions: [],
     });
-    const response = await postTestCheckout(makePrincipal(), tables);
-    expect(response.statusCode).toBe(201);
-    expect(tables.checkout_sessions).toHaveLength(1);
-    expect(tables.checkout_sessions[0]).toMatchObject({
-      tenant_id: 'tnt_1',
-      event_id: 'evt_pricing',
-      is_test: true,
-    });
+    try {
+      const response = await postTestCheckout(makePrincipal(), tables);
+      expect(response.statusCode).toBe(201);
+      expect(tables.checkout_sessions).toHaveLength(1);
+      expect(tables.checkout_sessions[0]).toMatchObject({
+        tenant_id: 'tnt_1',
+        event_id: 'evt_pricing',
+        is_test: true,
+      });
+    } finally {
+      if (previousSecret === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = previousSecret;
+    }
   });
 
   it('quotes from server-side ticket, discount, tax, and fee rows', async () => {

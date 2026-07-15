@@ -337,19 +337,174 @@ describe.sequential.each(driverCases)('agent plan persistence: $driver', ({ driv
     await expect(AgentPlansMigration.down!(db)).rejects.toThrow('rollback refused');
   });
 
+  it('isolates client-selected plan and event identities across tenants', async () => {
+    const otherTenantId = (
+      await new TenantRepository(db).create({ name: `Agent plan collision ${driver}` })
+    ).id;
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const otherAgentId = `agent_plan_other_${driver}`;
+    const otherSponsorId = `user_plan_other_${driver}`;
+    const otherDelegationId = `delegation_plan_other_${driver}`;
+    await db
+      .insertInto('agent_principals')
+      .values({
+        id: otherAgentId,
+        tenant_id: otherTenantId,
+        kind: 'third_party',
+        sponsor_principal_id: otherSponsorId,
+        capabilities: '["events.execute"]',
+        maximum_autonomy: 'execute_with_approval',
+        protocol_version: AGENT_PROTOCOL_VERSION,
+        state: 'active',
+        registered_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('agent_delegations')
+      .values({
+        id: otherDelegationId,
+        tenant_id: otherTenantId,
+        agent_principal_id: otherAgentId,
+        sponsor_principal_id: otherSponsorId,
+        capabilities: '["events.execute"]',
+        resource_scopes: '["event:event_plan_shared"]',
+        permission_snapshot: '["events:publish","events:write"]',
+        issued_at: now,
+        expires_at: new Date(now.getTime() + 3_600_000),
+        revoked_at: null,
+        created_at: now,
+      })
+      .execute();
+    const otherAction: AgentAction = {
+      ...action,
+      id: `action_plan_other_${driver}`,
+      agentPrincipalId: otherAgentId,
+      sponsorPrincipalId: otherSponsorId,
+      delegationGrantId: otherDelegationId,
+      target: {
+        ...action.target,
+        tenantId: otherTenantId,
+        resourceId: 'event_plan_shared',
+      },
+      idempotencyKey: 'agent-plan-other-action-2026',
+      preparedAt: new Date(now.getTime() - 2_000).toISOString(),
+    };
+    const otherActionDigest = agentActionDigest(otherAction);
+    await db
+      .insertInto('agent_actions')
+      .values({
+        id: otherAction.id,
+        tenant_id: otherTenantId,
+        agent_principal_id: otherAgentId,
+        sponsor_principal_id: otherSponsorId,
+        delegation_grant_id: otherDelegationId,
+        action_kind: otherAction.kind,
+        action_digest: otherActionDigest,
+        action_json: canonicalAgentJson(otherAction),
+        resource_type: otherAction.target.resourceType,
+        resource_id: otherAction.target.resourceId,
+        resource_version: otherAction.target.resourceVersion,
+        policy_version: otherAction.expectedPolicyVersion,
+        idempotency_key: otherAction.idempotencyKey,
+        request_fingerprint: agentSha256({ action: otherAction }),
+        authorization_snapshot_sha256: 'a'.repeat(64),
+        authorization_reasons: '["approval_required"]',
+        dry_run_json: canonicalAgentJson({
+          launchable: true,
+          readinessSnapshotSha256: otherAction.payload.readinessSnapshotSha256,
+          blockingReasonCodes: [],
+        }),
+        eligible_for_approval: true,
+        prepared_at: new Date(otherAction.preparedAt),
+        expires_at: new Date(now.getTime() + 600_000),
+      })
+      .execute();
+    const otherPlan = buildAgentPlanDefinition({
+      id: plan.id,
+      protocolVersion: plan.protocolVersion,
+      tenantId: otherTenantId,
+      agentPrincipalId: otherAgentId,
+      sponsorPrincipalId: otherSponsorId,
+      delegationGrantId: otherDelegationId,
+      purpose: plan.purpose,
+      assumptions: plan.assumptions,
+      steps: plan.steps.map((step) => ({
+        ...step,
+        actionDigest: otherActionDigest,
+        projectedChanges: step.projectedChanges.map((change) => ({
+          ...change,
+          resourceId: otherAction.target.resourceId,
+        })),
+      })),
+      createdAt: new Date(now.getTime() - 1_000).toISOString(),
+      expiresAt: new Date(now.getTime() + 600_000).toISOString(),
+    });
+    const repository = new AgentPlanRepository(db);
+    await expect(
+      repository.create({
+        definition: otherPlan,
+        actionBindings: [{ stepId: 'step_publish', actionId: otherAction.id }],
+        actor: { type: 'agent', tenantId: otherTenantId, principalId: otherAgentId },
+        idempotencyKey: 'agent-plan-other-create-2026',
+      }),
+    ).resolves.toMatchObject({ definition: { id: plan.id, tenantId: otherTenantId } });
+    await expect(
+      repository.getForAgent({
+        tenantId: otherTenantId,
+        agentPrincipalId: otherAgentId,
+        planId: plan.id,
+      }),
+    ).resolves.toMatchObject({ definition: { tenantId: otherTenantId } });
+    await expect(
+      repository.getForAgent({
+        tenantId,
+        agentPrincipalId: plan.agentPrincipalId,
+        planId: plan.id,
+      }),
+    ).resolves.toMatchObject({ definition: { tenantId } });
+
+    const sharedTransition = {
+      expectedStateVersion: 1,
+      status: 'awaiting_approval' as const,
+      stepStates: [{ stepId: 'step_publish', status: 'awaiting_approval' as const }],
+      reasonCode: 'approval_requested',
+      idempotencyKey: 'agent-plan-shared-transition-2026',
+    };
+    await expect(
+      repository.transition({
+        ...sharedTransition,
+        tenantId,
+        planId: plan.id,
+        actor: { type: 'agent', tenantId, principalId: plan.agentPrincipalId },
+      }),
+    ).resolves.toMatchObject({ state: { stateVersion: 2 } });
+    await expect(
+      repository.transition({
+        ...sharedTransition,
+        tenantId: otherTenantId,
+        planId: otherPlan.id,
+        actor: { type: 'agent', tenantId: otherTenantId, principalId: otherAgentId },
+      }),
+    ).resolves.toMatchObject({ state: { stateVersion: 2 } });
+    const sharedEvents = await db
+      .selectFrom('agent_plan_state_events')
+      .select(['tenant_id', 'id'])
+      .where('plan_id', '=', plan.id)
+      .execute();
+    expect(sharedEvents).toHaveLength(4);
+    expect(new Set(sharedEvents.map(({ id }) => id)).size).toBe(4);
+  });
+
   it('advances state only with authoritative approval evidence and CAS', async () => {
     const repository = new AgentPlanRepository(db);
-    const awaiting = await repository.transition({
-      tenantId,
-      planId: plan.id,
-      expectedStateVersion: 1,
-      status: 'awaiting_approval',
-      stepStates: [{ stepId: 'step_publish', status: 'awaiting_approval' }],
-      actor: { type: 'agent', tenantId, principalId: plan.agentPrincipalId },
-      reasonCode: 'approval_requested',
-      idempotencyKey: 'agent-plan-transition-awaiting-2026',
-    });
-    expect(awaiting.state.stateVersion).toBe(2);
+    await expect(
+      repository.getForAgent({
+        tenantId,
+        agentPrincipalId: plan.agentPrincipalId,
+        planId: plan.id,
+      }),
+    ).resolves.toMatchObject({ state: { stateVersion: 2, status: 'awaiting_approval' } });
     const approvedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
     const approvalId = 'approval_plan_publish';
     await db

@@ -1342,7 +1342,15 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
       sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
     });
     expect((await repository.findJob(tenantId, organizationId, job.id))?.status).toBe('committing');
-    for (const stage of MIGRATION_COMMIT_STAGES) {
+    const commitTotals = {
+      processed: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      conflicts: 0,
+      failed: 0,
+    };
+    for (const [stageIndex, stage] of MIGRATION_COMMIT_STAGES.entries()) {
       const result = await workerService.processStage(
         {
           tenantId,
@@ -1353,6 +1361,22 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
         { stage, claimOwner: `portable-round-trip:${stage}`, chunkSize: 100 },
       );
       expect(result.complete).toBe(true);
+      for (const counter of Object.keys(commitTotals) as Array<keyof typeof commitTotals>)
+        commitTotals[counter] += result[counter];
+      await workerService.recordProgress(
+        {
+          tenantId,
+          organizationId,
+          jobId: job.id,
+          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+        },
+        {
+          stage,
+          stageIndex,
+          stageCount: MIGRATION_COMMIT_STAGES.length,
+          ...commitTotals,
+        },
+      );
     }
     const organizationReference = await repository.findExternalReference({
       tenantId,
@@ -1854,13 +1878,29 @@ describe.sequential.each(cases)('portable import control: $driver', ({ driver, u
           }
           const scope = { ...input, sideEffects: MIGRATION_SIDE_EFFECT_POLICY };
           await commitService.beginCommit(scope);
-          for (const stage of MIGRATION_COMMIT_STAGES) {
+          const totals = {
+            processed: 0,
+            created: 0,
+            updated: 0,
+            skipped: 0,
+            conflicts: 0,
+            failed: 0,
+          };
+          for (const [stageIndex, stage] of MIGRATION_COMMIT_STAGES.entries()) {
             const result = await commitService.processStage(scope, {
               stage,
               claimOwner: `routed-intake:${stage}`,
               chunkSize: 100,
             });
             if (!result.complete) throw new Error(`ROUTED_COMMIT_STAGE_INCOMPLETE:${stage}`);
+            for (const counter of Object.keys(totals) as Array<keyof typeof totals>)
+              totals[counter] += result[counter];
+            await commitService.recordProgress(scope, {
+              stage,
+              stageIndex,
+              stageCount: MIGRATION_COMMIT_STAGES.length,
+              ...totals,
+            });
           }
           const reconciliation = await commitService.reconcile(scope);
           if (reconciliation.unresolved !== 0) {

@@ -96,7 +96,38 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-26');
+    expect(openApiSpec.info.version).toBe('2026-07-27');
+  });
+
+  it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
+    const create = openApiSpec.paths['/agent/plans'].post;
+    const inspect = openApiSpec.paths['/agent/plans/{planId}'].get;
+    const transition = openApiSpec.paths['/agent/plans/{planId}/transitions'].post;
+    expect(create.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(create.security).not.toContainEqual({ BearerAuth: [] });
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(transition.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(create.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['definition', 'actionBindings'],
+    });
+    expect(transition.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['expectedStateVersion', 'status', 'stepStates', 'reasonCode'],
+    });
+    const planSchemas = openApiSpec.components.schemas as Record<string, Record<string, unknown>>;
+    expect(planSchemas.AgentPlanProtocol_agentPlanDefinition).toMatchObject({
+      additionalProperties: false,
+      required: expect.arrayContaining(['planSha256', 'steps', 'agentPrincipalId']),
+    });
+    expect(planSchemas.AgentPlanProtocol_agentPlanState).toMatchObject({
+      additionalProperties: false,
+      required: expect.arrayContaining(['stateVersion', 'status', 'stepStates']),
+    });
+    expect(openApiSpec.components.schemas.PersistedAgentPlan).toMatchObject({
+      additionalProperties: false,
+      required: ['definition', 'state', 'actionBindings'],
+    });
   });
 
   it('publishes agent-only immutable action preparation without caller-owned bindings', () => {

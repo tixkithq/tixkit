@@ -10,7 +10,7 @@ export const AgentPlansMigration: Migration = {
   async up(db): Promise<void> {
     await db.schema
       .createTable('agent_plans')
-      .addColumn('id', 'varchar(64)', (column) => column.primaryKey())
+      .addColumn('id', 'varchar(64)', (column) => column.notNull())
       .addColumn('tenant_id', 'varchar(32)', (column) => column.notNull())
       .addColumn('agent_principal_id', 'varchar(64)', (column) => column.notNull())
       .addColumn('sponsor_principal_id', 'varchar(64)', (column) => column.notNull())
@@ -22,6 +22,7 @@ export const AgentPlansMigration: Migration = {
       .addColumn('request_fingerprint', 'varchar(64)', (column) => column.notNull())
       .addColumn('created_at', timestampType(), (column) => column.notNull())
       .addColumn('expires_at', timestampType(), (column) => column.notNull())
+      .addPrimaryKeyConstraint('agent_plans_pk', ['tenant_id', 'id'])
       .addForeignKeyConstraint('agent_plans_tenant_fk', ['tenant_id'], 'tenants', ['id'])
       .addForeignKeyConstraint(
         'agent_plans_principal_fk',
@@ -35,7 +36,6 @@ export const AgentPlansMigration: Migration = {
         'agent_delegations',
         ['tenant_id', 'id'],
       )
-      .addUniqueConstraint('agent_plans_tenant_id_unique', ['tenant_id', 'id'])
       .addUniqueConstraint('agent_plans_idempotency_unique', [
         'tenant_id',
         'agent_principal_id',
@@ -92,7 +92,7 @@ export const AgentPlansMigration: Migration = {
 
     await db.schema
       .createTable('agent_plan_state_events')
-      .addColumn('id', 'varchar(64)', (column) => column.primaryKey())
+      .addColumn('id', 'varchar(64)', (column) => column.notNull())
       .addColumn('tenant_id', 'varchar(32)', (column) => column.notNull())
       .addColumn('plan_id', 'varchar(64)', (column) => column.notNull())
       .addColumn('previous_state_version', 'bigint')
@@ -109,6 +109,7 @@ export const AgentPlansMigration: Migration = {
       .addColumn('idempotency_key', 'varchar(255)', (column) => column.notNull())
       .addColumn('request_fingerprint', 'varchar(64)', (column) => column.notNull())
       .addColumn('occurred_at', timestampType(), (column) => column.notNull())
+      .addPrimaryKeyConstraint('agent_plan_state_events_pk', ['tenant_id', 'id'])
       .addForeignKeyConstraint(
         'agent_plan_state_events_plan_fk',
         ['tenant_id', 'plan_id'],

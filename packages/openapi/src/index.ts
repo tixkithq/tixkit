@@ -1,4 +1,5 @@
 import { ALL_PERMISSIONS } from '@tixkit/domain';
+import agentPlanProtocolSchema from '@tixkit/agent-protocol/schemas/agent-plan/2026-07-27' with { type: 'json' };
 
 export type OpenApiReference = { $ref: string };
 export { generateOpenApiTypes } from './generate-types.js';
@@ -255,6 +256,7 @@ function exampleString(name: string, schema: Record<string, unknown>): string {
   if (pattern === '^[A-Z0-9_]{3,64}$') return 'SAFE_CODE';
   if (pattern === '^[a-z0-9_]{2,64}$') return 'reason_code';
   if (pattern === '^[a-z0-9][a-z0-9._-]*$') return 'value_example';
+  if (pattern === '^[a-z0-9][a-z0-9_.-]{1,63}$') return 'reason_code';
   if (pattern === '^[a-z][a-z0-9_.-]{1,63}$') return 'value.example';
   if (pattern === '^[A-Za-z0-9][A-Za-z0-9._:-]*$') return 'value_example';
   if (pattern === '^[A-Za-z0-9][A-Za-z0-9._:-]+$') return 'value_example';
@@ -371,7 +373,11 @@ function schemaExample(
     return schemaExample(selected, schemas, name, seen);
   }
   if (Array.isArray(value.allOf)) {
-    const examples = value.allOf.map((entry) => schemaExample(entry, schemas, name, seen));
+    const { allOf: _allOf, ...base } = value;
+    const examples = [
+      schemaExample(base, schemas, name, seen),
+      ...value.allOf.map((entry) => schemaExample(entry, schemas, name, seen)),
+    ];
     const objects = examples.filter(
       (entry): entry is Record<string, unknown> =>
         Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry),
@@ -543,11 +549,31 @@ const agentOAuthClientRequired = [
   'updatedAt',
 ] as const;
 
+function rewriteAgentPlanSchemaReferences(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(rewriteAgentPlanSchemaReferences);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      key === '$ref' && typeof item === 'string' && item.startsWith('#/$defs/')
+        ? `#/components/schemas/AgentPlanProtocol_${item.slice('#/$defs/'.length)}`
+        : rewriteAgentPlanSchemaReferences(item),
+    ]),
+  );
+}
+
+const agentPlanComponentSchemas = Object.fromEntries(
+  Object.entries(agentPlanProtocolSchema.$defs).map(([name, schema]) => [
+    `AgentPlanProtocol_${name}`,
+    rewriteAgentPlanSchemaReferences(schema),
+  ]),
+);
+
 const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-26',
+    version: '2026-07-27',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -622,6 +648,19 @@ const rawOpenApiSpec = {
         },
         description:
           'Required for agent action preparation. A key is permanently bound to the authenticated agent and exact typed request.',
+      },
+      AgentPlanIdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: {
+          type: 'string',
+          minLength: 16,
+          maxLength: 255,
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]+$',
+        },
+        description:
+          'Required for agent plan creation and transitions. Use 16-255 safe token characters and preserve a key only for identical plan intent.',
       },
       AgentApprovalConfirmation: {
         name: 'X-Tixkit-Confirmation',
@@ -787,6 +826,34 @@ const rawOpenApiSpec = {
       },
     },
     schemas: {
+      ...agentPlanComponentSchemas,
+      AgentPlanDefinition: {
+        $ref: '#/components/schemas/AgentPlanProtocol_agentPlanDefinition',
+      },
+      AgentPlanState: { $ref: '#/components/schemas/AgentPlanProtocol_agentPlanState' },
+      PersistedAgentPlan: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          definition: { $ref: '#/components/schemas/AgentPlanDefinition' },
+          state: { $ref: '#/components/schemas/AgentPlanState' },
+          actionBindings: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                stepId: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
+                actionId: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
+              },
+              required: ['stepId', 'actionId'],
+            },
+          },
+        },
+        required: ['definition', 'state', 'actionBindings'],
+      },
       ApiError: {
         type: 'object',
         properties: {
@@ -10639,6 +10706,152 @@ const rawOpenApiSpec = {
           '403': { description: 'Sponsor authorization changed' },
           '404': { description: 'Credential not found for this sponsored agent' },
           '409': { description: 'Idempotency conflict' },
+        },
+      },
+    },
+    '/agent/plans': {
+      post: {
+        summary: 'Persist an immutable agent plan',
+        description:
+          'Experimental/private beta. Exact Agent OAuth principal only. Persists a canonical protocol-2026-07-27 plan over already prepared immutable actions. The database revalidates agent identity, sponsor, delegation, capabilities, resource scopes, action digests and lifetime under lock. Plan creation has no product effect and grants no approval.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [{ $ref: '#/components/parameters/AgentPlanIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  definition: { $ref: '#/components/schemas/AgentPlanDefinition' },
+                  actionBindings: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 100,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        stepId: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
+                        actionId: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
+                      },
+                      required: ['stepId', 'actionId'],
+                    },
+                  },
+                },
+                required: ['definition', 'actionBindings'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Immutable definition, server-owned initial state and exact action bindings',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PersistedAgentPlan' } },
+            },
+          },
+          '400': { description: 'Invalid canonical plan, action bindings or idempotency key' },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': { description: 'Agent or bound authority is outside the authenticated scope' },
+          '409': { description: 'Idempotency conflict or plan lifetime is no longer valid' },
+        },
+      },
+    },
+    '/agent/plans/{planId}': {
+      get: {
+        summary: 'Inspect an agent plan and current state',
+        description:
+          'Returns the immutable plan, exact action bindings and current digest-verified state only to the exact agent or human sponsor. Sponsor inspection remains available for accountability without granting approval or execution authority.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'planId',
+            in: 'path',
+            required: true,
+            schema: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Immutable plan and current state',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PersistedAgentPlan' } },
+            },
+          },
+          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
+          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '404': { description: 'Plan not found for this agent or sponsor' },
+        },
+      },
+    },
+    '/agent/plans/{planId}/transitions': {
+      post: {
+        summary: 'Advance an agent plan using authoritative evidence',
+        description:
+          'Experimental/private beta. The exact agent or sponsor proposes a compare-and-swap state transition. The database reloads and locks current actor authorization, actions, approvals and executions; validates dependency, freshness, digest, consumption and result bindings; and records immutable before/after state plus inspectable authorization evidence. Clients cannot supply evidence or timestamps.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'planId',
+            in: 'path',
+            required: true,
+            schema: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
+          },
+          { $ref: '#/components/parameters/AgentPlanIdempotencyKey' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  expectedStateVersion: { type: 'integer', minimum: 1 },
+                  status: {
+                    enum: [
+                      'prepared',
+                      'awaiting_approval',
+                      'executing',
+                      'succeeded',
+                      'failed',
+                      'cancelled',
+                      'expired',
+                      'compensated',
+                    ],
+                  },
+                  stepStates: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 100,
+                    items: { $ref: '#/components/schemas/AgentPlanProtocol_stepState' },
+                  },
+                  reasonCode: { $ref: '#/components/schemas/AgentPlanProtocol_reasonCode' },
+                },
+                required: ['expectedStateVersion', 'status', 'stepStates', 'reasonCode'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Current immutable plan and newly committed state',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/PersistedAgentPlan' } },
+            },
+          },
+          '400': { description: 'Invalid state, reason code or idempotency key' },
+          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
+          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '404': { description: 'Plan or current actor authority is outside the caller scope' },
+          '409': {
+            description:
+              'State version, idempotency, lifetime, approval or execution evidence conflict',
+          },
         },
       },
     },

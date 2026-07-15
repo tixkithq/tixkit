@@ -36,6 +36,8 @@ describe('Generated client compile validation (T33)', () => {
     expect(output).toContain('Organization');
     expect(output).toContain('Brand');
     expect(output).toContain('paymentAccountId');
+    expect(output).toContain('/agent/plans/{planId}/transitions');
+    expect(output).toContain('PersistedAgentPlan');
 
     const directory = mkdtempSync(join(tmpdir(), 'tixkit-openapi-types-'));
     try {

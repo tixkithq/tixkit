@@ -7,7 +7,7 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
@@ -21,6 +21,7 @@ related:
   - /reference/migrations/2026-07-23-to-2026-07-24
   - /reference/migrations/2026-07-24-to-2026-07-25
   - /reference/migrations/2026-07-25-to-2026-07-26
+  - /reference/migrations/2026-07-26-to-2026-07-27
 keywords:
   - agents
   - delegation
@@ -36,7 +37,7 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-07-26` and agent protocol `2026-07-22` support these sponsor-controlled operations:
+API version `2026-07-27`, action protocol `2026-07-22` and plan protocol `2026-07-27` support these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
@@ -46,6 +47,7 @@ API version `2026-07-26` and agent protocol `2026-07-22` support these sponsor-c
 - create and revoke sponsor-bound OAuth clients for active agents;
 - exchange client credentials and inspect an explicit, permission-empty agent session;
 - prepare and retrieve an immutable `event.publish` action with a server-authoritative dry run;
+- persist, inspect and version an immutable multi-step plan over prepared actions;
 - issue a short-lived, digest-bound human approval;
 - revoke an unconsumed approval through an action-bound, digest-bound lifecycle event; and
 - execute one approved `event.publish` action through a durable, idempotent typed operation.
@@ -97,6 +99,14 @@ The exact authenticated agent executes through `tixkit.agentActions.execute` or 
 One execution can create at most one recorded product effect. An exact retry after a terminal result returns the same evidence. A retry while another worker holds the execution lease may return `409`; retry it without changing the action, approval or digest. Permanent authorization changes are recorded as a bounded failed execution, while retryable infrastructure faults leave the leased execution resumable. Approval consumption is consequential: a consumed approval cannot be revoked or transferred to another execution.
 
 The exact agent or human sponsor inspects durable execution and its ordered immutable audit history through `tixkit.agentActions.getExecution` or `GET /v1/agent/actions/{actionId}/executions/{executionId}`. Sponsor access remains available after event permission loss for accountability. Cross-tenant, cross-principal, cross-sponsor and cross-action lookups return not found; corrupt or incomplete audit evidence fails closed.
+
+## Persist and inspect an approval-aware plan
+
+After preparing every typed action, the authenticated agent submits the canonical `2026-07-27` plan definition and exact step-to-action bindings through `tixkit.agentPlans.create` or `POST /v1/agent/plans`. The database reloads those actions and rechecks the agent, sponsor, delegation, capabilities, resource scopes, action digests and lifetime. Creation has no product effect and grants no approval.
+
+The exact agent or sponsor reads the immutable definition, bindings and current state through `tixkit.agentPlans.get` or `GET /v1/agent/plans/{planId}`. Advance state with `tixkit.agentPlans.transition` or `POST /v1/agent/plans/{planId}/transitions`. Supply an expected state version, complete next step states, a bounded reason code and an idempotency key. Tixkit owns timestamps and reloads approvals and executions under lock; clients cannot assert their own evidence.
+
+Dependencies, fresh approvals, approval consumption, execution bindings and terminal result digests are validated before the compare-and-swap update. Each accepted transition appends immutable before-and-after state plus canonical, digest-bound actor-authorization evidence. Cross-tenant identifiers remain isolated and material authorization changes fail closed.
 
 ## Memory and managed tools
 

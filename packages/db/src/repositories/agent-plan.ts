@@ -410,6 +410,13 @@ export class AgentPlanRepository {
           throw new Error('AGENT_PLAN_IDEMPOTENCY_CONFLICT');
         return this.loadAtVersion(tx, replay, 1);
       }
+      const conflictingId = await tx
+        .selectFrom('agent_plans')
+        .select('id')
+        .where('tenant_id', '=', input.definition.tenantId)
+        .where('id', '=', input.definition.id)
+        .executeTakeFirst();
+      if (conflictingId) throw new Error('AGENT_PLAN_ID_CONFLICT');
       const actionRows = await tx
         .selectFrom('agent_actions')
         .selectAll()
@@ -505,7 +512,11 @@ export class AgentPlanRepository {
       await tx
         .insertInto('agent_plan_state_events')
         .values({
-          id: agentSha256({ planId: input.definition.id, stateVersion: 1 }),
+          id: agentSha256({
+            tenantId: input.definition.tenantId,
+            planId: input.definition.id,
+            stateVersion: 1,
+          }),
           tenant_id: input.definition.tenantId,
           plan_id: input.definition.id,
           previous_state_version: null,
@@ -688,6 +699,7 @@ export class AgentPlanRepository {
         .insertInto('agent_plan_state_events')
         .values({
           id: agentSha256({
+            tenantId: input.tenantId,
             planId: input.planId,
             stateVersion: next.stateVersion,
             idempotencyKey: input.idempotencyKey,

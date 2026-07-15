@@ -1,0 +1,35 @@
+---
+title: API migration from 2026-07-26 to 2026-07-27
+description: Persist and inspect immutable, approval-aware agent plans through the shared Platform API.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-27
+prerequisites:
+  - An integration using API version 2026-07-26
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-27` adds immutable agent-plan creation, scoped inspection and compare-and-swap state transitions. Existing `2026-07-26` operations remain compatible. Agent actions remain on protocol `2026-07-22`; plan definitions and states use the additive shared plan protocol `2026-07-27`.
+
+## Create an immutable plan
+
+Prepare every typed action first. Build a canonical plan definition whose step digests and identities match those actions, then call `POST /v1/agent/plans` or `tixkit.agentPlans.create`. Only the exact authenticated agent may create the plan. Tixkit reloads the bound actions and rechecks the agent, sponsor, delegation, capabilities, resource scopes, action digests and lifetime under a database lock.
+
+Creation stores an immutable definition, exact step-to-action bindings and a server-timestamped initial state. It does not approve or execute an action. Exact idempotent replay returns the original initial state. A reused key with different intent returns conflict.
+
+## Inspect and advance state
+
+The exact agent or human sponsor can call `GET /v1/agent/plans/{planId}` or `tixkit.agentPlans.get(planId)`. Cross-tenant, cross-agent and cross-sponsor plans return not found. Responses use `Cache-Control: no-store`.
+
+Call `POST /v1/agent/plans/{planId}/transitions` or `tixkit.agentPlans.transition` with the expected state version, the complete next step-state list, a bounded reason code and an idempotency key. Clients cannot submit evidence or timestamps. Tixkit locks and reloads the current plan, actions, approvals and executions, then validates dependencies, fresh approval binding, approval consumption, execution state and result digests before committing the next version.
+
+Every accepted transition records immutable before-and-after state plus canonical, digest-bound actor-authorization evidence. Material authorization changes fail closed. State-version races return conflict and are safe to re-read before retrying.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-27`.

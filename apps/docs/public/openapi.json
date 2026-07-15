@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tixkit API",
-    "version": "2026-07-26",
+    "version": "2026-07-27",
     "description": "Headless white-label event commerce platform API",
     "license": {
       "name": "MIT"
@@ -137,6 +137,18 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]+$"
         },
         "description": "Required for agent action preparation. A key is permanently bound to the authenticated agent and exact typed request."
+      },
+      "AgentPlanIdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]+$"
+        },
+        "description": "Required for agent plan creation and transitions. Use 16-255 safe token characters and preserve a key only for identical plan intent."
       },
       "AgentApprovalConfirmation": {
         "name": "X-Tixkit-Confirmation",
@@ -333,6 +345,619 @@
       }
     },
     "schemas": {
+      "AgentPlanProtocol_id": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$"
+      },
+      "AgentPlanProtocol_sha256": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "AgentPlanProtocol_timestamp": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+      },
+      "AgentPlanProtocol_reasonCode": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_.-]{1,63}$"
+      },
+      "AgentPlanProtocol_assumption": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+          },
+          "provenanceType": {
+            "enum": [
+              "user",
+              "system",
+              "tool",
+              "inferred"
+            ]
+          },
+          "sourceReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+          },
+          "verification": {
+            "enum": [
+              "confirmed",
+              "unverified",
+              "rejected"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "statement",
+          "provenanceType",
+          "verification"
+        ]
+      },
+      "AgentPlanProtocol_projectedChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resourceType": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "resourceId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "operation": {
+            "enum": [
+              "create",
+              "update",
+              "publish",
+              "send",
+              "refund",
+              "export",
+              "delete"
+            ]
+          },
+          "beforeVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "projectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "previewSha256": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          }
+        },
+        "required": [
+          "resourceType",
+          "resourceId",
+          "operation",
+          "previewSha256"
+        ]
+      },
+      "AgentPlanProtocol_cost": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amountMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "basis": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+          },
+          "quoteSha256": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_timestamp"
+          }
+        },
+        "required": [
+          "amountMinor",
+          "currency",
+          "basis",
+          "quoteSha256",
+          "expiresAt"
+        ]
+      },
+      "AgentPlanProtocol_readinessImpact": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "beforeSnapshotSha256": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          },
+          "projectedSnapshotSha256": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          },
+          "introducedReasonCodes": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_reasonCode"
+            }
+          },
+          "resolvedReasonCodes": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_reasonCode"
+            }
+          }
+        },
+        "required": [
+          "beforeSnapshotSha256",
+          "projectedSnapshotSha256",
+          "introducedReasonCodes",
+          "resolvedReasonCodes"
+        ]
+      },
+      "AgentPlanProtocol_approvalRequirement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "none",
+              "fresh_action"
+            ]
+          },
+          "riskClass": {
+            "enum": [
+              "read_only",
+              "low",
+              "high",
+              "critical"
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "riskClass"
+        ]
+      },
+      "AgentPlanProtocol_reversibility": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "none",
+              "reversible",
+              "compensatable"
+            ]
+          },
+          "compensationActionKind": {
+            "enum": [
+              "event.read",
+              "readiness.read",
+              "report.read",
+              "event.prepare",
+              "content.prepare",
+              "campaign.prepare",
+              "event.update",
+              "event.publish",
+              "inventory.change",
+              "campaign.send",
+              "refund.issue",
+              "permission.change",
+              "personal_data.export",
+              "credential.change",
+              "domain.change",
+              "provider.change",
+              "migration.execute",
+              "resource.delete"
+            ]
+          },
+          "windowSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31536000
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "compensatable"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "compensationActionKind": {}
+              },
+              "required": [
+                "compensationActionKind"
+              ]
+            },
+            "else": {
+              "properties": {
+                "compensationActionKind": false,
+                "windowSeconds": false
+              }
+            }
+          }
+        ]
+      },
+      "AgentPlanProtocol_planStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "actionKind": {
+            "const": "event.publish"
+          },
+          "actionProtocolVersion": {
+            "const": "2026-07-22"
+          },
+          "actionDigest": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          },
+          "dependsOnStepIds": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_id"
+            }
+          },
+          "projectedChanges": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_projectedChange"
+            }
+          },
+          "costs": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_cost"
+            }
+          },
+          "readinessImpact": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_readinessImpact"
+          },
+          "approvalRequirement": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_approvalRequirement"
+          },
+          "reversibility": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_reversibility"
+          }
+        },
+        "required": [
+          "id",
+          "actionKind",
+          "actionProtocolVersion",
+          "actionDigest",
+          "dependsOnStepIds",
+          "projectedChanges",
+          "costs",
+          "readinessImpact",
+          "approvalRequirement",
+          "reversibility"
+        ]
+      },
+      "AgentPlanProtocol_agentPlanDefinition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "protocolVersion": {
+            "const": "2026-07-27"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "agentPrincipalId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "sponsorPrincipalId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "delegationGrantId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+          },
+          "assumptions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_assumption"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_planStep"
+            }
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_timestamp"
+          },
+          "planSha256": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          }
+        },
+        "required": [
+          "id",
+          "protocolVersion",
+          "tenantId",
+          "agentPrincipalId",
+          "sponsorPrincipalId",
+          "delegationGrantId",
+          "purpose",
+          "assumptions",
+          "steps",
+          "createdAt",
+          "expiresAt",
+          "planSha256"
+        ]
+      },
+      "AgentPlanProtocol_stepState": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stepId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "blocked",
+              "awaiting_approval",
+              "approved",
+              "executing",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "compensated"
+            ]
+          },
+          "approvalId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "executionId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "resultSha256": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          },
+          "failureCode": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_]{3,64}$"
+          }
+        },
+        "required": [
+          "stepId",
+          "status"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "approved",
+                    "executing",
+                    "succeeded"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "approvalId": {}
+              },
+              "required": [
+                "approvalId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "executing",
+                    "succeeded"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "executionId": {}
+              },
+              "required": [
+                "executionId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "succeeded"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "resultSha256": {}
+              },
+              "required": [
+                "resultSha256"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "approvalId": {},
+                "executionId": {},
+                "failureCode": {}
+              },
+              "required": [
+                "approvalId",
+                "executionId",
+                "failureCode"
+              ]
+            }
+          }
+        ]
+      },
+      "AgentPlanProtocol_agentPlanState": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "planId": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_id"
+          },
+          "planSha256": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_sha256"
+          },
+          "stateVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "enum": [
+              "prepared",
+              "awaiting_approval",
+              "executing",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "expired",
+              "compensated"
+            ]
+          },
+          "stepStates": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_stepState"
+            }
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/AgentPlanProtocol_timestamp"
+          }
+        },
+        "required": [
+          "planId",
+          "planSha256",
+          "stateVersion",
+          "status",
+          "stepStates",
+          "updatedAt"
+        ]
+      },
+      "AgentPlanDefinition": {
+        "$ref": "#/components/schemas/AgentPlanProtocol_agentPlanDefinition"
+      },
+      "AgentPlanState": {
+        "$ref": "#/components/schemas/AgentPlanProtocol_agentPlanState"
+      },
+      "PersistedAgentPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/AgentPlanDefinition"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AgentPlanState"
+          },
+          "actionBindings": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "stepId": {
+                  "$ref": "#/components/schemas/AgentPlanProtocol_id"
+                },
+                "actionId": {
+                  "$ref": "#/components/schemas/AgentPlanProtocol_id"
+                }
+              },
+              "required": [
+                "stepId",
+                "actionId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "definition",
+          "state",
+          "actionBindings"
+        ]
+      },
       "ApiError": {
         "type": "object",
         "properties": {
@@ -22075,6 +22700,595 @@
           }
         },
         "operationId": "postAgentPrincipalsByIdOauthClientsByClientIdRevoke",
+        "tags": [
+          "Agent platform"
+        ]
+      }
+    },
+    "/agent/plans": {
+      "post": {
+        "summary": "Persist an immutable agent plan",
+        "description": "Experimental/private beta. Exact Agent OAuth principal only. Persists a canonical protocol-2026-07-27 plan over already prepared immutable actions. The database revalidates agent identity, sponsor, delegation, capabilities, resource scopes, action digests and lifetime under lock. Plan creation has no product effect and grants no approval.",
+        "security": [
+          {
+            "AgentOAuth": [
+              "agent.invoke"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentPlanIdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "definition": {
+                    "$ref": "#/components/schemas/AgentPlanDefinition"
+                  },
+                  "actionBindings": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "stepId": {
+                          "$ref": "#/components/schemas/AgentPlanProtocol_id"
+                        },
+                        "actionId": {
+                          "$ref": "#/components/schemas/AgentPlanProtocol_id"
+                        }
+                      },
+                      "required": [
+                        "stepId",
+                        "actionId"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "definition",
+                  "actionBindings"
+                ]
+              },
+              "example": {
+                "definition": {
+                  "id": "resource_example",
+                  "protocolVersion": "2026-07-27",
+                  "tenantId": "resource_example",
+                  "agentPrincipalId": "resource_example",
+                  "sponsorPrincipalId": "resource_example",
+                  "delegationGrantId": "resource_example",
+                  "purpose": "purpose example",
+                  "assumptions": [
+                    {
+                      "id": "resource_example",
+                      "statement": "statement example",
+                      "provenanceType": "user",
+                      "verification": "confirmed"
+                    }
+                  ],
+                  "steps": [
+                    {
+                      "id": "resource_example",
+                      "actionKind": "event.publish",
+                      "actionProtocolVersion": "2026-07-22",
+                      "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "dependsOnStepIds": [
+                        "resource_example"
+                      ],
+                      "projectedChanges": [
+                        {
+                          "resourceType": "resource_example",
+                          "resourceId": "resource_example",
+                          "operation": "create",
+                          "previewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        }
+                      ],
+                      "costs": [
+                        {
+                          "amountMinor": 0,
+                          "currency": "USD",
+                          "basis": "basis example",
+                          "quoteSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "expiresAt": "2026-07-10T12:00:00.000Z"
+                        }
+                      ],
+                      "readinessImpact": {
+                        "beforeSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "projectedSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "introducedReasonCodes": [
+                          "reason_code"
+                        ],
+                        "resolvedReasonCodes": [
+                          "reason_code"
+                        ]
+                      },
+                      "approvalRequirement": {
+                        "mode": "none",
+                        "riskClass": "read_only"
+                      },
+                      "reversibility": {
+                        "mode": "none"
+                      }
+                    }
+                  ],
+                  "createdAt": "2026-07-10T12:00:00.000Z",
+                  "expiresAt": "2026-07-10T12:00:00.000Z",
+                  "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "actionBindings": [
+                  {
+                    "stepId": "resource_example",
+                    "actionId": "resource_example"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Immutable definition, server-owned initial state and exact action bindings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersistedAgentPlan"
+                },
+                "example": {
+                  "definition": {
+                    "id": "resource_example",
+                    "protocolVersion": "2026-07-27",
+                    "tenantId": "resource_example",
+                    "agentPrincipalId": "resource_example",
+                    "sponsorPrincipalId": "resource_example",
+                    "delegationGrantId": "resource_example",
+                    "purpose": "purpose example",
+                    "assumptions": [
+                      {
+                        "id": "resource_example",
+                        "statement": "statement example",
+                        "provenanceType": "user",
+                        "verification": "confirmed"
+                      }
+                    ],
+                    "steps": [
+                      {
+                        "id": "resource_example",
+                        "actionKind": "event.publish",
+                        "actionProtocolVersion": "2026-07-22",
+                        "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "dependsOnStepIds": [
+                          "resource_example"
+                        ],
+                        "projectedChanges": [
+                          {
+                            "resourceType": "resource_example",
+                            "resourceId": "resource_example",
+                            "operation": "create",
+                            "previewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                          }
+                        ],
+                        "costs": [
+                          {
+                            "amountMinor": 0,
+                            "currency": "USD",
+                            "basis": "basis example",
+                            "quoteSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "expiresAt": "2026-07-10T12:00:00.000Z"
+                          }
+                        ],
+                        "readinessImpact": {
+                          "beforeSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "projectedSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "introducedReasonCodes": [
+                            "reason_code"
+                          ],
+                          "resolvedReasonCodes": [
+                            "reason_code"
+                          ]
+                        },
+                        "approvalRequirement": {
+                          "mode": "none",
+                          "riskClass": "read_only"
+                        },
+                        "reversibility": {
+                          "mode": "none"
+                        }
+                      }
+                    ],
+                    "createdAt": "2026-07-10T12:00:00.000Z",
+                    "expiresAt": "2026-07-10T12:00:00.000Z",
+                    "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "state": {
+                    "planId": "resource_example",
+                    "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "stateVersion": 1,
+                    "status": "prepared",
+                    "stepStates": [
+                      {
+                        "stepId": "resource_example",
+                        "status": "pending"
+                      }
+                    ],
+                    "updatedAt": "2026-07-10T12:00:00.000Z"
+                  },
+                  "actionBindings": [
+                    {
+                      "stepId": "resource_example",
+                      "actionId": "resource_example"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid canonical plan, action bindings or idempotency key"
+          },
+          "401": {
+            "description": "Valid Agent OAuth authentication required"
+          },
+          "403": {
+            "description": "Authenticated principal is not an agent"
+          },
+          "404": {
+            "description": "Agent or bound authority is outside the authenticated scope"
+          },
+          "409": {
+            "description": "Idempotency conflict or plan lifetime is no longer valid"
+          }
+        },
+        "operationId": "postAgentPlans",
+        "tags": [
+          "Agent platform"
+        ]
+      }
+    },
+    "/agent/plans/{planId}": {
+      "get": {
+        "summary": "Inspect an agent plan and current state",
+        "description": "Returns the immutable plan, exact action bindings and current digest-verified state only to the exact agent or human sponsor. Sponsor inspection remains available for accountability without granting approval or execution authority.",
+        "security": [
+          {
+            "AgentOAuth": [
+              "agent.invoke"
+            ]
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable plan and current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersistedAgentPlan"
+                },
+                "example": {
+                  "definition": {
+                    "id": "resource_example",
+                    "protocolVersion": "2026-07-27",
+                    "tenantId": "resource_example",
+                    "agentPrincipalId": "resource_example",
+                    "sponsorPrincipalId": "resource_example",
+                    "delegationGrantId": "resource_example",
+                    "purpose": "purpose example",
+                    "assumptions": [
+                      {
+                        "id": "resource_example",
+                        "statement": "statement example",
+                        "provenanceType": "user",
+                        "verification": "confirmed"
+                      }
+                    ],
+                    "steps": [
+                      {
+                        "id": "resource_example",
+                        "actionKind": "event.publish",
+                        "actionProtocolVersion": "2026-07-22",
+                        "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "dependsOnStepIds": [
+                          "resource_example"
+                        ],
+                        "projectedChanges": [
+                          {
+                            "resourceType": "resource_example",
+                            "resourceId": "resource_example",
+                            "operation": "create",
+                            "previewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                          }
+                        ],
+                        "costs": [
+                          {
+                            "amountMinor": 0,
+                            "currency": "USD",
+                            "basis": "basis example",
+                            "quoteSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "expiresAt": "2026-07-10T12:00:00.000Z"
+                          }
+                        ],
+                        "readinessImpact": {
+                          "beforeSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "projectedSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "introducedReasonCodes": [
+                            "reason_code"
+                          ],
+                          "resolvedReasonCodes": [
+                            "reason_code"
+                          ]
+                        },
+                        "approvalRequirement": {
+                          "mode": "none",
+                          "riskClass": "read_only"
+                        },
+                        "reversibility": {
+                          "mode": "none"
+                        }
+                      }
+                    ],
+                    "createdAt": "2026-07-10T12:00:00.000Z",
+                    "expiresAt": "2026-07-10T12:00:00.000Z",
+                    "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "state": {
+                    "planId": "resource_example",
+                    "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "stateVersion": 1,
+                    "status": "prepared",
+                    "stepStates": [
+                      {
+                        "stepId": "resource_example",
+                        "status": "pending"
+                      }
+                    ],
+                    "updatedAt": "2026-07-10T12:00:00.000Z"
+                  },
+                  "actionBindings": [
+                    {
+                      "stepId": "resource_example",
+                      "actionId": "resource_example"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid Agent OAuth or human bearer authentication required"
+          },
+          "403": {
+            "description": "Caller is not an explicit agent or human principal"
+          },
+          "404": {
+            "description": "Plan not found for this agent or sponsor"
+          }
+        },
+        "operationId": "getAgentPlansByPlanId",
+        "tags": [
+          "Agent platform"
+        ]
+      }
+    },
+    "/agent/plans/{planId}/transitions": {
+      "post": {
+        "summary": "Advance an agent plan using authoritative evidence",
+        "description": "Experimental/private beta. The exact agent or sponsor proposes a compare-and-swap state transition. The database reloads and locks current actor authorization, actions, approvals and executions; validates dependency, freshness, digest, consumption and result bindings; and records immutable before/after state plus inspectable authorization evidence. Clients cannot supply evidence or timestamps.",
+        "security": [
+          {
+            "AgentOAuth": [
+              "agent.invoke"
+            ]
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AgentPlanProtocol_id"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/AgentPlanIdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "expectedStateVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "status": {
+                    "enum": [
+                      "prepared",
+                      "awaiting_approval",
+                      "executing",
+                      "succeeded",
+                      "failed",
+                      "cancelled",
+                      "expired",
+                      "compensated"
+                    ]
+                  },
+                  "stepStates": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "$ref": "#/components/schemas/AgentPlanProtocol_stepState"
+                    }
+                  },
+                  "reasonCode": {
+                    "$ref": "#/components/schemas/AgentPlanProtocol_reasonCode"
+                  }
+                },
+                "required": [
+                  "expectedStateVersion",
+                  "status",
+                  "stepStates",
+                  "reasonCode"
+                ]
+              },
+              "example": {
+                "expectedStateVersion": 1,
+                "status": "prepared",
+                "stepStates": [
+                  {
+                    "stepId": "resource_example",
+                    "status": "pending"
+                  }
+                ],
+                "reasonCode": "reason_code"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current immutable plan and newly committed state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersistedAgentPlan"
+                },
+                "example": {
+                  "definition": {
+                    "id": "resource_example",
+                    "protocolVersion": "2026-07-27",
+                    "tenantId": "resource_example",
+                    "agentPrincipalId": "resource_example",
+                    "sponsorPrincipalId": "resource_example",
+                    "delegationGrantId": "resource_example",
+                    "purpose": "purpose example",
+                    "assumptions": [
+                      {
+                        "id": "resource_example",
+                        "statement": "statement example",
+                        "provenanceType": "user",
+                        "verification": "confirmed"
+                      }
+                    ],
+                    "steps": [
+                      {
+                        "id": "resource_example",
+                        "actionKind": "event.publish",
+                        "actionProtocolVersion": "2026-07-22",
+                        "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "dependsOnStepIds": [
+                          "resource_example"
+                        ],
+                        "projectedChanges": [
+                          {
+                            "resourceType": "resource_example",
+                            "resourceId": "resource_example",
+                            "operation": "create",
+                            "previewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                          }
+                        ],
+                        "costs": [
+                          {
+                            "amountMinor": 0,
+                            "currency": "USD",
+                            "basis": "basis example",
+                            "quoteSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "expiresAt": "2026-07-10T12:00:00.000Z"
+                          }
+                        ],
+                        "readinessImpact": {
+                          "beforeSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "projectedSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "introducedReasonCodes": [
+                            "reason_code"
+                          ],
+                          "resolvedReasonCodes": [
+                            "reason_code"
+                          ]
+                        },
+                        "approvalRequirement": {
+                          "mode": "none",
+                          "riskClass": "read_only"
+                        },
+                        "reversibility": {
+                          "mode": "none"
+                        }
+                      }
+                    ],
+                    "createdAt": "2026-07-10T12:00:00.000Z",
+                    "expiresAt": "2026-07-10T12:00:00.000Z",
+                    "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "state": {
+                    "planId": "resource_example",
+                    "planSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "stateVersion": 1,
+                    "status": "prepared",
+                    "stepStates": [
+                      {
+                        "stepId": "resource_example",
+                        "status": "pending"
+                      }
+                    ],
+                    "updatedAt": "2026-07-10T12:00:00.000Z"
+                  },
+                  "actionBindings": [
+                    {
+                      "stepId": "resource_example",
+                      "actionId": "resource_example"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid state, reason code or idempotency key"
+          },
+          "401": {
+            "description": "Valid Agent OAuth or human bearer authentication required"
+          },
+          "403": {
+            "description": "Caller is not an explicit agent or human principal"
+          },
+          "404": {
+            "description": "Plan or current actor authority is outside the caller scope"
+          },
+          "409": {
+            "description": "State version, idempotency, lifetime, approval or execution evidence conflict"
+          }
+        },
+        "operationId": "postAgentPlansByPlanIdTransitions",
         "tags": [
           "Agent platform"
         ]

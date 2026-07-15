@@ -34,6 +34,7 @@ import {
   type CreateUploadArtifactInput,
   type WebhookEvent,
   type CreateMigrationJobInput,
+  type AgentPlanDefinition,
 } from '../index.js';
 
 function mockFetch(status: number, body: unknown) {
@@ -3190,6 +3191,89 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm, 5)).toMatchObject({
       method: 'GET',
       url: `https://api.test/v1/agent/actions/${actionId}/executions/${executionId}`,
+    });
+  });
+
+  it('agentPlans preserves canonical definitions and versioned transition intent', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const definition: AgentPlanDefinition = {
+      id: 'plan_primary',
+      protocolVersion: '2026-07-27',
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      sponsorPrincipalId: 'sponsor_primary',
+      delegationGrantId: 'delegation_primary',
+      purpose: 'Publish the reviewed event',
+      assumptions: [],
+      steps: [
+        {
+          id: 'step_publish',
+          actionKind: 'event.publish',
+          actionProtocolVersion: '2026-07-22',
+          actionDigest: 'a'.repeat(64),
+          dependsOnStepIds: [],
+          projectedChanges: [],
+          costs: [],
+          readinessImpact: {
+            beforeSnapshotSha256: 'b'.repeat(64),
+            projectedSnapshotSha256: 'c'.repeat(64),
+            introducedReasonCodes: [],
+            resolvedReasonCodes: [],
+          },
+          approvalRequirement: { mode: 'fresh_action', riskClass: 'high' },
+          reversibility: { mode: 'none' },
+        },
+      ],
+      createdAt: '2026-07-14T12:00:00.000Z',
+      expiresAt: '2026-07-14T12:30:00.000Z',
+      planSha256: 'd'.repeat(64),
+    };
+    await client.agentPlans.create({
+      definition,
+      actionBindings: [{ stepId: 'step_publish', actionId: 'action_publish' }],
+      idempotencyKey: 'agent-plan-sdk-create-0001',
+    });
+    await client.agentPlans.get(definition.id);
+    await client.agentPlans.transition({
+      planId: definition.id,
+      expectedStateVersion: 1,
+      status: 'awaiting_approval',
+      stepStates: [{ stepId: 'step_publish', status: 'awaiting_approval' }],
+      reasonCode: 'approval_requested',
+      idempotencyKey: 'agent-plan-sdk-transition-0001',
+    });
+
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/plans',
+      headers: {
+        'Idempotency-Key': 'agent-plan-sdk-create-0001',
+        'X-Tixkit-Version': '2026-07-27',
+      },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      definition,
+      actionBindings: [{ stepId: 'step_publish', actionId: 'action_publish' }],
+    });
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: 'https://api.test/v1/agent/plans/plan_primary',
+    });
+    expect(getCall(fm, 2)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/plans/plan_primary/transitions',
+      headers: { 'Idempotency-Key': 'agent-plan-sdk-transition-0001' },
+    });
+    expect(JSON.parse(getCall(fm, 2).body)).toEqual({
+      expectedStateVersion: 1,
+      status: 'awaiting_approval',
+      stepStates: [{ stepId: 'step_publish', status: 'awaiting_approval' }],
+      reasonCode: 'approval_requested',
     });
   });
 

@@ -22,6 +22,7 @@ import {
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import { createHash, randomBytes } from 'node:crypto';
 import type { DB } from '../types/db.js';
+import { executeAgentTransactionWithRetry } from './agent-transaction-retry.js';
 
 type Executor = Kysely<DB> | Transaction<DB>;
 const LEASE_MILLISECONDS = 5 * 60 * 1000;
@@ -482,29 +483,19 @@ async function lockControlTenant(db: Executor, tenantId: string): Promise<void> 
   if (!tenant) throw new Error('AGENT_CONTROL_TENANT_NOT_FOUND');
 }
 
+async function executeRetryableTransaction<T>(
+  db: Kysely<DB>,
+  operation: (tx: Transaction<DB>) => Promise<T>,
+  exhaustedCode: string,
+): Promise<T> {
+  return executeAgentTransactionWithRetry(() => db.transaction().execute(operation), exhaustedCode);
+}
+
 async function executeControlTransaction<T>(
   db: Kysely<DB>,
   operation: (tx: Transaction<DB>) => Promise<T>,
 ): Promise<T> {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      return await db.transaction().execute(operation);
-    } catch (error) {
-      const databaseError = error as {
-        code?: string;
-        errno?: number;
-        cause?: { code?: string; errno?: number };
-      };
-      const code = databaseError.code ?? databaseError.cause?.code;
-      const errno = databaseError.errno ?? databaseError.cause?.errno;
-      if (
-        attempt === 4 ||
-        (code !== '40001' && code !== '40P01' && code !== 'ER_LOCK_DEADLOCK' && errno !== 1213)
-      )
-        throw error;
-    }
-  }
-  throw new Error('AGENT_CONTROL_TRANSACTION_RETRY_EXHAUSTED');
+  return executeRetryableTransaction(db, operation, 'AGENT_CONTROL_TRANSACTION_RETRY_EXHAUSTED');
 }
 
 async function authorizeControlActor(
@@ -1295,115 +1286,119 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     now: string;
     audit: readonly AgentAuditRecord[];
   }): Promise<{ created: boolean; execution: AgentExecution }> {
-    return this.db.transaction().execute(async (tx) => {
-      const approval = await tx
-        .selectFrom('agent_approvals')
-        .selectAll()
-        .where('tenant_id', '=', input.execution.tenantId)
-        .where('id', '=', input.approval.id)
-        .forUpdate()
-        .executeTakeFirst();
-      if (
-        !approval ||
-        input.approval.id !== input.execution.approvalId ||
-        approval.id !== input.execution.approvalId ||
-        approval.action_digest !== input.execution.actionDigest ||
-        approval.approver_principal_id !== input.execution.sponsorPrincipalId ||
-        (approval.action_id !== null && approval.action_id !== input.execution.actionId)
-      )
-        throw new Error('AGENT_APPROVAL_INVALID');
-      const existing = await tx
-        .selectFrom('agent_executions')
-        .selectAll()
-        .where('tenant_id', '=', input.execution.tenantId)
-        .where('idempotency_key', '=', input.execution.idempotencyKey)
-        .executeTakeFirst();
-      if (existing) {
+    return executeRetryableTransaction(
+      this.db,
+      async (tx) => {
+        const approval = await tx
+          .selectFrom('agent_approvals')
+          .selectAll()
+          .where('tenant_id', '=', input.execution.tenantId)
+          .where('id', '=', input.approval.id)
+          .forUpdate()
+          .executeTakeFirst();
         if (
-          existing.action_id !== input.execution.actionId ||
-          existing.action_digest !== input.execution.actionDigest ||
-          existing.agent_principal_id !== input.execution.agentPrincipalId ||
-          existing.sponsor_principal_id !== input.execution.sponsorPrincipalId ||
-          existing.delegation_grant_id !== input.execution.delegationGrantId ||
-          existing.approval_id !== input.execution.approvalId ||
-          existing.request_fingerprint !== input.execution.requestFingerprint ||
-          safeInteger(existing.resource_version, 'execution resource version') !==
-            input.execution.resourceVersion ||
-          safeInteger(existing.policy_version, 'execution policy version') !==
-            input.execution.policyVersion
+          !approval ||
+          input.approval.id !== input.execution.approvalId ||
+          approval.id !== input.execution.approvalId ||
+          approval.action_digest !== input.execution.actionDigest ||
+          approval.approver_principal_id !== input.execution.sponsorPrincipalId ||
+          (approval.action_id !== null && approval.action_id !== input.execution.actionId)
         )
-          throw new Error('AGENT_EXECUTION_IDEMPOTENCY_CONFLICT');
-        return { created: false, execution: toExecution(existing) };
-      }
+          throw new Error('AGENT_APPROVAL_INVALID');
+        const existing = await tx
+          .selectFrom('agent_executions')
+          .selectAll()
+          .where('tenant_id', '=', input.execution.tenantId)
+          .where('idempotency_key', '=', input.execution.idempotencyKey)
+          .executeTakeFirst();
+        if (existing) {
+          if (
+            existing.action_id !== input.execution.actionId ||
+            existing.action_digest !== input.execution.actionDigest ||
+            existing.agent_principal_id !== input.execution.agentPrincipalId ||
+            existing.sponsor_principal_id !== input.execution.sponsorPrincipalId ||
+            existing.delegation_grant_id !== input.execution.delegationGrantId ||
+            existing.approval_id !== input.execution.approvalId ||
+            existing.request_fingerprint !== input.execution.requestFingerprint ||
+            safeInteger(existing.resource_version, 'execution resource version') !==
+              input.execution.resourceVersion ||
+            safeInteger(existing.policy_version, 'execution policy version') !==
+              input.execution.policyVersion
+          )
+            throw new Error('AGENT_EXECUTION_IDEMPOTENCY_CONFLICT');
+          return { created: false, execution: toExecution(existing) };
+        }
 
-      const now = await databaseNow(tx);
-      const permissions: unknown = JSON.parse(approval.approver_permission_snapshot);
-      if (
-        safeInteger(approval.policy_version, 'approval policy version') !==
-          input.execution.policyVersion ||
-        !Array.isArray(permissions) ||
-        !permissions.includes(input.requiredApproverPermission) ||
-        approval.revoked_at !== null ||
-        approval.consumed_at !== null ||
-        new Date(approval.approved_at).getTime() > now.getTime() ||
-        new Date(approval.expires_at).getTime() <= now.getTime()
-      )
-        throw new Error('AGENT_APPROVAL_INVALID');
+        const now = await databaseNow(tx);
+        const permissions: unknown = JSON.parse(approval.approver_permission_snapshot);
+        if (
+          safeInteger(approval.policy_version, 'approval policy version') !==
+            input.execution.policyVersion ||
+          !Array.isArray(permissions) ||
+          !permissions.includes(input.requiredApproverPermission) ||
+          approval.revoked_at !== null ||
+          approval.consumed_at !== null ||
+          new Date(approval.approved_at).getTime() > now.getTime() ||
+          new Date(approval.expires_at).getTime() <= now.getTime()
+        )
+          throw new Error('AGENT_APPROVAL_INVALID');
 
-      const consumed = await tx
-        .updateTable('agent_approvals')
-        .set({ consumed_at: now, consumed_execution_id: input.execution.id })
-        .where('tenant_id', '=', input.execution.tenantId)
-        .where('id', '=', approval.id)
-        .where('consumed_at', 'is', null)
-        .where('revoked_at', 'is', null)
-        .executeTakeFirst();
-      if (Number(consumed.numUpdatedRows) !== 1) throw new Error('AGENT_APPROVAL_CONSUMED');
+        const consumed = await tx
+          .updateTable('agent_approvals')
+          .set({ consumed_at: now, consumed_execution_id: input.execution.id })
+          .where('tenant_id', '=', input.execution.tenantId)
+          .where('id', '=', approval.id)
+          .where('consumed_at', 'is', null)
+          .where('revoked_at', 'is', null)
+          .executeTakeFirst();
+        if (Number(consumed.numUpdatedRows) !== 1) throw new Error('AGENT_APPROVAL_CONSUMED');
 
-      await tx
-        .insertInto('agent_executions')
-        .values({
-          id: input.execution.id,
-          tenant_id: input.execution.tenantId,
-          action_id: input.execution.actionId,
-          action_digest: input.execution.actionDigest,
-          agent_principal_id: input.execution.agentPrincipalId,
-          sponsor_principal_id: input.execution.sponsorPrincipalId,
-          delegation_grant_id: input.execution.delegationGrantId,
-          approval_id: input.execution.approvalId,
-          idempotency_key: input.execution.idempotencyKey,
-          request_fingerprint: input.execution.requestFingerprint,
-          state: input.execution.state,
-          resource_version: input.execution.resourceVersion,
-          policy_version: input.execution.policyVersion,
-          fence_token: input.execution.fenceToken,
-          lease_owner: null,
-          lease_expires_at: null,
-          result: null,
-          failure_code: null,
-          created_at: now,
-          updated_at: now,
-        })
-        .execute();
-      if (
-        input.audit.length !== 2 ||
-        new Set(input.audit.map(({ phase }) => phase)).size !== 2 ||
-        !input.audit.some(({ phase }) => phase === 'prepared') ||
-        !input.audit.some(({ phase }) => phase === 'authorized')
-      )
-        throw new Error('AGENT_AUDIT_PHASE_MISMATCH');
-      for (const record of input.audit) {
-        assertAudit(input.execution, record, ['prepared', 'authorized']);
-        await appendAudit(tx, input.execution.id, { ...record, occurredAt: now.toISOString() });
-      }
-      const created = await tx
-        .selectFrom('agent_executions')
-        .selectAll()
-        .where('tenant_id', '=', input.execution.tenantId)
-        .where('id', '=', input.execution.id)
-        .executeTakeFirstOrThrow();
-      return { created: true, execution: toExecution(created) };
-    });
+        await tx
+          .insertInto('agent_executions')
+          .values({
+            id: input.execution.id,
+            tenant_id: input.execution.tenantId,
+            action_id: input.execution.actionId,
+            action_digest: input.execution.actionDigest,
+            agent_principal_id: input.execution.agentPrincipalId,
+            sponsor_principal_id: input.execution.sponsorPrincipalId,
+            delegation_grant_id: input.execution.delegationGrantId,
+            approval_id: input.execution.approvalId,
+            idempotency_key: input.execution.idempotencyKey,
+            request_fingerprint: input.execution.requestFingerprint,
+            state: input.execution.state,
+            resource_version: input.execution.resourceVersion,
+            policy_version: input.execution.policyVersion,
+            fence_token: input.execution.fenceToken,
+            lease_owner: null,
+            lease_expires_at: null,
+            result: null,
+            failure_code: null,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+        if (
+          input.audit.length !== 2 ||
+          new Set(input.audit.map(({ phase }) => phase)).size !== 2 ||
+          !input.audit.some(({ phase }) => phase === 'prepared') ||
+          !input.audit.some(({ phase }) => phase === 'authorized')
+        )
+          throw new Error('AGENT_AUDIT_PHASE_MISMATCH');
+        for (const record of input.audit) {
+          assertAudit(input.execution, record, ['prepared', 'authorized']);
+          await appendAudit(tx, input.execution.id, { ...record, occurredAt: now.toISOString() });
+        }
+        const created = await tx
+          .selectFrom('agent_executions')
+          .selectAll()
+          .where('tenant_id', '=', input.execution.tenantId)
+          .where('id', '=', input.execution.id)
+          .executeTakeFirstOrThrow();
+        return { created: true, execution: toExecution(created) };
+      },
+      'AGENT_EXECUTION_TRANSACTION_RETRY_EXHAUSTED',
+    );
   }
 
   async claim(input: {

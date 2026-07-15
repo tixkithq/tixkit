@@ -8,5 +8,5 @@
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../domain" }]
+  "references": [{ "path": "../agent-protocol" }, { "path": "../domain" }]
 }

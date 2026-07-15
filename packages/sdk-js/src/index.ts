@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-26';
+export const TIXKIT_API_VERSION = '2026-07-27';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1696,6 +1696,136 @@ export type AgentExecutionEvidence = {
   audit: AgentExecutionAuditRecord[];
 };
 
+export type AgentPlanAssumption = {
+  id: string;
+  statement: string;
+  provenanceType: 'user' | 'system' | 'tool' | 'inferred';
+  sourceReference?: string;
+  verification: 'confirmed' | 'unverified' | 'rejected';
+};
+
+export type AgentPlanActionKind =
+  | 'event.read'
+  | 'readiness.read'
+  | 'report.read'
+  | 'event.prepare'
+  | 'content.prepare'
+  | 'campaign.prepare'
+  | 'event.update'
+  | 'event.publish'
+  | 'inventory.change'
+  | 'campaign.send'
+  | 'refund.issue'
+  | 'permission.change'
+  | 'personal_data.export'
+  | 'credential.change'
+  | 'domain.change'
+  | 'provider.change'
+  | 'migration.execute'
+  | 'resource.delete';
+
+export type AgentPlanReversibility =
+  | {
+      mode: 'none' | 'reversible';
+      compensationActionKind?: never;
+      windowSeconds?: never;
+    }
+  | {
+      mode: 'compensatable';
+      compensationActionKind: AgentPlanActionKind;
+      windowSeconds?: number;
+    };
+
+export type AgentPlanStep = {
+  id: string;
+  actionKind: 'event.publish';
+  actionProtocolVersion: '2026-07-22';
+  actionDigest: string;
+  dependsOnStepIds: string[];
+  projectedChanges: Array<{
+    resourceType: string;
+    resourceId: string;
+    operation: 'create' | 'update' | 'publish' | 'send' | 'refund' | 'export' | 'delete';
+    beforeVersion?: number;
+    projectedVersion?: number;
+    previewSha256: string;
+  }>;
+  costs: Array<{
+    amountMinor: number;
+    currency: string;
+    basis: string;
+    quoteSha256: string;
+    expiresAt: string;
+  }>;
+  readinessImpact: {
+    beforeSnapshotSha256: string;
+    projectedSnapshotSha256: string;
+    introducedReasonCodes: string[];
+    resolvedReasonCodes: string[];
+  };
+  approvalRequirement: {
+    mode: 'none' | 'fresh_action';
+    riskClass: 'read_only' | 'low' | 'high' | 'critical';
+  };
+  reversibility: AgentPlanReversibility;
+};
+
+export type AgentPlanDefinition = {
+  id: string;
+  protocolVersion: '2026-07-27';
+  tenantId: string;
+  agentPrincipalId: string;
+  sponsorPrincipalId: string;
+  delegationGrantId: string;
+  purpose: string;
+  assumptions: AgentPlanAssumption[];
+  steps: AgentPlanStep[];
+  createdAt: string;
+  expiresAt: string;
+  planSha256: string;
+};
+
+export type AgentPlanStepState = {
+  stepId: string;
+  status:
+    | 'pending'
+    | 'blocked'
+    | 'awaiting_approval'
+    | 'approved'
+    | 'executing'
+    | 'succeeded'
+    | 'failed'
+    | 'cancelled'
+    | 'compensated';
+  approvalId?: string;
+  executionId?: string;
+  resultSha256?: string;
+  failureCode?: string;
+};
+
+export type AgentPlanState = {
+  planId: string;
+  planSha256: string;
+  stateVersion: number;
+  status:
+    | 'prepared'
+    | 'awaiting_approval'
+    | 'executing'
+    | 'succeeded'
+    | 'failed'
+    | 'cancelled'
+    | 'expired'
+    | 'compensated';
+  stepStates: AgentPlanStepState[];
+  updatedAt: string;
+};
+
+export type PersistedAgentPlan = {
+  definition: AgentPlanDefinition;
+  state: AgentPlanState;
+  actionBindings: Array<{ stepId: string; actionId: string }>;
+};
+
 export type AgentMemoryNamespaceInput =
   | {
       scopeType: 'workspace';
@@ -2857,6 +2987,7 @@ export class TixkitClient {
   readonly agentControl: AgentControlResource;
   readonly agentAuth: AgentAuthResource;
   readonly agentActions: AgentActionResource;
+  readonly agentPlans: AgentPlanResource;
   readonly agentMemory: AgentMemoryResource;
   readonly scannerDevices: ScannerDeviceResource;
   readonly reports: ReportResource;
@@ -2909,6 +3040,7 @@ export class TixkitClient {
     this.agentControl = new AgentControlResource(this);
     this.agentAuth = new AgentAuthResource(this);
     this.agentActions = new AgentActionResource(this);
+    this.agentPlans = new AgentPlanResource(this);
     this.agentMemory = new AgentMemoryResource(this);
     this.scannerDevices = new ScannerDeviceResource(this);
     this.reports = new ReportResource(this);
@@ -4330,6 +4462,38 @@ class AgentActionResource {
 
   async getExecution(actionId: string, executionId: string): Promise<AgentExecutionEvidence> {
     return this.client.request('GET', `/agent/actions/${actionId}/executions/${executionId}`);
+  }
+}
+
+class AgentPlanResource {
+  constructor(private client: TixkitClient) {}
+
+  async create(input: {
+    definition: AgentPlanDefinition;
+    actionBindings: Array<{ stepId: string; actionId: string }>;
+    idempotencyKey: string;
+  }): Promise<PersistedAgentPlan> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/plans', { body, idempotencyKey });
+  }
+
+  async get(planId: string): Promise<PersistedAgentPlan> {
+    return this.client.request('GET', `/agent/plans/${planId}`);
+  }
+
+  async transition(input: {
+    planId: string;
+    expectedStateVersion: number;
+    status: AgentPlanState['status'];
+    stepStates: AgentPlanStepState[];
+    reasonCode: string;
+    idempotencyKey: string;
+  }): Promise<PersistedAgentPlan> {
+    const { planId, idempotencyKey, ...body } = input;
+    return this.client.request('POST', `/agent/plans/${planId}/transitions`, {
+      body,
+      idempotencyKey,
+    });
   }
 }
 
