@@ -38,8 +38,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/agent-protocol": "workspace:*",
-    "@tixkit/domain": "workspace:*"
+    "@tixkit/agent-protocol": "0.1.0",
+    "@tixkit/domain": "0.1.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

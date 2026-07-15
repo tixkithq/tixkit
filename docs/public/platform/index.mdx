@@ -7,7 +7,7 @@ product_area: platform
 content_type: overview
 status: experimental
 owner: developer-experience
-last_verified: 2026-08-05
+last_verified: 2026-08-06
 prerequisites: []
 related:
   - /getting-started/first-api-call
@@ -37,7 +37,7 @@ The Tixkit Platform API is the developer-facing capability inside Tixkit Cloud. 
 
 ## Agent connections
 
-Third-party agents connect through the same Platform API. API version `2026-08-05` exposes experimental sponsor-bound principals, delegation, short-lived explicit agent authentication, an isolated session surface, direct version-bound `event.read` projections, aggregate-only `report.read` evidence, direct mutation-free `event.prepare` previews, bounded safe `content.prepare` event-page previews, consent/suppression-aware and send-free `campaign.prepare` evidence, freshly approved and version-safe `event.update` execution, digest-bound `readiness.read` evidence, server-derived `event.publish` action preparation, immutable approval-aware plans, short-lived digest-bound human approval, action-bound revocation and durable approved execution. Untrusted organizer content is explicitly declared and never interpreted as tool instruction. A public live conformance profile validates direct event and report reads, preparation approval/execution rejection, approved update replay and the plan-bound `event.publish` golden path in invited and Self-Hosted test environments. Current repository evidence covers fresh local PostgreSQL and MySQL integration, mocked transport and packed fail-closed execution; no hosted environment has been certified. Read the [agent Platform API guide](/platform/agent-platform) for the implemented boundary, runner and current private-beta limitations.
+Third-party agents connect through the same Platform API. API version `2026-08-06` exposes experimental sponsor-bound principals, delegation, short-lived explicit agent authentication, an isolated session surface, direct version-bound `event.read` projections, aggregate-only `report.read` evidence, direct mutation-free `event.prepare` previews, bounded safe `content.prepare` event-page previews, consent/suppression-aware and send-free `campaign.prepare` evidence, freshly approved and version-safe `event.update` execution, digest-bound `readiness.read` evidence, server-derived `event.publish` action preparation, immutable approval-aware plans, short-lived digest-bound human approval, action-bound revocation and durable approved execution. Untrusted organizer content is explicitly declared and never interpreted as tool instruction. A public live conformance profile validates direct event and report reads, preparation approval/execution rejection, approved update replay and the plan-bound `event.publish` golden path in invited and Self-Hosted test environments. Current repository evidence covers fresh local PostgreSQL and MySQL integration, mocked transport and packed fail-closed execution; no hosted environment has been certified. Read the [agent Platform API guide](/platform/agent-platform) for the implemented boundary, runner and current private-beta limitations.
 
 ## Continue
 

@@ -157,6 +157,7 @@ export type PublicEventRow = {
   resale_max_multiplier?: number;
   resale_max_absolute_cents?: number | null;
   public_revision?: Date | string | null;
+  version?: number;
 };
 
 export type PublicAvailabilityItem = Record<string, unknown>;
@@ -252,6 +253,7 @@ export async function loadPublicEventById(db: Database, eventId: string): Promis
       'resale_max_multiplier',
       'resale_max_absolute_cents',
       'public_revision',
+      'version',
     ])
     .where('id', '=', eventId)
     .executeTakeFirst();
@@ -271,13 +273,19 @@ export async function loadPublicMarketingIntegrations(db: Database, eventId: str
 export async function loadPublicEventMedia(
   db: Database,
   eventId: string,
+  scope?: { tenantId: string; organizationId: string; brandId: string },
 ): Promise<PublicEventMediaAsset[]> {
-  const assetRows = await db
+  let assetQuery = db
     .selectFrom('event_media_assets')
     .select(['id', 'role', 'alt_text', 'focal_x', 'focal_y'])
-    .where('event_id', '=', eventId)
-    .orderBy('role', 'asc')
-    .execute();
+    .where('event_id', '=', eventId);
+  if (scope) {
+    assetQuery = assetQuery
+      .where('tenant_id', '=', scope.tenantId)
+      .where('organization_id', '=', scope.organizationId)
+      .where('brand_id', '=', scope.brandId);
+  }
+  const assetRows = await assetQuery.orderBy('role', 'asc').execute();
   if (assetRows.length === 0) return [];
   const renditionRows = await db
     .selectFrom('event_media_renditions')

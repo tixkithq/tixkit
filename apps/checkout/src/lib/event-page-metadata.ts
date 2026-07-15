@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
 import type { PublicEventPageBootstrap } from '@/lib/api';
-import { resolveEventSocialMedia } from '@/lib/event-media';
+import {
+  eventPageMediaReferenceRole,
+  isSafeEventPageImageSource,
+} from '@tixkit/content-event-page';
+import { resolveEventMediaByUrl, resolveEventSocialMedia } from '@/lib/event-media';
 
 export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstrap): Metadata {
   const storedDiscovery = bootstrap.contentPage?.page.settings?.discovery as
@@ -19,12 +23,26 @@ export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstr
     bootstrap.event.description ||
     undefined;
   const socialMedia = resolveEventSocialMedia(bootstrap.event);
+  const storedSocialImageUrl =
+    isSafeEventPageImageSource(storedDiscovery?.socialImageUrl) &&
+    !eventPageMediaReferenceRole(storedDiscovery?.socialImageUrl ?? '')
+      ? storedDiscovery.socialImageUrl
+      : undefined;
+  const storedCoverImageUrl =
+    isSafeEventPageImageSource(storedDiscovery?.coverImageUrl) &&
+    !eventPageMediaReferenceRole(storedDiscovery?.coverImageUrl ?? '')
+      ? storedDiscovery.coverImageUrl
+      : undefined;
   const imageUrl =
-    storedDiscovery?.socialImageUrl ||
+    storedSocialImageUrl ||
     socialMedia?.url ||
-    storedDiscovery?.coverImageUrl ||
+    storedCoverImageUrl ||
     publicDiscovery?.imageUrl ||
     bootstrap.event.coverImageUrl;
+  const selectedMedia = imageUrl
+    ? (resolveEventMediaByUrl(bootstrap.event, imageUrl) ??
+      (socialMedia?.url === imageUrl ? socialMedia : undefined))
+    : undefined;
 
   return {
     title: { absolute: title },
@@ -37,11 +55,11 @@ export function eventPageMetadataFromBootstrap(bootstrap: PublicEventPageBootstr
             images: [
               {
                 url: imageUrl,
-                ...(socialMedia?.url === imageUrl
+                ...(selectedMedia
                   ? {
-                      width: socialMedia.width,
-                      height: socialMedia.height,
-                      alt: socialMedia.altText,
+                      width: selectedMedia.width,
+                      height: selectedMedia.height,
+                      alt: selectedMedia.altText,
                     }
                   : {}),
               },

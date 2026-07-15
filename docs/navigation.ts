@@ -190,6 +190,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-05 optimized event media',
         routeId: 'apiMigration20260804To20260805',
       },
+      {
+        label: 'Adopt 2026-08-06 portable event content',
+        routeId: 'apiMigration20260805To20260806',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

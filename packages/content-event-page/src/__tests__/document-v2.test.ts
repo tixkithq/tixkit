@@ -5,6 +5,9 @@ import {
   EVENT_PAGE_SCHEMA_VERSION,
   PUCK_EVENT_PAGE_PROVIDER,
   createDefaultEventPageDocument,
+  collectEventPageMediaReferences,
+  eventPageMediaReference,
+  eventPageMediaReferenceRole,
   eventPageBrandVariablesToCssProperties,
   formatTimezoneLabel,
   migrateLegacyEventPageBlocksToPuckData,
@@ -12,7 +15,10 @@ import {
   materializeEventPageDocument,
   normalizeEventPageDocument,
   sanitizeEventPageEmbedHtml,
+  resolveEventPageMediaReferences,
   validateEventPageDocument,
+  isSafeEventPageImageSource,
+  isSafeEventPageUrl,
   type EventPageDocument,
 } from '../index.js';
 
@@ -105,6 +111,129 @@ describe('EventPageDocument v2', () => {
     });
   });
 
+  it('accepts only exact portable owned-media references', () => {
+    const coverReference = eventPageMediaReference('cover');
+    const document = createDefaultEventPageDocument({
+      ...defaultInput,
+      coverImageUrl: coverReference,
+    });
+
+    expect(coverReference).toBe('tixkit:event-media:cover');
+    expect(eventPageMediaReferenceRole(coverReference)).toBe('cover');
+    expect(eventPageMediaReferenceRole(' tixkit:event-media:poster ')).toBe('poster');
+    expect(eventPageMediaReferenceRole('tixkit:event-media:cover/other')).toBeUndefined();
+    expect(eventPageMediaReferenceRole('tixkit:event-media:unknown')).toBeUndefined();
+    expect(
+      eventPageMediaReferenceRole('https://example.test/tixkit:event-media:cover'),
+    ).toBeUndefined();
+    expect(isSafeEventPageUrl(coverReference)).toBe(false);
+    expect(isSafeEventPageImageSource(coverReference)).toBe(true);
+    expect(isSafeEventPageImageSource('/v1/public/event-media/renditions/emr_safe')).toBe(true);
+    expect(isSafeEventPageImageSource('/v1/public/content-event-page-images/upl_safe')).toBe(true);
+    expect(isSafeEventPageImageSource('https://cdn.example.test/cover.webp')).toBe(true);
+    for (const unsafe of [
+      '/v1/events/evt_private/media/renditions/emr_private',
+      '/v1/upload-artifacts/upl_private',
+      '/v1/public/content-event-page-images/upl_private?token=secret',
+      'blob:https://example.test/private',
+      'data:image/png;base64,private',
+      'http://cdn.example.test/insecure.webp',
+      'https://user:password@cdn.example.test/private.webp',
+      'https://cdn.example.test/private.webp?token=secret',
+    ]) {
+      expect(isSafeEventPageImageSource(unsafe), unsafe).toBe(false);
+    }
+    expect(isSafeEventPageUrl('tixkit:event-media:unknown')).toBe(false);
+    expect(validateEventPageDocument(document).valid).toBe(true);
+
+    const materialized = materializeEventPageDocument(document, defaultInput);
+    expect(materialized.editor.data.content[0]).toMatchObject({
+      type: 'EventHeader',
+      props: {
+        imageUrl: coverReference,
+      },
+    });
+    expect(materialized.settings.discovery.coverImageUrl).toBe(coverReference);
+
+    const buttonRef = structuredClone(document);
+    buttonRef.editor.data.content.push({
+      type: 'Button',
+      props: { id: 'bad-ref', label: 'Bad ref', url: coverReference },
+    });
+    expect(validateEventPageDocument(buttonRef)).toMatchObject({
+      valid: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'unsafe_url',
+          field: expect.stringContaining('.url'),
+        }),
+      ]),
+    });
+  });
+
+  it('collects and purely resolves role references across root, content, discovery, and zones', () => {
+    const logical = createDefaultEventPageDocument({
+      ...defaultInput,
+      coverImageUrl: eventPageMediaReference('cover'),
+      coverImageAlt: undefined,
+    });
+    logical.editor.data.root.props.socialImageUrl = eventPageMediaReference('social');
+    logical.settings.discovery.socialImageUrl = eventPageMediaReference('poster');
+    logical.editor.data.zones = {
+      overlay: [
+        {
+          type: 'Media',
+          props: {
+            id: 'zone-media',
+            imageUrl: eventPageMediaReference('poster'),
+            imageAlt: '',
+          },
+        },
+      ],
+    };
+    const before = JSON.stringify(logical);
+
+    expect(collectEventPageMediaReferences(logical)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'cover', surface: 'page' }),
+        expect.objectContaining({ role: 'social', surface: 'social' }),
+        expect.objectContaining({
+          role: 'poster',
+          surface: 'page',
+          path: 'editor.data.zones.overlay.0.props.imageUrl',
+        }),
+      ]),
+    );
+
+    const result = resolveEventPageMediaReferences(logical, (role, surface) =>
+      role === 'social'
+        ? undefined
+        : {
+            url: `https://cdn.example.test/${role}-${surface}.webp`,
+            altText: `${role} alternative`,
+          },
+    );
+
+    expect(JSON.stringify(logical)).toBe(before);
+    expect(result.document.editor.data.content[0]?.props).toMatchObject({
+      imageUrl: 'https://cdn.example.test/cover-page.webp',
+      imageAlt: 'All Access Chicago',
+    });
+    expect(result.document.editor.data.zones?.overlay?.[0]?.props).toMatchObject({
+      imageUrl: 'https://cdn.example.test/poster-page.webp',
+      imageAlt: 'poster alternative',
+    });
+    expect(result.document.editor.data.root.props.socialImageUrl).toBeUndefined();
+    expect(result.unresolved).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'social',
+          path: 'editor.data.root.props.socialImageUrl',
+        }),
+      ]),
+    );
+  });
+
   it('normalizes only the hard-cutover v2 provider shape', () => {
     const document = createDefaultEventPageDocument(defaultInput);
     expect(normalizeEventPageDocument(document)).toBe(document);
@@ -194,7 +323,12 @@ describe('legacy block migration helper', () => {
         },
       },
       { id: 'resale-1', type: 'resale_tickets', title: 'Resale' },
-      { id: 'button-1', type: 'button', label: 'More', url: 'https://example.test/more' },
+      {
+        id: 'button-1',
+        type: 'button',
+        label: 'More',
+        url: 'https://example.test/more',
+      },
     ]);
 
     expect(data.content.map((block) => block.type)).toEqual(['RichText', 'Button']);

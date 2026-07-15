@@ -26,12 +26,12 @@ describe('portable configuration section policies', () => {
   it('uses stable real hashes and rejects unknown fields or incorrect types', () => {
     const first = createPortableConfigurationPayloadPolicies().get('organizations')!;
     const second = createPortableConfigurationPayloadPolicies().get('organizations')!;
-    expect(PORTABLE_CONFIGURATION_POLICY_VERSION).toBe('tixkit-portable-configuration-policy-v1');
+    expect(PORTABLE_CONFIGURATION_POLICY_VERSION).toBe('tixkit-portable-configuration-policy-v2');
     expect(first.schemaSha256).toBe(
-      '273cb7dbcdfa1081a0cddc64a6cca8ba1bac5ac8ed996e9419b1c0570d799f4d',
+      '7b21f14c0c8a67266b4d993a27a809feb7d7ef9336d25afbd0efb6b685223565',
     );
     expect(first.policySha256).toBe(
-      '061d057e3c2838d63e993ea2216aa53d2a7af61901f848b81735454ebff8e8ee',
+      '92fcb06b8eae3a609981b1097f2c07b9fba03619619c6c85d2c203340932fe1d',
     );
     expect(second.schemaSha256).toBe(first.schemaSha256);
     expect(first.validateRecord('organizations', organization)).toBe(true);
@@ -168,6 +168,379 @@ describe('portable configuration section policies', () => {
     ]) {
       expect(brandPolicy.validateRecord('brands', { ...brand, attributes })).toBe(false);
     }
+  });
+
+  it('accepts logical content versions and rejects malformed or duplicate version identity', () => {
+    const policy = createPortableConfigurationPayloadPolicies().get('content')!;
+    const content = {
+      portableId: 'content_document_1',
+      attributes: {
+        channel: 'event_page',
+        key: 'main',
+        name: 'Event page',
+        locale: 'en',
+        versions: [
+          {
+            portableId: 'content_version_1',
+            versionNumber: 1,
+            schemaVersion: 2,
+            subject: null,
+            previewText: null,
+            contentJson: {
+              schemaVersion: 2,
+              editor: {
+                provider: '@puckeditor/core',
+                data: {
+                  root: { props: {} },
+                  content: [
+                    {
+                      type: 'Media',
+                      props: {
+                        id: 'portable-poster',
+                        imageUrl: 'tixkit:event-media:poster',
+                        imageAlt: 'Poster',
+                      },
+                    },
+                  ],
+                },
+              },
+              settings: { locale: 'en', discovery: { summary: 'Portable event page', tags: [] } },
+            },
+            variables: [],
+            validation: { valid: true, severity: 'warning', issues: [] },
+            createdAt: '2026-07-15T00:00:00.000Z',
+          },
+        ],
+      },
+    };
+
+    expect(policy.validateRecord('content', content)).toBe(true);
+    const version = content.attributes.versions[0];
+    expect(
+      policy.validateRecord('content', {
+        ...content,
+        attributes: {
+          ...content.attributes,
+          versions: [{ ...version, contentJson: null }],
+        },
+      }),
+    ).toBe(false);
+    for (const malformedContentJson of [
+      {
+        ...version.contentJson,
+        editor: {
+          ...version.contentJson.editor,
+          data: {
+            ...version.contentJson.editor.data,
+            content: [{ type: 'TotallyUnknown', props: { id: 'unknown' } }],
+          },
+        },
+      },
+      {
+        ...version.contentJson,
+        editor: {
+          ...version.contentJson.editor,
+          data: {
+            ...version.contentJson.editor.data,
+            content: [{ type: 'Media', props: { id: 'missing-required-image-props' } }],
+          },
+        },
+      },
+      {
+        ...version.contentJson,
+        editor: {
+          ...version.contentJson.editor,
+          data: {
+            ...version.contentJson.editor.data,
+            content: [
+              { type: 'EventDetails', props: { id: 'empty-details', title: 'Details', items: [] } },
+            ],
+          },
+        },
+      },
+      {
+        ...version.contentJson,
+        editor: {
+          ...version.contentJson.editor,
+          data: {
+            ...version.contentJson.editor.data,
+            content: [
+              {
+                type: 'Button',
+                props: { id: 'unsafe-button', label: 'Unsafe', url: 'javascript:alert(1)' },
+              },
+            ],
+          },
+        },
+      },
+      {
+        ...version.contentJson,
+        editor: {
+          ...version.contentJson.editor,
+          data: {
+            ...version.contentJson.editor.data,
+            content: [
+              {
+                type: 'CustomEmbed',
+                props: { id: 'unsafe-embed', html: '<script>alert(1)</script>' },
+              },
+            ],
+          },
+        },
+      },
+      { ...version.contentJson, editor: { ...version.contentJson.editor, data: { root: [] } } },
+      { ...version.contentJson, settings: { locale: 'en', discovery: { summary: 1, tags: [] } } },
+    ]) {
+      expect(
+        policy.validateRecord('content', {
+          ...content,
+          attributes: {
+            ...content.attributes,
+            versions: [{ ...version, contentJson: malformedContentJson }],
+          },
+        }),
+      ).toBe(false);
+    }
+    expect(
+      policy.validateRecord('content', {
+        ...content,
+        attributes: {
+          ...content.attributes,
+          versions: [
+            {
+              ...version,
+              contentJson: {
+                ...version.contentJson,
+                editor: {
+                  ...version.contentJson.editor,
+                  data: {
+                    ...version.contentJson.editor.data,
+                    content: [
+                      {
+                        type: 'Button',
+                        props: {
+                          id: 'misplaced-media-reference',
+                          url: 'tixkit:event-media:cover',
+                          label: 'Unsafe',
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+    for (const imageUrl of [
+      'blob:https://source.example/private',
+      '/v1/events/evt_source/media/renditions/emr_source',
+      '/v1/upload-artifacts/upl_source',
+      '/v1/public/content-event-page-images/upl_source',
+      'https://user:password@cdn.example.test/private.webp',
+      'https://cdn.example.test/private.webp?token=secret',
+      'https://172.20.0.4/private.webp',
+      'https://media.internal.local/private.webp',
+      '<img src="&#x2f;v1&#x2f;events&#x2f;evt_secret">',
+      '<img src="/%76%31/events/evt_secret">',
+      '<img src="https://[::ffff:127.0.0.1]/secret">',
+      '<img src="https&colon;&sol;&sol;&lbrack;&colon;&colon;ffff&colon;127&period;0&period;0&period;1&rbrack;&sol;secret">',
+      '<img src="/%76%31/events/secret"><i data-x="%ZZ">',
+    ]) {
+      expect(
+        policy.validateRecord('content', {
+          ...content,
+          attributes: {
+            ...content.attributes,
+            versions: [
+              {
+                ...version,
+                contentJson: {
+                  ...version.contentJson,
+                  editor: {
+                    ...version.contentJson.editor,
+                    data: {
+                      ...version.contentJson.editor.data,
+                      content: [
+                        {
+                          type: 'Media',
+                          props: { id: 'unsafe-image', imageUrl, imageAlt: 'Unsafe' },
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        }),
+        imageUrl,
+      ).toBe(false);
+    }
+    for (const body of [
+      '<img src="//127.0.0.1/private">',
+      '<img src="https:\\127.0.0.1\\private">',
+      '<div style="background:url(https\\3a\\2f\\2f127\\2e0\\2e0\\2e1/private)">x</div>',
+      '<img src="\\\\127.0.0.1\\private">',
+      '<img src="/\\127.0.0.1/private">',
+      '<img src="ht&#x09;tps://127.0.0.1/private">',
+      '<img src="htt&#10;ps://127.0.0.1/private">',
+    ]) {
+      const richTextDocument = structuredClone(version.contentJson);
+      richTextDocument.editor.data.content = [
+        { type: 'RichText', props: { id: 'browser-normalization-probe', body } },
+      ];
+      expect(
+        policy.validateRecord('content', {
+          ...content,
+          attributes: {
+            ...content.attributes,
+            versions: [{ ...version, contentJson: richTextDocument }],
+          },
+        }),
+        body,
+      ).toBe(false);
+    }
+    expect(
+      policy.validateRecord('content', {
+        ...content,
+        attributes: { ...content.attributes, channel: 'unknown' },
+      }),
+    ).toBe(false);
+    expect(
+      policy.validateRecord('content', {
+        ...content,
+        attributes: {
+          ...content.attributes,
+          versions: [content.attributes.versions[0], content.attributes.versions[0]],
+        },
+      }),
+    ).toBe(false);
+    expect(
+      policy.validateRecord('content', {
+        ...content,
+        attributes: {
+          ...content.attributes,
+          versions: [{ ...content.attributes.versions[0], organizerUrl: '/v1/events/evt_1/media' }],
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('validates portable email and SMS bodies against their channel contracts', () => {
+    const policy = createPortableConfigurationPayloadPolicies().get('content')!;
+    const record = (channel: string, contentJson: unknown) => ({
+      portableId: `content_${channel}`,
+      attributes: {
+        channel,
+        key: 'main',
+        name: `${channel} content`,
+        locale: 'en',
+        versions: [
+          {
+            portableId: `version_${channel}`,
+            versionNumber: 1,
+            schemaVersion: 1,
+            subject: null,
+            previewText: null,
+            contentJson,
+            variables: [],
+            validation: { valid: true, severity: 'warning', issues: [] },
+            createdAt: '2026-07-15T00:00:00.000Z',
+          },
+        ],
+      },
+    });
+    const email = {
+      schemaVersion: 1,
+      editor: { provider: '@react-email/editor', contentHtml: '<p>Hello</p>' },
+      settings: {
+        templateKey: 'event-update',
+        subject: 'Event update',
+        locale: 'en',
+        category: 'transactional',
+        sender: {},
+      },
+      blocks: [],
+    };
+    const sms = {
+      schemaVersion: 1,
+      editor: {
+        provider: '@tixkit/content-message/sms-composer',
+        body: 'Your event starts soon.',
+      },
+      settings: {
+        templateKey: 'event-update',
+        locale: 'en',
+        category: 'transactional',
+        consentCategory: 'transactional',
+        segmentLimit: 3,
+        estimatedCostPerSegmentCents: 2,
+      },
+      shortLinks: [],
+    };
+
+    expect(policy.validateRecord('content', record('email', email))).toBe(true);
+    for (const contentHtml of [
+      '<img src="&#x2f;v1&#x2f;events&#x2f;evt_secret">',
+      '<img src="/%76%31/events/evt_secret">',
+      '<img src="https://[::ffff:127.0.0.1]/secret">',
+      '<img src="https&colon;&sol;&sol;&lbrack;&colon;&colon;ffff&colon;127&period;0&period;0&period;1&rbrack;&sol;secret">',
+      '<img src="/%76%31/events/secret"><i data-x="%ZZ">',
+      '<img src="//127.0.0.1/private">',
+      '<img src="https:\\127.0.0.1\\private">',
+      '<div style="background:url(https\\3a\\2f\\2f127\\2e0\\2e0\\2e1/private)">x</div>',
+      '<img src="\\\\127.0.0.1\\private">',
+      '<img src="/\\127.0.0.1/private">',
+      '<img src="ht&#x09;tps://127.0.0.1/private">',
+      '<img src="htt&#10;ps://127.0.0.1/private">',
+    ]) {
+      expect(
+        policy.validateRecord(
+          'content',
+          record('email', { ...email, editor: { ...email.editor, contentHtml } }),
+        ),
+      ).toBe(false);
+    }
+    expect(
+      policy.validateRecord(
+        'content',
+        record('email', {
+          ...email,
+          editor: {
+            ...email.editor,
+            globalCss: 'body{background:url(https\\3a\\2f\\2f127\\2e0\\2e0\\2e1/private)}',
+          },
+        }),
+      ),
+    ).toBe(false);
+    expect(policy.validateRecord('content', record('sms', sms))).toBe(true);
+    expect(
+      policy.validateRecord(
+        'content',
+        record('email', { ...email, editor: { provider: 'unknown', contentHtml: '<p>x</p>' } }),
+      ),
+    ).toBe(false);
+    expect(
+      policy.validateRecord('content', {
+        ...record('sms', sms),
+        attributes: {
+          ...record('sms', sms).attributes,
+          versions: [
+            {
+              ...record('sms', sms).attributes.versions[0],
+              contentJson: {
+                ...sms,
+                editor: { ...sms.editor, body: 'Open https://127.0.0.1/private?token=secret' },
+              },
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+    expect(policy.validateRecord('content', record('imessage', {}))).toBe(false);
+    expect(policy.validateRecord('content', record('social_invite', {}))).toBe(false);
   });
 
   it('rejects secret material nested inside configuration JSON before signing', () => {

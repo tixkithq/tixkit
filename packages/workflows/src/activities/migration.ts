@@ -7,6 +7,7 @@ export type MigrationCommitStage =
   | 'organizations_brands'
   | 'venues'
   | 'events_occurrences'
+  | 'content'
   | 'inventory_pools'
   | 'ticket_types_products'
   | 'questions'
@@ -21,6 +22,7 @@ export const MIGRATION_COMMIT_STAGES: readonly MigrationCommitStage[] = [
   'organizations_brands',
   'venues',
   'events_occurrences',
+  'content',
   'inventory_pools',
   'ticket_types_products',
   'questions',

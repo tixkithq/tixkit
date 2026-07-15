@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { createDefaultEventPageDocument, type EventPagePuckData } from '@tixkit/content-event-page';
+import {
+  createDefaultEventPageDocument,
+  eventPageMediaReference,
+  type EventPagePuckData,
+} from '@tixkit/content-event-page';
 import {
   EVENT_PAGE_PUCK_STYLES_CLASS,
   ButtonBlock,
   EventDetailsBlock,
   EventDescriptionBlock,
+  MediaBlock,
   EventPageRuntimeProvider,
   EventPageRender,
   ProductAddOnsBlock,
@@ -148,6 +153,136 @@ describe('eventPagePuckConfig', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use #0f172a' }));
 
     expect(changes).toContain('#0f172a');
+  });
+
+  it('offers owned event media choices and stores only the portable role reference', () => {
+    const changes: string[] = [];
+    const config = createEventPagePuckConfig({
+      eventMediaChoices: [
+        {
+          role: 'poster',
+          label: 'Event poster',
+          value: eventPageMediaReference('poster'),
+          previewUrl: 'blob:poster-preview',
+          altText: 'Poster alternative',
+        },
+      ],
+    });
+    const field = config.components.Media.fields?.imageUrl as unknown as {
+      label?: string;
+      render: (props: {
+        field: { label?: string };
+        id: string;
+        name: string;
+        value: string;
+        onChange: (value: string) => void;
+      }) => ReactElement;
+    };
+
+    const { container } = render(
+      field.render({
+        field,
+        id: 'media-image',
+        name: 'imageUrl',
+        value: '',
+        onChange: (value) => changes.push(value),
+      }),
+    );
+
+    const choice = screen.getByRole('button', { name: 'Event poster' });
+    expect(choice).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(choice);
+    expect(changes).toEqual(['tixkit:event-media:poster']);
+    expect(container.querySelector('img')).toHaveAttribute('src', 'blob:poster-preview');
+  });
+
+  it('resolves role references from runtime media and fails closed when the role is unavailable', () => {
+    const posterReference = eventPageMediaReference('poster');
+    const runtime = {
+      brandName: 'Tixkit',
+      brandFooterLabel: 'Powered by Tixkit',
+      tickets: [],
+      eventMedia: {
+        poster: {
+          url: 'blob:poster-preview',
+          altText: 'Accessible event poster',
+        },
+      },
+      interactive: false,
+    };
+    const { rerender } = render(
+      <EventPageRuntimeProvider value={runtime}>
+        <MediaBlock id="owned-poster" imageUrl={posterReference} imageAlt="" />
+      </EventPageRuntimeProvider>,
+    );
+
+    expect(screen.getByRole('img', { name: 'Accessible event poster' })).toHaveAttribute(
+      'src',
+      'blob:poster-preview',
+    );
+
+    rerender(
+      <EventPageRuntimeProvider value={{ ...runtime, eventMedia: {} }}>
+        <MediaBlock id="owned-poster" imageUrl={posterReference} imageAlt="" />
+      </EventPageRuntimeProvider>,
+    );
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    '/v1/events/evt_private/media/renditions/emr_private',
+    '/v1/upload-artifacts/upl_private',
+    'https://user:secret@cdn.example.test/hero.jpg',
+    'https://cdn.example.test/hero.jpg?token=private',
+  ])('does not render an unsafe stored image source: %s', (unsafeImageUrl) => {
+    const runtime = {
+      brandName: 'Tixkit',
+      brandFooterLabel: 'Powered by Tixkit',
+      tickets: [],
+      interactive: true,
+    };
+    const { container } = render(
+      <EventPageRuntimeProvider value={runtime}>
+        <EventDescriptionBlock
+          id="unsafe-description"
+          title="Description remains visible"
+          body="No private image should render."
+          imageUrl={unsafeImageUrl}
+          imageAlt="Private description image"
+        />
+        <MediaBlock id="unsafe-media" imageUrl={unsafeImageUrl} imageAlt="Private media image" />
+      </EventPageRuntimeProvider>,
+    );
+
+    expect(screen.getByText('Description remains visible')).toBeInTheDocument();
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(unsafeImageUrl);
+  });
+
+  it('does not render an unsafe URL supplied for a logical media role on a public page', () => {
+    const unsafeImageUrl = '/v1/events/evt_private/media/renditions/emr_private';
+    const { container } = render(
+      <EventPageRuntimeProvider
+        value={{
+          brandName: 'Tixkit',
+          brandFooterLabel: 'Powered by Tixkit',
+          tickets: [],
+          eventMedia: {
+            poster: { url: unsafeImageUrl, altText: 'Private poster' },
+          },
+          interactive: true,
+        }}
+      >
+        <MediaBlock
+          id="unsafe-owned-poster"
+          imageUrl={eventPageMediaReference('poster')}
+          imageAlt=""
+        />
+      </EventPageRuntimeProvider>,
+    );
+
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(unsafeImageUrl);
   });
 
   it('exposes complete discovery settings and editable collection content', () => {

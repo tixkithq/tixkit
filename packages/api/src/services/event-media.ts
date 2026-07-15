@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { ulid } from 'ulid';
-import type { Database } from '@tixkit/db';
+import { bumpEventPublicRevision, type Database } from '@tixkit/db';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   deleteEventMediaRendition,
@@ -312,6 +312,16 @@ export async function attachEventMedia(input: {
   const now = new Date();
   try {
     await input.db.transaction().execute(async (transaction) => {
+      const lockedEvent = await transaction
+        .selectFrom('events')
+        .select('id')
+        .where('id', '=', input.eventId)
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', input.organizationId)
+        .where('brand_id', '=', input.brandId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!lockedEvent) throw new NotFoundError('Event', input.eventId);
       if (existing) {
         const current = await transaction
           .selectFrom('event_media_assets')
@@ -399,6 +409,7 @@ export async function attachEventMedia(input: {
           .execute();
       }
       await transaction.insertInto('event_media_renditions').values(renditions).execute();
+      await bumpEventPublicRevision(transaction, input.eventId, now);
     });
   } catch (error) {
     await Promise.all(
@@ -443,6 +454,16 @@ export async function removeEventMedia(input: {
   role: EventMediaRole;
 }): Promise<boolean> {
   return input.db.transaction().execute(async (transaction) => {
+    const event = await transaction
+      .selectFrom('events')
+      .select('id')
+      .where('id', '=', input.eventId)
+      .where('tenant_id', '=', input.tenantId)
+      .where('organization_id', '=', input.organizationId)
+      .where('brand_id', '=', input.brandId)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!event) return false;
     const asset = await transaction
       .selectFrom('event_media_assets')
       .select('id')
@@ -470,7 +491,9 @@ export async function removeEventMedia(input: {
       .where('id', '=', asset.id)
       .where('tenant_id', '=', input.tenantId)
       .executeTakeFirst();
-    return Number(deleted.numDeletedRows) === 1;
+    const removed = Number(deleted.numDeletedRows) === 1;
+    if (removed) await bumpEventPublicRevision(transaction, input.eventId);
+    return removed;
   });
 }
 

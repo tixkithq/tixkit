@@ -11,6 +11,7 @@ import {
   parsePortableJson,
   portableImportControlInputSha256,
   portableManifestSha256,
+  validatePortableContentDocument,
   type PortableBundleManifest,
 } from '@tixkit/portability';
 import { ImportRepository, sql, type Database } from '@tixkit/db';
@@ -31,6 +32,7 @@ const REQUIRED_ATTRIBUTES: Record<MigrationEntityType, readonly string[]> = {
   brand: ['name'],
   venue: ['name'],
   event: ['title', 'currency', 'timezone'],
+  'content-document': ['channel', 'key', 'name', 'locale', 'versions'],
   occurrence: ['startsAt', 'endsAt', 'timezone'],
   'inventory-pool': ['name', 'totalCapacity'],
   'ticket-type': ['name', 'currency', 'priceMinor'],
@@ -53,6 +55,60 @@ const HISTORICAL_TYPES = new Set<MigrationEntityType>([
   'historical-refund',
   'check-in',
 ]);
+
+const PORTABLE_MEDIA_TARGETS = {
+  poster: [
+    { variant: 'thumbnail', width: 320, height: 320, maxBytes: 150_000 },
+    { variant: 'card', width: 480, height: 270, maxBytes: 200_000 },
+    { variant: 'page', width: 1080, height: 1350, maxBytes: 600_000 },
+    { variant: 'social', width: 1200, height: 630, maxBytes: 400_000 },
+  ],
+  cover: [
+    { variant: 'thumbnail', width: 320, height: 320, maxBytes: 150_000 },
+    { variant: 'card', width: 480, height: 270, maxBytes: 200_000 },
+    { variant: 'page', width: 1600, height: 900, maxBytes: 600_000 },
+    { variant: 'social', width: 1200, height: 630, maxBytes: 400_000 },
+  ],
+  social: [
+    { variant: 'thumbnail', width: 320, height: 320, maxBytes: 150_000 },
+    { variant: 'card', width: 480, height: 270, maxBytes: 200_000 },
+    { variant: 'page', width: 1200, height: 630, maxBytes: 600_000 },
+    { variant: 'social', width: 1200, height: 630, maxBytes: 400_000 },
+  ],
+} as const;
+
+async function renderPortableMediaRendition(
+  bytes: Uint8Array,
+  source: { width: number; height: number },
+  target: { width: number; height: number; maxBytes: number },
+  focalPoint: { x: number; y: number },
+): Promise<Buffer> {
+  const scale = Math.max(target.width / source.width, target.height / source.height);
+  const resizedWidth = Math.max(target.width, Math.ceil(source.width * scale));
+  const resizedHeight = Math.max(target.height, Math.ceil(source.height * scale));
+  const left = Math.max(
+    0,
+    Math.min(
+      resizedWidth - target.width,
+      Math.round(focalPoint.x * resizedWidth - target.width / 2),
+    ),
+  );
+  const top = Math.max(
+    0,
+    Math.min(
+      resizedHeight - target.height,
+      Math.round(focalPoint.y * resizedHeight - target.height / 2),
+    ),
+  );
+  const pipeline = sharp(bytes)
+    .resize(resizedWidth, resizedHeight, { fit: 'fill' })
+    .extract({ left, top, width: target.width, height: target.height });
+  for (const quality of [82, 76, 70, 64, 58, 52, 46, 40]) {
+    const rendered = await pipeline.clone().webp({ quality, effort: 5 }).toBuffer();
+    if (rendered.byteLength <= target.maxBytes) return rendered;
+  }
+  throw new Error('MIGRATION_EVENT_MEDIA_RENDITION_BUDGET_EXCEEDED');
+}
 
 function assertRequiredAttributes(entity: NormalizedMigrationEntity): void {
   for (const name of REQUIRED_ATTRIBUTES[entity.entityType]) {
@@ -462,6 +518,7 @@ const CANONICAL_TABLE: Record<MigrationEntityType, string> = {
   brand: 'brands',
   venue: 'venues',
   event: 'events',
+  'content-document': 'content_documents',
   occurrence: 'event_occurrences',
   'inventory-pool': 'inventory_pools',
   'ticket-type': 'ticket_types',
@@ -520,10 +577,24 @@ async function canonicalHash(
           .orderBy('variant', 'asc')
           .execute()
       : [];
+  const contentVersions =
+    type === 'content-document'
+      ? await tx
+          .selectFrom('content_document_versions')
+          .selectAll()
+          .where('document_id', '=', id)
+          .orderBy('version_number', 'asc')
+          .execute()
+      : [];
   return createHash('sha256')
     .update(
-      JSON.stringify(type === 'event' ? { row, media, renditions } : row, (_key, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
+      JSON.stringify(
+        type === 'event'
+          ? { row, media, renditions }
+          : type === 'content-document'
+            ? { row, versions: contentVersions }
+            : row,
+        (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
       ),
     )
     .digest('hex');
@@ -586,6 +657,82 @@ function storedJsonMatches(value: unknown, expected: string): boolean {
 
 function storedBooleanMatches(value: unknown, expected: boolean): boolean {
   return value === expected || value === (expected ? 1 : 0);
+}
+
+type PortableContentVersion = {
+  portableId: string;
+  versionNumber: number;
+  schemaVersion: number;
+  subject: string | null;
+  previewText: string | null;
+  contentJson: unknown;
+  variables: unknown;
+  validation: unknown;
+  createdAt: string;
+};
+
+function portableContentVersions(
+  entity: NormalizedMigrationEntity,
+  channel: string,
+): PortableContentVersion[] {
+  const value = entity.attributes.versions;
+  if (!Array.isArray(value))
+    throw new Error('MIGRATION_ATTRIBUTE_INVALID:content-document:versions');
+  const seenIds = new Set<string>();
+  const seenNumbers = new Set<number>();
+  const versions = value.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
+      throw new Error('MIGRATION_ATTRIBUTE_INVALID:content-document:versions');
+    const version = candidate as Record<string, unknown>;
+    const allowedKeys = new Set([
+      'portableId',
+      'versionNumber',
+      'schemaVersion',
+      'subject',
+      'previewText',
+      'contentJson',
+      'variables',
+      'validation',
+      'createdAt',
+    ]);
+    const portableId = typeof version.portableId === 'string' ? version.portableId.trim() : '';
+    const versionNumber = Number(version.versionNumber);
+    const schemaVersion = Number(version.schemaVersion);
+    const createdAt = typeof version.createdAt === 'string' ? version.createdAt : '';
+    if (
+      !portableId ||
+      !Number.isSafeInteger(versionNumber) ||
+      versionNumber < 1 ||
+      !Number.isSafeInteger(schemaVersion) ||
+      schemaVersion < 1 ||
+      Object.keys(version).some((key) => !allowedKeys.has(key)) ||
+      !Object.hasOwn(version, 'contentJson') ||
+      !validatePortableContentDocument(channel, version.contentJson) ||
+      !Number.isFinite(Date.parse(createdAt)) ||
+      seenIds.has(portableId) ||
+      seenNumbers.has(versionNumber)
+    )
+      throw new Error('MIGRATION_ATTRIBUTE_INVALID:content-document:versions');
+    seenIds.add(portableId);
+    seenNumbers.add(versionNumber);
+    return {
+      portableId,
+      versionNumber,
+      schemaVersion,
+      subject: typeof version.subject === 'string' ? version.subject : null,
+      previewText: typeof version.previewText === 'string' ? version.previewText : null,
+      contentJson: version.contentJson,
+      variables: version.variables ?? [],
+      validation: version.validation ?? { valid: true, severity: 'warning', issues: [] },
+      createdAt,
+    };
+  });
+  return versions.sort((left, right) => left.versionNumber - right.versionNumber);
+}
+
+function portableContentVersionId(documentId: string, portableId: string): string {
+  const digest = createHash('sha256').update(`${documentId}:${portableId}`).digest('hex');
+  return `cver_${digest.slice(0, 26)}`;
 }
 
 export interface PortableCanonicalAdoptionPlan {
@@ -795,6 +942,36 @@ async function writePortableEventMedia(
   if (input.sourceSystem !== 'tixkit-portable')
     throw new Error('MIGRATION_EVENT_MEDIA_SOURCE_NOT_TRUSTED');
   if (!Array.isArray(value) || value.length > 3) throw new Error('MIGRATION_EVENT_MEDIA_INVALID');
+  const existingMediaObjects: Array<{
+    bucket: string;
+    objectKey: string;
+    sha256: string;
+  }> = [];
+  const reusedExistingObjectKeys = new Set<string>();
+  const objectIdentity = (bucket: string, objectKey: string) => `${bucket}\u0000${objectKey}`;
+  const stageObjectWrite = async (objectKey: string, sha256: string): Promise<boolean> => {
+    const identity = objectIdentity(input.mediaStore.bucket, objectKey);
+    const existing = existingMediaObjects.find(
+      (object) => objectIdentity(object.bucket, object.objectKey) === identity,
+    );
+    if (existing) {
+      if (existing.sha256 !== sha256) throw new Error('MIGRATION_MEDIA_OBJECT_CONFLICT');
+      reusedExistingObjectKeys.add(identity);
+      return true;
+    }
+    input.stagedCleanupIds.push(
+      await enqueueMediaObjectCleanup(input.cleanupDb, {
+        tenantId: input.tenantId,
+        organizationId: input.organizationId,
+        bucket: input.mediaStore.bucket,
+        objectKey,
+        sha256,
+        reason: 'portable-media-commit-staged',
+        availableAt: new Date(Date.now() + 15 * 60_000),
+      }),
+    );
+    return false;
+  };
   const existingAssets = await tx
     .selectFrom('event_media_assets')
     .select(['id', 'upload_artifact_id'])
@@ -812,17 +989,22 @@ async function writePortableEventMedia(
         existingAssets.map((asset: { upload_artifact_id: string }) => asset.upload_artifact_id),
       )
       .execute();
-    for (const upload of existingUploads) {
-      if (upload.checksum_sha256)
-        await enqueueMediaObjectCleanup(tx, {
-          tenantId: input.tenantId,
-          organizationId: input.organizationId,
-          bucket: upload.bucket,
-          objectKey: upload.object_key,
-          sha256: upload.checksum_sha256,
-          reason: 'portable-media-replaced',
+    const existingRenditions = await tx
+      .selectFrom('event_media_renditions')
+      .select(['bucket', 'object_key', 'checksum_sha256'])
+      .where(
+        'asset_id',
+        'in',
+        existingAssets.map((asset: { id: string }) => asset.id),
+      )
+      .execute();
+    for (const object of [...existingUploads, ...existingRenditions])
+      if (object.checksum_sha256)
+        existingMediaObjects.push({
+          bucket: object.bucket,
+          objectKey: object.object_key,
+          sha256: object.checksum_sha256,
         });
-    }
     await tx
       .deleteFrom('event_media_assets')
       .where('tenant_id', '=', input.tenantId)
@@ -895,30 +1077,20 @@ async function writePortableEventMedia(
       .slice(0, 26);
     const assetId = `ema_${identity}`;
     const uploadId = `upl_${identity}`;
-    const renditionId = `emr_${identity}`;
     const objectKey = `event-media/${input.tenantId}/${input.id}/${assetId}/${sha256}.webp`;
-    input.stagedCleanupIds.push(
-      await enqueueMediaObjectCleanup(input.cleanupDb, {
-        tenantId: input.tenantId,
-        organizationId: input.organizationId,
-        bucket: input.mediaStore.bucket,
-        objectKey,
-        sha256,
-        reason: 'portable-media-commit-staged',
-        availableAt: new Date(Date.now() + 15 * 60_000),
-      }),
-    );
+    const reusedOriginal = await stageObjectWrite(objectKey, sha256);
     await input.mediaStore.putVerified({
       objectKey,
       bytes,
       sha256,
       contentType: 'image/webp',
     });
-    input.writtenObjects.push({
-      bucket: input.mediaStore.bucket,
-      objectKey,
-      sha256,
-    });
+    if (!reusedOriginal)
+      input.writtenObjects.push({
+        bucket: input.mediaStore.bucket,
+        objectKey,
+        sha256,
+      });
     await tx
       .insertInto('upload_artifacts')
       .values({
@@ -975,23 +1147,56 @@ async function writePortableEventMedia(
         updated_at: input.now,
       })
       .execute();
-    await tx
-      .insertInto('event_media_renditions')
-      .values({
-        id: renditionId,
-        asset_id: assetId,
-        variant: 'page',
-        width,
-        height,
-        format: 'webp',
-        content_type: 'image/webp',
-        bucket: input.mediaStore.bucket,
-        object_key: objectKey,
-        checksum_sha256: sha256,
-        size_bytes: bytes.byteLength,
-        created_at: input.now,
-      })
-      .execute();
+    for (const target of PORTABLE_MEDIA_TARGETS[role as keyof typeof PORTABLE_MEDIA_TARGETS]) {
+      const rendered = await renderPortableMediaRendition(bytes, { width, height }, target, {
+        x: focalPoint.x,
+        y: focalPoint.y,
+      });
+      const renditionSha256 = createHash('sha256').update(rendered).digest('hex');
+      const renditionId = `emr_${identity}_${target.variant}`;
+      const renditionObjectKey = `event-media/${input.tenantId}/${input.id}/${assetId}/${renditionId}/${renditionSha256}.webp`;
+      const reusedRendition = await stageObjectWrite(renditionObjectKey, renditionSha256);
+      await input.mediaStore.putVerified({
+        objectKey: renditionObjectKey,
+        bytes: rendered,
+        sha256: renditionSha256,
+        contentType: 'image/webp',
+      });
+      if (!reusedRendition)
+        input.writtenObjects.push({
+          bucket: input.mediaStore.bucket,
+          objectKey: renditionObjectKey,
+          sha256: renditionSha256,
+        });
+      await tx
+        .insertInto('event_media_renditions')
+        .values({
+          id: renditionId,
+          asset_id: assetId,
+          variant: target.variant,
+          width: target.width,
+          height: target.height,
+          format: 'webp',
+          content_type: 'image/webp',
+          bucket: input.mediaStore.bucket,
+          object_key: renditionObjectKey,
+          checksum_sha256: renditionSha256,
+          size_bytes: rendered.byteLength,
+          created_at: input.now,
+        })
+        .execute();
+    }
+  }
+  for (const object of existingMediaObjects) {
+    if (reusedExistingObjectKeys.has(objectIdentity(object.bucket, object.objectKey))) continue;
+    await enqueueMediaObjectCleanup(tx, {
+      tenantId: input.tenantId,
+      organizationId: input.organizationId,
+      bucket: object.bucket,
+      objectKey: object.objectKey,
+      sha256: object.sha256,
+      reason: 'portable-media-replaced',
+    });
   }
 }
 
@@ -1072,6 +1277,7 @@ async function writeCanonicalEntity(
           'brands',
           'venues',
           'events',
+          'content_documents',
           'buyers',
           'orders',
           'historical_financial_snapshots',
@@ -1080,7 +1286,7 @@ async function writeCanonicalEntity(
       ) {
         update = update.where('organization_id', '=', input.organizationId);
       }
-      if (new Set(['venues', 'buyers', 'orders']).has(table)) {
+      if (new Set(['venues', 'content_documents', 'buyers', 'orders']).has(table)) {
         update = update.where('tenant_id', '=', input.tenantId);
       }
       const result = await update.executeTakeFirst();
@@ -1172,6 +1378,110 @@ async function writeCanonicalEntity(
         ...(!input.existing ? { created_at: now } : {}),
       });
       await writePortableEventMedia(tx, input, dependency(deps, 'brand'));
+      return;
+    case 'content-document':
+      {
+        const channel = textAttribute(entity, 'channel');
+        if (!['event_page', 'email', 'sms', 'imessage', 'social_invite'].includes(channel))
+          throw new Error('MIGRATION_ATTRIBUTE_INVALID:content-document:channel');
+        const versions = portableContentVersions(entity, channel);
+        await updateOrInsert('content_documents', {
+          tenant_id: input.tenantId,
+          organization_id: organizationId,
+          brand_id: dependency(deps, 'brand'),
+          event_id: deps.get('event') ?? null,
+          channel,
+          key: textAttribute(entity, 'key'),
+          name: textAttribute(entity, 'name'),
+          status: 'draft',
+          locale: textAttribute(entity, 'locale', 'en'),
+          current_draft_version_id: null,
+          published_version_id: null,
+          updated_at: now,
+          ...(!input.existing ? { created_at: now } : {}),
+        });
+        const incomingVersionIds = versions.map((version) =>
+          portableContentVersionId(id, version.portableId),
+        );
+        if (input.existing) {
+          const existingVersions = await tx
+            .selectFrom('content_document_versions')
+            .select('id')
+            .where('document_id', '=', id)
+            .execute();
+          const incomingIds = new Set(incomingVersionIds);
+          const staleIds = existingVersions
+            .map((version: { id: string }) => version.id)
+            .filter((versionId: string) => !incomingIds.has(versionId));
+          if (staleIds.length > 0) {
+            for (const table of [
+              'content_assets',
+              'content_render_artifacts',
+              'content_test_sends',
+            ]) {
+              const reference = await tx
+                .selectFrom(table)
+                .select('id')
+                .where('document_id', '=', id)
+                .where('version_id', 'in', staleIds)
+                .executeTakeFirst();
+              if (reference) throw new Error(`MIGRATION_CONTENT_VERSION_IN_USE:${id}:${table}`);
+            }
+            await tx
+              .deleteFrom('content_document_versions')
+              .where('document_id', '=', id)
+              .where('id', 'in', staleIds)
+              .execute();
+          }
+        }
+        for (const version of versions) {
+          const versionId = portableContentVersionId(id, version.portableId);
+          const values = {
+            document_id: id,
+            version_number: version.versionNumber,
+            status: 'draft',
+            schema_version: version.schemaVersion,
+            subject: version.subject,
+            preview_text: version.previewText,
+            content_json: JSON.stringify(version.contentJson),
+            rendered_html: null,
+            rendered_text: null,
+            variables: JSON.stringify(version.variables),
+            validation: JSON.stringify(version.validation),
+            created_by: 'migration-import',
+            created_at: new Date(version.createdAt),
+            published_at: null,
+          };
+          const existingVersion = await tx
+            .selectFrom('content_document_versions')
+            .select('id')
+            .where('id', '=', versionId)
+            .where('document_id', '=', id)
+            .executeTakeFirst();
+          if (existingVersion) {
+            await tx
+              .updateTable('content_document_versions')
+              .set(values)
+              .where('id', '=', versionId)
+              .where('document_id', '=', id)
+              .execute();
+          } else {
+            await tx
+              .insertInto('content_document_versions')
+              .values({ id: versionId, ...values })
+              .execute();
+          }
+        }
+        const currentDraftVersionId = versions.at(-1)
+          ? portableContentVersionId(id, versions.at(-1)!.portableId)
+          : null;
+        await tx
+          .updateTable('content_documents')
+          .set({ current_draft_version_id: currentDraftVersionId, published_version_id: null })
+          .where('id', '=', id)
+          .where('tenant_id', '=', input.tenantId)
+          .execute();
+      }
       return;
     case 'occurrence':
       await updateOrInsert('event_occurrences', {
@@ -1495,6 +1805,7 @@ async function deleteCanonicalEntity(
     brand: 'brands',
     venue: 'venues',
     event: 'events',
+    'content-document': 'content_documents',
     occurrence: 'event_occurrences',
     'inventory-pool': 'inventory_pools',
     'ticket-type': 'ticket_types',
@@ -1571,12 +1882,16 @@ async function deleteCanonicalEntity(
       .where('order_id', '=', input.id)
       .execute();
   }
+  if (input.type === 'content-document') {
+    await tx.deleteFrom('content_document_versions').where('document_id', '=', input.id).execute();
+  }
   let deletion = tx.deleteFrom(table[input.type]).where('id', '=', input.id);
   if (
     new Set<MigrationEntityType>([
       'brand',
       'venue',
       'event',
+      'content-document',
       'buyer',
       'historical-order',
       'historical-payment',
@@ -1587,7 +1902,13 @@ async function deleteCanonicalEntity(
     deletion = deletion.where('organization_id', '=', input.organizationId);
   }
   if (
-    new Set<MigrationEntityType>(['venue', 'buyer', 'historical-order', 'ticket']).has(input.type)
+    new Set<MigrationEntityType>([
+      'venue',
+      'content-document',
+      'buyer',
+      'historical-order',
+      'ticket',
+    ]).has(input.type)
   ) {
     deletion = deletion.where('tenant_id', '=', input.tenantId);
   }
@@ -1643,6 +1964,14 @@ async function hasAuthoritativeRollbackBlocker(
   };
   if ((await canonicalHash(tx, input.type, input.id, true)) !== input.canonicalHash) return true;
   if (input.type === 'event' && (await hasExternalRows('orders', 'event_id'))) return true;
+  if (input.type === 'content-document' && (await count('content_assets', 'document_id')))
+    return true;
+  if (
+    input.type === 'content-document' &&
+    ((await count('content_render_artifacts', 'document_id')) ||
+      (await count('content_test_sends', 'document_id')))
+  )
+    return true;
   if (input.type === 'ticket-type' && (await count('order_line_items', 'ticket_type_id')))
     return true;
   if (input.type === 'product' && (await count('order_line_items', 'product_id'))) return true;
@@ -1907,6 +2236,11 @@ class ProductionMigrationCommitter implements MigrationDomainCommitter {
                 .where('entity_type', '=', this.entityType)
                 .where('source_external_id', '=', input.entity.externalId)
                 .executeTakeFirst();
+          if (existingReference && !existing) {
+            throw new Error(
+              `MIGRATION_EXTERNAL_REFERENCE_TARGET_INVALID:${this.entityType}:${existingReference.tixkit_id}`,
+            );
+          }
           if (!existing && this.entityType === 'organization') {
             existing = await transaction
               .selectFrom('imported_domain_entities')

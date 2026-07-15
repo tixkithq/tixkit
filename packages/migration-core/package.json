@@ -49,7 +49,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/portability": "workspace:*"
+    "@tixkit/portability": "0.1.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

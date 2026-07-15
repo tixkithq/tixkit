@@ -9,8 +9,10 @@ import {
 import {
   EVENT_PAGE_PUCK_COMPONENT_TYPES,
   PUCK_EVENT_PAGE_PROVIDER,
+  eventPageMediaReferenceRole,
   eventPageBrandVariablesToCssProperties,
   formatTimezoneLabel,
+  isSafeEventPageImageSource,
   normalizeEventPageDocument,
   sanitizeEventPageEmbedHtml,
   sanitizeEventPageHtml,
@@ -27,6 +29,7 @@ import {
   type EventPageEventHeaderProps,
   type EventPageFaqProps,
   type EventPageMediaProps,
+  type EventPageMediaRole,
   type EventPagePuckComponentType,
   type EventPageProductAddOnsProps,
   type EventPagePuckData,
@@ -109,11 +112,19 @@ export type EventPagePuckConfig = Config<
 >;
 export type EventPagePuckCoreData = Data<EventPagePuckComponentProps, EventPageRootProps>;
 export type EventPagePuckUploadImage = (file: File) => Promise<{ url: string }>;
+export type EventPageMediaChoice = {
+  role: EventPageMediaRole;
+  label: string;
+  value: string;
+  previewUrl?: string;
+  altText: string;
+};
 export type EventPagePuckConfigOptions = {
   allowUnsafeEmbeds?: boolean;
   onUploadImage?: EventPagePuckUploadImage;
   hasCommerceItems?: boolean;
   hasProductItems?: boolean;
+  eventMediaChoices?: readonly EventPageMediaChoice[];
 };
 
 type WithBlockId<T> = T & { id?: string };
@@ -180,6 +191,37 @@ export const eventPagePuckIframeConfig: IframeConfig = {
   waitForStyles: true,
   syncHostStyles: true,
 };
+
+function resolveEventPageImage(
+  imageUrl: unknown,
+  imageAlt: unknown,
+  runtime: EventPageRuntime,
+): { url: string; altText: string } | undefined {
+  if (typeof imageUrl !== 'string') return undefined;
+  const source = imageUrl.trim();
+  if (!source) return undefined;
+  const role = eventPageMediaReferenceRole(source);
+  if (role) {
+    const media = runtime.eventMedia?.[role];
+    const runtimeUrl = media?.url.trim();
+    const safeRuntimeUrl =
+      typeof runtimeUrl === 'string' &&
+      ((runtime.interactive === false && runtimeUrl.startsWith('blob:')) ||
+        isSafeEventPageImageSource(runtimeUrl));
+    return media && safeRuntimeUrl
+      ? {
+          url: runtimeUrl,
+          altText:
+            typeof imageAlt === 'string' && imageAlt.trim() ? imageAlt.trim() : media.altText,
+        }
+      : undefined;
+  }
+  if (!isSafeEventPageImageSource(source)) return undefined;
+  return {
+    url: source,
+    altText: typeof imageAlt === 'string' ? imageAlt.trim() : '',
+  };
+}
 
 const alignmentOptions = [
   { label: 'Left', value: 'left' },
@@ -1409,12 +1451,18 @@ function imageUrlField(
   label: string,
   help: string,
   onUploadImage?: EventPagePuckUploadImage,
+  eventMediaChoices: readonly EventPageMediaChoice[] = [],
 ): AnyField {
   return {
     type: 'custom',
     label,
     render: (props: CustomFieldRenderProps<string>) => (
-      <ImageUrlFieldControl {...props} help={help} onUploadImage={onUploadImage} />
+      <ImageUrlFieldControl
+        {...props}
+        help={help}
+        onUploadImage={onUploadImage}
+        eventMediaChoices={eventMediaChoices}
+      />
     ),
   };
 }
@@ -1428,11 +1476,17 @@ function ImageUrlFieldControl({
   readOnly,
   help,
   onUploadImage,
+  eventMediaChoices,
 }: CustomFieldRenderProps & {
   help: string;
   onUploadImage?: EventPagePuckUploadImage;
+  eventMediaChoices?: readonly EventPageMediaChoice[];
 }) {
   const stringValue = normalizeFieldValue(value);
+  const selectedEventMedia = eventMediaChoices?.find((choice) => choice.value === stringValue);
+  const previewUrl =
+    selectedEventMedia?.previewUrl ??
+    (eventPageMediaReferenceRole(stringValue) ? undefined : stringValue);
   const [uploading, setUploading] = React.useState(false);
   const [uploadError, setUploadError] = React.useState<string | undefined>();
 
@@ -1463,6 +1517,30 @@ function ImageUrlFieldControl({
         className="tk-ep-field__input"
         onChange={(event) => onChange(event.currentTarget.value)}
       />
+      {eventMediaChoices && eventMediaChoices.length > 0 ? (
+        <fieldset className="tk-ep-field__media-choices">
+          <legend>Event media</legend>
+          {eventMediaChoices.map((choice) => (
+            <button
+              key={choice.role}
+              type="button"
+              disabled={readOnly || uploading}
+              aria-pressed={choice.value === stringValue}
+              className="tk-ep-field__media-choice"
+              onClick={() => onChange(choice.value)}
+            >
+              {choice.previewUrl ? (
+                <img src={choice.previewUrl} alt="" className="tk-ep-field__media-choice-image" />
+              ) : (
+                <span className="tk-ep-field__media-choice-placeholder" aria-hidden>
+                  <ImageIcon size={18} />
+                </span>
+              )}
+              <span>{choice.label}</span>
+            </button>
+          ))}
+        </fieldset>
+      ) : null}
       {onUploadImage ? (
         <div className="tk-ep-field__chips">
           <label
@@ -1499,9 +1577,9 @@ function ImageUrlFieldControl({
         </div>
       ) : null}
       {uploadError ? <p className="tk-ep-field__error">{uploadError}</p> : null}
-      {stringValue ? (
+      {previewUrl ? (
         <div className="tk-ep-field__preview">
-          <img src={stringValue} alt="" className="tk-ep-field__preview-image" />
+          <img src={previewUrl} alt="" className="tk-ep-field__preview-image" />
         </div>
       ) : null}
       {!onUploadImage && stringValue ? (
@@ -1826,6 +1904,7 @@ export function createEventPagePuckConfig(
     hasCommerceItems = true,
     hasProductItems = hasCommerceItems,
     onUploadImage,
+    eventMediaChoices = [],
   } = options;
 
   return {
@@ -1889,11 +1968,13 @@ export function createEventPagePuckConfig(
           'Discovery cover',
           'Used on discovery cards when set.',
           onUploadImage,
+          eventMediaChoices,
         ),
         socialImageUrl: imageUrlField(
           'Social preview',
           'Used when this page is shared.',
           onUploadImage,
+          eventMediaChoices,
         ),
         _sectionColors: sectionField(
           'Colors',
@@ -1964,6 +2045,7 @@ export function createEventPagePuckConfig(
             'Image',
             'Upload or paste a URL. Placement tools appear on the canvas when selected.',
             onUploadImage,
+            eventMediaChoices,
           ),
           imageLayout: {
             type: 'select',
@@ -2155,7 +2237,12 @@ export function createEventPagePuckConfig(
         label: 'Image / media',
         fields: {
           _sectionImage: sectionField('Image', undefined, 'image', true),
-          imageUrl: imageUrlField('Image', 'Upload or paste a hosted image URL.', onUploadImage),
+          imageUrl: imageUrlField(
+            'Image',
+            'Upload or paste a hosted image URL.',
+            onUploadImage,
+            eventMediaChoices,
+          ),
           imageAlt: { type: 'text', label: 'Alt text' },
           caption: inlineTextField('Caption'),
           _sectionLayout: sectionField('Layout', undefined, 'layout'),
@@ -2686,6 +2773,7 @@ export function createEventPagePuckConfig(
             'Background image',
             'Upload or paste a URL. Placement tools appear on the canvas when selected.',
             onUploadImage,
+            eventMediaChoices,
           ),
           imageFit: {
             type: 'select',
@@ -3238,8 +3326,11 @@ export function EventDescriptionBlock({
       ? (ImageOverlay as OverlaySlotRender)({ className, minEmptyHeight })
       : null;
   const runtime = useEventPageRuntime();
+  const resolvedImage = resolveEventPageImage(imageUrl, imageAlt, runtime);
+  const resolvedImageUrl = resolvedImage?.url;
+  const resolvedImageAlt = resolvedImage?.altText ?? '';
   const showCanvasImageEditor = Boolean(
-    puck?.isEditing && runtime.interactive === false && Boolean(imageUrl),
+    puck?.isEditing && runtime.interactive === false && Boolean(resolvedImageUrl),
   );
   const sectionStyle: CSSProperties | undefined = backgroundColor ? { backgroundColor } : undefined;
   const resolvedPlacement = resolveHeroImagePlacement({
@@ -3342,7 +3433,7 @@ export function EventDescriptionBlock({
     ...(backgroundOverlayOpacity ? { '--tk-ep-overlay-opacity': backgroundOverlayOpacity } : {}),
   } as CSSProperties;
 
-  if (imageLayout === 'background' && imageUrl) {
+  if (imageLayout === 'background' && resolvedImageUrl) {
     return (
       <section
         className={joinClassNames(
@@ -3369,8 +3460,8 @@ export function EventDescriptionBlock({
           <img
             className={`tk-ep-overlay-image tk-ep-radius-${imageRadius}`}
             data-event-page-outline-target={`${id}:image`}
-            src={imageUrl}
-            alt={imageAlt ?? ''}
+            src={resolvedImageUrl}
+            alt={resolvedImageAlt}
             loading="lazy"
             style={imageStyle}
           />
@@ -3404,7 +3495,7 @@ export function EventDescriptionBlock({
       style={sectionStyle}
     >
       {copy}
-      {imageUrl ? (
+      {resolvedImageUrl ? (
         <div
           data-hero-image-surface
           className={joinClassNames(
@@ -3418,8 +3509,8 @@ export function EventDescriptionBlock({
           <img
             className={`tk-ep-hero__image tk-ep-radius-${imageRadius}`}
             data-event-page-outline-target={`${id}:image`}
-            src={imageUrl}
-            alt={imageAlt ?? ''}
+            src={resolvedImageUrl}
+            alt={resolvedImageAlt}
             loading="lazy"
             style={imageStyle}
           />
@@ -3522,6 +3613,9 @@ export function EventHeaderBlock({
   puck?: { isEditing?: boolean };
 }) {
   const runtime = useEventPageRuntime();
+  const resolvedImage = resolveEventPageImage(imageUrl, imageAlt, runtime);
+  const resolvedImageUrl = resolvedImage?.url;
+  const resolvedImageAlt = resolvedImage?.altText ?? '';
   const resolvedBrand =
     typeof brandLabel === 'string' || brandLabel == null
       ? trimmedText(brandLabel) || runtime.brandName
@@ -3545,7 +3639,7 @@ export function EventHeaderBlock({
       : venueName;
 
   const showCanvasImageEditor = Boolean(
-    puck?.isEditing && runtime.interactive === false && Boolean(imageUrl),
+    puck?.isEditing && runtime.interactive === false && Boolean(resolvedImageUrl),
   );
   const resolvedPlacement = resolveHeroImagePlacement({
     imagePlacement,
@@ -3690,12 +3784,12 @@ export function EventHeaderBlock({
     <header
       className={joinClassNames(
         'tk-ep-event-header',
-        imageUrl ? 'tk-ep-event-header--background' : undefined,
+        resolvedImageUrl ? 'tk-ep-event-header--background' : undefined,
       )}
       data-block-id={id}
       data-block-type="EventHeader"
     >
-      {imageUrl ? (
+      {resolvedImageUrl ? (
         <div
           data-hero-image-surface
           className={overlayClassName(
@@ -3710,8 +3804,8 @@ export function EventHeaderBlock({
           <img
             className="tk-ep-overlay-image"
             data-event-page-outline-target={`${id}:image`}
-            src={imageUrl}
-            alt={imageAlt ?? ''}
+            src={resolvedImageUrl}
+            alt={resolvedImageAlt}
             loading="lazy"
             style={imageStyle}
           />
@@ -3756,7 +3850,9 @@ export function MediaBlock({
   imageOpacity,
   imageOverlay: ImageOverlay,
 }: WithBlockId<EventPageMediaProps>) {
-  if (!imageUrl) return null;
+  const runtime = useEventPageRuntime();
+  const resolvedImage = resolveEventPageImage(imageUrl, imageAlt, runtime);
+  if (!resolvedImage) return null;
   const renderImageOverlay = () =>
     typeof ImageOverlay === 'function'
       ? (ImageOverlay as OverlaySlotRender)({
@@ -3768,8 +3864,8 @@ export function MediaBlock({
     <img
       className={`tk-ep-radius-${radius}`}
       data-event-page-outline-target={`${id}:image`}
-      src={imageUrl}
-      alt={imageAlt}
+      src={resolvedImage.url}
+      alt={resolvedImage.altText}
       loading="lazy"
       style={styleFromLengths({ borderRadius: customRadius })}
     />

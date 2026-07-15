@@ -44,8 +44,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/agent-protocol": "workspace:*",
-    "@tixkit/embed-core": "workspace:1.0.0"
+    "@tixkit/agent-protocol": "0.1.0",
+    "@tixkit/embed-core": "1.0.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

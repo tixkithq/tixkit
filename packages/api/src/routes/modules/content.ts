@@ -37,9 +37,11 @@ import {
 import { buildEmailTransport } from '@tixkit/email-transport';
 import {
   PUCK_EVENT_PAGE_PROVIDER,
+  collectEventPageMediaReferences,
   normalizeEventPageDocumentV2,
   normalizeOrMigrateEventPageDocumentV2,
   resolveEventPageDocumentV2Discovery,
+  resolveEventPageMediaReferences,
   validateEventPageDocumentV2,
   type CreateDefaultEventPageDocumentInput,
   type EventPageDiscoveryCard,
@@ -47,6 +49,8 @@ import {
   type EventPageDocumentV2,
   type EventPageRenderContext,
   type EventPageSettings,
+  type EventPageMediaReferenceSurface,
+  type EventPageMediaRole,
 } from '@tixkit/content-event-page';
 import {
   normalizeSmsTemplateDocument,
@@ -73,6 +77,7 @@ import {
   loadPublicMarketingIntegrations,
   loadPublicResaleListings,
   serializePublicEvent,
+  type PublicEventMediaAsset,
   type PublicEventRow,
 } from './public.js';
 
@@ -746,6 +751,7 @@ function publicContentPageCacheKey(input: {
   return JSON.stringify({
     eventId: input.event.id,
     publicRevision: input.event.public_revision ?? null,
+    eventVersion: input.event.version ?? null,
     documentId: input.document.id,
     documentUpdatedAt: input.document.updatedAt,
     versionId: input.version.id,
@@ -788,6 +794,7 @@ function toPublicContentPage(input: {
   context: EventPageRenderContext;
   event: PublicEventRow;
   host?: string;
+  mediaAssets: PublicEventMediaAsset[];
 }): PublicContentPage {
   if (
     input.document.channel !== 'event_page' ||
@@ -799,15 +806,22 @@ function toPublicContentPage(input: {
   const fallback = defaultEventPageDocumentInputForPublicEvent(input.event, input.host);
   // Prefer migrate/materialize so published leftovers (merge tags, #tickets CTAs, relative paths)
   // are repaired with live event context before public render validation.
-  const pageDocument =
+  const logicalPageDocument =
     normalizeOrMigrateEventPageDocumentV2(input.version.contentJson, fallback) ??
     normalizeEventPageDocumentV2(input.version.contentJson);
-  if (!pageDocument) {
+  if (!logicalPageDocument) {
     throw new ValidationError('Published event page is not a valid Puck event-page document', {
       code: 'invalid_event_page_document',
       eventId: input.document.eventId,
     });
   }
+  const resolved = resolveEventPageMediaReferences(logicalPageDocument, (role, surface) =>
+    resolvePublicEventPageMedia(input.mediaAssets, role, surface),
+  );
+  // Publish validation rejects missing role renditions. If an asset is removed or becomes
+  // unavailable afterward, pure resolution clears only that image and preserves the rest of the
+  // valid published page. Logical references must never reach the buyer payload.
+  const pageDocument = resolved.document;
   const validation = validateEventPageDocumentV2(pageDocument);
   if (!validation.valid) {
     throw new ValidationError('Published event page has render blockers', {
@@ -843,6 +857,56 @@ function toPublicContentPage(input: {
       },
     },
   };
+}
+
+function resolvePublicEventPageMedia(
+  assets: readonly PublicEventMediaAsset[],
+  role: EventPageMediaRole,
+  surface: EventPageMediaReferenceSurface,
+) {
+  const asset = assets.find((candidate) => candidate.role === role);
+  const rendition = asset?.renditions.find((candidate) => candidate.variant === surface);
+  return asset && rendition ? { url: rendition.url, altText: asset.altText } : undefined;
+}
+
+function validateEventPageForPublish(
+  document: ContentDocument,
+  version: ContentDocumentVersion,
+  mediaAssets: readonly PublicEventMediaAsset[],
+  principal: NonNullable<import('@tixkit/domain').Principal>,
+) {
+  const eventPageDocument = normalizeEventPageDocumentV2(version.contentJson);
+  if (!eventPageDocument) {
+    throw new ValidationError('Event-page publish requires Tixkit Puck event-page JSON', {
+      code: 'invalid_event_page_document',
+    });
+  }
+  requireUnsafeEmbedApproval(principal, eventPageDocument);
+  let validation = validateEventPageDocumentV2(eventPageDocument);
+  const mediaReferences = collectEventPageMediaReferences(eventPageDocument);
+  if (mediaReferences.length > 0 && !document.eventId) {
+    throw new ValidationError('Event-page media references require an event-scoped document', {
+      code: 'event_page_media_scope_required',
+    });
+  }
+  const unavailable = mediaReferences.filter(
+    (use) => !resolvePublicEventPageMedia(mediaAssets, use.role, use.surface),
+  );
+  if (unavailable.length > 0) {
+    validation = {
+      valid: false,
+      severity: 'error',
+      issues: validation.issues.concat(
+        unavailable.map((use) => ({
+          code: 'event_page_media_unavailable',
+          message: `The ${use.role} event media role requires a ${use.surface} rendition.`,
+          severity: 'error' as const,
+          field: use.path,
+        })),
+      ),
+    };
+  }
+  return validation;
 }
 
 function firstQueryParam(value: unknown): string {
@@ -976,8 +1040,7 @@ function defaultEventPageDocumentInputForPublicEvent(
   };
 }
 
-async function repairPublishedEventPageVersion(input: {
-  repo: ContentRepository;
+async function preparePublishedEventPageVersion(input: {
   event: PublicEventRow;
   version: ContentDocumentVersion;
   host?: string;
@@ -986,33 +1049,13 @@ async function repairPublishedEventPageVersion(input: {
   const repaired = normalizeOrMigrateEventPageDocumentV2(input.version.contentJson, fallback);
   if (!repaired) return input.version;
 
-  const before = JSON.stringify(input.version.contentJson);
-  const after = JSON.stringify(repaired);
-  if (before === after) {
-    return {
-      ...input.version,
-      schemaVersion: repaired.schemaVersion,
-      contentJson: repaired,
-    };
-  }
-
-  const validation = validateEventPageDocumentV2(repaired);
-  await input.repo.updateVersionContent({
-    versionId: input.version.id,
-    contentJson: repaired,
-    schemaVersion: repaired.schemaVersion,
-    renderedHtml: null,
-    renderedText: null,
-    validation,
-  });
-
   return {
     ...input.version,
     schemaVersion: repaired.schemaVersion,
     contentJson: repaired,
     renderedHtml: undefined,
     renderedText: undefined,
-    validation,
+    validation: validateEventPageDocumentV2(repaired),
   };
 }
 
@@ -1232,28 +1275,90 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     if (!version || version.documentId !== documentId) {
       throw new NotFoundError('ContentDocumentVersion', versionId);
     }
-    const publishValidation =
-      document.channel === 'event_page'
-        ? (() => {
-            const eventPageDocument = normalizeEventPageDocumentV2(version.contentJson);
-            if (!eventPageDocument) {
-              throw new ValidationError('Event-page publish requires Tixkit Puck event-page JSON', {
-                code: 'invalid_event_page_document',
-              });
-            }
-            requireUnsafeEmbedApproval(request.principal!, eventPageDocument);
-            return validateEventPageDocumentV2(eventPageDocument);
-          })()
-        : version.validation;
-    if (!publishValidation.valid) {
+    if (document.channel === 'event_page') {
+      const initialEventPageDocument = normalizeEventPageDocumentV2(version.contentJson);
+      if (!initialEventPageDocument) {
+        throw new ValidationError('Event-page publish requires Tixkit Puck event-page JSON', {
+          code: 'invalid_event_page_document',
+        });
+      }
+      requireUnsafeEmbedApproval(request.principal!, initialEventPageDocument);
+      const initialValidation = validateEventPageDocumentV2(initialEventPageDocument);
+      if (!initialValidation.valid) {
+        throw new ValidationError('Content version has publish blockers', {
+          issues: initialValidation.issues,
+        });
+      }
+      if (!document.eventId) {
+        throw new ValidationError('Event-page documents require an event scope', {
+          code: 'event_page_scope_required',
+        });
+      }
+      return db.transaction().execute(async (transaction) => {
+        const lockedEvent = await transaction
+          .selectFrom('events')
+          .select('id')
+          .where('id', '=', document.eventId!)
+          .where('tenant_id', '=', document.tenantId)
+          .where('organization_id', '=', document.organizationId)
+          .where('brand_id', '=', document.brandId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!lockedEvent) throw new NotFoundError('Event', document.eventId!);
+        await app.context.eventPagePublishCheckpoint?.({
+          stage: 'after_event_locked',
+          eventId: document.eventId!,
+          documentId,
+          versionId,
+        });
+        await transaction
+          .selectFrom('content_documents')
+          .select('id')
+          .where('id', '=', documentId)
+          .where('tenant_id', '=', document.tenantId)
+          .where('organization_id', '=', document.organizationId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        await transaction
+          .selectFrom('content_document_versions')
+          .select('id')
+          .where('id', '=', versionId)
+          .where('document_id', '=', documentId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        const transactionRepo = new ContentRepository(transaction);
+        const currentDocument = await transactionRepo.findDocumentById(documentId);
+        const currentVersion = await transactionRepo.findVersionById(versionId);
+        if (!currentDocument || !currentVersion || currentVersion.documentId !== documentId) {
+          throw new NotFoundError('ContentDocumentVersion', versionId);
+        }
+        const mediaAssets = await loadPublicEventMedia(transaction, document.eventId!, {
+          tenantId: document.tenantId,
+          organizationId: document.organizationId,
+          brandId: document.brandId,
+        });
+        const validation = validateEventPageForPublish(
+          currentDocument,
+          currentVersion,
+          mediaAssets,
+          request.principal!,
+        );
+        if (!validation.valid) {
+          throw new ValidationError('Content version has publish blockers', {
+            issues: validation.issues,
+          });
+        }
+        const published = await transactionRepo.publishVersion({ documentId, versionId });
+        await bumpEventPublicRevision(transaction, document.eventId!);
+        return published;
+      });
+    }
+    if (!version.validation.valid) {
       throw new ValidationError('Content version has publish blockers', {
-        issues: publishValidation.issues,
+        issues: version.validation.issues,
       });
     }
     const published = await repo().publishVersion({ documentId, versionId });
-    if (document.channel === 'event_page' && document.eventId) {
-      await bumpEventPublicRevision(db, document.eventId);
-    }
     return published;
   });
 
@@ -1564,18 +1669,25 @@ export const publicContentRoutes: FastifyPluginAsync = async (app) => {
       const cached = readPublicContentPageCache(publicContentPageCache, cacheKey, now);
       if (cached) return cached;
     }
-    const repairedVersion = await repairPublishedEventPageVersion({
-      repo: new ContentRepository(db),
-      event,
-      version: result.version,
-      host,
-    });
+    const [preparedVersion, mediaAssets] = await Promise.all([
+      preparePublishedEventPageVersion({
+        event,
+        version: result.version,
+        host,
+      }),
+      loadPublicEventMedia(db, event.id, {
+        tenantId: event.tenant_id,
+        organizationId: event.organization_id,
+        brandId: event.brand_id,
+      }),
+    ]);
     const page = toPublicContentPage({
       document: result.document,
-      version: repairedVersion,
+      version: preparedVersion,
       context: await contextForEvent(event, host),
       event,
       host,
+      mediaAssets,
     });
     if (cacheKey) rememberPublicContentPage(publicContentPageCache, cacheKey, page, now + ttlMs);
     return page;

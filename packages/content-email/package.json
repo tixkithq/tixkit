@@ -41,8 +41,8 @@
     "@react-email/components": "^1.0.12",
     "@react-email/editor": "^1.5.10",
     "@react-email/render": "^2.0.9",
-    "@tixkit/content-core": "workspace:*",
-    "@tixkit/domain": "workspace:*",
+    "@tixkit/content-core": "0.1.0",
+    "@tixkit/domain": "0.1.0",
     "react": "^19.2.0"
   },
   "devDependencies": {

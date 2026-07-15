@@ -275,6 +275,27 @@ export async function loadPortableConfigurationSections(
       .execute(),
   ]);
   const eventIds = events.map(({ id }) => id);
+  const contentDocuments = await db
+    .selectFrom('content_documents')
+    .selectAll()
+    .where('tenant_id', '=', input.tenantId)
+    .where('organization_id', '=', input.organizationId)
+    .orderBy('id', 'asc')
+    .execute();
+  const contentVersions =
+    contentDocuments.length === 0
+      ? []
+      : await db
+          .selectFrom('content_document_versions')
+          .selectAll()
+          .where(
+            'document_id',
+            'in',
+            contentDocuments.map(({ id }) => id),
+          )
+          .orderBy('document_id', 'asc')
+          .orderBy('version_number', 'asc')
+          .execute();
   const sections = new Map<PortableSection, PortableLogicalRecord[]>();
   sections.set('organizations', [
     {
@@ -333,6 +354,35 @@ export async function loadPortableConfigurationSections(
       dependencies: [
         dependency('brands', event.brand_id),
         ...(event.venue_id ? [dependency('venues', event.venue_id)] : []),
+      ],
+    })),
+  );
+  sections.set(
+    'content',
+    contentDocuments.map((document) => ({
+      portableId: document.id,
+      attributes: {
+        channel: document.channel,
+        key: document.key,
+        name: document.name,
+        locale: document.locale,
+        versions: contentVersions
+          .filter((version) => version.document_id === document.id)
+          .map((version) => ({
+            portableId: version.id,
+            versionNumber: version.version_number,
+            schemaVersion: version.schema_version,
+            subject: version.subject,
+            previewText: version.preview_text,
+            contentJson: logicalJson(version.content_json, 'contentJson'),
+            variables: logicalJson(version.variables, 'variables'),
+            validation: logicalJson(version.validation, 'validation'),
+            createdAt: iso(version.created_at),
+          })),
+      },
+      dependencies: [
+        dependency('brands', document.brand_id),
+        ...(document.event_id ? [dependency('events', document.event_id)] : []),
       ],
     })),
   );

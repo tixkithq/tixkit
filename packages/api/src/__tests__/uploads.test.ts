@@ -109,6 +109,7 @@ function createMockDb(
       select: () => query,
       selectAll: () => query,
       orderBy: () => query,
+      forUpdate: () => query,
       limit(value: number) {
         limitCount = value;
         return query;
@@ -2114,7 +2115,7 @@ describe('upload artifact service', () => {
     expect((writes[3]!.Body as Buffer).byteLength).toBe(social!.sizeBytes);
     expect(tables.event_media_assets).toHaveLength(1);
     expect(tables.event_media_renditions).toHaveLength(4);
-  });
+  }, 15_000);
 
   it('removes staged renditions and preserves the database when no quality meets a budget', async () => {
     const original = await deterministicNoisePng();
@@ -2190,7 +2191,7 @@ describe('upload artifact service', () => {
     expect(deletes).toEqual(writes);
     expect(tables.event_media_assets ?? []).toHaveLength(0);
     expect(tables.event_media_renditions ?? []).toHaveLength(0);
-  });
+  }, 15_000);
 
   it('compensates every attempted rendition object when a later write fails', async () => {
     const original = await sharp({

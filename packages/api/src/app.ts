@@ -66,6 +66,12 @@ export type AppContext = {
     eventId: string;
     startingPoint: 'free' | 'paid' | 'donation' | 'multiple';
   }) => void | Promise<void>;
+  eventPagePublishCheckpoint?: (input: {
+    stage: 'after_event_locked';
+    eventId: string;
+    documentId: string;
+    versionId: string;
+  }) => void | Promise<void>;
 };
 
 class ApiCaptureSmsTransport implements SmsTransport {

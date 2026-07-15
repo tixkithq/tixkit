@@ -51,6 +51,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@tixkit/content-event-page": "0.1.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1"
   },

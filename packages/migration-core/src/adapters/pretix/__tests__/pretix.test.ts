@@ -15,7 +15,9 @@ describe('pretix migration adapter', () => {
       SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
       context,
     );
-    expect(discovery.entities.map(({ type }) => type)).toEqual(MIGRATION_ENTITY_DEPENDENCY_ORDER);
+    expect(discovery.entities.map(({ type }) => type)).toEqual(
+      MIGRATION_ENTITY_DEPENDENCY_ORDER.filter((type) => type !== 'content-document'),
+    );
     expect(discovery.unsupportedFeatures).toEqual(expect.arrayContaining([...PRETIX_KNOWN_LOSSES]));
     const first = await pretixMigrationAdapter.extract({
       configuration: SANITIZED_PRETIX_OFFICIAL_API_FIXTURE,
@@ -63,7 +65,7 @@ describe('pretix migration adapter', () => {
       rows.map((row) => pretixMigrationAdapter.normalize(row, context)),
     );
     expect(sortEntitiesByDependency(normalized).map(({ entityType }) => entityType)).toEqual(
-      MIGRATION_ENTITY_DEPENDENCY_ORDER,
+      MIGRATION_ENTITY_DEPENDENCY_ORDER.filter((type) => type !== 'content-document'),
     );
     expect(
       new Set(

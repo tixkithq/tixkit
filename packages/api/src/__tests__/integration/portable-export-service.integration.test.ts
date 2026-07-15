@@ -21,6 +21,8 @@ import {
 } from '@tixkit/portability';
 import {
   createPortableExportService,
+  PORTABLE_EXPORT_API_VERSION,
+  PORTABLE_EXPORT_DATA_SCHEMA_VERSION,
   type PortableExportArtifactStore,
   type PortableExportMediaStore,
 } from '../../services/portable-export.js';
@@ -128,6 +130,7 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     });
     expect(transport.envelope.manifest.compatibility.requiredCapabilities).toEqual([
       'portable-bundle-v2',
+      'portable-content-documents-v1',
       'portable-rebinding-kinds-v2',
     ]);
     expect(transport.envelope.manifest.source.changeCursor).toMatch(
@@ -325,7 +328,7 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     };
     expect(deltaTransport.parentEnvelope).toEqual(legacyEnvelope);
     expect(deltaTransport.envelope.manifest).toMatchObject({
-      dataSchemaVersion: '0080',
+      dataSchemaVersion: PORTABLE_EXPORT_DATA_SCHEMA_VERSION,
       source: { exportSequence: Number(legacyJob.export_sequence) + 1 },
       lineage: {
         kind: 'delta',
@@ -1324,8 +1327,8 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     };
     expect(transport.envelope.manifest).toMatchObject({
       mode: 'historical',
-      apiVersion: '2026-07-17',
-      dataSchemaVersion: '0080',
+      apiVersion: PORTABLE_EXPORT_API_VERSION,
+      dataSchemaVersion: PORTABLE_EXPORT_DATA_SCHEMA_VERSION,
       historicalAuthorization: {
         authorizationId: authorization.id,
         tenantId,

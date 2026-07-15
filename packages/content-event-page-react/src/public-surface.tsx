@@ -14,6 +14,7 @@ import type {
   EventPageBrandVariables,
   EventPageCheckoutCtaProps,
   EventPageEventHeaderProps,
+  EventPageMediaRole,
   EventPageProductAddOnsProps,
   EventPageResaleTicketsProps,
   EventPageTicketsProps,
@@ -52,6 +53,15 @@ export type EventPageRuntime = {
   footerLinks?: PublicEventPageFooterLink[];
   tickets: PublicEventPageTicket[];
   products?: PublicEventPageProduct[];
+  eventMedia?: Partial<
+    Record<
+      EventPageMediaRole,
+      {
+        url: string;
+        altText: string;
+      }
+    >
+  >;
   resaleListings?: PublicEventPageResaleListing[];
   resaleError?: string;
   showGetTicketsCta?: boolean;

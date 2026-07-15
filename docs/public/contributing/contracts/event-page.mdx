@@ -7,7 +7,7 @@ product_area: platform
 content_type: reference
 status: beta
 owner: organizer-experience
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 prerequisites:
   - Familiarity with the content document lifecycle
 related:
@@ -47,6 +47,20 @@ The following former runtime fields are not part of the v2 payload:
 - Checkout Form remains the checkout data-collection editor.
 - Event Page owns the complete Puck page composition, including editable header, ticket, product add-on, resale, checkout CTA, and footer blocks.
 - Public checkout supplies live runtime data and interaction handlers to those blocks. It does not inject a second visual chrome outside the Puck document.
+
+## Event media references
+
+The editor stores event-owned poster, cover, and social selections as portable, event-relative references:
+
+- `tixkit:event-media:poster`
+- `tixkit:event-media:cover`
+- `tixkit:event-media:social`
+
+References contain no tenant, event, rendition, host, artifact, or credential identifier. They are valid only in image-bearing event-page fields: root and discovery cover/social images, plus the top-level `imageUrl` of `EventHeader`, `EventDescription`, and `Media`. General links, logos, speakers, sponsors, and buttons continue to require safe URLs and reject media references.
+
+Organizer previews fetch the authenticated `page` rendition and use a short-lived object URL in memory. Saved documents retain the logical reference. Public reads resolve a copy of the published document to the exact selected role and surface (`page` or `social`) without rewriting the stored version. Publishing fails closed when the selected asset or required rendition is unavailable.
+
+Portable bundles preserve logical references inside versioned content documents. Import rebinding therefore resolves them against destination-owned event media; private upload identifiers, signed URLs, and preview object URLs never cross the boundary.
 
 ## Component identifiers
 

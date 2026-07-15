@@ -6,6 +6,7 @@ import {
 import {
   PUCK_EVENT_PAGE_PROVIDER,
   createDefaultEventPageDocument,
+  isSafeEventPageImageSource,
   normalizeOrMigrateEventPageDocumentV2,
   resolveEventPageDocumentV2Discovery,
   validateEventPageDocumentV2,
@@ -211,7 +212,9 @@ function fallbackForEvent(event: AgentContentEventSnapshot): CreateDefaultEventP
     startsAt: event.startsAt,
     endsAt: event.endsAt ?? undefined,
     timezone: event.timezone,
-    coverImageUrl: event.coverImageUrl ?? undefined,
+    coverImageUrl: isSafeEventPageImageSource(event.coverImageUrl)
+      ? event.coverImageUrl
+      : undefined,
     coverImageAlt: event.title,
     publicUrl: `/e/${event.slug ?? event.id}`,
     locale: 'en',

@@ -2,8 +2,14 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
-import { EventPagePersistedEditorView } from './event-page-persisted-editor-view';
+import {
+  createDefaultEventPageDocument,
+  eventPageMediaReference,
+} from '@tixkit/content-event-page';
+import {
+  EventPagePersistedEditorView,
+  durableEventPageImagePath,
+} from './event-page-persisted-editor-view';
 
 type MockPuckContent = {
   type: string;
@@ -15,6 +21,7 @@ const adminApiMock = vi.hoisted(() => ({
   listBrands: vi.fn(),
   listTicketTypes: vi.fn(),
   listProducts: vi.fn(),
+  listEventMedia: vi.fn(),
   listContentDocuments: vi.fn(),
   createContentDocument: vi.fn(),
   updateContentDocument: vi.fn(),
@@ -34,9 +41,14 @@ const toastMock = vi.hoisted(() => ({
 const puckDispatchMock = vi.hoisted(() => vi.fn());
 const puckSelectionMock = vi.hoisted(() => ({ index: null as number | null }));
 const permissionCanMock = vi.hoisted(() => vi.fn((_permission?: string) => true));
+const requestBlobMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/api', () => ({
   adminApi: adminApiMock,
+}));
+
+vi.mock('@/lib/api-http', () => ({
+  requestBlob: requestBlobMock,
 }));
 
 vi.mock('sonner', () => ({
@@ -406,6 +418,30 @@ function createPuckEventPageDocument() {
 
 const eventPageDocument = createPuckEventPageDocument();
 
+describe('durable event-page image upload contract', () => {
+  it('normalizes the API public image contract and rejects private or credential-bearing forms', () => {
+    expect(
+      durableEventPageImagePath(
+        'http://localhost:4000/v1/public/content-event-page-images/upl_safe',
+        'http://localhost:3000',
+      ),
+    ).toBe('/v1/public/content-event-page-images/upl_safe');
+    expect(
+      durableEventPageImagePath(
+        '/v1/public/content-event-page-images/upl_safe',
+        'https://dashboard.example.test',
+      ),
+    ).toBe('/v1/public/content-event-page-images/upl_safe');
+    for (const unsafe of [
+      '/v1/upload-artifacts/upl_private/download',
+      '/v1/public/content-event-page-images/upl_safe?token=secret',
+      'blob:https://dashboard.example.test/private',
+      'https://user:secret@example.test/v1/public/content-event-page-images/upl_safe',
+    ])
+      expect(durableEventPageImagePath(unsafe, 'https://dashboard.example.test')).toBeUndefined();
+  });
+});
+
 const document = {
   id: 'cdoc_event_page',
   tenantId: 'tnt_1',
@@ -479,6 +515,14 @@ describe('EventPagePersistedEditorView', () => {
       'confirm',
       vi.fn(() => true),
     );
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:event-media-preview'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
     adminApiMock.getEvent.mockResolvedValue(ok(event));
     adminApiMock.listBrands.mockResolvedValue(
       ok([
@@ -532,6 +576,8 @@ describe('EventPagePersistedEditorView', () => {
         },
       ]),
     );
+    adminApiMock.listEventMedia.mockResolvedValue(ok([]));
+    requestBlobMock.mockResolvedValue({ ok: true, data: new Blob(['event-media']) });
     adminApiMock.listContentDocuments.mockResolvedValue(ok({ items: [document] }));
     adminApiMock.listContentVersions.mockResolvedValue(ok({ items: [version] }));
     adminApiMock.saveContentVersion.mockResolvedValue(ok(savedVersion));
@@ -794,6 +840,134 @@ describe('EventPagePersistedEditorView', () => {
         componentType: 'CustomEmbed',
       }),
     );
+  });
+
+  it('uses authenticated rendition blobs only for previews and preserves logical refs on save', async () => {
+    const logicalDocument = createPuckEventPageDocument();
+    const header = logicalDocument.editor.data.content.find(
+      (component) => component.type === 'EventHeader',
+    );
+    if (header) header.props.imageUrl = eventPageMediaReference('cover');
+    adminApiMock.listContentVersions.mockResolvedValue(
+      ok({ items: [{ ...version, contentJson: logicalDocument }] }),
+    );
+    adminApiMock.listEventMedia.mockResolvedValue(
+      ok([
+        {
+          id: 'ema_cover',
+          role: 'cover',
+          original: {
+            uploadArtifactId: 'upl_private',
+            width: 1600,
+            height: 900,
+            format: 'jpeg',
+            checksumSha256: 'a'.repeat(64),
+            sizeBytes: 1000,
+          },
+          focalPoint: { x: 0.5, y: 0.5 },
+          altText: 'Crowd facing the stage',
+          renditions: [
+            {
+              id: 'emr_page',
+              variant: 'page',
+              width: 1600,
+              height: 900,
+              format: 'webp',
+              checksumSha256: 'b'.repeat(64),
+              sizeBytes: 900,
+              url: 'http://localhost:4000/v1/public/event-media/renditions/emr_page',
+              organizerUrl: '/v1/events/evt_1/media/renditions/emr_page',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const view = render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+    await waitForPuckEditor();
+    await waitFor(() =>
+      expect(requestBlobMock).toHaveBeenCalledWith(
+        '/v1/events/evt_1/media/renditions/emr_page',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+
+    clickSaveDraft();
+    await waitFor(() => expect(adminApiMock.saveContentVersion).toHaveBeenCalled());
+    const serialized = JSON.stringify(lastSavePayload());
+    expect(serialized).toContain('tixkit:event-media:cover');
+    expect(serialized).not.toContain('blob:');
+    expect(serialized).not.toContain('/v1/events/evt_1/media/renditions/');
+    expect(serialized).not.toContain('upl_private');
+
+    view.unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:event-media-preview');
+  });
+
+  it('reports an unavailable authenticated media preview without exposing its organizer URL', async () => {
+    adminApiMock.listEventMedia.mockResolvedValue(
+      ok([
+        {
+          id: 'ema_cover',
+          role: 'cover',
+          original: {
+            uploadArtifactId: 'upl_private',
+            width: 1600,
+            height: 900,
+            format: 'jpeg',
+            checksumSha256: 'a'.repeat(64),
+            sizeBytes: 1000,
+          },
+          focalPoint: { x: 0.5, y: 0.5 },
+          altText: 'Crowd facing the stage',
+          renditions: [
+            {
+              id: 'emr_page',
+              variant: 'page',
+              width: 1600,
+              height: 900,
+              format: 'webp',
+              checksumSha256: 'b'.repeat(64),
+              sizeBytes: 900,
+              url: 'http://localhost:4000/v1/public/event-media/renditions/emr_page',
+              organizerUrl: '/v1/events/evt_1/media/renditions/emr_page',
+            },
+          ],
+        },
+      ]),
+    );
+    requestBlobMock.mockRejectedValueOnce(new Error('network unavailable'));
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+    await waitForPuckEditor();
+
+    expect(
+      await screen.findByText(
+        'Some event media previews could not be loaded. Saved media references are unchanged.',
+      ),
+    ).toHaveRole('status');
+    expect(
+      screen.queryByText('/v1/events/evt_1/media/renditions/emr_page'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the editor usable when optional event media discovery is unavailable', async () => {
+    adminApiMock.listEventMedia.mockResolvedValue({
+      ok: false,
+      error: { message: 'media service unavailable', status: 503 },
+    });
+
+    render(React.createElement(EventPagePersistedEditorView, { eventId: 'evt_1' }));
+    await waitForPuckEditor();
+
+    expect(screen.getByTestId('content-editor-shell')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Event media is temporarily unavailable. You can continue editing this page.',
+      ),
+    ).toBeInTheDocument();
+    clickSaveDraft();
+    await waitFor(() => expect(adminApiMock.saveContentVersion).toHaveBeenCalled());
   });
 
   it('makes settings searchable and keeps field groups genuinely collapsible', async () => {

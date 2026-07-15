@@ -46,7 +46,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/js": "workspace:*"
+    "@tixkit/js": "0.1.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

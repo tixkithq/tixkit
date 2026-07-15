@@ -129,4 +129,133 @@ describe('eventPageMetadataFromBootstrap', () => {
     });
     expect(metadata.twitter).toMatchObject({ images: ['https://media.example/social.webp'] });
   });
+
+  it('uses dimensions and alt text from the exact stored-role rendition', () => {
+    const posterSocialUrl = '/v1/public/event-media/renditions/emr_poster_social';
+    const metadata = eventPageMetadataFromBootstrap(
+      bootstrap({
+        event: {
+          ...bootstrap().event,
+          mediaAssets: [
+            {
+              role: 'poster',
+              altText: 'Portrait event poster',
+              focalPoint: { x: 0.5, y: 0.5 },
+              renditions: [
+                {
+                  variant: 'social',
+                  width: 1200,
+                  height: 630,
+                  url: posterSocialUrl,
+                },
+              ],
+            },
+            {
+              role: 'social',
+              altText: 'Default social artwork',
+              focalPoint: { x: 0.5, y: 0.5 },
+              renditions: [
+                {
+                  variant: 'social',
+                  width: 1200,
+                  height: 630,
+                  url: '/v1/public/event-media/renditions/emr_default_social',
+                },
+              ],
+            },
+          ],
+        },
+        contentPage: {
+          document: {
+            eventId: 'evt_1',
+            channel: 'event_page',
+            key: 'main',
+            name: 'Event page',
+            locale: 'en',
+            updatedAt: '2026-07-15T00:00:00.000Z',
+          },
+          version: { versionNumber: 4 },
+          page: {
+            provider: '@puckeditor/core',
+            puckData: null,
+            settings: { discovery: { socialImageUrl: posterSocialUrl } },
+            discovery: { title: 'Event', summary: 'Event summary', tags: [] },
+          },
+        },
+      }),
+    );
+
+    expect(metadata.openGraph).toMatchObject({
+      images: [
+        {
+          url: posterSocialUrl,
+          width: 1200,
+          height: 630,
+          alt: 'Portrait event poster',
+        },
+      ],
+    });
+    expect(metadata.twitter).toMatchObject({ images: [posterSocialUrl] });
+  });
+
+  it('does not emit unresolved logical media references in metadata', () => {
+    const metadata = eventPageMetadataFromBootstrap(
+      bootstrap({
+        contentPage: {
+          document: {
+            eventId: 'evt_1',
+            channel: 'event_page',
+            key: 'main',
+            name: 'Event page',
+            locale: 'en',
+            updatedAt: '2026-07-15T00:00:00.000Z',
+          },
+          version: { versionNumber: 4 },
+          page: {
+            provider: '@puckeditor/core',
+            puckData: null,
+            settings: { discovery: { socialImageUrl: 'tixkit:event-media:poster' } },
+            discovery: { title: 'Event', summary: 'Event summary', tags: [] },
+          },
+        },
+      }),
+    );
+
+    expect(JSON.stringify(metadata)).not.toContain('tixkit:event-media:');
+    expect(metadata.twitter).toMatchObject({ card: 'summary' });
+  });
+
+  it.each([
+    '/v1/events/evt_1/media/renditions/private',
+    '/v1/upload-artifacts/upl_private',
+    'blob:https://checkout.example.test/private-preview',
+    'https://user:secret@cdn.example.test/social.jpg',
+    'https://cdn.example.test/social.jpg?token=private',
+  ])('does not emit an unsafe stored media source in metadata: %s', (unsafeImageUrl) => {
+    const metadata = eventPageMetadataFromBootstrap(
+      bootstrap({
+        contentPage: {
+          document: {
+            eventId: 'evt_1',
+            channel: 'event_page',
+            key: 'main',
+            name: 'Event page',
+            locale: 'en',
+            updatedAt: '2026-07-15T00:00:00.000Z',
+          },
+          version: { versionNumber: 4 },
+          page: {
+            provider: '@puckeditor/core',
+            puckData: null,
+            settings: { discovery: { socialImageUrl: unsafeImageUrl } },
+            discovery: { title: 'Event', summary: 'Event summary', tags: [] },
+          },
+        },
+      }),
+    );
+
+    expect(JSON.stringify(metadata)).not.toContain(unsafeImageUrl);
+    expect(metadata.openGraph).not.toHaveProperty('images');
+    expect(metadata.twitter).toMatchObject({ card: 'summary' });
+  });
 });

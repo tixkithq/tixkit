@@ -472,7 +472,8 @@
         "tixkit-contract-tests": "./dist/cli.js",
       },
       "dependencies": {
-        "@tixkit/embed-core": "1.0.0",
+        "@tixkit/agent-protocol": "workspace:*",
+        "@tixkit/embed-core": "workspace:1.0.0",
       },
       "devDependencies": {
         "typescript": "7.0.2",
@@ -558,6 +559,7 @@
       "name": "@tixkit/openapi",
       "version": "0.1.0",
       "dependencies": {
+        "@tixkit/agent-protocol": "workspace:*",
         "@tixkit/domain": "workspace:*",
       },
       "devDependencies": {
@@ -569,6 +571,7 @@
       "name": "@tixkit/portability",
       "version": "0.1.0",
       "dependencies": {
+        "@tixkit/content-event-page": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
       },

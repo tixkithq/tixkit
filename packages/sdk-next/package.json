@@ -51,7 +51,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/js": "workspace:*"
+    "@tixkit/js": "0.1.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

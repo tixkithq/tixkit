@@ -1,0 +1,55 @@
+{
+  "policyVersion": "tixkit-portable-configuration-policy-v2",
+  "validatorVersion": "tixkit-portable-configuration-validator-v2",
+  "secretPolicyVersion": "tixkit-portable-secret-policy-v1",
+  "sections": {
+    "organizations": {
+      "schemaSha256": "7b21f14c0c8a67266b4d993a27a809feb7d7ef9336d25afbd0efb6b685223565",
+      "policySha256": "92fcb06b8eae3a609981b1097f2c07b9fba03619619c6c85d2c203340932fe1d"
+    },
+    "brands": {
+      "schemaSha256": "ceee21159f0b619cb798fca4c2914dbc8fdc0461107c1333066346c89186ba6b",
+      "policySha256": "f95474c694b184588cc7e66e07866518ccb92fba2ad6bfa9c468ed1db4c1df6f"
+    },
+    "venues": {
+      "schemaSha256": "8b042b6d2ac7828a75896bb54ffbaa18782a5452752978702635bfec6421d2d9",
+      "policySha256": "8669569de18dd1f58b2503f548f55f58c75ef923f358527a28e10a000502c804"
+    },
+    "events": {
+      "schemaSha256": "51bc1ba78141c39eb804e8fb0c68d901a8df42a5bbb9665da60a5df4c98e571c",
+      "policySha256": "f1f633d01584f86ce28cc344cded1043117f3a937eb7d2cffd7b3bb35c62c268"
+    },
+    "occurrences": {
+      "schemaSha256": "92eba387e146009f149c59dce1817b167ce3129e0d284e55c3e0cfeaa729da21",
+      "policySha256": "b2fa889657ce0af560667f63d56d8cf98d905843f2cffec5b16a7341f595035e"
+    },
+    "inventory": {
+      "schemaSha256": "92b1fc186bfbf739557d72430b746a04ab3b0abcc07d83992f9e46ff0c0f1836",
+      "policySha256": "e41e1963640fbc6e964e3ccfc26d8604889085edef949107396a7963ab2d8d9f"
+    },
+    "ticket_types": {
+      "schemaSha256": "f0aefe48e12568dd0c937580d9e6aeacf2ab717c63e246a56244d05a6601c3df",
+      "policySha256": "28e625b0f103115eb572f8a414a93ee0c3dce9802822a351786f94767d1ad40e"
+    },
+    "products": {
+      "schemaSha256": "eb837777843b88fd7075a778f813543dc392e9bcc1375545577de5ba5c3d1be7",
+      "policySha256": "9795ead9d43e00f4d4abdc3b0a567374f0c3f64a283dbecd0b646589245fa549"
+    },
+    "checkout_questions": {
+      "schemaSha256": "8d4b1bc87cf77b4ae82b7353c8840b0d4b5e00dc9f8bf0245c216ec735e6419b",
+      "policySha256": "5dd61ce67446ac011dcb54b385e4fbaa51e1ebbec565990f92db708c3d339576"
+    },
+    "discounts": {
+      "schemaSha256": "ed685fafceee8bb40406221c337d72995c48db9f691f1fff1dab445dc37e9c01",
+      "policySha256": "25ce9aeb731c3ae4a3ecf98fcd2bb1313dcf6b095d1a7103c9f3457e563f88c4"
+    },
+    "access_codes": {
+      "schemaSha256": "c026c45f5a3995f77e517b32278fadfce64848451ba65a7a6a3ee42fa17fdc9d",
+      "policySha256": "2f74df0bd7bc5caf1f27546700bb3a9b9527bbb9a97693e32ff51bd09b50f816"
+    },
+    "content": {
+      "schemaSha256": "4cae57289f73d4d6a1e7a4779362e1e677f90effe0defcb248bb3e67d514b508",
+      "policySha256": "5479fb6d330b59d0bce7218ab57657e0f5e90ab0c662ac30ed2ed2f7be0bda87"
+    }
+  }
+}

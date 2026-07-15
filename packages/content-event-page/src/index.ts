@@ -10,6 +10,45 @@ export const EVENT_PAGE_SCHEMA_VERSION = 2 as const;
 export const EVENT_PAGE_DOCUMENT_V2_SCHEMA_VERSION = EVENT_PAGE_SCHEMA_VERSION;
 export const EVENT_PAGE_PUCK_PROVIDER = PUCK_EVENT_PAGE_PROVIDER;
 
+export const EVENT_PAGE_MEDIA_ROLES = ['poster', 'cover', 'social'] as const;
+export type EventPageMediaRole = (typeof EVENT_PAGE_MEDIA_ROLES)[number];
+
+const EVENT_PAGE_MEDIA_REFERENCE_PREFIX = 'tixkit:event-media:';
+const eventPageMediaRoleSet = new Set<string>(EVENT_PAGE_MEDIA_ROLES);
+
+/**
+ * A portable, event-relative reference to an owned media role. References deliberately contain
+ * no event, rendition, tenant, host, or credential identifiers and are resolved by the runtime.
+ */
+export function eventPageMediaReference(role: EventPageMediaRole): string {
+  return `${EVENT_PAGE_MEDIA_REFERENCE_PREFIX}${role}`;
+}
+
+export function eventPageMediaReferenceRole(value: unknown): EventPageMediaRole | undefined {
+  if (typeof value !== 'string') return undefined;
+  const reference = value.trim();
+  if (!reference.startsWith(EVENT_PAGE_MEDIA_REFERENCE_PREFIX)) return undefined;
+  const role = reference.slice(EVENT_PAGE_MEDIA_REFERENCE_PREFIX.length);
+  return eventPageMediaRoleSet.has(role) ? (role as EventPageMediaRole) : undefined;
+}
+
+export type EventPageMediaReferenceSurface = 'page' | 'social';
+export type EventPageMediaReferenceUse = {
+  role: EventPageMediaRole;
+  surface: EventPageMediaReferenceSurface;
+  path: string;
+};
+
+export type ResolvedEventPageMediaReference = {
+  url: string;
+  altText: string;
+};
+
+export type ResolveEventPageMediaReferencesResult = {
+  document: EventPageDocument;
+  unresolved: EventPageMediaReferenceUse[];
+};
+
 export const EVENT_PAGE_PUCK_COMPONENT_TYPES = [
   'EventHeader',
   'EventDescription',
@@ -865,9 +904,13 @@ function materializeEventPageComponent<Block extends EventPagePuckComponentData>
   block: Block,
   replacements: Record<string, string>,
 ): Block {
+  const eventMediaKeys =
+    block.type === 'EventHeader' || block.type === 'EventDescription' || block.type === 'Media'
+      ? new Set(['imageUrl'])
+      : undefined;
   return {
     ...block,
-    props: materializeRecord(block.props, replacements) as Block['props'],
+    props: materializeRecord(block.props, replacements, eventMediaKeys) as Block['props'],
   };
 }
 
@@ -923,7 +966,11 @@ export function materializeEventPageDocument(
       ...document.editor,
       data: {
         root: {
-          props: materializeRecord(ensured.root.props, replacements) as EventPageRootProps,
+          props: materializeRecord(
+            ensured.root.props,
+            replacements,
+            new Set(['coverImageUrl', 'socialImageUrl']),
+          ) as EventPageRootProps,
         },
         content,
         ...(zones ? { zones } : {}),
@@ -939,8 +986,12 @@ export function materializeEventPageDocument(
           document.settings.discovery.summary,
         seoTitle: materializeString(document.settings.discovery.seoTitle, replacements),
         seoDescription: materializeString(document.settings.discovery.seoDescription, replacements),
-        coverImageUrl: sanitizeOptionalEventPageUrl(document.settings.discovery.coverImageUrl),
-        socialImageUrl: sanitizeOptionalEventPageUrl(document.settings.discovery.socialImageUrl),
+        coverImageUrl: sanitizeOptionalEventPageImageSource(
+          document.settings.discovery.coverImageUrl,
+        ),
+        socialImageUrl: sanitizeOptionalEventPageImageSource(
+          document.settings.discovery.socialImageUrl,
+        ),
       },
     },
   };
@@ -1054,8 +1105,12 @@ export function validateEventPageSettings(settings: EventPageSettings): ContentV
     );
   }
   validateOptionalUrl(issues, settings.publicPath, 'settings.publicPath');
-  validateOptionalUrl(issues, settings.discovery.coverImageUrl, 'settings.discovery.coverImageUrl');
-  validateOptionalUrl(
+  validateOptionalImageSource(
+    issues,
+    settings.discovery.coverImageUrl,
+    'settings.discovery.coverImageUrl',
+  );
+  validateOptionalImageSource(
     issues,
     settings.discovery.socialImageUrl,
     'settings.discovery.socialImageUrl',
@@ -1121,6 +1176,175 @@ export function isSafeEventPageUrl(value: unknown, allowRelative = true): value 
   if (allowRelative && /^#[A-Za-z][\w:-]*$/.test(url)) return true;
   if (allowRelative && url.startsWith('/') && !url.startsWith('//')) return true;
   return isAllowedDestination(url);
+}
+
+export function isSafeEventPageImageSource(value: unknown): value is string {
+  if (eventPageMediaReferenceRole(value) !== undefined) return true;
+  if (typeof value !== 'string') return false;
+  const source = value.trim();
+  if (!source) return false;
+  if (/^\/v1\/public\/event-media\/renditions\/[A-Za-z0-9_-]+$/u.test(source)) return true;
+  if (/^\/v1\/public\/content-event-page-images\/[A-Za-z0-9_-]+$/u.test(source)) return true;
+  if (source.startsWith('/')) return false;
+  try {
+    const url = new URL(source);
+    return (
+      url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      isAllowedDestination(url.toString())
+    );
+  } catch {
+    return false;
+  }
+}
+
+function eventPageMediaReferenceUse(
+  value: unknown,
+  surface: EventPageMediaReferenceSurface,
+  path: string,
+): EventPageMediaReferenceUse | undefined {
+  const role = eventPageMediaReferenceRole(value);
+  return role ? { role, surface, path } : undefined;
+}
+
+function componentEventPageMediaReferenceUses(
+  component: EventPagePuckComponentData,
+  path: string,
+): EventPageMediaReferenceUse[] {
+  if (
+    component.type !== 'EventHeader' &&
+    component.type !== 'EventDescription' &&
+    component.type !== 'Media'
+  )
+    return [];
+  const use = eventPageMediaReferenceUse(
+    component.props.imageUrl,
+    'page',
+    `${path}.props.imageUrl`,
+  );
+  return use ? [use] : [];
+}
+
+export function collectEventPageMediaReferences(
+  document: EventPageDocument,
+): EventPageMediaReferenceUse[] {
+  const uses = [
+    eventPageMediaReferenceUse(
+      document.editor.data.root.props.coverImageUrl,
+      'page',
+      'editor.data.root.props.coverImageUrl',
+    ),
+    eventPageMediaReferenceUse(
+      document.editor.data.root.props.socialImageUrl,
+      'social',
+      'editor.data.root.props.socialImageUrl',
+    ),
+    eventPageMediaReferenceUse(
+      document.settings.discovery.coverImageUrl,
+      'page',
+      'settings.discovery.coverImageUrl',
+    ),
+    eventPageMediaReferenceUse(
+      document.settings.discovery.socialImageUrl,
+      'social',
+      'settings.discovery.socialImageUrl',
+    ),
+  ].filter((use): use is EventPageMediaReferenceUse => Boolean(use));
+  document.editor.data.content.forEach((component, index) => {
+    uses.push(...componentEventPageMediaReferenceUses(component, `editor.data.content.${index}`));
+  });
+  for (const [zoneName, components] of Object.entries(document.editor.data.zones ?? {})) {
+    components.forEach((component, index) => {
+      uses.push(
+        ...componentEventPageMediaReferenceUses(
+          component,
+          `editor.data.zones.${zoneName}.${index}`,
+        ),
+      );
+    });
+  }
+  return uses;
+}
+
+/** Pure request-scoped resolution. The persisted document is never mutated. */
+export function resolveEventPageMediaReferences(
+  document: EventPageDocument,
+  resolve: (
+    role: EventPageMediaRole,
+    surface: EventPageMediaReferenceSurface,
+  ) => ResolvedEventPageMediaReference | undefined,
+): ResolveEventPageMediaReferencesResult {
+  const cloned = JSON.parse(JSON.stringify(document)) as EventPageDocument;
+  const unresolved: EventPageMediaReferenceUse[] = [];
+
+  const resolveValue = (
+    value: unknown,
+    surface: EventPageMediaReferenceSurface,
+    path: string,
+  ): ResolvedEventPageMediaReference | undefined => {
+    const use = eventPageMediaReferenceUse(value, surface, path);
+    if (!use) return undefined;
+    const resolved = resolve(use.role, use.surface);
+    if (!resolved) unresolved.push(use);
+    return resolved;
+  };
+
+  const root = cloned.editor.data.root.props;
+  const rootCover = resolveValue(
+    root.coverImageUrl,
+    'page',
+    'editor.data.root.props.coverImageUrl',
+  );
+  if (eventPageMediaReferenceRole(root.coverImageUrl)) root.coverImageUrl = rootCover?.url;
+  const rootSocial = resolveValue(
+    root.socialImageUrl,
+    'social',
+    'editor.data.root.props.socialImageUrl',
+  );
+  if (eventPageMediaReferenceRole(root.socialImageUrl)) root.socialImageUrl = rootSocial?.url;
+
+  const discovery = cloned.settings.discovery;
+  const discoveryCover = resolveValue(
+    discovery.coverImageUrl,
+    'page',
+    'settings.discovery.coverImageUrl',
+  );
+  if (eventPageMediaReferenceRole(discovery.coverImageUrl))
+    discovery.coverImageUrl = discoveryCover?.url;
+  const discoverySocial = resolveValue(
+    discovery.socialImageUrl,
+    'social',
+    'settings.discovery.socialImageUrl',
+  );
+  if (eventPageMediaReferenceRole(discovery.socialImageUrl))
+    discovery.socialImageUrl = discoverySocial?.url;
+
+  const resolveComponent = (component: EventPagePuckComponentData, path: string) => {
+    if (
+      component.type !== 'EventHeader' &&
+      component.type !== 'EventDescription' &&
+      component.type !== 'Media'
+    )
+      return;
+    const resolved = resolveValue(component.props.imageUrl, 'page', `${path}.props.imageUrl`);
+    if (!eventPageMediaReferenceRole(component.props.imageUrl)) return;
+    component.props.imageUrl = resolved?.url;
+    if (resolved && !cleanOptionalString(component.props.imageAlt)) {
+      component.props.imageAlt = resolved.altText;
+    }
+  };
+  cloned.editor.data.content.forEach((component, index) =>
+    resolveComponent(component, `editor.data.content.${index}`),
+  );
+  for (const [zoneName, components] of Object.entries(cloned.editor.data.zones ?? {})) {
+    components.forEach((component, index) =>
+      resolveComponent(component, `editor.data.zones.${zoneName}.${index}`),
+    );
+  }
+
+  return { document: cloned, unresolved };
 }
 
 export function sanitizeEventPageHtml(html: string): string {
@@ -1692,7 +1916,7 @@ function validateComponentProps(
 ): void {
   switch (type) {
     case 'EventDescription':
-      validateOptionalUrl(issues, props.imageUrl, `${field}.imageUrl`);
+      validateOptionalImageSource(issues, props.imageUrl, `${field}.imageUrl`);
       validateImageAlt(issues, props.imageUrl, props.imageAlt, `${field}.imageAlt`);
       validateOptionalColor(issues, props.backgroundColor, `${field}.backgroundColor`);
       validateOptionalLength(issues, props.imagePositionX, `${field}.imagePositionX`);
@@ -1753,7 +1977,7 @@ function validateComponentProps(
         `${field}.imageAlt`,
         'Media imageAlt is required.',
       );
-      validateOptionalUrl(issues, props.imageUrl, `${field}.imageUrl`);
+      validateOptionalImageSource(issues, props.imageUrl, `${field}.imageUrl`);
       validateOptionalLength(issues, props.maxWidth, `${field}.maxWidth`);
       validateOptionalLength(issues, props.customRadius, `${field}.customRadius`);
       validateOptionalLength(issues, props.captionFontSize, `${field}.captionFontSize`);
@@ -1862,7 +2086,7 @@ function validateComponentProps(
         `${field}.title`,
         'Event header title is required.',
       );
-      validateOptionalUrl(issues, props.imageUrl, `${field}.imageUrl`);
+      validateOptionalImageSource(issues, props.imageUrl, `${field}.imageUrl`);
       validateImageAlt(issues, props.imageUrl, props.imageAlt, `${field}.imageAlt`);
       validateOptionalLength(issues, props.imagePositionX, `${field}.imagePositionX`);
       validateOptionalLength(issues, props.imagePositionY, `${field}.imagePositionY`);
@@ -1929,8 +2153,8 @@ function validateRootProps(
   validateOptionalColor(issues, root.foregroundColor, `${field}.foregroundColor`);
   validateOptionalColor(issues, root.accentColor, `${field}.accentColor`);
   validateOptionalColor(issues, root.accentForegroundColor, `${field}.accentForegroundColor`);
-  validateOptionalUrl(issues, root.coverImageUrl, `${field}.coverImageUrl`);
-  validateOptionalUrl(issues, root.socialImageUrl, `${field}.socialImageUrl`);
+  validateOptionalImageSource(issues, root.coverImageUrl, `${field}.coverImageUrl`);
+  validateOptionalImageSource(issues, root.socialImageUrl, `${field}.socialImageUrl`);
   if (root.radius !== undefined && typeof root.radius !== 'string') {
     issues.push(
       issue('invalid_radius', 'Root radius must be a CSS string.', 'error', `${field}.radius`),
@@ -2151,6 +2375,24 @@ function validateOptionalUrl(
   if (!isSafeEventPageUrl(value)) {
     issues.push(
       issue('unsafe_url', 'URL must be http(s) and cannot target private hosts.', 'error', field),
+    );
+  }
+}
+
+function validateOptionalImageSource(
+  issues: ContentValidationIssue[],
+  value: unknown,
+  field: string,
+): void {
+  if (value === undefined || value === null || value === '') return;
+  if (!isSafeEventPageImageSource(value)) {
+    issues.push(
+      issue(
+        'unsafe_url',
+        'Image must use an owned event-media role or a safe http(s) URL.',
+        'error',
+        field,
+      ),
     );
   }
 }
@@ -2518,24 +2760,27 @@ function materializeString(
   });
 }
 
-function sanitizeOptionalEventPageUrl(value: unknown): string | undefined {
+function sanitizeOptionalEventPageImageSource(value: unknown): string | undefined {
   const cleaned = cleanOptionalString(value);
   if (!cleaned) return undefined;
-  if (isSafeEventPageUrl(cleaned)) return cleaned;
-  return undefined;
+  return isSafeEventPageImageSource(cleaned) ? cleaned : undefined;
 }
 
 function materializeRecord(
   value: Record<string, unknown>,
   replacements: Record<string, string>,
+  eventMediaKeys: ReadonlySet<string> = new Set(),
 ): Record<string, unknown> {
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry === 'string') {
       const materialized = materializeString(entry, replacements);
+      const isAllowedEventMediaReference =
+        eventMediaKeys.has(key) && eventPageMediaReferenceRole(materialized) !== undefined;
       if (
         (key === 'ctaUrl' || key === 'url' || key === 'mapUrl' || key.endsWith('Url')) &&
         materialized &&
+        !isAllowedEventMediaReference &&
         !isSafeEventPageUrl(materialized)
       ) {
         next[key] = key === 'ctaUrl' ? '#tickets' : undefined;

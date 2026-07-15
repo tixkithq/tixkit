@@ -257,6 +257,7 @@
       { "path": "packages/checkout-headless", "ecosystem": "npm" },
       { "path": "packages/content-core", "ecosystem": "npm" },
       { "path": "packages/content-email", "ecosystem": "npm" },
+      { "path": "packages/content-event-page", "ecosystem": "npm" },
       { "path": "packages/contract-tests", "ecosystem": "npm" },
       { "path": "packages/cli", "ecosystem": "npm" },
       { "path": "packages/db", "ecosystem": "npm" },
@@ -286,6 +287,7 @@
       { "name": "checkout", "dockerfile": "Dockerfile.checkout" }
     ],
     "contracts": [
+      "artifacts/api/2026-08-06",
       "artifacts/api/2026-08-05",
       "artifacts/api/2026-08-04",
       "artifacts/api/2026-08-03",

@@ -53,6 +53,7 @@ import {
   EVENT_PAGE_PUCK_COMPONENT_TYPES,
   PUCK_EVENT_PAGE_PROVIDER,
   createDefaultEventPageDocument,
+  eventPageMediaReference,
   materializeEventPageDocument,
   migrateLegacyEventPageDocumentToPuck,
   normalizeEventPageDocument,
@@ -74,6 +75,7 @@ import {
   type EventPagePuckCoreData,
   type EventPagePuckUploadImage,
   type EventPageRuntime,
+  type EventPageMediaChoice,
 } from '@tixkit/content-event-page-react/puck';
 import {
   EditorChrome,
@@ -93,9 +95,11 @@ import {
   type AdminContentDocument,
   type AdminContentDocumentVersion,
   type AdminEventDetail,
+  type AdminEventMediaAsset,
   type AdminProduct,
   type AdminTicketType,
 } from '@/lib/api';
+import { requestBlob } from '@/lib/api-http';
 import { publicEventUrl } from '@/lib/event-links';
 import { usePermissions } from '@/context/permission-provider';
 
@@ -104,6 +108,23 @@ type EventPageNavigatorTab = 'sections' | 'add';
 type EventPageMobilePanel = EventPageNavigatorTab | 'settings' | null;
 type EventPagePreviewViewport = 'desktop' | 'tablet' | 'mobile';
 type EventPageFocusTarget = number | 'root' | null;
+
+export function durableEventPageImagePath(value: unknown, baseUrl: string): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  try {
+    const parsed = new URL(value, baseUrl);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      !parsed.username &&
+      !parsed.password &&
+      !parsed.search &&
+      !parsed.hash &&
+      /^\/v1\/public\/content-event-page-images\/[A-Za-z0-9_-]+$/u.test(parsed.pathname)
+      ? parsed.pathname
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 type EventPagePreview = {
   label: string;
@@ -115,12 +136,86 @@ type EventPageEditorChrome = {
   brand?: AdminBrand;
   tickets: AdminTicketType[];
   products: AdminProduct[];
+  mediaAssets: AdminEventMediaAsset[];
   title?: string;
   description?: string;
   startsAt?: string;
   timezone?: string;
   venueName?: string;
 };
+
+const eventMediaRoleLabels = {
+  poster: 'Event poster',
+  cover: 'Event cover',
+  social: 'Social image',
+} as const;
+
+function useEventPageMediaChoices(mediaAssets: readonly AdminEventMediaAsset[]) {
+  const [previewUrls, setPreviewUrls] = React.useState<Partial<Record<string, string>>>({});
+  const [failedPreviewCount, setFailedPreviewCount] = React.useState(0);
+
+  React.useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const createdUrls: string[] = [];
+    setPreviewUrls({});
+    setFailedPreviewCount(0);
+
+    void Promise.all(
+      mediaAssets.map(async (asset) => {
+        const rendition = asset.renditions.find((candidate) => candidate.variant === 'page');
+        const organizerUrl = rendition?.organizerUrl;
+        if (!organizerUrl) return { role: asset.role, failed: true as const };
+        const result = await requestBlob(organizerUrl, { signal: controller.signal }).catch(
+          () => null,
+        );
+        if (!active || !result || !result.ok) return { role: asset.role, failed: true as const };
+        const objectUrl = URL.createObjectURL(result.data);
+        createdUrls.push(objectUrl);
+        return { role: asset.role, objectUrl };
+      }),
+    ).then((results) => {
+      if (!active) return;
+      const next: Partial<Record<string, string>> = {};
+      let failures = 0;
+      for (const result of results) {
+        if ('objectUrl' in result) next[result.role] = result.objectUrl;
+        else failures += 1;
+      }
+      setPreviewUrls(next);
+      setFailedPreviewCount(failures);
+    });
+
+    return () => {
+      active = false;
+      controller.abort();
+      for (const objectUrl of createdUrls) URL.revokeObjectURL(objectUrl);
+    };
+  }, [mediaAssets]);
+
+  const choices = React.useMemo<EventPageMediaChoice[]>(
+    () =>
+      mediaAssets.map((asset) => ({
+        role: asset.role,
+        label: eventMediaRoleLabels[asset.role],
+        value: eventPageMediaReference(asset.role),
+        previewUrl: previewUrls[asset.role],
+        altText: asset.altText,
+      })),
+    [mediaAssets, previewUrls],
+  );
+
+  const runtimeMedia = React.useMemo<EventPageRuntime['eventMedia']>(() => {
+    const entries = choices.flatMap((choice) =>
+      choice.previewUrl
+        ? [[choice.role, { url: choice.previewUrl, altText: choice.altText }] as const]
+        : [],
+    );
+    return Object.fromEntries(entries) as EventPageRuntime['eventMedia'];
+  }, [choices]);
+
+  return { choices, runtimeMedia, failedPreviewCount };
+}
 
 const eventPageViewports: Viewports = [
   { width: 390, height: 'auto', label: 'Mobile' },
@@ -2823,6 +2918,7 @@ export function EventPagePersistedEditorView({
   const [editorChrome, setEditorChrome] = React.useState<EventPageEditorChrome>({
     tickets: [],
     products: [],
+    mediaAssets: [],
   });
   const [structurePanelOpen, setStructurePanelOpen] = React.useState(true);
   const [structurePanelWidth, setStructurePanelWidth] = React.useState(structurePanelDefaultWidth);
@@ -2860,7 +2956,11 @@ export function EventPagePersistedEditorView({
   const canWrite = can('events.write');
   const canManageUnsafeEmbeds = can('settings.write');
   const canEdit = !isArchived && canWrite;
-  const pageRuntime = React.useMemo(() => buildPageRuntime(editorChrome), [editorChrome]);
+  const eventPageMedia = useEventPageMediaChoices(editorChrome.mediaAssets);
+  const pageRuntime = React.useMemo(
+    () => ({ ...buildPageRuntime(editorChrome), eventMedia: eventPageMedia.runtimeMedia }),
+    [editorChrome, eventPageMedia.runtimeMedia],
+  );
   const hasCommerceItems = pageRuntime.tickets.length > 0;
   const overrides = React.useMemo(
     () => puckOverrides(pageRuntime, editorChrome.brand),
@@ -2890,7 +2990,14 @@ export function EventPagePersistedEditorView({
       if (!result.data.downloadUrl) {
         throw new Error('Uploaded event page image did not return a download URL.');
       }
-      return { url: result.data.downloadUrl };
+      const durablePath = durableEventPageImagePath(
+        result.data.downloadUrl,
+        window.location.origin,
+      );
+      if (!durablePath) {
+        throw new Error('Uploaded event page image returned an unsafe or non-durable URL.');
+      }
+      return { url: durablePath };
     },
     [canEdit, document?.id, event?.brandId, event?.id],
   );
@@ -2901,8 +3008,15 @@ export function EventPagePersistedEditorView({
         hasCommerceItems,
         hasProductItems: (pageRuntime.products?.length ?? 0) > 0,
         onUploadImage: uploadEventPageImage,
+        eventMediaChoices: eventPageMedia.choices,
       }),
-    [canManageUnsafeEmbeds, hasCommerceItems, pageRuntime.products?.length, uploadEventPageImage],
+    [
+      canManageUnsafeEmbeds,
+      eventPageMedia.choices,
+      hasCommerceItems,
+      pageRuntime.products?.length,
+      uploadEventPageImage,
+    ],
   );
 
   React.useEffect(() => {
@@ -3069,10 +3183,11 @@ export function EventPagePersistedEditorView({
       return;
     }
 
-    const [brandsResult, ticketsResult, productsResult] = await Promise.all([
+    const [brandsResult, ticketsResult, productsResult, mediaResult] = await Promise.all([
       adminApi.listBrands(),
       adminApi.listTicketTypes(loadedEvent.id),
       adminApi.listProducts(loadedEvent.id),
+      adminApi.listEventMedia(loadedEvent.id),
     ]);
     const supportingDataFailure = !brandsResult.ok
       ? {
@@ -3111,6 +3226,10 @@ export function EventPagePersistedEditorView({
         ? productsResult.data
         : listItemsFromResponse<AdminProduct>(productsResult.data)
       : [];
+    const mediaAssets = mediaResult.ok ? mediaResult.data : [];
+    if (!mediaResult.ok) {
+      setNotice('Event media is temporarily unavailable. You can continue editing this page.');
+    }
 
     setEvent(loadedEvent);
     setDocument(loadedDocument);
@@ -3121,6 +3240,7 @@ export function EventPagePersistedEditorView({
       brand: brands.find((item) => item.id === loadedEvent.brandId),
       tickets,
       products,
+      mediaAssets,
       title: loadedEvent.title,
       description: loadedEvent.description ?? undefined,
       startsAt: loadedEvent.startsAt,
@@ -3965,6 +4085,11 @@ export function EventPagePersistedEditorView({
             {archivedReason}
           </div>
         )}
+        {eventPageMedia.failedPreviewCount > 0 ? (
+          <output className="fixed bottom-4 right-4 z-40 max-w-sm rounded-md border border-amber-500/30 bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm">
+            Some event media previews could not be loaded. Saved media references are unchanged.
+          </output>
+        ) : null}
         {actionError && !publishReviewOpen ? (
           <div
             className="fixed inset-x-3 top-[68px] z-50 flex items-start justify-between gap-3 rounded-md border border-destructive/30 bg-background px-3 py-2 text-sm text-destructive shadow-lg lg:hidden"

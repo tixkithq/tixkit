@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import {
   createDb,
@@ -20,6 +20,7 @@ import {
   ticketTailorApiV1Fixture,
   migrationAdapter,
   prepareTixkitPortableUpload,
+  CANONICAL_MIGRATION_ENTITY_CONTRACT,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
   portableSectionForMigrationEntity,
   sortEntitiesByDependency,
@@ -99,6 +100,44 @@ const attributes: Record<MigrationEntityType, Record<string, unknown>> = {
     minimumAge: 18,
     codeFormat: { symbology: 'qr', payloadFormat: 'compact_v2' },
   },
+  'content-document': {
+    channel: 'event_page',
+    key: 'main',
+    name: 'Imported event page',
+    locale: 'en',
+    versions: [
+      {
+        portableId: 'content-version-1',
+        versionNumber: 1,
+        schemaVersion: 2,
+        subject: null,
+        previewText: null,
+        contentJson: {
+          schemaVersion: 2,
+          editor: {
+            provider: '@puckeditor/core',
+            data: {
+              root: { props: {} },
+              content: [
+                {
+                  type: 'Media',
+                  props: {
+                    id: 'portable-poster',
+                    imageUrl: 'tixkit:event-media:poster',
+                    imageAlt: 'Event poster',
+                  },
+                },
+              ],
+            },
+          },
+          settings: { locale: 'en', discovery: { summary: 'Imported event', tags: [] } },
+        },
+        variables: [],
+        validation: { valid: true, severity: 'warning', issues: [] },
+        createdAt: '2026-10-01T00:00:00.000Z',
+      },
+    ],
+  },
   occurrence: {
     startsAt: '2026-10-01T18:00:00Z',
     endsAt: '2026-10-01T20:00:00Z',
@@ -175,8 +214,20 @@ const attributes: Record<MigrationEntityType, Record<string, unknown>> = {
   'historical-refund': {},
   'check-in': { occurredAt: '2026-10-01T18:30:00Z' },
 };
+const defaultContentVersions = structuredClone(
+  attributes['content-document'].versions as Record<string, unknown>[],
+);
 
 function entity(type: MigrationEntityType, index: number): NormalizedMigrationEntity {
+  const contract = CANONICAL_MIGRATION_ENTITY_CONTRACT[type];
+  const dependencyTypes = [
+    ...contract.requiredDependencies,
+    ...('optionalDependencies' in contract
+      ? contract.optionalDependencies.filter(
+          (dependency) => MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf(dependency) < index,
+        )
+      : []),
+  ];
   const financialSnapshot =
     type === 'historical-payment' || type === 'historical-refund'
       ? {
@@ -198,7 +249,7 @@ function entity(type: MigrationEntityType, index: number): NormalizedMigrationEn
     externalId: `${type}-1`,
     sourcePosition: `fixture:${index + 1}`,
     attributes: attributes[type],
-    dependencies: MIGRATION_ENTITY_DEPENDENCY_ORDER.slice(0, index).map((entityType) => ({
+    dependencies: dependencyTypes.map((entityType) => ({
       entityType,
       externalId: `${entityType}-1`,
     })),
@@ -240,6 +291,9 @@ describeDatabase('production migration committers', () => {
   });
 
   afterAll(async () => db?.destroy());
+  afterEach(() => {
+    attributes['content-document'].versions = structuredClone(defaultContentVersions);
+  });
 
   it('persists verified portable event media through the destination object store', async () => {
     const repository = new ImportRepository(db);
@@ -364,21 +418,17 @@ describeDatabase('production migration committers', () => {
         entity: initialEntity,
       }),
     ).resolves.toEqual({ reconciled: true });
-    expect(writes).toEqual([
+    expect(writes).toHaveLength(5);
+    expect(writes).toContainEqual(
       expect.objectContaining({ sha256, bytes: Uint8Array.from(mediaBytes) }),
-    ]);
+    );
     const asset = await db
       .selectFrom('event_media_assets')
-      .innerJoin(
-        'event_media_renditions as rendition',
-        'rendition.asset_id',
-        'event_media_assets.id',
-      )
       .select([
+        'event_media_assets.id',
         'event_media_assets.event_id',
         'event_media_assets.role',
         'event_media_assets.alt_text',
-        'rendition.checksum_sha256',
       ])
       .where('event_media_assets.event_id', '=', outcome.tixkitId!)
       .executeTakeFirstOrThrow();
@@ -386,8 +436,24 @@ describeDatabase('production migration committers', () => {
       event_id: outcome.tixkitId,
       role: 'cover',
       alt_text: 'Imported purple cover',
-      checksum_sha256: sha256,
     });
+    const renditions = await db
+      .selectFrom('event_media_renditions')
+      .select(['variant', 'width', 'height', 'checksum_sha256'])
+      .where('asset_id', '=', asset.id)
+      .orderBy('variant', 'asc')
+      .execute();
+    expect(renditions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variant: 'thumbnail', width: 320, height: 320 }),
+        expect.objectContaining({ variant: 'card', width: 480, height: 270 }),
+        expect.objectContaining({ variant: 'page', width: 1600, height: 900 }),
+        expect.objectContaining({ variant: 'social', width: 1200, height: 630 }),
+      ]),
+    );
+    expect(renditions.every(({ checksum_sha256 }) => /^[a-f0-9]{64}$/u.test(checksum_sha256))).toBe(
+      true,
+    );
     const provenance = await db
       .selectFrom('imported_domain_entities')
       .select('attributes')
@@ -395,6 +461,38 @@ describeDatabase('production migration committers', () => {
       .executeTakeFirstOrThrow();
     expect(provenance.attributes.length).toBeLessThan(4_000);
     expect(provenance.attributes).not.toContain(mediaBytes.toString('base64').slice(0, 100));
+
+    const metadataOnlyEntity = portableEvent({
+      bytes: mediaBytes,
+      sha256,
+      altText: 'Imported purple cover',
+    });
+    metadataOnlyEntity.attributes.title = 'Imported media event with updated details';
+    await expect(
+      committer.commit({
+        tenantId,
+        organizationId,
+        jobId: job.id,
+        entity: metadataOnlyEntity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).resolves.toMatchObject({ disposition: 'updated', tixkitId: outcome.tixkitId });
+    expect(
+      Number(
+        (
+          await db
+            .selectFrom('media_object_cleanup_jobs')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
+            .where('reason', '=', 'portable-media-replaced')
+            .where('status', '=', 'pending')
+            .executeTakeFirstOrThrow()
+        ).count,
+      ),
+    ).toBe(0);
+    await expect(
+      processMigrationMediaCleanupJobs(db, mediaStore, new Date(Date.now() + 1_000)),
+    ).resolves.toEqual({ completed: 0, retained: 0, failed: 0 });
+    expect(deletedKeys).toEqual([]);
 
     const replacementBytes = await sharp(randomBytes(1200 * 800 * 3), {
       raw: { width: 1200, height: 800, channels: 3 },
@@ -458,7 +556,8 @@ describeDatabase('production migration committers', () => {
     const rendition = await db
       .selectFrom('event_media_renditions')
       .selectAll()
-      .where('checksum_sha256', '=', replacementSha256)
+      .where('asset_id', '=', asset.id)
+      .where('variant', '=', 'social')
       .executeTakeFirstOrThrow();
     await db.deleteFrom('event_media_renditions').where('id', '=', rendition.id).execute();
     await expect(committer.assessReconciled(reconciliationInput)).resolves.toMatchObject({
@@ -484,11 +583,12 @@ describeDatabase('production migration committers', () => {
     await expect(
       processMigrationMediaCleanupJobs(db, mediaStore, new Date(Date.now() + 1_000)),
     ).resolves.toEqual({
-      completed: 1,
+      completed: 5,
       retained: 0,
       failed: 0,
     });
-    expect(deletedKeys).toEqual([expect.stringContaining(sha256)]);
+    expect(deletedKeys).toHaveLength(5);
+    expect(deletedKeys).toEqual(expect.arrayContaining([expect.stringContaining(sha256)]));
   });
 
   it('durably retries media cleanup when storage succeeds and the database commit fails', async () => {
@@ -1094,6 +1194,14 @@ describeDatabase('production migration committers', () => {
   });
 
   it('imports the canonical dependency chain idempotently without commerce side effects', async () => {
+    const baseContentVersions = structuredClone(defaultContentVersions);
+    const secondContentVersion = {
+      ...structuredClone(baseContentVersions[0]!),
+      portableId: 'content-version-2',
+      versionNumber: 2,
+      createdAt: '2026-10-02T00:00:00.000Z',
+    };
+    attributes['content-document'].versions = [...baseContentVersions, secondContentVersion];
     const firstJob = await importChain('chain:first');
     const imports = new ImportRepository(db);
     const completedJob = await imports.findJob(tenantId, organizationId, firstJob.id);
@@ -1167,7 +1275,159 @@ describeDatabase('production migration committers', () => {
       .select(['updated_at'])
       .where('id', '=', eventReference!.tixkit_id)
       .executeTakeFirstOrThrow();
+    const contentReference = await imports.findExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      entityType: 'content-document',
+      externalId: 'content-document-1',
+    });
+    const firstContentVersion = await db
+      .selectFrom('content_document_versions')
+      .select('id')
+      .where('document_id', '=', contentReference!.tixkit_id)
+      .where('version_number', '=', 1)
+      .executeTakeFirstOrThrow();
+    attributes['content-document'].versions = [secondContentVersion];
+    const contentCommitter = createProductionMigrationCommitters(db).get('content-document')!;
+    const replacementContentEntity = {
+      ...entity('content-document', MIGRATION_ENTITY_DEPENDENCY_ORDER.indexOf('content-document')),
+      attributes: structuredClone(attributes['content-document']),
+    };
+    await db
+      .insertInto('content_render_artifacts')
+      .values({
+        id: `cra_stale_${integrationDriver}`,
+        tenant_id: tenantId,
+        document_id: contentReference!.tixkit_id,
+        version_id: firstContentVersion.id,
+        channel: 'event_page',
+        output_type: 'html',
+        artifact_ref: `artifact://stale/${integrationDriver}`,
+        checksum: 'a'.repeat(64),
+        created_at: new Date(),
+      })
+      .execute();
+    await expect(
+      contentCommitter.commit({
+        tenantId,
+        organizationId,
+        jobId: firstJob.id,
+        entity: replacementContentEntity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow(
+      `MIGRATION_CONTENT_VERSION_IN_USE:${contentReference!.tixkit_id}:content_render_artifacts`,
+    );
+    await db
+      .deleteFrom('content_render_artifacts')
+      .where('id', '=', `cra_stale_${integrationDriver}`)
+      .execute();
+    await db
+      .insertInto('content_test_sends')
+      .values({
+        id: `cts_stale_${integrationDriver}`,
+        tenant_id: tenantId,
+        document_id: contentReference!.tixkit_id,
+        version_id: firstContentVersion.id,
+        channel: 'event_page',
+        recipient: 'operator@example.test',
+        status: 'completed',
+        rendered_subject: null,
+        rendered_html: '<p>Preview</p>',
+        rendered_text: 'Preview',
+        error: null,
+        created_at: new Date(),
+      })
+      .execute();
+    await expect(
+      contentCommitter.commit({
+        tenantId,
+        organizationId,
+        jobId: firstJob.id,
+        entity: replacementContentEntity,
+        sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+      }),
+    ).rejects.toThrow(
+      `MIGRATION_CONTENT_VERSION_IN_USE:${contentReference!.tixkit_id}:content_test_sends`,
+    );
+    await db
+      .deleteFrom('content_test_sends')
+      .where('id', '=', `cts_stale_${integrationDriver}`)
+      .execute();
     await importChain('chain:reimport');
+    expect(
+      await db
+        .selectFrom('content_document_versions')
+        .select(['version_number'])
+        .where('document_id', '=', contentReference!.tixkit_id)
+        .execute(),
+    ).toEqual([{ version_number: 2 }]);
+    await expect(importChain('chain:content-replay')).resolves.toBeDefined();
+    expect(
+      Number(
+        (
+          await db
+            .selectFrom('content_document_versions')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
+            .where('document_id', '=', contentReference!.tixkit_id)
+            .executeTakeFirstOrThrow()
+        ).count,
+      ),
+    ).toBe(1);
+    const currentContentVersion = await db
+      .selectFrom('content_document_versions')
+      .select('id')
+      .where('document_id', '=', contentReference!.tixkit_id)
+      .executeTakeFirstOrThrow();
+    const contentRollbackInput = {
+      tenantId,
+      organizationId,
+      jobId: firstJob.id,
+      tixkitId: contentReference!.tixkit_id,
+    };
+    for (const blocker of ['content_render_artifacts', 'content_test_sends'] as const) {
+      if (blocker === 'content_render_artifacts') {
+        await db
+          .insertInto(blocker)
+          .values({
+            id: `cra_rollback_${integrationDriver}`,
+            tenant_id: tenantId,
+            document_id: contentReference!.tixkit_id,
+            version_id: currentContentVersion.id,
+            channel: 'event_page',
+            output_type: 'html',
+            artifact_ref: `artifact://rollback/${integrationDriver}`,
+            checksum: 'b'.repeat(64),
+            created_at: new Date(),
+          })
+          .execute();
+      } else {
+        await db
+          .insertInto(blocker)
+          .values({
+            id: `cts_rollback_${integrationDriver}`,
+            tenant_id: tenantId,
+            document_id: contentReference!.tixkit_id,
+            version_id: currentContentVersion.id,
+            channel: 'event_page',
+            recipient: 'operator@example.test',
+            status: 'completed',
+            rendered_subject: null,
+            rendered_html: '<p>Preview</p>',
+            rendered_text: 'Preview',
+            error: null,
+            created_at: new Date(),
+          })
+          .execute();
+      }
+      await expect(contentCommitter.assessUntouched(contentRollbackInput)).resolves.toMatchObject({
+        eligible: false,
+        reason: 'Authoritative domain activity or canonical edit detected',
+      });
+      await db.deleteFrom(blocker).where('document_id', '=', contentReference!.tixkit_id).execute();
+    }
+    attributes['content-document'].versions = baseContentVersions;
     const lifecycleEvents = await imports.listEvents(tenantId, organizationId, firstJob.id);
     expect(lifecycleEvents.map((event) => event.sequence)).toEqual(
       lifecycleEvents.map((_event, index) => index + 1),
@@ -1666,6 +1926,8 @@ describeDatabase('production migration committers', () => {
     expect(sections.get('checkout_questions')?.length).toBeGreaterThan(0);
     expect(sections.get('discounts')?.length).toBeGreaterThan(0);
     expect(sections.get('access_codes')?.length).toBeGreaterThan(0);
+    expect(sections.get('content')?.length).toBeGreaterThan(0);
+    expect(JSON.stringify(sections.get('content'))).toContain('tixkit:event-media:poster');
     expect(
       sections
         .get('brands')!
@@ -1859,6 +2121,7 @@ describeDatabase('production migration committers', () => {
       ['brands', 'brand'],
       ['venues', 'venue'],
       ['events', 'event'],
+      ['content', 'content-document'],
       ['occurrences', 'occurrence'],
       ['inventory', 'inventory-pool'],
       ['ticket_types', 'ticket-type'],
@@ -1887,12 +2150,34 @@ describeDatabase('production migration committers', () => {
         const destinationRecord = destinationSections
           .get(section)
           ?.find(({ portableId }) => portableId === mappedId);
-        expect(destinationRecord?.attributes, `${section}:${sourceRecord.portableId}`).toEqual({
+        const expectedAttributes = {
           ...(section === 'organizations'
             ? destinationOrganizationBefore
             : sourceRecord.attributes),
           ...inertStateOverrides.get(section as never),
-        });
+        };
+        if (section === 'content') {
+          const withoutVersionIds = (attributes: Record<string, unknown> | undefined) => ({
+            ...attributes,
+            versions: Array.isArray(attributes?.versions)
+              ? attributes.versions.map((version) => {
+                  const { portableId: _portableId, ...rest } = version as Record<string, unknown>;
+                  return rest;
+                })
+              : [],
+          });
+          expect(
+            withoutVersionIds(destinationRecord?.attributes as Record<string, unknown>),
+            `${section}:${sourceRecord.portableId}`,
+          ).toEqual(withoutVersionIds(expectedAttributes));
+          expect(JSON.stringify(destinationRecord?.attributes)).toContain(
+            'tixkit:event-media:poster',
+          );
+        } else {
+          expect(destinationRecord?.attributes, `${section}:${sourceRecord.portableId}`).toEqual(
+            expectedAttributes,
+          );
+        }
         const staged = await db
           .selectFrom('imported_domain_entities')
           .select('attributes')
@@ -1997,6 +2282,138 @@ describeDatabase('production migration committers', () => {
         sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
       }),
     ).rejects.toThrow('MIGRATION_DEPENDENCY_UNRESOLVED:organization:organization-1');
+
+    const sourceContent = await imports.findExternalReference({
+      tenantId,
+      organizationId,
+      sourceSystem: 'generic-csv',
+      entityType: 'content-document',
+      externalId: 'content-document-1',
+    });
+    const otherBrand = await new BrandRepository(db).create({
+      tenantId,
+      organizationId: otherOrganization.id,
+      name: 'Other scoped brand',
+      slug: `other-scoped-brand-${integrationDriver}`,
+    });
+    await imports.recordExternalReference({
+      tenantId,
+      organizationId: otherOrganization.id,
+      sourceSystem: 'generic-csv',
+      entityType: 'brand',
+      externalId: 'other-brand',
+      tixkitId: otherBrand.id,
+      importJobId: job.id,
+      createdByJob: false,
+    });
+    await imports.recordExternalReference({
+      tenantId,
+      organizationId: otherOrganization.id,
+      sourceSystem: 'generic-csv',
+      entityType: 'content-document',
+      externalId: 'cross-scope-content',
+      tixkitId: sourceContent!.tixkit_id,
+      importJobId: job.id,
+      createdByJob: false,
+    });
+    const beforeContent = await db
+      .selectFrom('content_documents')
+      .selectAll()
+      .where('id', '=', sourceContent!.tixkit_id)
+      .executeTakeFirstOrThrow();
+    const beforeVersions = await db
+      .selectFrom('content_document_versions')
+      .selectAll()
+      .where('document_id', '=', sourceContent!.tixkit_id)
+      .orderBy('version_number', 'asc')
+      .execute();
+    await expect(
+      createProductionMigrationCommitters(db)
+        .get('content-document')!
+        .commit({
+          tenantId,
+          organizationId: otherOrganization.id,
+          jobId: job.id,
+          entity: {
+            entityType: 'content-document',
+            externalId: 'cross-scope-content',
+            sourcePosition: 'fixture:cross-scope-content',
+            attributes: attributes['content-document'],
+            dependencies: [{ entityType: 'brand', externalId: 'other-brand' }],
+          },
+          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+        }),
+    ).rejects.toThrow('MIGRATION_EXTERNAL_REFERENCE_TARGET_INVALID:content-document');
+    expect(
+      await db
+        .selectFrom('content_documents')
+        .selectAll()
+        .where('id', '=', sourceContent!.tixkit_id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(beforeContent);
+    expect(
+      await db
+        .selectFrom('content_document_versions')
+        .selectAll()
+        .where('document_id', '=', sourceContent!.tixkit_id)
+        .orderBy('version_number', 'asc')
+        .execute(),
+    ).toEqual(beforeVersions);
+
+    const unsafeAttributes = structuredClone(attributes['content-document']);
+    const unsafeVersions = unsafeAttributes.versions as Array<Record<string, unknown>>;
+    const unsafeContent = unsafeVersions[0]!.contentJson as Record<string, unknown>;
+    const unsafeEditor = unsafeContent.editor as Record<string, unknown>;
+    const unsafeData = unsafeEditor.data as Record<string, unknown>;
+    unsafeData.content = [
+      {
+        type: 'Media',
+        props: {
+          id: 'unsafe-portable-media',
+          imageUrl: '/v1/upload-artifacts/upl_cross_tenant',
+          imageAlt: 'Unsafe private upload',
+        },
+      },
+    ];
+    const contentCountBefore = Number(
+      (
+        await db
+          .selectFrom('content_documents')
+          .select(({ fn }) => fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', tenantId)
+          .where('organization_id', '=', otherOrganization.id)
+          .executeTakeFirstOrThrow()
+      ).count,
+    );
+    await expect(
+      createProductionMigrationCommitters(db)
+        .get('content-document')!
+        .commit({
+          tenantId,
+          organizationId: otherOrganization.id,
+          jobId: job.id,
+          entity: {
+            entityType: 'content-document',
+            externalId: 'unsafe-portable-content',
+            sourcePosition: 'fixture:unsafe-portable-content',
+            attributes: unsafeAttributes,
+            dependencies: [{ entityType: 'brand', externalId: 'other-brand' }],
+          },
+          sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
+        }),
+    ).rejects.toThrow('MIGRATION_ATTRIBUTE_INVALID:content-document:versions');
+    expect(
+      Number(
+        (
+          await db
+            .selectFrom('content_documents')
+            .select(({ fn }) => fn.countAll<number>().as('count'))
+            .where('tenant_id', '=', tenantId)
+            .where('organization_id', '=', otherOrganization.id)
+            .executeTakeFirstOrThrow()
+        ).count,
+      ),
+    ).toBe(contentCountBefore);
   });
 
   it('adopts an exact scoped Compact brand without claiming rollback ownership', async () => {

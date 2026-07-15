@@ -52,7 +52,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/js": "workspace:*"
+    "@tixkit/js": "0.1.0"
   },
   "peerDependencies": {
     "svelte": "^5.0.0"

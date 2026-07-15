@@ -545,6 +545,18 @@ function validateSdkReleaseWorkflow(manifest, root, violations) {
   violations.push(...sdkReleaseWorkflowViolations(manifest, workflow));
 }
 
+export function npmReleaseDependencyViolations(packageManifest, packagePath = 'package') {
+  const violations = [];
+  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+    for (const [name, version] of Object.entries(packageManifest[field] ?? {}))
+      if (String(version).startsWith('workspace:'))
+        violations.push(
+          `${packagePath}: ${field}.${name} uses non-publishable workspace protocol ${version}`,
+        );
+  }
+  return violations;
+}
+
 export function validatePublicDistribution(manifest, root, schema) {
   const violations = [];
   const resolvedSchema =
@@ -684,6 +696,7 @@ export function validatePublicDistribution(manifest, root, schema) {
       const packageManifest = JSON.parse(
         readFileSync(resolve(root, entry.path, 'package.json'), 'utf8'),
       );
+      violations.push(...npmReleaseDependencyViolations(packageManifest, entry.path));
       for (const field of ['dependencies', 'optionalDependencies']) {
         for (const [name, version] of Object.entries(packageManifest[field] ?? {})) {
           const dependencyPath = packageNameToPath.get(name);

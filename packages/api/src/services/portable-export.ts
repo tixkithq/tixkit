@@ -39,8 +39,8 @@ import {
 import sharp from 'sharp';
 
 const MAX_PORTABLE_ARTIFACT_BYTES = 50 * 1024 * 1024;
-export const PORTABLE_EXPORT_API_VERSION = '2026-07-17';
-export const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0080';
+export const PORTABLE_EXPORT_API_VERSION = '2026-08-06';
+export const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0081';
 export const PORTABLE_EXPORT_MEDIA_SCANNER_ID = 'tixkit_event_media_scanner_v1';
 export const PORTABLE_EXPORT_MEDIA_POLICY_SHA256 = createHash('sha256')
   .update('tixkit-portable-event-media-v1')
@@ -488,6 +488,7 @@ export function createPortableExportService(input: {
         acceptedCompatibilityPairs: [
           { apiVersion: '2026-07-16', dataSchemaVersion: '0079' },
           { apiVersion: '2026-07-17', dataSchemaVersion: '0080' },
+          { apiVersion: '2026-08-06', dataSchemaVersion: '0081' },
         ],
       });
       if (portableManifestSha256(recoveredParent.envelope.manifest) !== parent.manifest_sha256)
@@ -766,9 +767,13 @@ export function createPortableExportService(input: {
       compatibility: {
         minimumApiVersion: '2026-01-01',
         maximumApiVersion: '2026-12-31',
-        minimumDataSchemaVersion: '0080',
-        maximumDataSchemaVersion: '0080',
-        requiredCapabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
+        minimumDataSchemaVersion: '0081',
+        maximumDataSchemaVersion: '0081',
+        requiredCapabilities: [
+          'portable-bundle-v2',
+          'portable-rebinding-kinds-v2',
+          'portable-content-documents-v1',
+        ],
         requiredEntitlements: request.mode === 'historical' ? ['historical-import-v1'] : [],
       },
       sections: snapshot.sections,

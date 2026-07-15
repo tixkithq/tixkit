@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   jsonSchemaViolations,
+  npmReleaseDependencyViolations,
   publicDependencyBoundaryViolations,
   historicalClassificationViolations,
   sdkReleaseWorkflowViolations,
@@ -26,6 +27,26 @@ test('validates integer schema types and numeric minimums', () => {
   assert.deepEqual(jsonSchemaViolations(2, schema), []);
   assert.deepEqual(jsonSchemaViolations(0, schema), ['$ must be at least 1']);
   assert.deepEqual(jsonSchemaViolations(1.5, schema), ['$ must be integer']);
+});
+
+test('rejects workspace protocols from publishable npm manifests', () => {
+  assert.deepEqual(
+    npmReleaseDependencyViolations(
+      {
+        dependencies: { '@tixkit/domain': 'workspace:*', ajv: '^8.20.0' },
+        peerDependencies: { '@tixkit/js': 'workspace:0.1.0' },
+      },
+      'packages/example',
+    ),
+    [
+      'packages/example: dependencies.@tixkit/domain uses non-publishable workspace protocol workspace:*',
+      'packages/example: peerDependencies.@tixkit/js uses non-publishable workspace protocol workspace:0.1.0',
+    ],
+  );
+  assert.deepEqual(
+    npmReleaseDependencyViolations({ dependencies: { '@tixkit/domain': '0.1.0' } }),
+    [],
+  );
 });
 
 test('validates the authoritative public distribution and every SDK release path', () => {

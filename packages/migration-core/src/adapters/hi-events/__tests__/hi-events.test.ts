@@ -15,7 +15,9 @@ describe('Hi.Events migration adapter', () => {
       SANITIZED_HI_EVENTS_OFFICIAL_API_FIXTURE,
       context,
     );
-    expect(discovery.entities.map(({ type }) => type)).toEqual(MIGRATION_ENTITY_DEPENDENCY_ORDER);
+    expect(discovery.entities.map(({ type }) => type)).toEqual(
+      MIGRATION_ENTITY_DEPENDENCY_ORDER.filter((type) => type !== 'content-document'),
+    );
     expect(discovery.unsupportedFeatures).toEqual(
       expect.arrayContaining([...HI_EVENTS_KNOWN_LOSSES]),
     );
@@ -66,7 +68,7 @@ describe('Hi.Events migration adapter', () => {
         .map((row) => hiEventsMigrationAdapter.normalize(row, context)),
     );
     expect(sortEntitiesByDependency(normalized).map(({ entityType }) => entityType)).toEqual(
-      MIGRATION_ENTITY_DEPENDENCY_ORDER,
+      MIGRATION_ENTITY_DEPENDENCY_ORDER.filter((type) => type !== 'content-document'),
     );
     expect(
       new Set(

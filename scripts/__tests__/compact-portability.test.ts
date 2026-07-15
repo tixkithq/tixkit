@@ -132,7 +132,12 @@ describe('Compact portability public identity exchange', () => {
     expect(trust.destination.availableStorageBytes).toBe(1024 * 1024 * 1024);
     expect(trust.trustedBundleKeys.has(source.PORTABILITY_BUNDLE_SIGNING_KEY_ID)).toBe(true);
     expect(trust.trustedPayloadKeys.has(source.PORTABILITY_PAYLOAD_SIGNING_KEY_ID)).toBe(true);
-    expect(trust.trustedPayloadPolicies.size).toBe(11);
+    expect(trust.trustedPayloadPolicies.size).toBe(12);
+    expect(trust.destination.capabilities).toEqual([
+      'portable-bundle-v2',
+      'portable-rebinding-kinds-v2',
+      'portable-content-documents-v1',
+    ]);
     expect(trust.trustedMediaPolicies.get('tixkit_event_media_scanner_v1')).toEqual(
       expect.objectContaining({
         keyId: source.PORTABILITY_PAYLOAD_SIGNING_KEY_ID,

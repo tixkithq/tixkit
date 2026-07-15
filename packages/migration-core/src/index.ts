@@ -3,6 +3,7 @@ export const MIGRATION_ENTITY_DEPENDENCY_ORDER = [
   'brand',
   'venue',
   'event',
+  'content-document',
   'occurrence',
   'inventory-pool',
   'ticket-type',

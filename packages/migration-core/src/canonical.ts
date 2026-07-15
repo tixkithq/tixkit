@@ -19,6 +19,11 @@ export const CANONICAL_MIGRATION_ENTITY_CONTRACT = {
     requiredDependencies: ['brand'],
     optionalDependencies: ['venue'],
   },
+  'content-document': {
+    requiredAttributes: ['channel', 'key', 'name', 'locale', 'versions'],
+    requiredDependencies: ['brand'],
+    optionalDependencies: ['event'],
+  },
   occurrence: {
     requiredAttributes: ['startsAt', 'endsAt', 'timezone'],
     requiredDependencies: ['event'],

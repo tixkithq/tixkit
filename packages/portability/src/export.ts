@@ -45,6 +45,7 @@ export const PORTABLE_RUNTIME_EXPORT_SECTIONS: ReadonlySet<PortableSection> = ne
   'checkout_questions',
   'discounts',
   'access_codes',
+  'content',
   'buyers',
   'attendees',
   'orders',

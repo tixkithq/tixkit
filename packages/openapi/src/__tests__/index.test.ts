@@ -122,7 +122,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-05');
+    expect(openApiSpec.info.version).toBe('2026-08-06');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {

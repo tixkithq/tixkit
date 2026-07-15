@@ -41,6 +41,7 @@ export type {
   EventPagePuckConfig,
   EventPagePuckCoreData,
   EventPagePuckConfigOptions,
+  EventPageMediaChoice,
   EventPagePuckUploadImage,
   EventPageRenderProps,
   EventPageRuntime,

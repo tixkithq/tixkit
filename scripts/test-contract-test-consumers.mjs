@@ -21,6 +21,10 @@ try {
   const embedTar = pack('packages/embed-core');
   const agentProtocolTar = pack('packages/agent-protocol');
   const contractsTar = pack('packages/contract-tests');
+  const domainTar = pack('packages/domain');
+  const contentCoreTar = pack('packages/content-core');
+  const eventPageTar = pack('packages/content-event-page');
+  const portabilityTar = pack('packages/portability');
   execFileSync('bun', ['run', 'build'], {
     cwd: resolve(root, 'packages/sdk-js'),
     stdio: 'inherit',
@@ -34,6 +38,10 @@ try {
         '@tixkit/embed-core': `file:${embedTar}`,
         '@tixkit/agent-protocol': `file:${agentProtocolTar}`,
         '@tixkit/contract-tests': `file:${contractsTar}`,
+        '@tixkit/domain': `file:${domainTar}`,
+        '@tixkit/content-core': `file:${contentCoreTar}`,
+        '@tixkit/content-event-page': `file:${eventPageTar}`,
+        '@tixkit/portability': `file:${portabilityTar}`,
         '@tixkit/js': `file:${sdkTar}`,
         ajv: '^8.20.0',
         'ajv-formats': '^3.0.1',
@@ -41,6 +49,9 @@ try {
       overrides: {
         '@tixkit/embed-core': `file:${embedTar}`,
         '@tixkit/agent-protocol': `file:${agentProtocolTar}`,
+        '@tixkit/domain': `file:${domainTar}`,
+        '@tixkit/content-core': `file:${contentCoreTar}`,
+        '@tixkit/content-event-page': `file:${eventPageTar}`,
       },
     }),
   );
@@ -191,7 +202,7 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
-      apiVersion: '2026-08-05',
+      apiVersion: '2026-08-06',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
@@ -344,12 +355,58 @@ if (captured.headers.authorization !== 'Bearer tk_sandbox') throw new Error('Pac
 `,
   );
   execFileSync('bun', ['run', 'sdk-wire.mjs'], { cwd: temp, stdio: 'inherit' });
+  await writeFile(
+    join(temp, 'portable-event-page.mjs'),
+    `import { validatePortableContentDocument } from '@tixkit/portability';
+const base = {
+  schemaVersion: 2,
+  editor: { provider: '@puckeditor/core', data: { root: { props: {} }, content: [{ type: 'Media', props: { id: 'poster', imageUrl: 'tixkit:event-media:poster', imageAlt: 'Poster' } }] } },
+  settings: { locale: 'en', discovery: { summary: 'Portable event', tags: [] } },
+};
+if (!validatePortableContentDocument('event_page', base)) throw new Error('Packed portable event-page validation rejected the public contract');
+const unsafe = structuredClone(base);
+unsafe.editor.data.content = [{ type: 'Button', props: { id: 'unsafe', label: 'Unsafe', url: 'javascript:alert(1)' } }];
+if (validatePortableContentDocument('event_page', unsafe)) throw new Error('Packed portable event-page validation diverged from the canonical validator');
+`,
+  );
+  execFileSync('bun', ['run', 'portable-event-page.mjs'], { cwd: temp, stdio: 'inherit' });
+  const npmConsumer = await mkdtemp(join(tmpdir(), 'tixkit-npm-portability-consumer-'));
+  try {
+    await writeFile(
+      join(npmConsumer, 'package.json'),
+      JSON.stringify({ private: true, type: 'module' }),
+    );
+    execFileSync(
+      'npm',
+      [
+        'install',
+        '--ignore-scripts',
+        '--no-audit',
+        '--no-fund',
+        domainTar,
+        contentCoreTar,
+        eventPageTar,
+        portabilityTar,
+      ],
+      { cwd: npmConsumer, stdio: 'inherit' },
+    );
+    await copyFile(
+      join(temp, 'portable-event-page.mjs'),
+      join(npmConsumer, 'portable-event-page.mjs'),
+    );
+    execFileSync('node', ['portable-event-page.mjs'], {
+      cwd: npmConsumer,
+      stdio: 'inherit',
+    });
+  } finally {
+    await rm(npmConsumer, { recursive: true, force: true });
+  }
   const installed = JSON.parse(
     await readFile(join(temp, 'node_modules/@tixkit/contract-tests/package.json'), 'utf8'),
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
-    'Built and executed 4 packed contract profiles, including agent event-read/report-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, and the packed SDK wire contract.',
+    'Built and executed 5 packed contract profiles, including agent event-read/report-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, the packed SDK wire contract, and canonical portable event-page validation through clean Bun and npm installs.',
   );
 } finally {
   await rm(temp, { recursive: true, force: true });

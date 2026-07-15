@@ -1,0 +1,59 @@
+---
+title: API migration from 2026-08-05 to 2026-08-06
+description: Adopt logical event-media references and portable content documents.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-08-06
+prerequisites:
+  - An integration using API version 2026-08-05
+related:
+  - /reference/api-versions
+  - /operators/migration-operations
+  - /contributing/contracts/event-page
+---
+
+API version `2026-08-06` adds role-based event media to event-page content and advances portable
+configuration exports to data schema `0081`. The retained `2026-08-05` API contract remains
+available.
+
+## Store media roles, not delivery URLs
+
+Event-page image fields may store `tixkit:event-media:poster`, `tixkit:event-media:cover`, or
+`tixkit:event-media:social`. The organizer editor resolves these references through authenticated
+preview renditions, while the public event surface resolves the exact role through public immutable
+renditions. Missing or removed roles clear only the affected image; the rest of the published page
+continues to render. Private organizer paths, upload-artifact paths, object URLs, credential-bearing
+URLs, and secret-bearing query strings fail closed on public pages and social metadata.
+
+Publishing locks the event, document, and selected version in one transaction, validates every
+logical media reference against the event scope, and advances the public event revision atomically.
+Attaching or removing media uses the same event lock, so an approved document cannot race a media
+change into publication.
+
+## Upgrade portable destinations to schema 0081
+
+New configuration and historical exports declare:
+
+- API version `2026-08-06`;
+- data schema `0081` as both the minimum and maximum;
+- capabilities `portable-bundle-v2`, `portable-rebinding-kinds-v2`, and
+  `portable-content-documents-v1`.
+
+Destinations must advertise the exact data schema and all required capabilities before preflight.
+Schema `0081` includes scoped content documents and their immutable version bodies. Event-page
+logical media references remain logical across export and import, while owned media bytes travel as
+separately signed and checksummed assets. Destination import validates content again before any
+canonical write, removes stale unreferenced versions on replay, and blocks rollback when assets,
+render artifacts, or test sends still reference an imported version.
+
+Publication state is intentionally inert. Exports omit publication pointers and publication
+timestamps, and imports restore every document and version as a draft. Review and publish imported
+content explicitly at the destination.
+
+Rendition variants are unchanged from `2026-08-05`. Imported event media now generates the same
+`thumbnail`, `card`, `page`, and `social` WebP set used by native uploads, with checksum-addressed
+immutable object keys.

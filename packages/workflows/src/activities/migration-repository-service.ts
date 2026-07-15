@@ -90,6 +90,7 @@ const STAGE_ENTITIES: Record<MigrationCommitStage, readonly MigrationEntityType[
   organizations_brands: ['organization', 'brand'],
   venues: ['venue'],
   events_occurrences: ['event', 'occurrence'],
+  content: ['content-document'],
   inventory_pools: ['inventory-pool'],
   ticket_types_products: ['ticket-type', 'product'],
   questions: ['question'],

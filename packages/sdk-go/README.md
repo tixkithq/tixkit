@@ -10,7 +10,7 @@ Go services integrating Tixkit from trusted server environments.
 
 ## Status
 
-Supported module pinned to API version `2026-08-05`.
+Supported module pinned to API version `2026-08-06`.
 
 ## Installation
 
@@ -42,7 +42,7 @@ Keep keys server-side, verify webhook signatures against raw bodies, and avoid l
 
 ## Compatibility
 
-Semantic module releases track API version `2026-08-05`; exported Go identifiers are the compatibility boundary.
+Semantic module releases track API version `2026-08-06`; exported Go identifiers are the compatibility boundary.
 
 ## Related guides
 

@@ -11,7 +11,10 @@ import type {
 } from '@tixkit/domain';
 import type { Database } from '@tixkit/db';
 import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
-import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
+import {
+  createDefaultEventPageDocument,
+  eventPageMediaReference,
+} from '@tixkit/content-event-page';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
 import type { AppContext } from '../app.js';
 import { contentRoutes, publicContentRoutes } from '../routes/modules/content.js';
@@ -74,6 +77,9 @@ function createContentDb(seed: Record<string, Record<string, unknown>[]>) {
         return query;
       },
       orderBy() {
+        return query;
+      },
+      forUpdate() {
         return query;
       },
       limit() {
@@ -1292,6 +1298,58 @@ describe('content routes', () => {
     );
   });
 
+  it('blocks publish when an event-page role reference lacks the scoped rendition', async () => {
+    const eventPageDocument = eventPageJson();
+    const header = eventPageDocument.editor.data.content.find(
+      (component) => component.type === 'EventHeader',
+    );
+    if (header) header.props.imageUrl = eventPageMediaReference('poster');
+    const { db } = createContentDb({
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+        },
+      ],
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      event_media_assets: [],
+      event_media_renditions: [],
+      content_documents: [
+        documentRow({
+          id: 'cdoc_event_page',
+          event_id: 'evt_1',
+          channel: 'event_page',
+          key: 'main',
+          name: 'Main event page',
+        }),
+      ],
+      content_document_versions: [
+        versionRow({
+          id: 'cver_event_page',
+          document_id: 'cdoc_event_page',
+          schema_version: 2,
+          content_json: JSON.stringify(eventPageDocument),
+          validation: JSON.stringify({ valid: true, severity: 'warning', issues: [] }),
+        }),
+      ],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const publish = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_event_page/versions/cver_event_page/publish',
+    });
+
+    expect(publish.statusCode).toBe(400);
+    expect(publish.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      message: 'Content version has publish blockers',
+    });
+    await app.close();
+  });
+
   it('requires server-side settings approval before saving a custom embed', async () => {
     const eventPageDocument = eventPageJson();
     eventPageDocument.editor.data.content.push({
@@ -1885,7 +1943,7 @@ describe('content routes', () => {
     }
   });
 
-  it('repairs published legacy event-page documents during public load', async () => {
+  it('renders legacy event-page documents without mutating published history during public load', async () => {
     const legacyContent = {
       settings: {
         locale: 'en',
@@ -1977,38 +2035,19 @@ describe('content routes', () => {
       }),
     );
 
-    const repaired = await db
+    const persisted = await db
       .selectFrom('content_document_versions')
       .select(['schema_version', 'content_json', 'rendered_html', 'rendered_text'])
       .where('id', '=', 'cver_legacy_public')
       .executeTakeFirstOrThrow();
-    expect(repaired.schema_version).toBe(2);
-    expect(repaired.rendered_html).toBeNull();
-    expect(repaired.rendered_text).toBeNull();
-    expect(JSON.parse(repaired.content_json)).toMatchObject({
-      schemaVersion: 2,
-      editor: {
-        provider: '@puckeditor/core',
-        data: {
-          content: expect.arrayContaining([
-            expect.objectContaining({ type: 'EventHeader' }),
-            expect.objectContaining({ type: 'EventDescription' }),
-            expect.objectContaining({ type: 'Tickets' }),
-          ]),
-        },
-      },
-    });
-    expect(JSON.parse(repaired.content_json).editor.data.content).toEqual(
-      expect.not.arrayContaining([
-        expect.objectContaining({
-          props: expect.objectContaining({ id: 'hero-legacy' }),
-        }),
-      ]),
-    );
+    expect(persisted.schema_version).toBe(1);
+    expect(persisted.rendered_html).toBe('<h1>{{event.title}}</h1><p>Hi {{recipient.name}}</p>');
+    expect(persisted.rendered_text).toBe('Hi {{recipient.name}}');
+    expect(JSON.parse(persisted.content_json)).toEqual(legacyContent);
     await app.close();
   });
 
-  it('caches public Puck event pages by event public revision', async () => {
+  it('caches public Puck event pages by monotonic event version when timestamps collide', async () => {
     const event = {
       id: 'evt_render_cache',
       tenant_id: 'tnt_1',
@@ -2023,12 +2062,24 @@ describe('content routes', () => {
       timezone: 'America/Chicago',
       venue: null,
       public_revision: new Date('2026-06-01T00:00:00.000Z'),
+      version: 1,
     };
     const pageDocument = eventPageJson({
       eventId: 'evt_render_cache',
       eventTitle: 'Original headline',
       eventDescription: 'Preview copy',
     });
+    const pageHeader = pageDocument.editor.data.content.find(
+      (component) => component.type === 'EventHeader',
+    );
+    if (pageHeader) pageHeader.props.imageUrl = eventPageMediaReference('cover');
+    const mediaRendition = {
+      id: 'emr_cache_v1',
+      asset_id: 'ema_cache_cover',
+      variant: 'page',
+      width: 1600,
+      height: 900,
+    };
     const version = versionRow({
       id: 'cver_render_cache',
       document_id: 'cdoc_render_cache',
@@ -2051,6 +2102,20 @@ describe('content routes', () => {
     const { db } = createContentDb({
       events: [event],
       ticket_types: [],
+      event_media_assets: [
+        {
+          id: 'ema_cache_cover',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_render_cache',
+          role: 'cover',
+          alt_text: 'Cache cover',
+          focal_x: '0.5',
+          focal_y: '0.5',
+        },
+      ],
+      event_media_renditions: [mediaRendition],
       content_documents: [
         documentRow({
           id: 'cdoc_render_cache',
@@ -2075,12 +2140,17 @@ describe('content routes', () => {
       eventTitle: 'Updated headline',
       eventDescription: 'Updated preview copy',
     });
+    const updatedHeader = updatedPageDocument.editor.data.content.find(
+      (component) => component.type === 'EventHeader',
+    );
+    if (updatedHeader) updatedHeader.props.imageUrl = eventPageMediaReference('cover');
     version.content_json = JSON.stringify(updatedPageDocument);
     const second = await app.inject({
       method: 'GET',
       url: '/public/events/evt_render_cache/page',
     });
-    event.public_revision = new Date('2026-06-01T00:00:01.000Z');
+    mediaRendition.id = 'emr_cache_v2';
+    event.version = 2;
     const third = await app.inject({
       method: 'GET',
       url: '/public/events/evt_render_cache/page',
@@ -2110,6 +2180,15 @@ describe('content routes', () => {
           (component: { type: string }) => component.type === 'EventDescription',
         ).props.body,
     ).toBe('Updated preview copy');
+    const imageUrl = (response: typeof first) =>
+      response
+        .json()
+        .page.puckData.content.find(
+          (component: { type: string }) => component.type === 'EventHeader',
+        ).props.imageUrl;
+    expect(imageUrl(first)).toBe('/v1/public/event-media/renditions/emr_cache_v1');
+    expect(imageUrl(second)).toBe('/v1/public/event-media/renditions/emr_cache_v1');
+    expect(imageUrl(third)).toBe('/v1/public/event-media/renditions/emr_cache_v2');
     await app.close();
   });
 
@@ -2122,7 +2201,13 @@ describe('content routes', () => {
       expect(occurrenceIds).toEqual([]);
       return new Map<string, unknown>();
     });
-    const { db } = createContentDb({
+    const logicalPage = eventPageJson();
+    const header = logicalPage.editor.data.content.find(
+      (component) => component.type === 'EventHeader',
+    );
+    if (header) header.props.imageUrl = eventPageMediaReference('cover');
+    logicalPage.settings.discovery.socialImageUrl = eventPageMediaReference('cover');
+    const seed = {
       events: [
         {
           id: 'evt_1',
@@ -2168,6 +2253,9 @@ describe('content routes', () => {
       event_media_assets: [
         {
           id: 'ema_cover',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
           event_id: 'evt_1',
           role: 'cover',
           alt_text: 'Audience watching the stage',
@@ -2182,6 +2270,13 @@ describe('content routes', () => {
           variant: 'page',
           width: 1600,
           height: 900,
+        },
+        {
+          id: 'emr_social',
+          asset_id: 'ema_cover',
+          variant: 'social',
+          width: 1200,
+          height: 630,
         },
       ],
       content_documents: [
@@ -2201,7 +2296,7 @@ describe('content routes', () => {
           document_id: 'cdoc_public',
           version_number: 1,
           status: 'published',
-          content_json: JSON.stringify(eventPageJson()),
+          content_json: JSON.stringify(logicalPage),
           validation: JSON.stringify({
             valid: true,
             severity: 'warning',
@@ -2210,7 +2305,8 @@ describe('content routes', () => {
           published_at: new Date('2026-06-02T00:00:00.000Z'),
         }),
       ],
-    });
+    };
+    const { db } = createContentDb(seed);
     const app = await setupPublicContentApp(db, {
       inventoryService: {
         getAvailabilityBatch,
@@ -2224,7 +2320,8 @@ describe('content routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    const payload = response.json();
+    expect(payload).toMatchObject({
       event: {
         id: 'evt_1',
         title: 'Published page',
@@ -2239,6 +2336,12 @@ describe('content routes', () => {
                 width: 1600,
                 height: 900,
                 url: '/v1/public/event-media/renditions/emr_page',
+              },
+              {
+                variant: 'social',
+                width: 1200,
+                height: 630,
+                url: '/v1/public/event-media/renditions/emr_social',
               },
             ],
           },
@@ -2260,6 +2363,43 @@ describe('content routes', () => {
       },
       resaleListings: { items: [], nextCursor: null, hasMore: false },
     });
+    const publicHeader = payload.contentPage.page.puckData.content.find(
+      (component: { type: string }) => component.type === 'EventHeader',
+    );
+    expect(publicHeader.props.imageUrl).toBe('/v1/public/event-media/renditions/emr_page');
+    expect(payload.contentPage.page.settings.discovery.socialImageUrl).toBe(
+      '/v1/public/event-media/renditions/emr_social',
+    );
+    expect(JSON.stringify(payload)).not.toContain('tixkit:event-media:');
+
+    const persisted = await db
+      .selectFrom('content_document_versions')
+      .select('content_json')
+      .where('id', '=', 'cver_public')
+      .executeTakeFirstOrThrow();
+    expect(persisted.content_json).toContain('tixkit:event-media:cover');
+
+    seed.event_media_assets.length = 0;
+    seed.event_media_renditions.length = 0;
+    (seed.events[0] as Record<string, unknown>).public_revision = new Date(
+      '2026-06-02T00:00:01.000Z',
+    );
+    const afterRemoval = await app.inject({
+      method: 'GET',
+      url: '/public/events/evt_1/page-bootstrap',
+    });
+    expect(afterRemoval.statusCode).toBe(200);
+    const afterRemovalPayload = afterRemoval.json();
+    expect(afterRemovalPayload.contentPage).not.toBeNull();
+    expect(
+      afterRemovalPayload.contentPage.page.puckData.content.find(
+        (component: { type: string }) => component.type === 'EventHeader',
+      ).props,
+    ).not.toHaveProperty('imageUrl');
+    expect(afterRemovalPayload.contentPage.page.puckData.content).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'Tickets' })]),
+    );
+    expect(JSON.stringify(afterRemovalPayload)).not.toContain('tixkit:event-media:');
     await app.close();
   });
 

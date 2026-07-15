@@ -36,6 +36,7 @@ export const PORTABLE_SECTION_TO_MIGRATION_ENTITY: ReadonlyMap<
   ['brands', 'brand'],
   ['venues', 'venue'],
   ['events', 'event'],
+  ['content', 'content-document'],
   ['occurrences', 'occurrence'],
   ['inventory', 'inventory-pool'],
   ['ticket_types', 'ticket-type'],

@@ -264,7 +264,11 @@ function trustCompactPortabilityIdentityUnlocked({
       deploymentId: environment.TIXKIT_DEPLOYMENT_ID,
       apiVersion: PORTABLE_EXPORT_API_VERSION,
       dataSchemaVersion: PORTABLE_EXPORT_DATA_SCHEMA_VERSION,
-      capabilities: ['portable-bundle-v2', 'portable-rebinding-kinds-v2'],
+      capabilities: [
+        'portable-bundle-v2',
+        'portable-rebinding-kinds-v2',
+        'portable-content-documents-v1',
+      ],
       entitlements: ['historical-import-v1'],
       availableStorageBytes: capacity,
       acceptedSourceOperatingModels: ['cloud', 'self-hosted'],

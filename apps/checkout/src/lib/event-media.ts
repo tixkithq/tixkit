@@ -67,3 +67,37 @@ export function resolveEventPageMedia(event: PublicEvent): ResolvedEventMedia | 
 export function resolveEventSocialMedia(event: PublicEvent): ResolvedEventMedia | undefined {
   return resolve(event.mediaAssets, SOCIAL_CANDIDATES);
 }
+
+export function resolveEventMediaRole(
+  event: PublicEvent,
+  role: PublicEventMediaAsset['role'],
+  variant: PublicEventMediaAsset['renditions'][number]['variant'],
+): ResolvedEventMedia | undefined {
+  const asset = event.mediaAssets?.find((candidate) => candidate.role === role);
+  const rendition = asset?.renditions.find((candidate) => candidate.variant === variant);
+  return asset && rendition
+    ? {
+        url: rendition.url,
+        altText: asset.altText,
+        width: rendition.width,
+        height: rendition.height,
+      }
+    : undefined;
+}
+
+export function resolveEventMediaByUrl(
+  event: PublicEvent,
+  url: string,
+): ResolvedEventMedia | undefined {
+  for (const asset of event.mediaAssets ?? []) {
+    const rendition = asset.renditions.find((candidate) => candidate.url === url);
+    if (rendition)
+      return {
+        url: rendition.url,
+        altText: asset.altText,
+        width: rendition.width,
+        height: rendition.height,
+      };
+  }
+  return undefined;
+}

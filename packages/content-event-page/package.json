@@ -1,10 +1,23 @@
 {
   "name": "@tixkit/content-event-page",
   "version": "0.1.0",
-  "private": true,
+  "description": "Canonical Tixkit event-page document and validation contracts",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tixkit/tixkit.git",
+    "directory": "packages/content-event-page"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "!dist/.tsbuildinfo",
+    "!dist/**/__tests__/**",
+    "!dist/**/*.test.*",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,18 +26,24 @@
     "./puck": {
       "types": "./dist/puck-contract.d.ts",
       "import": "./dist/puck-contract.js"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -b",
     "lint": "oxlint src",
     "typecheck": "tsc -b",
     "test:unit": "vitest run",
+    "prepack": "bun run build",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@tixkit/content-core": "workspace:*",
-    "@tixkit/domain": "workspace:*"
+    "@tixkit/content-core": "0.1.0",
+    "@tixkit/domain": "0.1.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",
