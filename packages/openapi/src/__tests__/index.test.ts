@@ -96,7 +96,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-27');
+    expect(openApiSpec.info.version).toBe('2026-07-28');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -181,8 +181,13 @@ describe('openApiSpec', () => {
     expect(approve.requestBody.content['application/json'].schema).toMatchObject({
       additionalProperties: false,
       required: ['actionDigest'],
+      properties: { planSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } },
     });
     expect(openApiSpec.components.schemas.AgentApproval.required).toContain('actionDigest');
+    expect(openApiSpec.components.schemas.AgentExecution.properties.planSha256).toEqual({
+      type: 'string',
+      pattern: '^[a-f0-9]{64}$',
+    });
     expect(revoke.parameters).toEqual(
       expect.arrayContaining([
         { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },

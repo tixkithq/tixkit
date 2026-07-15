@@ -1,0 +1,39 @@
+---
+title: API migration from 2026-07-27 to 2026-07-28
+description: Bind planned approvals, executions, audits and cancellation to the authoritative plan digest.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-28
+prerequisites:
+  - An integration using API version 2026-07-27
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-28` makes the existing plan-digest safety contract executable end to end. The action protocol remains `2026-07-22` and immutable plan definitions remain readable at plan protocol `2026-07-27`. This release is compatible: it adds optional response/request properties at the HTTP schema level, while requiring the property only when an action is already bound to an authoritative plan.
+
+## Approve a planned action
+
+Standalone actions continue to send `actionDigest` with confirmation `approve:<actionId>:<actionDigest>`.
+
+For an action bound to a plan, send both `actionDigest` and `planSha256`. The confirmation must be `approve:<actionId>:<actionDigest>:<planSha256>`. Tixkit rejects an omitted or substituted plan digest, a plan or step outside `awaiting_approval`, incomplete dependencies, an expired plan, or a changed action binding. Exact idempotent replay still returns the original approval without granting new authority.
+
+## Persist and inspect execution evidence
+
+Migration `0085_agent_execution_plan_binding` adds nullable `agent_executions.plan_sha256`. Existing standalone execution rows remain valid. New planned executions persist the exact approval and plan digest, and every lifecycle audit record must carry the same digest. Rollback refuses to discard populated plan-bound evidence.
+
+The execution request remains `{ approvalId, actionDigest }`; do not send `planSha256` there. The server derives it from the consumed approval. The JavaScript SDK accepts `planSha256` only on `agentActions.approve` and constructs the exact planned confirmation.
+
+## Cancellation and synchronous adapters
+
+The first public `event.publish` adapter returns a terminal result synchronously, so a plan may advance directly from `awaiting_approval` to an evidence-validated terminal state. This is compatible enforcement of the existing `2026-07-27` plan schema; serialized plan definitions and digests do not change.
+
+Cancellation and effect application serialize on the tenant boundary. Cancellation that commits first prevents reservation or product mutation. Once any bound execution exists, cancellation is rejected; clients must inspect the execution and record its exact terminal result instead of claiming that the effect was stopped.
+
+Durable domain webhook envelopes remain at `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and `X-Tixkit-API-Version` report `2026-07-28`.

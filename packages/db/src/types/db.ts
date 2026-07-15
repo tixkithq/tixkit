@@ -230,6 +230,7 @@ export interface AgentExecutionTable {
   tenant_id: string;
   action_id: string;
   action_digest: string;
+  plan_sha256: string | null;
   agent_principal_id: string;
   sponsor_principal_id: string;
   delegation_grant_id: string;

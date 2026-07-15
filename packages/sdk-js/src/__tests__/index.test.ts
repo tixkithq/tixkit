@@ -3194,6 +3194,33 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('agentActions binds planned approval intent to the plan digest', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_user_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const actionId = 'act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const actionDigest = 'b'.repeat(64);
+    const planSha256 = 'c'.repeat(64);
+    await client.agentActions.approve({
+      actionId,
+      actionDigest,
+      planSha256,
+      idempotencyKey: 'agent-plan-approval-0001',
+    });
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: `https://api.test/v1/agent/actions/${actionId}/approvals`,
+      headers: {
+        'Idempotency-Key': 'agent-plan-approval-0001',
+        'X-Tixkit-Confirmation': `approve:${actionId}:${actionDigest}:${planSha256}`,
+      },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({ actionDigest, planSha256 });
+  });
+
   it('agentPlans preserves canonical definitions and versioned transition intent', async () => {
     const fm = mockFetch(201, {});
     const client = new TixkitClient({
@@ -3253,7 +3280,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-07-27',
+        'X-Tixkit-Version': '2026-07-28',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

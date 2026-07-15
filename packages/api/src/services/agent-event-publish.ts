@@ -113,6 +113,12 @@ export class EventPublishAgentAdapter
       .transaction()
       .setIsolationLevel('serializable')
       .execute(async (tx) => {
+        await tx
+          .selectFrom('tenants')
+          .select('id')
+          .where('id', '=', input.tenantId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
         const executionRow = await tx
           .selectFrom('agent_executions')
           .selectAll()
@@ -137,6 +143,58 @@ export class EventPublishAgentAdapter
           Number(executionRow.policy_version) !== input.expectedPolicyVersion
         )
           throw Object.assign(new Error('agent execution binding changed'), {
+            code: 'AGENT_AUTHORIZATION_CHANGED',
+          });
+        const plan = await tx
+          .selectFrom('agent_plans as plan')
+          .innerJoin('agent_plan_actions as binding', (join) =>
+            join
+              .onRef('binding.tenant_id', '=', 'plan.tenant_id')
+              .onRef('binding.plan_id', '=', 'plan.id'),
+          )
+          .innerJoin('agent_plan_states as state', (join) =>
+            join
+              .onRef('state.tenant_id', '=', 'plan.tenant_id')
+              .onRef('state.plan_id', '=', 'plan.id'),
+          )
+          .select([
+            'plan.plan_sha256',
+            'plan.expires_at',
+            'binding.action_digest',
+            'binding.step_id',
+            'state.status',
+            'state.state_json',
+          ])
+          .where('plan.tenant_id', '=', input.tenantId)
+          .where('binding.action_id', '=', executionRow.action_id)
+          .forUpdate()
+          .executeTakeFirst();
+        const planStepIsExecutable = plan
+          ? (() => {
+              const state: unknown = JSON.parse(plan.state_json);
+              if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
+              const stepStates = (state as { stepStates?: unknown }).stepStates;
+              if (!Array.isArray(stepStates)) return false;
+              return stepStates.some(
+                (step) =>
+                  Boolean(step) &&
+                  typeof step === 'object' &&
+                  !Array.isArray(step) &&
+                  (step as { stepId?: unknown }).stepId === plan.step_id &&
+                  (step as { status?: unknown }).status === 'awaiting_approval',
+              );
+            })()
+          : true;
+        if (
+          Boolean(plan) !== Boolean(executionRow.plan_sha256) ||
+          (plan &&
+            (plan.plan_sha256 !== executionRow.plan_sha256 ||
+              plan.action_digest !== executionRow.action_digest ||
+              plan.status !== 'awaiting_approval' ||
+              !planStepIsExecutable ||
+              new Date(plan.expires_at).getTime() <= invocationTime))
+        )
+          throw Object.assign(new Error('agent plan authorization changed before invocation'), {
             code: 'AGENT_AUTHORIZATION_CHANGED',
           });
         const priorEffect = await tx
@@ -190,6 +248,7 @@ export class EventPublishAgentAdapter
           tenantId: executionRow.tenant_id,
           actionId: executionRow.action_id,
           actionDigest: executionRow.action_digest,
+          ...(executionRow.plan_sha256 ? { planSha256: executionRow.plan_sha256 } : {}),
           agentPrincipalId: executionRow.agent_principal_id,
           sponsorPrincipalId: executionRow.sponsor_principal_id,
           delegationGrantId: executionRow.delegation_grant_id,

@@ -248,6 +248,43 @@ describe('agent action routes', () => {
     await app.close();
   });
 
+  it('binds a planned approval body and confirmation to the authoritative plan digest', async () => {
+    const approve = vi.fn(async (input) => ({
+      id: `apr_${'e'.repeat(48)}`,
+      tenantId: input.tenantId,
+      actionDigest: input.actionDigest,
+      planSha256: input.planSha256,
+      approverPrincipalId: input.approverPrincipalId,
+      approverPermissionSnapshot: ['events:publish'],
+      policyVersion: 3,
+      approvedAt: '2026-07-14T12:01:00.000Z',
+      expiresAt: '2026-07-14T12:06:00.000Z',
+    }));
+    const { app } = await setup({ actor: principal('user'), service: { approve } });
+    const actionId = `act_${'d'.repeat(48)}`;
+    const actionDigest = 'b'.repeat(64);
+    const planSha256 = 'c'.repeat(64);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/approvals`,
+      headers: {
+        'idempotency-key': 'agent-plan-approval-0001',
+        'x-tixkit-confirmation': `approve:${actionId}:${actionDigest}:${planSha256}`,
+      },
+      payload: { actionDigest, planSha256 },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(approve).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      approverPrincipalId: 'user_primary',
+      actionId,
+      actionDigest,
+      planSha256,
+      idempotencyKey: 'agent-plan-approval-0001',
+    });
+    await app.close();
+  });
+
   it('rejects agent approval and mismatched human confirmation before the service', async () => {
     const approve = vi.fn();
     const agentSetup = await setup({ service: { approve } });
@@ -476,6 +513,16 @@ describe('agent action routes', () => {
       payload: { approvalId, actionDigest },
     });
     expect(invalid.statusCode).toBe(400);
+    const ignoredPlanDigest = await agent.app.inject({
+      method: 'POST',
+      url: `/agent/actions/${actionId}/executions`,
+      headers: {
+        'idempotency-key': `execute:${actionId}:${approvalId}:${actionDigest}`,
+        'x-tixkit-confirmation': `execute:${actionId}:${approvalId}:${actionDigest}`,
+      },
+      payload: { approvalId, actionDigest, planSha256: 'c'.repeat(64) },
+    });
+    expect(ignoredPlanDigest.statusCode).toBe(400);
     expect(execute).not.toHaveBeenCalled();
     await agent.app.close();
   });

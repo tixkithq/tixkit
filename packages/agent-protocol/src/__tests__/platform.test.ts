@@ -301,6 +301,7 @@ describe('agent platform contracts', () => {
       tenantId: plan.tenantId,
       actionId: preparedAction.id,
       actionDigest: plan.steps[0]!.actionDigest,
+      planSha256: plan.planSha256,
       agentPrincipalId: plan.agentPrincipalId,
       sponsorPrincipalId: plan.sponsorPrincipalId,
       delegationGrantId: plan.delegationGrantId,
@@ -401,6 +402,18 @@ describe('agent platform contracts', () => {
     };
     expect(() =>
       validateAgentPlanStateTransition(plan, executing, succeeded, {
+        actions: [preparedAction],
+        approvals: [approval],
+        executions: [succeededExecution],
+      }),
+    ).not.toThrow();
+    const directlySucceeded: AgentPlanState = {
+      ...succeeded,
+      stateVersion: 3,
+      updatedAt: '2026-07-14T12:02:00.000Z',
+    };
+    expect(() =>
+      validateAgentPlanStateTransition(plan, awaitingApproval, directlySucceeded, {
         actions: [preparedAction],
         approvals: [approval],
         executions: [succeededExecution],

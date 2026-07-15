@@ -1,10 +1,12 @@
 import {
   AGENT_PROTOCOL_VERSION,
+  AGENT_PLATFORM_PROTOCOL_VERSION,
   agentActionDigest,
   agentAuthorizationStateDigest,
   agentSha256,
   AgentExecutionConflictError,
   DurableAgentExecutionService,
+  buildAgentPlanDefinition,
   type AgentAction,
   type AgentExecution,
   type AgentExecutionStore,
@@ -19,6 +21,7 @@ import {
   OrganizationRepository,
   runMigrations,
   AgentExecutionRepository,
+  AgentPlanRepository,
   TenantRepository,
   truncateAllData,
   type Database,
@@ -728,6 +731,365 @@ describe.sequential.each(driverCases)(
         .where('permission', '=', 'events.write')
         .execute();
       await expect(service.approve(request)).resolves.toEqual(first);
+    });
+
+    it('binds approval and durable execution to an authoritative plan digest', async () => {
+      let releaseEffect!: () => void;
+      let effectReached!: () => void;
+      const releaseEffectPromise = new Promise<void>((resolve) => {
+        releaseEffect = resolve;
+      });
+      const effectReachedPromise = new Promise<void>((resolve) => {
+        effectReached = resolve;
+      });
+      const service = new AgentActionService(db, {
+        beforeProductAudit: async () => {
+          effectReached();
+          await releaseEffectPromise;
+        },
+      });
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-planned-action-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const createdAt = prepared.action.preparedAt;
+      const expiresAt = new Date(
+        Math.min(
+          new Date(prepared.expiresAt).getTime(),
+          new Date(createdAt).getTime() + 4 * 60 * 1000,
+        ),
+      ).toISOString();
+      const plan = buildAgentPlanDefinition({
+        id: `plan_publish_${driver}`,
+        protocolVersion: AGENT_PLATFORM_PROTOCOL_VERSION,
+        tenantId: prepared.action.target.tenantId,
+        agentPrincipalId: prepared.action.agentPrincipalId,
+        sponsorPrincipalId: prepared.action.sponsorPrincipalId,
+        delegationGrantId: prepared.action.delegationGrantId,
+        purpose: 'Publish the reviewed event configuration',
+        assumptions: [
+          {
+            id: 'assumption_reviewed',
+            statement: 'The organizer reviewed the event launch configuration.',
+            provenanceType: 'user',
+            sourceReference: 'agent_event_publish_integration',
+            verification: 'confirmed',
+          },
+        ],
+        steps: [
+          {
+            id: 'step_publish',
+            actionKind: prepared.action.kind,
+            actionProtocolVersion: prepared.action.protocolVersion,
+            actionDigest: prepared.actionDigest,
+            dependsOnStepIds: [],
+            projectedChanges: [
+              {
+                resourceType: prepared.action.target.resourceType,
+                resourceId: prepared.action.target.resourceId,
+                operation: 'publish',
+                beforeVersion: prepared.action.target.resourceVersion,
+                projectedVersion: prepared.action.target.resourceVersion + 1,
+                previewSha256: agentSha256(prepared.dryRun),
+              },
+            ],
+            costs: [
+              {
+                amountMinor: 0,
+                currency: 'USD',
+                basis: 'Event publication has no direct platform charge.',
+                quoteSha256: agentSha256({ amountMinor: 0, currency: 'USD' }),
+                expiresAt,
+              },
+            ],
+            readinessImpact: {
+              beforeSnapshotSha256: prepared.dryRun.readinessSnapshotSha256,
+              projectedSnapshotSha256: agentSha256({
+                actionDigest: prepared.actionDigest,
+                status: 'published',
+              }),
+              introducedReasonCodes: [],
+              resolvedReasonCodes: ['event_unpublished'],
+            },
+            approvalRequirement: { mode: 'fresh_action', riskClass: 'high' },
+            reversibility: { mode: 'none' },
+          },
+        ],
+        createdAt,
+        expiresAt,
+      });
+      const plans = new AgentPlanRepository(db);
+      await plans.create({
+        definition: plan,
+        actionBindings: [{ stepId: 'step_publish', actionId: prepared.action.id }],
+        actor: {
+          type: 'agent',
+          tenantId: plan.tenantId,
+          principalId: plan.agentPrincipalId,
+        },
+        idempotencyKey: `agent-plan-create-${driver}-0001`,
+      });
+      await expect(
+        service.approve({
+          tenantId: plan.tenantId,
+          approverPrincipalId: plan.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          planSha256: plan.planSha256,
+          idempotencyKey: `agent-plan-premature-${driver}-0001`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_APPROVAL_PLAN_BINDING_INVALID');
+      await plans.transition({
+        tenantId: plan.tenantId,
+        planId: plan.id,
+        expectedStateVersion: 1,
+        status: 'awaiting_approval',
+        stepStates: [{ stepId: 'step_publish', status: 'awaiting_approval' }],
+        actor: {
+          type: 'agent',
+          tenantId: plan.tenantId,
+          principalId: plan.agentPrincipalId,
+        },
+        reasonCode: 'approval_requested',
+        idempotencyKey: `agent-plan-awaiting-${driver}-0001`,
+      });
+      await expect(
+        service.approve({
+          tenantId: plan.tenantId,
+          approverPrincipalId: plan.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `agent-plan-omitted-${driver}-0001`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_APPROVAL_PLAN_BINDING_INVALID');
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select('id')
+          .where('action_id', '=', prepared.action.id)
+          .execute(),
+      ).toEqual([]);
+      const approval = await service.approve({
+        tenantId: plan.tenantId,
+        approverPrincipalId: plan.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        planSha256: plan.planSha256,
+        idempotencyKey: `agent-plan-approval-${driver}-0001`,
+      });
+      expect(approval.planSha256).toBe(plan.planSha256);
+      const invalidAuditExecution: AgentExecution = {
+        id: `exec_${'a'.repeat(48)}`,
+        tenantId: plan.tenantId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        planSha256: plan.planSha256,
+        agentPrincipalId: plan.agentPrincipalId,
+        sponsorPrincipalId: plan.sponsorPrincipalId,
+        delegationGrantId: plan.delegationGrantId,
+        approvalId: approval.id,
+        idempotencyKey: 'a'.repeat(64),
+        requestFingerprint: 'b'.repeat(64),
+        state: 'reserved',
+        resourceVersion: prepared.action.target.resourceVersion,
+        policyVersion: prepared.action.expectedPolicyVersion,
+        fenceToken: 0,
+        createdAt: approval.approvedAt,
+        updatedAt: approval.approvedAt,
+      };
+      const invalidAuditBase = {
+        tenantId: plan.tenantId,
+        agentPrincipalId: plan.agentPrincipalId,
+        sponsorPrincipalId: plan.sponsorPrincipalId,
+        delegationGrantId: plan.delegationGrantId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        approvalId: approval.id,
+        idempotencyKey: invalidAuditExecution.idempotencyKey,
+        resourceVersion: prepared.action.target.resourceVersion,
+        occurredAt: approval.approvedAt,
+        reasonCodes: [],
+      };
+      await expect(
+        new AgentExecutionRepository(db).reserveAndConsume({
+          execution: invalidAuditExecution,
+          approval,
+          requiredApproverPermission: 'events:publish',
+          now: approval.approvedAt,
+          audit: [
+            { ...invalidAuditBase, id: `aaud_${'a'.repeat(48)}`, phase: 'prepared' },
+            { ...invalidAuditBase, id: `aaud_${'b'.repeat(48)}`, phase: 'authorized' },
+          ],
+        }),
+      ).rejects.toThrow('AGENT_AUDIT_IDENTITY_MISMATCH');
+      expect(
+        await db
+          .selectFrom('agent_approvals')
+          .select('consumed_at')
+          .where('id', '=', approval.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ consumed_at: null });
+      const cancelledPrepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-cancelled-action-${driver}-0001`,
+        kind: 'event.publish',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      const cancelledExpiresAt = new Date(
+        Math.min(
+          new Date(cancelledPrepared.expiresAt).getTime(),
+          new Date(cancelledPrepared.action.preparedAt).getTime() + 4 * 60 * 1000,
+        ),
+      ).toISOString();
+      const { planSha256: _originalPlanSha256, ...cancelledPlanInput } = plan;
+      const cancelledPlan = buildAgentPlanDefinition({
+        ...cancelledPlanInput,
+        id: `plan_cancelled_${driver}`,
+        steps: plan.steps.map((step) => ({
+          ...step,
+          actionDigest: cancelledPrepared.actionDigest,
+          actionProtocolVersion: cancelledPrepared.action.protocolVersion,
+          readinessImpact: {
+            ...step.readinessImpact,
+            beforeSnapshotSha256: cancelledPrepared.dryRun.readinessSnapshotSha256,
+          },
+          costs: step.costs.map((cost) => ({ ...cost, expiresAt: cancelledExpiresAt })),
+        })),
+        createdAt: cancelledPrepared.action.preparedAt,
+        expiresAt: cancelledExpiresAt,
+      });
+      await plans.create({
+        definition: cancelledPlan,
+        actionBindings: [
+          { stepId: 'step_publish', actionId: cancelledPrepared.action.id },
+        ],
+        actor: {
+          type: 'agent',
+          tenantId: cancelledPlan.tenantId,
+          principalId: cancelledPlan.agentPrincipalId,
+        },
+        idempotencyKey: `agent-plan-cancel-create-${driver}-0001`,
+      });
+      await plans.transition({
+        tenantId: cancelledPlan.tenantId,
+        planId: cancelledPlan.id,
+        expectedStateVersion: 1,
+        status: 'awaiting_approval',
+        stepStates: [{ stepId: 'step_publish', status: 'awaiting_approval' }],
+        actor: {
+          type: 'agent',
+          tenantId: cancelledPlan.tenantId,
+          principalId: cancelledPlan.agentPrincipalId,
+        },
+        reasonCode: 'approval_requested',
+        idempotencyKey: `agent-plan-cancel-awaiting-${driver}-0001`,
+      });
+      const cancelledApproval = await service.approve({
+        tenantId: cancelledPlan.tenantId,
+        approverPrincipalId: cancelledPlan.sponsorPrincipalId,
+        actionId: cancelledPrepared.action.id,
+        actionDigest: cancelledPrepared.actionDigest,
+        planSha256: cancelledPlan.planSha256,
+        idempotencyKey: `agent-plan-cancel-approval-${driver}-0001`,
+      });
+      await plans.transition({
+        tenantId: cancelledPlan.tenantId,
+        planId: cancelledPlan.id,
+        expectedStateVersion: 2,
+        status: 'cancelled',
+        stepStates: [{ stepId: 'step_publish', status: 'cancelled' }],
+        actor: {
+          type: 'user',
+          tenantId: cancelledPlan.tenantId,
+          principalId: cancelledPlan.sponsorPrincipalId,
+        },
+        reasonCode: 'sponsor_cancelled',
+        idempotencyKey: `agent-plan-cancelled-${driver}-0001`,
+      });
+      await expect(
+        service.execute({
+          tenantId: cancelledPlan.tenantId,
+          agentPrincipalId: cancelledPlan.agentPrincipalId,
+          actionId: cancelledPrepared.action.id,
+          approvalId: cancelledApproval.id,
+          actionDigest: cancelledPrepared.actionDigest,
+        }),
+      ).rejects.toThrow('agent execution reservation conflicted');
+      const executionPromise = service.execute({
+        tenantId: plan.tenantId,
+        agentPrincipalId: plan.agentPrincipalId,
+        actionId: prepared.action.id,
+        approvalId: approval.id,
+        actionDigest: prepared.actionDigest,
+      });
+      await effectReachedPromise;
+      const cancellationPromise = plans.transition({
+        tenantId: plan.tenantId,
+        planId: plan.id,
+        expectedStateVersion: 2,
+        status: 'cancelled',
+        stepStates: [{ stepId: 'step_publish', status: 'cancelled' }],
+        actor: { type: 'user', tenantId: plan.tenantId, principalId: plan.sponsorPrincipalId },
+        reasonCode: 'sponsor_cancelled',
+        idempotencyKey: `agent-plan-cancel-race-${driver}-0001`,
+      });
+      const cancellationResult = cancellationPromise.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      releaseEffect();
+      const executed = await executionPromise;
+      expect(await cancellationResult).toMatchObject({
+        message: 'AGENT_PLAN_CANCELLATION_REQUIRES_NO_EXECUTION',
+      });
+      expect(executed).toMatchObject({ state: 'succeeded', planSha256: plan.planSha256 });
+      expect(
+        await db
+          .selectFrom('agent_executions')
+          .select('plan_sha256')
+          .where('id', '=', executed.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ plan_sha256: plan.planSha256 });
+      expect(
+        await db
+          .selectFrom('agent_audit_events')
+          .select('plan_sha256')
+          .where('execution_id', '=', executed.id)
+          .execute(),
+      ).toSatisfy((rows: Array<{ plan_sha256: string | null }>) =>
+        rows.length > 0 && rows.every(({ plan_sha256 }) => plan_sha256 === plan.planSha256),
+      );
+      await expect(
+        plans.transition({
+          tenantId: plan.tenantId,
+          planId: plan.id,
+          expectedStateVersion: 2,
+          status: 'succeeded',
+          stepStates: [
+            {
+              stepId: 'step_publish',
+              status: 'succeeded',
+              approvalId: approval.id,
+              executionId: executed.id,
+              resultSha256: agentSha256(executed.result),
+            },
+          ],
+          actor: {
+            type: 'agent',
+            tenantId: plan.tenantId,
+            principalId: plan.agentPrincipalId,
+          },
+          reasonCode: 'execution_succeeded',
+          idempotencyKey: `agent-plan-succeeded-${driver}-0001`,
+        }),
+      ).resolves.toMatchObject({ state: { status: 'succeeded', stateVersion: 3 } });
     });
 
     it('hides an action from a different sponsor without approval persistence', async () => {

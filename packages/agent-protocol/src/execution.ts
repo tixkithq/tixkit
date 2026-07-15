@@ -18,6 +18,7 @@ export interface AgentExecution {
   tenantId: string;
   actionId: string;
   actionDigest: string;
+  planSha256?: string;
   agentPrincipalId: string;
   sponsorPrincipalId: string;
   delegationGrantId: string;
@@ -243,6 +244,7 @@ export class DurableAgentExecutionService {
       tenantId: input.action.target.tenantId,
       actionId: input.action.id,
       actionDigest: input.actionDigest,
+      ...(input.approval.planSha256 ? { planSha256: input.approval.planSha256 } : {}),
       agentPrincipalId: input.action.agentPrincipalId,
       sponsorPrincipalId: input.action.sponsorPrincipalId,
       delegationGrantId: input.action.delegationGrantId,
@@ -460,6 +462,7 @@ export class DurableAgentExecutionService {
       delegationGrantId: execution.delegationGrantId,
       actionId: execution.actionId,
       actionDigest: execution.actionDigest,
+      ...(execution.planSha256 ? { planSha256: execution.planSha256 } : {}),
       approvalId: execution.approvalId,
       phase,
       idempotencyKey: execution.idempotencyKey,

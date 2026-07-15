@@ -154,6 +154,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-07-27 durable agent plans',
         routeId: 'apiMigration20260726To20260727',
       },
+      {
+        label: 'Adopt 2026-07-28 plan-bound execution',
+        routeId: 'apiMigration20260727To20260728',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

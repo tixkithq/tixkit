@@ -44,6 +44,8 @@ Authorization is the intersection of agent capability, sponsor permission, deleg
 
 Managed Cloud releases must pin action protocol version `2026-07-22`, platform protocol version `2026-07-27`, and the registry/schema digests through their Cloud/core compatibility manifest. Changes to canonical bytes, action or plan digests, authorization inputs, approval semantics, registry policy, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. The immutable `2026-07-11` and `2026-07-22` action schemas remain exported byte-for-byte; `./schema` intentionally continues to resolve to `2026-07-22`.
 
+HTTP API release `2026-07-28` is a compatible enforcement release for the existing platform protocol: serialized `2026-07-27` plan definitions, states and digests remain byte-for-byte readable. It carries the already-required plan digest through approval, execution and audit evidence and permits an evidence-validated direct terminal transition for synchronous adapters; it does not change canonical plan bytes or the immutable JSON schemas.
+
 ## Related guides
 
 [API permissions](../../docs/public/developers/api-fundamentals/permissions.mdx) · [Platform API overview](../../docs/public/platform/index.mdx)

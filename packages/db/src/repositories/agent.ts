@@ -170,6 +170,7 @@ function toExecution(row: Selectable<DB['agent_executions']>): AgentExecution {
     tenantId: row.tenant_id,
     actionId: row.action_id,
     actionDigest: row.action_digest,
+    ...(row.plan_sha256 === null ? {} : { planSha256: row.plan_sha256 }),
     agentPrincipalId: row.agent_principal_id,
     sponsorPrincipalId: row.sponsor_principal_id,
     delegationGrantId: row.delegation_grant_id,
@@ -196,6 +197,7 @@ function assertExecutionEvidenceState(execution: AgentExecution): void {
     !EXECUTION_ID.test(execution.id) ||
     !ACTION_ID.test(execution.actionId) ||
     !SHA256.test(execution.actionDigest) ||
+    (execution.planSha256 !== undefined && !SHA256.test(execution.planSha256)) ||
     !AGENT_ID.test(execution.agentPrincipalId) ||
     !DELEGATION_ID.test(execution.delegationGrantId) ||
     !APPROVAL_ID.test(execution.approvalId) ||
@@ -547,6 +549,7 @@ function assertAudit(
     record.delegationGrantId !== execution.delegationGrantId ||
     record.actionId !== execution.actionId ||
     record.actionDigest !== execution.actionDigest ||
+    record.planSha256 !== execution.planSha256 ||
     record.approvalId !== execution.approvalId ||
     record.idempotencyKey !== execution.idempotencyKey ||
     record.resourceVersion !== execution.resourceVersion
@@ -1289,6 +1292,68 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     return executeRetryableTransaction(
       this.db,
       async (tx) => {
+        await tx
+          .selectFrom('tenants')
+          .select('id')
+          .where('id', '=', input.execution.tenantId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        const plan = await tx
+          .selectFrom('agent_plans as plan')
+          .innerJoin('agent_plan_actions as binding', (join) =>
+            join
+              .onRef('binding.tenant_id', '=', 'plan.tenant_id')
+              .onRef('binding.plan_id', '=', 'plan.id'),
+          )
+          .innerJoin('agent_plan_states as state', (join) =>
+            join
+              .onRef('state.tenant_id', '=', 'plan.tenant_id')
+              .onRef('state.plan_id', '=', 'plan.id'),
+          )
+          .select([
+            'plan.plan_sha256',
+            'plan.expires_at',
+            'binding.action_digest',
+            'binding.step_id',
+            'state.status',
+            'state.state_json',
+          ])
+          .where('plan.tenant_id', '=', input.execution.tenantId)
+          .where('binding.action_id', '=', input.execution.actionId)
+          .forUpdate()
+          .executeTakeFirst();
+        const planStepIsExecutable = plan
+          ? (() => {
+              const state: unknown = JSON.parse(plan.state_json);
+              if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
+              const stepStates = (state as { stepStates?: unknown }).stepStates;
+              if (!Array.isArray(stepStates)) return false;
+              const step = stepStates.find(
+                (candidate) =>
+                  Boolean(candidate) &&
+                  typeof candidate === 'object' &&
+                  !Array.isArray(candidate) &&
+                  (candidate as { stepId?: unknown }).stepId === plan.step_id,
+              );
+              return (
+                Boolean(step) &&
+                typeof step === 'object' &&
+                !Array.isArray(step) &&
+                (step as { status?: unknown }).status === 'awaiting_approval'
+              );
+            })()
+          : true;
+        const transactionNow = await databaseNow(tx);
+        if (
+          Boolean(plan) !== Boolean(input.execution.planSha256) ||
+          (plan &&
+            (plan.plan_sha256 !== input.execution.planSha256 ||
+              plan.action_digest !== input.execution.actionDigest ||
+              plan.status !== 'awaiting_approval' ||
+              !planStepIsExecutable ||
+              new Date(plan.expires_at).getTime() <= transactionNow.getTime()))
+        )
+          throw new Error('AGENT_APPROVAL_INVALID');
         const approval = await tx
           .selectFrom('agent_approvals')
           .selectAll()
@@ -1301,6 +1366,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           input.approval.id !== input.execution.approvalId ||
           approval.id !== input.execution.approvalId ||
           approval.action_digest !== input.execution.actionDigest ||
+          approval.plan_sha256 !== (input.execution.planSha256 ?? null) ||
           approval.approver_principal_id !== input.execution.sponsorPrincipalId ||
           (approval.action_id !== null && approval.action_id !== input.execution.actionId)
         )
@@ -1315,6 +1381,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           if (
             existing.action_id !== input.execution.actionId ||
             existing.action_digest !== input.execution.actionDigest ||
+            existing.plan_sha256 !== (input.execution.planSha256 ?? null) ||
             existing.agent_principal_id !== input.execution.agentPrincipalId ||
             existing.sponsor_principal_id !== input.execution.sponsorPrincipalId ||
             existing.delegation_grant_id !== input.execution.delegationGrantId ||
@@ -1329,7 +1396,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           return { created: false, execution: toExecution(existing) };
         }
 
-        const now = await databaseNow(tx);
+        const now = transactionNow;
         const permissions: unknown = JSON.parse(approval.approver_permission_snapshot);
         if (
           safeInteger(approval.policy_version, 'approval policy version') !==
@@ -1360,6 +1427,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
             tenant_id: input.execution.tenantId,
             action_id: input.execution.actionId,
             action_digest: input.execution.actionDigest,
+            plan_sha256: input.execution.planSha256 ?? null,
             agent_principal_id: input.execution.agentPrincipalId,
             sponsor_principal_id: input.execution.sponsorPrincipalId,
             delegation_grant_id: input.execution.delegationGrantId,
@@ -1408,6 +1476,13 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     audit: AgentAuditRecord;
   }): Promise<AgentExecution | null> {
     return this.db.transaction().execute(async (tx) => {
+      const tenant = await tx
+        .selectFrom('tenants')
+        .select('id')
+        .where('id', '=', input.tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!tenant) return null;
       const row = await tx
         .selectFrom('agent_executions')
         .selectAll()
@@ -1524,6 +1599,13 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     audit: AgentAuditRecord;
   }): Promise<boolean> {
     return this.db.transaction().execute(async (tx) => {
+      const tenant = await tx
+        .selectFrom('tenants')
+        .select('id')
+        .where('id', '=', input.execution.tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!tenant) return false;
       const row = await tx
         .selectFrom('agent_executions')
         .selectAll()

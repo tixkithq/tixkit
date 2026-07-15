@@ -25,8 +25,15 @@ const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{
 const approvalParamsSchema = actionParamsSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
   .strict();
-const approvalSchema = z.object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
-const executionSchema = approvalSchema
+const actionDigestSchema = z
+  .object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$/u) })
+  .strict();
+const approvalSchema = actionDigestSchema
+  .extend({
+    planSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+  })
+  .strict();
+const executionSchema = actionDigestSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
   .strict();
 const executionParamsSchema = actionParamsSchema
@@ -57,6 +64,7 @@ export interface AgentActionRouteService {
     approverPrincipalId: string;
     actionId: string;
     actionDigest: string;
+    planSha256?: string;
     idempotencyKey: string;
   }): Promise<import('@tixkit/agent-protocol').AgentApproval>;
   revokeApproval(input: {
@@ -147,6 +155,8 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new NotFoundError('AgentAction', 'requested');
   if (message === 'AGENT_ACTION_APPROVAL_DIGEST_MISMATCH')
     throw new ConflictError('Agent action digest no longer matches the reviewed action');
+  if (message === 'AGENT_ACTION_APPROVAL_PLAN_BINDING_INVALID')
+    throw new ConflictError('Agent action approval does not match its authoritative plan');
   if (message === 'AGENT_ACTION_NOT_APPROVABLE')
     throw new ConflictError('Agent action is no longer eligible for approval');
   if (message === 'AGENT_ACTION_ALREADY_APPROVED')
@@ -216,8 +226,8 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
     requireHumanApprover(actor);
     const key = idempotencyKey(request.headers);
     const { actionId } = parseBody(actionParamsSchema, request.params);
-    const { actionDigest } = parseBody(approvalSchema, request.body);
-    const expectedConfirmation = `approve:${actionId}:${actionDigest}`;
+    const { actionDigest, planSha256 } = parseBody(approvalSchema, request.body);
+    const expectedConfirmation = `approve:${actionId}:${actionDigest}${planSha256 ? `:${planSha256}` : ''}`;
     if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
       throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);
     try {
@@ -226,6 +236,7 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
         approverPrincipalId: actor.id,
         actionId,
         actionDigest,
+        ...(planSha256 ? { planSha256 } : {}),
         idempotencyKey: key,
       });
       reply.header('Cache-Control', 'no-store');
@@ -240,7 +251,7 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
     requireHumanSponsor(actor);
     const key = idempotencyKey(request.headers);
     const { actionId, approvalId } = parseBody(approvalParamsSchema, request.params);
-    const { actionDigest } = parseBody(approvalSchema, request.body);
+    const { actionDigest } = parseBody(actionDigestSchema, request.body);
     const expectedConfirmation = `revoke:${actionId}:${approvalId}:${actionDigest}`;
     if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
       throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);

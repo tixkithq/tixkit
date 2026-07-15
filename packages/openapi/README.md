@@ -42,7 +42,7 @@ Security schemes and scopes must match enforcement; examples cannot contain cred
 
 ## Compatibility
 
-Operation IDs, current API version `2026-07-27`, SDK exports, dashboard types, and docs reference must remain synchronized.
+Operation IDs, current API version `2026-07-28`, SDK exports, dashboard types, and docs reference must remain synchronized.
 
 ## Related guides
 

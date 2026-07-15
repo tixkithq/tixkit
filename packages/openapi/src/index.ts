@@ -573,7 +573,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-27',
+    version: '2026-07-28',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -668,10 +668,10 @@ const rawOpenApiSpec = {
         required: true,
         schema: {
           type: 'string',
-          pattern: '^approve:act_[a-f0-9]{48}:[a-f0-9]{64}$',
+          pattern: '^approve:act_[a-f0-9]{48}:[a-f0-9]{64}(?::[a-f0-9]{64})?$',
         },
         description:
-          'Must exactly equal approve:<actionId>:<actionDigest>. This binds explicit human intent to the immutable reviewed action.',
+          'Must exactly equal approve:<actionId>:<actionDigest> for a standalone action, or approve:<actionId>:<actionDigest>:<planSha256> for a planned action. This binds explicit human intent to the immutable reviewed action and plan.',
       },
       AgentApprovalIdempotencyKey: {
         name: 'Idempotency-Key',
@@ -5408,7 +5408,7 @@ const rawOpenApiSpec = {
       AgentApproval: {
         type: 'object',
         description:
-          'Fresh human approval bound to one immutable action digest and current server-derived permission/policy evidence. Approval does not itself execute the action.',
+          'Fresh human approval bound to one immutable action digest, optionally its authoritative plan digest, and current server-derived permission/policy evidence. Approval does not itself execute the action.',
         additionalProperties: false,
         properties: {
           id: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
@@ -5461,6 +5461,7 @@ const rawOpenApiSpec = {
             pattern: '^[a-f0-9]{64}$',
             example: 'c'.repeat(64),
           },
+          planSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           agentPrincipalId: {
             type: 'string',
             pattern: '^agt_[a-f0-9]{48}$',
@@ -10934,7 +10935,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Approve one immutable agent action',
         description:
-          'Experimental/private beta. Human sponsor only. Rechecks active identity, accepted event membership, tenant events.write, agent/delegation state, policy, event version and readiness under a serializable lock. The server derives the permission snapshot, approval time and expiry. A material change fails closed and requires a newly prepared action.',
+          'Experimental/private beta. Human sponsor only. Rechecks active identity, accepted event membership, tenant events.write, agent/delegation state, policy, event version and readiness under a serializable lock. planSha256 is mandatory when the action belongs to an authoritative plan; the server verifies the exact unexpired plan, sponsor, action and step binding, completed dependencies and approvable state. The server derives the permission snapshot, approval time and expiry. A material change fails closed and requires a newly prepared action.',
         'x-required-permissions': ['events.write'],
         security: [{ BearerAuth: [] }],
         parameters: [
@@ -10956,6 +10957,7 @@ const rawOpenApiSpec = {
                 additionalProperties: false,
                 properties: {
                   actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                  planSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
                 },
                 required: ['actionDigest'],
               },

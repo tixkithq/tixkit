@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../../client.js';
 import { runMigrations, truncateAllData } from '../../migrate.js';
 import { AgentPlansMigration } from '../../migrations/0084_agent_plans.js';
+import { AgentExecutionPlanBindingMigration } from '../../migrations/0085_agent_execution_plan_binding.js';
 import {
   AgentExecutionRepository,
   AgentPlanRepository,
@@ -613,6 +614,7 @@ describe.sequential.each(driverCases)('agent plan persistence: $driver', ({ driv
       tenant_id: tenantId,
       action_id: action.id,
       action_digest: agentActionDigest(action),
+      plan_sha256: plan.planSha256,
       agent_principal_id: plan.agentPrincipalId,
       sponsor_principal_id: plan.sponsorPrincipalId,
       delegation_grant_id: plan.delegationGrantId,
@@ -774,6 +776,9 @@ describe.sequential.each(driverCases)('agent plan persistence: $driver', ({ driv
       idempotencyKey: 'agent-plan-transition-succeeded-2026',
     });
     expect(succeeded.state).toMatchObject({ stateVersion: 6, status: 'succeeded' });
+    await expect(AgentExecutionPlanBindingMigration.down!(db)).rejects.toThrow(
+      'rollback refused',
+    );
   });
 
   it('reauthorizes tenant-scoped actors for every transition', async () => {

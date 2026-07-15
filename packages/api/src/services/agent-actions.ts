@@ -20,6 +20,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   eventPublishReadinessSnapshotSha256,
   EventPublishAgentAdapter,
+  type EventPublishAgentAdapterCheckpoints,
 } from './agent-event-publish.js';
 import { ReadinessService, resolvePaymentMode } from './readiness.js';
 
@@ -199,7 +200,10 @@ function toDelegation(row: {
 }
 
 export class AgentActionService {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly eventPublishCheckpoints: EventPublishAgentAdapterCheckpoints = {},
+  ) {}
 
   async prepare(input: {
     tenantId: string;
@@ -506,11 +510,13 @@ export class AgentActionService {
     approverPrincipalId: string;
     actionId: string;
     actionDigest: string;
+    planSha256?: string;
     idempotencyKey: string;
   }): Promise<AgentApproval> {
     const fingerprint = agentSha256({
       actionId: input.actionId,
       actionDigest: input.actionDigest,
+      planSha256: input.planSha256 ?? null,
     });
     return executeAgentActionTransaction(this.db, async (tx) => {
       await tx
@@ -531,6 +537,108 @@ export class AgentActionService {
       const prepared = this.fromRow(row);
       if (prepared.actionDigest !== input.actionDigest)
         throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
+      const now = await databaseNow(tx);
+      let planExpiresAt: Date | undefined;
+      const plan = await tx
+        .selectFrom('agent_plans as plan')
+        .innerJoin('agent_plan_actions as binding', (join) =>
+          join
+            .onRef('binding.tenant_id', '=', 'plan.tenant_id')
+            .onRef('binding.plan_id', '=', 'plan.id'),
+        )
+        .innerJoin('agent_plan_states as state', (join) =>
+          join
+            .onRef('state.tenant_id', '=', 'plan.tenant_id')
+            .onRef('state.plan_id', '=', 'plan.id'),
+        )
+        .select([
+          'plan.plan_sha256',
+          'plan.plan_json',
+          'plan.expires_at',
+          'binding.action_digest',
+          'binding.step_id',
+          'state.status',
+          'state.state_json',
+        ])
+        .where('plan.tenant_id', '=', input.tenantId)
+        .where('plan.sponsor_principal_id', '=', input.approverPrincipalId)
+        .where('binding.action_id', '=', input.actionId)
+        .forUpdate()
+        .executeTakeFirst();
+      const planStepState = plan
+        ? (() => {
+            const state: unknown = JSON.parse(plan.state_json);
+            if (!state || typeof state !== 'object' || Array.isArray(state)) return undefined;
+            const stepStates = (state as { stepStates?: unknown }).stepStates;
+            if (!Array.isArray(stepStates)) return undefined;
+            return stepStates.find(
+              (step): step is { stepId: string; status: string } =>
+                Boolean(step) &&
+                typeof step === 'object' &&
+                !Array.isArray(step) &&
+                (step as { stepId?: unknown }).stepId === plan.step_id &&
+                typeof (step as { status?: unknown }).status === 'string',
+            );
+          })()
+        : undefined;
+      const dependenciesSucceeded = plan
+        ? (() => {
+            const definition: unknown = JSON.parse(plan.plan_json);
+            const state: unknown = JSON.parse(plan.state_json);
+            if (
+              !definition ||
+              typeof definition !== 'object' ||
+              Array.isArray(definition) ||
+              !state ||
+              typeof state !== 'object' ||
+              Array.isArray(state)
+            )
+              return false;
+            const steps = (definition as { steps?: unknown }).steps;
+            const stepStates = (state as { stepStates?: unknown }).stepStates;
+            if (!Array.isArray(steps) || !Array.isArray(stepStates)) return false;
+            const definitionStep = steps.find(
+              (step) =>
+                Boolean(step) &&
+                typeof step === 'object' &&
+                !Array.isArray(step) &&
+                (step as { id?: unknown }).id === plan.step_id,
+            ) as { dependsOnStepIds?: unknown } | undefined;
+            if (
+              !definitionStep ||
+              !Array.isArray(definitionStep.dependsOnStepIds) ||
+              definitionStep.dependsOnStepIds.some((dependency) => typeof dependency !== 'string')
+            )
+              return false;
+            const statuses = new Map(
+              stepStates.flatMap((step) =>
+                step &&
+                typeof step === 'object' &&
+                !Array.isArray(step) &&
+                typeof (step as { stepId?: unknown }).stepId === 'string' &&
+                typeof (step as { status?: unknown }).status === 'string'
+                  ? [[
+                      (step as { stepId: string }).stepId,
+                      (step as { status: string }).status,
+                    ] as const]
+                  : [],
+              ),
+            );
+            return definitionStep.dependsOnStepIds.every(
+              (dependency) => statuses.get(dependency as string) === 'succeeded',
+            );
+          })()
+        : true;
+      const invalidPlanBinding =
+        Boolean(plan) !== Boolean(input.planSha256) ||
+        (plan &&
+          (plan.plan_sha256 !== input.planSha256 ||
+            plan.action_digest !== input.actionDigest ||
+            new Date(plan.expires_at).getTime() <= now.getTime() ||
+            plan.status !== 'awaiting_approval' ||
+            planStepState?.status !== 'awaiting_approval' ||
+            !dependenciesSucceeded));
+      if (plan) planExpiresAt = new Date(plan.expires_at);
       const replay = await tx
         .selectFrom('agent_action_events')
         .selectAll()
@@ -558,6 +666,7 @@ export class AgentActionService {
         const replayed = this.approvalFromRow(approval);
         if (
           replayed.actionDigest !== input.actionDigest ||
+          replayed.planSha256 !== input.planSha256 ||
           replayed.approverPrincipalId !== input.approverPrincipalId ||
           replayed.policyVersion !== prepared.action.expectedPolicyVersion ||
           replayed.approverPermissionSnapshot.length !== 1 ||
@@ -566,13 +675,17 @@ export class AgentActionService {
           throw new Error('persisted agent approval binding is invalid');
         return replayed;
       }
-      const now = await databaseNow(tx);
-      const authorizationSha256 = await this.assertCurrentlyApprovable(
+      if (invalidPlanBinding) throw new Error('AGENT_ACTION_APPROVAL_PLAN_BINDING_INVALID');
+      const actionAuthorizationSha256 = await this.assertCurrentlyApprovable(
         tx,
         prepared,
         input.approverPrincipalId,
         now,
       );
+      const authorizationSha256 = agentSha256({
+        actionAuthorizationSha256,
+        planSha256: input.planSha256 ?? null,
+      });
       const existing = await tx
         .selectFrom('agent_approvals')
         .select('id')
@@ -582,7 +695,11 @@ export class AgentActionService {
         .executeTakeFirst();
       if (existing) throw new Error('AGENT_ACTION_ALREADY_APPROVED');
       const expiresAt = new Date(
-        Math.min(now.getTime() + APPROVAL_TTL_MILLISECONDS, new Date(prepared.expiresAt).getTime()),
+        Math.min(
+          now.getTime() + APPROVAL_TTL_MILLISECONDS,
+          new Date(prepared.expiresAt).getTime(),
+          planExpiresAt?.getTime() ?? Number.POSITIVE_INFINITY,
+        ),
       );
       const approval: AgentApproval = {
         id: stableId(
@@ -594,6 +711,7 @@ export class AgentActionService {
         ),
         tenantId: input.tenantId,
         actionDigest: input.actionDigest,
+        ...(input.planSha256 ? { planSha256: input.planSha256 } : {}),
         approverPrincipalId: input.approverPrincipalId,
         approverPermissionSnapshot: ['events:publish'],
         policyVersion: prepared.action.expectedPolicyVersion,
@@ -607,7 +725,7 @@ export class AgentActionService {
           tenant_id: approval.tenantId,
           action_id: input.actionId,
           action_digest: approval.actionDigest,
-          plan_sha256: null,
+          plan_sha256: input.planSha256 ?? null,
           approver_principal_id: approval.approverPrincipalId,
           approver_permission_snapshot: canonicalAgentJson(approval.approverPermissionSnapshot),
           policy_version: approval.policyVersion,
@@ -795,6 +913,7 @@ export class AgentActionService {
       tenantId: input.tenantId,
       actionId: input.actionId,
       actionDigest: input.actionDigest,
+      ...(approvalRow.plan_sha256 ? { planSha256: approvalRow.plan_sha256 } : {}),
       agentPrincipalId: input.agentPrincipalId,
       sponsorPrincipalId: prepared.action.sponsorPrincipalId,
       delegationGrantId: prepared.action.delegationGrantId,
@@ -813,7 +932,7 @@ export class AgentActionService {
       updatedAt: now,
     };
     const repository = new AgentExecutionRepository(this.db);
-    const adapter = new EventPublishAgentAdapter(this.db);
+    const adapter = new EventPublishAgentAdapter(this.db, this.eventPublishCheckpoints);
     const executionService = new DurableAgentExecutionService(
       repository,
       adapter,
@@ -829,6 +948,7 @@ export class AgentActionService {
       if (
         existing.actionId !== probe.actionId ||
         existing.actionDigest !== probe.actionDigest ||
+        existing.planSha256 !== probe.planSha256 ||
         existing.agentPrincipalId !== probe.agentPrincipalId ||
         existing.sponsorPrincipalId !== probe.sponsorPrincipalId ||
         existing.delegationGrantId !== probe.delegationGrantId ||

@@ -286,6 +286,7 @@
       { "name": "checkout", "dockerfile": "Dockerfile.checkout" }
     ],
     "contracts": [
+      "artifacts/api/2026-07-28",
       "artifacts/api/2026-07-27",
       "artifacts/api/2026-07-26",
       "artifacts/api/2026-07-25",

@@ -174,6 +174,7 @@ function executionFromRow(row: Selectable<DB['agent_executions']>): AgentExecuti
     tenantId: row.tenant_id,
     actionId: row.action_id,
     actionDigest: row.action_digest,
+    ...(row.plan_sha256 ? { planSha256: row.plan_sha256 } : {}),
     agentPrincipalId: row.agent_principal_id,
     sponsorPrincipalId: row.sponsor_principal_id,
     delegationGrantId: row.delegation_grant_id,
@@ -674,6 +675,8 @@ export class AgentPlanRepository {
         if (!approval || !approval.consumed_at || approval.consumed_execution_id !== execution.id)
           throw new Error('AGENT_PLAN_EXECUTION_APPROVAL_BINDING_INVALID');
       }
+      if (next.status === 'cancelled' && executions.length > 0)
+        throw new Error('AGENT_PLAN_CANCELLATION_REQUIRES_NO_EXECUTION');
       validateAgentPlanStateTransition(definition, previous, next, {
         actions,
         approvals: approvals.map(approvalFromRow),

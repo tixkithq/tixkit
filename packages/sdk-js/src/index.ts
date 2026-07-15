@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-27';
+export const TIXKIT_API_VERSION = '2026-07-28';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1656,6 +1656,7 @@ export type AgentExecution = {
   tenantId: string;
   actionId: string;
   actionDigest: string;
+  planSha256?: string;
   agentPrincipalId: string;
   sponsorPrincipalId: string;
   delegationGrantId: string;
@@ -4415,13 +4416,17 @@ class AgentActionResource {
   async approve(input: {
     actionId: string;
     actionDigest: string;
+    planSha256?: string;
     idempotencyKey: string;
   }): Promise<AgentApproval> {
     return this.client.request('POST', `/agent/actions/${input.actionId}/approvals`, {
-      body: { actionDigest: input.actionDigest },
+      body: {
+        actionDigest: input.actionDigest,
+        ...(input.planSha256 ? { planSha256: input.planSha256 } : {}),
+      },
       idempotencyKey: input.idempotencyKey,
       headers: {
-        'X-Tixkit-Confirmation': `approve:${input.actionId}:${input.actionDigest}`,
+        'X-Tixkit-Confirmation': `approve:${input.actionId}:${input.actionDigest}${input.planSha256 ? `:${input.planSha256}` : ''}`,
       },
     });
   }

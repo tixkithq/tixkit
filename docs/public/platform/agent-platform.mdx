@@ -7,7 +7,7 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
@@ -22,6 +22,7 @@ related:
   - /reference/migrations/2026-07-24-to-2026-07-25
   - /reference/migrations/2026-07-25-to-2026-07-26
   - /reference/migrations/2026-07-26-to-2026-07-27
+  - /reference/migrations/2026-07-27-to-2026-07-28
 keywords:
   - agents
   - delegation
@@ -37,7 +38,7 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-07-27`, action protocol `2026-07-22` and plan protocol `2026-07-27` support these sponsor-controlled operations:
+API version `2026-07-28`, action protocol `2026-07-22` and plan protocol `2026-07-27` support these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
@@ -88,13 +89,13 @@ The sponsor can inspect only their own principal and can revoke their own princi
 
 An explicitly authenticated agent prepares an event publish action through `tixkit.agentActions.prepare` or `POST /v1/agent/actions`. The request contains only the action kind, delegation identifier and event identifier. The server derives identity, sponsor, tenant, resource and policy versions, exact readiness digest, operation and preparation time under a serializable transaction. The resulting action and dry-run evidence are immutable, expire after at most 15 minutes and converge on exact idempotent replay. Cross-agent reads fail closed.
 
-Preparation never authorizes execution. `eligibleForApproval` means only that the live authorization intersection and event readiness passed except for the mandatory approval. A human sponsor with current `events.write` permission issues approval through `tixkit.agentActions.approve` or `POST /v1/agent/actions/{actionId}/approvals`. The request must carry the exact action digest, a unique idempotency key and the explicit confirmation value `approve:<actionId>:<actionDigest>`. Tixkit revalidates the principal, delegation, sponsor, tenant membership, permission, policy, risk, resource version and readiness digest inside the serializable transaction. The resulting approval expires after at most five minutes and cannot be reused for another action.
+Preparation never authorizes execution. `eligibleForApproval` means only that the live authorization intersection and event readiness passed except for the mandatory approval. A human sponsor with current `events.write` permission issues approval through `tixkit.agentActions.approve` or `POST /v1/agent/actions/{actionId}/approvals`. A standalone request carries the exact action digest and confirmation `approve:<actionId>:<actionDigest>`. Once an action belongs to an authoritative plan, `planSha256` is mandatory and confirmation must be `approve:<actionId>:<actionDigest>:<planSha256>`. Tixkit revalidates the exact plan, step, completed dependencies, principal, delegation, sponsor, tenant membership, permission, policy, risk, resource version and readiness digest inside the serializable transaction. The resulting approval expires after at most five minutes or at plan expiry, whichever occurs first, and cannot be reused for another action or plan.
 
 An exact replay returns the original approval even if authority has since changed, without creating new authority. A new approval request after any material readiness, policy, resource, delegation or permission change fails closed.
 
 The exact human sponsor revokes an unconsumed approval through `tixkit.agentActions.revokeApproval` or `POST /v1/agent/actions/{actionId}/approvals/{approvalId}/revoke`. Revocation remains available after event permission loss, requires the exact action digest and explicit confirmation, converges under exact replay and records one immutable lifecycle event. Cross-sponsor, cross-tenant, changed-binding and consumed-approval attempts fail closed.
 
-The exact authenticated agent executes through `tixkit.agentActions.execute` or `POST /v1/agent/actions/{actionId}/executions`. Send only the approval identifier and exact action digest, with both `Idempotency-Key` and `X-Tixkit-Confirmation` equal to `execute:<actionId>:<approvalId>:<actionDigest>`. Tixkit atomically consumes the unrevoked approval and reserves durable execution evidence. The typed event-publish boundary then rechecks the current principal, delegation, sponsor membership and permission, tenant and risk policy, event version, approval binding and readiness digest before changing the event.
+The exact authenticated agent executes through `tixkit.agentActions.execute` or `POST /v1/agent/actions/{actionId}/executions`. Send only the approval identifier and exact action digest, with both `Idempotency-Key` and `X-Tixkit-Confirmation` equal to `execute:<actionId>:<approvalId>:<actionDigest>`. Tixkit atomically consumes the unrevoked approval and reserves durable execution evidence. Planned execution is persisted with the plan digest. The typed event-publish boundary locks and rechecks the current plan and step alongside the principal, delegation, sponsor membership and permission, tenant and risk policy, event version, approval binding and readiness digest before changing the event. Cancellation wins before reservation or effect application; once an execution exists, cancellation is rejected rather than claiming that a consequential effect was stopped.
 
 One execution can create at most one recorded product effect. An exact retry after a terminal result returns the same evidence. A retry while another worker holds the execution lease may return `409`; retry it without changing the action, approval or digest. Permanent authorization changes are recorded as a bounded failed execution, while retryable infrastructure faults leave the leased execution resumable. Approval consumption is consequential: a consumed approval cannot be revoked or transferred to another execution.
 

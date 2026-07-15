@@ -713,7 +713,14 @@ export function validateAgentPlanState(
 
 const PLAN_STATUS_TRANSITIONS: Readonly<Record<AgentPlanStatus, readonly AgentPlanStatus[]>> = {
   prepared: ['prepared', 'awaiting_approval', 'cancelled', 'expired'],
-  awaiting_approval: ['awaiting_approval', 'executing', 'failed', 'cancelled', 'expired'],
+  awaiting_approval: [
+    'awaiting_approval',
+    'executing',
+    'succeeded',
+    'failed',
+    'cancelled',
+    'expired',
+  ],
   executing: ['executing', 'awaiting_approval', 'succeeded', 'failed', 'cancelled', 'compensated'],
   succeeded: ['succeeded'],
   failed: ['failed', 'compensated', 'cancelled'],
@@ -727,7 +734,14 @@ const STEP_STATUS_TRANSITIONS: Readonly<
 > = {
   pending: ['pending', 'blocked', 'awaiting_approval', 'cancelled'],
   blocked: ['blocked', 'pending', 'awaiting_approval', 'cancelled'],
-  awaiting_approval: ['awaiting_approval', 'approved', 'executing', 'cancelled'],
+  awaiting_approval: [
+    'awaiting_approval',
+    'approved',
+    'executing',
+    'succeeded',
+    'failed',
+    'cancelled',
+  ],
   approved: ['approved', 'executing', 'cancelled'],
   executing: ['executing', 'succeeded', 'failed', 'compensated'],
   succeeded: ['succeeded'],
@@ -857,6 +871,7 @@ export function validateAgentPlanStateTransition(
           execution.sponsorPrincipalId === definition.sponsorPrincipalId &&
           execution.delegationGrantId === definition.delegationGrantId &&
           execution.actionDigest === planStep.actionDigest &&
+          execution.planSha256 === definition.planSha256 &&
           execution.approvalId === stepState.approvalId &&
           execution.resourceVersion === action.target.resourceVersion &&
           execution.policyVersion === action.expectedPolicyVersion &&
