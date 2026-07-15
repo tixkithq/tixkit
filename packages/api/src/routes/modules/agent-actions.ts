@@ -28,6 +28,29 @@ const readReadinessSchema = z
   })
   .strict();
 const readEventSchema = readReadinessSchema;
+const agentReportTimestampSchema = z
+  .string()
+  .datetime({ offset: false })
+  .refine(
+    (value) => new Date(value).toISOString() === value && value.endsWith('.000Z'),
+    'must be canonical whole-second UTC',
+  );
+const readReportSchema = readReadinessSchema
+  .extend({
+    from: agentReportTimestampSchema.optional(),
+    to: agentReportTimestampSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.from === undefined) !== (value.to === undefined))
+      context.addIssue({
+        code: 'custom',
+        path: value.from === undefined ? ['from'] : ['to'],
+        message: 'from and to must be provided together',
+      });
+    if (value.from && value.to && Date.parse(value.from) > Date.parse(value.to))
+      context.addIssue({ code: 'custom', path: ['to'], message: 'must be on or after from' });
+  });
 const prepareEventChangesSchema = readReadinessSchema
   .extend({ changes: eventPrepareChangesSchema })
   .strict();
@@ -86,6 +109,7 @@ export interface AgentActionRouteService {
     kind:
       | 'event.publish'
       | 'event.read'
+      | 'report.read'
       | 'readiness.read'
       | 'event.prepare'
       | 'content.prepare'
@@ -95,6 +119,8 @@ export interface AgentActionRouteService {
     resourceId: string;
     changes?: Readonly<Record<string, unknown>>;
     content?: unknown;
+    from?: string;
+    to?: string;
     audience?: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
     attendeeIds?: readonly string[];
     channel?: 'email' | 'sms' | 'both';
@@ -206,6 +232,8 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new ConflictError('Agent action policy is not configured');
   if (message === 'AGENT_ACTION_NO_MATERIAL_CHANGE')
     throw new ConflictError('Agent event update does not contain a material change');
+  if (message === 'AGENT_ACTION_REPORT_RANGE_INVALID')
+    throw new ValidationError('Agent report range is invalid');
   if (
     message === 'AGENT_ACTION_CONTENT_INVALID' ||
     message === 'AGENT_ACTION_CONTENT_PREVIEW_INVALID' ||
@@ -296,6 +324,26 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
         agentPrincipalId: actor.id,
         idempotencyKey: key,
         kind: 'event.read',
+        ...body,
+      });
+      reply.header('Cache-Control', 'no-store');
+      return reply.status(201).send(prepared);
+    } catch (error) {
+      translateAgentActionError(key, error);
+    }
+  });
+
+  app.post('/agent/reports', { config: { agentAccess: true } }, async (request, reply) => {
+    const actor = request.principal!;
+    requireAgent(actor);
+    const key = idempotencyKey(request.headers);
+    const body = parseBody(readReportSchema, request.body);
+    try {
+      const prepared = await service.prepare({
+        tenantId: actor.tenantId,
+        agentPrincipalId: actor.id,
+        idempotencyKey: key,
+        kind: 'report.read',
         ...body,
       });
       reply.header('Cache-Control', 'no-store');
@@ -472,6 +520,31 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
           : undefined;
     if (!action || action.action.kind !== 'event.read')
       throw new NotFoundError('AgentEventRead', actionId);
+    reply.header('Cache-Control', 'no-store');
+    return action;
+  });
+
+  app.get('/agent/reports/:actionId', { config: { agentAccess: true } }, async (request, reply) => {
+    const actor = request.principal!;
+    if (actor.type === 'agent') requireAgent(actor);
+    else requireHumanSponsor(actor);
+    const { actionId } = parseBody(actionParamsSchema, request.params);
+    const action =
+      actor.type === 'agent'
+        ? await service.getForAgent({
+            tenantId: actor.tenantId,
+            agentPrincipalId: actor.id,
+            actionId,
+          })
+        : actor.type === 'user'
+          ? await service.getForSponsor({
+              tenantId: actor.tenantId,
+              sponsorPrincipalId: actor.id,
+              actionId,
+            })
+          : undefined;
+    if (!action || action.action.kind !== 'report.read')
+      throw new NotFoundError('AgentReportRead', actionId);
     reply.header('Cache-Control', 'no-store');
     return action;
   });

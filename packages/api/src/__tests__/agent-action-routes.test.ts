@@ -17,6 +17,7 @@ import type {
   PreparedAgentCampaignPrepareAction,
   PreparedAgentEventPrepareAction,
   PreparedAgentEventReadAction,
+  PreparedAgentReportReadAction,
   PreparedAgentEventUpdateAction,
   PreparedAgentReadinessAction,
 } from '../services/agent-actions.js';
@@ -129,6 +130,54 @@ const eventReadPrepared: PreparedAgentEventReadAction = {
     untrustedContentPaths: ['event.title', 'event.description'],
   },
   resultSha256: '6'.repeat(64),
+};
+const reportReadPrepared: PreparedAgentReportReadAction = {
+  action: {
+    ...action,
+    id: `act_${'5'.repeat(48)}`,
+    kind: 'report.read',
+    autonomy: 'read',
+    target: { ...action.target, apiOperation: 'reports.get' },
+    payload: {
+      reportType: 'event_sales',
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-14T12:00:00.000Z',
+      reportSnapshotSha256: '4'.repeat(64),
+    },
+  },
+  actionDigest: '3'.repeat(64),
+  expiresAt: '2026-07-14T12:15:00.000Z',
+  authorization: {
+    allowed: true,
+    eligibleForApproval: false,
+    reasons: [],
+    snapshotSha256: '2'.repeat(64),
+    checkedAt: '2026-07-14T12:00:00.000Z',
+  },
+  result: {
+    resourceId: 'event_primary',
+    resourceVersion: 7,
+    reportType: 'event_sales',
+    from: '2026-07-01T00:00:00.000Z',
+    to: '2026-07-14T12:00:00.000Z',
+    reportSnapshotSha256: '4'.repeat(64),
+    observedAt: '2026-07-14T12:00:00.000Z',
+    report: {
+      currency: 'USD',
+      grossSalesCents: 12_500,
+      grossSalesByChannelCents: { online: 10_000, boxOffice: 2_500 },
+      netRevenueCents: 11_000,
+      refundsCents: 1_500,
+      feesCents: 500,
+      taxCents: 750,
+      ticketsSold: 5,
+      checkIns: 3,
+      ordersCount: 4,
+      paidOrdersCount: 3,
+    },
+    untrustedContentPaths: [],
+  },
+  resultSha256: '1'.repeat(64),
 };
 const eventPreparePrepared: PreparedAgentEventPrepareAction = {
   action: {
@@ -503,6 +552,75 @@ describe('agent action routes', () => {
       resourceId: 'event_primary',
     });
     expect(response.json()).toEqual(JSON.parse(JSON.stringify(eventReadPrepared)));
+    await app.close();
+  });
+
+  it('accepts report.read with an exact closed range only through its direct-read route', async () => {
+    const prepare = vi.fn(async () => reportReadPrepared);
+    const { app } = await setup({ service: { prepare } });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/reports',
+      headers: { 'idempotency-key': 'agent-report-read-route-0001' },
+      payload: {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        from: '2026-07-01T00:00:00.000Z',
+        to: '2026-07-14T12:00:00.000Z',
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(prepare).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      idempotencyKey: 'agent-report-read-route-0001',
+      kind: 'report.read',
+      delegationGrantId: 'dlg_primary',
+      resourceId: 'event_primary',
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-14T12:00:00.000Z',
+    });
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(reportReadPrepared)));
+    for (const payload of [
+      {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        from: '2026-07-01T00:00:00Z',
+      },
+      {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        from: '2026-07-01T00:00:00.000Z',
+      },
+      {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        from: '2026-07-01T00:00:00.001Z',
+        to: '2026-07-14T00:00:00.000Z',
+      },
+      {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        from: '2026-07-15T00:00:00.000Z',
+        to: '2026-07-14T00:00:00.000Z',
+      },
+      {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        extra: true,
+      },
+    ])
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/agent/reports',
+            headers: { 'idempotency-key': 'agent-report-read-route-invalid' },
+            payload,
+          })
+        ).statusCode,
+      ).toBe(400);
     await app.close();
   });
 
@@ -896,6 +1014,23 @@ describe('agent action routes', () => {
     ).toBe(404);
     expect(
       (await app.inject({ method: 'GET', url: `/agent/readiness/${actionId}` })).statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
+  it('returns report.read evidence only from its dedicated retrieval route', async () => {
+    const getForAgent = vi.fn(async () => reportReadPrepared);
+    const { app } = await setup({ service: { getForAgent } });
+    const actionId = reportReadPrepared.action.id;
+    const response = await app.inject({ method: 'GET', url: `/agent/reports/${actionId}` });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(reportReadPrepared)));
+    expect((await app.inject({ method: 'GET', url: `/agent/events/${actionId}` })).statusCode).toBe(
+      404,
+    );
+    expect(
+      (await app.inject({ method: 'GET', url: `/agent/actions/${actionId}` })).statusCode,
     ).toBe(404);
     await app.close();
   });
