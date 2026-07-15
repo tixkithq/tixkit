@@ -14,6 +14,7 @@ const ENV_KEYS = [
   'CLERK_WEBHOOK_SECRET',
   'CORS_ALLOWED_ORIGINS',
   'CUSTOM_DOMAIN_CORS_ENABLED',
+  'DASHBOARD_CURSOR_SIGNING_KEY',
   'DATABASE_URL',
   'DATABASE_URL_MYSQL',
   'DB_DRIVER',
@@ -63,6 +64,7 @@ function setValidProductionConfig(): void {
   process.env.CLERK_WEBHOOK_SECRET = 'whsec_clerk_example';
   process.env.CORS_ALLOWED_ORIGINS = 'https://admin.example.com,https://checkout.example.com';
   process.env.DATABASE_URL = 'postgres://tixkit:secret@db.example.com:5432/tixkit';
+  process.env.DASHBOARD_CURSOR_SIGNING_KEY = 'production-dashboard-cursor-signing-key';
   process.env.METRICS_BEARER_TOKEN = 'metrics-token';
   process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'https://otel.example.com';
   process.env.REDIS_URL = 'rediss://redis.example.com:6379';
@@ -462,6 +464,7 @@ describe('API exposure config parsing', () => {
 
     for (const key of [
       'DATABASE_URL',
+      'DASHBOARD_CURSOR_SIGNING_KEY',
       'REDIS_URL',
       'METRICS_BEARER_TOKEN',
       'API_BASE_URL',
@@ -499,6 +502,14 @@ describe('API exposure config parsing', () => {
 
       expect(() => loadConfig(), key).toThrow(message);
     }
+  });
+
+  it('rejects a short production dashboard cursor signing key', () => {
+    setValidProductionConfig();
+    process.env.DASHBOARD_CURSOR_SIGNING_KEY = 'too-short';
+    expect(() => loadConfig()).toThrow(
+      'DASHBOARD_CURSOR_SIGNING_KEY must contain at least 32 characters',
+    );
   });
 
   it('rejects dev auth and requires OIDC settings when OIDC is selected in production', () => {

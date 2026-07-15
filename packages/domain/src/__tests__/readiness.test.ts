@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  dashboardActionDeadlinePolicies,
+  dashboardActionReasonCodes,
+  dashboardActionSourceTypes,
+  dashboardRemediationIds,
   eventLaunchReadinessStepIds,
   finalizeEventLaunchReadiness,
   humanAcknowledgementStepVersions,
@@ -20,6 +24,10 @@ describe('readiness contracts', () => {
       eventLaunchReadinessStepIds,
       readinessReasonCodes,
       readinessActionIds,
+      dashboardActionSourceTypes,
+      dashboardActionReasonCodes,
+      dashboardRemediationIds,
+      dashboardActionDeadlinePolicies,
     ]) {
       expect(new Set(values).size).toBe(values.length);
     }

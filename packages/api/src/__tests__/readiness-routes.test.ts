@@ -26,16 +26,18 @@ async function createApp(principal: Principal, event?: Record<string, unknown>) 
     getWorkspaceReadiness: vi.fn(),
     acknowledgementSubject: vi.fn(),
   };
+  const dashboardActionService = { getFeed: vi.fn() };
   app.decorate('context', {
     db: eventDb(event),
     readinessServiceFactory: () => readinessService,
+    dashboardActionServiceFactory: () => dashboardActionService,
   } as unknown as AppContext);
   app.addHook('onRequest', async (request) => {
     request.principal = principal;
   });
   registerErrorHandler(app);
   await app.register(readinessRoutes);
-  return { app, readinessService };
+  return { app, readinessService, dashboardActionService };
 }
 
 const event = {
@@ -47,7 +49,7 @@ const event = {
 
 describe('readiness route authorization', () => {
   it('rejects reads before computing readiness when events.read is absent', async () => {
-    const { app, readinessService } = await createApp({
+    const { app, readinessService, dashboardActionService } = await createApp({
       type: 'user',
       id: 'usr_1',
       tenantId: 'tnt_1',
@@ -57,6 +59,54 @@ describe('readiness route authorization', () => {
     const response = await app.inject({ method: 'GET', url: '/events/evt_1/launch-readiness' });
     expect(response.statusCode).toBe(403);
     expect(readinessService.getEventLaunchReadiness).not.toHaveBeenCalled();
+    const feedResponse = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_1/dashboard-actions?brandId=brd_1',
+    });
+    expect(feedResponse.statusCode).toBe(403);
+    expect(dashboardActionService.getFeed).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('projects scoped dashboard pagination through the server action service', async () => {
+    const { app, dashboardActionService } = await createApp(
+      {
+        type: 'user',
+        id: 'usr_1',
+        tenantId: 'tnt_1',
+        organizationIds: ['org_1'],
+        brandIds: ['brd_1'],
+        eventIds: ['evt_1'],
+        scopes: ['events.read', 'checkins.write'],
+      },
+      event,
+    );
+    dashboardActionService.getFeed.mockResolvedValue({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      evaluationVersion: 1,
+      generatedAt: '2027-01-01T00:00:00.000Z',
+      expiresAt: '2027-01-01T00:05:00.000Z',
+      nextCursor: null,
+      actions: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/organizations/org_1/dashboard-actions?brandId=brd_1&limit=10',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(dashboardActionService.getFeed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        eventIds: ['evt_1'],
+        limit: 10,
+      }),
+    );
     await app.close();
   });
 

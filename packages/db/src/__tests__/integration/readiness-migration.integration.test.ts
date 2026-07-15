@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Migrator } from 'kysely/migration';
 import { createDb, type Database } from '../../client.js';
-import { TixkitMigrationProvider } from '../../migrate.js';
+import { runMigrations, TixkitMigrationProvider } from '../../migrate.js';
 import {
   BrandRepository,
   EventRepository,
@@ -22,8 +22,9 @@ const enabled = Boolean(url);
   let db: Database;
   let migrator: Migrator;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.DB_DRIVER = driver!;
+    await runMigrations(url!);
     db = createDb(url!);
     migrator = new Migrator({ db, provider: new TixkitMigrationProvider() });
   });
@@ -33,6 +34,9 @@ const enabled = Boolean(url);
   });
 
   it('backfills existing rows when 0063 and 0064 are rolled down and reapplied', async () => {
+    const migrationNames = Object.keys(await new TixkitMigrationProvider().getMigrations());
+    const migration64Index = migrationNames.indexOf('0064_organization_event_defaults');
+    const migrationsToRemove = migrationNames.slice(migration64Index).toReversed();
     const suffix = `${driver}_${Date.now()}`;
     const tenant = await new TenantRepository(db).create({ name: `Migration ${suffix}` });
     const organization = await new OrganizationRepository(db).create({
@@ -60,7 +64,7 @@ const enabled = Boolean(url);
     let migrationsDown = 0;
     try {
       for (const expectedName of [
-        '0064_organization_event_defaults',
+        ...migrationsToRemove,
         '0063_event_checkout_configuration_revision',
       ]) {
         const down = await migrator.migrateDown();
@@ -83,7 +87,7 @@ const enabled = Boolean(url);
 
       for (const expectedName of [
         '0063_event_checkout_configuration_revision',
-        '0064_organization_event_defaults',
+        ...migrationsToRemove.toReversed(),
       ]) {
         const up = await migrator.migrateUp();
         expect(up.error).toBeUndefined();

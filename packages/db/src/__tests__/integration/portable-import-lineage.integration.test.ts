@@ -25,6 +25,7 @@ describeDatabase(`portable import lineage checkpoints (${integrationDriver})`, (
   let organizationId: string;
 
   beforeAll(async () => {
+    process.env.DB_DRIVER = integrationDriver;
     await runMigrations(url);
     db = createDb(url);
     await PortableImportLineageCheckpointsMigration.up!(db);

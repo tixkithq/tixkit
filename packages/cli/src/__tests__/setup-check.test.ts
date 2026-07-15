@@ -23,6 +23,7 @@ function makeCompleteEnv(extra: Record<string, string> = {}): string {
     OFFLINE_MANIFEST_SIGNING_KEY: 'offline-local-key',
     OFFLINE_MANIFEST_KEY_ID: 'manifest:v1',
     WIDGET_IMPRESSION_HASH_SECRET: 'widget-hash-local-secret',
+    DASHBOARD_CURSOR_SIGNING_KEY: 'local-dashboard-cursor-signing-key',
     TEMPORAL_ADDRESS: 'localhost:7233',
     TEMPORAL_NAMESPACE: 'default',
     CLERK_SECRET_KEY: '',

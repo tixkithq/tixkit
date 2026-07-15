@@ -84,3 +84,4 @@ export { AgentApprovalActionUniqueMigration } from './0083_agent_approval_action
 export { AgentPlansMigration } from './0084_agent_plans.js';
 export { AgentExecutionPlanBindingMigration } from './0085_agent_execution_plan_binding.js';
 export { AgentActionResultsMigration } from './0086_agent_action_results.js';
+export { DashboardActionRevisionsMigration } from './0087_dashboard_action_revisions.js';

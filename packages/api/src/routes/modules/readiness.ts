@@ -15,9 +15,18 @@ import {
 import { ClerkAuthService } from '../../auth/clerk.js';
 import { NotFoundError, ValidationError } from '@tixkit/domain';
 import { ReadinessService, resolvePaymentMode } from '../../services/readiness.js';
+import { DashboardActionService } from '../../services/dashboard-actions.js';
+import { config } from '../../config/index.js';
 import { writeAuditLog } from '../../auth/audit.js';
 
 const workspaceReadinessQuerySchema = z.object({ brandId: z.string().min(1) }).strict();
+const dashboardActionsQuerySchema = z
+  .object({
+    brandId: z.string().min(1),
+    limit: z.coerce.number().int().min(1).max(50).optional(),
+    cursor: z.string().min(1).optional(),
+  })
+  .strict();
 const acknowledgementParamsSchema = z
   .object({ eventId: z.string().min(1), stepId: z.string().min(1) })
   .strict();
@@ -63,6 +72,44 @@ export const readinessRoutes: FastifyPluginAsync = async (app) => {
       'Workspace readiness evaluated',
     );
     return readiness;
+  });
+
+  app.get('/organizations/:organizationId/dashboard-actions', async (request) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { organizationId } = request.params as { organizationId: string };
+    const query = dashboardActionsQuerySchema.parse(request.query);
+    ClerkAuthService.requireOrganizationScope(principal, organizationId);
+    ClerkAuthService.requireBrandScope(principal, query.brandId);
+    const brand = await new BrandRepository(db).findById(query.brandId);
+    if (!brand || brand.organization_id !== organizationId) {
+      throw new NotFoundError('Brand', query.brandId);
+    }
+    ClerkAuthService.requireResourceTenant(principal, brand, 'Brand', query.brandId);
+    const dashboardService =
+      app.context.dashboardActionServiceFactory?.(db) ??
+      new DashboardActionService(db, config.dashboardCursorSigningKey);
+    const feed = await dashboardService.getFeed({
+      tenantId: principal.tenantId,
+      organizationId,
+      brandId: query.brandId,
+      permissions: permissions(request),
+      ...(principal.eventIds && principal.eventIds.length > 0
+        ? { eventIds: principal.eventIds }
+        : {}),
+      ...(query.limit === undefined ? {} : { limit: query.limit }),
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+    });
+    request.log.info(
+      {
+        organizationId,
+        brandId: query.brandId,
+        actionCount: feed.actions.length,
+        hasMore: feed.nextCursor !== null,
+      },
+      'Dashboard actions evaluated',
+    );
+    return feed;
   });
 
   app.get('/events/:eventId/launch-readiness', async (request) => {

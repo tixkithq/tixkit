@@ -155,6 +155,7 @@ export function initializeCompactEnvironment({
     `QR_SIGNING_SECRET=${secret(48)}`,
     `OFFLINE_MANIFEST_SIGNING_KEY=${secret(48)}`,
     `WIDGET_IMPRESSION_HASH_SECRET=${secret(48)}`,
+    `DASHBOARD_CURSOR_SIGNING_KEY=${secret(48)}`,
     `TIXKIT_MIGRATION_CURSOR_KEY=${secret(32)}`,
     `PORTABILITY_BUNDLE_SIGNING_KEY_ID=${bundleKey.keyId}`,
     `PORTABILITY_BUNDLE_SIGNING_PRIVATE_KEY_BASE64=${bundleKey.privateKeyBase64}`,
@@ -181,6 +182,32 @@ export function initializeCompactEnvironment({
   writeFileSync(environmentPath, contents, { mode: 0o600 });
   chmodSync(environmentPath, 0o600);
   return environmentPath;
+}
+
+export function upgradeCompactEnvironment({ environmentPath = envFile } = {}) {
+  if (!existsSync(environmentPath))
+    throw new Error('Compact is not initialized. Run `bun run compact:init`.');
+  const environment = compactEnvironment(environmentPath);
+  if (environment.DASHBOARD_CURSOR_SIGNING_KEY !== undefined) {
+    validateCompactEnvironment({ environmentPath });
+    return false;
+  }
+  const mode = statSync(environmentPath).mode & 0o777;
+  if (mode !== 0o600)
+    throw new Error(`Compact environment must have mode 0600; found ${mode.toString(8)}.`);
+  const original = readFileSync(environmentPath, 'utf8');
+  const separator = original.endsWith('\n') ? '' : '\n';
+  const upgraded = `${original}${separator}DASHBOARD_CURSOR_SIGNING_KEY=${secret(48)}\n`;
+  const temporaryPath = `${environmentPath}.upgrade-${randomUUID()}`;
+  try {
+    writeFileSync(temporaryPath, upgraded, { flag: 'wx', mode: 0o600 });
+    validateCompactEnvironment({ environmentPath: temporaryPath });
+    renameSync(temporaryPath, environmentPath);
+    chmodSync(environmentPath, 0o600);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+  return true;
 }
 
 function requireEnvironment({ environmentPath = envFile } = {}) {
@@ -258,6 +285,7 @@ export function validateCompactEnvironment({ environmentPath = envFile } = {}) {
     'QR_SIGNING_SECRET',
     'OFFLINE_MANIFEST_SIGNING_KEY',
     'WIDGET_IMPRESSION_HASH_SECRET',
+    'DASHBOARD_CURSOR_SIGNING_KEY',
     'TIXKIT_MIGRATION_CURSOR_KEY',
   ]) {
     const value = environment[key] ?? '';
@@ -905,7 +933,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
         console.log('Compact restore completed and services are healthy.');
         break;
       case 'upgrade':
-        requireEnvironment(runtime);
+        upgradeCompactEnvironment(runtime);
         backupCompact(
           arguments_[0] ?? resolve(root, 'backups', `pre-upgrade-${Date.now()}`),
           runtime,

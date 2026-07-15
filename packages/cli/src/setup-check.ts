@@ -156,6 +156,13 @@ export const ENV_RULES: EnvRule[] = [
     guide: GUIDES.deploy,
   },
   {
+    variable: 'DASHBOARD_CURSOR_SIGNING_KEY',
+    requiredFor: ['production'],
+    message:
+      'Dashboard cursor signing key is required in production to bind paginated actions to one scope and snapshot.',
+    guide: GUIDES.deploy,
+  },
+  {
     variable: 'CLERK_SECRET_KEY',
     requiredFor: ['production'],
     message:

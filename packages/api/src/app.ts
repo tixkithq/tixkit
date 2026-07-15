@@ -35,6 +35,7 @@ import {
 import type Stripe from 'stripe';
 import type { EmailTransport, SendSmsInput, SendSmsResult, SmsTransport } from '@tixkit/domain';
 import type { ReadinessService } from './services/readiness.js';
+import type { DashboardActionService } from './services/dashboard-actions.js';
 import { createDefaultEmailTransport } from '@tixkit/email-transport';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
@@ -54,6 +55,7 @@ export type AppContext = {
   smsTransport: SmsTransport;
   stripe?: Stripe;
   readinessServiceFactory?: (db: Database) => ReadinessService;
+  dashboardActionServiceFactory?: (db: Database) => DashboardActionService;
   portableDryRunAttestation?: PortableDryRunAttestationConfiguration;
   portableCutoverTrust?: PortableCutoverTrustConfiguration;
   eventDuplicationCheckpoint?: (input: {

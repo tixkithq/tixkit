@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/empty-state';
 import { ApiErrorState } from '@/components/api-error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EventStatusBadge } from '@/features/events/event-status-badge';
-import { WorkspaceReadinessChecklist } from './workspace-readiness';
+import { DashboardActionFeed } from './dashboard-action-feed';
 import { OrderStatusBadge } from '@/features/events/event-status-badge';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { usePermissions } from '@/context/permission-provider';
@@ -120,7 +120,7 @@ export function DashboardView() {
         ) : null}
       </div>
 
-      <WorkspaceReadinessChecklist />
+      <DashboardActionFeed />
 
       {!workspaceSelected ? (
         <Card>

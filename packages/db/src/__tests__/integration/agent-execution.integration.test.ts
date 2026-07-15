@@ -1479,6 +1479,15 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         audit(secondExecution, 'authorized_revocation', 'authorized'),
       ],
     });
+    const controlEventCountBeforeRevocation = Number(
+      (
+        await db
+          .selectFrom('agent_control_events')
+          .select((builder) => builder.fn.countAll<number>().as('count'))
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirstOrThrow()
+      ).count,
+    );
     await expect(
       Promise.all(
         Array.from({ length: 8 }, () =>
@@ -1518,7 +1527,8 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       .selectAll()
       .where('tenant_id', '=', tenantId)
       .execute();
-    expect(controlEvents).toHaveLength(13);
+    expect(controlEvents).toHaveLength(controlEventCountBeforeRevocation + 1);
+    expect(controlEvents.filter(({ id }) => id === 'revoke_test')).toHaveLength(1);
     expect(controlEvents.find(({ id }) => id === 'revoke_test')).toMatchObject({
       actor_principal_id: 'user_actor',
       operation: 'revoke',

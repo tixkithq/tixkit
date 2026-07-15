@@ -33,6 +33,11 @@ Only variables explicitly designed for public browser use may use a public prefi
 
 Rotate a secret after suspected exposure and restart/redeploy every process that consumes it. Verify old credentials no longer authenticate.
 
+Set `DASHBOARD_CURSOR_SIGNING_KEY` to at least 32 random characters in every deployed API replica.
+All replicas in one environment must share the same value so organizer action cursors remain
+verifiable across requests. Rotating it intentionally invalidates every outstanding dashboard
+cursor; clients then refresh the first page.
+
 ## Configuration drift
 
 Record non-secret environment contracts in deployment configuration, validate them before release, and compare API/worker settings that must agree, including database, Temporal namespace/task queue, storage, and provider mode.

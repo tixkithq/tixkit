@@ -1030,9 +1030,7 @@ export class ReadinessService {
             ? 'test_order_not_applicable'
             : testOrderCurrent
               ? 'test_order_complete'
-              : Number(testOrderCount.count) > 0
-                ? 'test_order_stale'
-                : 'test_order_recommended',
+              : 'test_order_recommended',
         ],
         actionId: 'run_test_order',
         requiredPermission: 'orders.write',

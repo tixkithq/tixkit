@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 // Mock adminApi before importing DashboardView
 const mockListEvents = vi.fn();
@@ -30,6 +30,56 @@ const mockGetWorkspaceReadiness = vi.fn().mockResolvedValue({
     ],
   },
 });
+const defaultDashboardFeed = {
+  ok: true as const,
+  data: {
+    tenantId: 'tnt_1',
+    organizationId: 'org_1',
+    brandId: 'brd_1',
+    evaluationVersion: 1 as const,
+    generatedAt: '2027-01-01T00:00:00.000Z',
+    expiresAt: '2027-01-01T00:05:00.000Z',
+    nextCursor: null,
+    actions: [
+      {
+        id: 'event:evt_1:unpublished',
+        sourceType: 'event_launch' as const,
+        resource: {
+          type: 'event' as const,
+          organizationId: 'org_1',
+          brandId: 'brd_1',
+          eventId: 'evt_1',
+          eventVersion: 1,
+          eventTitle: 'Test Event',
+        },
+        severity: 'critical' as const,
+        owner: 'organizer' as const,
+        deadlineAt: '2027-01-01T00:00:00.000Z',
+        deadlinePolicy: 'event_start' as const,
+        overdue: false,
+        occurrenceCount: 1,
+        reasonCode: 'event_unpublished' as const,
+        remediation: {
+          id: 'continue_event_setup' as const,
+          readinessActionId: 'view_event' as const,
+          requiredPermission: 'events.write' as const,
+          canRemediate: true,
+          availability: 'available' as const,
+        },
+        staleness: {
+          state: 'current' as const,
+          consistency: 'repeatable_read' as const,
+          evaluatedAt: '2027-01-01T00:00:00.000Z',
+          expiresAt: '2027-01-01T00:05:00.000Z',
+          sourceUpdatedAt: '2026-12-31T00:00:00.000Z',
+          sourceVersion: 1,
+          evidenceRevision: 'a'.repeat(64),
+        },
+      },
+    ],
+  },
+};
+const mockGetDashboardActions = vi.fn().mockResolvedValue(defaultDashboardFeed);
 const mockCan = vi.fn<(permission: string) => boolean>(() => true);
 
 vi.mock('@/lib/api', () => ({
@@ -37,6 +87,7 @@ vi.mock('@/lib/api', () => ({
     listEvents: (...args: unknown[]) => mockListEvents(...args),
     listOrders: (...args: unknown[]) => mockListOrders(...args),
     getWorkspaceReadiness: (...args: unknown[]) => mockGetWorkspaceReadiness(...args),
+    getDashboardActions: (...args: unknown[]) => mockGetDashboardActions(...args),
   },
 }));
 
@@ -166,6 +217,14 @@ function makeEmpty() {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 describe('DashboardView error states', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -192,24 +251,25 @@ describe('DashboardView error states', () => {
 
     render(<DashboardView />);
 
-    expect(await screen.findByText(/Critical · Owner: Finance · No fixed deadline/)).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Resolve Prepare the payment path' })).toHaveAttribute(
+    expect(await screen.findByText(/Finish launch and publish this event/)).toBeVisible();
+    expect(screen.getByLabelText('critical action owned by Organizer')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Continue launch for Test Event' })).toHaveAttribute(
       'href',
-      '/settings/payments',
+      '/events/evt_1',
     );
   });
 
   it('fails closed with an actionable retry when an incomplete mixed-version response has no feed', async () => {
-    mockGetWorkspaceReadiness.mockResolvedValueOnce({
+    mockGetDashboardActions.mockResolvedValueOnce({
       ok: true,
       data: {
         tenantId: 'tnt_1',
         organizationId: 'org_1',
         brandId: 'brd_1',
-        generatedAt: new Date(0).toISOString(),
-        paymentMode: 'capture',
-        complete: false,
-        steps: [],
+        evaluationVersion: 1,
+        generatedAt: '2027-01-01T00:00:00.000Z',
+        expiresAt: '2027-01-01T00:05:00.000Z',
+        nextCursor: null,
       },
     });
     mockListEvents.mockResolvedValue(makeEmpty());
@@ -218,7 +278,7 @@ describe('DashboardView error states', () => {
     render(<DashboardView />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/actions are unavailable/i);
-    expect(screen.getByRole('button', { name: /retry workspace actions/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /retry dashboard actions/i })).toBeEnabled();
   });
 
   it('does not request orders without orders.read', async () => {
@@ -234,28 +294,18 @@ describe('DashboardView error states', () => {
   });
 
   it('renders an owner handoff without a remediation link when permission is denied', async () => {
-    mockGetWorkspaceReadiness.mockResolvedValueOnce({
-      ok: true,
+    mockGetDashboardActions.mockResolvedValueOnce({
+      ...defaultDashboardFeed,
       data: {
-        tenantId: 'tnt_1',
-        organizationId: 'org_1',
-        brandId: 'brd_1',
-        generatedAt: new Date(0).toISOString(),
-        paymentMode: 'capture',
-        complete: false,
-        steps: [],
-        actionFeed: [
+        ...defaultDashboardFeed.data,
+        actions: [
           {
-            id: 'workspace:payment_path',
-            stepId: 'payment_path',
-            severity: 'critical',
-            owner: 'finance',
-            deadlineAt: null,
-            status: 'blocked',
-            reasonCodes: ['payment_path_missing', 'permission_required'],
-            actionId: null,
-            requiredPermission: 'billing.write',
-            updatedAt: null,
+            ...defaultDashboardFeed.data.actions[0]!,
+            remediation: {
+              ...defaultDashboardFeed.data.actions[0]!.remediation,
+              canRemediate: false,
+              availability: 'permission_required' as const,
+            },
           },
         ],
       },
@@ -265,8 +315,151 @@ describe('DashboardView error states', () => {
 
     render(<DashboardView />);
 
-    expect(await screen.findByText('Finance action required')).toBeVisible();
-    expect(screen.queryByRole('link', { name: 'Resolve Prepare the payment path' })).toBeNull();
+    expect(await screen.findByText('Organizer permission required')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Continue launch for Test Event' })).toBeNull();
+  });
+
+  it('loads, deduplicates, and renders the next page from the same snapshot', async () => {
+    mockGetDashboardActions
+      .mockResolvedValueOnce({
+        ...defaultDashboardFeed,
+        data: { ...defaultDashboardFeed.data, nextCursor: 'cursor_2' },
+      })
+      .mockResolvedValueOnce({
+        ...defaultDashboardFeed,
+        data: {
+          ...defaultDashboardFeed.data,
+          actions: [
+            defaultDashboardFeed.data.actions[0],
+            {
+              ...defaultDashboardFeed.data.actions[0],
+              id: 'event:evt_2:unpublished',
+              resource: {
+                ...defaultDashboardFeed.data.actions[0]!.resource,
+                eventId: 'evt_2',
+                eventTitle: 'Second Event',
+              },
+            },
+          ],
+        },
+      });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more actions' }));
+
+    expect(await screen.findByText('Second Event')).toBeVisible();
+    expect(screen.getAllByText('Test Event')).toHaveLength(1);
+    expect(mockGetDashboardActions).toHaveBeenLastCalledWith('org_1', 'brd_1', {
+      limit: 20,
+      cursor: 'cursor_2',
+    });
+  });
+
+  it('fails closed when a loaded page belongs to a different snapshot', async () => {
+    mockGetDashboardActions
+      .mockResolvedValueOnce({
+        ...defaultDashboardFeed,
+        data: { ...defaultDashboardFeed.data, nextCursor: 'cursor_2' },
+      })
+      .mockResolvedValueOnce({
+        ...defaultDashboardFeed,
+        data: {
+          ...defaultDashboardFeed.data,
+          generatedAt: '2027-01-01T00:01:00.000Z',
+          actions: [],
+        },
+      });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more actions' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/snapshot changed/i);
+    expect(screen.queryByRole('link', { name: 'Continue launch for Test Event' })).toBeNull();
+  });
+
+  it('disables pagination and asks for refresh when the snapshot is expired', async () => {
+    mockGetDashboardActions.mockResolvedValueOnce({
+      ...defaultDashboardFeed,
+      data: {
+        ...defaultDashboardFeed.data,
+        generatedAt: '2020-01-01T00:00:00.000Z',
+        expiresAt: '2020-01-01T00:05:00.000Z',
+        nextCursor: 'expired_cursor',
+      },
+    });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/snapshot expired/i);
+    expect(screen.queryByRole('button', { name: 'Load more actions' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Continue launch for Test Event' })).toBeNull();
+  });
+
+  it('ignores an old pagination response after a refreshed snapshot arrives', async () => {
+    const oldPage = deferred<typeof defaultDashboardFeed>();
+    const freshFeed = {
+      ...defaultDashboardFeed,
+      data: {
+        ...defaultDashboardFeed.data,
+        generatedAt: '2027-01-01T00:01:00.000Z',
+        expiresAt: '2027-01-01T00:06:00.000Z',
+        actions: [
+          {
+            ...defaultDashboardFeed.data.actions[0]!,
+            id: 'event:evt_fresh:unpublished',
+            resource: {
+              ...defaultDashboardFeed.data.actions[0]!.resource,
+              eventId: 'evt_fresh',
+              eventTitle: 'Fresh Event',
+            },
+          },
+        ],
+      },
+    };
+    mockGetDashboardActions
+      .mockResolvedValueOnce({
+        ...defaultDashboardFeed,
+        data: { ...defaultDashboardFeed.data, nextCursor: 'cursor_2' },
+      })
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockResolvedValueOnce(freshFeed);
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByText('Fresh Event')).toBeVisible();
+
+    await act(async () => {
+      oldPage.resolve({
+        ...defaultDashboardFeed,
+        data: {
+          ...defaultDashboardFeed.data,
+          actions: [
+            {
+              ...defaultDashboardFeed.data.actions[0]!,
+              id: 'event:evt_stale:unpublished',
+              resource: {
+                ...defaultDashboardFeed.data.actions[0]!.resource,
+                eventId: 'evt_stale',
+                eventTitle: 'Stale Event',
+              },
+            },
+          ],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Stale Event')).toBeNull();
+    expect(screen.getByText('Fresh Event')).toBeVisible();
   });
 
   it('shows error state on 401', async () => {

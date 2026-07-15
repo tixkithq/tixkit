@@ -31,6 +31,7 @@ export type AppConfig = {
   corsAllowedOrigins: string[];
   customDomainCorsEnabled: boolean;
   metricsBearerToken: string;
+  dashboardCursorSigningKey: string;
   rateLimitMax: number;
   rateLimitTimeWindow: string;
   compressionThresholdBytes: number;
@@ -156,6 +157,7 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
     requiredDatabaseVariable,
     'REDIS_URL',
     'METRICS_BEARER_TOKEN',
+    'DASHBOARD_CURSOR_SIGNING_KEY',
     'API_BASE_URL',
     'CORS_ALLOWED_ORIGINS',
     'STRIPE_SECRET_KEY',
@@ -173,6 +175,9 @@ function requireProductionConfig(nodeEnv: string, trustProxy: TrustProxyConfig):
   const missing = requireEnvValues(required);
   if (missing.length > 0) {
     throw new Error(`Production config requires ${missing.join(', ')}`);
+  }
+  if ((process.env.DASHBOARD_CURSOR_SIGNING_KEY?.length ?? 0) < 32) {
+    throw new Error('DASHBOARD_CURSOR_SIGNING_KEY must contain at least 32 characters');
   }
   if (process.env.OTEL_SDK_DISABLED !== 'true') {
     requireHttpsEndpoint(
@@ -348,6 +353,8 @@ export function loadConfig(): AppConfig {
       false,
     ),
     metricsBearerToken: process.env.METRICS_BEARER_TOKEN?.trim() ?? '',
+    dashboardCursorSigningKey:
+      process.env.DASHBOARD_CURSOR_SIGNING_KEY ?? 'tixkit-local-dashboard-cursor-signing-key',
     rateLimitMax: parsePositiveIntegerConfig(
       'RATE_LIMIT_MAX',
       process.env.RATE_LIMIT_MAX,

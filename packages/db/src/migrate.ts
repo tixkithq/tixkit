@@ -87,6 +87,7 @@ import { AgentApprovalActionUniqueMigration } from './migrations/0083_agent_appr
 import { AgentPlansMigration } from './migrations/0084_agent_plans.js';
 import { AgentExecutionPlanBindingMigration } from './migrations/0085_agent_execution_plan_binding.js';
 import { AgentActionResultsMigration } from './migrations/0086_agent_action_results.js';
+import { DashboardActionRevisionsMigration } from './migrations/0087_dashboard_action_revisions.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -188,6 +189,7 @@ const ALL_SCHEMA_TABLES = [
   'ticket_listings',
   'access_rule_redemptions',
   'event_readiness_acknowledgements',
+  'dashboard_action_revisions',
   'sandbox_environments',
   'historical_check_ins',
   'historical_financial_snapshots',
@@ -349,6 +351,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0084_agent_plans': AgentPlansMigration,
       '0085_agent_execution_plan_binding': AgentExecutionPlanBindingMigration,
       '0086_agent_action_results': AgentActionResultsMigration,
+      '0087_dashboard_action_revisions': DashboardActionRevisionsMigration,
     };
   }
 }
@@ -566,12 +569,18 @@ export async function dropAllTables(db: Database): Promise<void> {
     'reject_portable_import_commit_authorization_mutation',
     'reject_portable_import_cutover_proof_mutation',
     'reject_import_job_event_mutation',
+    'bump_dashboard_revision_for_event',
+    'bump_dashboard_revision_for_checkin',
+    'bump_dashboard_revision_for_export',
   ]) {
     // eslint-disable-next-line no-await-in-loop -- PostgreSQL reset removes standalone trigger functions after their tables.
     await sql`DROP FUNCTION IF EXISTS ${sql.raw(functionName)}() CASCADE`
       .execute(db)
       .catch(() => undefined);
   }
+  await sql`DROP FUNCTION IF EXISTS bump_dashboard_action_revision(varchar, varchar, varchar) CASCADE`
+    .execute(db)
+    .catch(() => undefined);
 }
 
 /**

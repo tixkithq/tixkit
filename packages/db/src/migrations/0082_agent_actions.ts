@@ -169,11 +169,7 @@ export const AgentActionsMigration: Migration = {
       .dropConstraint('agent_approvals_action_fk')
       .execute();
     if (process.env.DB_DRIVER === 'mysql' || process.env.DB_DRIVER === 'mssql') {
-      await db.schema
-        .dropIndex('agent_approvals_action_id_idx')
-        .on('agent_approvals')
-        .ifExists()
-        .execute();
+      await sql`drop index agent_approvals_action_id_idx on agent_approvals`.execute(db);
     } else {
       await sql`drop index if exists agent_approvals_action_id_idx`.execute(db);
     }

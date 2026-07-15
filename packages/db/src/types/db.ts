@@ -1528,6 +1528,13 @@ export interface ExportJobTable {
   completed_at: Timestamp | null;
 }
 
+export interface DashboardActionRevisionTable {
+  tenant_id: string;
+  organization_id: string;
+  brand_id: string;
+  revision: number | string | bigint;
+}
+
 export interface ExportJobEventTable {
   id: string;
   tenant_id: string;
@@ -2276,6 +2283,7 @@ export interface DB {
   sms_provider_events: SmsProviderEventTable;
   message_consents: MessageConsentTable;
   export_jobs: ExportJobTable;
+  dashboard_action_revisions: DashboardActionRevisionTable;
   export_job_events: ExportJobEventTable;
   payment_accounts: PaymentAccountTable;
   tax_registrations: TaxRegistrationTable;

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import type { KyselyPlugin, PluginTransformQueryArgs, PluginTransformResultArgs } from 'kysely';
 import {
   BrandRepository,
+  CheckInListRepository,
   createDb,
   EventRepository,
   EventReadinessAcknowledgementRepository,
@@ -11,13 +12,18 @@ import {
   TicketTypeRepository,
   type Database,
 } from '@tixkit/db';
-import { humanAcknowledgementStepVersions } from '@tixkit/domain';
+import { humanAcknowledgementStepVersions, type DashboardAction } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import {
   EVENT_READINESS_QUERY_BUDGET,
   WORKSPACE_READINESS_QUERY_BUDGET,
   ReadinessService,
 } from '../../services/readiness.js';
+import {
+  DASHBOARD_ACTION_QUERY_BUDGET,
+  DashboardActionService,
+  compareDashboardActions,
+} from '../../services/dashboard-actions.js';
 import {
   describeWithIntegrationDatabase,
   integrationDatabaseUrl,
@@ -26,6 +32,7 @@ import {
 } from './integration-database.js';
 
 describeWithIntegrationDatabase('readiness service query and isolation budget', () => {
+  const dashboardCursorSigningKey = 'integration-dashboard-cursor-signing-key';
   let db: Database;
   let previousDriver: string | undefined;
 
@@ -142,6 +149,33 @@ describeWithIntegrationDatabase('readiness service query and isolation budget', 
         reasonCodes: ['brand_identity_incomplete', 'permission_required'],
       },
     );
+    statementCount = 0;
+    const dashboardFeed = await new DashboardActionService(
+      countingDb,
+      dashboardCursorSigningKey,
+    ).getFeed({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      permissions,
+      now: new Date('2026-12-31T18:00:00.000Z'),
+    });
+    expect(statementCount).toBeLessThanOrEqual(DASHBOARD_ACTION_QUERY_BUDGET);
+    const currentEvent = await new EventRepository(db).findById(event.id);
+    expect(currentEvent).toBeDefined();
+    expect(
+      dashboardFeed.actions.find((action) => action.id === `event:${event.id}:unpublished`),
+    ).toMatchObject({
+      sourceType: 'event_launch',
+      reasonCode: 'event_unpublished',
+      resource: { type: 'event', eventId: event.id, eventVersion: Number(currentEvent?.version) },
+      remediation: { id: 'continue_event_setup', canRemediate: true },
+      staleness: {
+        state: 'current',
+        consistency: 'repeatable_read',
+        sourceVersion: Number(currentEvent?.version),
+      },
+    });
     const scope = {
       tenantId: tenant.id,
       organizationId: organization.id,
@@ -187,6 +221,357 @@ describeWithIntegrationDatabase('readiness service query and isolation budget', 
         permissions,
       }),
     ).rejects.toThrow('Event readiness scope was not found');
+  });
+
+  it('paginates more than fifty actionable events without old-event starvation and removes resolved actions', async () => {
+    const runId = ulid().slice(-10).toLowerCase();
+    const tenant = await new TenantRepository(db).create({ name: `Action feed ${runId}` });
+    const organization = await new OrganizationRepository(db).create({
+      tenantId: tenant.id,
+      name: `Action feed ${runId}`,
+      slug: `action-feed-${runId}`,
+    });
+    const brand = await new BrandRepository(db).create({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      name: `Action feed ${runId}`,
+      slug: `action-feed-${runId}`,
+    });
+    const events = new EventRepository(db);
+    for (let index = 0; index < 51; index += 1) {
+      const oldEvent = await events.create({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        slug: `old-${index}-${runId}`,
+        title: `Old published event ${index}`,
+        currency: 'USD',
+        timezone: 'UTC',
+        startsAt: new Date(`2025-01-${String((index % 28) + 1).padStart(2, '0')}T18:00:00.000Z`),
+      });
+      await events.updateStatus(oldEvent.id, 'published');
+    }
+    const expectedDraftIds = new Set<string>();
+    let mutableDraftId = '';
+    for (let index = 0; index < 53; index += 1) {
+      const draft = await events.create({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        slug: `draft-${index}-${runId}`,
+        title: `Future draft ${index}`,
+        currency: 'USD',
+        timezone: 'UTC',
+        startsAt: new Date(`2027-02-${String((index % 28) + 1).padStart(2, '0')}T18:00:00.000Z`),
+      });
+      if (index === 0) mutableDraftId = draft.id;
+      expectedDraftIds.add(`event:${draft.id}:unpublished`);
+    }
+    const configuredEvent = await events.create({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      slug: `configured-${runId}`,
+      title: 'Configured door operations',
+      currency: 'USD',
+      timezone: 'UTC',
+      startsAt: new Date('2027-01-02T18:00:00.000Z'),
+    });
+    await events.updateStatus(configuredEvent.id, 'published');
+    await new CheckInListRepository(db).create({
+      eventId: configuredEvent.id,
+      name: 'Main entrance',
+      ticketTypeIds: [],
+    });
+    const unresolvedEvent = await events.create({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      slug: `unresolved-${runId}`,
+      title: 'Unresolved operations',
+      currency: 'USD',
+      timezone: 'UTC',
+      startsAt: new Date('2027-01-01T18:00:00.000Z'),
+    });
+    await events.updateStatus(unresolvedEvent.id, 'published');
+    const exportId = `exp_${ulid()}`;
+    await db
+      .insertInto('export_jobs')
+      .values({
+        id: exportId,
+        tenant_id: tenant.id,
+        event_id: unresolvedEvent.id,
+        type: 'attendees',
+        format: 'csv',
+        status: 'failed',
+        file_url: null,
+        requested_by: 'usr_action_feed_integration',
+        filters: JSON.stringify({}),
+        created_at: new Date('2026-01-01T12:00:00.000Z'),
+        completed_at: null,
+      })
+      .execute();
+
+    let statementCount = 0;
+    let statementRowCounts: number[] = [];
+    const countingDb = db.withPlugin({
+      transformQuery(args: PluginTransformQueryArgs) {
+        statementCount += 1;
+        return args.node;
+      },
+      async transformResult(args: PluginTransformResultArgs) {
+        statementRowCounts.push(args.result.rows.length);
+        return args.result;
+      },
+    });
+    const service = new DashboardActionService(countingDb, dashboardCursorSigningKey);
+    const permissions = new Set([
+      'events.read',
+      'events.write',
+      'checkins.write',
+      'reports.read',
+    ] as const);
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const observedIds: string[] = [];
+    const observedActions: DashboardAction[] = [];
+    let cursor: string | undefined;
+    for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
+      statementCount = 0;
+      statementRowCounts = [];
+      const page = await service.getFeed({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        permissions,
+        now,
+        limit: 7,
+        cursor,
+      });
+      expect(statementCount).toBeLessThanOrEqual(DASHBOARD_ACTION_QUERY_BUDGET);
+      expect(Math.max(...statementRowCounts)).toBeLessThanOrEqual(8);
+      observedActions.push(...page.actions);
+      observedIds.push(...page.actions.map((action) => action.id));
+      cursor = page.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
+
+    expect(cursor).toBeUndefined();
+    expect(new Set(observedIds).size).toBe(observedIds.length);
+    expect(observedIds).toEqual(
+      [...observedActions].sort(compareDashboardActions).map((action) => action.id),
+    );
+    expect(observedIds).toHaveLength(expectedDraftIds.size + 2);
+    for (const id of expectedDraftIds) expect(observedIds).toContain(id);
+    expect(observedIds).toContain(`event:${unresolvedEvent.id}:check-in`);
+    expect(observedIds).toContain(`event:${unresolvedEvent.id}:failed-exports`);
+    expect(observedIds).not.toContain(`event:${configuredEvent.id}:check-in`);
+    const eventScoped = await service.getFeed({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      eventIds: [unresolvedEvent.id],
+      permissions,
+      now,
+      limit: 50,
+    });
+    expect(eventScoped.actions.map((action) => action.id).sort()).toEqual(
+      [`event:${unresolvedEvent.id}:check-in`, `event:${unresolvedEvent.id}:failed-exports`].sort(),
+    );
+
+    const mutationPage = await service.getFeed({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      permissions,
+      now,
+      limit: 1,
+    });
+    expect(mutationPage.nextCursor).not.toBeNull();
+    const mutationCursor = mutationPage.nextCursor ?? '';
+    await expect(
+      service.getFeed({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        permissions,
+        now,
+        limit: 1,
+        cursor: `${mutationCursor.slice(0, -1)}x`,
+      }),
+    ).rejects.toThrow('Dashboard action cursor is invalid');
+    await expect(
+      service.getFeed({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        eventIds: [unresolvedEvent.id],
+        permissions,
+        now,
+        limit: 1,
+        cursor: mutationCursor,
+      }),
+    ).rejects.toThrow('Dashboard action cursor does not match the requested scope');
+    await expect(
+      service.getFeed({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: `other_${brand.id}`,
+        permissions,
+        now,
+        limit: 1,
+        cursor: mutationCursor,
+      }),
+    ).rejects.toThrow('Dashboard action cursor does not match the requested scope');
+    await expect(
+      service.getFeed({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        permissions,
+        now: new Date('2026-01-01T00:05:00.001Z'),
+        limit: 1,
+        cursor: mutationCursor,
+      }),
+    ).rejects.toThrow('Dashboard action cursor has expired');
+    await events.update(mutableDraftId, { title: 'Changed during pagination' });
+    await expect(
+      service.getFeed({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        permissions,
+        now,
+        limit: 1,
+        cursor: mutationCursor,
+      }),
+    ).rejects.toThrow('Dashboard action snapshot changed');
+
+    const exportSwapEvents = [];
+    for (const label of ['a', 'b', 'c']) {
+      const event = await events.create({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        slug: `export-swap-${label}-${runId}`,
+        title: `Export swap ${label.toUpperCase()}`,
+        currency: 'USD',
+        timezone: 'UTC',
+        startsAt: new Date('2027-03-01T18:00:00.000Z'),
+      });
+      await events.updateStatus(event.id, 'published');
+      await new CheckInListRepository(db).create({
+        eventId: event.id,
+        name: `Export swap ${label.toUpperCase()} entrance`,
+        ticketTypeIds: [],
+      });
+      exportSwapEvents.push(event);
+    }
+    const [swapEventA, swapEventB, swapEventC] = exportSwapEvents;
+    if (!swapEventA || !swapEventB || !swapEventC) throw new Error('Export swap setup failed');
+    const swapExportA = `exp_${ulid()}`;
+    const swapExportB = `exp_${ulid()}`;
+    const swapExportC = `exp_${ulid()}`;
+    await db
+      .insertInto('export_jobs')
+      .values([
+        {
+          id: swapExportA,
+          tenant_id: tenant.id,
+          event_id: swapEventA.id,
+          type: 'attendees',
+          format: 'csv',
+          status: 'failed',
+          file_url: null,
+          requested_by: 'usr_action_feed_integration',
+          filters: JSON.stringify({}),
+          created_at: new Date('2026-01-01T10:00:00.000Z'),
+          completed_at: null,
+        },
+        {
+          id: swapExportB,
+          tenant_id: tenant.id,
+          event_id: swapEventB.id,
+          type: 'attendees',
+          format: 'csv',
+          status: 'completed',
+          file_url: null,
+          requested_by: 'usr_action_feed_integration',
+          filters: JSON.stringify({}),
+          created_at: new Date('2026-01-01T11:00:00.000Z'),
+          completed_at: new Date('2026-01-01T11:01:00.000Z'),
+        },
+        {
+          id: swapExportC,
+          tenant_id: tenant.id,
+          event_id: swapEventC.id,
+          type: 'attendees',
+          format: 'csv',
+          status: 'failed',
+          file_url: null,
+          requested_by: 'usr_action_feed_integration',
+          filters: JSON.stringify({}),
+          created_at: new Date('2026-01-01T12:00:00.000Z'),
+          completed_at: null,
+        },
+      ])
+      .execute();
+    const exportSwapPage = await service.getFeed({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      permissions,
+      now,
+      limit: 1,
+    });
+    expect(exportSwapPage.nextCursor).not.toBeNull();
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable('export_jobs')
+        .set({ status: 'completed', completed_at: new Date('2026-01-01T13:00:00.000Z') })
+        .where('id', '=', swapExportA)
+        .execute();
+      await trx
+        .updateTable('export_jobs')
+        .set({ status: 'failed', completed_at: null })
+        .where('id', '=', swapExportB)
+        .execute();
+    });
+    await expect(
+      service.getFeed({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        brandId: brand.id,
+        permissions,
+        now,
+        limit: 1,
+        cursor: exportSwapPage.nextCursor ?? '',
+      }),
+    ).rejects.toThrow('Dashboard action snapshot changed');
+
+    await new CheckInListRepository(db).create({
+      eventId: unresolvedEvent.id,
+      name: 'Resolved entrance',
+      ticketTypeIds: [],
+    });
+    await db
+      .updateTable('export_jobs')
+      .set({ status: 'completed', completed_at: new Date('2026-01-01T13:00:00.000Z') })
+      .where('id', '=', exportId)
+      .execute();
+    const resolved = await service.getFeed({
+      tenantId: tenant.id,
+      organizationId: organization.id,
+      brandId: brand.id,
+      permissions,
+      now,
+      limit: 50,
+    });
+    expect(resolved.actions.map((action) => action.id)).not.toContain(
+      `event:${unresolvedEvent.id}:check-in`,
+    );
+    expect(resolved.actions.map((action) => action.id)).not.toContain(
+      `event:${unresolvedEvent.id}:failed-exports`,
+    );
   });
 
   it('requires a current successful test order before completing test checkout readiness', async () => {
@@ -319,7 +704,7 @@ describeWithIntegrationDatabase('readiness service query and isolation budget', 
       .execute();
     expect((await readiness()).steps.find((step) => step.id === 'test_order')).toMatchObject({
       status: 'incomplete',
-      reasonCodes: ['test_order_stale'],
+      reasonCodes: ['test_order_recommended'],
     });
   });
 });

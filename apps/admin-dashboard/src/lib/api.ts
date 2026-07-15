@@ -16,6 +16,7 @@ export { getAdminApiAuthHeaders, getAdminApiBaseUrl } from './api-http';
 export { hasClerkKey } from '@/lib/auth';
 import type { AdminTableQuery, AdminTablePage } from '@tixkit/admin-table-core';
 import type {
+  DashboardActionFeed,
   EventLaunchReadinessStepId,
   Permission,
   ReadinessActionId,
@@ -315,6 +316,8 @@ export type AdminWorkspaceDashboardAction = {
   requiredPermission: Permission | null;
   updatedAt: string | null;
 };
+
+export type AdminDashboardActionFeed = DashboardActionFeed;
 
 export type AdminEventLaunchReadiness = {
   tenantId: string;
@@ -2071,6 +2074,11 @@ export type AdminApi = {
     organizationId: string,
     brandId: string,
   ): Promise<ApiResult<AdminWorkspaceReadiness>>;
+  getDashboardActions(
+    organizationId: string,
+    brandId: string,
+    options?: { limit?: number; cursor?: string },
+  ): Promise<ApiResult<AdminDashboardActionFeed>>;
   updateOrganization(
     organizationId: string,
     input: UpdateOrganizationInput,
@@ -4774,6 +4782,33 @@ export const adminApi: AdminApi = {
             };
           })(),
         ),
+    );
+  },
+
+  async getDashboardActions(organizationId, brandId, options) {
+    return withFixture(
+      () => {
+        const params = new URLSearchParams({ brandId });
+        if (options?.limit !== undefined) params.set('limit', String(options.limit));
+        if (options?.cursor) params.set('cursor', options.cursor);
+        return request<AdminDashboardActionFeed>(
+          `/v1/organizations/${organizationId}/dashboard-actions?${params.toString()}`,
+          { method: 'GET' },
+        );
+      },
+      () => {
+        const generatedAt = iso(0);
+        return ok({
+          tenantId: 'ten_demo',
+          organizationId,
+          brandId,
+          evaluationVersion: 1,
+          generatedAt,
+          expiresAt: new Date(Date.parse(generatedAt) + 5 * 60_000).toISOString(),
+          nextCursor: null,
+          actions: [],
+        });
+      },
     );
   },
 

@@ -20,6 +20,7 @@ import {
   initializeCompactEnvironment,
   parseCompactCliArguments,
   runRecoveryActions,
+  upgradeCompactEnvironment,
   validateCompactEnvironment,
 } from '../compact.mjs';
 import {
@@ -70,6 +71,10 @@ test('Compact topology contains the complete single-database application stack',
   assert.equal(compose['x-app-environment'].TIXKIT_RUNTIME_MODE, 'development');
   assert.equal(compose['x-app-environment'].TIXKIT_MIGRATION_CURSOR_ACTIVE_KEY_ID, 'compact-v1');
   assert.match(compose['x-app-environment'].TIXKIT_MIGRATION_CURSOR_KEYS, /compact-v1/u);
+  assert.match(
+    compose['x-app-environment'].DASHBOARD_CURSOR_SIGNING_KEY,
+    /DASHBOARD_CURSOR_SIGNING_KEY/u,
+  );
   assert.match(compose.services.api.environment.TIXKIT_DEPLOYMENT_ID, /TIXKIT_DEPLOYMENT_ID/u);
   assert.match(
     compose.services.api.environment.PORTABILITY_BUNDLE_SIGNING_PRIVATE_KEY_BASE64,
@@ -545,6 +550,7 @@ test('Compact environment generation creates unique non-placeholder secrets with
       'QR_SIGNING_SECRET',
       'OFFLINE_MANIFEST_SIGNING_KEY',
       'WIDGET_IMPRESSION_HASH_SECRET',
+      'DASHBOARD_CURSOR_SIGNING_KEY',
       'TIXKIT_MIGRATION_CURSOR_KEY',
     ]) {
       assert.ok(firstValues[key].length >= 32);
@@ -610,6 +616,43 @@ test('Compact environment generation creates unique non-placeholder secrets with
       () => validateCompactEnvironment({ environmentPath: second }),
       /cutover trust contains invalid Ed25519 public-key entries/u,
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Compact upgrades an existing environment with a unique dashboard cursor key', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-compact-dashboard-key-upgrade-'));
+  const first = resolve(directory, '.env');
+  const second = resolve(directory, '.env-second');
+  try {
+    initializeCompactEnvironment({ environmentPath: first });
+    initializeCompactEnvironment({ environmentPath: second });
+    for (const environmentPath of [first, second]) {
+      writeFileSync(
+        environmentPath,
+        readFileSync(environmentPath, 'utf8').replace(
+          /^DASHBOARD_CURSOR_SIGNING_KEY=.*\n/mu,
+          '',
+        ),
+        { mode: 0o600 },
+      );
+    }
+    const firstBefore = readFileSync(first, 'utf8');
+    assert.equal(upgradeCompactEnvironment({ environmentPath: first }), true);
+    assert.equal(upgradeCompactEnvironment({ environmentPath: second }), true);
+    const firstAfter = readFileSync(first, 'utf8');
+    const secondAfter = readFileSync(second, 'utf8');
+    assert.ok(firstAfter.startsWith(firstBefore));
+    const firstKey = /^DASHBOARD_CURSOR_SIGNING_KEY=(.+)$/mu.exec(firstAfter)?.[1];
+    const secondKey = /^DASHBOARD_CURSOR_SIGNING_KEY=(.+)$/mu.exec(secondAfter)?.[1];
+    assert.ok(firstKey && firstKey.length >= 32);
+    assert.ok(secondKey && secondKey.length >= 32);
+    assert.notEqual(firstKey, secondKey);
+    assert.equal(statSync(first).mode & 0o777, 0o600);
+    assert.doesNotThrow(() => validateCompactEnvironment({ environmentPath: first }));
+    assert.equal(upgradeCompactEnvironment({ environmentPath: first }), false);
+    assert.equal(readFileSync(first, 'utf8'), firstAfter);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

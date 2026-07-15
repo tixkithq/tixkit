@@ -90,7 +90,6 @@ export const readinessReasonCodes = [
   'preview_reviewed',
   'preview_review_required',
   'test_order_complete',
-  'test_order_stale',
   'test_order_recommended',
   'test_order_not_applicable',
   'check_in_configured',
@@ -149,7 +148,6 @@ export const readinessReasonCodeStepIds = {
   preview_reviewed: ['preview_review'],
   preview_review_required: ['preview_review'],
   test_order_complete: ['test_order'],
-  test_order_stale: ['test_order'],
   test_order_recommended: ['test_order'],
   test_order_not_applicable: ['test_order'],
   check_in_configured: ['check_in_configuration'],
@@ -233,6 +231,85 @@ export interface WorkspaceDashboardAction {
   actionId: ReadinessActionId | null;
   requiredPermission: Permission | null;
   updatedAt: string | null;
+}
+
+export const dashboardActionSourceTypes = [
+  'event_launch',
+  'event_operations',
+  'delivery_operations',
+] as const;
+export type DashboardActionSourceType = (typeof dashboardActionSourceTypes)[number];
+
+export const dashboardActionReasonCodes = [
+  'event_unpublished',
+  'event_starting_soon',
+  'event_sales_paused',
+  'failed_exports',
+] as const;
+export type DashboardActionReasonCode = (typeof dashboardActionReasonCodes)[number];
+
+export const dashboardRemediationIds = [
+  'continue_event_setup',
+  'prepare_door_operations',
+  'review_paused_event',
+  'review_failed_exports',
+] as const;
+export type DashboardRemediationId = (typeof dashboardRemediationIds)[number];
+
+export interface DashboardActionResource {
+  type: 'event';
+  organizationId: string;
+  brandId: string;
+  eventId: string;
+  eventVersion: number;
+  eventTitle: string;
+}
+
+export interface DashboardActionStaleness {
+  state: 'current' | 'expired';
+  consistency: 'repeatable_read';
+  evaluatedAt: string;
+  expiresAt: string;
+  sourceUpdatedAt: string | null;
+  sourceVersion: number | null;
+  evidenceRevision: string;
+}
+
+export const dashboardActionDeadlinePolicies = ['none', 'event_start'] as const;
+export type DashboardActionDeadlinePolicy = (typeof dashboardActionDeadlinePolicies)[number];
+
+export interface DashboardActionRemediation {
+  id: DashboardRemediationId;
+  readinessActionId: 'view_event' | 'configure_check_in' | null;
+  requiredPermission: 'events.write' | 'checkins.write' | 'reports.read' | null;
+  canRemediate: boolean;
+  availability: 'available' | 'permission_required' | 'unsupported';
+}
+
+export interface DashboardAction {
+  id: string;
+  sourceType: DashboardActionSourceType;
+  resource: DashboardActionResource;
+  severity: DashboardActionSeverity;
+  owner: DashboardActionOwner;
+  deadlineAt: string | null;
+  deadlinePolicy: DashboardActionDeadlinePolicy;
+  overdue: boolean;
+  occurrenceCount: number;
+  reasonCode: DashboardActionReasonCode;
+  remediation: DashboardActionRemediation;
+  staleness: DashboardActionStaleness;
+}
+
+export interface DashboardActionFeed {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  evaluationVersion: 1;
+  generatedAt: string;
+  expiresAt: string;
+  nextCursor: string | null;
+  actions: ReadonlyArray<DashboardAction>;
 }
 
 export interface EventLaunchReadiness {
