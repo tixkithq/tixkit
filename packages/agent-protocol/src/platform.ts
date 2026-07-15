@@ -312,6 +312,7 @@ const REASON_CODE = /^[a-z0-9][a-z0-9_.-]{1,63}$/u;
 const FAILURE_CODE = /^[A-Z0-9_]{3,64}$/u;
 const MATERIAL_DIGEST = /^[A-Za-z][A-Za-z0-9_.-]{1,63}$/u;
 const RFC3339_MILLISECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const RFC3339_WHOLE_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/u;
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new AgentProtocolValidationError(message);
@@ -1209,7 +1210,11 @@ export function validateAgentReportReadResult(
   const from = validDate(action.payload.from);
   const to = validDate(action.payload.to);
   assert(
-    result.from === action.payload.from && result.to === action.payload.to && from <= to,
+    RFC3339_WHOLE_SECONDS.test(action.payload.from) &&
+      RFC3339_WHOLE_SECONDS.test(action.payload.to) &&
+      result.from === action.payload.from &&
+      result.to === action.payload.to &&
+      from <= to,
     'agent report range binding is invalid',
   );
   assert(
@@ -1487,7 +1492,7 @@ export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_02 =
 export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_03 =
   '90a370a02930c77d2726a78a03ebd77e679184396165727b0f72cf9af0308aea' as const;
 export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
-  '037b8a13ea7a9384e1929d91850200c655501a786b42812c767d04bb9625eeb1' as const;
+  '8f9a908cb690a36918ef31944f94bd2837aa69ba9a8d5f72997ade2f76897741' as const;
 
 const riskByKind: Readonly<Record<AgentActionKind, AgentRiskClass>> = {
   'event.read': 'read_only',

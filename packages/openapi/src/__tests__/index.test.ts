@@ -101,7 +101,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-03');
+    expect(openApiSpec.info.version).toBe('2026-08-04');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -317,6 +317,42 @@ describe('openApiSpec', () => {
       { type: 'string', const: 'event.title' },
       { type: 'string', const: 'event.description' },
     ]);
+  });
+
+  it('adds an aggregate-only direct event sales report with exact range and authority boundaries', () => {
+    const read = openApiSpec.paths['/agent/reports'].post;
+    const inspect = openApiSpec.paths['/agent/reports/{actionId}'].get;
+    const action = openApiSpec.components.schemas.AgentReportReadAction;
+    const result = openApiSpec.components.schemas.AgentReportReadResult;
+    const prepared = openApiSpec.components.schemas.PreparedAgentReportReadAction;
+    expect(read.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(read.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['delegationGrantId', 'resourceId'],
+      dependentRequired: { from: ['to'], to: ['from'] },
+    });
+    expect(read.requestBody.content['application/json'].schema.properties.from).toMatchObject({
+      format: 'date-time',
+      pattern: expect.stringContaining('\\.000Z'),
+    });
+    expect(action.properties.kind).toEqual({ type: 'string', const: 'report.read' });
+    expect(action.properties.target.properties).toMatchObject({
+      resourceType: { type: 'string', const: 'event' },
+      apiOperation: { type: 'string', const: 'reports.get' },
+    });
+    expect(action.properties.payload).toMatchObject({
+      additionalProperties: false,
+      required: ['reportType', 'from', 'to', 'reportSnapshotSha256'],
+    });
+    expect(action.properties.payload.properties.from.pattern).toContain('\\.000Z');
+    expect(result.properties.from.pattern).toContain('\\.000Z');
+    expect(result.properties.report.additionalProperties).toBe(false);
+    expect(result.properties.report['x-tixkit-reportAggregateCoherent']).toBe(true);
+    expect(result.properties.untrustedContentPaths.maxItems).toBe(0);
+    expect(result.properties).not.toHaveProperty('buyerEmail');
+    expect(prepared.required).toEqual(expect.arrayContaining(['result', 'resultSha256']));
+    expect(prepared.properties).not.toHaveProperty('dryRun');
   });
 
   it('adds direct event preparation with the complete non-status patch surface', () => {

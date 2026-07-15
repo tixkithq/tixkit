@@ -282,6 +282,7 @@ describe('third-party contract profiles', () => {
     const eventUpdateActionId = `act_${'f'.repeat(48)}`;
     const eventUpdateApprovalId = `apr_${'d'.repeat(48)}`;
     const eventUpdateExecutionId = `exec_${'e'.repeat(48)}`;
+    const reportReadActionId = `act_${'6'.repeat(48)}`;
     const agentPrincipalId = `agt_${'1'.repeat(48)}`;
     const delegationGrantId = `dlg_${'2'.repeat(48)}`;
     const action = {
@@ -375,6 +376,19 @@ describe('third-party contract profiles', () => {
       observedAt: '2026-07-14T11:58:00.000Z',
       event: eventProjection,
       untrustedContentPaths: ['event.title', 'event.description'] as const,
+    };
+    const reportAggregate = {
+      currency: 'USD',
+      grossSalesCents: 12_000,
+      grossSalesByChannelCents: { online: 10_000, boxOffice: 2_000 },
+      netRevenueCents: 11_000,
+      refundsCents: 1_000,
+      feesCents: 600,
+      taxCents: 400,
+      ticketsSold: 12,
+      checkIns: 8,
+      ordersCount: 10,
+      paidOrdersCount: 9,
     };
     const eventPrepareBefore = {
       description: eventProjection.description,
@@ -669,6 +683,21 @@ describe('third-party contract profiles', () => {
       | 'replay'
       | undefined;
     let eventReadCall = 0;
+    let reportReadMutation:
+      | 'agent'
+      | 'sponsor'
+      | 'delegation'
+      | 'resource'
+      | 'tenant'
+      | 'idempotency'
+      | 'action_digest'
+      | 'report_digest'
+      | 'range'
+      | 'pii'
+      | 'replay'
+      | undefined;
+    let reportReadCall = 0;
+    let reportReadEnvelope: Record<string, unknown> | undefined;
     let eventPrepareMutation:
       | 'agent'
       | 'sponsor'
@@ -728,7 +757,7 @@ describe('third-party contract profiles', () => {
       headers: Record<string, string>;
     }> = [];
     const contractInput = {
-      apiVersion: '2026-08-03',
+      apiVersion: '2026-08-04',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: `tk_agent_${'e'.repeat(48)}`,
       agentClientSecret: 'secret_value',
@@ -758,6 +787,7 @@ describe('third-party contract profiles', () => {
           return response(200, {
             principal: {
               id: agentPrincipalId,
+              tenantId: 'tenant_primary',
               sponsorPrincipalId: 'sponsor_primary',
             },
             authentication: { grantType: 'client_credentials' },
@@ -813,6 +843,77 @@ describe('third-party contract profiles', () => {
               eventMutation === 'result_digest' ? '0'.repeat(64) : agentSha256(returnedResult),
           });
         }
+        if (request.path === '/v1/agent/reports') {
+          reportReadCall += 1;
+          const body = request.body as {
+            delegationGrantId: string;
+            resourceId: string;
+            from: string;
+            to: string;
+          };
+          const reportSnapshotSha256 = agentSha256(reportAggregate);
+          const returnedAction = {
+            id: reportReadActionId,
+            protocolVersion: '2026-07-22' as const,
+            agentPrincipalId:
+              reportReadMutation === 'agent' ? 'agent_substituted' : agentPrincipalId,
+            sponsorPrincipalId:
+              reportReadMutation === 'sponsor' ? 'sponsor_substituted' : 'sponsor_primary',
+            delegationGrantId:
+              reportReadMutation === 'delegation' ? 'delegation_substituted' : delegationGrantId,
+            kind: 'report.read' as const,
+            autonomy: 'read' as const,
+            target: {
+              tenantId: reportReadMutation === 'tenant' ? 'tenant_substituted' : 'tenant_primary',
+              resourceType: 'event' as const,
+              resourceId: reportReadMutation === 'resource' ? 'event_substituted' : body.resourceId,
+              resourceVersion: 7,
+              apiOperation: 'reports.get',
+            },
+            payload: {
+              reportType: 'event_sales' as const,
+              from: body.from,
+              to: body.to,
+              reportSnapshotSha256,
+            },
+            idempotencyKey:
+              reportReadMutation === 'idempotency'
+                ? 'agent.conformance.substituted.report.read'
+                : 'agent.conformance.0001.report.read',
+            expectedPolicyVersion: 3,
+            preparedAt: '2026-07-14T11:58:15.000Z',
+          };
+          const returnedResult = {
+            resourceId: reportReadMutation === 'resource' ? 'event_substituted' : body.resourceId,
+            resourceVersion: 7,
+            reportType: 'event_sales' as const,
+            from: reportReadMutation === 'range' ? '1970-01-01T00:00:01.000Z' : body.from,
+            to: body.to,
+            reportSnapshotSha256:
+              reportReadMutation === 'report_digest' ? '0'.repeat(64) : reportSnapshotSha256,
+            observedAt:
+              reportReadMutation === 'replay' && reportReadCall === 2
+                ? '2026-07-14T11:58:16.000Z'
+                : '2026-07-14T11:58:15.000Z',
+            report:
+              reportReadMutation === 'pii'
+                ? { ...reportAggregate, buyerEmail: 'buyer@example.test' }
+                : reportAggregate,
+            untrustedContentPaths: [] as const,
+          };
+          reportReadEnvelope = {
+            action: returnedAction,
+            actionDigest:
+              reportReadMutation === 'action_digest' ? '0'.repeat(64) : agentSha256(returnedAction),
+            expiresAt: '2026-07-14T12:08:15.000Z',
+            authorization: { allowed: true },
+            result: returnedResult,
+            resultSha256: agentSha256(returnedResult),
+          };
+          return response(201, reportReadEnvelope);
+        }
+        if (request.path === `/v1/agent/reports/${reportReadActionId}`)
+          return response(200, reportReadEnvelope ?? {});
         if (request.path === '/v1/agent/event-preparations') {
           eventPrepareCall += 1;
           const returnedAction = {
@@ -1114,6 +1215,8 @@ describe('third-party contract profiles', () => {
         if (
           request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
           request.path === `/v1/agent/actions/${contentPrepareActionId}/executions` ||
+          request.path === `/v1/agent/actions/${reportReadActionId}/approvals` ||
+          request.path === `/v1/agent/actions/${reportReadActionId}/executions` ||
           request.path === `/v1/agent/actions/${campaignPrepareAction.id}/approvals` ||
           request.path === `/v1/agent/actions/${campaignPrepareAction.id}/executions`
         )
@@ -1211,6 +1314,41 @@ describe('third-party contract profiles', () => {
     const output = await runAgentPlatformContract(contractInput);
     expect(output).toEqual({ ok: true, findings: [] });
     expect(requests.filter((request) => request.path === '/v1/agent/events')).toHaveLength(2);
+    expect(requests.filter((request) => request.path === '/v1/agent/reports')).toHaveLength(2);
+    expect(
+      requests.filter((request) => request.path === `/v1/agent/reports/${reportReadActionId}`),
+    ).toHaveLength(1);
+    expect(
+      requests.filter(
+        (request) =>
+          request.path === `/v1/agent/actions/${reportReadActionId}/approvals` ||
+          request.path === `/v1/agent/actions/${reportReadActionId}/executions`,
+      ),
+    ).toHaveLength(2);
+    const reportApprovalRequest = requests.find(
+      (request) => request.path === `/v1/agent/actions/${reportReadActionId}/approvals`,
+    );
+    expect(reportApprovalRequest).toMatchObject({
+      headers: {
+        'Idempotency-Key': 'agent.conformance.0001.report.read.approval',
+        'X-Tixkit-Confirmation': `approve:${reportReadActionId}:${reportReadEnvelope?.actionDigest}`,
+      },
+      body: { actionDigest: reportReadEnvelope?.actionDigest },
+    });
+    const reportExecutionRequest = requests.find(
+      (request) => request.path === `/v1/agent/actions/${reportReadActionId}/executions`,
+    );
+    const reportExecutionConfirmation = `execute:${reportReadActionId}:apr_${'0'.repeat(48)}:${reportReadEnvelope?.actionDigest}`;
+    expect(reportExecutionRequest).toMatchObject({
+      headers: {
+        'Idempotency-Key': reportExecutionConfirmation,
+        'X-Tixkit-Confirmation': reportExecutionConfirmation,
+      },
+      body: {
+        approvalId: `apr_${'0'.repeat(48)}`,
+        actionDigest: reportReadEnvelope?.actionDigest,
+      },
+    });
     expect(
       requests.filter((request) => request.path === '/v1/agent/event-preparations'),
     ).toHaveLength(2);
@@ -1300,6 +1438,36 @@ describe('third-party contract profiles', () => {
       ).toHaveLength(readinessRequestsBefore);
     }
     eventMutation = undefined;
+
+    for (const mutation of [
+      'agent',
+      'sponsor',
+      'delegation',
+      'resource',
+      'tenant',
+      'idempotency',
+      'action_digest',
+      'report_digest',
+      'range',
+      'pii',
+      'replay',
+    ] as const) {
+      reportReadMutation = mutation;
+      reportReadCall = 0;
+      const eventPrepareRequestsBefore = requests.filter(
+        (request) => request.path === '/v1/agent/event-preparations',
+      ).length;
+      const malformedReportRead = await runAgentPlatformContract(contractInput);
+      expect(
+        malformedReportRead.findings.map((finding) => finding.code),
+        mutation,
+      ).toContain('AGENT_PLATFORM_REPORT_READ_SCHEMA');
+      expect(
+        requests.filter((request) => request.path === '/v1/agent/event-preparations'),
+        mutation,
+      ).toHaveLength(eventPrepareRequestsBefore);
+    }
+    reportReadMutation = undefined;
 
     for (const mutation of [
       'agent',

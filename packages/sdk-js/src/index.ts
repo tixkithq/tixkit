@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-03';
+export const TIXKIT_API_VERSION = '2026-08-04';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1675,6 +1675,48 @@ export type AgentEventReadResult = {
   untrustedContentPaths: ['event.title', 'event.description'];
 };
 
+export type AgentReportReadAction = AgentActionBase & {
+  kind: 'report.read';
+  autonomy: 'read';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'reports.get';
+  };
+  payload: {
+    reportType: 'event_sales';
+    from: string;
+    to: string;
+    reportSnapshotSha256: string;
+  };
+};
+
+export type AgentReportReadResult = {
+  resourceId: string;
+  resourceVersion: number;
+  reportType: 'event_sales';
+  from: string;
+  to: string;
+  reportSnapshotSha256: string;
+  observedAt: string;
+  report: {
+    currency: string;
+    grossSalesCents: number;
+    grossSalesByChannelCents: { online: number; boxOffice: number };
+    netRevenueCents: number;
+    refundsCents: number;
+    feesCents: number;
+    taxCents: number;
+    ticketsSold: number;
+    checkIns: number;
+    ordersCount: number;
+    paidOrdersCount: number;
+  };
+  untrustedContentPaths: [];
+};
+
 export type AgentEventPrepareChanges = {
   title?: string;
   slug?: string;
@@ -1896,6 +1938,21 @@ export type PreparedAgentEventReadAction = {
     checkedAt: string;
   };
   result: AgentEventReadResult;
+  resultSha256: string;
+};
+
+export type PreparedAgentReportReadAction = {
+  action: AgentReportReadAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  result: AgentReportReadResult;
   resultSha256: string;
 };
 
@@ -4773,6 +4830,20 @@ class AgentActionResource {
     });
   }
 
+  async readReport(
+    input: {
+      delegationGrantId: string;
+      resourceId: string;
+      idempotencyKey: string;
+    } & ({ from: string; to: string } | { from?: never; to?: never }),
+  ): Promise<PreparedAgentReportReadAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/reports', {
+      body,
+      idempotencyKey,
+    });
+  }
+
   async prepareEvent(input: {
     delegationGrantId: string;
     resourceId: string;
@@ -4839,6 +4910,10 @@ class AgentActionResource {
 
   async getEvent(actionId: string): Promise<PreparedAgentEventReadAction> {
     return this.client.request('GET', `/agent/events/${actionId}`);
+  }
+
+  async getReport(actionId: string): Promise<PreparedAgentReportReadAction> {
+    return this.client.request('GET', `/agent/reports/${actionId}`);
   }
 
   async getEventPreparation(actionId: string): Promise<PreparedAgentEventPrepareAction> {

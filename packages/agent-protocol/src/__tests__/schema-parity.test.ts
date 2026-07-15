@@ -69,6 +69,12 @@ ajv.addSchema(
 const validate = ajv.compile(currentSchema);
 const validateRetained = ajv.getSchema('https://tixkit.com/schemas/agent-protocol/2026-07-22')!;
 const validateLegacy = ajv.compile(legacySchema);
+const reportContractId = 'https://tixkit.com/schemas/agent-action-contracts/2026-08-04';
+const validateReportPrepare = ajv.getSchema(`${reportContractId}#/$defs/reportReadPrepareInput`)!;
+const validateReportPayload = ajv.getSchema(
+  `${reportContractId}#/$defs/reportReadResolvedPayload`,
+)!;
+const validateReportResult = ajv.getSchema(`${reportContractId}#/$defs/reportReadResult`)!;
 const campaign: CampaignSendPayload = {
   channel: 'email',
   contentVersion: 'content_v7',
@@ -276,6 +282,7 @@ describe('published agent schema parity', () => {
       { ...valid, payload: {} },
       { ...valid, payload: { ...valid.payload, extra: true } },
       { ...valid, payload: { ...valid.payload, from: 'not-a-timestamp' } },
+      { ...valid, payload: { ...valid.payload, from: '2026-08-01T00:00:00.001Z' } },
       {
         ...valid,
         payload: {
@@ -291,6 +298,61 @@ describe('published agent schema parity', () => {
       expect(validate(item), ajv.errorsText(validate.errors)).toBe(false);
       expect(() => agentActionDigest(item)).toThrow(AgentProtocolValidationError);
     }
+  });
+
+  it('enforces paired whole-second report ranges across preparation, payload and result schemas', () => {
+    const prepare = {
+      kind: 'report.read',
+      delegationGrantId: 'delegation_primary',
+      resourceId: 'event_primary',
+    };
+    expect(validateReportPrepare(prepare)).toBe(true);
+    expect(
+      validateReportPrepare({
+        ...prepare,
+        from: '2026-08-01T00:00:00.000Z',
+        to: '2026-08-02T00:00:00.000Z',
+      }),
+    ).toBe(true);
+    expect(validateReportPrepare({ ...prepare, from: '2026-08-01T00:00:00.000Z' })).toBe(false);
+    expect(
+      validateReportPrepare({
+        ...prepare,
+        from: '2026-08-01T00:00:00.001Z',
+        to: '2026-08-02T00:00:00.000Z',
+      }),
+    ).toBe(false);
+    const report = {
+      currency: 'USD',
+      grossSalesCents: 1_000,
+      grossSalesByChannelCents: { online: 1_000, boxOffice: 0 },
+      netRevenueCents: 900,
+      refundsCents: 100,
+      feesCents: 50,
+      taxCents: 25,
+      ticketsSold: 2,
+      checkIns: 1,
+      ordersCount: 2,
+      paidOrdersCount: 2,
+    };
+    const payload = {
+      reportType: 'event_sales',
+      from: '2026-08-01T00:00:00.000Z',
+      to: '2026-08-02T00:00:00.000Z',
+      reportSnapshotSha256: agentSha256(report),
+    };
+    expect(validateReportPayload(payload)).toBe(true);
+    expect(validateReportPayload({ ...payload, from: '2026-08-01T00:00:00.001Z' })).toBe(false);
+    const result = {
+      resourceId: 'event_primary',
+      resourceVersion: 1,
+      ...payload,
+      observedAt: '2026-08-02T00:00:01.000Z',
+      report,
+      untrustedContentPaths: [],
+    };
+    expect(validateReportResult(result)).toBe(true);
+    expect(validateReportResult({ ...result, to: '2026-08-02T00:00:00.001Z' })).toBe(false);
   });
 
   it('rejects ambiguous numbers, invalid keys, oversized values and malformed campaigns in both', () => {

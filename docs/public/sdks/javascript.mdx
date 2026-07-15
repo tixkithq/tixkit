@@ -7,7 +7,7 @@ product_area: sdks
 content_type: how-to
 status: beta
 owner: developer-platform
-last_verified: 2026-08-03
+last_verified: 2026-08-04
 prerequisites:
   - A server-side JavaScript runtime
 related:
@@ -43,11 +43,13 @@ const page = await tixkit.events.list({ limit: 10 });
 console.log(page.items.map((event) => event.id));
 ```
 
-The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-08-03`; keep SDK and server compatibility aligned.
+The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-08-04`; keep SDK and server compatibility aligned.
 
 Agent-control methods are available under `tixkit.agentControl`. Configure `accessToken` with the authenticated human sponsor's bearer token for those calls; do not pass an API key, and do not give the sponsor token to the agent process. See the [agent Platform API guide](/platform/agent-platform) for the private-beta authorization boundary.
 
 Explicit agent sessions use `tixkit.agentActions`. `prepareContent` submits an event-scoped document to the mutation-free `content.prepare` adapter, while `getContentPreparation` retrieves reauthorized immutable evidence. These methods require Agent OAuth plus the exact capability and delegation; they never apply content or expose an approval/execution path.
+
+`readReport` returns an aggregate-only event sales report for one exact closed UTC range; omit both bounds to use the server-derived event-created-at through observation-time range. `getReport` reauthorizes and recomputes the same range before returning persisted evidence. Grant only `reports.read` with exact event scope and retain sponsor `reports.read`; this direct-only adapter exposes no buyer or attendee identifiers and cannot be planned, approved, executed or exported.
 
 `prepareCampaign` resolves exact published templates, audience eligibility, consent and suppression evidence without queueing email or SMS delivery. `getCampaignPreparation` reauthorizes and recomputes the immutable snapshots before returning persisted evidence. Grant only `campaigns.prepare` with event scope and retain sponsor `messages.write`; this direct-only adapter has no send, approval or execution method.
 

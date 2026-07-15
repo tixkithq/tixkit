@@ -617,7 +617,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-03',
+    version: '2026-08-04',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -2761,8 +2761,14 @@ const rawOpenApiSpec = {
             type: 'object',
             properties: {
               type: { const: 'date_range' },
-              from: { type: 'string', format: 'date-time' },
-              to: { type: 'string', format: 'date-time' },
+              from: {
+                type: 'string',
+                format: 'date-time',
+              },
+              to: {
+                type: 'string',
+                format: 'date-time',
+              },
             },
             required: ['type'],
           },
@@ -5334,7 +5340,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-03, including bounded content and campaign preparation.',
+          'Explicit agent identity for API 2026-08-04, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5381,7 +5387,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-03, including consent-aware campaign preparation.',
+          'Explicit agent identity for API 2026-08-04, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5488,7 +5494,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-03 agent identity, including bounded content and campaign preparation.',
+          'Live explicit API 2026-08-04 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5525,7 +5531,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-03 agent identity, including consent-aware campaign preparation.',
+          'Live explicit API 2026-08-04 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5855,6 +5861,147 @@ const rawOpenApiSpec = {
           'eventSnapshotSha256',
           'observedAt',
           'event',
+          'untrustedContentPaths',
+        ],
+      },
+      AgentReportReadAction: {
+        type: 'object',
+        description:
+          'Server-derived immutable direct event sales report read. It is not approval-, execution- or plan-eligible.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          protocolVersion: { type: 'string', const: '2026-07-22' },
+          agentPrincipalId: { type: 'string' },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: { type: 'string' },
+          kind: { type: 'string', const: 'report.read' },
+          autonomy: { type: 'string', const: 'read' },
+          target: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              tenantId: { type: 'string' },
+              resourceType: { type: 'string', const: 'event' },
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 1 },
+              apiOperation: { type: 'string', const: 'reports.get' },
+            },
+            required: ['tenantId', 'resourceType', 'resourceId', 'resourceVersion', 'apiOperation'],
+          },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              reportType: { type: 'string', const: 'event_sales' },
+              from: {
+                type: 'string',
+                format: 'date-time',
+                pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$',
+              },
+              to: {
+                type: 'string',
+                format: 'date-time',
+                pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$',
+              },
+              reportSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            },
+            required: ['reportType', 'from', 'to', 'reportSnapshotSha256'],
+          },
+          idempotencyKey: { type: 'string', minLength: 16, maxLength: 127 },
+          expectedPolicyVersion: { type: 'integer', minimum: 1 },
+          preparedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'protocolVersion',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'kind',
+          'autonomy',
+          'target',
+          'payload',
+          'idempotencyKey',
+          'expectedPolicyVersion',
+          'preparedAt',
+        ],
+      },
+      AgentReportReadResult: {
+        type: 'object',
+        description:
+          'Aggregate-only, digest-bound event sales report for one exact closed time range. It contains no buyer or attendee identifiers.',
+        additionalProperties: false,
+        properties: {
+          resourceId: { type: 'string' },
+          resourceVersion: { type: 'integer', minimum: 1 },
+          reportType: { type: 'string', const: 'event_sales' },
+          from: {
+            type: 'string',
+            format: 'date-time',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$',
+          },
+          to: {
+            type: 'string',
+            format: 'date-time',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$',
+          },
+          reportSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          observedAt: { type: 'string', format: 'date-time' },
+          report: {
+            type: 'object',
+            additionalProperties: false,
+            'x-tixkit-reportAggregateCoherent': true,
+            properties: {
+              currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+              grossSalesCents: { type: 'integer', minimum: 0 },
+              grossSalesByChannelCents: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  online: { type: 'integer', minimum: 0 },
+                  boxOffice: { type: 'integer', minimum: 0 },
+                },
+                required: ['online', 'boxOffice'],
+              },
+              netRevenueCents: { type: 'integer' },
+              refundsCents: { type: 'integer', minimum: 0 },
+              feesCents: { type: 'integer', minimum: 0 },
+              taxCents: { type: 'integer', minimum: 0 },
+              ticketsSold: { type: 'integer', minimum: 0 },
+              checkIns: { type: 'integer', minimum: 0 },
+              ordersCount: { type: 'integer', minimum: 0 },
+              paidOrdersCount: { type: 'integer', minimum: 0 },
+            },
+            required: [
+              'currency',
+              'grossSalesCents',
+              'grossSalesByChannelCents',
+              'netRevenueCents',
+              'refundsCents',
+              'feesCents',
+              'taxCents',
+              'ticketsSold',
+              'checkIns',
+              'ordersCount',
+              'paidOrdersCount',
+            ],
+          },
+          untrustedContentPaths: {
+            type: 'array',
+            maxItems: 0,
+            items: false,
+          },
+        },
+        required: [
+          'resourceId',
+          'resourceVersion',
+          'reportType',
+          'from',
+          'to',
+          'reportSnapshotSha256',
+          'observedAt',
+          'report',
           'untrustedContentPaths',
         ],
       },
@@ -7064,6 +7211,39 @@ const rawOpenApiSpec = {
           'resultSha256',
         ],
       },
+      PreparedAgentReportReadAction: {
+        type: 'object',
+        description:
+          'Immutable direct event-sales report action with required digest-bound, aggregate-only result evidence.',
+        additionalProperties: false,
+        properties: {
+          action: { $ref: '#/components/schemas/AgentReportReadAction' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          authorization: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              allowed: { type: 'boolean', const: true },
+              eligibleForApproval: { type: 'boolean', const: false },
+              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              checkedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['allowed', 'eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
+          },
+          result: { $ref: '#/components/schemas/AgentReportReadResult' },
+          resultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: [
+          'action',
+          'actionDigest',
+          'expiresAt',
+          'authorization',
+          'result',
+          'resultSha256',
+        ],
+      },
       PreparedAgentEventPrepareAction: {
         type: 'object',
         description:
@@ -7596,7 +7776,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-03 authority grant, including bounded content and campaign preparation.',
+          'Time-bounded API 2026-08-04 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -7653,7 +7833,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-03 authority grant, including consent-aware campaign preparation.',
+          'Time-bounded API 2026-08-04 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -13302,6 +13482,97 @@ const rawOpenApiSpec = {
           '404': {
             description: 'Action or current authority is outside the caller scope',
           },
+        },
+      },
+    },
+    '/agent/reports': {
+      post: {
+        summary: 'Read an aggregate event sales report through a direct agent action',
+        description:
+          'Experimental/private beta. Requires Agent OAuth. Returns aggregate-only, digest-bound event sales metrics for one exact closed time range after authorizing reports.read capability, reports:read delegation evidence, current sponsor reports.read permission, event scope, resource version and tenant action/risk policy. Omitted from defaults to event creation, capped at the observation time for database timestamp precision; omitted to defaults to the database observation time. This operation never exports personal data or creates approval, plan or execution authority.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [{ $ref: '#/components/parameters/AgentActionIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  delegationGrantId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  resourceId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  from: {
+                    type: 'string',
+                    format: 'date-time',
+                    pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$',
+                  },
+                  to: {
+                    type: 'string',
+                    format: 'date-time',
+                    pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$',
+                  },
+                },
+                required: ['delegationGrantId', 'resourceId'],
+                dependentRequired: { from: ['to'], to: ['from'] },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Immutable direct report-read action with required aggregate result and result digest. Exact still-authorized replays re-resolve the closed range and return identical evidence only when it has not drifted.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentReportReadAction' },
+              },
+            },
+          },
+          '400': { description: 'Invalid typed request, range or idempotency key' },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': {
+            description:
+              'Current agent, delegation, sponsor, policy or event authority is unavailable',
+          },
+          '409': { description: 'Idempotency conflict or report-read policy is unavailable' },
+        },
+      },
+    },
+    '/agent/reports/{actionId}': {
+      get: {
+        summary: 'Get a direct event sales report result',
+        description:
+          'Requires the exact agent or sponsor, reauthorizes the complete current permission intersection and re-resolves the persisted closed range before returning aggregate evidence. Report or authorization drift fails closed.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'Immutable direct report-read action and required aggregate result evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentReportReadAction' },
+              },
+            },
+          },
+          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
+          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '404': { description: 'Action, report snapshot or current authority is unavailable' },
         },
       },
     },

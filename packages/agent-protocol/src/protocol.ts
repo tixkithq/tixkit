@@ -702,6 +702,8 @@ function isEventTimestamp(value: unknown): value is string {
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
 
+const REPORT_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/u;
+
 function validateReportReadPayload(payload: Readonly<Record<string, unknown>>): void {
   const expected = ['from', 'reportSnapshotSha256', 'reportType', 'to'];
   if (
@@ -709,6 +711,8 @@ function validateReportReadPayload(payload: Readonly<Record<string, unknown>>): 
     payload.reportType !== 'event_sales' ||
     !isEventTimestamp(payload.from) ||
     !isEventTimestamp(payload.to) ||
+    !REPORT_TIMESTAMP.test(payload.from) ||
+    !REPORT_TIMESTAMP.test(payload.to) ||
     Date.parse(payload.from) > Date.parse(payload.to) ||
     typeof payload.reportSnapshotSha256 !== 'string' ||
     !SHA256.test(payload.reportSnapshotSha256)

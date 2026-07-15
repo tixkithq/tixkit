@@ -191,7 +191,7 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
-      apiVersion: '2026-08-03',
+      apiVersion: '2026-08-04',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
@@ -349,7 +349,7 @@ if (captured.headers.authorization !== 'Bearer tk_sandbox') throw new Error('Pac
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
-    'Built and executed 4 packed contract profiles, including agent event-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, and the packed SDK wire contract.',
+    'Built and executed 4 packed contract profiles, including agent event-read/report-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, and the packed SDK wire contract.',
   );
 } finally {
   await rm(temp, { recursive: true, force: true });

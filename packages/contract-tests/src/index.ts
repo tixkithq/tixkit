@@ -17,6 +17,7 @@ import {
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
   validateAgentEventUpdatePreview,
+  validateAgentReportReadResult,
   validateAgentReadinessReadResult,
   type AgentAction,
   type AgentActionResult,
@@ -27,12 +28,13 @@ import {
   type AgentEventReadResult,
   type AgentEventPrepareResult,
   type AgentEventUpdatePreview,
+  type AgentReportReadResult,
   type AgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-03' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-04' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -497,10 +499,13 @@ export async function runAgentPlatformContract(
     });
     return result(findings);
   }
+  const reportFrom = new Date(0).toISOString();
+  const reportTo = new Date(Math.floor((Date.now() - 5_000) / 1_000) * 1_000).toISOString();
   const request = async (
     stage: string,
     value: AgentPlatformContractRequest,
     expectedStatus: number,
+    requireNoStore = true,
   ): Promise<AgentPlatformContractResponse | undefined> => {
     try {
       const response = await input.execute(value);
@@ -515,7 +520,7 @@ export async function runAgentPlatformContract(
       const cacheControl = Object.entries(response.headers).find(
         ([name]) => name.toLowerCase() === 'cache-control',
       )?.[1];
-      if (!/(?:^|,)\s*no-store(?:\s*(?:,|$))/iu.test(cacheControl ?? ''))
+      if (requireNoStore && !/(?:^|,)\s*no-store(?:\s*(?:,|$))/iu.test(cacheControl ?? ''))
         findings.push({
           code: 'AGENT_PLATFORM_CACHE_CONTROL',
           message: `${stage} must return Cache-Control: no-store.`,
@@ -571,6 +576,7 @@ export async function runAgentPlatformContract(
   const principal = objectBody(session?.principal);
   if (
     typeof principal?.id !== 'string' ||
+    typeof principal.tenantId !== 'string' ||
     typeof principal.sponsorPrincipalId !== 'string' ||
     objectBody(session?.authentication)?.grantType !== 'client_credentials' ||
     session?.delegationRequired !== true
@@ -636,6 +642,113 @@ export async function runAgentPlatformContract(
     });
     return result(findings);
   }
+  const reportReadRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: '/v1/agent/reports',
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.report.read`,
+    },
+    body: {
+      delegationGrantId: input.delegationGrantId,
+      resourceId: input.resourceId,
+      from: reportFrom,
+      to: reportTo,
+    },
+  };
+  const reportReadResponse = await request('report-read', reportReadRequest, 201);
+  const reportReadReplay = await request('report-read-replay', reportReadRequest, 201);
+  const preparedReport = objectBody(reportReadResponse?.body);
+  const reportAction = objectBody(preparedReport?.action) as unknown as AgentAction | undefined;
+  const reportResult = objectBody(preparedReport?.result);
+  const reportAuthorization = objectBody(preparedReport?.authorization);
+  let reportActionDigest: string | undefined;
+  let reportResultDigest: string | undefined;
+  let reportValidationFailure: string | undefined;
+  try {
+    if (!reportAction || !reportResult) throw new Error('invalid report read response');
+    validateAgentReportReadResult(reportAction, reportResult as unknown as AgentReportReadResult);
+    reportActionDigest = agentActionDigest(reportAction);
+    reportResultDigest = agentSha256(reportResult);
+  } catch (error) {
+    reportValidationFailure = error instanceof Error ? error.message : 'unknown validation error';
+  }
+  const reportRetrieved =
+    typeof reportAction?.id === 'string'
+      ? await request(
+          'report-read-get',
+          {
+            method: 'GET',
+            path: `/v1/agent/reports/${encodeURIComponent(reportAction.id)}`,
+            headers: headers(accessToken),
+          },
+          200,
+        )
+      : undefined;
+  if (
+    !reportAction ||
+    reportAction.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    reportAction.kind !== 'report.read' ||
+    reportAction.autonomy !== 'read' ||
+    reportAction.agentPrincipalId !== principal.id ||
+    reportAction.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    reportAction.delegationGrantId !== input.delegationGrantId ||
+    reportAction.target.tenantId !== principal.tenantId ||
+    reportAction.target.resourceType !== 'event' ||
+    reportAction.target.resourceId !== input.resourceId ||
+    reportAction.target.apiOperation !== 'reports.get' ||
+    reportAction.idempotencyKey !== `${input.idempotencyPrefix}.report.read` ||
+    reportActionDigest !== preparedReport?.actionDigest ||
+    reportResultDigest !== preparedReport?.resultSha256 ||
+    reportAuthorization?.allowed !== true ||
+    preparedReport?.dryRun !== undefined ||
+    objectBody(reportAction.payload)?.reportType !== 'event_sales' ||
+    objectBody(reportAction.payload)?.from !== reportFrom ||
+    objectBody(reportAction.payload)?.to !== reportTo ||
+    objectBody(reportAction.payload)?.reportSnapshotSha256 !== reportResult?.reportSnapshotSha256 ||
+    reportResult?.from !== reportFrom ||
+    reportResult?.to !== reportTo ||
+    agentSha256(reportReadResponse?.body) !== agentSha256(reportReadReplay?.body) ||
+    agentSha256(reportReadResponse?.body) !== agentSha256(reportRetrieved?.body) ||
+    !Array.isArray(reportResult?.untrustedContentPaths) ||
+    reportResult.untrustedContentPaths.length !== 0
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_REPORT_READ_SCHEMA',
+      message: `Direct aggregate report, closed range, snapshot digest, retrieval or exact replay evidence is invalid.${reportValidationFailure ? ` ${reportValidationFailure}` : ''}`,
+    });
+    return result(findings);
+  }
+  await request(
+    'report-read-approval-rejected',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(reportAction.id)}/approvals`,
+      headers: {
+        ...headers(input.sponsorAccessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.report.read.approval`,
+        'X-Tixkit-Confirmation': `approve:${reportAction.id}:${reportActionDigest}`,
+      },
+      body: { actionDigest: reportActionDigest },
+    },
+    404,
+    false,
+  );
+  await request(
+    'report-read-execution-rejected',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(reportAction.id)}/executions`,
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `execute:${reportAction.id}:apr_${'0'.repeat(48)}:${reportActionDigest}`,
+        'X-Tixkit-Confirmation': `execute:${reportAction.id}:apr_${'0'.repeat(48)}:${reportActionDigest}`,
+      },
+      body: { approvalId: `apr_${'0'.repeat(48)}`, actionDigest: reportActionDigest },
+    },
+    404,
+    false,
+  );
   const eventPrepareRequest: AgentPlatformContractRequest = {
     method: 'POST',
     path: '/v1/agent/event-preparations',
@@ -783,10 +896,12 @@ export async function runAgentPlatformContract(
       headers: {
         ...headers(input.sponsorAccessToken),
         'Idempotency-Key': `${input.idempotencyPrefix}.content.prepare.approval`,
+        'X-Tixkit-Confirmation': `approve:${contentAction.id}:${contentActionDigest}`,
       },
       body: { actionDigest: contentActionDigest },
     },
     404,
+    false,
   );
   await request(
     'content-prepare-execution-rejected',
@@ -795,11 +910,13 @@ export async function runAgentPlatformContract(
       path: `/v1/agent/actions/${encodeURIComponent(contentAction.id)}/executions`,
       headers: {
         ...headers(accessToken),
-        'Idempotency-Key': `${input.idempotencyPrefix}.content.prepare.execution`,
+        'Idempotency-Key': `execute:${contentAction.id}:apr_${'0'.repeat(48)}:${contentActionDigest}`,
+        'X-Tixkit-Confirmation': `execute:${contentAction.id}:apr_${'0'.repeat(48)}:${contentActionDigest}`,
       },
-      body: { actionDigest: contentActionDigest },
+      body: { approvalId: `apr_${'0'.repeat(48)}`, actionDigest: contentActionDigest },
     },
     404,
+    false,
   );
   const campaignPrepareRequest: AgentPlatformContractRequest = {
     method: 'POST',
@@ -876,10 +993,12 @@ export async function runAgentPlatformContract(
       headers: {
         ...headers(input.sponsorAccessToken),
         'Idempotency-Key': `${input.idempotencyPrefix}.campaign.prepare.approval`,
+        'X-Tixkit-Confirmation': `approve:${campaignAction.id}:${campaignActionDigest}`,
       },
       body: { actionDigest: campaignActionDigest },
     },
     404,
+    false,
   );
   await request(
     'campaign-prepare-execution-rejected',
@@ -888,11 +1007,13 @@ export async function runAgentPlatformContract(
       path: `/v1/agent/actions/${encodeURIComponent(campaignAction.id)}/executions`,
       headers: {
         ...headers(accessToken),
-        'Idempotency-Key': `${input.idempotencyPrefix}.campaign.prepare.execution`,
+        'Idempotency-Key': `execute:${campaignAction.id}:apr_${'0'.repeat(48)}:${campaignActionDigest}`,
+        'X-Tixkit-Confirmation': `execute:${campaignAction.id}:apr_${'0'.repeat(48)}:${campaignActionDigest}`,
       },
-      body: { actionDigest: campaignActionDigest },
+      body: { approvalId: `apr_${'0'.repeat(48)}`, actionDigest: campaignActionDigest },
     },
     404,
+    false,
   );
   const eventUpdateRequest: AgentPlatformContractRequest = {
     method: 'POST',

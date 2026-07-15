@@ -3299,6 +3299,77 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('agentActions reads and retrieves a direct aggregate event sales report', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const prepared = await client.agentActions.readReport({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      from: '2026-08-01T00:00:00.000Z',
+      to: '2026-08-02T00:00:00.000Z',
+      idempotencyKey: 'agent-report-read-0001',
+    });
+    const assertReportResponseType = (value: typeof prepared) => {
+      const reportType: 'event_sales' = value.result.reportType;
+      const paths: [] = value.result.untrustedContentPaths;
+      void reportType;
+      void paths;
+      void value.result.report.grossSalesByChannelCents.online;
+      // @ts-expect-error aggregate reports never expose buyer data.
+      void value.result.report.buyerEmail;
+      // @ts-expect-error direct reads never expose approval dry-run evidence.
+      void value.dryRun;
+    };
+    void assertReportResponseType;
+    const assertReportRangeInput = () => {
+      void client.agentActions.readReport({
+        delegationGrantId: 'dlg_1',
+        resourceId: 'evt_1',
+        idempotencyKey: 'agent-report-read-default-range',
+      });
+      // @ts-expect-error report bounds must be supplied together.
+      void client.agentActions.readReport({
+        delegationGrantId: 'dlg_1',
+        resourceId: 'evt_1',
+        from: '2026-08-01T00:00:00.000Z',
+        idempotencyKey: 'agent-report-read-from-only',
+      });
+      // @ts-expect-error report bounds must be supplied together.
+      void client.agentActions.readReport({
+        delegationGrantId: 'dlg_1',
+        resourceId: 'evt_1',
+        to: '2026-08-02T00:00:00.000Z',
+        idempotencyKey: 'agent-report-read-to-only',
+      });
+    };
+    void assertReportRangeInput;
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/reports',
+      headers: { 'Idempotency-Key': 'agent-report-read-0001' },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      from: '2026-08-01T00:00:00.000Z',
+      to: '2026-08-02T00:00:00.000Z',
+    });
+    const actionId = `act_${'a'.repeat(48)}`;
+    const inspected = await client.agentActions.getReport(actionId);
+    const assertInspectedReportType = (value: typeof inspected) => {
+      void value.result.reportSnapshotSha256;
+    };
+    void assertInspectedReportType;
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/reports/${actionId}`,
+    });
+  });
+
   it('agentActions prepares and retrieves a direct normalized event patch preview', async () => {
     const fm = mockFetch(201, {});
     const client = new TixkitClient({
@@ -3620,7 +3691,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-03',
+        'X-Tixkit-Version': '2026-08-04',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

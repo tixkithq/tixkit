@@ -853,6 +853,18 @@ describe('agent platform contracts', () => {
         { ...result, from: expiresAt, to: createdAt },
       ),
     ).toThrow('range binding');
+    expect(() =>
+      validateAgentReportReadResult(
+        {
+          ...reportAction,
+          payload: {
+            ...reportAction.payload,
+            from: '2026-07-14T11:58:15.001Z',
+          },
+        },
+        { ...result, from: '2026-07-14T11:58:15.001Z' },
+      ),
+    ).toThrow('range binding');
     const contradictoryChannels = {
       ...report,
       grossSalesByChannelCents: { online: 12_500, boxOffice: 2_500 },

@@ -1,0 +1,39 @@
+---
+title: API migration from 2026-08-03 to 2026-08-04
+description: Adopt aggregate-only, event-scoped sales report reads through the shared agent protocol.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-08-04
+prerequisites:
+  - An integration using API version 2026-08-03
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-08-04` adds the direct-only, aggregate-only `report.read` adapter for event sales. The action wire protocol remains `2026-07-22`, immutable plan definitions remain `2026-07-27`, and the action-registry contract advances to `2026-08-04`. Every `2026-08-03` schema remains available unchanged.
+
+## Grant the bounded capability
+
+Add `reports.read` to the explicit agent principal and event-scoped delegation. The sponsor must retain accepted tenant membership and live `reports.read` authority for the event. The delegation's server-derived protocol permission snapshot is `reports:read`, and tenant action and risk policies must allow `report.read`.
+
+This capability does not expose raw orders, buyers, attendees, payment details or contact data. It cannot enter a plan and cannot create approval, execution, export or product effects.
+
+## Read one exact range
+
+Send `POST /v1/agent/reports` with an idempotency key, `delegationGrantId`, event `resourceId`, and either both `from` and `to` or neither. Explicit bounds must be canonical UTC whole-second timestamps and form a non-empty closed range. When both bounds are omitted, the server derives `from` from the earlier of the event creation time and its database observation, and derives `to` from that observation. The normalized bounds are returned in the action and result.
+
+The terminal result reports currency, gross sales and channel totals, net revenue, refunds, fees, tax, tickets sold, check-ins, order count and paid-order count. It contains no untrusted strings or row-level identifiers. The server enforces coherent aggregates: channel totals equal gross sales, paid orders do not exceed orders, and net revenue equals gross sales minus refunds. A negative coherent net value remains valid.
+
+`reportSnapshotSha256` binds the aggregate projection. The action digest binds that snapshot to the exact resource, event version and closed range; `resultSha256` binds the complete timestamped result. Reusing an idempotency key with different bounds returns a conflict.
+
+Retrieve persisted evidence with `GET /v1/agent/reports/{actionId}`. Exact replay and retrieval reauthorize the full current principal, delegation, scope, sponsor permission, tenant membership and policy intersection, then recompute the same range. Relevant data drift, event or policy version drift, revocation, permission loss, evidence expiry and persisted-evidence substitution fail closed. Changes outside the bound range do not invalidate its evidence.
+
+Local repository proof covers fresh PostgreSQL and MySQL execution, tenant and organizer scoping, inclusive boundary behavior, default bounds, idempotent replay, in-range and out-of-range drift, expiry, denial paths, evidence substitution and absence of approval, execution, export and event mutation. No hosted environment or external provider proof is claimed.
+
+Pin the registry through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-04` and the full action overlay through `@tixkit/agent-protocol/schema` or `./schemas/2026-08-04`. Durable webhook envelopes remain at `2026-01-01`; synthetic test/replay API-version fields and SDK request headers advance to `2026-08-04`.

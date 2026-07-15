@@ -1689,10 +1689,19 @@
         "kind": { "const": "report.read" },
         "delegationGrantId": { "$ref": "#/$defs/id" },
         "resourceId": { "$ref": "#/$defs/id" },
-        "from": { "type": "string", "format": "date-time" },
-        "to": { "type": "string", "format": "date-time" }
+        "from": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$"
+        }
       },
-      "required": ["kind", "delegationGrantId", "resourceId"]
+      "required": ["kind", "delegationGrantId", "resourceId"],
+      "dependentRequired": { "from": ["to"], "to": ["from"] }
     },
     "reportReadResolvedPayload": {
       "type": "object",
@@ -1700,8 +1709,16 @@
       "additionalProperties": false,
       "properties": {
         "reportType": { "const": "event_sales" },
-        "from": { "type": "string", "format": "date-time" },
-        "to": { "type": "string", "format": "date-time" },
+        "from": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$"
+        },
         "reportSnapshotSha256": { "$ref": "#/$defs/sha256" }
       },
       "required": ["reportType", "from", "to", "reportSnapshotSha256"]
@@ -1713,8 +1730,16 @@
         "resourceId": { "$ref": "#/$defs/id" },
         "resourceVersion": { "type": "integer", "minimum": 1 },
         "reportType": { "const": "event_sales" },
-        "from": { "type": "string", "format": "date-time" },
-        "to": { "type": "string", "format": "date-time" },
+        "from": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$"
+        },
         "reportSnapshotSha256": { "$ref": "#/$defs/sha256" },
         "observedAt": { "type": "string", "format": "date-time" },
         "report": {

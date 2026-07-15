@@ -1,16 +1,17 @@
 import { agentSha256, installAgentProtocolSchemaKeywords } from '@tixkit/agent-protocol';
 import currentAgentSchema from '@tixkit/agent-protocol/schema' with { type: 'json' };
 import retainedAgentSchema from '@tixkit/agent-protocol/schemas/2026-07-22' with { type: 'json' };
-import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-03' with { type: 'json' };
+import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-04' with { type: 'json' };
+import retainedCurrentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-03' with { type: 'json' };
 import retainedActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-27' with { type: 'json' };
 import { runAgentPlatformContract } from '@tixkit/contract-tests';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 
 if (
-  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-08-03' ||
+  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-08-04' ||
   retainedAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-07-22' ||
-  currentAgentSchema.allOf[0]?.$ref !== retainedAgentSchema.$id ||
+  !currentAgentSchema.allOf.some((entry) => entry.$ref === retainedAgentSchema.$id) ||
   !currentAgentSchema.allOf.some(
     (entry) => entry.then?.properties?.autonomy?.const === 'prepare',
   ) ||
@@ -19,7 +20,8 @@ if (
   ) ||
   !currentAgentSchema.allOf.some(
     (entry) => entry.if?.properties?.kind?.const === 'campaign.prepare',
-  )
+  ) ||
+  !currentAgentSchema.allOf.some((entry) => entry.if?.properties?.kind?.const === 'report.read')
 )
   throw new Error('packed agent protocol schema exports do not enforce the current contract');
 
@@ -28,6 +30,7 @@ addFormats(ajv);
 installAgentProtocolSchemaKeywords(ajv);
 ajv.addSchema(retainedAgentSchema);
 ajv.addSchema(retainedActionContracts);
+ajv.addSchema(retainedCurrentActionContracts);
 ajv.addSchema(currentActionContracts);
 const validateCurrentAction = ajv.compile(currentAgentSchema);
 const validateEventPreparePayload = ajv.getSchema(
@@ -42,21 +45,30 @@ const validateContentPreparePayload = ajv.getSchema(
 const validateCampaignPreparePayload = ajv.getSchema(
   `${currentActionContracts.$id}#/$defs/campaignPrepareResolvedPayload`,
 );
+const validateReportReadPayload = ajv.getSchema(
+  `${currentActionContracts.$id}#/$defs/reportReadResolvedPayload`,
+);
+const validateReportReadResult = ajv.getSchema(
+  `${currentActionContracts.$id}#/$defs/reportReadResult`,
+);
 if (
   !validateEventPreparePayload ||
   !validateEventUpdatePayload ||
   !validateContentPreparePayload ||
-  !validateCampaignPreparePayload
+  !validateCampaignPreparePayload ||
+  !validateReportReadPayload ||
+  !validateReportReadResult
 )
-  throw new Error('packed agent action contracts did not expose typed event change validation');
+  throw new Error('packed agent action contracts did not expose current typed action validation');
 
-const mutation = process.argv[2] || 'none';
+let mutation = process.argv[2] || 'none';
 const actionId = `act_${'a'.repeat(48)}`;
 const approvalId = `apr_${'b'.repeat(48)}`;
 const executionId = `exec_${'c'.repeat(48)}`;
 const eventUpdateActionId = `act_${'f'.repeat(48)}`;
 const eventUpdateApprovalId = `apr_${'d'.repeat(48)}`;
 const eventUpdateExecutionId = `exec_${'e'.repeat(48)}`;
+const reportReadActionId = `act_${'6'.repeat(48)}`;
 const agentPrincipalId = `agt_${'1'.repeat(48)}`;
 const delegationGrantId = `dlg_${'2'.repeat(48)}`;
 const base = {
@@ -96,6 +108,56 @@ const eventAction = {
   idempotencyKey: 'agent.conformance.packed.event.read',
   preparedAt: '2026-07-14T11:58:00.000Z',
 };
+const reportAggregate = {
+  currency: 'USD',
+  grossSalesCents: 12_000,
+  grossSalesByChannelCents: { online: 10_000, boxOffice: 2_000 },
+  netRevenueCents: 11_000,
+  refundsCents: 1_000,
+  feesCents: 600,
+  taxCents: 400,
+  ticketsSold: 12,
+  checkIns: 8,
+  ordersCount: 10,
+  paidOrdersCount: 9,
+};
+const packedReportPayload = {
+  reportType: 'event_sales',
+  from: '1970-01-01T00:00:00.000Z',
+  to: '2026-07-14T11:58:10.000Z',
+  reportSnapshotSha256: agentSha256(reportAggregate),
+};
+const packedReportAction = {
+  id: reportReadActionId,
+  ...base,
+  kind: 'report.read',
+  autonomy: 'read',
+  target: { ...initialTarget, apiOperation: 'reports.get' },
+  payload: packedReportPayload,
+  idempotencyKey: 'agent.conformance.packed.report.read',
+  preparedAt: '2026-07-14T11:58:15.000Z',
+};
+const packedReportResult = {
+  resourceId: initialTarget.resourceId,
+  resourceVersion: initialTarget.resourceVersion,
+  ...packedReportPayload,
+  observedAt: '2026-07-14T11:58:15.000Z',
+  report: reportAggregate,
+  untrustedContentPaths: [],
+};
+if (
+  !validateCurrentAction(packedReportAction) ||
+  !validateReportReadPayload(packedReportPayload) ||
+  !validateReportReadResult(packedReportResult)
+)
+  throw new Error('packed agent schemas rejected a valid aggregate-only report.read action');
+if (
+  validateReportReadResult({
+    ...packedReportResult,
+    report: { ...reportAggregate, buyerEmail: 'buyer@example.test' },
+  })
+)
+  throw new Error('packed report.read result schema accepted buyer PII');
 const eventPreparePreview = {
   resourceId: 'event_primary',
   resourceVersion: 7,
@@ -305,6 +367,8 @@ const publishAction = {
 const actionDigest = agentSha256(publishAction);
 let planSha256 = '';
 let eventCalls = 0;
+let reportReadCalls = 0;
+let reportReadEnvelope;
 let eventPrepareCalls = 0;
 let contentPrepareCalls = 0;
 let campaignPrepareCalls = 0;
@@ -327,6 +391,7 @@ const execute = async (request) => {
     return response(200, {
       principal: {
         id: agentPrincipalId,
+        tenantId: initialTarget.tenantId,
         sponsorPrincipalId: 'sponsor_primary',
       },
       authentication: { grantType: 'client_credentials' },
@@ -360,6 +425,71 @@ const execute = async (request) => {
       resultSha256: mutation === 'result_digest' ? '0'.repeat(64) : agentSha256(result),
     });
   }
+  if (request.path === '/v1/agent/reports') {
+    reportReadCalls += 1;
+    const reportMutation = mutation.startsWith('report_') ? mutation.slice('report_'.length) : '';
+    const payload = {
+      ...packedReportPayload,
+      from: request.body.from,
+      to: request.body.to,
+    };
+    const returnedAction = {
+      ...packedReportAction,
+      agentPrincipalId:
+        reportMutation === 'agent' ? 'agent_substituted' : packedReportAction.agentPrincipalId,
+      sponsorPrincipalId:
+        reportMutation === 'sponsor'
+          ? 'sponsor_substituted'
+          : packedReportAction.sponsorPrincipalId,
+      delegationGrantId:
+        reportMutation === 'delegation'
+          ? 'delegation_substituted'
+          : packedReportAction.delegationGrantId,
+      target: {
+        ...packedReportAction.target,
+        tenantId:
+          reportMutation === 'tenant' ? 'tenant_substituted' : packedReportAction.target.tenantId,
+        resourceId:
+          reportMutation === 'resource'
+            ? 'event_substituted'
+            : packedReportAction.target.resourceId,
+      },
+      idempotencyKey:
+        reportMutation === 'idempotency'
+          ? 'agent.conformance.packed.substituted.report.read'
+          : packedReportAction.idempotencyKey,
+      payload,
+    };
+    const returnedResult = {
+      ...packedReportResult,
+      resourceId:
+        reportMutation === 'resource' ? 'event_substituted' : packedReportResult.resourceId,
+      ...payload,
+      from: reportMutation === 'range' ? '1970-01-01T00:00:01.000Z' : payload.from,
+      reportSnapshotSha256:
+        reportMutation === 'digest' ? '0'.repeat(64) : payload.reportSnapshotSha256,
+      observedAt:
+        reportMutation === 'replay' && reportReadCalls === 2
+          ? '2026-07-14T11:58:16.000Z'
+          : '2026-07-14T11:58:15.000Z',
+      report:
+        reportMutation === 'pii'
+          ? { ...reportAggregate, buyerEmail: 'buyer@example.test' }
+          : reportAggregate,
+    };
+    reportReadEnvelope = {
+      action: returnedAction,
+      actionDigest:
+        reportMutation === 'action_digest' ? '0'.repeat(64) : agentSha256(returnedAction),
+      expiresAt: '2026-07-14T12:08:15.000Z',
+      authorization: { allowed: true },
+      result: returnedResult,
+      resultSha256: agentSha256(returnedResult),
+    };
+    return response(201, reportReadEnvelope);
+  }
+  if (request.path === `/v1/agent/reports/${reportReadActionId}`)
+    return response(200, reportReadEnvelope ?? {});
   if (request.path === '/v1/agent/event-preparations') {
     eventPrepareCalls += 1;
     const prepareMutation = mutation.startsWith('prepare_')
@@ -567,6 +697,8 @@ const execute = async (request) => {
   if (
     request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
     request.path === `/v1/agent/actions/${contentPrepareActionId}/executions` ||
+    request.path === `/v1/agent/actions/${reportReadActionId}/approvals` ||
+    request.path === `/v1/agent/actions/${reportReadActionId}/executions` ||
     request.path === `/v1/agent/actions/${campaignPrepareAction.id}/approvals` ||
     request.path === `/v1/agent/actions/${campaignPrepareAction.id}/executions`
   )
@@ -654,8 +786,8 @@ const execute = async (request) => {
   return response(404, {});
 };
 
-const result = await runAgentPlatformContract({
-  apiVersion: '2026-08-03',
+const contractInput = {
+  apiVersion: '2026-08-04',
   sponsorAccessToken: 'sponsor_token',
   agentClientId: `tk_agent_${'e'.repeat(48)}`,
   agentClientSecret: 'secret_value',
@@ -665,11 +797,53 @@ const result = await runAgentPlatformContract({
   planId: 'plan_conformance_packed',
   idempotencyPrefix: 'agent.conformance.packed',
   execute,
-});
+};
+const reportMutationProofs = [];
+if (mutation === 'none') {
+  for (const reportMutation of [
+    'agent',
+    'sponsor',
+    'delegation',
+    'resource',
+    'tenant',
+    'idempotency',
+    'action_digest',
+    'digest',
+    'range',
+    'pii',
+    'replay',
+  ]) {
+    mutation = `report_${reportMutation}`;
+    eventCalls = 0;
+    reportReadCalls = 0;
+    reportReadEnvelope = undefined;
+    const mutationResult = await runAgentPlatformContract(contractInput);
+    if (
+      mutationResult.ok !== false ||
+      !mutationResult.findings.some(
+        (finding) => finding.code === 'AGENT_PLATFORM_REPORT_READ_SCHEMA',
+      )
+    )
+      throw new Error(`packed report.read ${reportMutation} mutation did not fail closed`);
+    reportMutationProofs.push(reportMutation);
+  }
+  mutation = 'none';
+  eventCalls = 0;
+  reportReadCalls = 0;
+  reportReadEnvelope = undefined;
+}
+const result = await runAgentPlatformContract(contractInput);
+if (
+  mutation === 'none' &&
+  (result.ok !== true || reportReadCalls !== 2 || reportMutationProofs.length !== 11)
+)
+  throw new Error('packed report.read happy path or fail-closed mutation proof is incomplete');
 process.stdout.write(
   JSON.stringify({
     result,
     eventCalls,
+    reportReadCalls,
+    reportMutationProofs,
     eventPrepareCalls,
     contentPrepareCalls,
     campaignPrepareCalls,
