@@ -7,12 +7,14 @@ import {
   AgentExecutionConflictError,
   DurableAgentExecutionService,
   buildAgentPlanDefinition,
+  validateAgentContentPrepareResult,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
   type AgentAction,
   type AgentExecution,
   type AgentExecutionStore,
 } from '@tixkit/agent-protocol';
+import { createDefaultEventPageDocument } from '@tixkit/content-event-page';
 import { createHash } from 'node:crypto';
 import type { Permission } from '@tixkit/domain';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -282,6 +284,7 @@ describe.sequential.each(driverCases)(
             'events.read',
             'events.prepare',
             'readiness.read',
+            'content.prepare',
           ]),
           maximum_autonomy: 'execute_with_approval',
           protocol_version: AGENT_PROTOCOL_VERSION,
@@ -302,6 +305,7 @@ describe.sequential.each(driverCases)(
             'events.read',
             'events.prepare',
             'readiness.read',
+            'content.prepare',
           ]),
           resource_scopes: JSON.stringify([`event:${event.id}`]),
           permission_snapshot: JSON.stringify(['events:publish', 'events:read', 'events:write']),
@@ -391,6 +395,14 @@ describe.sequential.each(driverCases)(
           {
             tenant_id: tenant.id,
             action_kind: 'event.prepare',
+            allowed: true,
+            risk_allowed: true,
+            policy_version: 1,
+            updated_at: now,
+          },
+          {
+            tenant_id: tenant.id,
+            action_kind: 'content.prepare',
             allowed: true,
             risk_allowed: true,
             policy_version: 1,
@@ -1083,7 +1095,9 @@ describe.sequential.each(driverCases)(
             size_bytes: 100,
             checksum_sha256: 'a'.repeat(64),
             client_token_hash: null,
-            metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+            metadata: JSON.stringify({
+              image: { width: 1200, height: 630, format: 'jpeg' },
+            }),
             consumed_by_checkout_session_id: null,
             consumed_at: null,
             completion_owner_token: null,
@@ -1163,7 +1177,10 @@ describe.sequential.each(driverCases)(
       if (changed === 'resource')
         await db
           .updateTable('events')
-          .set({ title: 'External post-claim winner', version: Number(before.version) + 1 })
+          .set({
+            title: 'External post-claim winner',
+            version: Number(before.version) + 1,
+          })
           .where('id', '=', action.target.resourceId)
           .execute();
       if (changed === 'lease_expiry')
@@ -1225,7 +1242,10 @@ describe.sequential.each(driverCases)(
         .executeTakeFirstOrThrow();
       expect(after).toEqual(
         changed === 'resource'
-          ? { title: 'External post-claim winner', version: Number(before.version) + 1 }
+          ? {
+              title: 'External post-claim winner',
+              version: Number(before.version) + 1,
+            }
           : { title: before.title, version: before.version },
       );
       expect(
@@ -2117,7 +2137,9 @@ describe.sequential.each(driverCases)(
         .executeTakeFirstOrThrow();
       const losingApply = racingService.applyResolvedPatch(racingResolved);
       await atCompareAndSwap;
-      await new EventRepository(db).update(event.id, { title: 'Racing compare-and-swap winner' });
+      await new EventRepository(db).update(event.id, {
+        title: 'Racing compare-and-swap winner',
+      });
       releaseCompareAndSwap();
       await expect(losingApply).resolves.toMatchObject({ applied: false });
       expect(
@@ -2332,6 +2354,150 @@ describe.sequential.each(driverCases)(
         ).rejects.toThrow();
       }
       expect(await db.selectFrom('agent_actions').select('id').execute()).toEqual(beforeActions);
+    });
+
+    it('prepares canonical event-page content directly without mutating product tables', async () => {
+      const service = new AgentActionService(db);
+      const event = await db
+        .selectFrom('events')
+        .select([
+          'id',
+          'title',
+          'description',
+          'starts_at',
+          'ends_at',
+          'timezone',
+          'slug',
+          'cover_image_url',
+          'version',
+        ])
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const content = createDefaultEventPageDocument({
+        eventId: event.id,
+        eventTitle: event.title,
+        eventDescription: event.description ?? undefined,
+        startsAt: new Date(event.starts_at).toISOString(),
+        endsAt: event.ends_at ? new Date(event.ends_at).toISOString() : undefined,
+        timezone: event.timezone,
+        coverImageUrl: event.cover_image_url ?? undefined,
+        publicUrl: `/e/${event.slug ?? event.id}`,
+      }) as unknown as Record<string, unknown>;
+      content.untrustedExtra = { secret: 'must not persist' };
+      const before = {
+        event: await db
+          .selectFrom('events')
+          .selectAll()
+          .where('id', '=', event.id)
+          .executeTakeFirstOrThrow(),
+        documents: await db.selectFrom('content_documents').select('id').execute(),
+        versions: await db.selectFrom('content_document_versions').select('id').execute(),
+        artifacts: await db.selectFrom('content_render_artifacts').select('id').execute(),
+        products: await db.selectFrom('products').select('id').execute(),
+        mediaAssets: await db.selectFrom('event_media_assets').select('id').execute(),
+        mediaRenditions: await db.selectFrom('event_media_renditions').select('id').execute(),
+        uploadArtifacts: await db.selectFrom('upload_artifacts').select('id').execute(),
+      };
+      const request = {
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-content-prepare-${driver}-0001`,
+        kind: 'content.prepare' as const,
+        delegationGrantId: action.delegationGrantId,
+        resourceId: event.id,
+        content,
+      };
+      const concurrent = await Promise.all(
+        Array.from({ length: 4 }, () => service.prepare(request)),
+      );
+      const prepared = concurrent[0]!;
+      expect(concurrent).toEqual([prepared, prepared, prepared, prepared]);
+      expect(await service.prepare(request)).toEqual(prepared);
+      expect(prepared.action).toMatchObject({
+        kind: 'content.prepare',
+        autonomy: 'prepare',
+        target: {
+          resourceType: 'event',
+          resourceId: event.id,
+          resourceVersion: Number(event.version),
+          apiOperation: 'content.prepare',
+        },
+      });
+      expect(prepared.authorization).toMatchObject({
+        allowed: true,
+        eligibleForApproval: false,
+        reasons: [],
+      });
+      expect(prepared.result.content).not.toHaveProperty('untrustedExtra');
+      expect(prepared.result.untrustedContentPaths).toEqual(['content', 'preview.discovery']);
+      expect(prepared.resultSha256).toBe(agentSha256(prepared.result));
+      expect(() =>
+        validateAgentContentPrepareResult(prepared.action, prepared.result),
+      ).not.toThrow();
+      await expect(
+        service.prepare({
+          ...request,
+          content: { ...content, schemaVersion: 99 },
+        }),
+      ).rejects.toThrow('AGENT_ACTION_IDEMPOTENCY_CONFLICT');
+      await expect(
+        service.approve({
+          tenantId: request.tenantId,
+          approverPrincipalId: action.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `agent-content-approve-${driver}-0001`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_NOT_APPROVABLE');
+      await expect(
+        service.execute({
+          tenantId: request.tenantId,
+          agentPrincipalId: request.agentPrincipalId,
+          actionId: prepared.action.id,
+          approvalId: 'approval_publish',
+          actionDigest: prepared.actionDigest,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+      expect(
+        await db
+          .selectFrom('events')
+          .selectAll()
+          .where('id', '=', event.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual(before.event);
+      expect(await db.selectFrom('content_documents').select('id').execute()).toEqual(
+        before.documents,
+      );
+      expect(await db.selectFrom('content_document_versions').select('id').execute()).toEqual(
+        before.versions,
+      );
+      expect(await db.selectFrom('content_render_artifacts').select('id').execute()).toEqual(
+        before.artifacts,
+      );
+      expect(await db.selectFrom('products').select('id').execute()).toEqual(before.products);
+      expect(await db.selectFrom('event_media_assets').select('id').execute()).toEqual(
+        before.mediaAssets,
+      );
+      expect(await db.selectFrom('event_media_renditions').select('id').execute()).toEqual(
+        before.mediaRenditions,
+      );
+      expect(await db.selectFrom('upload_artifacts').select('id').execute()).toEqual(
+        before.uploadArtifacts,
+      );
+
+      await db
+        .updateTable('events')
+        .set({ version: Number(event.version) + 1, updated_at: new Date() })
+        .where('id', '=', event.id)
+        .execute();
+      await expect(service.prepare(request)).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+      await expect(
+        service.getForAgent({
+          tenantId: request.tenantId,
+          agentPrincipalId: request.agentPrincipalId,
+          actionId: prepared.action.id,
+        }),
+      ).resolves.toBeUndefined();
     });
 
     it('denies event.prepare before evaluation when sponsor write permission is missing', async () => {

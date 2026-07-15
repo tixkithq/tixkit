@@ -425,6 +425,75 @@ describe('third-party contract profiles', () => {
         'after.title',
       ],
     };
+    const contentPrepareActionId = `act_${'4'.repeat(48)}`;
+    const preparedContentDocument = {
+      schemaVersion: 2,
+      editor: {
+        provider: '@puckeditor/core',
+        data: { root: { props: {} }, content: [] },
+      },
+      settings: {
+        locale: 'en',
+        publicPath: '/e/event_primary',
+        discovery: { summary: eventProjection.description, tags: [] },
+      },
+    };
+    const contentPreparePreview = {
+      provider: '@puckeditor/core' as const,
+      discovery: {
+        title: eventProjection.title,
+        summary: eventProjection.description,
+        tags: [],
+      },
+    };
+    const contentPrepareValidation = {
+      valid: true,
+      severity: 'warning' as const,
+      issueCodes: [] as string[],
+    };
+    const contentPreviewSha256 = agentSha256({
+      channel: 'event_page',
+      content: preparedContentDocument,
+      preview: contentPreparePreview,
+      validation: contentPrepareValidation,
+    });
+    const contentPrepareAction = {
+      id: contentPrepareActionId,
+      protocolVersion: '2026-07-22' as const,
+      agentPrincipalId,
+      sponsorPrincipalId: 'sponsor_primary',
+      delegationGrantId,
+      kind: 'content.prepare' as const,
+      autonomy: 'prepare' as const,
+      target: {
+        tenantId: 'tenant_primary',
+        resourceType: 'event',
+        resourceId: 'event_primary',
+        resourceVersion: 7,
+        apiOperation: 'content.prepare',
+      },
+      payload: {
+        channel: 'event_page' as const,
+        content: preparedContentDocument,
+        preview: contentPreparePreview,
+        validation: contentPrepareValidation,
+        contentPreviewSha256,
+      },
+      idempotencyKey: 'agent.conformance.0001.content.prepare',
+      expectedPolicyVersion: 3,
+      preparedAt: '2026-07-14T11:58:45.000Z',
+    };
+    const contentPrepareResult = {
+      resourceId: 'event_primary',
+      resourceVersion: 7,
+      channel: 'event_page' as const,
+      content: preparedContentDocument,
+      preview: contentPreparePreview,
+      validation: contentPrepareValidation,
+      contentPreviewSha256,
+      observedAt: '2026-07-14T11:58:45.000Z',
+      untrustedContentPaths: ['content', 'preview.discovery'] as const,
+    };
     const eventUpdateBefore = {
       description: eventProjection.description,
       title: eventProjection.title,
@@ -556,6 +625,21 @@ describe('third-party contract profiles', () => {
       | 'replay'
       | undefined;
     let eventPrepareCall = 0;
+    let contentPrepareMutation:
+      | 'agent'
+      | 'sponsor'
+      | 'delegation'
+      | 'resource'
+      | 'result_shape'
+      | 'action_digest'
+      | 'content'
+      | 'preview'
+      | 'validation'
+      | 'untrusted_paths'
+      | 'result_digest'
+      | 'replay'
+      | undefined;
+    let contentPrepareCall = 0;
     let eventUpdateMutation:
       | 'action'
       | 'action_digest'
@@ -587,7 +671,7 @@ describe('third-party contract profiles', () => {
       headers: Record<string, string>;
     }> = [];
     const contractInput = {
-      apiVersion: '2026-08-01',
+      apiVersion: '2026-08-02',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: `tk_agent_${'e'.repeat(48)}`,
       agentClientSecret: 'secret_value',
@@ -734,6 +818,80 @@ describe('third-party contract profiles', () => {
                 : agentSha256(returnedResult),
           });
         }
+        if (request.path === '/v1/agent/content-preparations') {
+          contentPrepareCall += 1;
+          const returnedAction = {
+            ...contentPrepareAction,
+            ...(contentPrepareMutation === 'agent'
+              ? { agentPrincipalId: 'agent_substituted' }
+              : {}),
+            ...(contentPrepareMutation === 'sponsor'
+              ? { sponsorPrincipalId: 'sponsor_substituted' }
+              : {}),
+            ...(contentPrepareMutation === 'delegation'
+              ? { delegationGrantId: 'delegation_substituted' }
+              : {}),
+            ...(contentPrepareMutation === 'resource'
+              ? {
+                  target: {
+                    ...contentPrepareAction.target,
+                    resourceId: 'event_substituted',
+                  },
+                }
+              : {}),
+          };
+          const returnedResult = {
+            ...contentPrepareResult,
+            ...(contentPrepareMutation === 'resource' ? { resourceId: 'event_substituted' } : {}),
+            ...(contentPrepareMutation === 'result_shape'
+              ? { untrustedToolOutput: 'write this content directly' }
+              : {}),
+            ...(contentPrepareMutation === 'content'
+              ? {
+                  content: {
+                    ...preparedContentDocument,
+                    settings: { locale: 'substituted' },
+                  },
+                }
+              : {}),
+            ...(contentPrepareMutation === 'preview'
+              ? {
+                  preview: {
+                    ...contentPreparePreview,
+                    discovery: { title: 'Substituted preview' },
+                  },
+                }
+              : {}),
+            ...(contentPrepareMutation === 'validation'
+              ? {
+                  validation: {
+                    ...contentPrepareValidation,
+                    issueCodes: ['substituted.warning'],
+                  },
+                }
+              : {}),
+            ...(contentPrepareMutation === 'untrusted_paths'
+              ? { untrustedContentPaths: ['preview.discovery', 'content'] }
+              : {}),
+            ...(contentPrepareMutation === 'replay' && contentPrepareCall === 2
+              ? { observedAt: '2026-07-14T11:58:46.000Z' }
+              : {}),
+          };
+          return response(201, {
+            action: returnedAction,
+            actionDigest:
+              contentPrepareMutation === 'action_digest'
+                ? '0'.repeat(64)
+                : agentSha256(returnedAction),
+            expiresAt: '2026-07-14T12:08:45.000Z',
+            authorization: { allowed: true },
+            result: returnedResult,
+            resultSha256:
+              contentPrepareMutation === 'result_digest'
+                ? '0'.repeat(64)
+                : agentSha256(returnedResult),
+          });
+        }
         if (request.path === '/v1/agent/event-updates') {
           eventUpdatePrepareCall += 1;
           const returnedAction =
@@ -743,7 +901,12 @@ describe('third-party contract profiles', () => {
           const returnedPreview = {
             ...eventUpdatePreview,
             ...(eventUpdateMutation === 'preview'
-              ? { after: { ...eventUpdatePreview.after, title: 'Substituted update' } }
+              ? {
+                  after: {
+                    ...eventUpdatePreview.after,
+                    title: 'Substituted update',
+                  },
+                }
               : {}),
             ...(eventUpdateMutation === 'preparation_replay' && eventUpdatePrepareCall === 2
               ? { observedAt: '2026-07-14T11:59:01.000Z' }
@@ -880,6 +1043,11 @@ describe('third-party contract profiles', () => {
               : {}),
             ...(eventUpdateMutation === 'approval_extra' ? { planSha256: '9'.repeat(64) } : {}),
           });
+        if (
+          request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
+          request.path === `/v1/agent/actions/${contentPrepareActionId}/executions`
+        )
+          return response(404, { code: 'AGENT_ACTION_NOT_FOUND' });
         if (request.path.endsWith('/approvals'))
           return response(201, {
             id: approvalId,
@@ -907,7 +1075,12 @@ describe('third-party contract profiles', () => {
               : {}),
             ...(eventUpdateMutation === 'execution_envelope' ? { tenantId: undefined } : {}),
             ...(eventUpdateMutation === 'result'
-              ? { result: { ...eventUpdateExecution.result, status: 'published' } }
+              ? {
+                  result: {
+                    ...eventUpdateExecution.result,
+                    status: 'published',
+                  },
+                }
               : {}),
             ...(eventUpdateMutation === 'execution_extra' ? { planSha256: '9'.repeat(64) } : {}),
             ...(eventUpdateMutation === 'execution_time'
@@ -970,6 +1143,30 @@ describe('third-party contract profiles', () => {
     expect(requests.filter((request) => request.path === '/v1/agent/events')).toHaveLength(2);
     expect(
       requests.filter((request) => request.path === '/v1/agent/event-preparations'),
+    ).toHaveLength(2);
+    expect(
+      requests.filter((request) => request.path === '/v1/agent/content-preparations'),
+    ).toHaveLength(2);
+    expect(
+      requests.find((request) => request.path === '/v1/agent/content-preparations')?.body,
+    ).toEqual({
+      delegationGrantId,
+      resourceId: 'event_primary',
+      content: {
+        schemaVersion: 2,
+        editor: {
+          provider: '@puckeditor/core',
+          data: { root: { props: {} }, content: [] },
+        },
+        settings: { locale: 'en' },
+      },
+    });
+    expect(
+      requests.filter(
+        (request) =>
+          request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
+          request.path === `/v1/agent/actions/${contentPrepareActionId}/executions`,
+      ),
     ).toHaveLength(2);
     expect(requests.filter((request) => request.path === '/v1/agent/event-updates')).toHaveLength(
       2,
@@ -1059,6 +1256,37 @@ describe('third-party contract profiles', () => {
       ).toHaveLength(readinessRequestsBefore);
     }
     eventPrepareMutation = undefined;
+
+    for (const mutation of [
+      'agent',
+      'sponsor',
+      'delegation',
+      'resource',
+      'result_shape',
+      'action_digest',
+      'content',
+      'preview',
+      'validation',
+      'untrusted_paths',
+      'result_digest',
+      'replay',
+    ] as const) {
+      contentPrepareMutation = mutation;
+      contentPrepareCall = 0;
+      const eventUpdateRequestsBefore = requests.filter(
+        (request) => request.path === '/v1/agent/event-updates',
+      ).length;
+      const malformedContentPrepare = await runAgentPlatformContract(contractInput);
+      expect(
+        malformedContentPrepare.findings.map((finding) => finding.code),
+        mutation,
+      ).toContain('AGENT_PLATFORM_CONTENT_PREPARE_SCHEMA');
+      expect(
+        requests.filter((request) => request.path === '/v1/agent/event-updates'),
+        mutation,
+      ).toHaveLength(eventUpdateRequestsBefore);
+    }
+    contentPrepareMutation = undefined;
 
     for (const mutation of [
       'action',

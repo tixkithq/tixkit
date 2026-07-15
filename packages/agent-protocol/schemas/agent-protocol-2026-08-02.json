@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/agent-protocol/2026-08-02",
+  "title": "Tixkit Agent Action Structural Contract 2026-08-02",
+  "description": "Current full Agent Action validation overlay. The action wire protocol remains 2026-07-22; this contract adds fail-closed exact autonomy plus event.update and content.prepare payload semantics without changing retained prior bytes.",
+  "allOf": [
+    {
+      "$ref": "https://tixkit.com/schemas/agent-protocol/2026-07-22"
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": { "const": "content.prepare" }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-08-02#/$defs/contentPrepareResolvedPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": ["event.read", "readiness.read", "report.read"]
+          }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "autonomy": {
+            "const": "read"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": ["event.prepare", "content.prepare", "campaign.prepare"]
+          }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "autonomy": {
+            "const": "prepare"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "event.update",
+              "event.publish",
+              "inventory.change",
+              "campaign.send",
+              "refund.issue",
+              "permission.change",
+              "personal_data.export",
+              "credential.change",
+              "domain.change",
+              "provider.change",
+              "migration.execute",
+              "resource.delete"
+            ]
+          }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "autonomy": {
+            "const": "execute_with_approval"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "event.update"
+          }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-08-02#/$defs/eventUpdateResolvedPayload"
+          }
+        }
+      }
+    }
+  ]
+}

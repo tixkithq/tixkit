@@ -13,6 +13,7 @@ import {
 } from '../routes/modules/agent-actions.js';
 import type {
   PreparedAgentAction,
+  PreparedAgentContentPrepareAction,
   PreparedAgentEventPrepareAction,
   PreparedAgentEventReadAction,
   PreparedAgentEventUpdateAction,
@@ -165,6 +166,63 @@ const eventPreparePrepared: PreparedAgentEventPrepareAction = {
     ],
   },
   resultSha256: '0'.repeat(64),
+};
+const contentPreparePrepared: PreparedAgentContentPrepareAction = {
+  action: {
+    ...action,
+    id: `act_${'8'.repeat(48)}`,
+    kind: 'content.prepare',
+    autonomy: 'prepare',
+    target: { ...action.target, apiOperation: 'content.prepare' },
+    payload: {
+      channel: 'event_page',
+      content: {
+        schemaVersion: 2,
+        editor: {
+          provider: '@puckeditor/core',
+          data: { root: { props: {} }, content: [] },
+        },
+        settings: { locale: 'en', discovery: { summary: 'Summer event' } },
+      },
+      preview: {
+        provider: '@puckeditor/core',
+        discovery: { title: 'Summer event', summary: 'Summer event', tags: [] },
+      },
+      validation: { valid: true, severity: 'warning', issueCodes: [] },
+      contentPreviewSha256: '7'.repeat(64),
+    },
+  },
+  actionDigest: '6'.repeat(64),
+  expiresAt: '2026-07-14T12:15:00.000Z',
+  authorization: {
+    allowed: true,
+    eligibleForApproval: false,
+    reasons: [],
+    snapshotSha256: '5'.repeat(64),
+    checkedAt: '2026-07-14T12:00:00.000Z',
+  },
+  result: {
+    resourceId: 'event_primary',
+    resourceVersion: 7,
+    channel: 'event_page',
+    content: {
+      schemaVersion: 2,
+      editor: {
+        provider: '@puckeditor/core',
+        data: { root: { props: {} }, content: [] },
+      },
+      settings: { locale: 'en', discovery: { summary: 'Summer event' } },
+    },
+    preview: {
+      provider: '@puckeditor/core',
+      discovery: { title: 'Summer event', summary: 'Summer event', tags: [] },
+    },
+    validation: { valid: true, severity: 'warning', issueCodes: [] },
+    contentPreviewSha256: '7'.repeat(64),
+    observedAt: '2026-07-14T12:00:00.000Z',
+    untrustedContentPaths: ['content', 'preview.discovery'],
+  },
+  resultSha256: '4'.repeat(64),
 };
 const eventUpdatePrepared: PreparedAgentEventUpdateAction = {
   action: {
@@ -493,6 +551,65 @@ describe('agent action routes', () => {
     await app.close();
   });
 
+  it('accepts event-page content only through the direct content preparation route', async () => {
+    const prepare = vi.fn(async () => contentPreparePrepared);
+    const getForAgent = vi.fn(async () => contentPreparePrepared);
+    const { app } = await setup({ service: { prepare, getForAgent } });
+    const content = contentPreparePrepared.action.payload.content;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/content-preparations',
+      headers: { 'idempotency-key': 'agent-content-prepare-route-0001' },
+      payload: {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        content,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(prepare).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      idempotencyKey: 'agent-content-prepare-route-0001',
+      kind: 'content.prepare',
+      delegationGrantId: 'dlg_primary',
+      resourceId: 'event_primary',
+      content,
+    });
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(contentPreparePrepared)));
+
+    const dedicated = await app.inject({
+      method: 'GET',
+      url: `/agent/content-preparations/${contentPreparePrepared.action.id}`,
+    });
+    expect(dedicated.statusCode).toBe(200);
+    expect(dedicated.headers['cache-control']).toBe('no-store');
+    expect(dedicated.json()).toEqual(JSON.parse(JSON.stringify(contentPreparePrepared)));
+    const generic = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/${contentPreparePrepared.action.id}`,
+    });
+    expect(generic.statusCode).toBe(404);
+
+    for (const extra of ['tenantId', 'agentPrincipalId', 'channel', 'contentPreviewSha256']) {
+      const invalid = await app.inject({
+        method: 'POST',
+        url: '/agent/content-preparations',
+        headers: { 'idempotency-key': `agent-content-invalid-${extra}-0001` },
+        payload: {
+          delegationGrantId: 'dlg_primary',
+          resourceId: 'event_primary',
+          content,
+          [extra]: 'caller-controlled',
+        },
+      });
+      expect(invalid.statusCode).toBe(400);
+    }
+    expect(prepare).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
   it('keeps event publish preparation closed to readiness requests', async () => {
     const { app, service } = await setup();
     const response = await app.inject({
@@ -578,7 +695,10 @@ describe('agent action routes', () => {
     const actionDigest = eventUpdatePrepared.actionDigest;
     const approvalId = `apr_${'e'.repeat(48)}`;
     const executionId = `exec_${'f'.repeat(48)}`;
-    const execute = vi.fn(async () => ({ ...executionEvidence.execution, id: executionId }));
+    const execute = vi.fn(async () => ({
+      ...executionEvidence.execution,
+      id: executionId,
+    }));
     const getForAgent = vi.fn(async () => eventUpdatePrepared);
     const getExecutionForAgent = vi.fn(async () => executionEvidence);
     const { app } = await setup({

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SDK_API_VERSION = '2026-08-01';
+export const SDK_API_VERSION = '2026-08-02';
 
 export const sdkParityCatalog = [
   {
@@ -247,7 +247,10 @@ export function validateSdkParity({ root, registry, docRoutes, catalog = sdkPari
     if (item.demoDependency) {
       try {
         const demoManifest = JSON.parse(read(root, `${entry.demoPath}/package.json`));
-        const dependencies = { ...demoManifest.dependencies, ...demoManifest.devDependencies };
+        const dependencies = {
+          ...demoManifest.dependencies,
+          ...demoManifest.devDependencies,
+        };
         if (!dependencies[item.demoDependency])
           failures.push(`${item.id}: demo does not depend on ${item.demoDependency}`);
         if (!demoManifest.scripts?.typecheck)
@@ -258,5 +261,9 @@ export function validateSdkParity({ root, registry, docRoutes, catalog = sdkPari
     }
   }
 
-  return { failures, checkedEntries: catalog.length, apiVersion: SDK_API_VERSION };
+  return {
+    failures,
+    checkedEntries: catalog.length,
+    apiVersion: SDK_API_VERSION,
+  };
 }

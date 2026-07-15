@@ -325,6 +325,30 @@ describe('OpenAPI compatibility', () => {
     );
   });
 
+  it('accepts an additive response union that retains the prior schema reference', () => {
+    const current = structuredClone(base);
+    current.paths['/things'].post.responses['201'].content['application/json'].schema = {
+      anyOf: [
+        { $ref: '#/components/schemas/Thing' },
+        { $ref: '#/components/schemas/Thing20260802' },
+      ],
+    } as never;
+    (current.components.schemas as Record<string, unknown>).Thing20260802 = {
+      type: 'object',
+      required: ['id'],
+      properties: { id: { type: 'string' }, capability: { const: 'content.prepare' } },
+    };
+
+    const changes = compareOpenApi(base as never, current as never);
+    expect(changes).toContainEqual(
+      expect.objectContaining({
+        category: 'schema-reference-widened',
+        severity: 'compatible',
+      }),
+    );
+    expect(changes).not.toContainEqual(expect.objectContaining({ severity: 'breaking' }));
+  });
+
   it('detects path-level and existing parameter requiredness', () => {
     const previous = structuredClone(base) as typeof base & {
       paths: Record<string, never>;

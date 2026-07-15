@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-01';
+export const TIXKIT_API_VERSION = '2026-08-02';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1521,7 +1521,8 @@ export type AgentCapability =
   | 'events.read'
   | 'events.prepare'
   | 'events.execute'
-  | 'readiness.read';
+  | 'readiness.read'
+  | 'content.prepare';
 
 export type AgentPrincipal = {
   id: string;
@@ -1755,6 +1756,41 @@ export type AgentEventUpdateAction = AgentActionBase & {
 
 export type AgentEventUpdatePreview = AgentEventPrepareResult;
 
+export type AgentContentPrepareAction = AgentActionBase & {
+  kind: 'content.prepare';
+  autonomy: 'prepare';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'content.prepare';
+  };
+  payload: AgentContentPreparePayload;
+};
+
+export type AgentContentPreparePayload = {
+  channel: 'event_page';
+  content: Record<string, unknown>;
+  preview: {
+    provider: '@puckeditor/core';
+    discovery: Record<string, unknown>;
+  };
+  validation: {
+    valid: boolean;
+    severity: 'error' | 'warning';
+    issueCodes: string[];
+  };
+  contentPreviewSha256: string;
+};
+
+export type AgentContentPrepareResult = AgentContentPreparePayload & {
+  resourceId: string;
+  resourceVersion: number;
+  observedAt: string;
+  untrustedContentPaths: ['content', 'preview.discovery'];
+};
+
 export type AgentReadinessReadResult = {
   resourceId: string;
   resourceVersion: number;
@@ -1845,6 +1881,21 @@ export type PreparedAgentEventUpdateAction = {
   };
   preview: AgentEventUpdatePreview;
   previewSha256: string;
+};
+
+export type PreparedAgentContentPrepareAction = {
+  action: AgentContentPrepareAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  result: AgentContentPrepareResult;
+  resultSha256: string;
 };
 
 export type AgentApproval = {
@@ -4688,6 +4739,19 @@ class AgentActionResource {
     });
   }
 
+  async prepareContent(input: {
+    delegationGrantId: string;
+    resourceId: string;
+    content: Record<string, unknown>;
+    idempotencyKey: string;
+  }): Promise<PreparedAgentContentPrepareAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/content-preparations', {
+      body,
+      idempotencyKey,
+    });
+  }
+
   async get(actionId: string): Promise<PreparedAgentAction> {
     return this.client.request('GET', `/agent/actions/${actionId}`);
   }
@@ -4706,6 +4770,10 @@ class AgentActionResource {
 
   async getEventUpdate(actionId: string): Promise<PreparedAgentEventUpdateAction> {
     return this.client.request('GET', `/agent/event-updates/${actionId}`);
+  }
+
+  async getContentPreparation(actionId: string): Promise<PreparedAgentContentPrepareAction> {
+    return this.client.request('GET', `/agent/content-preparations/${actionId}`);
   }
 
   async approveEventUpdate(input: {
@@ -4748,7 +4816,10 @@ class AgentActionResource {
   }): Promise<AgentEventUpdateExecution> {
     const executionKey = `execute:${input.actionId}:${input.approvalId}:${input.actionDigest}`;
     return this.client.request('POST', `/agent/event-updates/${input.actionId}/executions`, {
-      body: { approvalId: input.approvalId, actionDigest: input.actionDigest },
+      body: {
+        approvalId: input.approvalId,
+        actionDigest: input.actionDigest,
+      },
       idempotencyKey: executionKey,
       headers: { 'X-Tixkit-Confirmation': executionKey },
     });
@@ -4805,7 +4876,10 @@ class AgentActionResource {
   }): Promise<AgentExecution> {
     const executionKey = `execute:${input.actionId}:${input.approvalId}:${input.actionDigest}`;
     return this.client.request('POST', `/agent/actions/${input.actionId}/executions`, {
-      body: { approvalId: input.approvalId, actionDigest: input.actionDigest },
+      body: {
+        approvalId: input.approvalId,
+        actionDigest: input.actionDigest,
+      },
       idempotencyKey: executionKey,
       headers: {
         'X-Tixkit-Confirmation': executionKey,
@@ -4827,7 +4901,10 @@ class AgentPlanResource {
     idempotencyKey: string;
   }): Promise<PersistedAgentPlan> {
     const { idempotencyKey, ...body } = input;
-    return this.client.request('POST', '/agent/plans', { body, idempotencyKey });
+    return this.client.request('POST', '/agent/plans', {
+      body,
+      idempotencyKey,
+    });
   }
 
   async get(planId: string): Promise<PersistedAgentPlan> {

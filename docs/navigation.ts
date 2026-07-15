@@ -174,6 +174,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-01 approved event updates',
         routeId: 'apiMigration20260731To20260801',
       },
+      {
+        label: 'Adopt 2026-08-02 safe content preparation',
+        routeId: 'apiMigration20260801To20260802',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

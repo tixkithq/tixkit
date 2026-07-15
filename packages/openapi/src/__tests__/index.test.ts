@@ -36,7 +36,12 @@ function exampleMatchesSchema(example: unknown, schema: any): boolean {
       new Set(example.map((entry) => JSON.stringify(entry))).size !== example.length
     )
       return false;
-    return example.every((entry) => exampleMatchesSchema(entry, schema.items));
+    return example.every((entry, index) => {
+      const itemSchema = Array.isArray(schema.prefixItems)
+        ? (schema.prefixItems[index] ?? schema.items)
+        : schema.items;
+      return exampleMatchesSchema(entry, itemSchema);
+    });
   }
   if (types.includes('object') || schema.properties) {
     if (!example || typeof example !== 'object' || Array.isArray(example)) return false;
@@ -96,7 +101,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-01');
+    expect(openApiSpec.info.version).toBe('2026-08-02');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -142,7 +147,9 @@ describe('openApiSpec', () => {
     expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
     expect(get.responses['401'].description).toMatch(/Agent OAuth or human bearer/u);
     expect(approve.security).toEqual([{ BearerAuth: [] }]);
-    expect(approve.security).not.toContainEqual({ AgentOAuth: ['agent.invoke'] });
+    expect(approve.security).not.toContainEqual({
+      AgentOAuth: ['agent.invoke'],
+    });
     expect(revoke.security).toEqual([{ BearerAuth: [] }]);
     expect(revoke.description).toMatch(/even after losing event permission/u);
     expect(execute.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
@@ -268,12 +275,18 @@ describe('openApiSpec', () => {
       additionalProperties: false,
       required: ['delegationGrantId', 'resourceId'],
     });
-    expect(publishAction.properties.kind).toEqual({ type: 'string', const: 'event.publish' });
+    expect(publishAction.properties.kind).toEqual({
+      type: 'string',
+      const: 'event.publish',
+    });
     expect(publishAction).not.toHaveProperty('oneOf');
     expect(publishPrepared.properties).not.toHaveProperty('result');
     expect(publishPrepared.properties).not.toHaveProperty('resultSha256');
     expect(publishPrepared.properties.authorization.properties).not.toHaveProperty('allowed');
-    expect(readinessAction.properties.kind).toEqual({ type: 'string', const: 'readiness.read' });
+    expect(readinessAction.properties.kind).toEqual({
+      type: 'string',
+      const: 'readiness.read',
+    });
     expect(readinessPrepared.required).toEqual(expect.arrayContaining(['result', 'resultSha256']));
     expect(readinessPrepared.properties.authorization.required).toContain('allowed');
     expect(
@@ -289,7 +302,10 @@ describe('openApiSpec', () => {
     const prepared = openApiSpec.components.schemas.PreparedAgentEventReadAction;
     expect(read.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
     expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
-    expect(action.properties.kind).toEqual({ type: 'string', const: 'event.read' });
+    expect(action.properties.kind).toEqual({
+      type: 'string',
+      const: 'event.read',
+    });
     expect(action.properties.target.properties.apiOperation).toEqual({
       type: 'string',
       const: 'events.get',
@@ -2546,7 +2562,9 @@ describe('openApiSpec', () => {
                   enum: ['tixkit-portable-bundle-v2', 'tixkit-portable-bundle-v1'],
                   default: 'tixkit-portable-bundle-v2',
                 },
-                configuration: { properties: { artifactIds: { minItems: 1, maxItems: 1 } } },
+                configuration: {
+                  properties: { artifactIds: { minItems: 1, maxItems: 1 } },
+                },
               },
             },
           },

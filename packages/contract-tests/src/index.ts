@@ -12,6 +12,7 @@ import {
   agentSha256,
   buildAgentPlanDefinition,
   validateAgentActionResultForAction,
+  validateAgentContentPrepareResult,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
   validateAgentEventUpdatePreview,
@@ -19,6 +20,7 @@ import {
   type AgentAction,
   type AgentActionResult,
   type AgentApproval,
+  type AgentContentPrepareResult,
   type AgentExecution,
   type AgentEventReadResult,
   type AgentEventPrepareResult,
@@ -28,7 +30,7 @@ import {
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-01' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-02' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -701,6 +703,100 @@ export async function runAgentPlatformContract(
     });
     return result(findings);
   }
+  const contentPrepareRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: '/v1/agent/content-preparations',
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.content.prepare`,
+    },
+    body: {
+      delegationGrantId: input.delegationGrantId,
+      resourceId: input.resourceId,
+      content: {
+        schemaVersion: 2,
+        editor: {
+          provider: '@puckeditor/core',
+          data: { root: { props: {} }, content: [] },
+        },
+        settings: { locale: 'en' },
+      },
+    },
+  };
+  const contentPrepareResponse = await request('content-prepare', contentPrepareRequest, 201);
+  const contentPrepareReplay = await request('content-prepare-replay', contentPrepareRequest, 201);
+  const preparedContent = objectBody(contentPrepareResponse?.body);
+  const contentAction = objectBody(preparedContent?.action) as unknown as AgentAction | undefined;
+  const contentResult = objectBody(preparedContent?.result);
+  const contentAuthorization = objectBody(preparedContent?.authorization);
+  let contentActionDigest: string | undefined;
+  let contentResultDigest: string | undefined;
+  let contentValidationFailure: string | undefined;
+  try {
+    if (!contentAction || !contentResult) throw new Error('invalid content prepare response');
+    validateAgentContentPrepareResult(
+      contentAction,
+      contentResult as unknown as AgentContentPrepareResult,
+    );
+    contentActionDigest = agentActionDigest(contentAction);
+    contentResultDigest = agentSha256(contentResult);
+  } catch (error) {
+    contentActionDigest = undefined;
+    contentValidationFailure = error instanceof Error ? error.message : 'unknown validation error';
+  }
+  if (
+    !contentAction ||
+    contentAction.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    contentAction.kind !== 'content.prepare' ||
+    contentAction.autonomy !== 'prepare' ||
+    contentAction.agentPrincipalId !== principal.id ||
+    contentAction.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    contentAction.delegationGrantId !== input.delegationGrantId ||
+    contentAction.target.resourceType !== 'event' ||
+    contentAction.target.resourceId !== input.resourceId ||
+    contentAction.target.apiOperation !== 'content.prepare' ||
+    contentActionDigest !== preparedContent?.actionDigest ||
+    contentResultDigest !== preparedContent?.resultSha256 ||
+    contentAuthorization?.allowed !== true ||
+    preparedContent?.dryRun !== undefined ||
+    contentResult?.contentPreviewSha256 !==
+      objectBody(contentAction.payload)?.contentPreviewSha256 ||
+    agentSha256(contentPrepareResponse?.body) !== agentSha256(contentPrepareReplay?.body) ||
+    !Array.isArray(contentResult?.untrustedContentPaths) ||
+    contentResult.untrustedContentPaths.join(',') !== 'content,preview.discovery'
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_CONTENT_PREPARE_SCHEMA',
+      message: `Direct content preparation, canonical preview digest, untrusted-content boundary or exact replay evidence is invalid.${contentValidationFailure ? ` ${contentValidationFailure}` : ''}`,
+    });
+    return result(findings);
+  }
+  await request(
+    'content-prepare-approval-rejected',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(contentAction.id)}/approvals`,
+      headers: {
+        ...headers(input.sponsorAccessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.content.prepare.approval`,
+      },
+      body: { actionDigest: contentActionDigest },
+    },
+    404,
+  );
+  await request(
+    'content-prepare-execution-rejected',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(contentAction.id)}/executions`,
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.content.prepare.execution`,
+      },
+      body: { actionDigest: contentActionDigest },
+    },
+    404,
+  );
   const eventUpdateRequest: AgentPlatformContractRequest = {
     method: 'POST',
     path: '/v1/agent/event-updates',

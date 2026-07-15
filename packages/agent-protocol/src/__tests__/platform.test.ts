@@ -17,10 +17,12 @@ import {
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_29,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_30,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_31,
+  AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_01,
   AGENT_ACTION_REGISTRY,
   AGENT_PLATFORM_PROTOCOL_VERSION,
   buildAgentPlanDefinition,
   validateAgentActionRegistry,
+  validateAgentContentPrepareResult,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
   validateAgentEventUpdatePreview,
@@ -33,6 +35,7 @@ import {
   type AgentPlanDefinition,
   type AgentPlanState,
   type AgentEventReadResult,
+  type AgentContentPrepareResult,
   type AgentEventPrepareResult,
   type AgentEventUpdatePreview,
   type AgentReadinessReadResult,
@@ -135,6 +138,62 @@ function action(): AgentAction {
 }
 
 describe('agent platform contracts', () => {
+  it('validates exact direct content preparation results and untrusted output paths', () => {
+    const projection = {
+      channel: 'event_page' as const,
+      content: {
+        schemaVersion: 2,
+        editor: {
+          provider: '@puckeditor/core',
+          data: { root: { props: {} }, content: [] },
+        },
+        settings: {
+          locale: 'en',
+          publicPath: '/e/summer-event',
+          discovery: { summary: 'A summer event', tags: [] },
+        },
+      },
+      preview: {
+        provider: '@puckeditor/core' as const,
+        discovery: { title: 'Summer event', summary: 'A summer event', tags: [] },
+      },
+      validation: { valid: true, severity: 'warning' as const, issueCodes: [] },
+    };
+    const contentAction: AgentAction = {
+      ...action(),
+      kind: 'content.prepare',
+      autonomy: 'prepare',
+      target: { ...action().target, apiOperation: 'content.prepare' },
+      payload: { ...projection, contentPreviewSha256: agentSha256(projection) },
+    };
+    const result: AgentContentPrepareResult = {
+      resourceId: contentAction.target.resourceId,
+      resourceVersion: contentAction.target.resourceVersion,
+      ...projection,
+      contentPreviewSha256: agentSha256(projection),
+      observedAt: createdAt,
+      untrustedContentPaths: ['content', 'preview.discovery'],
+    };
+    expect(() => validateAgentContentPrepareResult(contentAction, result)).not.toThrow();
+    expect(() =>
+      validateAgentContentPrepareResult(contentAction, {
+        ...result,
+        preview: {
+          ...result.preview,
+          discovery: {
+            ...result.preview.discovery,
+            title: 'Substituted event',
+          },
+        },
+      }),
+    ).toThrow('preview binding');
+    expect(() =>
+      validateAgentContentPrepareResult(contentAction, {
+        ...result,
+        untrustedContentPaths: ['preview.discovery', 'content'],
+      } as unknown as AgentContentPrepareResult),
+    ).toThrow('untrusted content');
+  });
   it('domain-separates immutable plan material from mutable server state', () => {
     const plan = buildAgentPlanDefinition(definitionInput());
     expect(plan.planSha256).toMatch(/^[a-f0-9]{64}$/u);
@@ -686,6 +745,10 @@ describe('agent platform contracts', () => {
         planSupport: 'direct_only',
       }),
       expect.objectContaining({
+        kind: 'content.prepare',
+        planSupport: 'direct_only',
+      }),
+      expect.objectContaining({
         kind: 'event.update',
         planSupport: 'direct_only',
       }),
@@ -724,7 +787,7 @@ describe('agent platform contracts', () => {
       ...AGENT_ACTION_REGISTRY,
       actions: substitutedActions,
       registrySha256: agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-08-01',
+        domain: 'tixkit.agent-action-registry.v2026-08-02',
         protocolVersion: AGENT_ACTION_REGISTRY.protocolVersion,
         actionProtocolVersion: AGENT_ACTION_REGISTRY.actionProtocolVersion,
         actions: substitutedActions,
@@ -739,7 +802,7 @@ describe('agent platform contracts', () => {
       'utf8',
     );
     const contractsSchemaText = readFileSync(
-      new URL('../../schemas/agent-action-contracts-2026-08-01.json', import.meta.url),
+      new URL('../../schemas/agent-action-contracts-2026-08-02.json', import.meta.url),
       'utf8',
     );
     expect(createHash('sha256').update(contractsSchemaText).digest('hex')).toBe(
@@ -830,6 +893,14 @@ describe('agent platform contracts', () => {
       AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_31,
     );
     ajv.addSchema(JSON.parse(prior20260731ContractsText));
+    const prior20260801ContractsText = readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-08-01.json', import.meta.url),
+      'utf8',
+    );
+    expect(createHash('sha256').update(prior20260801ContractsText).digest('hex')).toBe(
+      AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_01,
+    );
+    ajv.addSchema(JSON.parse(prior20260801ContractsText));
     const contracts = JSON.parse(contractsSchemaText) as { $id: string };
     ajv.addSchema(contracts);
     const validatePrepare = ajv.getSchema(`${contracts.$id}#/$defs/eventPublishPrepareInput`)!;
@@ -848,6 +919,15 @@ describe('agent platform contracts', () => {
       `${contracts.$id}#/$defs/eventPrepareResolvedPayload`,
     )!;
     const validateEventPrepareResult = ajv.getSchema(`${contracts.$id}#/$defs/eventPrepareResult`)!;
+    const validateContentPrepare = ajv.getSchema(
+      `${contracts.$id}#/$defs/contentPreparePrepareInput`,
+    )!;
+    const validateContentPreparePayload = ajv.getSchema(
+      `${contracts.$id}#/$defs/contentPrepareResolvedPayload`,
+    )!;
+    const validateContentPrepareResult = ajv.getSchema(
+      `${contracts.$id}#/$defs/contentPrepareResult`,
+    )!;
     const validateEventUpdatePrepare = ajv.getSchema(
       `${contracts.$id}#/$defs/eventUpdatePrepareInput`,
     )!;
@@ -1098,6 +1178,168 @@ describe('agent platform contracts', () => {
         changes: {},
       }),
     ).toBe(false);
+    const contentProjection = {
+      channel: 'event_page' as const,
+      content: {
+        schemaVersion: 2,
+        editor: {
+          provider: '@puckeditor/core',
+          data: { root: { props: {} }, content: [] },
+        },
+        settings: {
+          locale: 'en',
+          publicPath: '/e/summer-event',
+          discovery: { summary: 'A summer event', tags: [] },
+        },
+      },
+      preview: {
+        provider: '@puckeditor/core' as const,
+        discovery: {
+          title: 'Summer event',
+          summary: 'A summer event',
+          tags: [],
+        },
+      },
+      validation: { valid: true, severity: 'warning' as const, issueCodes: [] },
+    };
+    const contentPayload = {
+      ...contentProjection,
+      contentPreviewSha256: agentSha256(contentProjection),
+    };
+    const contentAction: AgentAction = {
+      ...action(),
+      kind: 'content.prepare',
+      autonomy: 'prepare',
+      target: { ...action().target, apiOperation: 'content.prepare' },
+      payload: contentPayload,
+    };
+    const contentResult: AgentContentPrepareResult = {
+      resourceId: contentAction.target.resourceId,
+      resourceVersion: contentAction.target.resourceVersion,
+      ...contentPayload,
+      observedAt: createdAt,
+      untrustedContentPaths: ['content', 'preview.discovery'],
+    };
+    expect(
+      validateContentPrepare({
+        kind: 'content.prepare',
+        delegationGrantId: 'delegation_primary',
+        resourceId: 'event_primary',
+        content: contentProjection.content,
+      }),
+      ajv.errorsText(validateContentPrepare.errors),
+    ).toBe(true);
+    expect(
+      validateContentPreparePayload(contentPayload),
+      ajv.errorsText(validateContentPreparePayload.errors),
+    ).toBe(true);
+    expect(
+      validateContentPrepareResult(contentResult),
+      ajv.errorsText(validateContentPrepareResult.errors),
+    ).toBe(true);
+    expect(() => validateAgentContentPrepareResult(contentAction, contentResult)).not.toThrow();
+    expect(
+      validateContentPrepare({
+        kind: 'content.prepare',
+        delegationGrantId: 'delegation_primary',
+        resourceId: 'event_primary',
+        content: {
+          ...contentProjection.content,
+          editor: {
+            ...contentProjection.content.editor,
+            data: {
+              ...contentProjection.content.editor.data,
+              content: [
+                {
+                  type: 'CustomEmbed',
+                  props: { id: 'unsafe', html: '<script>x</script>' },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toBe(false);
+    const expectContentProjectionRejected = (
+      projection: typeof contentProjection,
+      label: string,
+    ) => {
+      const payload = {
+        ...projection,
+        contentPreviewSha256: agentSha256(projection),
+      };
+      const candidateAction = { ...contentAction, payload } as AgentAction;
+      const candidateResult = {
+        ...contentResult,
+        ...payload,
+      } as AgentContentPrepareResult;
+      expect(
+        validateContentPreparePayload(payload),
+        `${label}: ${ajv.errorsText(validateContentPreparePayload.errors)}`,
+      ).toBe(false);
+      expect(() => validateAgentContentPrepareResult(candidateAction, candidateResult)).toThrow(
+        'content prepare',
+      );
+    };
+    const missingPublicPath = structuredClone(contentProjection);
+    delete (missingPublicPath.content.settings as { publicPath?: string }).publicPath;
+    expectContentProjectionRejected(missingPublicPath as typeof contentProjection, 'public path');
+    const wrongComponentProp = structuredClone(contentProjection);
+    wrongComponentProp.content.editor.data.content = [
+      { type: 'Divider', props: { id: 'divider_1', title: 'wrong component property' } },
+    ] as never;
+    expectContentProjectionRejected(wrongComponentProp, 'wrong component property');
+    const emptyTitle = structuredClone(contentProjection);
+    emptyTitle.preview.discovery.title = '';
+    expectContentProjectionRejected(emptyTitle, 'empty title');
+    const oversizedTitle = structuredClone(contentProjection);
+    oversizedTitle.preview.discovery.title = 'x'.repeat(513);
+    expectContentProjectionRejected(oversizedTitle, 'oversized title');
+    const unsortedIssueCodes = structuredClone(contentProjection);
+    unsortedIssueCodes.validation.issueCodes = ['z.warning', 'a.warning'];
+    expectContentProjectionRejected(unsortedIssueCodes, 'unsorted issue codes');
+    const incoherentValidation = structuredClone(contentProjection);
+    incoherentValidation.validation.severity = 'error' as 'warning';
+    expectContentProjectionRejected(incoherentValidation, 'incoherent validation severity');
+    const invalidStartsAt = structuredClone(contentProjection);
+    (invalidStartsAt.preview.discovery as Record<string, unknown>).startsAt = 'not-a-date';
+    expectContentProjectionRejected(invalidStartsAt, 'invalid starts at');
+    for (const invalidDate of [
+      '2026-02-29T00:00:00Z',
+      '2026-02-30T00:00:00Z',
+      '2026-13-01T00:00:00Z',
+      '2026-01-01T00:00:00+24:00',
+      '2026-01-01t00:00:00z',
+      '2026-01-01 00:00:00Z',
+    ]) {
+      const projection = structuredClone(contentProjection);
+      (projection.preview.discovery as Record<string, unknown>).startsAt = invalidDate;
+      expectContentProjectionRejected(projection, invalidDate);
+    }
+    for (const validDate of [
+      '2028-02-29T00:00:00Z',
+      '2026-12-31T23:59:60Z',
+      '2026-01-01T00:00:00+23:59',
+    ]) {
+      const projection = structuredClone(contentProjection);
+      (projection.preview.discovery as Record<string, unknown>).startsAt = validDate;
+      const payload = {
+        ...projection,
+        contentPreviewSha256: agentSha256(projection),
+      };
+      const candidateAction = { ...contentAction, payload } as AgentAction;
+      const candidateResult = {
+        ...contentResult,
+        ...payload,
+      } as AgentContentPrepareResult;
+      expect(
+        validateContentPreparePayload(payload),
+        `${validDate}: ${ajv.errorsText(validateContentPreparePayload.errors)}`,
+      ).toBe(true);
+      expect(() =>
+        validateAgentContentPrepareResult(candidateAction, candidateResult),
+      ).not.toThrow();
+    }
     const eventUpdateAction: AgentAction = {
       ...eventPrepareAction,
       kind: 'event.update',

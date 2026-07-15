@@ -1,17 +1,20 @@
 import { agentSha256, installAgentProtocolSchemaKeywords } from '@tixkit/agent-protocol';
 import currentAgentSchema from '@tixkit/agent-protocol/schema' with { type: 'json' };
 import retainedAgentSchema from '@tixkit/agent-protocol/schemas/2026-07-22' with { type: 'json' };
-import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-01' with { type: 'json' };
+import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-02' with { type: 'json' };
 import retainedActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-27' with { type: 'json' };
 import { runAgentPlatformContract } from '@tixkit/contract-tests';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 
 if (
-  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-08-01' ||
+  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-08-02' ||
   retainedAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-07-22' ||
   currentAgentSchema.allOf[0]?.$ref !== retainedAgentSchema.$id ||
-  currentAgentSchema.allOf[2]?.then?.properties?.autonomy?.const !== 'prepare'
+  !currentAgentSchema.allOf.some(
+    (entry) => entry.then?.properties?.autonomy?.const === 'prepare',
+  ) ||
+  !currentAgentSchema.allOf.some((entry) => entry.if?.properties?.kind?.const === 'content.prepare')
 )
   throw new Error('packed agent protocol schema exports do not enforce the current contract');
 
@@ -28,7 +31,10 @@ const validateEventPreparePayload = ajv.getSchema(
 const validateEventUpdatePayload = ajv.getSchema(
   `${currentActionContracts.$id}#/$defs/eventUpdateResolvedPayload`,
 );
-if (!validateEventPreparePayload || !validateEventUpdatePayload)
+const validateContentPreparePayload = ajv.getSchema(
+  `${currentActionContracts.$id}#/$defs/contentPrepareResolvedPayload`,
+);
+if (!validateEventPreparePayload || !validateEventUpdatePayload || !validateContentPreparePayload)
   throw new Error('packed agent action contracts did not expose typed event change validation');
 
 const mutation = process.argv[2] || 'none';
@@ -104,7 +110,12 @@ if (!validateCurrentAction(eventPrepareAction))
   throw new Error(
     `packed current action schema rejected valid event.prepare: ${ajv.errorsText(validateCurrentAction.errors)}`,
   );
-if (validateCurrentAction({ ...eventPrepareAction, autonomy: 'execute_with_approval' }))
+if (
+  validateCurrentAction({
+    ...eventPrepareAction,
+    autonomy: 'execute_with_approval',
+  })
+)
   throw new Error('packed current action schema accepted event.prepare autonomy escalation');
 if (!validateEventPreparePayload(eventPrepareAction.payload))
   throw new Error(
@@ -117,6 +128,66 @@ if (
   })
 )
   throw new Error('packed action contracts accepted unowned resolved event media');
+const contentPrepareActionId = `act_${'4'.repeat(48)}`;
+const preparedContentDocument = {
+  schemaVersion: 2,
+  editor: {
+    provider: '@puckeditor/core',
+    data: { root: { props: {} }, content: [] },
+  },
+  settings: {
+    locale: 'en',
+    publicPath: '/e/event_primary',
+    discovery: { summary: projection.description, tags: [] },
+  },
+};
+const contentPreparePreview = {
+  provider: '@puckeditor/core',
+  discovery: {
+    title: projection.title,
+    summary: projection.description,
+    tags: [],
+  },
+};
+const contentPrepareValidation = {
+  valid: true,
+  severity: 'warning',
+  issueCodes: [],
+};
+const contentPreviewSha256 = agentSha256({
+  channel: 'event_page',
+  content: preparedContentDocument,
+  preview: contentPreparePreview,
+  validation: contentPrepareValidation,
+});
+const contentPrepareAction = {
+  id: contentPrepareActionId,
+  ...base,
+  kind: 'content.prepare',
+  autonomy: 'prepare',
+  target: { ...initialTarget, apiOperation: 'content.prepare' },
+  payload: {
+    channel: 'event_page',
+    content: preparedContentDocument,
+    preview: contentPreparePreview,
+    validation: contentPrepareValidation,
+    contentPreviewSha256,
+  },
+  idempotencyKey: 'agent.conformance.packed.content.prepare',
+  preparedAt: '2026-07-14T11:58:45.000Z',
+};
+if (
+  !validateCurrentAction(contentPrepareAction) ||
+  !validateContentPreparePayload(contentPrepareAction.payload)
+)
+  throw new Error('packed agent schemas rejected a valid content.prepare action');
+if (
+  validateCurrentAction({
+    ...contentPrepareAction,
+    autonomy: 'execute_with_approval',
+  })
+)
+  throw new Error('packed current action schema accepted content.prepare autonomy escalation');
 const eventUpdateAfter = {
   description: 'Organizer-approved updated description.',
   title: 'Contract-updated event',
@@ -177,6 +248,7 @@ const actionDigest = agentSha256(publishAction);
 let planSha256 = '';
 let eventCalls = 0;
 let eventPrepareCalls = 0;
+let contentPrepareCalls = 0;
 let eventUpdateCalls = 0;
 let eventUpdateExecutionCalls = 0;
 const response = (status, body) => ({
@@ -194,7 +266,10 @@ const execute = async (request) => {
     });
   if (request.path === '/v1/agent/session')
     return response(200, {
-      principal: { id: agentPrincipalId, sponsorPrincipalId: 'sponsor_primary' },
+      principal: {
+        id: agentPrincipalId,
+        sponsorPrincipalId: 'sponsor_primary',
+      },
       authentication: { grantType: 'client_credentials' },
       delegationRequired: true,
     });
@@ -240,7 +315,10 @@ const execute = async (request) => {
           : '2026-07-14T11:58:30.000Z',
       after:
         prepareMutation === 'preview'
-          ? { ...eventPreparePreview.after, title: 'Substituted prepared title' }
+          ? {
+              ...eventPreparePreview.after,
+              title: 'Substituted prepared title',
+            }
           : eventPreparePreview.after,
       untrustedContentPaths:
         prepareMutation === 'untrusted_paths'
@@ -257,12 +335,59 @@ const execute = async (request) => {
         prepareMutation === 'result_digest' ? '0'.repeat(64) : agentSha256(preparedResult),
     });
   }
+  if (request.path === '/v1/agent/content-preparations') {
+    contentPrepareCalls += 1;
+    const contentMutation = mutation.startsWith('content_')
+      ? mutation.slice('content_'.length)
+      : '';
+    const preparedResult = {
+      resourceId: initialTarget.resourceId,
+      resourceVersion: initialTarget.resourceVersion,
+      channel: 'event_page',
+      content:
+        contentMutation === 'content'
+          ? { ...preparedContentDocument, settings: { locale: 'substituted' } }
+          : preparedContentDocument,
+      preview:
+        contentMutation === 'preview'
+          ? {
+              ...contentPreparePreview,
+              discovery: { title: 'Substituted preview' },
+            }
+          : contentPreparePreview,
+      validation:
+        contentMutation === 'validation'
+          ? { ...contentPrepareValidation, issueCodes: ['substituted.warning'] }
+          : contentPrepareValidation,
+      contentPreviewSha256,
+      observedAt:
+        contentMutation === 'replay' && contentPrepareCalls === 2
+          ? '2026-07-14T11:58:46.000Z'
+          : '2026-07-14T11:58:45.000Z',
+      untrustedContentPaths:
+        contentMutation === 'untrusted_paths'
+          ? ['preview.discovery', 'content']
+          : ['content', 'preview.discovery'],
+    };
+    return response(201, {
+      action: contentPrepareAction,
+      actionDigest:
+        contentMutation === 'action_digest' ? '0'.repeat(64) : agentSha256(contentPrepareAction),
+      expiresAt: '2026-07-14T12:08:45.000Z',
+      authorization: { allowed: true },
+      result: preparedResult,
+      resultSha256:
+        contentMutation === 'result_digest' ? '0'.repeat(64) : agentSha256(preparedResult),
+    });
+  }
   if (request.path === '/v1/agent/event-updates') {
     eventUpdateCalls += 1;
     const returnedPreview = {
       ...eventUpdatePreview,
       ...(mutation === 'update_preview'
-        ? { after: { ...eventUpdatePreview.after, title: 'Substituted update' } }
+        ? {
+            after: { ...eventUpdatePreview.after, title: 'Substituted update' },
+          }
         : {}),
       ...(mutation === 'update_replay' && eventUpdateCalls === 2
         ? { observedAt: '2026-07-14T11:59:01.000Z' }
@@ -357,6 +482,11 @@ const execute = async (request) => {
       expiresAt: '2026-07-14T12:03:00.000Z',
       ...(mutation === 'update_approval_extra' ? { planSha256: '9'.repeat(64) } : {}),
     });
+  if (
+    request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
+    request.path === `/v1/agent/actions/${contentPrepareActionId}/executions`
+  )
+    return response(404, { code: 'AGENT_ACTION_NOT_FOUND' });
   if (request.path.endsWith('/approvals'))
     return response(201, {
       id: approvalId,
@@ -413,7 +543,11 @@ const execute = async (request) => {
       actionDigest,
       approvalId,
       ...base,
-      result: { resourceId: 'event_primary', resourceVersion: 9, status: 'published' },
+      result: {
+        resourceId: 'event_primary',
+        resourceVersion: 9,
+        status: 'published',
+      },
     });
   if (request.path.endsWith(`/${executionId}`)) {
     const binding = {
@@ -437,7 +571,7 @@ const execute = async (request) => {
 };
 
 const result = await runAgentPlatformContract({
-  apiVersion: '2026-08-01',
+  apiVersion: '2026-08-02',
   sponsorAccessToken: 'sponsor_token',
   agentClientId: `tk_agent_${'e'.repeat(48)}`,
   agentClientSecret: 'secret_value',
@@ -452,6 +586,7 @@ process.stdout.write(
     result,
     eventCalls,
     eventPrepareCalls,
+    contentPrepareCalls,
     eventUpdateCalls,
     eventUpdateExecutionCalls,
   }),

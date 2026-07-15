@@ -3199,7 +3199,10 @@ describe('TixkitClient new resource methods', () => {
         'X-Tixkit-Confirmation': `execute:${actionId}:${approvalId}:${actionDigest}`,
       },
     });
-    expect(JSON.parse(getCall(fm, 4).body)).toEqual({ approvalId, actionDigest });
+    expect(JSON.parse(getCall(fm, 4).body)).toEqual({
+      approvalId,
+      actionDigest,
+    });
     expect(getCall(fm, 5)).toMatchObject({
       method: 'GET',
       url: `https://api.test/v1/agent/actions/${actionId}/executions/${executionId}`,
@@ -3412,7 +3415,11 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm, 3).url).toBe(
       `https://api.test/v1/agent/event-updates/${actionId}/approvals/${approvalId}/revoke`,
     );
-    await client.agentActions.executeEventUpdate({ actionId, approvalId, actionDigest });
+    await client.agentActions.executeEventUpdate({
+      actionId,
+      approvalId,
+      actionDigest,
+    });
     expect(getCall(fm, 4)).toMatchObject({
       method: 'POST',
       url: `https://api.test/v1/agent/event-updates/${actionId}/executions`,
@@ -3425,6 +3432,56 @@ describe('TixkitClient new resource methods', () => {
     expect(getCall(fm, 5)).toMatchObject({
       method: 'GET',
       url: `https://api.test/v1/agent/event-updates/${actionId}/executions/${executionId}`,
+    });
+  });
+
+  it('agentActions prepares and retrieves direct event-page content evidence', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const content = {
+      schemaVersion: 2,
+      editor: {
+        provider: '@puckeditor/core',
+        data: { root: { props: {} }, content: [] },
+      },
+      settings: { locale: 'en', discovery: { summary: 'Summer event' } },
+    };
+    const prepared = await client.agentActions.prepareContent({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      content,
+      idempotencyKey: 'agent-content-prepare-0001',
+    });
+    const assertContentType = (value: typeof prepared) => {
+      const kind: 'content.prepare' = value.action.kind;
+      const channel: 'event_page' = value.result.channel;
+      const paths: ['content', 'preview.discovery'] = value.result.untrustedContentPaths;
+      void kind;
+      void channel;
+      void paths;
+      // @ts-expect-error direct content preparation never exposes approval evidence.
+      void value.previewSha256;
+    };
+    void assertContentType;
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/content-preparations',
+      headers: { 'Idempotency-Key': 'agent-content-prepare-0001' },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      content,
+    });
+    const actionId = `act_${'c'.repeat(48)}`;
+    await client.agentActions.getContentPreparation(actionId);
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/content-preparations/${actionId}`,
     });
   });
 
@@ -3514,7 +3571,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-01',
+        'X-Tixkit-Version': '2026-08-02',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
@@ -3586,7 +3643,10 @@ describe('TixkitClient new resource methods', () => {
           'X-Tixkit-Confirmation': executionKey,
         },
       });
-      expect(JSON.parse(getCall(fetchMock, index).body)).toEqual({ approvalId, actionDigest });
+      expect(JSON.parse(getCall(fetchMock, index).body)).toEqual({
+        approvalId,
+        actionDigest,
+      });
     }
   });
 

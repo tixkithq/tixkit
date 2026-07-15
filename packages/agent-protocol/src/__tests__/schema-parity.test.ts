@@ -8,6 +8,7 @@ import {
   AGENT_PROTOCOL_VERSION,
   AgentProtocolValidationError,
   agentActionDigest,
+  agentSha256,
   installAgentProtocolSchemaKeywords,
   type AgentAction,
   type AgentActionKind,
@@ -20,7 +21,7 @@ const retainedSchemaText = readFileSync(
 );
 const retainedSchema = JSON.parse(retainedSchemaText) as Record<string, unknown>;
 const currentSchema = JSON.parse(
-  readFileSync(new URL('../../schemas/agent-protocol-2026-08-01.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../schemas/agent-protocol-2026-08-02.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
 const retainedOverlayText = readFileSync(
   new URL('../../schemas/agent-protocol-2026-07-31.json', import.meta.url),
@@ -44,7 +45,7 @@ ajv.addSchema(
 ajv.addSchema(
   JSON.parse(
     readFileSync(
-      new URL('../../schemas/agent-action-contracts-2026-08-01.json', import.meta.url),
+      new URL('../../schemas/agent-action-contracts-2026-08-02.json', import.meta.url),
       'utf8',
     ),
   ),
@@ -94,7 +95,42 @@ function action(kind: AgentActionKind): AgentAction {
                 changePreviewSha256: 'a'.repeat(64),
                 changes: { title: 'Prepared event' },
               }
-            : {},
+            : kind === 'content.prepare'
+              ? (() => {
+                  const projection = {
+                    channel: 'event_page' as const,
+                    content: {
+                      schemaVersion: 2,
+                      editor: {
+                        provider: '@puckeditor/core',
+                        data: { root: { props: {} }, content: [] },
+                      },
+                      settings: {
+                        locale: 'en',
+                        publicPath: '/e/summer-event',
+                        discovery: { summary: 'Summer event', tags: [] },
+                      },
+                    },
+                    preview: {
+                      provider: '@puckeditor/core' as const,
+                      discovery: {
+                        title: 'Summer event',
+                        summary: 'Summer event',
+                        tags: [],
+                      },
+                    },
+                    validation: {
+                      valid: true,
+                      severity: 'warning' as const,
+                      issueCodes: [],
+                    },
+                  };
+                  return {
+                    ...projection,
+                    contentPreviewSha256: agentSha256(projection),
+                  };
+                })()
+              : {},
     idempotencyKey: `agent-action-${kind}-2026-07-12`,
     expectedPolicyVersion: 1,
     preparedAt: '2026-07-12T12:00:00.000Z',

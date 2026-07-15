@@ -10,7 +10,7 @@ Astro integrations using server-side credentials and browser-safe checkout helpe
 
 ## Status
 
-Public SDK at version 0.1.0 and API version `2026-08-01`; pre-1.0 exports may evolve with release notes.
+Public SDK at version 0.1.0 and API version `2026-08-02`; pre-1.0 exports may evolve with release notes.
 
 ## Installation
 
@@ -42,7 +42,7 @@ bun run --filter @tixkit/astro typecheck && bun run --filter @tixkit/astro lint 
 
 ## Compatibility
 
-Tracks API version `2026-08-01`; framework peer versions and subpath exports are the compatibility boundary.
+Tracks API version `2026-08-02`; framework peer versions and subpath exports are the compatibility boundary.
 
 ## Related guides
 

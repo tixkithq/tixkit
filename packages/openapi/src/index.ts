@@ -573,7 +573,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-01',
+    version: '2026-08-02',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5287,6 +5287,59 @@ const rawOpenApiSpec = {
         ],
         additionalProperties: false,
       },
+      AgentPrincipal20260802: {
+        type: 'object',
+        description:
+          'Explicit agent identity for API 2026-08-02, including bounded content preparation.',
+        properties: {
+          id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          kind: { type: 'string', enum: ['third_party', 'self_hosted'] },
+          sponsorPrincipalId: { type: 'string' },
+          capabilities: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 5,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              enum: [
+                'events.read',
+                'events.prepare',
+                'events.execute',
+                'readiness.read',
+                'content.prepare',
+              ],
+            },
+          },
+          maximumAutonomy: {
+            type: 'string',
+            enum: ['read', 'recommend', 'prepare', 'execute_with_approval'],
+          },
+          protocolVersion: { type: 'string' },
+          state: { type: 'string', enum: ['active', 'suspended', 'revoked'] },
+          registeredAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'kind',
+          'sponsorPrincipalId',
+          'capabilities',
+          'maximumAutonomy',
+          'protocolVersion',
+          'state',
+          'registeredAt',
+        ],
+        additionalProperties: false,
+      },
+      AgentPrincipalResponse: {
+        anyOf: [
+          { $ref: '#/components/schemas/AgentPrincipal' },
+          { $ref: '#/components/schemas/AgentPrincipal20260802' },
+        ],
+      },
       AgentOAuthClient: {
         type: 'object',
         description:
@@ -5338,6 +5391,49 @@ const rawOpenApiSpec = {
         },
         required: ['principal', 'authentication', 'delegationRequired', 'supportedProtocolVersion'],
         additionalProperties: false,
+      },
+      AgentSession20260802: {
+        type: 'object',
+        description:
+          'Live explicit API 2026-08-02 agent identity, including bounded content preparation.',
+        properties: {
+          principal: {
+            allOf: [
+              { $ref: '#/components/schemas/AgentPrincipal20260802' },
+              {
+                type: 'object',
+                properties: {
+                  updatedAt: { type: 'string', format: 'date-time' },
+                },
+                required: ['updatedAt'],
+              },
+            ],
+          },
+          authentication: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              grantType: { type: 'string', const: 'client_credentials' },
+              scope: { type: 'string', const: 'agent.invoke' },
+              productPermissions: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
+            },
+            required: ['grantType', 'scope', 'productPermissions'],
+          },
+          delegationRequired: { type: 'boolean', const: true },
+          supportedProtocolVersion: { type: 'string' },
+        },
+        required: ['principal', 'authentication', 'delegationRequired', 'supportedProtocolVersion'],
+        additionalProperties: false,
+      },
+      AgentSessionResponse: {
+        anyOf: [
+          { $ref: '#/components/schemas/AgentSession' },
+          { $ref: '#/components/schemas/AgentSession20260802' },
+        ],
       },
       AgentAction: {
         type: 'object',
@@ -5582,7 +5678,10 @@ const rawOpenApiSpec = {
                 maxLength: 128,
                 pattern: '^[^\\u0000]+$',
               },
-              startsAt: { type: 'string', format: 'date-time' },
+              startsAt: {
+                type: 'string',
+                format: 'date-time',
+              },
               endsAt: {
                 oneOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }],
               },
@@ -5995,6 +6094,562 @@ const rawOpenApiSpec = {
           'untrustedContentPaths',
         ],
       },
+      AgentSafeEventPageContent: {
+        type: 'object',
+        description:
+          'Canonical, bounded event-page content accepted by the initial content.prepare adapter. Custom embeds, zones and non-core blocks are rejected.',
+        additionalProperties: false,
+        properties: {
+          schemaVersion: { type: 'integer', const: 2 },
+          editor: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              provider: { type: 'string', const: '@puckeditor/core' },
+              data: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  root: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      props: {
+                        type: 'object',
+                        maxProperties: 32,
+                        propertyNames: {
+                          enum: [
+                            'title',
+                            'description',
+                            'marketingSummary',
+                            'category',
+                            'tags',
+                            'coverImageUrl',
+                            'socialImageUrl',
+                            'backgroundColor',
+                            'foregroundColor',
+                            'accentColor',
+                            'accentForegroundColor',
+                            'fontFamily',
+                            'headingFontFamily',
+                            'radius',
+                          ],
+                        },
+                        additionalProperties: { type: 'string', maxLength: 100000 },
+                      },
+                    },
+                    required: ['props'],
+                  },
+                  content: {
+                    type: 'array',
+                    maxItems: 100,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        type: {
+                          type: 'string',
+                          enum: [
+                            'EventHeader',
+                            'EventDescription',
+                            'Divider',
+                            'Tickets',
+                            'ResaleTickets',
+                            'CheckoutCta',
+                            'BrandFooter',
+                          ],
+                        },
+                        props: {
+                          type: 'object',
+                          maxProperties: 64,
+                          propertyNames: {
+                            enum: [
+                              'id',
+                              'brandLabel',
+                              'title',
+                              'description',
+                              'startsAtLabel',
+                              'timezone',
+                              'venueName',
+                              'showDate',
+                              'showTimezone',
+                              'showVenue',
+                              'showBrandBadge',
+                              'imageUrl',
+                              'imageAlt',
+                              'imageFit',
+                              'imagePosition',
+                              'imagePlacement',
+                              'overlayContentPosition',
+                              'overlayContentHorizontalPosition',
+                              'overlayMinHeight',
+                              'overlayPadding',
+                              'contentPadding',
+                              'contentGap',
+                              'imageOpacity',
+                              'backgroundOverlayColor',
+                              'backgroundOverlayOpacity',
+                              'logos',
+                              'logoPosition',
+                              'logoSize',
+                              'logoMaxHeight',
+                              'logoMaxWidth',
+                              'eyebrow',
+                              'body',
+                              'alignment',
+                              'titleAlignment',
+                              'bodyAlignment',
+                              'imageAlignment',
+                              'spacing',
+                              'backgroundColor',
+                              'imageLayout',
+                              'imagePositionX',
+                              'imagePositionY',
+                              'imageRadius',
+                              'imageOverlay',
+                              'eyebrowFontSize',
+                              'titleFontSize',
+                              'bodyFontSize',
+                              'eyebrowColor',
+                              'titleColor',
+                              'bodyColor',
+                              'contentBackgroundColor',
+                              'contentRadius',
+                              'emptyTitle',
+                              'emptyDescription',
+                              'badgeLabel',
+                              'label',
+                              'supportingText',
+                            ],
+                          },
+                          properties: {
+                            ...Object.fromEntries(
+                              [
+                                'id',
+                                'brandLabel',
+                                'title',
+                                'description',
+                                'startsAtLabel',
+                                'timezone',
+                                'venueName',
+                                'imageUrl',
+                                'imageAlt',
+                                'imageFit',
+                                'imagePosition',
+                                'overlayContentPosition',
+                                'overlayContentHorizontalPosition',
+                                'overlayMinHeight',
+                                'overlayPadding',
+                                'contentPadding',
+                                'contentGap',
+                                'imageOpacity',
+                                'backgroundOverlayColor',
+                                'backgroundOverlayOpacity',
+                                'logoPosition',
+                                'logoSize',
+                                'logoMaxHeight',
+                                'logoMaxWidth',
+                                'eyebrow',
+                                'body',
+                                'alignment',
+                                'titleAlignment',
+                                'bodyAlignment',
+                                'imageAlignment',
+                                'spacing',
+                                'backgroundColor',
+                                'imageLayout',
+                                'imagePositionX',
+                                'imagePositionY',
+                                'imageRadius',
+                                'eyebrowFontSize',
+                                'titleFontSize',
+                                'bodyFontSize',
+                                'eyebrowColor',
+                                'titleColor',
+                                'bodyColor',
+                                'contentBackgroundColor',
+                                'contentRadius',
+                                'emptyTitle',
+                                'emptyDescription',
+                                'badgeLabel',
+                                'label',
+                                'supportingText',
+                              ].map((name) => [name, { type: 'string', maxLength: 100000 }]),
+                            ),
+                            id: { type: 'string', minLength: 1, maxLength: 100000 },
+                            showDate: { type: 'boolean' },
+                            showTimezone: { type: 'boolean' },
+                            showVenue: { type: 'boolean' },
+                            showBrandBadge: { type: 'boolean' },
+                            logos: { type: 'array', maxItems: 0 },
+                            imageOverlay: { type: 'array', maxItems: 0 },
+                            imagePlacement: {
+                              type: 'object',
+                              additionalProperties: false,
+                              properties: {
+                                x: { type: 'string', maxLength: 100000 },
+                                y: { type: 'string', maxLength: 100000 },
+                                scale: { type: 'string', maxLength: 100000 },
+                              },
+                            },
+                          },
+                          additionalProperties: false,
+                          required: ['id'],
+                        },
+                      },
+                      required: ['type', 'props'],
+                      // oxlint-disable unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
+                      allOf: [
+                        {
+                          if: { properties: { type: { const: 'EventHeader' } } },
+                          ['then']: {
+                            properties: {
+                              props: {
+                                type: 'object',
+                                propertyNames: {
+                                  enum: [
+                                    'id',
+                                    'brandLabel',
+                                    'title',
+                                    'description',
+                                    'startsAtLabel',
+                                    'timezone',
+                                    'venueName',
+                                    'showDate',
+                                    'showTimezone',
+                                    'showVenue',
+                                    'showBrandBadge',
+                                    'imageUrl',
+                                    'imageAlt',
+                                    'imageFit',
+                                    'imagePosition',
+                                    'imagePlacement',
+                                    'overlayContentPosition',
+                                    'overlayContentHorizontalPosition',
+                                    'overlayMinHeight',
+                                    'overlayPadding',
+                                    'contentPadding',
+                                    'contentGap',
+                                    'imageOpacity',
+                                    'backgroundOverlayColor',
+                                    'backgroundOverlayOpacity',
+                                    'logos',
+                                    'logoPosition',
+                                    'logoSize',
+                                    'logoMaxHeight',
+                                    'logoMaxWidth',
+                                  ],
+                                },
+                              },
+                            },
+                          },
+                        },
+                        {
+                          if: { properties: { type: { const: 'EventDescription' } } },
+                          ['then']: {
+                            properties: {
+                              props: {
+                                type: 'object',
+                                propertyNames: {
+                                  enum: [
+                                    'id',
+                                    'eyebrow',
+                                    'title',
+                                    'body',
+                                    'imageUrl',
+                                    'imageAlt',
+                                    'alignment',
+                                    'titleAlignment',
+                                    'bodyAlignment',
+                                    'imageAlignment',
+                                    'spacing',
+                                    'backgroundColor',
+                                    'imageLayout',
+                                    'imageFit',
+                                    'imagePosition',
+                                    'imagePositionX',
+                                    'imagePositionY',
+                                    'imagePlacement',
+                                    'imageRadius',
+                                    'overlayContentPosition',
+                                    'overlayContentHorizontalPosition',
+                                    'overlayMinHeight',
+                                    'overlayPadding',
+                                    'imageOpacity',
+                                    'backgroundOverlayColor',
+                                    'backgroundOverlayOpacity',
+                                    'imageOverlay',
+                                    'logos',
+                                    'logoPosition',
+                                    'logoSize',
+                                    'logoMaxHeight',
+                                    'logoMaxWidth',
+                                    'eyebrowFontSize',
+                                    'titleFontSize',
+                                    'bodyFontSize',
+                                    'eyebrowColor',
+                                    'titleColor',
+                                    'bodyColor',
+                                    'contentBackgroundColor',
+                                    'contentPadding',
+                                    'contentRadius',
+                                    'contentGap',
+                                  ],
+                                },
+                              },
+                            },
+                          },
+                        },
+                        {
+                          if: { properties: { type: { const: 'Divider' } } },
+                          ['then']: {
+                            properties: {
+                              props: {
+                                type: 'object',
+                                propertyNames: { enum: ['id', 'spacing'] },
+                              },
+                            },
+                          },
+                        },
+                        {
+                          if: { properties: { type: { const: 'Tickets' } } },
+                          ['then']: {
+                            properties: {
+                              props: {
+                                type: 'object',
+                                propertyNames: {
+                                  enum: ['id', 'title', 'emptyTitle', 'emptyDescription'],
+                                },
+                              },
+                            },
+                          },
+                        },
+                        {
+                          if: { properties: { type: { const: 'ResaleTickets' } } },
+                          ['then']: {
+                            properties: {
+                              props: {
+                                type: 'object',
+                                propertyNames: { enum: ['id', 'title', 'badgeLabel'] },
+                              },
+                            },
+                          },
+                        },
+                        {
+                          if: { properties: { type: { const: 'CheckoutCta' } } },
+                          ['then']: {
+                            properties: {
+                              props: {
+                                type: 'object',
+                                propertyNames: { enum: ['id', 'label', 'supportingText'] },
+                              },
+                            },
+                          },
+                        },
+                        {
+                          if: { properties: { type: { const: 'BrandFooter' } } },
+                          ['then']: {
+                            properties: {
+                              props: {
+                                type: 'object',
+                                propertyNames: { enum: ['id'] },
+                              },
+                            },
+                          },
+                        },
+                      ],
+                      // oxlint-enable unicorn/no-thenable
+                    },
+                  },
+                },
+                required: ['root', 'content'],
+              },
+            },
+            required: ['provider', 'data'],
+          },
+          settings: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              locale: { type: 'string', minLength: 2, maxLength: 16 },
+              publicPath: { type: 'string', minLength: 1, maxLength: 2048 },
+              discovery: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  summary: { type: 'string', maxLength: 100000 },
+                  category: { type: 'string', maxLength: 100000 },
+                  tags: {
+                    type: 'array',
+                    maxItems: 50,
+                    items: { type: 'string', maxLength: 128 },
+                  },
+                  coverImageUrl: { type: 'string', maxLength: 100000 },
+                  socialImageUrl: { type: 'string', maxLength: 100000 },
+                  seoTitle: { type: 'string', maxLength: 100000 },
+                  seoDescription: { type: 'string', maxLength: 100000 },
+                },
+                required: ['summary', 'tags'],
+              },
+            },
+            required: ['locale', 'publicPath', 'discovery'],
+          },
+        },
+        required: ['schemaVersion', 'editor', 'settings'],
+      },
+      AgentContentPrepareValidation: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          valid: { type: 'boolean' },
+          severity: { type: 'string', enum: ['error', 'warning'] },
+          issueCodes: {
+            type: 'array',
+            maxItems: 100,
+            uniqueItems: true,
+            'x-tixkit-sortedUniqueStrings': true,
+            items: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$' },
+          },
+        },
+        required: ['valid', 'severity', 'issueCodes'],
+        // oxlint-disable unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
+        allOf: [
+          {
+            if: { properties: { valid: { const: true } }, required: ['valid'] },
+            ['then']: { properties: { severity: { const: 'warning' } } },
+          },
+          {
+            if: { properties: { valid: { const: false } }, required: ['valid'] },
+            ['then']: { properties: { severity: { const: 'error' } } },
+          },
+        ],
+        // oxlint-enable unicorn/no-thenable
+      },
+      AgentContentPreparePreview: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          provider: { type: 'string', const: '@puckeditor/core' },
+          discovery: {
+            type: 'object',
+            additionalProperties: false,
+            description: 'Server-derived discovery projection from the locked event snapshot.',
+            properties: {
+              title: { type: 'string', minLength: 1, maxLength: 512 },
+              summary: { type: 'string', minLength: 1, maxLength: 50000 },
+              category: { type: 'string', maxLength: 128 },
+              tags: {
+                type: 'array',
+                maxItems: 50,
+                items: { type: 'string', maxLength: 128 },
+              },
+              imageUrl: { type: 'string', maxLength: 2048 },
+              startsAt: { type: 'string', format: 'date-time' },
+              venueName: { type: 'string', maxLength: 512 },
+              publicPath: { type: 'string', minLength: 1, maxLength: 2048 },
+            },
+            required: ['title', 'summary', 'tags'],
+          },
+        },
+        required: ['provider', 'discovery'],
+      },
+      AgentContentPreparePayload: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          channel: { type: 'string', const: 'event_page' },
+          content: { $ref: '#/components/schemas/AgentSafeEventPageContent' },
+          preview: { $ref: '#/components/schemas/AgentContentPreparePreview' },
+          validation: {
+            $ref: '#/components/schemas/AgentContentPrepareValidation',
+          },
+          contentPreviewSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: ['channel', 'content', 'preview', 'validation', 'contentPreviewSha256'],
+      },
+      AgentContentPrepareAction: {
+        type: 'object',
+        description:
+          'Server-derived, event-version-bound, mutation-free event-page content preparation.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          protocolVersion: { type: 'string', const: '2026-07-22' },
+          agentPrincipalId: { type: 'string' },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: { type: 'string' },
+          kind: { type: 'string', const: 'content.prepare' },
+          autonomy: { type: 'string', const: 'prepare' },
+          target: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              tenantId: { type: 'string' },
+              resourceType: { type: 'string', const: 'event' },
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 1 },
+              apiOperation: { type: 'string', const: 'content.prepare' },
+            },
+            required: ['tenantId', 'resourceType', 'resourceId', 'resourceVersion', 'apiOperation'],
+          },
+          payload: { $ref: '#/components/schemas/AgentContentPreparePayload' },
+          idempotencyKey: { type: 'string', minLength: 16, maxLength: 127 },
+          expectedPolicyVersion: { type: 'integer', minimum: 1 },
+          preparedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'protocolVersion',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'kind',
+          'autonomy',
+          'target',
+          'payload',
+          'idempotencyKey',
+          'expectedPolicyVersion',
+          'preparedAt',
+        ],
+      },
+      AgentContentPrepareResult: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          resourceId: { type: 'string' },
+          resourceVersion: { type: 'integer', minimum: 1 },
+          channel: { type: 'string', const: 'event_page' },
+          content: { $ref: '#/components/schemas/AgentSafeEventPageContent' },
+          preview: { $ref: '#/components/schemas/AgentContentPreparePreview' },
+          validation: {
+            $ref: '#/components/schemas/AgentContentPrepareValidation',
+          },
+          contentPreviewSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          observedAt: { type: 'string', format: 'date-time' },
+          untrustedContentPaths: {
+            type: 'array',
+            example: ['content', 'preview.discovery'],
+            prefixItems: [
+              { type: 'string', const: 'content' },
+              { type: 'string', const: 'preview.discovery' },
+            ],
+            items: false,
+            minItems: 2,
+            maxItems: 2,
+          },
+        },
+        required: [
+          'resourceId',
+          'resourceVersion',
+          'channel',
+          'content',
+          'preview',
+          'validation',
+          'contentPreviewSha256',
+          'observedAt',
+          'untrustedContentPaths',
+        ],
+      },
       AgentEventUpdateAction: {
         type: 'object',
         description:
@@ -6221,6 +6876,43 @@ const rawOpenApiSpec = {
             required: ['allowed', 'eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
           },
           result: { $ref: '#/components/schemas/AgentEventPrepareResult' },
+          resultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: [
+          'action',
+          'actionDigest',
+          'expiresAt',
+          'authorization',
+          'result',
+          'resultSha256',
+        ],
+      },
+      PreparedAgentContentPrepareAction: {
+        type: 'object',
+        description:
+          'Immutable direct event-page content preparation with canonical digest-bound result evidence and no product mutation authority.',
+        additionalProperties: false,
+        properties: {
+          action: { $ref: '#/components/schemas/AgentContentPrepareAction' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          authorization: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              allowed: { type: 'boolean', const: true },
+              eligibleForApproval: { type: 'boolean', const: false },
+              reasons: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
+              snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              checkedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['allowed', 'eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
+          },
+          result: { $ref: '#/components/schemas/AgentContentPrepareResult' },
           resultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
         },
         required: [
@@ -6653,6 +7345,69 @@ const rawOpenApiSpec = {
           'expiresAt',
         ],
         additionalProperties: false,
+      },
+      AgentDelegation20260802: {
+        type: 'object',
+        description:
+          'Time-bounded API 2026-08-02 authority grant, including bounded content preparation.',
+        properties: {
+          id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          agentPrincipalId: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          sponsorPrincipalId: { type: 'string' },
+          capabilities: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 5,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              enum: [
+                'events.read',
+                'events.prepare',
+                'events.execute',
+                'readiness.read',
+                'content.prepare',
+              ],
+            },
+          },
+          resourceScopes: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+            },
+          },
+          permissionSnapshot: {
+            type: 'array',
+            items: { type: 'string' },
+            uniqueItems: true,
+          },
+          issuedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          revokedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'capabilities',
+          'resourceScopes',
+          'permissionSnapshot',
+          'issuedAt',
+          'expiresAt',
+        ],
+        additionalProperties: false,
+      },
+      AgentDelegationResponse: {
+        anyOf: [
+          { $ref: '#/components/schemas/AgentDelegation' },
+          { $ref: '#/components/schemas/AgentDelegation20260802' },
+        ],
       },
       AgentMemoryNamespaceRequest: {
         oneOf: [
@@ -11608,11 +12363,17 @@ const rawOpenApiSpec = {
                   capabilities: {
                     type: 'array',
                     minItems: 1,
-                    maxItems: 4,
+                    maxItems: 5,
                     uniqueItems: true,
                     items: {
                       type: 'string',
-                      enum: ['events.read', 'events.prepare', 'events.execute', 'readiness.read'],
+                      enum: [
+                        'events.read',
+                        'events.prepare',
+                        'events.execute',
+                        'readiness.read',
+                        'content.prepare',
+                      ],
                     },
                   },
                   maximumAutonomy: {
@@ -11630,7 +12391,12 @@ const rawOpenApiSpec = {
             description: 'Agent principal registered',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentPrincipal' },
+                schema: {
+                  anyOf: [
+                    { $ref: '#/components/schemas/AgentPrincipal' },
+                    { $ref: '#/components/schemas/AgentPrincipal20260802' },
+                  ],
+                },
               },
             },
           },
@@ -11655,7 +12421,12 @@ const rawOpenApiSpec = {
             description: 'Sponsored agent principal',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentPrincipal' },
+                schema: {
+                  anyOf: [
+                    { $ref: '#/components/schemas/AgentPrincipal' },
+                    { $ref: '#/components/schemas/AgentPrincipal20260802' },
+                  ],
+                },
               },
             },
           },
@@ -12327,6 +13098,101 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/agent/content-preparations': {
+      post: {
+        summary: 'Prepare canonical event-page content without mutating product state',
+        description:
+          'Experimental/private beta. Requires Agent OAuth plus content.prepare capability, event scope and live sponsor events.write authority. The server canonicalizes the safe initial Puck subset, rejects CustomEmbed and zones, derives discovery output from the locked event version, and persists only direct action/result/audit evidence.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [{ $ref: '#/components/parameters/AgentActionIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  delegationGrantId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  resourceId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  content: {
+                    $ref: '#/components/schemas/AgentSafeEventPageContent',
+                  },
+                },
+                required: ['delegationGrantId', 'resourceId', 'content'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Immutable direct content preparation with canonical content, derived preview, validation and result digests. Exact still-authorized replays return identical evidence.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentContentPrepareAction',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid, unsafe, unsupported or oversized content',
+          },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': {
+            description: 'Current principal, delegation, sponsor or event scope unavailable',
+          },
+          '409': {
+            description: 'Idempotency conflict or content-prepare policy unavailable',
+          },
+        },
+      },
+    },
+    '/agent/content-preparations/{actionId}': {
+      get: {
+        summary: 'Get a direct event-page content preparation result',
+        description:
+          'Requires the exact agent or sponsor and reauthorizes the current capability, delegation, sponsor permission, policy and event version before returning persisted evidence.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Immutable direct content preparation and required result evidence',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentContentPrepareAction',
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Action or current authority is outside the caller scope',
+          },
+        },
+      },
+    },
     '/agent/event-updates': {
       post: {
         summary: 'Prepare a consequential event update for fresh human approval',
@@ -12458,15 +13324,25 @@ const rawOpenApiSpec = {
             description: 'Fresh short-lived events.write approval',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentEventUpdateApproval' },
+                schema: {
+                  $ref: '#/components/schemas/AgentEventUpdateApproval',
+                },
               },
             },
           },
-          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '400': {
+            description: 'Invalid path, digest, idempotency key or confirmation',
+          },
           '401': { description: 'Human authentication required' },
-          '403': { description: 'Caller is not a human sponsor with events.write' },
-          '404': { description: 'Event update is outside the current sponsor scope' },
-          '409': { description: 'Digest, resource, preview, policy or authorization changed' },
+          '403': {
+            description: 'Caller is not a human sponsor with events.write',
+          },
+          '404': {
+            description: 'Event update is outside the current sponsor scope',
+          },
+          '409': {
+            description: 'Digest, resource, preview, policy or authorization changed',
+          },
         },
       },
     },
@@ -12490,7 +13366,9 @@ const rawOpenApiSpec = {
             schema: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
           },
           { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
-          { $ref: '#/components/parameters/AgentApprovalRevocationConfirmation' },
+          {
+            $ref: '#/components/parameters/AgentApprovalRevocationConfirmation',
+          },
         ],
         requestBody: {
           required: true,
@@ -12512,15 +13390,23 @@ const rawOpenApiSpec = {
             description: 'Revoked event-update approval',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentEventUpdateApproval' },
+                schema: {
+                  $ref: '#/components/schemas/AgentEventUpdateApproval',
+                },
               },
             },
           },
-          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '400': {
+            description: 'Invalid path, digest, idempotency key or confirmation',
+          },
           '401': { description: 'Human authentication required' },
           '403': { description: 'Caller is not a human principal' },
-          '404': { description: 'Event update or approval is outside the sponsor scope' },
-          '409': { description: 'Approval already revoked or consumed, or binding changed' },
+          '404': {
+            description: 'Event update or approval is outside the sponsor scope',
+          },
+          '409': {
+            description: 'Approval already revoked or consumed, or binding changed',
+          },
         },
       },
     },
@@ -12561,15 +13447,23 @@ const rawOpenApiSpec = {
             description: 'Durable event-update execution evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentEventUpdateExecution' },
+                schema: {
+                  $ref: '#/components/schemas/AgentEventUpdateExecution',
+                },
               },
             },
           },
-          '400': { description: 'Invalid path, approval, digest or confirmation' },
+          '400': {
+            description: 'Invalid path, approval, digest or confirmation',
+          },
           '401': { description: 'Valid Agent OAuth authentication required' },
           '403': { description: 'Authenticated principal is not an agent' },
-          '404': { description: 'Event update or approval is outside the agent scope' },
-          '409': { description: 'Approval, preview, authority, version, policy or lease changed' },
+          '404': {
+            description: 'Event update or approval is outside the agent scope',
+          },
+          '409': {
+            description: 'Approval, preview, authority, version, policy or lease changed',
+          },
         },
       },
     },
@@ -12598,13 +13492,21 @@ const rawOpenApiSpec = {
             description: 'Event-update execution and ordered immutable audit evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentEventUpdateExecutionEvidence' },
+                schema: {
+                  $ref: '#/components/schemas/AgentEventUpdateExecutionEvidence',
+                },
               },
             },
           },
-          '401': { description: 'Valid Agent OAuth or human authentication required' },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
-          '404': { description: 'Event update execution is outside the caller scope' },
+          '401': {
+            description: 'Valid Agent OAuth or human authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Event update execution is outside the caller scope',
+          },
         },
       },
     },
@@ -12932,7 +13834,12 @@ const rawOpenApiSpec = {
             description: 'Live agent session',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentSession' },
+                schema: {
+                  anyOf: [
+                    { $ref: '#/components/schemas/AgentSession' },
+                    { $ref: '#/components/schemas/AgentSession20260802' },
+                  ],
+                },
               },
             },
           },
@@ -12970,11 +13877,17 @@ const rawOpenApiSpec = {
                   capabilities: {
                     type: 'array',
                     minItems: 1,
-                    maxItems: 4,
+                    maxItems: 5,
                     uniqueItems: true,
                     items: {
                       type: 'string',
-                      enum: ['events.read', 'events.prepare', 'events.execute', 'readiness.read'],
+                      enum: [
+                        'events.read',
+                        'events.prepare',
+                        'events.execute',
+                        'readiness.read',
+                        'content.prepare',
+                      ],
                     },
                   },
                   resourceScopes: {
@@ -13003,7 +13916,12 @@ const rawOpenApiSpec = {
             description: 'Agent delegation granted',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentDelegation' },
+                schema: {
+                  anyOf: [
+                    { $ref: '#/components/schemas/AgentDelegation' },
+                    { $ref: '#/components/schemas/AgentDelegation20260802' },
+                  ],
+                },
               },
             },
           },

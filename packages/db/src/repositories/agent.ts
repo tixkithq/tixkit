@@ -44,7 +44,8 @@ function delegationPermissionSnapshot(capabilities: readonly AgentCapability[]):
   for (const capability of capabilities) {
     if (capability === 'events.read' || capability === 'readiness.read')
       permissions.add('events:read');
-    else if (capability === 'events.prepare') permissions.add('events:write');
+    else if (capability === 'events.prepare' || capability === 'content.prepare')
+      permissions.add('events:write');
     else if (capability === 'events.execute') {
       permissions.add('events:write');
       permissions.add('events:publish');

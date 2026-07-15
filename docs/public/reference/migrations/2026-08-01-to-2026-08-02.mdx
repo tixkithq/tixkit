@@ -1,0 +1,35 @@
+---
+title: API migration from 2026-08-01 to 2026-08-02
+description: Adopt mutation-free, bounded event-page content preparation through the shared agent protocol.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-08-02
+prerequisites:
+  - An integration using API version 2026-08-01
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-08-02` adds the direct-only, mutation-free `content.prepare` adapter for event pages. The action wire protocol remains `2026-07-22`, immutable plan definitions remain `2026-07-27`, and the action-registry contract advances to `2026-08-02`. Every `2026-08-01` schema remains available unchanged.
+
+## Grant the bounded capability
+
+Add `content.prepare` to the explicit agent principal and event-scoped delegation. The sponsor must retain accepted tenant membership and live `events.write` authority for the event. Tenant action and risk policies must allow `content.prepare`. This capability does not imply `events.execute`, cannot enter a plan, and cannot create an approval or execution.
+
+## Prepare canonical event-page content
+
+Send `POST /v1/agent/content-preparations` with an idempotency key and exactly `delegationGrantId`, event `resourceId`, and `content`. Identity, sponsor, tenant, event version, policy, channel, derived preview, validation, digests, and timestamps are server-owned. Retrieve persisted evidence with `GET /v1/agent/content-preparations/{actionId}`.
+
+The initial channel is `event_page`. Documents may contain only `EventHeader`, `EventDescription`, `Divider`, `Tickets`, `ResaleTickets`, `CheckoutCta`, and `BrandFooter`. `CustomEmbed`, populated zones, unsupported components, non-JSON values, excessive depth, oversized collections, strings, or canonical payloads fail closed. The server strips unknown fields against its templates, preserves no executable markup, and derives discovery fields from the locked event snapshot.
+
+The action payload and result bind the canonical content, `@puckeditor/core` preview, bounded validation reason codes, event version, and `contentPreviewSha256`. `content` and `preview.discovery` are explicitly untrusted organizer data. Exact idempotent replay returns byte-equivalent evidence while current capability, delegation, sponsor permission, policy, membership, and event version remain valid; any drift or persisted-evidence substitution fails closed.
+
+No event-page document or other product state is changed. Applying prepared content remains outside this release and requires a future typed consequential action with fresh approval.
+
+Pin the registry through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-02` and the full action overlay through `@tixkit/agent-protocol/schema` or `./schemas/2026-08-02`. Durable webhook envelopes remain at `2026-01-01`; synthetic test/replay API-version fields and SDK request headers advance to `2026-08-02`.

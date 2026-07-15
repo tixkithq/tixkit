@@ -56,8 +56,12 @@ describe('@tixkit/docs-core', () => {
 
   it('matches the most specific contextual help route', () => {
     expect(helpForPath('/events')).toMatchObject({ id: 'events' });
-    expect(helpForPath('/events/evt_demo/tickets')).toMatchObject({ id: 'event-tickets' });
-    expect(helpForPath('/developer/webhooks/wh_demo')).toMatchObject({ id: 'developer-webhooks' });
+    expect(helpForPath('/events/evt_demo/tickets')).toMatchObject({
+      id: 'event-tickets',
+    });
+    expect(helpForPath('/developer/webhooks/wh_demo')).toMatchObject({
+      id: 'developer-webhooks',
+    });
     expect(helpForPath('/unregistered')).toBeUndefined();
   });
 
@@ -97,7 +101,7 @@ describe('@tixkit/docs-core', () => {
       expect(entry.packageName).toBeTruthy();
       expect(entry.demoPath).toBeTruthy();
       expect(docRoutes[entry.docRouteId]).toBeTruthy();
-      expect(entry.apiVersion).toBe('2026-08-01');
+      expect(entry.apiVersion).toBe('2026-08-02');
     }
   });
 });

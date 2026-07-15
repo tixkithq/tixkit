@@ -27,11 +27,12 @@ const agentCapabilitySchema = z.enum([
   'events.prepare',
   'events.execute',
   'readiness.read',
+  'content.prepare',
 ]);
 const agentCapabilitiesSchema = z
   .array(agentCapabilitySchema)
   .min(1)
-  .max(4)
+  .max(5)
   .refine((capabilities) => new Set(capabilities).size === capabilities.length, {
     message: 'Agent capabilities must be unique',
   });
@@ -65,7 +66,10 @@ const grantDelegationSchema = z
 
 const idParamsSchema = z.object({ id: agentIdSchema }).strict();
 const oauthClientParamsSchema = z
-  .object({ id: agentIdSchema, clientId: z.string().regex(/^oapp_[a-f0-9]{27}$/u) })
+  .object({
+    id: agentIdSchema,
+    clientId: z.string().regex(/^oapp_[a-f0-9]{27}$/u),
+  })
   .strict();
 const createOAuthClientSchema = z
   .object({

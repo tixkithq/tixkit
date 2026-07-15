@@ -197,10 +197,18 @@ describe('TixkitScannerClient', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ accepted: 1, duplicates: 0, invalid: 0, results: [] }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            accepted: 1,
+            duplicates: 0,
+            invalid: 0,
+            results: [],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       );
     const client = makeClient();
 
@@ -376,7 +384,9 @@ describe('TixkitScannerClient', () => {
   it('refuses expired persisted scanner manifests', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
-    const manifest = makeSignedManifest({ expiresAt: '2026-05-01T00:00:00.000Z' });
+    const manifest = makeSignedManifest({
+      expiresAt: '2026-05-01T00:00:00.000Z',
+    });
     const storageKey = 'tixkit:scanner:sd_public_1:offline-state';
     const { storage, store } = createMemoryStorage({
       [storageKey]: JSON.stringify({
@@ -492,7 +502,10 @@ describe('TixkitScannerClient', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(conflict).toHaveBeenCalledTimes(2);
-    expect(conflict).toHaveBeenCalledWith({ qrHash: 'hash_1', outcome: 'duplicate' });
+    expect(conflict).toHaveBeenCalledWith({
+      qrHash: 'hash_1',
+      outcome: 'duplicate',
+    });
   });
 
   it('rejects manifests with invalid signatures', async () => {
@@ -607,7 +620,12 @@ describe('TixkitScannerClient', () => {
           page: {
             provider: '@puckeditor/core',
             puckData: {
-              content: [{ type: 'Hero', props: { id: 'Hero-hero', headline: 'All Access' } }],
+              content: [
+                {
+                  type: 'Hero',
+                  props: { id: 'Hero-hero', headline: 'All Access' },
+                },
+              ],
               root: { props: { title: 'All Access' } },
             },
             settings: { locale: 'en' },
@@ -621,11 +639,16 @@ describe('TixkitScannerClient', () => {
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
     });
-    const client = new TixkitPublicEventPageClient({ apiBaseUrl: 'https://api.test' });
+    const client = new TixkitPublicEventPageClient({
+      apiBaseUrl: 'https://api.test',
+    });
 
     await expect(client.getContentPage('evt_1', { locale: 'en' })).resolves.toMatchObject({
       document: { eventId: 'evt_1' },
-      page: { provider: '@puckeditor/core', puckData: { content: [{ type: 'Hero' }] } },
+      page: {
+        provider: '@puckeditor/core',
+        puckData: { content: [{ type: 'Hero' }] },
+      },
     });
     await client.getEventPage('evt_1', { locale: 'en' });
     await client.getEventPageBySlug('all-access', {
@@ -668,7 +691,7 @@ describe('TixkitScannerClient', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       const headers = init?.headers as Record<string, string>;
-      expect(headers['X-Tixkit-Version']).toBe('2026-08-01');
+      expect(headers['X-Tixkit-Version']).toBe('2026-08-02');
 
       if (url.includes('/events/evt_1/resale-listings')) {
         expect(init?.method).toBe('GET');
@@ -712,7 +735,9 @@ describe('TixkitScannerClient', () => {
           { status: 200 },
         );
       }
-      return new Response(JSON.stringify({ message: 'unexpected request' }), { status: 500 });
+      return new Response(JSON.stringify({ message: 'unexpected request' }), {
+        status: 500,
+      });
     });
 
     const client = new TixkitResaleClient({
@@ -732,7 +757,9 @@ describe('TixkitScannerClient', () => {
       clientToken: 'client_token',
       idempotencyKey: 'idem_checkout',
     });
-    await client.delistResaleListing('lst_2', { idempotencyKey: 'idem_delist' });
+    await client.delistResaleListing('lst_2', {
+      idempotencyKey: 'idem_delist',
+    });
     await expect(
       client.completeResaleListing('lst_2', {
         buyerId: 'usr_1',
@@ -836,7 +863,9 @@ describe('Tixkit secure storage helpers', () => {
         secureStore.delete(key);
       }),
     };
-    const storage = createTixkitSecureStorage(adapter, { keyPrefix: 'tixkit-secure' });
+    const storage = createTixkitSecureStorage(adapter, {
+      keyPrefix: 'tixkit-secure',
+    });
 
     await storage.setItem('scanner:manifest', 'encrypted-manifest-json');
     expect(await storage.getItem('scanner:manifest')).toBe('encrypted-manifest-json');
@@ -998,7 +1027,10 @@ describe('Tixkit React Native component adapters', () => {
     });
 
     expect(scanOnline).toHaveBeenCalledWith('cil_1', 'signed-ticket-payload');
-    expect(onResult).toHaveBeenCalledWith({ outcome: 'accepted', message: 'ok' });
+    expect(onResult).toHaveBeenCalledWith({
+      outcome: 'accepted',
+      message: 'ok',
+    });
   });
 
   it('throttles duplicate camera reads inside the configured scan window', async () => {
@@ -1063,7 +1095,12 @@ describe('Tixkit React Native component adapters', () => {
   it('surfaces manual scanner sync results from the camera component', async () => {
     const runtime = createReactNativeRuntime();
     const components = createTixkitReactNativeComponents(runtime);
-    const onSync = vi.fn(async () => ({ accepted: 1, duplicates: 0, invalid: 0, results: [] }));
+    const onSync = vi.fn(async () => ({
+      accepted: 1,
+      duplicates: 0,
+      invalid: 0,
+      results: [],
+    }));
     const onSyncResult = vi.fn();
 
     const scanner = components.TixkitCameraScanner({
@@ -1081,7 +1118,10 @@ describe('Tixkit React Native component adapters', () => {
 
     await (syncAction!.props!.onPress as () => Promise<void>)();
 
-    expect(onSync).toHaveBeenCalledWith({ checkInListId: 'cil_1', trigger: 'manual' });
+    expect(onSync).toHaveBeenCalledWith({
+      checkInListId: 'cil_1',
+      trigger: 'manual',
+    });
     expect(onSyncResult).toHaveBeenCalledWith({
       accepted: 1,
       duplicates: 0,

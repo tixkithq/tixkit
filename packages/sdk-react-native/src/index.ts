@@ -12,7 +12,7 @@ import {
   type TicketResaleCompletion,
 } from '@tixkit/js';
 
-export const TIXKIT_API_VERSION = '2026-08-01';
+export const TIXKIT_API_VERSION = '2026-08-02';
 
 // NOTE: React Native does not provide Node.js `crypto` APIs by default.
 // The following is a pure-JS HMAC-SHA256 implementation so the SDK works
@@ -618,7 +618,10 @@ export function createTixkitReactNativeComponents(
     async function sync(trigger: TixkitScannerSyncRequest['trigger']): Promise<void> {
       if (!props.onSync) return;
       try {
-        const result = await props.onSync({ checkInListId: props.checkInListId, trigger });
+        const result = await props.onSync({
+          checkInListId: props.checkInListId,
+          trigger,
+        });
         props.onSyncResult?.(result);
       } catch (error) {
         props.onError?.(error instanceof Error ? error : new Error(String(error)));
@@ -789,7 +792,10 @@ export class TixkitResaleClient {
   private readonly client: TixkitClient;
 
   constructor(config: TixkitResaleClientConfig = {}) {
-    this.client = new TixkitClient({ apiBaseUrl: config.apiBaseUrl, apiKey: config.apiKey });
+    this.client = new TixkitClient({
+      apiBaseUrl: config.apiBaseUrl,
+      apiKey: config.apiKey,
+    });
   }
 
   async listResaleListings(
@@ -916,7 +922,10 @@ export class TixkitScannerClient {
       ticket.status === 'refunded' ||
       ticket.status === 'transferred'
     ) {
-      return { outcome: 'revoked', message: 'Ticket is voided, refunded, or transferred' };
+      return {
+        outcome: 'revoked',
+        message: 'Ticket is voided, refunded, or transferred',
+      };
     }
 
     if (this.offlineScans.has(qrHash)) {

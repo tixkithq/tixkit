@@ -32,6 +32,7 @@ const prepareEventChangesSchema = readReadinessSchema
   .extend({ changes: eventPrepareChangesSchema })
   .strict();
 const prepareEventUpdateSchema = prepareEventChangesSchema;
+const prepareContentSchema = readReadinessSchema.extend({ content: z.unknown() }).strict();
 const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{48}$/u) }).strict();
 const approvalParamsSchema = actionParamsSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
@@ -57,10 +58,17 @@ export interface AgentActionRouteService {
     tenantId: string;
     agentPrincipalId: string;
     idempotencyKey: string;
-    kind: 'event.publish' | 'event.read' | 'readiness.read' | 'event.prepare' | 'event.update';
+    kind:
+      | 'event.publish'
+      | 'event.read'
+      | 'readiness.read'
+      | 'event.prepare'
+      | 'content.prepare'
+      | 'event.update';
     delegationGrantId: string;
     resourceId: string;
     changes?: Readonly<Record<string, unknown>>;
+    content?: unknown;
   }): Promise<PreparedAgentAction>;
   getForAgent(input: {
     tenantId: string;
@@ -167,6 +175,15 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new ConflictError('Agent action policy is not configured');
   if (message === 'AGENT_ACTION_NO_MATERIAL_CHANGE')
     throw new ConflictError('Agent event update does not contain a material change');
+  if (
+    message === 'AGENT_ACTION_CONTENT_INVALID' ||
+    message === 'AGENT_ACTION_CONTENT_PREVIEW_INVALID' ||
+    message === 'AGENT_ACTION_CONTENT_UNSUPPORTED' ||
+    message === 'AGENT_ACTION_CONTENT_UNSAFE' ||
+    message === 'AGENT_ACTION_CONTENT_TOO_LARGE' ||
+    message === 'AGENT_ACTION_CONTENT_PREVIEW_TOO_LARGE'
+  )
+    throw new ValidationError('Agent event-page content is invalid or unsupported');
   if (message === 'AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT')
     throw new IdempotencyConflictError(key);
   if (message === 'AGENT_ACTION_APPROVAL_SCOPE_DENIED')
@@ -298,6 +315,30 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
       translateAgentActionError(key, error);
     }
   });
+
+  app.post(
+    '/agent/content-preparations',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      requireAgent(actor);
+      const key = idempotencyKey(request.headers);
+      const body = parseBody(prepareContentSchema, request.body);
+      try {
+        const prepared = await service.prepare({
+          tenantId: actor.tenantId,
+          agentPrincipalId: actor.id,
+          idempotencyKey: key,
+          kind: 'content.prepare',
+          ...body,
+        });
+        reply.header('Cache-Control', 'no-store');
+        return reply.status(201).send(prepared);
+      } catch (error) {
+        translateAgentActionError(key, error);
+      }
+    },
+  );
 
   app.get('/agent/actions/:actionId', { config: { agentAccess: true } }, async (request, reply) => {
     const actor = request.principal!;
@@ -431,6 +472,35 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
             : undefined;
       if (!action || action.action.kind !== 'event.update')
         throw new NotFoundError('AgentEventUpdate', actionId);
+      reply.header('Cache-Control', 'no-store');
+      return action;
+    },
+  );
+
+  app.get(
+    '/agent/content-preparations/:actionId',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      if (actor.type === 'agent') requireAgent(actor);
+      else requireHumanSponsor(actor);
+      const { actionId } = parseBody(actionParamsSchema, request.params);
+      const action =
+        actor.type === 'agent'
+          ? await service.getForAgent({
+              tenantId: actor.tenantId,
+              agentPrincipalId: actor.id,
+              actionId,
+            })
+          : actor.type === 'user'
+            ? await service.getForSponsor({
+                tenantId: actor.tenantId,
+                sponsorPrincipalId: actor.id,
+                actionId,
+              })
+            : undefined;
+      if (!action || action.action.kind !== 'content.prepare')
+        throw new NotFoundError('AgentContentPreparation', actionId);
       reply.header('Cache-Control', 'no-store');
       return action;
     },

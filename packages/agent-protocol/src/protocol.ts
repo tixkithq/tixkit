@@ -108,6 +108,23 @@ export interface EventPublishPayload extends Readonly<Record<string, unknown>> {
   readinessSnapshotSha256: string;
 }
 
+export interface ContentPrepareValidation extends Readonly<Record<string, unknown>> {
+  valid: boolean;
+  severity: 'error' | 'warning';
+  issueCodes: readonly string[];
+}
+
+export interface ContentPreparePayload extends Readonly<Record<string, unknown>> {
+  channel: 'event_page';
+  content: Readonly<Record<string, unknown>>;
+  preview: {
+    provider: '@puckeditor/core';
+    discovery: Readonly<Record<string, unknown>>;
+  };
+  validation: ContentPrepareValidation;
+  contentPreviewSha256: string;
+}
+
 export interface AgentPlan {
   id: string;
   protocolVersion: typeof AGENT_PROTOCOL_VERSION;
@@ -221,6 +238,7 @@ const OPERATION = /^[a-z][a-z0-9_.-]{2,127}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const CURRENCY = /^[A-Z]{3}$/u;
 const PERMISSION = /^[a-z][a-z0-9_-]{1,31}:[a-z][a-z0-9_-]{1,63}$/u;
+const REASON_CODE = /^[a-z0-9][a-z0-9_.-]{1,63}$/u;
 const CAPABILITIES = new Set<AgentCapability>([
   'events.read',
   'events.prepare',
@@ -469,13 +487,22 @@ export function agentSha256(value: unknown): string {
   return createHash('sha256').update(canonicalAgentJson(value)).digest('hex');
 }
 
+type AgentSchemaKeywordDefinition =
+  | {
+      keyword: string;
+      schemaType: 'number';
+      type: 'object';
+      validate: (limit: number, data: unknown) => boolean;
+    }
+  | {
+      keyword: string;
+      schemaType: 'boolean';
+      type: 'array';
+      validate: (enabled: boolean, data: unknown) => boolean;
+    };
+
 interface AgentSchemaKeywordHost {
-  addKeyword(definition: {
-    keyword: string;
-    schemaType: string;
-    type: string;
-    validate: (limit: number, data: unknown) => boolean;
-  }): unknown;
+  addKeyword(definition: AgentSchemaKeywordDefinition): unknown;
 }
 
 function canonicalDepth(value: unknown, depth = 0): number {
@@ -506,6 +533,19 @@ export function installAgentProtocolSchemaKeywords(host: AgentSchemaKeywordHost)
     schemaType: 'number',
     type: 'object',
     validate: (limit, data) => canonicalDepth(data) <= limit,
+  });
+  host.addKeyword({
+    keyword: 'x-tixkit-sortedUniqueStrings',
+    schemaType: 'boolean',
+    type: 'array',
+    validate: (enabled, data) =>
+      !enabled ||
+      (Array.isArray(data) &&
+        data.every(
+          (value, index) =>
+            typeof value === 'string' &&
+            (index === 0 || (typeof data[index - 1] === 'string' && data[index - 1] < value)),
+        )),
   });
 }
 
@@ -540,6 +580,7 @@ function validateAction(action: AgentAction): void {
     throw new AgentProtocolValidationError('action payload exceeds 256 KiB');
   if (action.kind === 'campaign.send') validateCampaignSendPayload(action.payload);
   if (action.kind === 'event.publish') validateEventPublishPayload(action.payload);
+  if (action.kind === 'content.prepare') validateContentPreparePayload(action.payload);
   if (action.kind === 'event.prepare' || action.kind === 'event.update')
     validateEventChangePayload(action.payload);
   const expectedAutonomy = descriptor.consequential
@@ -779,6 +820,387 @@ function validateEventPublishPayload(payload: Readonly<Record<string, unknown>>)
     !SHA256.test(payload.readinessSnapshotSha256)
   )
     throw new AgentProtocolValidationError('event publish payload is invalid');
+}
+
+const CONTENT_VALIDATION_SEVERITIES = new Set(['error', 'warning']);
+const CONTENT_PREPARE_COMPONENT_PROPS = {
+  EventHeader: new Set([
+    'id',
+    'brandLabel',
+    'title',
+    'description',
+    'startsAtLabel',
+    'timezone',
+    'venueName',
+    'showDate',
+    'showTimezone',
+    'showVenue',
+    'showBrandBadge',
+    'imageUrl',
+    'imageAlt',
+    'imageFit',
+    'imagePosition',
+    'imagePlacement',
+    'overlayContentPosition',
+    'overlayContentHorizontalPosition',
+    'overlayMinHeight',
+    'overlayPadding',
+    'contentPadding',
+    'contentGap',
+    'imageOpacity',
+    'backgroundOverlayColor',
+    'backgroundOverlayOpacity',
+    'logos',
+    'logoPosition',
+    'logoSize',
+    'logoMaxHeight',
+    'logoMaxWidth',
+  ]),
+  EventDescription: new Set([
+    'id',
+    'eyebrow',
+    'title',
+    'body',
+    'imageUrl',
+    'imageAlt',
+    'alignment',
+    'titleAlignment',
+    'bodyAlignment',
+    'imageAlignment',
+    'spacing',
+    'backgroundColor',
+    'imageLayout',
+    'imageFit',
+    'imagePosition',
+    'imagePositionX',
+    'imagePositionY',
+    'imagePlacement',
+    'imageRadius',
+    'overlayContentPosition',
+    'overlayContentHorizontalPosition',
+    'overlayMinHeight',
+    'overlayPadding',
+    'imageOpacity',
+    'backgroundOverlayColor',
+    'backgroundOverlayOpacity',
+    'imageOverlay',
+    'logos',
+    'logoPosition',
+    'logoSize',
+    'logoMaxHeight',
+    'logoMaxWidth',
+    'eyebrowFontSize',
+    'titleFontSize',
+    'bodyFontSize',
+    'eyebrowColor',
+    'titleColor',
+    'bodyColor',
+    'contentBackgroundColor',
+    'contentPadding',
+    'contentRadius',
+    'contentGap',
+  ]),
+  Divider: new Set(['id', 'spacing']),
+  Tickets: new Set(['id', 'title', 'emptyTitle', 'emptyDescription']),
+  ResaleTickets: new Set(['id', 'title', 'badgeLabel']),
+  CheckoutCta: new Set(['id', 'label', 'supportingText']),
+  BrandFooter: new Set(['id']),
+} as const;
+const CONTENT_PREPARE_ROOT_PROPS = new Set([
+  'title',
+  'description',
+  'marketingSummary',
+  'category',
+  'tags',
+  'coverImageUrl',
+  'socialImageUrl',
+  'backgroundColor',
+  'foregroundColor',
+  'accentColor',
+  'accentForegroundColor',
+  'fontFamily',
+  'headingFontFamily',
+  'radius',
+]);
+const CONTENT_PREPARE_DISCOVERY_FIELDS = new Set([
+  'summary',
+  'category',
+  'tags',
+  'coverImageUrl',
+  'socialImageUrl',
+  'seoTitle',
+  'seoDescription',
+]);
+const CONTENT_PREPARE_PREVIEW_FIELDS = new Set([
+  'title',
+  'summary',
+  'category',
+  'tags',
+  'imageUrl',
+  'startsAt',
+  'venueName',
+  'publicPath',
+]);
+const CONTENT_PREPARE_BOOLEAN_PROPS = new Set([
+  'showDate',
+  'showTimezone',
+  'showVenue',
+  'showBrandBadge',
+]);
+const CONTENT_PREPARE_EMPTY_ARRAY_PROPS = new Set(['logos', 'imageOverlay']);
+
+function validateContentPrepareString(
+  value: unknown,
+  field: string,
+  bounds: { min?: number; max?: number } = {},
+): void {
+  const length = typeof value === 'string' ? [...value].length : -1;
+  if (typeof value !== 'string' || length < (bounds.min ?? 0) || length > (bounds.max ?? 100_000))
+    throw new AgentProtocolValidationError(`content prepare ${field} is invalid`);
+}
+
+function validateContentPrepareStringRecord(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+  field: string,
+): asserts value is Readonly<Record<string, unknown>> {
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !allowed.has(key)))
+    throw new AgentProtocolValidationError(`content prepare ${field} is invalid`);
+  for (const [key, item] of Object.entries(value))
+    validateContentPrepareString(item, `${field}.${key}`);
+}
+
+export function validateAgentContentPrepareDocument(value: unknown): void {
+  if (
+    !isPlainObject(value) ||
+    JSON.stringify(Object.keys(value).sort()) !==
+      JSON.stringify(['editor', 'schemaVersion', 'settings']) ||
+    value.schemaVersion !== 2 ||
+    Buffer.byteLength(canonicalAgentJson(value), 'utf8') > 256 * 1024
+  )
+    throw new AgentProtocolValidationError('content prepare document is invalid');
+  const editor = value.editor;
+  if (
+    !isPlainObject(editor) ||
+    JSON.stringify(Object.keys(editor).sort()) !== JSON.stringify(['data', 'provider']) ||
+    editor.provider !== '@puckeditor/core'
+  )
+    throw new AgentProtocolValidationError('content prepare editor is invalid');
+  const data = editor.data;
+  if (
+    !isPlainObject(data) ||
+    JSON.stringify(Object.keys(data).sort()) !== JSON.stringify(['content', 'root']) ||
+    !isPlainObject(data.root) ||
+    JSON.stringify(Object.keys(data.root)) !== JSON.stringify(['props'])
+  )
+    throw new AgentProtocolValidationError('content prepare editor data is invalid');
+  validateContentPrepareStringRecord(data.root.props, CONTENT_PREPARE_ROOT_PROPS, 'root props');
+  if (!Array.isArray(data.content) || data.content.length > 100)
+    throw new AgentProtocolValidationError('content prepare block list is invalid');
+  for (const [index, item] of data.content.entries()) {
+    if (
+      !isPlainObject(item) ||
+      JSON.stringify(Object.keys(item).sort()) !== JSON.stringify(['props', 'type']) ||
+      typeof item.type !== 'string' ||
+      !Object.hasOwn(CONTENT_PREPARE_COMPONENT_PROPS, item.type) ||
+      !isPlainObject(item.props)
+    )
+      throw new AgentProtocolValidationError('content prepare block is invalid');
+    const allowed = CONTENT_PREPARE_COMPONENT_PROPS[
+      item.type as keyof typeof CONTENT_PREPARE_COMPONENT_PROPS
+    ] as ReadonlySet<string>;
+    if (
+      Object.keys(item.props).length > 64 ||
+      Object.keys(item.props).some((key) => !allowed.has(key)) ||
+      !Object.hasOwn(item.props, 'id')
+    )
+      throw new AgentProtocolValidationError('content prepare block props are invalid');
+    for (const [key, prop] of Object.entries(item.props)) {
+      if (CONTENT_PREPARE_BOOLEAN_PROPS.has(key)) {
+        if (typeof prop !== 'boolean')
+          throw new AgentProtocolValidationError('content prepare boolean prop is invalid');
+      } else if (CONTENT_PREPARE_EMPTY_ARRAY_PROPS.has(key)) {
+        if (!Array.isArray(prop) || prop.length !== 0)
+          throw new AgentProtocolValidationError('content prepare array prop is invalid');
+      } else if (key === 'imagePlacement') {
+        validateContentPrepareStringRecord(
+          prop,
+          new Set(['x', 'y', 'scale']),
+          `block ${index} image placement`,
+        );
+      } else validateContentPrepareString(prop, `block ${index} prop ${key}`);
+    }
+  }
+  const settings = value.settings;
+  if (
+    !isPlainObject(settings) ||
+    JSON.stringify(Object.keys(settings).sort()) !==
+      JSON.stringify(['discovery', 'locale', 'publicPath'])
+  )
+    throw new AgentProtocolValidationError('content prepare settings are invalid');
+  validateContentPrepareString(settings.locale, 'settings locale', { min: 2, max: 16 });
+  validateContentPrepareString(settings.publicPath, 'settings public path', {
+    min: 1,
+    max: 2048,
+  });
+  if (
+    !isPlainObject(settings.discovery) ||
+    Object.keys(settings.discovery).some((key) => !CONTENT_PREPARE_DISCOVERY_FIELDS.has(key)) ||
+    !Object.hasOwn(settings.discovery, 'summary') ||
+    !Object.hasOwn(settings.discovery, 'tags')
+  )
+    throw new AgentProtocolValidationError('content prepare discovery settings are invalid');
+  for (const [key, item] of Object.entries(settings.discovery)) {
+    if (key === 'tags') {
+      if (
+        !Array.isArray(item) ||
+        item.length > 50 ||
+        item.some((tag) => typeof tag !== 'string' || [...tag].length > 128)
+      )
+        throw new AgentProtocolValidationError('content prepare discovery tags are invalid');
+    } else validateContentPrepareString(item, `settings discovery ${key}`);
+  }
+}
+
+export function validateAgentContentPreparePreview(value: unknown): void {
+  if (
+    !isPlainObject(value) ||
+    JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(['discovery', 'provider']) ||
+    value.provider !== '@puckeditor/core' ||
+    !isPlainObject(value.discovery) ||
+    Object.keys(value.discovery).some((key) => !CONTENT_PREPARE_PREVIEW_FIELDS.has(key)) ||
+    !Object.hasOwn(value.discovery, 'title') ||
+    !Object.hasOwn(value.discovery, 'summary') ||
+    !Object.hasOwn(value.discovery, 'tags')
+  )
+    throw new AgentProtocolValidationError('content prepare preview is invalid');
+  for (const [key, item] of Object.entries(value.discovery)) {
+    if (key === 'tags') {
+      if (
+        !Array.isArray(item) ||
+        item.length > 50 ||
+        item.some((tag) => typeof tag !== 'string' || [...tag].length > 128)
+      )
+        throw new AgentProtocolValidationError('content prepare preview tags are invalid');
+    } else {
+      const bounds =
+        key === 'title'
+          ? { min: 1, max: 512 }
+          : key === 'summary'
+            ? { min: 1, max: 50_000 }
+            : key === 'category'
+              ? { max: 128 }
+              : key === 'imageUrl' || key === 'publicPath'
+                ? { min: key === 'publicPath' ? 1 : 0, max: 2048 }
+                : key === 'venueName'
+                  ? { max: 512 }
+                  : {};
+      validateContentPrepareString(item, `preview discovery ${key}`, bounds);
+      if (key === 'startsAt' && !validContentPrepareDateTime(item as string))
+        throw new AgentProtocolValidationError('content prepare preview start time is invalid');
+    }
+  }
+}
+
+function validContentPrepareDateTime(value: string): boolean {
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = match[7] === 'Z' ? 0 : Number(match[9]);
+  const offsetMinute = match[7] === 'Z' ? 0 : Number(match[10]);
+  if (
+    month < 1 ||
+    month > 12 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 60 ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  )
+    return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= days[month - 1]!;
+}
+
+export function validateAgentContentPrepareValidation(value: unknown): void {
+  const issueCodes =
+    isPlainObject(value) && Array.isArray(value.issueCodes) ? value.issueCodes : undefined;
+  if (
+    !isPlainObject(value) ||
+    JSON.stringify(Object.keys(value).sort()) !==
+      JSON.stringify(['issueCodes', 'severity', 'valid']) ||
+    typeof value.valid !== 'boolean' ||
+    typeof value.severity !== 'string' ||
+    !CONTENT_VALIDATION_SEVERITIES.has(value.severity) ||
+    !issueCodes ||
+    issueCodes.length > 100 ||
+    issueCodes.some(
+      (code, index) =>
+        typeof code !== 'string' ||
+        !REASON_CODE.test(code) ||
+        (index > 0 && typeof issueCodes[index - 1] === 'string' && issueCodes[index - 1] >= code),
+    ) ||
+    (value.valid && value.severity !== 'warning') ||
+    (!value.valid && value.severity !== 'error')
+  )
+    throw new AgentProtocolValidationError('content prepare validation is invalid');
+}
+
+function validateContentPreparePayload(payload: Readonly<Record<string, unknown>>): void {
+  const expected = ['channel', 'content', 'contentPreviewSha256', 'preview', 'validation'];
+  const validation = payload.validation;
+  const preview = payload.preview;
+  const issueCodes =
+    isPlainObject(validation) && Array.isArray(validation.issueCodes)
+      ? validation.issueCodes
+      : undefined;
+  if (
+    JSON.stringify(Object.keys(payload).sort()) !== JSON.stringify(expected) ||
+    payload.channel !== 'event_page' ||
+    !isPlainObject(payload.content) ||
+    !isPlainObject(preview) ||
+    JSON.stringify(Object.keys(preview).sort()) !== JSON.stringify(['discovery', 'provider']) ||
+    preview.provider !== '@puckeditor/core' ||
+    !isPlainObject(preview.discovery) ||
+    !isPlainObject(validation) ||
+    JSON.stringify(Object.keys(validation).sort()) !==
+      JSON.stringify(['issueCodes', 'severity', 'valid']) ||
+    typeof validation.valid !== 'boolean' ||
+    typeof validation.severity !== 'string' ||
+    !CONTENT_VALIDATION_SEVERITIES.has(validation.severity) ||
+    !issueCodes ||
+    issueCodes.length > 100 ||
+    issueCodes.some(
+      (code, index) =>
+        typeof code !== 'string' ||
+        !REASON_CODE.test(code) ||
+        (index > 0 && typeof issueCodes[index - 1] === 'string' && issueCodes[index - 1] >= code),
+    ) ||
+    (validation.valid && validation.severity !== 'warning') ||
+    (!validation.valid && validation.severity !== 'error') ||
+    typeof payload.contentPreviewSha256 !== 'string' ||
+    !SHA256.test(payload.contentPreviewSha256) ||
+    payload.contentPreviewSha256 !==
+      agentSha256({
+        channel: payload.channel,
+        content: payload.content,
+        preview,
+        validation,
+      })
+  )
+    throw new AgentProtocolValidationError('content prepare payload is invalid');
+  validateAgentContentPrepareValidation(validation);
+  validateAgentContentPrepareDocument(payload.content);
+  validateAgentContentPreparePreview(preview);
 }
 
 function validateCampaignSendPayload(payload: Readonly<Record<string, unknown>>): void {
