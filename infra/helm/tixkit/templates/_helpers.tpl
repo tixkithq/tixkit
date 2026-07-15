@@ -94,6 +94,9 @@
 {{- if not .Values.availability.topologySpread.enabled -}}
 {{- fail "production profile requires topology spread" -}}
 {{- end -}}
+{{- if lt (int .Values.availability.topologySpread.minDomains) 2 -}}
+{{- fail "production profile requires availability.topologySpread.minDomains of at least 2" -}}
+{{- end -}}
 {{- if ne (int .Values.availability.rollingUpdate.maxUnavailable) 0 -}}
 {{- fail "production profile requires availability.rollingUpdate.maxUnavailable=0" -}}
 {{- end -}}
@@ -192,6 +195,7 @@ terminationGracePeriodSeconds: {{ .root.Values.security.terminationGracePeriodSe
 {{- if .root.Values.availability.topologySpread.enabled }}
 topologySpreadConstraints:
   - maxSkew: {{ .root.Values.availability.topologySpread.maxSkew }}
+    minDomains: {{ .root.Values.availability.topologySpread.minDomains }}
     topologyKey: {{ .root.Values.availability.topologySpread.topologyKey }}
     whenUnsatisfiable: DoNotSchedule
     labelSelector:
@@ -215,6 +219,7 @@ app.kubernetes.io/name: {{ include "tixkit.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name (.Chart.Version | replace "+" "_") | quote }}
 {{- end -}}
 
 {{- define "tixkit.selectorLabels" -}}

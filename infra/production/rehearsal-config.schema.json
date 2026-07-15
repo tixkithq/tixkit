@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/production-rehearsal-config.schema.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "drillId",
+    "kind",
+    "acknowledgement",
+    "expectedContext",
+    "namespace",
+    "release",
+    "beforeReleaseManifest",
+    "thresholds",
+    "adapters"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "tixkit-production-rehearsal-config-v1" },
+    "drillId": { "type": "string", "pattern": "^[a-z0-9](?:[-a-z0-9]{0,62})$" },
+    "kind": { "enum": ["zone-loss", "dependency-loss", "release-upgrade-rollback"] },
+    "acknowledgement": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "expectedContext": { "type": "string", "minLength": 1, "maxLength": 253 },
+    "namespace": { "type": "string", "pattern": "^[a-z0-9](?:[-a-z0-9]{0,62})$" },
+    "release": { "type": "string", "pattern": "^[a-z0-9](?:[-a-z0-9]{0,62})$" },
+    "dependency": { "enum": ["postgres", "mysql", "redis", "temporal", "object-storage"] },
+    "beforeReleaseManifest": { "type": "string", "minLength": 1 },
+    "targetReleaseManifest": { "type": "string", "minLength": 1 },
+    "thresholds": {
+      "type": "object",
+      "required": ["adapterTimeoutSeconds", "maxOutageSeconds", "maxRecoverySeconds"],
+      "properties": {
+        "adapterTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "maxOutageSeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 3600 },
+        "maxRecoverySeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 7200 }
+      },
+      "additionalProperties": false
+    },
+    "adapters": {
+      "type": "object",
+      "required": ["baselineProbe", "inject", "duringProbe", "recover", "recoveredProbe"],
+      "properties": {
+        "baselineProbe": { "type": "string", "minLength": 1 },
+        "inject": { "type": "string", "minLength": 1 },
+        "duringProbe": { "type": "string", "minLength": 1 },
+        "recover": { "type": "string", "minLength": 1 },
+        "recoveredProbe": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "dependency-loss" } } },
+      "then": { "properties": { "dependency": true }, "required": ["dependency"] },
+      "else": { "not": { "required": ["dependency"] } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "release-upgrade-rollback" } } },
+      "then": {
+        "properties": { "targetReleaseManifest": true },
+        "required": ["targetReleaseManifest"]
+      },
+      "else": { "not": { "required": ["targetReleaseManifest"] } }
+    }
+  ],
+  "additionalProperties": false
+}

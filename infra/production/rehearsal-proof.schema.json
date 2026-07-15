@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/production-rehearsal-proof.schema.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "drillId",
+    "kind",
+    "acknowledgement",
+    "cluster",
+    "namespace",
+    "release",
+    "releaseManifests",
+    "thresholds",
+    "startedAt",
+    "completedAt",
+    "measurements",
+    "steps",
+    "snapshots",
+    "signingKeyFingerprint"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "tixkit-production-rehearsal-proof-v1" },
+    "status": { "const": "passed" },
+    "drillId": { "type": "string", "pattern": "^[a-z0-9](?:[-a-z0-9]{0,62})$" },
+    "kind": { "enum": ["zone-loss", "dependency-loss", "release-upgrade-rollback"] },
+    "dependency": { "enum": ["postgres", "mysql", "redis", "temporal", "object-storage"] },
+    "acknowledgement": { "type": "string", "minLength": 1 },
+    "cluster": {
+      "type": "object",
+      "required": ["context", "server", "caSha256", "systemNamespaceUid"],
+      "properties": {
+        "context": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "pattern": "^https://" },
+        "caSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "systemNamespaceUid": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "namespace": {
+      "type": "object",
+      "required": ["name", "uid"],
+      "properties": { "name": { "type": "string" }, "uid": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "release": { "type": "string", "minLength": 1 },
+    "releaseManifests": {
+      "type": "object",
+      "required": ["before"],
+      "properties": {
+        "before": { "$ref": "#/$defs/fileIdentity" },
+        "target": { "$ref": "#/$defs/fileIdentity" }
+      },
+      "additionalProperties": false
+    },
+    "thresholds": { "$ref": "#/$defs/thresholds" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "measurements": {
+      "type": "object",
+      "required": ["outageSeconds", "recoverySeconds"],
+      "properties": {
+        "outageSeconds": { "type": "number", "minimum": 0 },
+        "recoverySeconds": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "steps": { "type": "array", "minItems": 5, "items": { "$ref": "#/$defs/step" } },
+    "snapshots": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/snapshot" } },
+    "signingKeyFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "fileIdentity": {
+      "type": "object",
+      "required": ["sha256", "size"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "thresholds": {
+      "type": "object",
+      "required": ["adapterTimeoutSeconds", "maxOutageSeconds", "maxRecoverySeconds"],
+      "properties": {
+        "adapterTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "maxOutageSeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 3600 },
+        "maxRecoverySeconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 7200 }
+      },
+      "additionalProperties": false
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "name",
+        "adapterSha256",
+        "exitCode",
+        "durationMilliseconds",
+        "stdoutSha256",
+        "stderrSha256",
+        "result"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "adapterSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "exitCode": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "stdoutSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "stderrSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "result": { "$ref": "#/$defs/adapterResult" }
+      },
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "required": ["phase", "helm", "images", "zones", "placements", "rollouts", "capturedAt"],
+      "properties": {
+        "phase": { "type": "string", "minLength": 1 },
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "helm": {
+          "type": "object",
+          "required": ["revision", "chart", "appVersion", "manifestSha256", "valuesSha256"],
+          "properties": {
+            "revision": { "type": "integer", "minimum": 1 },
+            "chart": { "type": "string", "minLength": 1 },
+            "appVersion": { "type": "string", "minLength": 1 },
+            "manifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "valuesSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        "images": {
+          "type": "object",
+          "required": ["api", "worker", "admin", "checkout"],
+          "properties": {
+            "api": { "$ref": "#/$defs/imageReference" },
+            "worker": { "$ref": "#/$defs/imageReference" },
+            "admin": { "$ref": "#/$defs/imageReference" },
+            "checkout": { "$ref": "#/$defs/imageReference" }
+          },
+          "additionalProperties": false
+        },
+        "zones": {
+          "type": "object",
+          "required": ["api", "worker", "admin", "checkout"],
+          "properties": {
+            "api": { "$ref": "#/$defs/zones" },
+            "worker": { "$ref": "#/$defs/zones" },
+            "admin": { "$ref": "#/$defs/zones" },
+            "checkout": { "$ref": "#/$defs/zones" }
+          },
+          "additionalProperties": false
+        },
+        "placements": {
+          "type": "object",
+          "required": ["api", "worker", "admin", "checkout"],
+          "properties": {
+            "api": { "$ref": "#/$defs/placements" },
+            "worker": { "$ref": "#/$defs/placements" },
+            "admin": { "$ref": "#/$defs/placements" },
+            "checkout": { "$ref": "#/$defs/placements" }
+          },
+          "additionalProperties": false
+        },
+        "rollouts": {
+          "type": "object",
+          "required": ["api", "worker", "admin", "checkout"],
+          "properties": {
+            "api": { "$ref": "#/$defs/rollout" },
+            "worker": { "$ref": "#/$defs/rollout" },
+            "admin": { "$ref": "#/$defs/rollout" },
+            "checkout": { "$ref": "#/$defs/rollout" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "imageReference": { "type": "string", "pattern": "@sha256:[a-f0-9]{64}$" },
+    "adapterResult": {
+      "type": "object",
+      "required": ["schemaVersion", "healthy", "outageMilliseconds", "observationCount"],
+      "properties": {
+        "schemaVersion": { "const": "tixkit-production-adapter-result-v1" },
+        "healthy": { "type": "boolean" },
+        "outageMilliseconds": { "type": "integer", "minimum": 0, "maximum": 7200000 },
+        "observationCount": { "type": "integer", "minimum": 1, "maximum": 10000000 }
+      },
+      "additionalProperties": false
+    },
+    "zones": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "placements": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["podUid", "nodeUid", "nodeName", "zone", "image", "imageId"],
+        "properties": {
+          "podUid": { "type": "string", "minLength": 1 },
+          "nodeUid": { "type": "string", "minLength": 1 },
+          "nodeName": { "type": "string", "minLength": 1 },
+          "zone": { "type": "string", "minLength": 1 },
+          "image": { "$ref": "#/$defs/imageReference" },
+          "imageId": { "type": "string", "pattern": "@sha256:[a-f0-9]{64}$" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "rollout": {
+      "type": "object",
+      "required": [
+        "deploymentUid",
+        "generation",
+        "revision",
+        "replicas",
+        "replicaSetUid",
+        "replicaSetRevision"
+      ],
+      "properties": {
+        "deploymentUid": { "type": "string", "minLength": 1 },
+        "generation": { "type": "integer", "minimum": 1 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "replicas": { "type": "integer", "minimum": 2 },
+        "replicaSetUid": { "type": "string", "minLength": 1 },
+        "replicaSetRevision": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

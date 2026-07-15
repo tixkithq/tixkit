@@ -178,6 +178,7 @@ availability:
   topologySpread:
     enabled: false
     maxSkew: 1
+    minDomains: 2
     topologyKey: topology.kubernetes.io/zone
 
 security:

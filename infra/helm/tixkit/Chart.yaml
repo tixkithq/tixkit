@@ -4,3 +4,4 @@ description: Tixkit Self-Hosted chart with explicit evaluation and production pr
 type: application
 version: 0.2.0
 appVersion: '0.1.0'
+kubeVersion: '>=1.30.0-0'

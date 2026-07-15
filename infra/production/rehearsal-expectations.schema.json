@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/production-rehearsal-expectations.schema.json",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "drillId",
+    "kind",
+    "context",
+    "clusterServer",
+    "clusterCaSha256",
+    "systemNamespaceUid",
+    "namespaceName",
+    "namespaceUid",
+    "release",
+    "beforeReleaseSha256",
+    "beforeImages",
+    "thresholds",
+    "adapterSha256"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "tixkit-production-rehearsal-expectations-v1" },
+    "drillId": { "type": "string", "pattern": "^[a-z0-9](?:[-a-z0-9]{0,62})$" },
+    "kind": { "enum": ["zone-loss", "dependency-loss", "release-upgrade-rollback"] },
+    "dependency": { "enum": ["postgres", "mysql", "redis", "temporal", "object-storage"] },
+    "context": { "type": "string", "minLength": 1 },
+    "clusterServer": { "type": "string", "pattern": "^https://" },
+    "clusterCaSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "systemNamespaceUid": { "type": "string", "minLength": 1 },
+    "namespaceName": { "type": "string", "minLength": 1 },
+    "namespaceUid": { "type": "string", "minLength": 1 },
+    "release": { "type": "string", "minLength": 1 },
+    "beforeReleaseSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "targetReleaseSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "beforeImages": { "$ref": "#/$defs/images" },
+    "targetImages": { "$ref": "#/$defs/images" },
+    "thresholds": {
+      "$ref": "production-rehearsal-proof.schema.json#/$defs/thresholds"
+    },
+    "adapterSha256": {
+      "type": "object",
+      "required": ["baselineProbe", "inject", "duringProbe", "recover", "recoveredProbe"],
+      "properties": {
+        "baselineProbe": { "$ref": "#/$defs/sha256" },
+        "inject": { "$ref": "#/$defs/sha256" },
+        "duringProbe": { "$ref": "#/$defs/sha256" },
+        "recover": { "$ref": "#/$defs/sha256" },
+        "recoveredProbe": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "dependency-loss" } } },
+      "then": { "properties": { "dependency": true }, "required": ["dependency"] },
+      "else": { "not": { "required": ["dependency"] } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "release-upgrade-rollback" } } },
+      "then": {
+        "properties": { "targetReleaseSha256": true, "targetImages": true },
+        "required": ["targetReleaseSha256", "targetImages"]
+      },
+      "else": {
+        "allOf": [
+          { "not": { "required": ["targetReleaseSha256"] } },
+          { "not": { "required": ["targetImages"] } }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "image": { "type": "string", "pattern": "@sha256:[a-f0-9]{64}$" },
+    "images": {
+      "type": "object",
+      "required": ["api", "worker", "admin", "checkout"],
+      "properties": {
+        "api": { "$ref": "#/$defs/image" },
+        "worker": { "$ref": "#/$defs/image" },
+        "admin": { "$ref": "#/$defs/image" },
+        "checkout": { "$ref": "#/$defs/image" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

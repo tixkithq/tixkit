@@ -31,20 +31,41 @@ printf '%s\n' "$*" >>"$MOCK_KUBECTL_CALLS"
 args="$*"
 if [[ "$args" == "config current-context" ]]; then
   printf '%s\n' "${'${'}MOCK_CONTEXT:-proof-cluster}"
-elif [[ "$args" == *" get namespace "* ]]; then
-  printf '%s\n' tixkit
+elif [[ "$args" == *" config view --minify -o jsonpath={.clusters[0].cluster.server}" ]]; then
+  printf '%s' 'https://proof.example'
+elif [[ "$args" == *" config view --minify --raw --flatten -o jsonpath={.clusters[0].cluster.certificate-authority-data}" ]]; then
+  printf '%s' 'cHJvb2YtY2E='
+elif [[ "$args" == *" get namespace kube-system -o json" ]]; then
+  printf '%s\n' '{"metadata":{"name":"kube-system","uid":"namespace-kube-system"}}'
+elif [[ "$args" == *" get namespace "*" -o json" ]]; then
+  printf '%s\n' '{"metadata":{"name":"tixkit-proof","uid":"namespace-tixkit-proof"}}'
+elif [[ "$args" == *" get secrets "* ]]; then
+  printf '%s\n' '{"items":[{"metadata":{"uid":"helm-secret-uid","labels":{"version":"7","status":"deployed","chart":"tixkit-1.2.3","appVersion":"1.2.3"}},"data":{"release":"helm-release-payload"}}]}'
+elif [[ "$args" == *" get nodes -o json" ]]; then
+  if [[ "${'${'}MOCK_MISSING_ZONE:-0}" == 1 ]]; then zone_b=''; else zone_b=',"topology.kubernetes.io/zone":"zone-b"'; fi
+  printf '{"items":[{"metadata":{"name":"node-a","uid":"node-uid-a","labels":{"topology.kubernetes.io/zone":"zone-a"}}},{"metadata":{"name":"node-b","uid":"node-uid-b","labels":{%s}}}]}\n' "${'${'}zone_b#,}"
 elif [[ "$args" == *" get deployments "* ]]; then
   component="$(printf '%s' "$args" | sed -n 's/.*app.kubernetes.io\/component=\([^ ,]*\).*/\1/p')"
   replicas="${'${'}MOCK_REPLICAS:-2}"
-  printf '{"items":[{"metadata":{"name":"tixkit-%s","generation":2},"spec":{"replicas":%s,"minReadySeconds":10,"progressDeadlineSeconds":600,"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}},"template":{"spec":{"containers":[{"image":"ghcr.io/tixkit/tixkit/%s@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}},"status":{"observedGeneration":2,"availableReplicas":%s,"readyReplicas":%s,"updatedReplicas":%s,"unavailableReplicas":0}}]}\n' "$component" "$replicas" "$component" "$replicas" "$replicas" "$replicas"
+  topology_min="${'${'}MOCK_TOPOLOGY_MIN_DOMAINS:-2}"
+  printf '{"items":[{"metadata":{"name":"tixkit-%s","generation":2,"labels":{"helm.sh/chart":"tixkit-1.2.3","app.kubernetes.io/version":"1.2.3"}},"spec":{"replicas":%s,"minReadySeconds":10,"progressDeadlineSeconds":600,"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}},"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"minDomains":%s,"topologyKey":"topology.kubernetes.io/zone","whenUnsatisfiable":"DoNotSchedule"}],"containers":[{"image":"ghcr.io/tixkit/tixkit/%s@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}},"status":{"observedGeneration":2,"availableReplicas":%s,"readyReplicas":%s,"updatedReplicas":%s,"unavailableReplicas":0}}]}\n' "$component" "$replicas" "$topology_min" "$component" "$replicas" "$replicas" "$replicas"
+elif [[ "$args" == *" get horizontalpodautoscalers "* ]]; then
+  min="${'${'}MOCK_HPA_MIN:-2}"
+  max="${'${'}MOCK_HPA_MAX:-6}"
+  desired="${'${'}MOCK_HPA_DESIRED:-2}"
+  component="$(printf '%s' "$args" | sed -n 's/.*app.kubernetes.io\/component=\([^ ,]*\).*/\1/p')"
+  printf '{"items":[{"metadata":{"uid":"hpa-uid"},"spec":{"scaleTargetRef":{"kind":"Deployment","name":"tixkit-%s"},"minReplicas":%s,"maxReplicas":%s},"status":{"desiredReplicas":%s}}]}\n' "$component" "$min" "$max" "$desired"
 elif [[ "$args" == *" get poddisruptionbudgets "* ]]; then
-  printf '%s\n' '{"items":[{"spec":{"minAvailable":1},"status":{"currentHealthy":2,"disruptionsAllowed":1}}]}'
+  disruptions="${'${'}MOCK_DISRUPTIONS_ALLOWED:-1}"
+  minimum="${'${'}MOCK_PDB_MIN:-1}"
+  printf '{"items":[{"metadata":{"uid":"pdb-uid"},"spec":{"minAvailable":%s},"status":{"currentHealthy":2,"disruptionsAllowed":%s}}]}\n' "$minimum" "$disruptions"
 elif [[ "$args" == *" get pods "* ]]; then
   component="$(printf '%s' "$args" | sed -n 's/.*app.kubernetes.io\/component=\([^ ,]*\).*/\1/p')"
   if [[ "${'${'}MOCK_NO_REPLACEMENT:-0}" != 1 ]] && grep -qx "$component" "$MOCK_STATE" 2>/dev/null; then
-    printf '{"items":[{"metadata":{"name":"tixkit-%s-new","uid":"uid-%s-new"},"status":{"conditions":[{"type":"Ready","status":"True"}]}},{"metadata":{"name":"tixkit-%s-b","uid":"uid-%s-b"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}\n' "$component" "$component" "$component" "$component"
+    printf '{"items":[{"metadata":{"name":"tixkit-%s-new","uid":"uid-%s-new"},"spec":{"nodeName":"node-a"},"status":{"conditions":[{"type":"Ready","status":"True"}]}},{"metadata":{"name":"tixkit-%s-b","uid":"uid-%s-b"},"spec":{"nodeName":"node-b"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}\n' "$component" "$component" "$component" "$component"
   else
-    printf '{"items":[{"metadata":{"name":"tixkit-%s-a","uid":"uid-%s-a"},"status":{"conditions":[{"type":"Ready","status":"True"}]}},{"metadata":{"name":"tixkit-%s-b","uid":"uid-%s-b"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}\n' "$component" "$component" "$component" "$component"
+    node_b="node-b"; [[ "${'${'}MOCK_SINGLE_ZONE:-0}" == 1 ]] && node_b="node-a"
+    printf '{"items":[{"metadata":{"name":"tixkit-%s-a","uid":"uid-%s-a"},"spec":{"nodeName":"node-a"},"status":{"conditions":[{"type":"Ready","status":"True"}]}},{"metadata":{"name":"tixkit-%s-b","uid":"uid-%s-b"},"spec":{"nodeName":"%s"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}\n' "$component" "$component" "$component" "$component" "$node_b"
   fi
 elif [[ "$args" == *" create -f -"* ]]; then
   manifest="$(cat)"
@@ -94,7 +115,11 @@ function runVerifier(env) {
 test('production verifier records read-only readiness evidence without disruption by default', () => {
   const { directory, evidence, env, calls } = harness();
   try {
-    const output = execFileSync(verifier, { cwd: root, env, encoding: 'utf8' }).trim();
+    const output = execFileSync(verifier, {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+    }).trim();
     assert.equal(output, join(evidence, 'replacement-001.json'));
     const proof = JSON.parse(readFileSync(output, 'utf8'));
     assert.deepEqual(
@@ -111,6 +136,28 @@ test('production verifier records read-only readiness evidence without disruptio
     );
     assert.deepEqual(proof.after, proof.before);
     assert.equal(proof.disruptionPerformed, false);
+    assert.deepEqual(proof.cluster, {
+      server: 'https://proof.example',
+      caSha256: '313aa2469a1dc6308b1041090bd7e5933f351657a7a92487c4f1a36a71d18427',
+      kubeSystemNamespaceUid: 'namespace-kube-system',
+    });
+    assert.equal(proof.namespaceUid, 'namespace-tixkit-proof');
+    assert.deepEqual(proof.before[0].readyPods, [
+      {
+        name: 'tixkit-api-a',
+        uid: 'uid-api-a',
+        nodeName: 'node-a',
+        nodeUid: 'node-uid-a',
+        zone: 'zone-a',
+      },
+      {
+        name: 'tixkit-api-b',
+        uid: 'uid-api-b',
+        nodeName: 'node-b',
+        nodeUid: 'node-uid-b',
+        zone: 'zone-b',
+      },
+    ]);
     assert.equal(statSync(output).mode & 0o777, 0o400);
     assert.doesNotMatch(readFileSync(calls, 'utf8'), / create -f -|rollout status /u);
     const replay = spawnSync(verifier, { cwd: root, env, encoding: 'utf8' });
@@ -239,3 +286,49 @@ test('production verifier fails before disruption when a workload is not highly 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+for (const [name, overrides, message] of [
+  ['single-zone Ready pods', { MOCK_SINGLE_ZONE: '1' }, /zone-spread invariant failed for api/u],
+  [
+    'a live topology constraint with fewer than two domains',
+    { MOCK_TOPOLOGY_MIN_DOMAINS: '1' },
+    /deployment invariant failed for api/u,
+  ],
+  [
+    'a missing node zone label',
+    { MOCK_MISSING_ZONE: '1' },
+    /zone-spread invariant failed for api/u,
+  ],
+  ['an HPA minimum below two', { MOCK_HPA_MIN: '1' }, /autoscaler invariant failed for api/u],
+  [
+    'an HPA desired replica count above its maximum',
+    { MOCK_HPA_DESIRED: '7' },
+    /autoscaler invariant failed for api/u,
+  ],
+  [
+    'a PDB that consumes all desired replicas',
+    { MOCK_PDB_MIN: '2' },
+    /disruption-budget invariant failed for api/u,
+  ],
+  [
+    'a PDB with no currently allowed disruption in read-only mode',
+    { MOCK_DISRUPTIONS_ALLOWED: '0' },
+    /disruption-budget invariant failed for api/u,
+  ],
+]) {
+  test(`production verifier rejects ${name}`, () => {
+    const { directory, env, calls } = harness();
+    try {
+      const result = spawnSync(verifier, {
+        cwd: root,
+        env: { ...env, ...overrides },
+        encoding: 'utf8',
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, message);
+      assert.doesNotMatch(readFileSync(calls, 'utf8'), / create -f -/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}

@@ -18,7 +18,7 @@ related:
   - /self-hosting/upgrades
 ---
 
-The Production profile is the high-availability Self-Hosted path. It consumes immutable public images and requires external PostgreSQL or MySQL, Redis, Temporal, object storage, secrets, telemetry, and backup services. It does not install evaluation datastores.
+The Production profile is the high-availability Self-Hosted path. It requires Kubernetes 1.30 or newer so the scheduler enforces the chart's stable two-domain `minDomains` topology contract. It consumes immutable public images and requires external PostgreSQL or MySQL, Redis, Temporal, object storage, secrets, telemetry, and backup services. It does not install evaluation datastores.
 
 ## Compatibility contract
 
@@ -42,7 +42,7 @@ Keep at least two replicas, topology spreading, disruption budgets, bounded auto
 
 Start from `infra/helm/tixkit/values-production.yaml`. The chart fails when image digests, operator-selected network CIDRs, manual migration strategy, observability, or required external secret mappings are absent. For External Secrets, reconcile the secret, run `infra/scripts/run-helm-migration.sh`, and only then install or upgrade workloads. The migration runner uses a lock, unique Job, isolated egress policy, and current logs; it never reuses an old completed Job.
 
-Production renders zero-unavailable rolling updates with a replacement surge, a readiness dwell, a bounded progress deadline, at least two replicas per workload, and a disruption budget below the minimum replica count. A digest change rolls the relevant workload; a chart-managed ConfigMap change changes the pod-template checksum and rolls all four workloads. After an external Secret value changes, explicitly restart and verify the affected workloads because the chart cannot hash provider-owned secret contents.
+Production renders zero-unavailable rolling updates with a replacement surge, a readiness dwell, a bounded progress deadline, at least two replicas per workload, a disruption budget below the minimum replica count, and a hard topology-spread minimum of two zones. A digest change rolls the relevant workload; a chart-managed ConfigMap change changes the pod-template checksum and rolls all four workloads. After an external Secret value changes, explicitly restart and verify the affected workloads because the chart cannot hash provider-owned secret contents.
 
 Run the production conformance harness first without disruption, then with its exact destructive acknowledgement. Use a dedicated production-like cluster and an operator-owned evidence directory:
 
@@ -63,6 +63,8 @@ PRODUCTION_DISRUPTION_ACK=evict-one-pod-per-component \
 bun run iac:verify:production
 ```
 
-The harness refuses a context mismatch or existing evidence file, verifies digest-pinned images, replica/readiness, rollout bounds and disruption budgets, submits one policy eviction per workload only after the explicit acknowledgement, waits for a distinct Ready pod UID and fully observed deployment replacement, and writes before/after JSON without secret values. This is pod-replacement evidence only; it does not replace zone-loss, dependency, upgrade, rollback or cross-store DR drills.
+The harness refuses a context mismatch or existing evidence file, verifies digest-pinned images, replica/readiness, HPA bounds, rollout bounds, disruption headroom, the live two-zone topology constraint, and Ready pod placement across distinct node zones. It binds cluster, namespace and Helm release identity, submits one policy eviction per workload only after the explicit acknowledgement, waits for a distinct Ready pod UID and fully observed deployment replacement, and writes before/after JSON without secret values. This is pod-replacement evidence only; it does not replace zone-loss, dependency, upgrade, rollback or cross-store DR drills.
+
+Use the signed [Production cluster rehearsal contract](https://github.com/tixkit/tixkit/blob/main/infra/production/README.md) for the remaining cluster drills. It supports exact `zone-loss`, `dependency-loss`, and `release-upgrade-rollback` modes, requires a drill-specific destructive acknowledgement, pins operator adapter bytes, binds prior and target public release manifests, records functional-probe outage and recovery measurements, verifies rollback against live image and topology state, and publishes exclusive Ed25519-signed/checksummed evidence. Run dependency loss separately for the configured database, Redis, Temporal, and object storage. A valid local controlled-adapter result is implementation proof only; C-119 remains open until the contract runs on a reviewed production-like cluster and the independently expected proof verifies.
 
 Before accepting the release, prove pod replacement, zone disruption, dependency loss, retry recovery, upgrade, application rollback, staged data restore, failed-cutover rollback, authenticated metrics, trace delivery, and alert routing. Record actual RPO/RTO from the [backup and restore runbook](/self-hosting/backups-and-restore). Until those drills pass in the operator's environment, the profile is configured but not production-proven.

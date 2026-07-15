@@ -92,12 +92,30 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   const deployments = rendered.filter((resource) => resource.kind === 'Deployment');
   assert.equal(deployments.length, 4);
   for (const deployment of deployments) {
+    assert.equal(deployment.metadata.labels['helm.sh/chart'], 'tixkit-0.2.0');
+    assert.equal(deployment.metadata.labels['app.kubernetes.io/version'], '0.1.0');
     assert.equal(deployment.spec.minReadySeconds, 10);
     assert.equal(deployment.spec.progressDeadlineSeconds, 600);
     assert.deepEqual(deployment.spec.strategy, {
       type: 'RollingUpdate',
       rollingUpdate: { maxUnavailable: 0, maxSurge: 1 },
     });
+    assert.deepEqual(deployment.spec.template.spec.topologySpreadConstraints, [
+      {
+        maxSkew: 1,
+        minDomains: 2,
+        topologyKey: 'topology.kubernetes.io/zone',
+        whenUnsatisfiable: 'DoNotSchedule',
+        labelSelector: {
+          matchLabels: {
+            'app.kubernetes.io/name': 'tixkit',
+            'app.kubernetes.io/instance': 'tixkit',
+            'app.kubernetes.io/component':
+              deployment.metadata.labels['app.kubernetes.io/component'],
+          },
+        },
+      },
+    ]);
     assert.match(
       deployment.spec.template.metadata.annotations['checksum/config'],
       /^[a-f0-9]{64}$/u,
@@ -176,6 +194,22 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   );
 });
 
+test('Chart refuses Kubernetes versions without stable minDomains scheduling', () => {
+  const unsupported = spawnSync('helm', ['template', 'tixkit', chart, '--kube-version', '1.29.9'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(unsupported.status, 0);
+  assert.match(unsupported.stderr, /requires kubeVersion: >=1\.30\.0-0/u);
+
+  const supported = spawnSync(
+    'helm',
+    ['template', 'tixkit', chart, '--kube-version', '1.30.0', '--values', evaluation],
+    { cwd: root, encoding: 'utf8' },
+  );
+  assert.equal(supported.status, 0, supported.stderr);
+});
+
 test('Production config changes deterministically roll every workload', () => {
   const base = resources(
     render(production, [
@@ -230,6 +264,10 @@ test('Production rejects availability settings that permit a single-instance out
     [
       ['availability.rollingUpdate.progressDeadlineSeconds=59'],
       'availability.rollingUpdate.progressDeadlineSeconds of at least 60',
+    ],
+    [
+      ['availability.topologySpread.minDomains=1'],
+      'availability.topologySpread.minDomains of at least 2',
     ],
   ]) {
     assert.throws(
