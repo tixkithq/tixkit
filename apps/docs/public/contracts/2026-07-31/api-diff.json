@@ -1,0 +1,60 @@
+{
+  "from": "2026-07-30",
+  "to": "2026-07-31",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 8
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/event-preparations",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/event-preparations/{actionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventPrepareChanges",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventPrepareProjection",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventPrepareResolvedChanges",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventPrepareAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventPrepareResult",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PreparedAgentEventPrepareAction",
+      "message": "A named schema was added."
+    }
+  ]
+}
