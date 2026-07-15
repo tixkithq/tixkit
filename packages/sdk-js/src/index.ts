@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-06';
+export const TIXKIT_API_VERSION = '2026-08-08';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -269,6 +269,62 @@ export type WorkspaceDashboardAction = {
   actionId: ReadinessActionId | null;
   requiredPermission: Permission | null;
   updatedAt: string | null;
+};
+export type DashboardActionSourceType = 'event_launch' | 'event_operations' | 'delivery_operations';
+export type DashboardActionReasonCode =
+  | 'event_unpublished'
+  | 'event_starting_soon'
+  | 'event_sales_paused'
+  | 'failed_exports';
+export type DashboardRemediationId =
+  | 'continue_event_setup'
+  | 'prepare_door_operations'
+  | 'review_paused_event'
+  | 'review_failed_exports';
+export type DashboardAction = {
+  id: string;
+  sourceType: DashboardActionSourceType;
+  resource: {
+    type: 'event';
+    organizationId: string;
+    brandId: string;
+    eventId: string;
+    eventVersion: number;
+    eventTitle: string;
+  };
+  severity: DashboardActionSeverity;
+  owner: DashboardActionOwner;
+  deadlineAt: string | null;
+  deadlinePolicy: 'none' | 'event_start';
+  overdue: boolean;
+  occurrenceCount: number;
+  reasonCode: DashboardActionReasonCode;
+  remediation: {
+    id: DashboardRemediationId;
+    readinessActionId: 'view_event' | 'configure_check_in' | null;
+    requiredPermission: 'events.write' | 'checkins.write' | 'reports.read' | null;
+    canRemediate: boolean;
+    availability: 'available' | 'permission_required' | 'unsupported';
+  };
+  staleness: {
+    state: 'current' | 'expired';
+    consistency: 'repeatable_read';
+    evaluatedAt: string;
+    expiresAt: string;
+    sourceUpdatedAt: string | null;
+    sourceVersion: number | null;
+    evidenceRevision: string;
+  };
+};
+export type DashboardActionFeed = {
+  tenantId: string;
+  organizationId: string;
+  brandId: string;
+  evaluationVersion: 1;
+  generatedAt: string;
+  expiresAt: string;
+  nextCursor: string | null;
+  actions: DashboardAction[];
 };
 export type EventLaunchReadiness = {
   tenantId: string;
@@ -4279,6 +4335,19 @@ class OrganizationResource {
   async readiness(organizationId: string, brandId: string): Promise<WorkspaceReadiness> {
     return this.client.request('GET', `/organizations/${organizationId}/readiness`, {
       params: { brandId },
+    });
+  }
+  async dashboardActions(
+    organizationId: string,
+    brandId: string,
+    options?: { limit?: number; cursor?: string },
+  ): Promise<DashboardActionFeed> {
+    return this.client.request('GET', `/organizations/${organizationId}/dashboard-actions`, {
+      params: {
+        brandId,
+        ...(options?.limit === undefined ? {} : { limit: String(options.limit) }),
+        ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+      },
     });
   }
   async create(input: {

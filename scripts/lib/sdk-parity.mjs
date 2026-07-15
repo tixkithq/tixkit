@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SDK_API_VERSION = '2026-08-06';
+export const SDK_API_VERSION = '2026-08-08';
 
 export const sdkParityCatalog = [
   {

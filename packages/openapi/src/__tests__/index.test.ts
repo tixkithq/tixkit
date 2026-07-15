@@ -122,7 +122,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-07');
+    expect(openApiSpec.info.version).toBe('2026-08-08');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -633,6 +633,7 @@ describe('openApiSpec', () => {
 
   it('documents workspace/event readiness, acknowledgements, and publish conflicts', () => {
     expect(openApiSpec.paths).toHaveProperty('/organizations/{organizationId}/readiness');
+    expect(openApiSpec.paths).toHaveProperty('/organizations/{organizationId}/dashboard-actions');
     expect(openApiSpec.paths).toHaveProperty('/events/{eventId}/launch-readiness');
     expect(openApiSpec.paths).toHaveProperty('/events/{eventId}/operational-health');
     expect(openApiSpec.paths).toHaveProperty('/events/{eventId}/setup-section');
@@ -641,6 +642,8 @@ describe('openApiSpec', () => {
     );
     expect(openApiSpec.components.schemas).toHaveProperty('WorkspaceReadiness');
     expect(openApiSpec.components.schemas).toHaveProperty('WorkspaceDashboardAction');
+    expect(openApiSpec.components.schemas).toHaveProperty('DashboardAction');
+    expect(openApiSpec.components.schemas).toHaveProperty('DashboardActionFeed');
     expect(openApiSpec.components.schemas.WorkspaceReadiness.properties).toHaveProperty(
       'actionFeed',
     );
@@ -648,6 +651,7 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas).toHaveProperty('ReadinessAcknowledgement');
     const readinessOperations = [
       openApiSpec.paths['/organizations/{organizationId}/readiness'].get,
+      openApiSpec.paths['/organizations/{organizationId}/dashboard-actions'].get,
       openApiSpec.paths['/events/{eventId}/launch-readiness'].get,
       openApiSpec.paths['/events/{eventId}/operational-health'].get,
       openApiSpec.paths['/events/{eventId}/setup-section'].put,
@@ -658,12 +662,23 @@ describe('openApiSpec', () => {
       ['events.read'],
       ['events.read'],
       ['events.read'],
+      ['events.read'],
       ['events.write'],
       ['events.write'],
       ['events.write'],
     ]);
     for (const operation of readinessOperations)
       expect(operation.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
+    expect(openApiSpec.components.schemas.DashboardAction.properties.reasonCode.enum).toEqual([
+      'event_unpublished',
+      'event_starting_soon',
+      'event_sales_paused',
+      'failed_exports',
+    ]);
+    expect(
+      openApiSpec.components.schemas.DashboardAction.properties.remediation.properties.availability
+        .enum,
+    ).toEqual(['available', 'permission_required', 'unsupported']);
     const launchExample = openApiSpec.components.schemas.EventLaunchReadiness.example;
     expect(launchExample.launchable).toBe(true);
     expect(launchExample.requiredBlockers).toEqual([]);

@@ -7,7 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
-const String tixkitApiVersion = '2026-08-06';
+const String tixkitApiVersion = '2026-08-08';
 
 enum TixkitScanOutcome {
   accepted,

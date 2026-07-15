@@ -194,6 +194,14 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-06 portable event content',
         routeId: 'apiMigration20260805To20260806',
       },
+      {
+        label: 'Adopt 2026-08-07 workspace actions',
+        routeId: 'apiMigration20260806To20260807',
+      },
+      {
+        label: 'Adopt 2026-08-08 dashboard actions',
+        routeId: 'apiMigration20260807To20260808',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

@@ -620,7 +620,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-07',
+    version: '2026-08-08',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -2592,6 +2592,209 @@ const rawOpenApiSpec = {
           'actionId',
           'requiredPermission',
           'updatedAt',
+        ],
+      },
+      DashboardAction: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string' },
+          sourceType: {
+            type: 'string',
+            enum: ['event_launch', 'event_operations', 'delivery_operations'],
+          },
+          resource: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              type: { type: 'string', enum: ['event'] },
+              organizationId: { type: 'string' },
+              brandId: { type: 'string' },
+              eventId: { type: 'string' },
+              eventVersion: { type: 'integer', minimum: 1 },
+              eventTitle: { type: 'string' },
+            },
+            required: [
+              'type',
+              'organizationId',
+              'brandId',
+              'eventId',
+              'eventVersion',
+              'eventTitle',
+            ],
+          },
+          severity: {
+            type: 'string',
+            enum: ['critical', 'high', 'medium', 'low'],
+          },
+          owner: {
+            type: 'string',
+            enum: ['organizer', 'finance', 'marketing', 'support', 'door_operations'],
+          },
+          deadlineAt: { type: ['string', 'null'], format: 'date-time' },
+          deadlinePolicy: { type: 'string', enum: ['none', 'event_start'] },
+          overdue: { type: 'boolean' },
+          occurrenceCount: { type: 'integer', minimum: 1 },
+          reasonCode: {
+            type: 'string',
+            enum: [
+              'event_unpublished',
+              'event_starting_soon',
+              'event_sales_paused',
+              'failed_exports',
+            ],
+          },
+          remediation: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              id: {
+                type: 'string',
+                enum: [
+                  'continue_event_setup',
+                  'prepare_door_operations',
+                  'review_paused_event',
+                  'review_failed_exports',
+                ],
+              },
+              readinessActionId: {
+                type: ['string', 'null'],
+                enum: ['view_event', 'configure_check_in', null],
+              },
+              requiredPermission: {
+                type: ['string', 'null'],
+                enum: ['events.write', 'checkins.write', 'reports.read', null],
+              },
+              canRemediate: { type: 'boolean' },
+              availability: {
+                type: 'string',
+                enum: ['available', 'permission_required', 'unsupported'],
+              },
+            },
+            required: [
+              'id',
+              'readinessActionId',
+              'requiredPermission',
+              'canRemediate',
+              'availability',
+            ],
+          },
+          staleness: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              state: { type: 'string', enum: ['current', 'expired'] },
+              consistency: { type: 'string', enum: ['repeatable_read'] },
+              evaluatedAt: { type: 'string', format: 'date-time' },
+              expiresAt: { type: 'string', format: 'date-time' },
+              sourceUpdatedAt: {
+                type: ['string', 'null'],
+                format: 'date-time',
+              },
+              sourceVersion: { type: ['integer', 'null'], minimum: 1 },
+              evidenceRevision: {
+                type: 'string',
+                pattern: '^[0-9a-f]{64}$',
+              },
+            },
+            required: [
+              'state',
+              'consistency',
+              'evaluatedAt',
+              'expiresAt',
+              'sourceUpdatedAt',
+              'sourceVersion',
+              'evidenceRevision',
+            ],
+          },
+        },
+        required: [
+          'id',
+          'sourceType',
+          'resource',
+          'severity',
+          'owner',
+          'deadlineAt',
+          'deadlinePolicy',
+          'overdue',
+          'occurrenceCount',
+          'reasonCode',
+          'remediation',
+          'staleness',
+        ],
+      },
+      DashboardActionFeed: {
+        type: 'object',
+        additionalProperties: false,
+        example: {
+          tenantId: 'tnt_example',
+          organizationId: 'org_example',
+          brandId: 'brd_example',
+          evaluationVersion: 1,
+          generatedAt: '2026-08-08T12:00:00.000Z',
+          expiresAt: '2026-08-08T12:05:00.000Z',
+          nextCursor: null,
+          actions: [
+            {
+              id: 'event:evt_example:unpublished',
+              sourceType: 'event_launch',
+              resource: {
+                type: 'event',
+                organizationId: 'org_example',
+                brandId: 'brd_example',
+                eventId: 'evt_example',
+                eventVersion: 1,
+                eventTitle: 'Example event',
+              },
+              severity: 'high',
+              owner: 'organizer',
+              deadlineAt: '2026-08-10T18:00:00.000Z',
+              deadlinePolicy: 'event_start',
+              overdue: false,
+              occurrenceCount: 1,
+              reasonCode: 'event_unpublished',
+              remediation: {
+                id: 'continue_event_setup',
+                readinessActionId: 'view_event',
+                requiredPermission: 'events.write',
+                canRemediate: true,
+                availability: 'available',
+              },
+              staleness: {
+                state: 'current',
+                consistency: 'repeatable_read',
+                evaluatedAt: '2026-08-08T12:00:00.000Z',
+                expiresAt: '2026-08-08T12:05:00.000Z',
+                sourceUpdatedAt: '2026-08-08T11:45:00.000Z',
+                sourceVersion: 1,
+                evidenceRevision:
+                  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              },
+            },
+          ],
+        },
+        properties: {
+          tenantId: { type: 'string' },
+          organizationId: { type: 'string' },
+          brandId: { type: 'string' },
+          evaluationVersion: { type: 'integer', enum: [1] },
+          generatedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          nextCursor: { type: ['string', 'null'] },
+          actions: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DashboardAction' },
+          },
+        },
+        required: [
+          'tenantId',
+          'organizationId',
+          'brandId',
+          'evaluationVersion',
+          'generatedAt',
+          'expiresAt',
+          'nextCursor',
+          'actions',
         ],
       },
       EventLaunchReadiness: {
@@ -5498,7 +5701,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-06, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-08, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5545,7 +5748,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-06, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-08, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5652,7 +5855,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-06 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-08 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5689,7 +5892,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-06 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-08 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -7975,7 +8178,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-06 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-08 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8032,7 +8235,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-06 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-08 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -9214,6 +9417,53 @@ const rawOpenApiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/WorkspaceReadiness' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/organizations/{organizationId}/dashboard-actions': {
+      get: {
+        summary: 'Get a stable page of unresolved organizer dashboard actions',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        'x-required-permissions': ['events.read'],
+        parameters: [
+          {
+            name: 'brandId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description:
+              'Opaque, authenticated five-minute cursor bound to the evaluation scope and source revision.',
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'A repeatable-read snapshot page of unresolved dashboard actions',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DashboardActionFeed' },
+              },
+            },
+          },
+          '400': {
+            description: 'Invalid or expired cursor',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
               },
             },
           },

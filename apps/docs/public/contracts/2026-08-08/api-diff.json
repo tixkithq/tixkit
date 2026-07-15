@@ -1,0 +1,30 @@
+{
+  "from": "2026-08-07",
+  "to": "2026-08-08",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 3
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /organizations/{organizationId}/dashboard-actions",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.DashboardAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.DashboardActionFeed",
+      "message": "A named schema was added."
+    }
+  ]
+}

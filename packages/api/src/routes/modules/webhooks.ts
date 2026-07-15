@@ -25,6 +25,7 @@ import {
 import {
   createWebhookTestPayload,
   isWebhookTestPayload,
+  WEBHOOK_TEST_API_VERSION,
   WEBHOOK_TEST_EVENT_TYPE,
 } from '../../services/webhook-test.js';
 
@@ -251,7 +252,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       });
       try {
         await temporalClient.startWebhookDelivery({
-          apiVersion: '2026-08-06',
+          apiVersion: WEBHOOK_TEST_API_VERSION,
           endpointId,
           eventId: event.id,
           eventType: WEBHOOK_TEST_EVENT_TYPE,
@@ -303,7 +304,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     await Promise.all(
       endpoints.map((endpoint) =>
         temporalClient.startWebhookDelivery({
-          apiVersion: '2026-08-06',
+          apiVersion: WEBHOOK_TEST_API_VERSION,
           endpointId: endpoint.id,
           eventId,
           eventType: event.type as string,
@@ -369,7 +370,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
 
     const payload = syntheticTest ? createWebhookTestPayload(endpointId) : eventPayload;
     await temporalClient.startWebhookDelivery({
-      apiVersion: '2026-08-06',
+      apiVersion: WEBHOOK_TEST_API_VERSION,
       endpointId,
       eventId,
       eventType,

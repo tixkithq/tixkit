@@ -1,0 +1,30 @@
+---
+title: API migration from 2026-08-06 to 2026-08-07
+description: Adopt authoritative workspace readiness actions.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-08-07
+prerequisites:
+  - An integration using API version 2026-08-06
+related:
+  - /reference/api-versions
+  - /platform
+---
+
+API version `2026-08-07` adds an optional `actionFeed` to organization workspace-readiness
+responses. The retained `2026-08-06` contract remains available.
+
+## Render server-owned setup actions
+
+Each action has a stable workspace ID, closed step and reason-code enums, severity, owner, optional
+deadline, status, remediation action, required permission, and source update time. Preserve the
+server order. Do not infer completion or fabricate links when the action is blocked, has no
+remediation, or the principal lacks the required permission.
+
+Older servers may omit `actionFeed`. Clients must treat an absent feed as unavailable evidence and
+offer refresh or version-upgrade guidance; they must not interpret it as an empty, completed
+workspace.

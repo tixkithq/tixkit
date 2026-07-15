@@ -535,6 +535,24 @@ describe('TixkitClient', () => {
     );
   });
 
+  it('gets a cursor-paginated server dashboard action feed', async () => {
+    const fetchMock = mockFetch(200, { evaluationVersion: 1, nextCursor: null, actions: [] });
+    const client = new TixkitClient({
+      apiKey: '***********',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+
+    await client.organizations.dashboardActions('org_1', 'brd_1', {
+      limit: 25,
+      cursor: 'cursor_1',
+    });
+
+    expect(getCall(fetchMock).url).toBe(
+      'https://api.test/v1/organizations/org_1/dashboard-actions?brandId=brd_1&limit=25&cursor=cursor_1',
+    );
+  });
+
   it('constructs a public client without an API key', () => {
     const client = new TixkitClient({ apiBaseUrl: 'https://api.test' });
     expect(client.checkout).toBeDefined();
@@ -3698,7 +3716,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-06',
+        'X-Tixkit-Version': '2026-08-08',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

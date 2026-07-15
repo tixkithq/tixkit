@@ -1,0 +1,48 @@
+---
+title: API migration from 2026-08-07 to 2026-08-08
+description: Adopt paginated, freshness-bound organizer dashboard actions.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-08-08
+prerequisites:
+  - An integration using API version 2026-08-07
+related:
+  - /reference/api-versions
+  - /platform
+---
+
+API version `2026-08-08` adds
+`GET /v1/organizations/{organizationId}/dashboard-actions`. The retained `2026-08-07` contract
+remains available.
+
+## Consume one evaluated snapshot at a time
+
+Pass the required `brandId` and an optional limit from 1 to 50. Render actions in response order and
+use `nextCursor` unchanged to load another page. A cursor binds the evaluation time, tenant,
+organization, brand, principal event scope, and source revision. It expires after five minutes and
+fails closed if event, check-in, or failed-export evidence changes. On either error, discard
+accumulated pages and request a fresh first page.
+
+Actions currently cover unresolved event publication, paused sales, missing check-in configuration
+for an upcoming published event, and failed report exports. Deadlines are event starts or `null`;
+the API does not invent operational SLAs. Each action includes an evidence revision, event version,
+remediation availability, required permission, and explicit owner. Treat `permission_required` as a
+handoff and `unsupported` as review-only—never synthesize a mutation.
+
+The endpoint requires `events.read` and enforces tenant, organization, brand, and event scopes on
+both event and export evidence. SDK clients pinned to `2026-08-08` expose the operation as
+`organizations.dashboardActions`.
+
+Self-Hosted operators must configure one shared `DASHBOARD_CURSOR_SIGNING_KEY` of at least 32
+random characters on every API replica before upgrading. Rotating the key invalidates outstanding
+cursors safely; clients refresh from the first page.
+
+Database migration `0087_dashboard_action_revisions` creates a one-row-per-brand revision ledger
+and database triggers for events, check-in lists, and failed export jobs. The API uses that indexed
+ledger to invalidate changed snapshots without scanning or materializing the full brand history.
+Apply the migration before starting `2026-08-08` API replicas. Compact upgrades generate a missing
+cursor key and apply the migration automatically; existing strong keys are preserved.
