@@ -1,0 +1,30 @@
+{
+  "from": "2026-07-25",
+  "to": "2026-07-26",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 3
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/actions/{actionId}/executions/{executionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentExecutionAuditRecord",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentExecutionEvidence",
+      "message": "A named schema was added."
+    }
+  ]
+}
