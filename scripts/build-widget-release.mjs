@@ -10,7 +10,7 @@ import {
   copyFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const packageJson = JSON.parse(readFileSync(join(root, 'packages/widget/package.json'), 'utf8'));
@@ -57,6 +57,44 @@ function hash(bytes, algorithm) {
   return createHash(algorithm).update(bytes).digest('base64');
 }
 
+function normalizeSourceMap(mapPath) {
+  const sourceMap = JSON.parse(readFileSync(mapPath, 'utf8'));
+  if (!Array.isArray(sourceMap.sources) || sourceMap.sources.length === 0) {
+    throw new Error('Widget source map must contain source paths.');
+  }
+
+  sourceMap.sourceRoot = 'tixkit:///';
+  sourceMap.sources = sourceMap.sources.map((source) => {
+    if (typeof source !== 'string' || source.length === 0) {
+      throw new Error('Widget source map contains an invalid source path.');
+    }
+    const absoluteSource = resolve(dirname(mapPath), source);
+    const repositoryPath = relative(root, absoluteSource);
+    if (
+      repositoryPath.length === 0 ||
+      repositoryPath === '..' ||
+      repositoryPath.startsWith(`..${sep}`) ||
+      isAbsolute(repositoryPath)
+    ) {
+      throw new Error(`Widget source map escapes the repository: ${source}`);
+    }
+    const canonicalPath = repositoryPath.split(sep).join('/');
+    if (
+      !canonicalPath.startsWith('packages/widget/') &&
+      !canonicalPath.startsWith('packages/embed-core/')
+    ) {
+      throw new Error(`Widget source map contains an unexpected source: ${canonicalPath}`);
+    }
+    return canonicalPath;
+  });
+
+  const canonicalMap = `${JSON.stringify(sourceMap)}\n`;
+  if (canonicalMap.includes(root)) {
+    throw new Error('Widget source map contains the local checkout path.');
+  }
+  writeFileSync(mapPath, canonicalMap);
+}
+
 function build(directory) {
   mkdirSync(directory, { recursive: true });
   const file = `tixkit-widget-${version}.js`;
@@ -70,10 +108,12 @@ function build(directory) {
       '--format=esm',
       '--sourcemap=external',
       '--sources-content=true',
+      '--alias:@tixkit/embed-core=./packages/embed-core/src/index.ts',
       `--outfile=${output}`,
     ],
     { cwd: root, stdio: 'inherit', env: { ...process.env, TZ: 'UTC' } },
   );
+  normalizeSourceMap(`${output}.map`);
   return { file, output, map: `${output}.map` };
 }
 
