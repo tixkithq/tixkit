@@ -1,0 +1,578 @@
+{
+  "apiVersion": "2026-07-30",
+  "events": [
+    {
+      "type": "order.created",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "order.created"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "orderId",
+              "eventId",
+              "checkoutSessionId"
+            ],
+            "properties": {
+              "orderId": {
+                "type": "string"
+              },
+              "eventId": {
+                "type": "string"
+              },
+              "checkoutSessionId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "order.paid",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "order.paid"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "orderId",
+              "eventId",
+              "checkoutSessionId"
+            ],
+            "properties": {
+              "orderId": {
+                "type": "string"
+              },
+              "eventId": {
+                "type": "string"
+              },
+              "checkoutSessionId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "order.refunded",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "order.refunded"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "orderId",
+              "eventId",
+              "checkoutSessionId"
+            ],
+            "properties": {
+              "orderId": {
+                "type": "string"
+              },
+              "eventId": {
+                "type": "string"
+              },
+              "checkoutSessionId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "order.disputed",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "order.disputed"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "orderId",
+              "eventId",
+              "checkoutSessionId"
+            ],
+            "properties": {
+              "orderId": {
+                "type": "string"
+              },
+              "eventId": {
+                "type": "string"
+              },
+              "checkoutSessionId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "ticket.issued",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "ticket.issued"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "orderId",
+              "ticketIds"
+            ],
+            "properties": {
+              "orderId": {
+                "type": "string"
+              },
+              "ticketIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "ticket.checked_in",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "ticket.checked_in"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "ticketId",
+              "eventId",
+              "checkInListId"
+            ],
+            "properties": {
+              "ticketId": {
+                "type": "string"
+              },
+              "eventId": {
+                "type": "string"
+              },
+              "checkInListId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "attendee.updated",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "attendee.updated"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "attendeeId",
+              "eventId"
+            ],
+            "properties": {
+              "attendeeId": {
+                "type": "string"
+              },
+              "eventId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "event.published",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "event.published"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "eventId"
+            ],
+            "properties": {
+              "eventId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "event.cancelled",
+      "subscribable": true,
+      "test": false,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "apiVersion",
+          "createdAt",
+          "tenantId",
+          "organizationId",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "event.cancelled"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "eventId"
+            ],
+            "properties": {
+              "eventId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "test.ping",
+      "subscribable": false,
+      "test": true,
+      "delivery": "at-least-once",
+      "ordering": "not-guaranteed",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "test",
+          "apiVersion",
+          "createdAt",
+          "data"
+        ],
+        "properties": {
+          "type": {
+            "const": "test.ping"
+          },
+          "test": {
+            "const": true
+          },
+          "apiVersion": {
+            "const": "2026-07-30"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "endpointId"
+            ],
+            "properties": {
+              "endpointId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
