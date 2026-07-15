@@ -150,7 +150,7 @@ export function EventSettingsView({ eventId }: { eventId: string }) {
             <CardTitle>Media</CardTitle>
           </CardHeader>
           <CardContent>
-            <EventMediaSettings event={event} onSaved={() => void refetch()} />
+            <EventMediaSettings event={event} onChanged={() => void refetch()} />
           </CardContent>
         </Card>
       </section>

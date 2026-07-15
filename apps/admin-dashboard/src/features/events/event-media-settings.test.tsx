@@ -118,21 +118,17 @@ describe('EventMediaSettings', () => {
       },
     });
 
-    const view = render(<EventMediaSettings event={event} onSaved={vi.fn()} />);
+    const onChanged = vi.fn();
+    const view = render(<EventMediaSettings event={event} onChanged={onChanged} />);
     expect(await view.findByAltText('Crowd under stage lights')).toHaveAttribute(
       'src',
       '/v1/events/evt_1/media/renditions/emr_card',
     );
     expect(view.getByRole('slider', { name: 'cover vertical focal point' })).toHaveValue('0.4');
 
-    fireEvent.change(
-      view.getByLabelText('Alt text for next upload', {
-        selector: '#event-social-alt',
-      }),
-      {
-        target: { value: 'Social card for Launch Night' },
-      },
-    );
+    fireEvent.change(view.getByLabelText('Social alt text for next upload'), {
+      target: { value: 'Social card for Launch Night' },
+    });
     const file = new File(['image'], 'social.webp', { type: 'image/webp' });
     fireEvent.change(view.getByLabelText('Upload social'), {
       target: { files: [file] },
@@ -160,5 +156,100 @@ describe('EventMediaSettings', () => {
     fireEvent.click(removeCover);
     await waitFor(() => expect(api.removeEventMedia).toHaveBeenCalledWith('evt_1', 'cover'));
     expect(view.queryByAltText('Crowd under stage lights')).not.toBeInTheDocument();
+    expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps legacy image metadata read-only and never persists signed upload URLs', async () => {
+    api.listEventMedia.mockResolvedValue({ ok: true, data: [] });
+    const legacyEvent = {
+      ...event,
+      coverImageUrl: 'https://storage.example.test/signed-cover?expires=900',
+      seo: { imageUrl: 'https://storage.example.test/signed-social?expires=900' },
+      seoUseCoverImage: false,
+    } as AdminEventDetail;
+
+    const view = render(<EventMediaSettings event={legacyEvent} onChanged={vi.fn()} />);
+
+    expect(
+      await view.findByRole('complementary', { name: 'Legacy event media' }),
+    ).toHaveTextContent('read-only here');
+    expect(view.queryByLabelText('Upload event cover')).not.toBeInTheDocument();
+    expect(view.queryByLabelText('Social image')).not.toBeInTheDocument();
+    expect(view.queryByRole('button', { name: 'Save media' })).not.toBeInTheDocument();
+    expect(
+      view.queryByRole('img', { name: /event cover preview|social sharing preview/i }),
+    ).toBeNull();
+    expect(api.updateEvent).not.toHaveBeenCalled();
+    expect(api.getEvent).not.toHaveBeenCalled();
+  });
+
+  it('requires alt text before creating a structured role upload', async () => {
+    api.listEventMedia.mockResolvedValue({ ok: true, data: [] });
+    const view = render(<EventMediaSettings event={event} onChanged={vi.fn()} />);
+    await waitFor(() => expect(api.listEventMedia).toHaveBeenCalledWith('evt_1'));
+
+    fireEvent.change(view.getByLabelText('Cover alt text for next upload'), {
+      target: { value: '   ' },
+    });
+    fireEvent.change(view.getByLabelText('Upload cover'), {
+      target: { files: [new File(['image'], 'cover.webp', { type: 'image/webp' })] },
+    });
+
+    expect(await view.findByRole('alert')).toHaveTextContent(
+      'Add alt text before uploading the cover image.',
+    );
+    expect(api.uploadArtifact).not.toHaveBeenCalled();
+    expect(api.attachEventMedia).not.toHaveBeenCalled();
+  });
+
+  it('recovers controls and preserves the asset when removal rejects unexpectedly', async () => {
+    api.listEventMedia.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'ema_social',
+          role: 'social',
+          original: {
+            uploadArtifactId: 'upl_social',
+            width: 1200,
+            height: 630,
+            format: 'webp',
+            checksumSha256: 'd'.repeat(64),
+            sizeBytes: 80,
+          },
+          focalPoint: { x: 0.5, y: 0.5 },
+          altText: 'Launch Night social card',
+          renditions: [],
+        },
+      ],
+    });
+    api.removeEventMedia.mockRejectedValue(new Error('Connection interrupted'));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const view = render(<EventMediaSettings event={event} onChanged={vi.fn()} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Remove social' }));
+
+    expect(await view.findByRole('alert')).toHaveTextContent('Connection interrupted');
+    expect(view.getByLabelText('Social alt text for next upload')).toHaveValue(
+      'Launch Night social card',
+    );
+    expect(view.getByLabelText('Upload social')).toBeEnabled();
+    expect(view.getByRole('button', { name: 'Remove social' })).toBeEnabled();
+  });
+
+  it('fails closed and retries when the initial media request rejects', async () => {
+    api.listEventMedia
+      .mockRejectedValueOnce(new Error('Media service unavailable'))
+      .mockResolvedValueOnce({ ok: true, data: [] });
+    const view = render(<EventMediaSettings event={event} onChanged={vi.fn()} />);
+
+    expect(await view.findByRole('alert')).toHaveTextContent('Media service unavailable');
+    expect(view.getByLabelText('Upload cover')).toBeDisabled();
+    fireEvent.click(view.getByRole('button', { name: 'Retry loading media' }));
+
+    await waitFor(() => expect(api.listEventMedia).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(view.getByLabelText('Upload cover')).toBeEnabled());
+    expect(view.queryByRole('alert')).not.toBeInTheDocument();
+    expect(view.getByText(/JPEG, PNG, and WebP files up to 8 MB/)).toBeInTheDocument();
   });
 });
