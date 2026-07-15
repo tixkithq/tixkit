@@ -364,7 +364,8 @@ describe.sequential.each(driverCases)('import platform: $driver', ({ driver, url
       eventKey: 'commit:progress:event:1',
       type: 'commit.progress',
       severity: 'info',
-      message: 'Replay must not duplicate',
+      message: 'Processed one row',
+      data: { processed: 1 },
     });
     const reconciled = await imports.appendIdempotentEvent({
       tenantId: tenant.id,
