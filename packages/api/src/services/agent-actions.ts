@@ -11,6 +11,7 @@ import {
   type AgentApproval,
   type AgentDelegationGrant,
   type AgentExecution,
+  type AgentExecutionEvidence,
   type AgentPrincipal,
 } from '@tixkit/agent-protocol';
 import { AgentExecutionRepository, sql, type Database } from '@tixkit/db';
@@ -425,6 +426,24 @@ export class AgentActionService {
       .where('id', '=', input.actionId)
       .executeTakeFirst();
     return row ? this.fromRow(row) : undefined;
+  }
+
+  async getExecutionForAgent(input: {
+    tenantId: string;
+    agentPrincipalId: string;
+    actionId: string;
+    executionId: string;
+  }): Promise<AgentExecutionEvidence | undefined> {
+    return new AgentExecutionRepository(this.db).getExecutionEvidence(input);
+  }
+
+  async getExecutionForSponsor(input: {
+    tenantId: string;
+    sponsorPrincipalId: string;
+    actionId: string;
+    executionId: string;
+  }): Promise<AgentExecutionEvidence | undefined> {
+    return new AgentExecutionRepository(this.db).getExecutionEvidence(input);
   }
 
   async getForSponsor(input: {

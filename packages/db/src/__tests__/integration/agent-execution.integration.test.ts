@@ -817,6 +817,296 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     ).rejects.toThrow(/immutable/u);
   });
 
+  it('returns contract-valid evidence only after exact scope and rejects corrupt or excessive state', async () => {
+    const repository = new AgentExecutionRepository(db);
+    const exactPrincipal = {
+      ...principal(tenantId),
+      id: `agt_${'a'.repeat(48)}`,
+    };
+    const exactDelegation = {
+      ...delegation(tenantId),
+      id: `dlg_${'b'.repeat(48)}`,
+      agentPrincipalId: exactPrincipal.id,
+    };
+    await repository.registerPrincipal(exactPrincipal, controlAudit('register_evidence'));
+    await repository.grantDelegation(exactDelegation, controlAudit('grant_evidence'));
+    const exactApproval = {
+      ...approval(tenantId),
+      id: `apr_${'c'.repeat(48)}`,
+      actionDigest: 'd'.repeat(64),
+    };
+    await persistApproval(db, exactApproval);
+    const exactExecution: AgentExecution = {
+      ...execution(tenantId, `exec_${'e'.repeat(48)}`),
+      actionId: `act_${'f'.repeat(48)}`,
+      actionDigest: exactApproval.actionDigest,
+      agentPrincipalId: exactPrincipal.id,
+      delegationGrantId: exactDelegation.id,
+      approvalId: exactApproval.id,
+      idempotencyKey: '1'.repeat(64),
+      requestFingerprint: '2'.repeat(64),
+    };
+    await repository.reserveAndConsume({
+      execution: exactExecution,
+      approval: exactApproval,
+      requiredApproverPermission: 'events:write',
+      now: new Date().toISOString(),
+      audit: [
+        audit(exactExecution, `aaud_${'1'.repeat(48)}`, 'prepared'),
+        audit(exactExecution, `aaud_${'2'.repeat(48)}`, 'authorized'),
+      ],
+    });
+    const claimed = await repository.claim({
+      tenantId,
+      executionId: exactExecution.id,
+      workerId: 'worker_evidence',
+      audit: audit(exactExecution, `aaud_${'3'.repeat(48)}`, 'started'),
+    });
+    expect(claimed).toBeTruthy();
+    const completed = {
+      ...claimed!,
+      state: 'succeeded' as const,
+      result: { resourceId: scopedEventId, resourceVersion: 5, status: 'published' as const },
+    };
+    await expect(
+      repository.complete({
+        execution: completed,
+        expectedRevision: {
+          fenceToken: claimed!.fenceToken,
+          leaseOwner: claimed!.leaseOwner!,
+        },
+        audit: audit(completed, `aaud_${'4'.repeat(48)}`, 'succeeded'),
+      }),
+    ).resolves.toBe(true);
+
+    const agentScope = {
+      tenantId,
+      executionId: exactExecution.id,
+      actionId: exactExecution.actionId,
+      agentPrincipalId: exactPrincipal.id,
+    };
+    await expect(repository.getExecutionEvidence(agentScope)).resolves.toMatchObject({
+      execution: { id: exactExecution.id, state: 'succeeded' },
+      audit: [
+        { phase: 'prepared' },
+        { phase: 'authorized' },
+        { phase: 'started' },
+        { phase: 'succeeded' },
+      ],
+    });
+    await expect(
+      repository.getExecutionEvidence({
+        tenantId,
+        executionId: exactExecution.id,
+        actionId: exactExecution.actionId,
+        sponsorPrincipalId: 'user_actor',
+      }),
+    ).resolves.toBeTruthy();
+    await expect(
+      repository.getExecutionEvidence({
+        ...agentScope,
+        agentPrincipalId: `agt_${'9'.repeat(48)}`,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      repository.getExecutionEvidence({
+        ...agentScope,
+        actionId: `act_${'9'.repeat(48)}`,
+      }),
+    ).resolves.toBeUndefined();
+
+    const raceApproval = {
+      ...approval(tenantId),
+      id: `apr_${'5'.repeat(48)}`,
+      actionDigest: '6'.repeat(64),
+    };
+    await persistApproval(db, raceApproval);
+    const raceExecution: AgentExecution = {
+      ...exactExecution,
+      id: `exec_${'7'.repeat(48)}`,
+      actionId: `act_${'8'.repeat(48)}`,
+      actionDigest: raceApproval.actionDigest,
+      approvalId: raceApproval.id,
+      idempotencyKey: '3'.repeat(64),
+      requestFingerprint: '4'.repeat(64),
+      state: 'reserved',
+      fenceToken: 0,
+      result: undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await repository.reserveAndConsume({
+      execution: raceExecution,
+      approval: raceApproval,
+      requiredApproverPermission: 'events:write',
+      now: new Date().toISOString(),
+      audit: [
+        audit(raceExecution, `aaud_${'5'.repeat(48)}`, 'prepared'),
+        audit(raceExecution, `aaud_${'6'.repeat(48)}`, 'authorized'),
+      ],
+    });
+    const raceScope = {
+      tenantId,
+      executionId: raceExecution.id,
+      actionId: raceExecution.actionId,
+      agentPrincipalId: exactPrincipal.id,
+    };
+    let inspectionSettled = false;
+    let inspection: Promise<Awaited<ReturnType<typeof repository.getExecutionEvidence>>> | undefined;
+    await db.transaction().execute(async (tx) => {
+      await tx
+        .selectFrom('agent_executions')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', raceExecution.id)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      inspection = repository.getExecutionEvidence(raceScope).finally(() => {
+        inspectionSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(inspectionSettled).toBe(false);
+      const now = new Date();
+      await tx
+        .updateTable('agent_executions')
+        .set({
+          state: 'running',
+          fence_token: 1,
+          lease_owner: 'worker_evidence_race',
+          lease_expires_at: new Date(now.getTime() + 300_000),
+          updated_at: now,
+        })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', raceExecution.id)
+        .executeTakeFirstOrThrow();
+      await tx
+        .insertInto('agent_audit_events')
+        .values({
+          id: `aaud_${'7'.repeat(48)}`,
+          tenant_id: tenantId,
+          execution_id: raceExecution.id,
+          agent_principal_id: raceExecution.agentPrincipalId,
+          sponsor_principal_id: raceExecution.sponsorPrincipalId,
+          delegation_grant_id: raceExecution.delegationGrantId,
+          action_id: raceExecution.actionId,
+          action_digest: raceExecution.actionDigest,
+          plan_sha256: null,
+          approval_id: raceExecution.approvalId,
+          phase: 'started',
+          idempotency_key: raceExecution.idempotencyKey,
+          resource_version: raceExecution.resourceVersion,
+          occurred_at: now,
+          reason_codes: '[]',
+          immutable: true,
+        })
+        .execute();
+    });
+    await expect(inspection!).resolves.toMatchObject({
+      execution: { id: raceExecution.id, state: 'running', fenceToken: 1 },
+      audit: [{ phase: 'prepared' }, { phase: 'authorized' }, { phase: 'started' }],
+    });
+    await db
+      .updateTable('agent_executions')
+      .set({
+        state: 'reserved',
+        fence_token: 0,
+        lease_owner: null,
+        lease_expires_at: null,
+        updated_at: new Date(),
+      })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', raceExecution.id)
+      .execute();
+    await expect(repository.getExecutionEvidence(raceScope)).rejects.toThrow(
+      'AGENT_AUDIT_SEQUENCE_INVALID',
+    );
+
+    await db
+      .updateTable('agent_executions')
+      .set({ state: 'unexpected' })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', exactExecution.id)
+      .execute();
+    await expect(repository.getExecutionEvidence(agentScope)).rejects.toThrow(
+      'AGENT_EXECUTION_EVIDENCE_INVALID',
+    );
+    await expect(
+      repository.getExecutionEvidence({
+        ...agentScope,
+        agentPrincipalId: `agt_${'9'.repeat(48)}`,
+      }),
+    ).resolves.toBeUndefined();
+    await db
+      .updateTable('agent_executions')
+      .set({ state: 'succeeded', result: null })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', exactExecution.id)
+      .execute();
+    await expect(repository.getExecutionEvidence(agentScope)).rejects.toThrow(
+      'AGENT_EXECUTION_STATE_INVALID',
+    );
+    await db
+      .updateTable('agent_executions')
+      .set({
+        state: 'succeeded',
+        result: JSON.stringify({ ...completed.result, internalSecret: 'must-not-escape' }),
+      })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', exactExecution.id)
+      .execute();
+    await expect(repository.getExecutionEvidence(agentScope)).rejects.toThrow(
+      'AGENT_EXECUTION_RESULT_INVALID',
+    );
+    await db
+      .updateTable('agent_executions')
+      .set({ state: 'compensated', result: null, failure_code: 'BAD_COMPENSATION' })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', exactExecution.id)
+      .execute();
+    await expect(repository.getExecutionEvidence(agentScope)).rejects.toThrow(
+      'AGENT_EXECUTION_STATE_INVALID',
+    );
+    await db
+      .updateTable('agent_executions')
+      .set({
+        state: 'succeeded',
+        result: JSON.stringify(completed.result),
+        failure_code: null,
+      })
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', exactExecution.id)
+      .execute();
+
+    const extraAudit = Array.from({ length: 97 }, (_, index) => ({
+      id: `aaud_${(index + 10).toString(16).padStart(48, '0')}`,
+      tenant_id: tenantId,
+      execution_id: exactExecution.id,
+      agent_principal_id: exactExecution.agentPrincipalId,
+      sponsor_principal_id: exactExecution.sponsorPrincipalId,
+      delegation_grant_id: exactExecution.delegationGrantId,
+      action_id: exactExecution.actionId,
+      action_digest: exactExecution.actionDigest,
+      plan_sha256: null,
+      approval_id: exactExecution.approvalId,
+      phase: 'started',
+      idempotency_key: exactExecution.idempotencyKey,
+      resource_version: exactExecution.resourceVersion,
+      occurred_at: new Date(completed.updatedAt),
+      reason_codes: '[]',
+      immutable: true,
+    }));
+    await db.insertInto('agent_audit_events').values(extraAudit).execute();
+    await expect(repository.getExecutionEvidence(agentScope)).rejects.toThrow(
+      'AGENT_AUDIT_LIMIT_EXCEEDED',
+    );
+    await expect(
+      repository.getExecutionEvidence({
+        ...agentScope,
+        agentPrincipalId: `agt_${'9'.repeat(48)}`,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('blocks claims after approval and delegation revocation', async () => {
     const repository = new AgentExecutionRepository(db);
     const revokedApproval = { ...approval(tenantId), id: 'approval_revoked' };

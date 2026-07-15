@@ -6,6 +6,8 @@ import type {
   AgentCapability,
   AgentDelegationGrant,
   AgentExecution,
+  AgentExecutionAuditRecord,
+  AgentExecutionEvidence,
   AgentExecutionStore,
   AgentPrincipal,
 } from '@tixkit/agent-protocol';
@@ -25,7 +27,16 @@ type Executor = Kysely<DB> | Transaction<DB>;
 const LEASE_MILLISECONDS = 5 * 60 * 1000;
 const CONTROL_TOKEN = /^[A-Z0-9_]{3,64}$/u;
 const CONTROL_ID = /^[a-z0-9][a-z0-9_-]{1,62}$/u;
+const EXECUTION_ID = /^exec_[a-f0-9]{48}$/u;
+const ACTION_ID = /^act_[a-f0-9]{48}$/u;
+const AGENT_ID = /^agt_[a-f0-9]{48}$/u;
+const DELEGATION_ID = /^dlg_[a-f0-9]{48}$/u;
+const APPROVAL_ID = /^apr_[a-f0-9]{48}$/u;
+const AUDIT_ID = /^aaud_[a-f0-9]{48}$/u;
+const SHA256 = /^[a-f0-9]{64}$/u;
+const FAILURE_CODE = /^[A-Z0-9_]{3,64}$/u;
 const MAX_DELEGATION_TTL_MILLISECONDS = 30 * 24 * 60 * 60 * 1000;
+const MAX_EXECUTION_AUDIT_RECORDS = 100;
 
 function delegationPermissionSnapshot(capabilities: readonly AgentCapability[]): string[] {
   const permissions = new Set<string>();
@@ -174,6 +185,124 @@ function toExecution(row: Selectable<DB['agent_executions']>): AgentExecution {
     ...(row.failure_code === null ? {} : { failureCode: row.failure_code }),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
+  };
+}
+
+function assertExecutionEvidenceState(execution: AgentExecution): void {
+  const createdAt = new Date(execution.createdAt).getTime();
+  const updatedAt = new Date(execution.updatedAt).getTime();
+  if (
+    !EXECUTION_ID.test(execution.id) ||
+    !ACTION_ID.test(execution.actionId) ||
+    !SHA256.test(execution.actionDigest) ||
+    !AGENT_ID.test(execution.agentPrincipalId) ||
+    !DELEGATION_ID.test(execution.delegationGrantId) ||
+    !APPROVAL_ID.test(execution.approvalId) ||
+    !SHA256.test(execution.idempotencyKey) ||
+    !SHA256.test(execution.requestFingerprint) ||
+    !['reserved', 'running', 'succeeded', 'failed', 'compensated'].includes(execution.state) ||
+    !Number.isSafeInteger(execution.resourceVersion) ||
+    execution.resourceVersion < 0 ||
+    !Number.isSafeInteger(execution.policyVersion) ||
+    execution.policyVersion < 1 ||
+    !Number.isSafeInteger(execution.fenceToken) ||
+    execution.fenceToken < 0 ||
+    !Number.isFinite(createdAt) ||
+    !Number.isFinite(updatedAt) ||
+    createdAt > updatedAt
+  )
+    throw new Error('AGENT_EXECUTION_EVIDENCE_INVALID');
+  const hasLease = execution.leaseOwner !== undefined || execution.leaseExpiresAt !== undefined;
+  const leaseIsValid =
+    typeof execution.leaseOwner === 'string' &&
+    CONTROL_ID.test(execution.leaseOwner) &&
+    typeof execution.leaseExpiresAt === 'string' &&
+    Number.isFinite(new Date(execution.leaseExpiresAt).getTime());
+  if (execution.result !== undefined) {
+    try {
+      validateAgentActionResult(execution.result as AgentActionResult);
+    } catch {
+      throw new Error('AGENT_EXECUTION_RESULT_INVALID');
+    }
+  }
+  if (
+    (execution.state === 'reserved' &&
+      (execution.fenceToken !== 0 || hasLease || execution.result || execution.failureCode)) ||
+    (execution.state === 'running' &&
+      (execution.fenceToken < 1 || !leaseIsValid || execution.result || execution.failureCode)) ||
+    (execution.state === 'succeeded' &&
+      (execution.fenceToken < 1 ||
+        hasLease ||
+        execution.failureCode ||
+        !execution.result ||
+        execution.result.status !== 'published')) ||
+    (execution.state === 'failed' &&
+      (execution.fenceToken < 1 ||
+        hasLease ||
+        execution.result ||
+        typeof execution.failureCode !== 'string' ||
+        !FAILURE_CODE.test(execution.failureCode))) ||
+    (execution.state === 'compensated' &&
+      (execution.fenceToken < 1 ||
+        hasLease ||
+        execution.result ||
+        execution.failureCode !== 'AGENT_ACTION_COMPENSATED'))
+  )
+    throw new Error('AGENT_EXECUTION_STATE_INVALID');
+}
+
+const AGENT_AUDIT_PHASES = new Set<AgentAuditRecord['phase']>([
+  'prepared',
+  'authorized',
+  'denied',
+  'started',
+  'succeeded',
+  'failed',
+  'compensated',
+]);
+const AGENT_AUDIT_PHASE_ORDER: Readonly<Record<AgentAuditRecord['phase'], number>> = {
+  prepared: 0,
+  authorized: 1,
+  denied: 2,
+  started: 3,
+  succeeded: 4,
+  failed: 4,
+  compensated: 4,
+};
+
+function toAuditRecord(row: Selectable<DB['agent_audit_events']>): AgentAuditRecord {
+  if (!AGENT_AUDIT_PHASES.has(row.phase as AgentAuditRecord['phase']))
+    throw new Error('AGENT_AUDIT_PHASE_INVALID');
+  if (row.immutable !== true && row.immutable !== 1)
+    throw new Error('AGENT_AUDIT_MUTABILITY_INVALID');
+  if (
+    !AUDIT_ID.test(row.id) ||
+    (row.plan_sha256 !== null && !SHA256.test(row.plan_sha256)) ||
+    !Number.isFinite(new Date(row.occurred_at).getTime())
+  )
+    throw new Error('AGENT_AUDIT_EVIDENCE_INVALID');
+  const reasonCodes = parseStrings(row.reason_codes, 'audit reason codes');
+  if (
+    reasonCodes.length > 16 ||
+    new Set(reasonCodes).size !== reasonCodes.length ||
+    reasonCodes.some((code) => !/^[a-z0-9_]{2,64}$/u.test(code))
+  )
+    throw new Error('AGENT_AUDIT_REASON_CODES_INVALID');
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    agentPrincipalId: row.agent_principal_id,
+    sponsorPrincipalId: row.sponsor_principal_id,
+    delegationGrantId: row.delegation_grant_id,
+    actionId: row.action_id,
+    actionDigest: row.action_digest,
+    ...(row.plan_sha256 === null ? {} : { planSha256: row.plan_sha256 }),
+    ...(row.approval_id === null ? {} : { approvalId: row.approval_id }),
+    phase: row.phase as AgentAuditRecord['phase'],
+    idempotencyKey: row.idempotency_key,
+    resourceVersion: safeInteger(row.resource_version, 'audit resource version'),
+    occurredAt: iso(row.occurred_at),
+    reasonCodes,
   };
 }
 
@@ -403,7 +532,7 @@ function assertAudit(
   execution: AgentExecution,
   record: AgentAuditRecord,
   allowedPhases: readonly AgentAuditRecord['phase'][],
-): void {
+): asserts record is AgentExecutionAuditRecord {
   if (
     !allowedPhases.includes(record.phase) ||
     record.tenantId !== execution.tenantId ||
@@ -430,6 +559,92 @@ export class AgentExecutionRepository implements AgentExecutionStore {
       .where('id', '=', executionId)
       .executeTakeFirst();
     return row ? toExecution(row) : undefined;
+  }
+
+  async getExecutionEvidence(
+    input: {
+      tenantId: string;
+      executionId: string;
+      actionId: string;
+    } & (
+      | { agentPrincipalId: string; sponsorPrincipalId?: never }
+      | { sponsorPrincipalId: string; agentPrincipalId?: never }
+    ),
+  ): Promise<AgentExecutionEvidence | undefined> {
+    return this.db.transaction().execute(async (tx) => {
+      let query = tx
+        .selectFrom('agent_executions')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.executionId)
+        .where('action_id', '=', input.actionId);
+      query =
+        'agentPrincipalId' in input && input.agentPrincipalId !== undefined
+          ? query.where('agent_principal_id', '=', input.agentPrincipalId)
+          : query.where('sponsor_principal_id', '=', input.sponsorPrincipalId!);
+      const executionRow = await query.forUpdate().executeTakeFirst();
+      if (!executionRow) return undefined;
+      const execution = toExecution(executionRow);
+      assertExecutionEvidenceState(execution);
+      const rows = await tx
+        .selectFrom('agent_audit_events')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('execution_id', '=', input.executionId)
+        .orderBy('occurred_at', 'asc')
+        .orderBy('id', 'asc')
+        .limit(MAX_EXECUTION_AUDIT_RECORDS + 1)
+        .execute();
+      if (rows.length > MAX_EXECUTION_AUDIT_RECORDS) throw new Error('AGENT_AUDIT_LIMIT_EXCEEDED');
+      const audit = rows
+        .map(toAuditRecord)
+        .sort((left, right) => {
+          const timestamp = left.occurredAt.localeCompare(right.occurredAt);
+          if (timestamp !== 0) return timestamp;
+          const phase = AGENT_AUDIT_PHASE_ORDER[left.phase] - AGENT_AUDIT_PHASE_ORDER[right.phase];
+          return phase === 0 ? left.id.localeCompare(right.id) : phase;
+        })
+        .map((record) => {
+          assertAudit(execution, record, [...AGENT_AUDIT_PHASES]);
+          return record;
+        });
+      const terminalPhases = audit.filter(({ phase }) =>
+        ['denied', 'succeeded', 'failed', 'compensated'].includes(phase),
+      );
+      const expectedTerminalPhase = ['succeeded', 'failed', 'compensated'].includes(execution.state)
+        ? execution.state
+        : undefined;
+      const lifecycleTail = audit.slice(2);
+      const expectedStartedRecords = expectedTerminalPhase
+        ? lifecycleTail.slice(0, -1)
+        : lifecycleTail;
+      if (
+        audit.filter(({ phase }) => phase === 'prepared').length !== 1 ||
+        audit.filter(({ phase }) => phase === 'authorized').length !== 1 ||
+        audit[0]?.phase !== 'prepared' ||
+        audit[1]?.phase !== 'authorized' ||
+        (execution.state === 'reserved' && audit.length !== 2) ||
+        ((execution.state === 'running' ||
+          execution.state === 'succeeded' ||
+          execution.state === 'failed' ||
+          execution.state === 'compensated') &&
+          !audit.some(({ phase }) => phase === 'started')) ||
+        expectedStartedRecords.some(({ phase }) => phase !== 'started') ||
+        terminalPhases.length !== (expectedTerminalPhase ? 1 : 0) ||
+        (expectedTerminalPhase !== undefined &&
+          (terminalPhases[0]?.phase !== expectedTerminalPhase ||
+            lifecycleTail.at(-1)?.phase !== expectedTerminalPhase)) ||
+        audit.some(({ occurredAt }) => {
+          const timestamp = new Date(occurredAt).getTime();
+          return (
+            timestamp < new Date(execution.createdAt).getTime() ||
+            timestamp > new Date(execution.updatedAt).getTime()
+          );
+        })
+      )
+        throw new Error('AGENT_AUDIT_SEQUENCE_INVALID');
+      return { execution, audit };
+    });
   }
 
   async assertControlActor(tenantId: string, actorPrincipalId: string): Promise<void> {

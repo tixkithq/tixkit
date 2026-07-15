@@ -1,0 +1,29 @@
+---
+title: API migration from 2026-07-25 to 2026-07-26
+description: Inspect durable agent execution and immutable audit evidence through the shared Platform API.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-26
+prerequisites:
+  - An integration using API version 2026-07-25
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-26` adds read-only inspection of durable agent execution and audit evidence. Existing `2026-07-25` operations remain compatible. The serialized agent protocol remains `2026-07-22`; no database or agent-protocol migration is required.
+
+## Inspect exact execution evidence
+
+Call `GET /v1/agent/actions/{actionId}/executions/{executionId}` or `tixkit.agentActions.getExecution(actionId, executionId)`. The exact authenticated agent principal and the exact human sponsor may inspect the execution. Cross-tenant, cross-agent, cross-sponsor and cross-action lookups return not found.
+
+The response contains the durable execution and its ordered immutable audit records. Every record is bound to the execution tenant, agent, sponsor, delegation, action digest, approval, idempotency key and resource version. The response is capped at 100 records and uses `Cache-Control: no-store`. Corrupt, mutable, incomplete or mismatched evidence fails closed.
+
+Sponsor inspection remains available after event permission loss so consequential activity stays accountable. Inspection does not grant execution authority, resume work, create an approval or repeat a product effect.
+
+Durable domain webhook payloads remain at envelope version `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and the `X-Tixkit-API-Version` delivery-attempt header report `2026-07-26`.

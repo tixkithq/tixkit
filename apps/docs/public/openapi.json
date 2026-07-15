@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tixkit API",
-    "version": "2026-07-25",
+    "version": "2026-07-26",
     "description": "Headless white-label event commerce platform API",
     "license": {
       "name": "MIT"
@@ -9951,7 +9951,7 @@
       },
       "AgentExecution": {
         "type": "object",
-        "description": "Durable, tenant-scoped execution evidence for one approved immutable action. Terminal exact replays return the same result or bounded failure code without repeating the product effect.",
+        "description": "Durable, tenant-scoped execution evidence for one approved immutable action. Reserved evidence has no lease or terminal payload; running evidence has a valid lease; succeeded evidence has one exact published result; failed evidence has one bounded failure code; compensated evidence has no result and uses AGENT_ACTION_COMPENSATED. Terminal exact replays do not repeat the product effect.",
         "additionalProperties": false,
         "properties": {
           "id": {
@@ -10053,7 +10053,8 @@
           },
           "failureCode": {
             "type": "string",
-            "pattern": "^[A-Z0-9_]{3,64}$"
+            "pattern": "^[A-Z0-9_]{3,64}$",
+            "description": "Required for failed evidence. Compensated evidence uses AGENT_ACTION_COMPENSATED exactly."
           },
           "createdAt": {
             "type": "string",
@@ -10081,6 +10082,124 @@
           "fenceToken",
           "createdAt",
           "updatedAt"
+        ]
+      },
+      "AgentExecutionAuditRecord": {
+        "type": "object",
+        "description": "Immutable, ordered lifecycle evidence bound to the exact execution identity, action digest, approval, idempotency key and resource version.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^aaud_[a-f0-9]{48}$",
+            "example": "aaud_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "agentPrincipalId": {
+            "type": "string",
+            "pattern": "^agt_[a-f0-9]{48}$",
+            "example": "agt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sponsorPrincipalId": {
+            "type": "string"
+          },
+          "delegationGrantId": {
+            "type": "string",
+            "pattern": "^dlg_[a-f0-9]{48}$",
+            "example": "dlg_cccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "actionId": {
+            "type": "string",
+            "pattern": "^act_[a-f0-9]{48}$",
+            "example": "act_dddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "actionDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "example": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
+          "planSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "approvalId": {
+            "type": "string",
+            "pattern": "^apr_[a-f0-9]{48}$",
+            "example": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "authorized",
+              "denied",
+              "started",
+              "succeeded",
+              "failed",
+              "compensated"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "example": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "resourceVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reasonCodes": {
+            "type": "array",
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{2,64}$"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "agentPrincipalId",
+          "sponsorPrincipalId",
+          "delegationGrantId",
+          "actionId",
+          "actionDigest",
+          "approvalId",
+          "phase",
+          "idempotencyKey",
+          "resourceVersion",
+          "occurredAt",
+          "reasonCodes"
+        ]
+      },
+      "AgentExecutionEvidence": {
+        "type": "object",
+        "description": "Durable execution plus bounded immutable audit history, visible only to the exact agent principal or human sponsor.",
+        "additionalProperties": false,
+        "properties": {
+          "execution": {
+            "$ref": "#/components/schemas/AgentExecution"
+          },
+          "audit": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AgentExecutionAuditRecord"
+            }
+          }
+        },
+        "required": [
+          "execution",
+          "audit"
         ]
       },
       "AgentDelegation": {
@@ -15854,7 +15973,7 @@
               },
               "example": {
                 "ticketTypeIds": [
-                  "tickettype_example"
+                  "ticketTypeId1 example"
                 ]
               }
             }
@@ -15886,7 +16005,7 @@
                 "example": {
                   "valid": true,
                   "ticketTypeIds": [
-                    "tickettype_example"
+                    "ticketTypeId1 example"
                   ]
                 }
               }
@@ -20270,7 +20389,7 @@
                       "eventId": "event_example",
                       "name": "name example",
                       "ticketTypeIds": [
-                        "tickettype_example"
+                        "ticketTypeId1 example"
                       ],
                       "status": "status example"
                     }
@@ -20350,7 +20469,7 @@
                   "eventId": "event_example",
                   "name": "name example",
                   "ticketTypeIds": [
-                    "tickettype_example"
+                    "ticketTypeId1 example"
                   ],
                   "status": "status example"
                 }
@@ -21336,7 +21455,7 @@
                       "name": "name example",
                       "keyPrefix": "keyPrefix example",
                       "scopes": [
-                        "scope example"
+                        "scope1 example"
                       ],
                       "createdAt": "2026-07-10T12:00:00.000Z",
                       "updatedAt": "2026-07-10T12:00:00.000Z"
@@ -21410,7 +21529,7 @@
                 "organizationId": "organization_example",
                 "name": "name example",
                 "scopes": [
-                  "scope example"
+                  "scope1 example"
                 ]
               }
             }
@@ -21431,7 +21550,7 @@
                   "name": "name example",
                   "keyPrefix": "keyPrefix example",
                   "scopes": [
-                    "scope example"
+                    "scope1 example"
                   ],
                   "createdAt": "2026-07-10T12:00:00.000Z",
                   "updatedAt": "2026-07-10T12:00:00.000Z",
@@ -22048,7 +22167,7 @@
                   "authorization": {
                     "eligibleForApproval": true,
                     "reasons": [
-                      "reason example"
+                      "reason1 example"
                     ],
                     "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "checkedAt": "2026-07-10T12:00:00.000Z"
@@ -22057,7 +22176,7 @@
                     "launchable": true,
                     "readinessSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "blockingReasonCodes": [
-                      "blockingReasonCode example"
+                      "blockingReasonCode1 example"
                     ]
                   }
                 }
@@ -22147,7 +22266,7 @@
                   "authorization": {
                     "eligibleForApproval": true,
                     "reasons": [
-                      "reason example"
+                      "reason1 example"
                     ],
                     "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "checkedAt": "2026-07-10T12:00:00.000Z"
@@ -22156,7 +22275,7 @@
                     "launchable": true,
                     "readinessSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "blockingReasonCodes": [
-                      "blockingReasonCode example"
+                      "blockingReasonCode1 example"
                     ]
                   }
                 }
@@ -22489,6 +22608,122 @@
         ]
       }
     },
+    "/agent/actions/{actionId}/executions/{executionId}": {
+      "get": {
+        "summary": "Inspect durable agent execution and audit evidence",
+        "description": "Experimental/private beta. Returns bounded immutable lifecycle evidence only to the exact authenticated agent principal or its exact human sponsor. Cross-tenant, cross-agent, cross-sponsor and cross-action lookups return not found. Sponsor inspection remains available after event permission loss so consequential execution stays accountable.",
+        "security": [
+          {
+            "AgentOAuth": [
+              "agent.invoke"
+            ]
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^act_[a-f0-9]{48}$"
+            }
+          },
+          {
+            "name": "executionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^exec_[a-f0-9]{48}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Durable execution and ordered immutable audit evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentExecutionEvidence"
+                },
+                "example": {
+                  "execution": {
+                    "id": "exec_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "tenantId": "tenant_example",
+                    "actionId": "act_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "actionDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "agentPrincipalId": "agt_dddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "sponsorPrincipalId": "user_example",
+                    "delegationGrantId": "dlg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    "approvalId": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff",
+                    "idempotencyKey": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "requestFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+                    "state": "reserved",
+                    "resourceVersion": 3,
+                    "policyVersion": 1,
+                    "fenceToken": 0,
+                    "createdAt": "2026-07-26T12:00:00.000Z",
+                    "updatedAt": "2026-07-26T12:00:00.000Z"
+                  },
+                  "audit": [
+                    {
+                      "id": "aaud_333333333333333333333333333333333333333333333333",
+                      "tenantId": "tenant_example",
+                      "agentPrincipalId": "agt_dddddddddddddddddddddddddddddddddddddddddddddddd",
+                      "sponsorPrincipalId": "user_example",
+                      "delegationGrantId": "dlg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "actionId": "act_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "actionDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                      "approvalId": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff",
+                      "phase": "prepared",
+                      "idempotencyKey": "1111111111111111111111111111111111111111111111111111111111111111",
+                      "resourceVersion": 3,
+                      "occurredAt": "2026-07-26T12:00:00.000Z",
+                      "reasonCodes": []
+                    },
+                    {
+                      "id": "aaud_444444444444444444444444444444444444444444444444",
+                      "tenantId": "tenant_example",
+                      "agentPrincipalId": "agt_dddddddddddddddddddddddddddddddddddddddddddddddd",
+                      "sponsorPrincipalId": "user_example",
+                      "delegationGrantId": "dlg_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "actionId": "act_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "actionDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                      "approvalId": "apr_ffffffffffffffffffffffffffffffffffffffffffffffff",
+                      "phase": "authorized",
+                      "idempotencyKey": "1111111111111111111111111111111111111111111111111111111111111111",
+                      "resourceVersion": 3,
+                      "occurredAt": "2026-07-26T12:00:00.000Z",
+                      "reasonCodes": []
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid action or execution identifier"
+          },
+          "401": {
+            "description": "Human or Agent OAuth authentication required"
+          },
+          "403": {
+            "description": "Caller is not an explicit agent or human principal"
+          },
+          "404": {
+            "description": "Execution is outside the exact caller and action scope"
+          }
+        },
+        "operationId": "getAgentActionsByActionIdExecutionsByExecutionId",
+        "tags": [
+          "Agent platform"
+        ]
+      }
+    },
     "/agent/session": {
       "get": {
         "summary": "Inspect the authenticated agent session",
@@ -22654,7 +22889,7 @@
                     "event:event_example"
                   ],
                   "permissionSnapshot": [
-                    "permissionSnapshot example"
+                    "permissionSnapshot1 example"
                   ],
                   "issuedAt": "2026-07-10T12:00:00.000Z",
                   "expiresAt": "2026-07-10T12:00:00.000Z"
@@ -23280,7 +23515,7 @@
                       "name": "name example",
                       "deviceId": "device_example",
                       "eventIds": [
-                        "event_example"
+                        "eventId1 example"
                       ],
                       "scopes": [
                         "checkins.read"
@@ -23373,7 +23608,7 @@
                   "name": "name example",
                   "deviceId": "device_example",
                   "eventIds": [
-                    "event_example"
+                    "eventId1 example"
                   ],
                   "scopes": [
                     "checkins.read"
@@ -24046,7 +24281,7 @@
                   "tenantId": "tenant_example",
                   "type": "type example",
                   "scopes": [
-                    "scope example"
+                    "scope1 example"
                   ]
                 }
               }
@@ -24299,10 +24534,10 @@
                     "invitedAt": "2026-07-10T12:00:00.000Z",
                     "joinedAt": "2026-07-10T12:00:00.000Z",
                     "brandIds": [
-                      "brand_example"
+                      "brandId1 example"
                     ],
                     "eventIds": [
-                      "event_example"
+                      "eventId1 example"
                     ]
                   }
                 ]
@@ -24531,10 +24766,10 @@
                   "invitedAt": "2026-07-10T12:00:00.000Z",
                   "joinedAt": "2026-07-10T12:00:00.000Z",
                   "brandIds": [
-                    "brand_example"
+                    "brandId1 example"
                   ],
                   "eventIds": [
-                    "event_example"
+                    "eventId1 example"
                   ],
                   "invitationDelivery": "queued",
                   "invitationProvider": "invitationProvider example"
@@ -24737,10 +24972,10 @@
                   "invitedAt": "2026-07-10T12:00:00.000Z",
                   "joinedAt": "2026-07-10T12:00:00.000Z",
                   "brandIds": [
-                    "brand_example"
+                    "brandId1 example"
                   ],
                   "eventIds": [
-                    "event_example"
+                    "eventId1 example"
                   ]
                 }
               }
@@ -26960,10 +27195,10 @@
                   "consentExclusions": 1,
                   "skippedRecipients": 1,
                   "emailJobIds": [
-                    "emailjob_example"
+                    "operator@example.test"
                   ],
                   "smsJobIds": [
-                    "smsjob_example"
+                    "smsJobId1 example"
                   ]
                 }
               }
@@ -29163,7 +29398,7 @@
                       "title": "title example",
                       "summary": "summary example",
                       "tags": [
-                        "tag example"
+                        "tag1 example"
                       ]
                     }
                   }
@@ -29276,7 +29511,7 @@
                         "title": "title example",
                         "summary": "summary example",
                         "tags": [
-                          "tag example"
+                          "tag1 example"
                         ]
                       }
                     }
@@ -29398,7 +29633,7 @@
                       "title": "title example",
                       "summary": "summary example",
                       "tags": [
-                        "tag example"
+                        "tag1 example"
                       ]
                     }
                   }
@@ -29497,7 +29732,7 @@
                       "title": "title example",
                       "summary": "summary example",
                       "tags": [
-                        "tag example"
+                        "tag1 example"
                       ]
                     }
                   }
@@ -29618,7 +29853,7 @@
                         "title": "title example",
                         "summary": "summary example",
                         "tags": [
-                          "tag example"
+                          "tag1 example"
                         ]
                       }
                     }
@@ -29714,7 +29949,7 @@
                   "title": "title example",
                   "summary": "summary example",
                   "tags": [
-                    "tag example"
+                    "tag1 example"
                   ]
                 }
               }
@@ -29877,7 +30112,7 @@
                   "validation": {
                     "valid": true,
                     "unknownTags": [
-                      "unknownTag example"
+                      "unknownTag1 example"
                     ]
                   }
                 }
@@ -30814,10 +31049,10 @@
                       "name": "name example",
                       "clientId": "client_example",
                       "redirectUris": [
-                        "redirectUri example"
+                        "redirectUri1 example"
                       ],
                       "scopes": [
-                        "scope example"
+                        "scope1 example"
                       ],
                       "status": "active"
                     }
@@ -30919,7 +31154,7 @@
                   "https://example.test/tixkit"
                 ],
                 "scopes": [
-                  "scope example"
+                  "scope1 example"
                 ]
               }
             }
@@ -30939,10 +31174,10 @@
                   "name": "name example",
                   "clientId": "client_example",
                   "redirectUris": [
-                    "redirectUri example"
+                    "redirectUri1 example"
                   ],
                   "scopes": [
-                    "scope example"
+                    "scope1 example"
                   ],
                   "status": "active",
                   "clientSecret": "$REDACTED_SECRET"
@@ -31377,11 +31612,11 @@
                       "id": "generic-csv",
                       "displayName": "displayName example",
                       "supportedVersions": [
-                        "supportedVersion example"
+                        "supportedVersion1 example"
                       ],
                       "featureMapping": {},
                       "knownLosses": [
-                        "knownLosse example"
+                        "knownLosse1 example"
                       ],
                       "rateLimitPolicy": {},
                       "sourceModes": [

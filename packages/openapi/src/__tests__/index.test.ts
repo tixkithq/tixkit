@@ -96,7 +96,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-25');
+    expect(openApiSpec.info.version).toBe('2026-07-26');
   });
 
   it('publishes agent-only immutable action preparation without caller-owned bindings', () => {
@@ -106,6 +106,7 @@ describe('openApiSpec', () => {
     const revoke =
       openApiSpec.paths['/agent/actions/{actionId}/approvals/{approvalId}/revoke'].post;
     const execute = openApiSpec.paths['/agent/actions/{actionId}/executions'].post;
+    const inspect = openApiSpec.paths['/agent/actions/{actionId}/executions/{executionId}'].get;
     expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
     expect(get.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
     expect(get.responses['401'].description).toMatch(/Agent OAuth or human bearer/u);
@@ -115,6 +116,8 @@ describe('openApiSpec', () => {
     expect(revoke.description).toMatch(/even after losing event permission/u);
     expect(execute.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
     expect(execute.security).not.toContainEqual({ BearerAuth: [] });
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(inspect.description).toMatch(/after event permission loss/u);
     expect(prepare.security).not.toContainEqual({ BearerAuth: [] });
     expect(prepare.security).not.toContainEqual({ ApiKey: [] });
     const body = prepare.requestBody.content['application/json'].schema;
@@ -172,6 +175,48 @@ describe('openApiSpec', () => {
     expect(openApiSpec.components.schemas.AgentExecution.required).toEqual(
       expect.arrayContaining(['actionId', 'approvalId', 'actionDigest', 'state', 'fenceToken']),
     );
+    expect(openApiSpec.components.schemas.AgentExecutionEvidence).toMatchObject({
+      additionalProperties: false,
+      required: ['execution', 'audit'],
+      properties: {
+        audit: { minItems: 2, maxItems: 100 },
+      },
+    });
+    expect(openApiSpec.components.schemas.AgentExecutionAuditRecord.required).toEqual(
+      expect.arrayContaining([
+        'approvalId',
+        'phase',
+        'idempotencyKey',
+        'resourceVersion',
+        'reasonCodes',
+      ]),
+    );
+    const evidenceExample = inspect.responses['200'].content['application/json'].example;
+    const { execution, audit } = evidenceExample;
+    expect(
+      exampleMatchesSchema(
+        evidenceExample,
+        inspect.responses['200'].content['application/json'].schema,
+      ),
+    ).toBe(true);
+    expect(audit.map((record: { phase: string }) => record.phase)).toEqual([
+      'prepared',
+      'authorized',
+    ]);
+    expect(new Set(audit.map((record: { id: string }) => record.id)).size).toBe(audit.length);
+    for (const record of audit) {
+      expect(record).toMatchObject({
+        tenantId: execution.tenantId,
+        agentPrincipalId: execution.agentPrincipalId,
+        sponsorPrincipalId: execution.sponsorPrincipalId,
+        delegationGrantId: execution.delegationGrantId,
+        actionId: execution.actionId,
+        actionDigest: execution.actionDigest,
+        approvalId: execution.approvalId,
+        idempotencyKey: execution.idempotencyKey,
+        resourceVersion: execution.resourceVersion,
+      });
+    }
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

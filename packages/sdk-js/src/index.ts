@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-25';
+export const TIXKIT_API_VERSION = '2026-07-26';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1672,6 +1672,28 @@ export type AgentExecution = {
   failureCode?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AgentExecutionAuditRecord = {
+  id: string;
+  tenantId: string;
+  agentPrincipalId: string;
+  sponsorPrincipalId: string;
+  delegationGrantId: string;
+  actionId: string;
+  actionDigest: string;
+  planSha256?: string;
+  approvalId: string;
+  phase: 'prepared' | 'authorized' | 'denied' | 'started' | 'succeeded' | 'failed' | 'compensated';
+  idempotencyKey: string;
+  resourceVersion: number;
+  occurredAt: string;
+  reasonCodes: string[];
+};
+
+export type AgentExecutionEvidence = {
+  execution: AgentExecution;
+  audit: AgentExecutionAuditRecord[];
 };
 
 export type AgentMemoryNamespaceInput =
@@ -4304,6 +4326,10 @@ class AgentActionResource {
         'X-Tixkit-Confirmation': executionKey,
       },
     });
+  }
+
+  async getExecution(actionId: string, executionId: string): Promise<AgentExecutionEvidence> {
+    return this.client.request('GET', `/agent/actions/${actionId}/executions/${executionId}`);
   }
 }
 

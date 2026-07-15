@@ -3139,6 +3139,8 @@ describe('TixkitClient new resource methods', () => {
       idempotencyKey: 'agent-action-revocation-0001',
     });
     await c.agentActions.execute({ actionId, approvalId, actionDigest });
+    const executionId = `exec_${'d'.repeat(48)}`;
+    await c.agentActions.getExecution(actionId, executionId);
 
     const prepare = getCall(fm);
     expect(prepare).toMatchObject({
@@ -3185,6 +3187,10 @@ describe('TixkitClient new resource methods', () => {
       },
     });
     expect(JSON.parse(getCall(fm, 4).body)).toEqual({ approvalId, actionDigest });
+    expect(getCall(fm, 5)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/actions/${actionId}/executions/${executionId}`,
+    });
   });
 
   it('retries approved agent execution with the exact immutable execution key', async () => {

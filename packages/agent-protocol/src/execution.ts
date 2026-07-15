@@ -36,6 +36,14 @@ export interface AgentExecution {
   updatedAt: string;
 }
 
+export interface AgentExecutionEvidence {
+  execution: AgentExecution;
+  audit: readonly AgentExecutionAuditRecord[];
+}
+
+/** Audit evidence returned with an execution is always bound to its consumed approval. */
+export type AgentExecutionAuditRecord = AgentAuditRecord & { approvalId: string };
+
 export interface AgentExecutionStore {
   /**
    * Atomically consumes the exact authoritative approval and inserts/reads the payload-bound

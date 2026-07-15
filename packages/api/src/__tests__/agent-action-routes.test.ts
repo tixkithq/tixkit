@@ -2,6 +2,7 @@ import {
   AGENT_PROTOCOL_VERSION,
   AgentExecutionConflictError,
   type AgentAction,
+  type AgentExecutionEvidence,
 } from '@tixkit/agent-protocol';
 import type { Principal } from '@tixkit/domain';
 import Fastify from 'fastify';
@@ -47,6 +48,42 @@ const prepared: PreparedAgentAction = {
     readinessSnapshotSha256: 'a'.repeat(64),
     blockingReasonCodes: [],
   },
+};
+const executionEvidence: AgentExecutionEvidence = {
+  execution: {
+    id: `exec_${'f'.repeat(48)}`,
+    tenantId: 'tenant_primary',
+    actionId: `act_${'d'.repeat(48)}`,
+    actionDigest: 'b'.repeat(64),
+    agentPrincipalId: 'agent_primary',
+    sponsorPrincipalId: 'user_primary',
+    delegationGrantId: 'dlg_primary',
+    approvalId: `apr_${'e'.repeat(48)}`,
+    idempotencyKey: '1'.repeat(64),
+    requestFingerprint: '2'.repeat(64),
+    state: 'succeeded',
+    resourceVersion: 7,
+    policyVersion: 3,
+    fenceToken: 1,
+    result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+    createdAt: '2026-07-14T12:02:00.000Z',
+    updatedAt: '2026-07-14T12:02:01.000Z',
+  },
+  audit: (['prepared', 'authorized', 'started', 'succeeded'] as const).map((phase, index) => ({
+    id: `aaud_${String(index + 1).repeat(48)}`,
+    tenantId: 'tenant_primary',
+    agentPrincipalId: 'agent_primary',
+    sponsorPrincipalId: 'user_primary',
+    delegationGrantId: 'dlg_primary',
+    actionId: `act_${'d'.repeat(48)}`,
+    actionDigest: 'b'.repeat(64),
+    approvalId: `apr_${'e'.repeat(48)}`,
+    phase,
+    idempotencyKey: '1'.repeat(64),
+    resourceVersion: 7,
+    occurredAt: `2026-07-14T12:02:0${index}.000Z`,
+    reasonCodes: [],
+  })),
 };
 
 function principal(type: Principal['type'] = 'agent'): Principal {
@@ -112,6 +149,8 @@ async function setup(
       createdAt: '2026-07-14T12:02:00.000Z',
       updatedAt: '2026-07-14T12:02:01.000Z',
     })),
+    getExecutionForAgent: vi.fn(async () => executionEvidence),
+    getExecutionForSponsor: vi.fn(async () => executionEvidence),
     ...input.service,
   };
   app.decorate('context', { db: {} } as never);
@@ -355,6 +394,57 @@ describe('agent action routes', () => {
       approvalId,
       actionDigest,
     });
+    await app.close();
+  });
+
+  it('returns immutable execution audit evidence to the exact agent or sponsor', async () => {
+    const actionId = `act_${'d'.repeat(48)}`;
+    const executionId = `exec_${'f'.repeat(48)}`;
+    const agentLookup = vi.fn(async () => executionEvidence);
+    const agent = await setup({ service: { getExecutionForAgent: agentLookup } });
+    const agentResponse = await agent.app.inject({
+      method: 'GET',
+      url: `/agent/actions/${actionId}/executions/${executionId}`,
+    });
+    expect(agentResponse.statusCode).toBe(200);
+    expect(agentResponse.headers['cache-control']).toBe('no-store');
+    expect(agentResponse.json()).toEqual(executionEvidence);
+    expect(agentLookup).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      actionId,
+      executionId,
+    });
+    await agent.app.close();
+
+    const sponsorLookup = vi.fn(async () => executionEvidence);
+    const sponsor = await setup({
+      actor: { ...principal('user'), scopes: [] },
+      service: { getExecutionForSponsor: sponsorLookup },
+    });
+    const sponsorResponse = await sponsor.app.inject({
+      method: 'GET',
+      url: `/agent/actions/${actionId}/executions/${executionId}`,
+    });
+    expect(sponsorResponse.statusCode).toBe(200);
+    expect(sponsorLookup).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      sponsorPrincipalId: 'user_primary',
+      actionId,
+      executionId,
+    });
+    await sponsor.app.close();
+  });
+
+  it('returns not found for execution evidence outside the caller scope', async () => {
+    const { app } = await setup({
+      service: { getExecutionForAgent: vi.fn(async () => undefined) },
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/act_${'d'.repeat(48)}/executions/exec_${'f'.repeat(48)}`,
+    });
+    expect(response.statusCode).toBe(404);
     await app.close();
   });
 

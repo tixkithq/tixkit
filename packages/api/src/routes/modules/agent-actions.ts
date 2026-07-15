@@ -29,6 +29,9 @@ const approvalSchema = z.object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$
 const executionSchema = approvalSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
   .strict();
+const executionParamsSchema = actionParamsSchema
+  .extend({ executionId: z.string().regex(/^exec_[a-f0-9]{48}$/u) })
+  .strict();
 
 export interface AgentActionRouteService {
   prepare(input: {
@@ -71,6 +74,18 @@ export interface AgentActionRouteService {
     approvalId: string;
     actionDigest: string;
   }): Promise<import('@tixkit/agent-protocol').AgentExecution>;
+  getExecutionForAgent(input: {
+    tenantId: string;
+    agentPrincipalId: string;
+    actionId: string;
+    executionId: string;
+  }): Promise<import('@tixkit/agent-protocol').AgentExecutionEvidence | undefined>;
+  getExecutionForSponsor(input: {
+    tenantId: string;
+    sponsorPrincipalId: string;
+    actionId: string;
+    executionId: string;
+  }): Promise<import('@tixkit/agent-protocol').AgentExecutionEvidence | undefined>;
 }
 
 export interface AgentActionRouteOptions {
@@ -271,6 +286,34 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
       } catch (error) {
         translateAgentActionError(actionId, error);
       }
+    },
+  );
+
+  app.get(
+    '/agent/actions/:actionId/executions/:executionId',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      if (actor.type === 'agent') requireAgent(actor);
+      else requireHumanSponsor(actor);
+      const { actionId, executionId } = parseBody(executionParamsSchema, request.params);
+      const evidence =
+        actor.type === 'agent'
+          ? await service.getExecutionForAgent({
+              tenantId: actor.tenantId,
+              agentPrincipalId: actor.id,
+              actionId,
+              executionId,
+            })
+          : await service.getExecutionForSponsor({
+              tenantId: actor.tenantId,
+              sponsorPrincipalId: actor.id,
+              actionId,
+              executionId,
+            });
+      if (!evidence) throw new NotFoundError('AgentActionExecution', executionId);
+      reply.header('Cache-Control', 'no-store');
+      return evidence;
     },
   );
 };

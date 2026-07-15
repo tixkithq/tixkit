@@ -253,6 +253,7 @@ function exampleString(name: string, schema: Record<string, unknown>): string {
   const hexadecimalId = pattern?.match(/^\^([A-Za-z0-9_]+)\[a-f0-9\]\{(\d+)\}\$$/u);
   if (hexadecimalId) return `${hexadecimalId[1]}${'a'.repeat(Number(hexadecimalId[2]))}`;
   if (pattern === '^[A-Z0-9_]{3,64}$') return 'SAFE_CODE';
+  if (pattern === '^[a-z0-9_]{2,64}$') return 'reason_code';
   if (pattern === '^[a-z0-9][a-z0-9._-]*$') return 'value_example';
   if (pattern === '^[a-z][a-z0-9_.-]{1,63}$') return 'value.example';
   if (pattern === '^[A-Za-z0-9][A-Za-z0-9._:-]*$') return 'value_example';
@@ -388,7 +389,11 @@ function schemaExample(
   if (declaredType === 'null') return null;
   if (declaredType === 'array') {
     if (value.maxItems === 0) return [];
-    return [schemaExample(value.items, schemas, name.replace(/s$/, '') || 'item', seen)];
+    const count = Math.max(1, typeof value.minItems === 'number' ? value.minItems : 1);
+    const itemName = name.replace(/s$/, '') || 'item';
+    return Array.from({ length: count }, (_, index) =>
+      schemaExample(value.items, schemas, `${itemName}${index + 1}`, seen),
+    );
   }
   if (declaredType === 'boolean') return true;
   if (declaredType === 'integer' || declaredType === 'number') {
@@ -542,7 +547,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-25',
+    version: '2026-07-26',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5370,7 +5375,7 @@ const rawOpenApiSpec = {
       AgentExecution: {
         type: 'object',
         description:
-          'Durable, tenant-scoped execution evidence for one approved immutable action. Terminal exact replays return the same result or bounded failure code without repeating the product effect.',
+          'Durable, tenant-scoped execution evidence for one approved immutable action. Reserved evidence has no lease or terminal payload; running evidence has a valid lease; succeeded evidence has one exact published result; failed evidence has one bounded failure code; compensated evidence has no result and uses AGENT_ACTION_COMPENSATED. Terminal exact replays do not repeat the product effect.',
         additionalProperties: false,
         properties: {
           id: {
@@ -5434,7 +5439,12 @@ const rawOpenApiSpec = {
             },
             required: ['resourceId', 'resourceVersion', 'status'],
           },
-          failureCode: { type: 'string', pattern: '^[A-Z0-9_]{3,64}$' },
+          failureCode: {
+            type: 'string',
+            pattern: '^[A-Z0-9_]{3,64}$',
+            description:
+              'Required for failed evidence. Compensated evidence uses AGENT_ACTION_COMPENSATED exactly.',
+          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -5456,6 +5466,103 @@ const rawOpenApiSpec = {
           'createdAt',
           'updatedAt',
         ],
+      },
+      AgentExecutionAuditRecord: {
+        type: 'object',
+        description:
+          'Immutable, ordered lifecycle evidence bound to the exact execution identity, action digest, approval, idempotency key and resource version.',
+        additionalProperties: false,
+        properties: {
+          id: {
+            type: 'string',
+            pattern: '^aaud_[a-f0-9]{48}$',
+            example: `aaud_${'a'.repeat(48)}`,
+          },
+          tenantId: { type: 'string' },
+          agentPrincipalId: {
+            type: 'string',
+            pattern: '^agt_[a-f0-9]{48}$',
+            example: `agt_${'b'.repeat(48)}`,
+          },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: {
+            type: 'string',
+            pattern: '^dlg_[a-f0-9]{48}$',
+            example: `dlg_${'c'.repeat(48)}`,
+          },
+          actionId: {
+            type: 'string',
+            pattern: '^act_[a-f0-9]{48}$',
+            example: `act_${'d'.repeat(48)}`,
+          },
+          actionDigest: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+            example: 'e'.repeat(64),
+          },
+          planSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          approvalId: {
+            type: 'string',
+            pattern: '^apr_[a-f0-9]{48}$',
+            example: `apr_${'f'.repeat(48)}`,
+          },
+          phase: {
+            type: 'string',
+            enum: [
+              'prepared',
+              'authorized',
+              'denied',
+              'started',
+              'succeeded',
+              'failed',
+              'compensated',
+            ],
+          },
+          idempotencyKey: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+            example: '1'.repeat(64),
+          },
+          resourceVersion: { type: 'integer', minimum: 0 },
+          occurredAt: { type: 'string', format: 'date-time' },
+          reasonCodes: {
+            type: 'array',
+            maxItems: 16,
+            uniqueItems: true,
+            items: { type: 'string', pattern: '^[a-z0-9_]{2,64}$' },
+          },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'actionId',
+          'actionDigest',
+          'approvalId',
+          'phase',
+          'idempotencyKey',
+          'resourceVersion',
+          'occurredAt',
+          'reasonCodes',
+        ],
+      },
+      AgentExecutionEvidence: {
+        type: 'object',
+        description:
+          'Durable execution plus bounded immutable audit history, visible only to the exact agent principal or human sponsor.',
+        additionalProperties: false,
+        properties: {
+          execution: { $ref: '#/components/schemas/AgentExecution' },
+          audit: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 100,
+            items: { $ref: '#/components/schemas/AgentExecutionAuditRecord' },
+          },
+        },
+        required: ['execution', 'audit'],
       },
       AgentDelegation: {
         type: 'object',
@@ -10772,6 +10879,94 @@ const rawOpenApiSpec = {
             description:
               'Approval, action, authorization, resource, policy or readiness changed; or an execution is currently leased by another worker',
           },
+        },
+      },
+    },
+    '/agent/actions/{actionId}/executions/{executionId}': {
+      get: {
+        summary: 'Inspect durable agent execution and audit evidence',
+        description:
+          'Experimental/private beta. Returns bounded immutable lifecycle evidence only to the exact authenticated agent principal or its exact human sponsor. Cross-tenant, cross-agent, cross-sponsor and cross-action lookups return not found. Sponsor inspection remains available after event permission loss so consequential execution stays accountable.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          {
+            name: 'executionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^exec_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Durable execution and ordered immutable audit evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentExecutionEvidence' },
+                example: {
+                  execution: {
+                    id: `exec_${'a'.repeat(48)}`,
+                    tenantId: 'tenant_example',
+                    actionId: `act_${'b'.repeat(48)}`,
+                    actionDigest: 'c'.repeat(64),
+                    agentPrincipalId: `agt_${'d'.repeat(48)}`,
+                    sponsorPrincipalId: 'user_example',
+                    delegationGrantId: `dlg_${'e'.repeat(48)}`,
+                    approvalId: `apr_${'f'.repeat(48)}`,
+                    idempotencyKey: '1'.repeat(64),
+                    requestFingerprint: '2'.repeat(64),
+                    state: 'reserved',
+                    resourceVersion: 3,
+                    policyVersion: 1,
+                    fenceToken: 0,
+                    createdAt: '2026-07-26T12:00:00.000Z',
+                    updatedAt: '2026-07-26T12:00:00.000Z',
+                  },
+                  audit: [
+                    {
+                      id: `aaud_${'3'.repeat(48)}`,
+                      tenantId: 'tenant_example',
+                      agentPrincipalId: `agt_${'d'.repeat(48)}`,
+                      sponsorPrincipalId: 'user_example',
+                      delegationGrantId: `dlg_${'e'.repeat(48)}`,
+                      actionId: `act_${'b'.repeat(48)}`,
+                      actionDigest: 'c'.repeat(64),
+                      approvalId: `apr_${'f'.repeat(48)}`,
+                      phase: 'prepared',
+                      idempotencyKey: '1'.repeat(64),
+                      resourceVersion: 3,
+                      occurredAt: '2026-07-26T12:00:00.000Z',
+                      reasonCodes: [],
+                    },
+                    {
+                      id: `aaud_${'4'.repeat(48)}`,
+                      tenantId: 'tenant_example',
+                      agentPrincipalId: `agt_${'d'.repeat(48)}`,
+                      sponsorPrincipalId: 'user_example',
+                      delegationGrantId: `dlg_${'e'.repeat(48)}`,
+                      actionId: `act_${'b'.repeat(48)}`,
+                      actionDigest: 'c'.repeat(64),
+                      approvalId: `apr_${'f'.repeat(48)}`,
+                      phase: 'authorized',
+                      idempotencyKey: '1'.repeat(64),
+                      resourceVersion: 3,
+                      occurredAt: '2026-07-26T12:00:00.000Z',
+                      reasonCodes: [],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid action or execution identifier' },
+          '401': { description: 'Human or Agent OAuth authentication required' },
+          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '404': { description: 'Execution is outside the exact caller and action scope' },
         },
       },
     },
