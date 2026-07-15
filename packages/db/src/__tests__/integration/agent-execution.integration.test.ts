@@ -952,7 +952,9 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       agentPrincipalId: exactPrincipal.id,
     };
     let inspectionSettled = false;
-    let inspection: Promise<Awaited<ReturnType<typeof repository.getExecutionEvidence>>> | undefined;
+    let inspection:
+      | Promise<Awaited<ReturnType<typeof repository.getExecutionEvidence>>>
+      | undefined;
     await db.transaction().execute(async (tx) => {
       await tx
         .selectFrom('agent_executions')
