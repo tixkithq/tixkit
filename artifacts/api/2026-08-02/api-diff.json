@@ -1,0 +1,138 @@
+{
+  "from": "2026-08-01",
+  "to": "2026-08-02",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 21
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /agent-principals.requestBody.content.application/json.schema.properties.capabilities.items",
+      "message": "Enum value content.prepare was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-reference-widened",
+      "path": "POST /agent-principals.responses.201.content.application/json.schema",
+      "message": "The prior response schema remains accepted by an additive anyOf branch."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-reference-widened",
+      "path": "GET /agent-principals/{id}.responses.200.content.application/json.schema",
+      "message": "The prior response schema remains accepted by an additive anyOf branch."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-reference-widened",
+      "path": "GET /agent/session.responses.200.content.application/json.schema",
+      "message": "The prior response schema remains accepted by an additive anyOf branch."
+    },
+    {
+      "severity": "compatible",
+      "category": "enum-expanded",
+      "path": "POST /agent-delegations.requestBody.content.application/json.schema.properties.capabilities.items",
+      "message": "Enum value content.prepare was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-reference-widened",
+      "path": "POST /agent-delegations.responses.201.content.application/json.schema",
+      "message": "The prior response schema remains accepted by an additive anyOf branch."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/content-preparations",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/content-preparations/{actionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPrincipal20260802",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPrincipalResponse",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentSession20260802",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentSessionResponse",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentSafeEventPageContent",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentContentPrepareValidation",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentContentPreparePreview",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentContentPreparePayload",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentContentPrepareAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentContentPrepareResult",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PreparedAgentContentPrepareAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentDelegation20260802",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentDelegationResponse",
+      "message": "A named schema was added."
+    }
+  ]
+}
