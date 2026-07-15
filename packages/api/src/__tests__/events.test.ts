@@ -5,7 +5,10 @@ import type { Database } from '@tixkit/db';
 import type { AppContext } from '../app.js';
 import { eventRoutes, isVenueForeignKeyError } from '../routes/modules/events.js';
 
-function createEventListDb(rows: Record<string, unknown>[]) {
+function createEventListDb(
+  rows: Record<string, unknown>[],
+  thumbnailRows: Record<string, unknown>[] = [],
+) {
   const whereCalls: unknown[][] = [];
   let countAlias: string | null = null;
   const query = {
@@ -51,6 +54,9 @@ function createEventListDb(rows: Record<string, unknown>[]) {
     select() {
       return emptyStatsQuery;
     },
+    innerJoin() {
+      return emptyStatsQuery;
+    },
     where(...args: unknown[]) {
       whereCalls.push(args);
       return emptyStatsQuery;
@@ -62,11 +68,27 @@ function createEventListDb(rows: Record<string, unknown>[]) {
       return Promise.resolve([]);
     },
   };
+  const thumbnailQuery = {
+    select() {
+      return thumbnailQuery;
+    },
+    innerJoin() {
+      return thumbnailQuery;
+    },
+    where(...args: unknown[]) {
+      whereCalls.push(args);
+      return thumbnailQuery;
+    },
+    execute() {
+      return Promise.resolve(thumbnailRows);
+    },
+  };
   return {
     whereCalls,
     db: {
       selectFrom(table: string) {
         if (table === 'events') return query;
+        if (table === 'event_media_renditions as rendition') return thumbnailQuery;
         return emptyStatsQuery;
       },
     } as unknown as Database,
@@ -350,7 +372,9 @@ describe('event routes', () => {
     expect(isVenueForeignKeyError({ code: 'ER_NO_REFERENCED_ROW_2' })).toBe(true);
     expect(isVenueForeignKeyError({ code: 'EREQUEST', number: 547 })).toBe(true);
     expect(
-      isVenueForeignKeyError({ cause: { code: 'EREQUEST', originalError: { number: 547 } } }),
+      isVenueForeignKeyError({
+        cause: { code: 'EREQUEST', originalError: { number: 547 } },
+      }),
     ).toBe(true);
     expect(isVenueForeignKeyError({ code: 'EREQUEST', number: 2627 })).toBe(false);
   });
@@ -362,7 +386,11 @@ describe('event routes', () => {
     const accepted = await app.inject({
       method: 'POST',
       url: '/onboarding-events',
-      payload: { stage: 'autosave_failure', outcome: 'failed', reasonCode: 'request_failed' },
+      payload: {
+        stage: 'autosave_failure',
+        outcome: 'failed',
+        reasonCode: 'request_failed',
+      },
     });
     expect(accepted.statusCode).toBe(204);
 
@@ -1442,29 +1470,43 @@ describe('event routes', () => {
       brandIds: ['brd_1'],
       eventIds: ['evt_1'],
     };
-    const { db, whereCalls } = createEventListDb([
-      {
-        id: 'evt_1',
-        tenant_id: 'tnt_1',
-        organization_id: 'org_1',
-        brand_id: 'brd_1',
-        slug: 'event',
-        title: 'Event',
-        description: null,
-        status: 'published',
-        timezone: 'America/New_York',
-        starts_at: new Date('2026-07-01T00:00:00.000Z'),
-        ends_at: null,
-        venue: null,
-        visibility: 'public',
-        seo: JSON.stringify({}),
-        capacity: null,
-        cover_image_url: null,
-        external_url: null,
-        created_at: new Date('2026-06-01T00:00:00.000Z'),
-        updated_at: new Date('2026-06-01T00:00:00.000Z'),
-      },
-    ]);
+    const { db, whereCalls } = createEventListDb(
+      [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          slug: 'event',
+          title: 'Event',
+          description: null,
+          status: 'published',
+          timezone: 'America/New_York',
+          starts_at: new Date('2026-07-01T00:00:00.000Z'),
+          ends_at: null,
+          venue: null,
+          visibility: 'public',
+          seo: JSON.stringify({}),
+          capacity: null,
+          cover_image_url: null,
+          external_url: null,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+      [
+        {
+          rendition_id: 'emr_cover',
+          width: 480,
+          height: 270,
+          checksum_sha256: 'a'.repeat(64),
+          event_id: 'evt_1',
+          role: 'cover',
+          variant: 'card',
+          alt_text: 'Event crowd',
+        },
+      ],
+    );
     const app = Fastify();
     app.decorate('context', {
       db,
@@ -1488,6 +1530,16 @@ describe('event routes', () => {
     expect(whereCalls).toContainEqual(['tenant_id', '=', 'tnt_1']);
     expect(whereCalls).toContainEqual(['brand_id', 'in', ['brd_1']]);
     expect(whereCalls).toContainEqual(['id', 'in', ['evt_1']]);
+    expect(response.json().items[0].thumbnail).toEqual({
+      renditionId: 'emr_cover',
+      role: 'cover',
+      variant: 'card',
+      altText: 'Event crowd',
+      width: 480,
+      height: 270,
+      checksumSha256: 'a'.repeat(64),
+      url: '/v1/events/evt_1/media/renditions/emr_cover',
+    });
 
     await app.close();
   });

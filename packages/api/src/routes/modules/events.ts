@@ -40,6 +40,7 @@ import { ReadinessService, resolvePaymentMode } from '../../services/readiness.j
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 import { publishEvent } from '../../services/event-publication.js';
 import { EventUpdateService } from '../../services/event-update.js';
+import { loadEventMediaThumbnails } from '../../services/event-media.js';
 
 const marketingIntegrationStatusSchema = z.enum(['active', 'disabled']).default('active');
 const onboardingTelemetrySchema = z
@@ -814,19 +815,29 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
       tableQuery,
     );
 
-    // Enrich with event stats
+    // Enrich with event stats and optimized organizer thumbnails in bounded bulk queries.
     const eventIds = result.items.map((e) => (e as Record<string, unknown>).id as string);
     if (eventIds.length > 0) {
-      const stats = await computeEventStats(db, principal.tenantId, eventIds);
+      const [stats, thumbnails] = await Promise.all([
+        computeEventStats(db, principal.tenantId, eventIds),
+        loadEventMediaThumbnails(db, {
+          tenantId: principal.tenantId,
+          eventIds,
+        }),
+      ]);
       const enrichedItems = result.items.map((item) => {
         const event = item as Record<string, unknown>;
         const stat = stats.get(event.id as string);
-        if (!stat) return event;
         return {
           ...event,
-          grossSalesCents: stat.gross_sales_cents,
-          ticketsSold: stat.tickets_sold,
-          checkIns: stat.check_ins,
+          ...(stat
+            ? {
+                grossSalesCents: stat.gross_sales_cents,
+                ticketsSold: stat.tickets_sold,
+                checkIns: stat.check_ins,
+              }
+            : {}),
+          thumbnail: thumbnails.get(event.id as string) ?? null,
         };
       });
       return { ...result, items: enrichedItems } as AdminTablePage<unknown>;
@@ -846,8 +857,17 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
     ClerkAuthService.requireBrandScope(principal, event.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
-    const stats = await computeEventStats(db, principal.tenantId, [eventId]);
-    return serializeEvent({ ...event, ...stats.get(eventId) });
+    const [stats, thumbnails] = await Promise.all([
+      computeEventStats(db, principal.tenantId, [eventId]),
+      loadEventMediaThumbnails(db, {
+        tenantId: principal.tenantId,
+        eventIds: [eventId],
+      }),
+    ]);
+    return {
+      ...serializeEvent({ ...event, ...stats.get(eventId) }),
+      thumbnail: thumbnails.get(eventId) ?? null,
+    };
   });
 
   app.get('/events/:eventId/operational-health', async (request) => {

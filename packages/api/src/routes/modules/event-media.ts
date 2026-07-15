@@ -8,6 +8,7 @@ import { parseBody } from '../../http/schemas.js';
 import {
   attachEventMedia,
   removeEventMedia,
+  streamScopedEventMediaRendition,
   type EventMediaRole,
 } from '../../services/event-media.js';
 
@@ -104,8 +105,34 @@ export const eventMediaRoutes: FastifyPluginAsync = async (app) => {
           checksumSha256: rendition.checksum_sha256,
           sizeBytes: Number(rendition.size_bytes),
           url: `/v1/public/event-media/renditions/${rendition.id}`,
+          organizerUrl: `/v1/events/${eventId}/media/renditions/${rendition.id}`,
         })),
     }));
+  });
+
+  app.get('/events/:eventId/media/renditions/:renditionId', async (request, reply) => {
+    const principal = request.principal!;
+    ClerkAuthService.requirePermission(principal, 'events.read');
+    const { eventId, renditionId } = request.params as {
+      eventId: string;
+      renditionId: string;
+    };
+    const event = await scopedEvent(app, principal, eventId);
+    const { stream, contentType, fileName, checksumSha256 } = await streamScopedEventMediaRendition(
+      app.context.db,
+      {
+        renditionId,
+        tenantId: principal.tenantId,
+        organizationId: event.organization_id,
+        brandId: event.brand_id,
+        eventId,
+      },
+    );
+    reply.header('Content-Type', contentType);
+    reply.header('Content-Disposition', `inline; filename="${fileName.replaceAll('"', '')}"`);
+    reply.header('Cache-Control', 'private, max-age=31536000, immutable');
+    reply.header('ETag', `"${checksumSha256}"`);
+    return reply.send(stream);
   });
 
   app.put('/events/:eventId/media/:role', async (request) => {
@@ -149,13 +176,22 @@ export const eventMediaRoutes: FastifyPluginAsync = async (app) => {
         checksumSha256: attached.original.checksumSha256,
       },
     });
-    return attached;
+    return {
+      ...attached,
+      renditions: attached.renditions.map((rendition) => ({
+        ...rendition,
+        organizerUrl: `/v1/events/${eventId}/media/renditions/${rendition.id}`,
+      })),
+    };
   });
 
   app.delete('/events/:eventId/media/:role', async (request, reply) => {
     const principal = request.principal!;
     ClerkAuthService.requirePermission(principal, 'events.write');
-    const { eventId, role: rawRole } = request.params as { eventId: string; role: string };
+    const { eventId, role: rawRole } = request.params as {
+      eventId: string;
+      role: string;
+    };
     const role = roleSchema.parse(rawRole) as EventMediaRole;
     const event = await scopedEvent(app, principal, eventId);
     const removed = await removeEventMedia({

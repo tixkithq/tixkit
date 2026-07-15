@@ -24,6 +24,24 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
+vi.mock('@/features/events/authenticated-event-image', () => ({
+  AuthenticatedEventImage: ({
+    source,
+  }: {
+    source?: {
+      url: string;
+      altText: string;
+      width: number;
+      height: number;
+    } | null;
+  }) =>
+    source ? (
+      <img src={source.url} alt={source.altText} width={source.width} height={source.height} />
+    ) : (
+      <span data-testid="event-image-fallback" />
+    ),
+}));
+
 vi.mock('@/context/bootstrap-provider', () => ({
   useBootstrap: () => ({
     organizations: [],
@@ -76,6 +94,16 @@ function makeEvents() {
           capacity: 200,
           checkIns: 10,
           updatedAt: '2026-06-01T00:00:00Z',
+          thumbnail: {
+            renditionId: 'emr_cover',
+            role: 'cover' as const,
+            variant: 'card' as const,
+            altText: 'Audience watching Test Event',
+            width: 480,
+            height: 270,
+            checksumSha256: 'a'.repeat(64),
+            url: '/v1/events/evt_1/media/renditions/emr_cover',
+          },
         },
       ],
       total: 1,
@@ -125,6 +153,20 @@ function makeEmpty() {
 describe('DashboardView error states', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('renders the optimized recent-event thumbnail with intrinsic dimensions', async () => {
+    mockListEvents.mockResolvedValue(makeEvents());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    const thumbnail = await screen.findByRole('img', {
+      name: 'Audience watching Test Event',
+    });
+    expect(thumbnail).toHaveAttribute('src', '/v1/events/evt_1/media/renditions/emr_cover');
+    expect(thumbnail).toHaveAttribute('width', '480');
+    expect(thumbnail).toHaveAttribute('height', '270');
   });
 
   it('shows error state on 401', async () => {

@@ -2103,6 +2103,44 @@ describe('cross-organization denial (same tenant)', () => {
     await app.close();
   });
 
+  it.each([
+    {
+      name: 'another tenant',
+      principal: makePrincipal({ tenantId: 'tnt_A' }),
+      event: eventRow({ tenant_id: 'tnt_B' }),
+    },
+    {
+      name: 'another organization',
+      principal: makePrincipal({ organizationIds: ['org_A'] }),
+      event: eventRow({ organization_id: 'org_B' }),
+    },
+    {
+      name: 'another brand',
+      principal: makePrincipal({ brandIds: ['brd_A'] }),
+      event: eventRow({ brand_id: 'brd_B' }),
+    },
+    {
+      name: 'another event',
+      principal: makePrincipal({ eventIds: ['evt_A'] }),
+      event: eventRow({ id: 'evt_B' }),
+    },
+  ])(
+    'GET /events/:eventId/media/renditions/:renditionId hides media in $name',
+    async ({ principal, event }) => {
+      const app = await setupApp(eventMediaRoutes, principal, {
+        events: [event],
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/events/${String(event.id)}/media/renditions/emr_1`,
+      });
+
+      expect(response.statusCode).toBe(404);
+      await app.close();
+    },
+  );
+
   it('PATCH /events/:eventId returns 404 for event in another organization', async () => {
     const tables: Tables = {
       events: [eventRow({ tenant_id: 'tnt_1', organization_id: 'org_B' })],
@@ -3462,6 +3500,21 @@ describe('brand and event scope denial', () => {
 // ===========================================================================
 
 describe('API key scope enforcement', () => {
+  it('GET /events/:eventId/media/renditions/:renditionId returns 403 without events.read', async () => {
+    const app = await setupApp(eventMediaRoutes, makePrincipal({ scopes: ['events.write'] }), {
+      events: [eventRow()],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/media/renditions/emr_1',
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toContain('events.read');
+    await app.close();
+  });
+
   it('DELETE /events/:eventId/media/:role returns 403 without events.write and preserves media', async () => {
     const tables: Tables = {
       events: [eventRow()],

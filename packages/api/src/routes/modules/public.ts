@@ -166,7 +166,7 @@ export type PublicEventMediaAsset = {
   altText: string;
   focalPoint: { x: number; y: number };
   renditions: Array<{
-    variant: 'thumbnail' | 'page' | 'social';
+    variant: 'thumbnail' | 'card' | 'page' | 'social';
     width: number;
     height: number;
     url: string;
@@ -304,7 +304,10 @@ export async function loadPublicEventMedia(
     const asset = assets.get(row.asset_id);
     if (
       !asset ||
-      (row.variant !== 'thumbnail' && row.variant !== 'page' && row.variant !== 'social')
+      (row.variant !== 'thumbnail' &&
+        row.variant !== 'card' &&
+        row.variant !== 'page' &&
+        row.variant !== 'social')
     )
       continue;
     asset.renditions.push({
@@ -899,7 +902,10 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/public/events/:eventId/bootstrap', async (request) => {
     const { eventId } = request.params as { eventId: string };
-    const query = request.query as { products?: unknown; resaleListingId?: unknown };
+    const query = request.query as {
+      products?: unknown;
+      resaleListingId?: unknown;
+    };
     const requestedProducts = parseRequestedProducts(query.products);
     const resaleListingId = firstQueryParam(query.resaleListingId).trim() || undefined;
     const event = await loadPublicEventById(db, eventId);
@@ -1069,7 +1075,9 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       .map((v) => (v instanceof Date ? v.toISOString() : String(v)));
 
     // eslint-disable-next-line unicorn/no-array-sort -- API targets ES2022 and this array is local.
-    return { revision: candidates.length > 0 ? candidates.sort().at(-1)! : null };
+    return {
+      revision: candidates.length > 0 ? candidates.sort().at(-1)! : null,
+    };
   });
 
   app.get('/public/events/:eventId/questions', async (request) => {

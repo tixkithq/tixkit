@@ -46,7 +46,7 @@ export type PublicEventMediaAsset = {
   altText: string;
   focalPoint: { x: number; y: number };
   renditions: Array<{
-    variant: 'thumbnail' | 'page' | 'social';
+    variant: 'thumbnail' | 'card' | 'page' | 'social';
     width: number;
     height: number;
     url: string;
@@ -569,7 +569,11 @@ export const publicApi = {
       event: normalizePublicEvent(response.event),
       contentPage: response.contentPage ?? null,
       availability: Array.isArray(response.availability) ? response.availability : [],
-      resaleListings: response.resaleListings ?? { items: [], nextCursor: null, hasMore: false },
+      resaleListings: response.resaleListings ?? {
+        items: [],
+        nextCursor: null,
+        hasMore: false,
+      },
     };
   },
 
@@ -593,7 +597,11 @@ export const publicApi = {
       event: normalizePublicEvent(response.event),
       contentPage: response.contentPage ?? null,
       availability: Array.isArray(response.availability) ? response.availability : [],
-      resaleListings: response.resaleListings ?? { items: [], nextCursor: null, hasMore: false },
+      resaleListings: response.resaleListings ?? {
+        items: [],
+        nextCursor: null,
+        hasMore: false,
+      },
     };
   },
 
@@ -666,7 +674,9 @@ export const publicApi = {
   ): Promise<MarketingIntegration[]> {
     const response = await apiRequest<{ items?: MarketingIntegration[] } | MarketingIntegration[]>(
       `/public/events/${encodeURIComponent(eventId)}/marketing-integrations`,
-      { signal },
+      {
+        signal,
+      },
     );
     return Array.isArray(response) ? response : (response.items ?? []);
   },
@@ -691,7 +701,12 @@ export const publicApi = {
     eventId: string,
     file: File,
     questionId: string,
-  ): Promise<{ artifactId: string; fileName: string; contentType: string; sizeBytes: number }> {
+  ): Promise<{
+    artifactId: string;
+    fileName: string;
+    contentType: string;
+    sizeBytes: number;
+  }> {
     const artifact = await apiRequest<UploadArtifact>(
       `/public/events/${encodeURIComponent(eventId)}/upload-artifacts`,
       {

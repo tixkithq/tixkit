@@ -36,6 +36,7 @@ import { ScannerPanel } from '@/features/check-in/scanner-panel';
 import { ManualLookup } from '@/features/check-in/manual-lookup';
 import { CreateCheckInListDialog } from '@/features/check-in/create-check-in-list-dialog';
 import { BoxOfficeOrderPanel } from '@/features/events/box-office-order-panel';
+import { AuthenticatedEventImage } from '@/features/events/authenticated-event-image';
 import { subscribeToCheckInActivity } from '@/lib/scan-activity';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -454,7 +455,14 @@ export function CheckInConsole({
                   <SelectContent>
                     {events.map((event: AdminEventListItem) => (
                       <SelectItem key={event.id} value={event.id}>
-                        {event.title}
+                        <span className="flex items-center gap-2">
+                          <AuthenticatedEventImage
+                            source={event.thumbnail}
+                            className="size-7 rounded"
+                            fallbackClassName="size-7"
+                          />
+                          <span className="truncate">{event.title}</span>
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>

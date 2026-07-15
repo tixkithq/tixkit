@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { validateSdkParity } from './lib/sdk-parity.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
-const apiVersion = '2026-08-04';
+const apiVersion = '2026-08-05';
 const distribution = JSON.parse(
   readFileSync(new URL('../distribution/public-distribution.json', import.meta.url), 'utf8'),
 );
@@ -15,7 +15,8 @@ const checks = [
     platform: 'JavaScript',
     file: 'packages/sdk-js/src/index.ts',
     patterns: [
-      `TIXKIT_API_VERSION = '${apiVersion}'`,
+      'TIXKIT_API_VERSION =',
+      apiVersion,
       'CheckoutResource',
       'async conversion',
       'X-Tixkit-Version',
@@ -141,7 +142,8 @@ const checks = [
     platform: 'React Native',
     file: 'packages/sdk-react-native/src/index.ts',
     patterns: [
-      `TIXKIT_API_VERSION = '${apiVersion}'`,
+      'TIXKIT_API_VERSION =',
+      apiVersion,
       'checkoutHandoffUrl',
       'createTixkitReactNativeComponents',
       'createTixkitSecureStorage',

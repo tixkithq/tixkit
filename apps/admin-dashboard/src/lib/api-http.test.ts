@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { request } from './api-http';
+import { request, requestBlob } from './api-http';
 
 describe('request', () => {
   afterEach(() => {
@@ -16,7 +16,9 @@ describe('request', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await request<{ ok: boolean }>('/v1/test', { method: 'POST' });
+    const result = await request<{ ok: boolean }>('/v1/test', {
+      method: 'POST',
+    });
 
     expect(result.ok).toBe(true);
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -108,5 +110,72 @@ describe('request', () => {
 
     expect(result.ok).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('requestBlob', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('loads binary media with credentials and does not parse it as JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('event-thumbnail', {
+        status: 200,
+        headers: { 'Content-Type': 'image/webp' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await requestBlob('/v1/events/evt_1/media/renditions/emr_1');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(await result.data.text()).toBe('event-thumbnail');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:4000/v1/events/evt_1/media/renditions/emr_1');
+    expect(init.credentials).toBe('include');
+  });
+
+  it('fails closed when a private rendition is denied', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })));
+
+    const result = await requestBlob('/v1/events/evt_1/media/renditions/emr_other');
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'http_error',
+        message: 'Image request failed with status 404',
+        status: 404,
+      },
+    });
+  });
+
+  it('rejects cross-origin media before calling fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await requestBlob(
+      'https://attacker.example/v1/events/evt_1/media/renditions/emr_1',
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_media_url',
+        message: 'The authenticated event media URL is invalid',
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects same-origin paths outside the authenticated rendition surface', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await requestBlob('/v1/agent/sessions?redirect=https://attacker.example');
+
+    expect(result.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

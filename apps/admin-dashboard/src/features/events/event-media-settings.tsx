@@ -9,6 +9,7 @@ import {
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { AuthenticatedEventImage } from './authenticated-event-image';
 
 export function EventMediaSettings({
   event,
@@ -261,19 +262,22 @@ export function EventMediaSettings({
         <div className="grid gap-4 lg:grid-cols-3">
           {(['poster', 'cover', 'social'] as const).map((role) => {
             const asset = assets.find((candidate) => candidate.role === role);
-            const preview = asset?.renditions.find(
-              (rendition) => rendition.variant === 'thumbnail',
-            );
+            const preview =
+              asset?.renditions.find((rendition) => rendition.variant === 'card') ??
+              asset?.renditions.find((rendition) => rendition.variant === 'thumbnail');
             return (
               <article key={role} className="space-y-3 rounded-lg border p-4">
                 <h3 className="font-medium capitalize">{role}</h3>
                 {preview ? (
-                  <img
+                  <AuthenticatedEventImage
+                    source={{
+                      url: preview.organizerUrl ?? preview.url,
+                      altText: asset?.altText ?? `${role} preview`,
+                      width: preview.width,
+                      height: preview.height,
+                    }}
                     className="aspect-video w-full rounded-md object-cover"
-                    src={preview.url}
-                    alt={asset?.altText ?? `${role} preview`}
-                    width={preview.width}
-                    height={preview.height}
+                    fallbackClassName="aspect-video w-full"
                   />
                 ) : (
                   <div className="flex aspect-video items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
@@ -287,7 +291,10 @@ export function EventMediaSettings({
                     value={roleAlt[role]}
                     maxLength={500}
                     onChange={(change) =>
-                      setRoleAlt((current) => ({ ...current, [role]: change.target.value }))
+                      setRoleAlt((current) => ({
+                        ...current,
+                        [role]: change.target.value,
+                      }))
                     }
                   />
                 </label>

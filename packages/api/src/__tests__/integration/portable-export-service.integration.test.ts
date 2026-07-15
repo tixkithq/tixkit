@@ -25,7 +25,7 @@ import {
   type PortableExportMediaStore,
 } from '../../services/portable-export.js';
 import { loadPublicEventMedia } from '../../routes/modules/public.js';
-import { removeEventMedia } from '../../services/event-media.js';
+import { loadEventMediaThumbnails, removeEventMedia } from '../../services/event-media.js';
 import { parseUploadArtifactMetadata } from '../../services/uploads.js';
 import { createPortableHistoricalAuthorizationService } from '../../services/portable-export-authorization.js';
 import sharp from 'sharp';
@@ -193,7 +193,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         signature: signPortableManifest(parentManifest, 'bundle_key_01', bundleKeys.privateKey),
       };
       const bytes = new TextEncoder().encode(
-        canonicalPortableJson({ envelope: parentEnvelope, payloads: transport.payloads }),
+        canonicalPortableJson({
+          envelope: parentEnvelope,
+          payloads: transport.payloads,
+        }),
       );
       const manifestSha256 = portableManifestSha256(parentManifest);
       const artifactSha256 = createHash('sha256').update(bytes).digest('hex');
@@ -276,7 +279,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       signature: signPortableManifest(legacyManifest, 'bundle_key_01', bundleKeys.privateKey),
     };
     const legacyBytes = new TextEncoder().encode(
-      canonicalPortableJson({ envelope: legacyEnvelope, payloads: transport.payloads }),
+      canonicalPortableJson({
+        envelope: legacyEnvelope,
+        payloads: transport.payloads,
+      }),
     );
     const legacyObjectKey = firstObjectKey.replace(first.jobId, legacyJob.id);
     objects.set(legacyObjectKey, legacyBytes);
@@ -399,10 +405,30 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         expiresAt: new Date('2027-07-12T22:00:00.000Z'),
         required: true,
       },
-      { id: `wcr_expired_${driver}`, status: 'expired', expiresAt: now, required: false },
-      { id: `wcr_inactive_${driver}`, status: 'inactive', expiresAt: null, required: false },
-      { id: `wcr_pending_${driver}`, status: 'pending', expiresAt: null, required: false },
-      { id: `wcr_revoked_${driver}`, status: 'revoked', expiresAt: null, required: false },
+      {
+        id: `wcr_expired_${driver}`,
+        status: 'expired',
+        expiresAt: now,
+        required: false,
+      },
+      {
+        id: `wcr_inactive_${driver}`,
+        status: 'inactive',
+        expiresAt: null,
+        required: false,
+      },
+      {
+        id: `wcr_pending_${driver}`,
+        status: 'pending',
+        expiresAt: null,
+        required: false,
+      },
+      {
+        id: `wcr_revoked_${driver}`,
+        status: 'revoked',
+        expiresAt: null,
+        required: false,
+      },
     ] as const;
     await Promise.all([
       db
@@ -602,7 +628,9 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
           brand_id: brand.id,
           event_id: null,
           provider: 'meta_pixel',
-          config: JSON.stringify({ accessToken: 'MARKETING_SECRET_MUST_NOT_EXPORT' }),
+          config: JSON.stringify({
+            accessToken: 'MARKETING_SECRET_MUST_NOT_EXPORT',
+          }),
           consent_required: true,
           status: 'active',
           created_at: now,
@@ -709,7 +737,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
 
     await db
       .updateTable('sender_identities')
-      .set({ verified: true, updated_at: new Date('2026-07-12T22:01:00.000Z') })
+      .set({
+        verified: true,
+        updated_at: new Date('2026-07-12T22:01:00.000Z'),
+      })
       .where('tenant_id', '=', tenantId)
       .where('organization_id', '=', organizationId)
       .where('id', '=', `si_portable_${driver}`)
@@ -756,7 +787,12 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       startsAt: new Date('2027-01-01T00:00:00Z'),
     });
     const original = await sharp({
-      create: { width: 1600, height: 1000, channels: 3, background: '#7c3aed' },
+      create: {
+        width: 1600,
+        height: 1000,
+        channels: 3,
+        background: '#7c3aed',
+      },
     })
       .jpeg()
       .withMetadata({ orientation: 1 })
@@ -785,7 +821,9 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         size_bytes: original.byteLength,
         checksum_sha256: checksum,
         client_token_hash: null,
-        metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'jpeg' } }),
+        metadata: JSON.stringify({
+          image: { width: 1600, height: 1000, format: 'jpeg' },
+        }),
         consumed_by_checkout_session_id: null,
         consumed_at: null,
         completion_owner_token: null,
@@ -828,20 +866,36 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       .execute();
     await db
       .insertInto('event_media_renditions')
-      .values({
-        id: `emr_media_${driver}`,
-        asset_id: assetId,
-        variant: 'page',
-        width: 1600,
-        height: 900,
-        format: 'webp',
-        content_type: 'image/webp',
-        bucket: 'media',
-        object_key: `event-media/${event.id}/${assetId}/page.webp`,
-        checksum_sha256: 'b'.repeat(64),
-        size_bytes: 1024,
-        created_at: now,
-      })
+      .values([
+        {
+          id: `emr_media_${driver}`,
+          asset_id: assetId,
+          variant: 'page',
+          width: 1600,
+          height: 900,
+          format: 'webp',
+          content_type: 'image/webp',
+          bucket: 'media',
+          object_key: `event-media/${event.id}/${assetId}/page.webp`,
+          checksum_sha256: 'b'.repeat(64),
+          size_bytes: 1024,
+          created_at: now,
+        },
+        {
+          id: `emr_thumbnail_${driver}`,
+          asset_id: assetId,
+          variant: 'thumbnail',
+          width: 480,
+          height: 270,
+          format: 'webp',
+          content_type: 'image/webp',
+          bucket: 'media',
+          object_key: `event-media/${event.id}/${assetId}/thumbnail.webp`,
+          checksum_sha256: 'c'.repeat(64),
+          size_bytes: 512,
+          created_at: now,
+        },
+      ])
       .execute();
     expect(await loadPublicEventMedia(db, event.id)).toEqual([
       {
@@ -855,9 +909,33 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
             height: 900,
             url: `/v1/public/event-media/renditions/emr_media_${driver}`,
           },
+          {
+            variant: 'thumbnail',
+            width: 480,
+            height: 270,
+            url: `/v1/public/event-media/renditions/emr_thumbnail_${driver}`,
+          },
         ],
       },
     ]);
+    expect(
+      (await loadEventMediaThumbnails(db, { tenantId, eventIds: [event.id] })).get(event.id),
+    ).toEqual({
+      renditionId: `emr_thumbnail_${driver}`,
+      role: 'cover',
+      variant: 'thumbnail',
+      altText: 'Purple event cover',
+      width: 480,
+      height: 270,
+      checksumSha256: 'c'.repeat(64),
+      url: `/v1/events/${event.id}/media/renditions/emr_thumbnail_${driver}`,
+    });
+    expect(
+      await loadEventMediaThumbnails(db, {
+        tenantId: `tnt_other_${driver}`,
+        eventIds: [event.id],
+      }),
+    ).toEqual(new Map());
     const mediaStore: PortableExportMediaStore = {
       async read(bucket, objectKey, maximumBytes) {
         expect({ bucket, objectKey, maximumBytes }).toEqual({
@@ -902,7 +980,11 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     const sanitized = Buffer.from(transport.payloads[asset.path]!, 'base64');
     expect(createHash('sha256').update(sanitized).digest('hex')).toBe(asset.sha256);
     const metadata = await sharp(sanitized).metadata();
-    expect(metadata).toMatchObject({ format: 'webp', width: 1600, height: 1000 });
+    expect(metadata).toMatchObject({
+      format: 'webp',
+      width: 1600,
+      height: 1000,
+    });
     expect(metadata.exif).toBeUndefined();
     await expect(
       removeEventMedia({
@@ -920,14 +1002,22 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         .select(['object_key', 'checksum_sha256', 'reason', 'status'])
         .where('reason', '=', 'event-media-removed')
         .execute(),
-    ).toEqual([
-      expect.objectContaining({
-        object_key: `event-media/${event.id}/${assetId}/page.webp`,
-        checksum_sha256: 'b'.repeat(64),
-        reason: 'event-media-removed',
-        status: 'pending',
-      }),
-    ]);
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          object_key: `event-media/${event.id}/${assetId}/page.webp`,
+          checksum_sha256: 'b'.repeat(64),
+          reason: 'event-media-removed',
+          status: 'pending',
+        }),
+        expect.objectContaining({
+          object_key: `event-media/${event.id}/${assetId}/thumbnail.webp`,
+          checksum_sha256: 'c'.repeat(64),
+          reason: 'event-media-removed',
+          status: 'pending',
+        }),
+      ]),
+    );
     await db.deleteFrom('upload_artifacts').where('id', '=', uploadId).execute();
     await db.deleteFrom('events').where('id', '=', event.id).execute();
     await db.deleteFrom('brands').where('id', '=', brand.id).execute();
@@ -1138,7 +1228,9 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
     await putStarted;
     await expect(service.exportConfiguration(request)).rejects.toThrow(/IN_PROGRESS/u);
     releasePut();
-    await expect(first).resolves.toMatchObject({ bundleId: expect.stringMatching(/^bundle_/u) });
+    await expect(first).resolves.toMatchObject({
+      bundleId: expect.stringMatching(/^bundle_/u),
+    });
     expect(putCount).toBe(1);
   });
 
@@ -1260,9 +1352,15 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         .where('authorization_id', '=', authorization.id)
         .where('event_type', '=', 'consumed')
         .executeTakeFirstOrThrow(),
-    ).resolves.toMatchObject({ event_type: 'consumed', export_job_id: first.jobId });
+    ).resolves.toMatchObject({
+      event_type: 'consumed',
+      export_job_id: first.jobId,
+    });
     await expect(
-      service.exportHistorical({ ...request, idempotencyKey: 'portable-api-historical-reuse' }),
+      service.exportHistorical({
+        ...request,
+        idempotencyKey: 'portable-api-historical-reuse',
+      }),
     ).rejects.toThrow(/ALREADY_CONSUMED/u);
   });
 
@@ -1357,7 +1455,10 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         objects.set(
           key,
           new TextEncoder().encode(
-            canonicalPortableJson({ envelope: transport.envelope, payloads: transport.payloads }),
+            canonicalPortableJson({
+              envelope: transport.envelope,
+              payloads: transport.payloads,
+            }),
           ),
         );
         return 'exists';

@@ -12,8 +12,8 @@ function asset(
     focalPoint: { x: 0.5, y: 0.5 },
     renditions: variants.map((variant) => ({
       variant,
-      width: variant === 'thumbnail' ? 480 : 1200,
-      height: variant === 'thumbnail' ? 270 : 630,
+      width: variant === 'thumbnail' ? 320 : variant === 'card' ? 480 : 1200,
+      height: variant === 'thumbnail' ? 320 : variant === 'card' ? 270 : 630,
       url: `https://media.example/${role}-${variant}.webp`,
     })),
   };
@@ -46,6 +46,11 @@ describe('event media fallback resolution', () => {
       name: 'uses a thumbnail only after larger renditions are exhausted',
       assets: [asset('social', ['thumbnail'])],
       expected: 'https://media.example/social-thumbnail.webp',
+    },
+    {
+      name: 'uses a card before a square thumbnail when larger renditions are unavailable',
+      assets: [asset('cover', ['thumbnail', 'card'])],
+      expected: 'https://media.example/cover-card.webp',
     },
   ])('$name', ({ assets, expected }) => {
     expect(resolveEventSocialMedia(event(assets))?.url).toBe(expected);

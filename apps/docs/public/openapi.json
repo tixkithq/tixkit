@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tixkit API",
-    "version": "2026-08-04",
+    "version": "2026-08-05",
     "description": "Headless white-label event commerce platform API",
     "license": {
       "name": "MIT"
@@ -3054,6 +3054,7 @@
             "type": "string",
             "enum": [
               "thumbnail",
+              "card",
               "page",
               "social"
             ]
@@ -3459,6 +3460,60 @@
           "createdAt"
         ]
       },
+      "EventThumbnail": {
+        "type": "object",
+        "properties": {
+          "renditionId": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "poster",
+              "cover",
+              "social"
+            ]
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "card",
+              "thumbnail"
+            ]
+          },
+          "altText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^/v1/events/[^/]+/media/renditions/[^/]+$"
+          }
+        },
+        "required": [
+          "renditionId",
+          "role",
+          "variant",
+          "altText",
+          "width",
+          "height",
+          "checksumSha256",
+          "url"
+        ]
+      },
       "Event": {
         "type": "object",
         "properties": {
@@ -3541,6 +3596,16 @@
           "coverImageUrl": {
             "type": "string",
             "format": "uri"
+          },
+          "thumbnail": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventThumbnail"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "externalUrl": {
             "type": "string",
@@ -6254,6 +6319,7 @@
             "type": "string",
             "enum": [
               "thumbnail",
+              "card",
               "page",
               "social"
             ]
@@ -6282,6 +6348,10 @@
           },
           "url": {
             "type": "string"
+          },
+          "organizerUrl": {
+            "type": "string",
+            "pattern": "^/v1/events/[^/]+/media/renditions/[^/]+$"
           }
         },
         "required": [
@@ -10135,7 +10205,7 @@
       },
       "AgentPrincipal20260802": {
         "type": "object",
-        "description": "Explicit agent identity for API 2026-08-04, including bounded content, campaign preparation and event sales report reads.",
+        "description": "Explicit agent identity for API 2026-08-05, including bounded content, campaign preparation and event sales report reads.",
         "properties": {
           "id": {
             "type": "string",
@@ -10214,7 +10284,7 @@
       },
       "AgentPrincipal20260803": {
         "type": "object",
-        "description": "Explicit agent identity for API 2026-08-04, including consent-aware campaign preparation and aggregate report reads.",
+        "description": "Explicit agent identity for API 2026-08-05, including consent-aware campaign preparation and aggregate report reads.",
         "properties": {
           "id": {
             "type": "string",
@@ -10501,7 +10571,7 @@
       },
       "AgentSession20260802": {
         "type": "object",
-        "description": "Live explicit API 2026-08-04 agent identity, including bounded content, campaign preparation and aggregate report reads.",
+        "description": "Live explicit API 2026-08-05 agent identity, including bounded content, campaign preparation and aggregate report reads.",
         "properties": {
           "principal": {
             "allOf": [
@@ -10566,7 +10636,7 @@
       },
       "AgentSession20260803": {
         "type": "object",
-        "description": "Live explicit API 2026-08-04 agent identity, including consent-aware campaign preparation and aggregate report reads.",
+        "description": "Live explicit API 2026-08-05 agent identity, including consent-aware campaign preparation and aggregate report reads.",
         "properties": {
           "principal": {
             "allOf": [
@@ -14613,7 +14683,7 @@
       },
       "AgentDelegation20260802": {
         "type": "object",
-        "description": "Time-bounded API 2026-08-04 authority grant, including bounded content, campaign preparation and aggregate report reads.",
+        "description": "Time-bounded API 2026-08-05 authority grant, including bounded content, campaign preparation and aggregate report reads.",
         "properties": {
           "id": {
             "type": "string",
@@ -14690,7 +14760,7 @@
       },
       "AgentDelegation20260803": {
         "type": "object",
-        "description": "Time-bounded API 2026-08-04 authority grant, including consent-aware campaign preparation and aggregate report reads.",
+        "description": "Time-bounded API 2026-08-05 authority grant, including consent-aware campaign preparation and aggregate report reads.",
         "properties": {
           "id": {
             "type": "string",
@@ -21373,6 +21443,118 @@
           }
         },
         "operationId": "getEventsByEventIdMedia",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/events/{eventId}/media/renditions/{renditionId}": {
+      "get": {
+        "summary": "Stream an immutable event media rendition within organizer scope",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "renditionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable optimized event media rendition",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "private, max-age=31536000, immutable"
+              }
+            },
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing events.read permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Event or rendition not found in tenant, organization, brand, and event scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "code example",
+                    "message": "message example",
+                    "requestId": "request_example"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getEventsByEventIdMediaRenditionsByRenditionId",
         "tags": [
           "Events"
         ]

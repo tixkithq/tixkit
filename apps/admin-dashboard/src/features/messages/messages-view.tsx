@@ -7,6 +7,7 @@ import {
   type AdminMessageDeliveryLog,
   type AdminMessageJob,
   type AdminMessageProviderEvent,
+  type AdminEventListItem,
   adminApi,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,7 @@ import { useBootstrap } from '@/context/bootstrap-provider';
 import { formatDate } from '@/lib/format';
 import { LifecycleEmailsView } from './lifecycle-emails-view';
 import { MessageFormDialog } from './message-form';
+import { AuthenticatedEventImage } from '@/features/events/authenticated-event-image';
 
 type MessagesViewProps = {
   initialEventId?: string;
@@ -43,7 +45,7 @@ function EventPicker({
   value,
 }: {
   disabled: boolean;
-  events: Array<{ id: string; title: string }>;
+  events: AdminEventListItem[];
   onValueChange: (value: string) => void;
   value: string;
 }) {
@@ -80,6 +82,11 @@ function EventPicker({
                 value={`${event.title} ${event.id}`}
               >
                 <Check className={event.id === value ? 'opacity-100' : 'opacity-0'} />
+                <AuthenticatedEventImage
+                  source={event.thumbnail}
+                  className="size-8 rounded"
+                  fallbackClassName="size-8"
+                />
                 <span className="truncate">{event.title}</span>
               </CommandItem>
             ))}
@@ -458,7 +465,13 @@ function RecordTable({
   loading: boolean;
   error?: string;
   onRetry: () => void;
-  rows: Array<{ id: string; channel: string; status: string; subject: string; updatedAt: string }>;
+  rows: Array<{
+    id: string;
+    channel: string;
+    status: string;
+    subject: string;
+    updatedAt: string;
+  }>;
 }) {
   return (
     <div className="rounded-md border">

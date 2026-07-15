@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-04';
+export const TIXKIT_API_VERSION = '2026-08-05';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -58,6 +58,7 @@ export type Event = {
   capacity?: number;
   minimumAge: number | null;
   coverImageUrl?: string;
+  thumbnail?: EventThumbnail | null;
   externalUrl?: string;
   version: number;
   lastSetupSection?: string;
@@ -69,6 +70,17 @@ export type Event = {
   checkIns: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type EventThumbnail = {
+  renditionId: string;
+  role: EventMediaRole;
+  variant: 'card' | 'thumbnail';
+  altText: string;
+  width: number;
+  height: number;
+  checksumSha256: string;
+  url: string;
 };
 
 export type DuplicateEventInput = {
@@ -438,7 +450,7 @@ export type PublicMarketingIntegration = {
 };
 
 export type PublicEventMediaRendition = {
-  variant: 'thumbnail' | 'page' | 'social';
+  variant: 'thumbnail' | 'card' | 'page' | 'social';
   width: number;
   height: number;
   url: string;
@@ -755,13 +767,14 @@ export type EventMediaAsset = {
   altText: string;
   renditions: Array<{
     id: string;
-    variant: 'thumbnail' | 'page' | 'social';
+    variant: 'thumbnail' | 'card' | 'page' | 'social';
     width: number;
     height: number;
     format: 'webp';
     checksumSha256: string;
     sizeBytes: number;
     url: string;
+    organizerUrl?: string;
   }>;
 };
 
@@ -3879,6 +3892,10 @@ class EventResource {
 
   async listMedia(eventId: string): Promise<EventMediaAsset[]> {
     return this.client.request('GET', `/events/${eventId}/media`);
+  }
+
+  async downloadMediaRendition(eventId: string, renditionId: string): Promise<Response> {
+    return this.client.requestRaw('GET', `/events/${eventId}/media/renditions/${renditionId}`);
   }
 
   async attachMedia(

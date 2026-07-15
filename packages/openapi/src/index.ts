@@ -87,7 +87,10 @@ const adminTableQueryParameterRefs = [
 ] as const;
 
 const agentCampaignPrepareProperties = {
-  audience: { type: 'string', enum: ['all', 'checked_in', 'not_checked_in', 'specific'] },
+  audience: {
+    type: 'string',
+    enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
+  },
   channel: { type: 'string', enum: ['email', 'sms', 'both'] },
   requestedAttendeeIds: {
     type: 'array',
@@ -617,7 +620,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-04',
+    version: '2026-08-05',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -1998,7 +2001,10 @@ const rawOpenApiSpec = {
       PublicEventMediaRendition: {
         type: 'object',
         properties: {
-          variant: { type: 'string', enum: ['thumbnail', 'page', 'social'] },
+          variant: {
+            type: 'string',
+            enum: ['thumbnail', 'card', 'page', 'social'],
+          },
           width: { type: 'integer', minimum: 1 },
           height: { type: 'integer', minimum: 1 },
           url: { type: 'string', format: 'uri-reference' },
@@ -2194,6 +2200,32 @@ const rawOpenApiSpec = {
           'createdAt',
         ],
       },
+      EventThumbnail: {
+        type: 'object',
+        properties: {
+          renditionId: { type: 'string' },
+          role: { type: 'string', enum: ['poster', 'cover', 'social'] },
+          variant: { type: 'string', enum: ['card', 'thumbnail'] },
+          altText: { type: 'string', minLength: 1, maxLength: 500 },
+          width: { type: 'integer', minimum: 1 },
+          height: { type: 'integer', minimum: 1 },
+          checksumSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          url: {
+            type: 'string',
+            pattern: '^/v1/events/[^/]+/media/renditions/[^/]+$',
+          },
+        },
+        required: [
+          'renditionId',
+          'role',
+          'variant',
+          'altText',
+          'width',
+          'height',
+          'checksumSha256',
+          'url',
+        ],
+      },
       Event: {
         type: 'object',
         properties: {
@@ -2221,6 +2253,9 @@ const rawOpenApiSpec = {
           venue: { type: ['object', 'null'], additionalProperties: true },
           seo: { type: 'object' },
           coverImageUrl: { type: 'string', format: 'uri' },
+          thumbnail: {
+            oneOf: [{ $ref: '#/components/schemas/EventThumbnail' }, { type: 'null' }],
+          },
           externalUrl: { type: 'string', format: 'uri' },
           resalePolicy: { $ref: '#/components/schemas/ResalePolicy' },
           grossSalesCents: { type: 'integer', minimum: 0 },
@@ -3597,13 +3632,20 @@ const rawOpenApiSpec = {
         type: 'object',
         properties: {
           id: { type: 'string' },
-          variant: { type: 'string', enum: ['thumbnail', 'page', 'social'] },
+          variant: {
+            type: 'string',
+            enum: ['thumbnail', 'card', 'page', 'social'],
+          },
           width: { type: 'integer', minimum: 1 },
           height: { type: 'integer', minimum: 1 },
           format: { type: 'string', enum: ['webp'] },
           checksumSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           sizeBytes: { type: 'integer', minimum: 1 },
           url: { type: 'string' },
+          organizerUrl: {
+            type: 'string',
+            pattern: '^/v1/events/[^/]+/media/renditions/[^/]+$',
+          },
         },
         required: [
           'id',
@@ -5340,7 +5382,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-04, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-05, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5387,7 +5429,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-04, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-05, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5494,7 +5536,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-04 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-05 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5531,14 +5573,16 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-04 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-05 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
               { $ref: '#/components/schemas/AgentPrincipal20260803' },
               {
                 type: 'object',
-                properties: { updatedAt: { type: 'string', format: 'date-time' } },
+                properties: {
+                  updatedAt: { type: 'string', format: 'date-time' },
+                },
                 required: ['updatedAt'],
               },
             ],
@@ -5549,7 +5593,11 @@ const rawOpenApiSpec = {
             properties: {
               grantType: { type: 'string', const: 'client_credentials' },
               scope: { type: 'string', const: 'agent.invoke' },
-              productPermissions: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              productPermissions: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
             },
             required: ['grantType', 'scope', 'productPermissions'],
           },
@@ -5904,7 +5952,10 @@ const rawOpenApiSpec = {
                 format: 'date-time',
                 pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.000Z$',
               },
-              reportSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              reportSnapshotSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
             },
             required: ['reportType', 'from', 'to', 'reportSnapshotSha256'],
           },
@@ -6407,7 +6458,10 @@ const rawOpenApiSpec = {
                             'radius',
                           ],
                         },
-                        additionalProperties: { type: 'string', maxLength: 100000 },
+                        additionalProperties: {
+                          type: 'string',
+                          maxLength: 100000,
+                        },
                       },
                     },
                     required: ['props'],
@@ -6548,7 +6602,11 @@ const rawOpenApiSpec = {
                                 'supportingText',
                               ].map((name) => [name, { type: 'string', maxLength: 100000 }]),
                             ),
-                            id: { type: 'string', minLength: 1, maxLength: 100000 },
+                            id: {
+                              type: 'string',
+                              minLength: 1,
+                              maxLength: 100000,
+                            },
                             showDate: { type: 'boolean' },
                             showTimezone: { type: 'boolean' },
                             showVenue: { type: 'boolean' },
@@ -6573,7 +6631,9 @@ const rawOpenApiSpec = {
                       // oxlint-disable unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
                       allOf: [
                         {
-                          if: { properties: { type: { const: 'EventHeader' } } },
+                          if: {
+                            properties: { type: { const: 'EventHeader' } },
+                          },
                           ['then']: {
                             properties: {
                               props: {
@@ -6617,7 +6677,9 @@ const rawOpenApiSpec = {
                           },
                         },
                         {
-                          if: { properties: { type: { const: 'EventDescription' } } },
+                          if: {
+                            properties: { type: { const: 'EventDescription' } },
+                          },
                           ['then']: {
                             properties: {
                               props: {
@@ -6697,29 +6759,39 @@ const rawOpenApiSpec = {
                           },
                         },
                         {
-                          if: { properties: { type: { const: 'ResaleTickets' } } },
+                          if: {
+                            properties: { type: { const: 'ResaleTickets' } },
+                          },
                           ['then']: {
                             properties: {
                               props: {
                                 type: 'object',
-                                propertyNames: { enum: ['id', 'title', 'badgeLabel'] },
+                                propertyNames: {
+                                  enum: ['id', 'title', 'badgeLabel'],
+                                },
                               },
                             },
                           },
                         },
                         {
-                          if: { properties: { type: { const: 'CheckoutCta' } } },
+                          if: {
+                            properties: { type: { const: 'CheckoutCta' } },
+                          },
                           ['then']: {
                             properties: {
                               props: {
                                 type: 'object',
-                                propertyNames: { enum: ['id', 'label', 'supportingText'] },
+                                propertyNames: {
+                                  enum: ['id', 'label', 'supportingText'],
+                                },
                               },
                             },
                           },
                         },
                         {
-                          if: { properties: { type: { const: 'BrandFooter' } } },
+                          if: {
+                            properties: { type: { const: 'BrandFooter' } },
+                          },
                           ['then']: {
                             properties: {
                               props: {
@@ -6791,7 +6863,10 @@ const rawOpenApiSpec = {
             ['then']: { properties: { severity: { const: 'warning' } } },
           },
           {
-            if: { properties: { valid: { const: false } }, required: ['valid'] },
+            if: {
+              properties: { valid: { const: false } },
+              required: ['valid'],
+            },
             ['then']: { properties: { severity: { const: 'error' } } },
           },
         ],
@@ -7226,7 +7301,11 @@ const rawOpenApiSpec = {
             properties: {
               allowed: { type: 'boolean', const: true },
               eligibleForApproval: { type: 'boolean', const: false },
-              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              reasons: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
               snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
               checkedAt: { type: 'string', format: 'date-time' },
             },
@@ -7333,7 +7412,11 @@ const rawOpenApiSpec = {
             properties: {
               allowed: { type: 'boolean', const: true },
               eligibleForApproval: { type: 'boolean', const: false },
-              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              reasons: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
               snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
               checkedAt: { type: 'string', format: 'date-time' },
             },
@@ -7776,7 +7859,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-04 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-05 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -7833,7 +7916,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-04 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-05 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -7861,9 +7944,16 @@ const rawOpenApiSpec = {
             minItems: 1,
             maxItems: 100,
             uniqueItems: true,
-            items: { type: 'string', pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+            items: {
+              type: 'string',
+              pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+            },
           },
-          permissionSnapshot: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+          permissionSnapshot: {
+            type: 'array',
+            items: { type: 'string' },
+            uniqueItems: true,
+          },
           issuedAt: { type: 'string', format: 'date-time' },
           expiresAt: { type: 'string', format: 'date-time' },
           revokedAt: { type: 'string', format: 'date-time' },
@@ -10814,6 +10904,66 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/events/{eventId}/media/renditions/{renditionId}': {
+      get: {
+        summary: 'Stream an immutable event media rendition within organizer scope',
+        security: [{ BearerAuth: [] }, { ApiKey: [] }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'renditionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Immutable optimized event media rendition',
+            headers: {
+              ETag: { schema: { type: 'string' } },
+              'Cache-Control': {
+                schema: { type: 'string' },
+                description: 'private, max-age=31536000, immutable',
+              },
+            },
+            content: {
+              'image/webp': { schema: { type: 'string', format: 'binary' } },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '403': {
+            description: 'Missing events.read permission',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+          '404': {
+            description:
+              'Event or rendition not found in tenant, organization, brand, and event scope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/events/{eventId}/media/{role}': {
       put: {
         summary: 'Attach an owned original and generate optimized event media renditions',
@@ -13531,18 +13681,24 @@ const rawOpenApiSpec = {
               'Immutable direct report-read action with required aggregate result and result digest. Exact still-authorized replays re-resolve the closed range and return identical evidence only when it has not drifted.',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentReportReadAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentReportReadAction',
+                },
               },
             },
           },
-          '400': { description: 'Invalid typed request, range or idempotency key' },
+          '400': {
+            description: 'Invalid typed request, range or idempotency key',
+          },
           '401': { description: 'Valid Agent OAuth authentication required' },
           '403': { description: 'Authenticated principal is not an agent' },
           '404': {
             description:
               'Current agent, delegation, sponsor, policy or event authority is unavailable',
           },
-          '409': { description: 'Idempotency conflict or report-read policy is unavailable' },
+          '409': {
+            description: 'Idempotency conflict or report-read policy is unavailable',
+          },
         },
       },
     },
@@ -13566,13 +13722,21 @@ const rawOpenApiSpec = {
               'Immutable direct report-read action and required aggregate result evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentReportReadAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentReportReadAction',
+                },
               },
             },
           },
-          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
-          '404': { description: 'Action, report snapshot or current authority is unavailable' },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Action, report snapshot or current authority is unavailable',
+          },
         },
       },
     },
@@ -13818,7 +13982,10 @@ const rawOpenApiSpec = {
                 // oxlint-disable unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
                 allOf: [
                   {
-                    if: { properties: { audience: { const: 'specific' } }, required: ['audience'] },
+                    if: {
+                      properties: { audience: { const: 'specific' } },
+                      required: ['audience'],
+                    },
                     ['then']: { required: ['attendeeIds'] },
                     else: { not: { required: ['attendeeIds'] } },
                   },
@@ -13850,7 +14017,9 @@ const rawOpenApiSpec = {
               'Immutable direct campaign preparation with exact published content, audience, exclusion and compliance digests. Exact still-authorized replays return identical evidence.',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentCampaignPrepareAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentCampaignPrepareAction',
+                },
               },
             },
           },
@@ -13889,14 +14058,18 @@ const rawOpenApiSpec = {
             description: 'Immutable direct campaign preparation and required result evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentCampaignPrepareAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentCampaignPrepareAction',
+                },
               },
             },
           },
           '401': {
             description: 'Valid Agent OAuth or human bearer authentication required',
           },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
           '404': {
             description:
               'Action, current authority, resource or snapshot is outside the caller scope',

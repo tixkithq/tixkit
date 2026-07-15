@@ -21,6 +21,7 @@ import { DataTableColumnHeader } from '@/components/data-table/column-header';
 import { EventStatusBadge } from './event-status-badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { toast } from 'sonner';
+import { AuthenticatedEventImage } from './authenticated-event-image';
 
 export type EventAction = {
   type: 'publish' | 'pause' | 'archive';
@@ -61,13 +62,20 @@ export function getEventColumns(
       cell: ({ row }) => {
         const event = row.original;
         return (
-          <Link
-            href={routes.eventDetail(event.id)}
-            prefetch={false}
-            className="font-medium hover:underline"
-          >
-            {event.title}
-          </Link>
+          <div className="flex min-w-0 items-center gap-3">
+            <AuthenticatedEventImage
+              source={event.thumbnail}
+              className="size-10 rounded-md"
+              fallbackClassName="size-10"
+            />
+            <Link
+              href={routes.eventDetail(event.id)}
+              prefetch={false}
+              className="truncate font-medium hover:underline"
+            >
+              {event.title}
+            </Link>
+          </div>
         );
       },
       meta: { title: 'Event' },
@@ -195,15 +203,31 @@ export function getEventColumns(
 function getAvailableStatusActions(
   status: EventStatus,
 ): Array<{ type: EventAction['type']; label: string; icon: React.ReactNode }> {
-  const actions: Array<{ type: EventAction['type']; label: string; icon: React.ReactNode }> = [];
+  const actions: Array<{
+    type: EventAction['type'];
+    label: string;
+    icon: React.ReactNode;
+  }> = [];
   if (status === 'draft' || status === 'paused') {
-    actions.push({ type: 'publish', label: 'Publish', icon: <Globe className="size-4" /> });
+    actions.push({
+      type: 'publish',
+      label: 'Publish',
+      icon: <Globe className="size-4" />,
+    });
   }
   if (status === 'published') {
-    actions.push({ type: 'pause', label: 'Pause', icon: <Pause className="size-4" /> });
+    actions.push({
+      type: 'pause',
+      label: 'Pause',
+      icon: <Pause className="size-4" />,
+    });
   }
   if (status !== 'archived') {
-    actions.push({ type: 'archive', label: 'Archive', icon: <Archive className="size-4" /> });
+    actions.push({
+      type: 'archive',
+      label: 'Archive',
+      icon: <Archive className="size-4" />,
+    });
   }
   return actions;
 }

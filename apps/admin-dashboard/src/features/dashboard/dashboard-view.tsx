@@ -18,6 +18,7 @@ import { usePermissions } from '@/context/permission-provider';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { useAllEvents } from '@/hooks/use-all-events';
 import { formatCurrency, formatNumber, formatDate } from '@/lib/format';
+import { AuthenticatedEventImage } from '@/features/events/authenticated-event-image';
 
 export function DashboardView() {
   const { organizationId, brandId } = useBootstrap();
@@ -215,11 +216,18 @@ export function DashboardView() {
                     prefetch={false}
                     className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/50 transition-colors"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{event.title}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatDate(event.startsAt)} · {formatNumber(event.ticketsSold)} tickets
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <AuthenticatedEventImage
+                        source={event.thumbnail}
+                        className="size-12 rounded-md"
+                        fallbackClassName="size-12"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{event.title}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {formatDate(event.startsAt)} · {formatNumber(event.ticketsSold)} tickets
+                        </p>
+                      </div>
                     </div>
                     <EventStatusBadge status={event.status} />
                   </Link>

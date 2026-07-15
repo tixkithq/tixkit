@@ -14,6 +14,13 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/api', () => ({ adminApi: api }));
+vi.mock('./authenticated-event-image', () => ({
+  AuthenticatedEventImage: ({
+    source,
+  }: {
+    source: { url: string; altText: string; width: number; height: number };
+  }) => <img src={source.url} alt={source.altText} width={source.width} height={source.height} />,
+}));
 
 const event = {
   id: 'evt_1',
@@ -59,14 +66,26 @@ describe('EventMediaSettings', () => {
           altText: 'Crowd under stage lights',
           renditions: [
             {
-              id: 'emr_thumb',
-              variant: 'thumbnail',
+              id: 'emr_card',
+              variant: 'card',
               width: 480,
               height: 270,
+              format: 'webp',
+              checksumSha256: 'c'.repeat(64),
+              sizeBytes: 60,
+              url: '/v1/public/event-media/renditions/emr_card',
+              organizerUrl: '/v1/events/evt_1/media/renditions/emr_card',
+            },
+            {
+              id: 'emr_thumb',
+              variant: 'thumbnail',
+              width: 320,
+              height: 320,
               format: 'webp',
               checksumSha256: 'b'.repeat(64),
               sizeBytes: 50,
               url: '/v1/public/event-media/renditions/emr_thumb',
+              organizerUrl: '/v1/events/evt_1/media/renditions/emr_thumb',
             },
           ],
         },
@@ -74,7 +93,11 @@ describe('EventMediaSettings', () => {
     });
     api.uploadArtifact.mockResolvedValue({
       ok: true,
-      data: { artifactId: 'upl_social', status: 'uploaded', scanStatus: 'clean' },
+      data: {
+        artifactId: 'upl_social',
+        status: 'uploaded',
+        scanStatus: 'clean',
+      },
     });
     api.attachEventMedia.mockResolvedValue({
       ok: true,
@@ -98,18 +121,22 @@ describe('EventMediaSettings', () => {
     const view = render(<EventMediaSettings event={event} onSaved={vi.fn()} />);
     expect(await view.findByAltText('Crowd under stage lights')).toHaveAttribute(
       'src',
-      '/v1/public/event-media/renditions/emr_thumb',
+      '/v1/events/evt_1/media/renditions/emr_card',
     );
     expect(view.getByRole('slider', { name: 'cover vertical focal point' })).toHaveValue('0.4');
 
     fireEvent.change(
-      view.getByLabelText('Alt text for next upload', { selector: '#event-social-alt' }),
+      view.getByLabelText('Alt text for next upload', {
+        selector: '#event-social-alt',
+      }),
       {
         target: { value: 'Social card for Launch Night' },
       },
     );
     const file = new File(['image'], 'social.webp', { type: 'image/webp' });
-    fireEvent.change(view.getByLabelText('Upload social'), { target: { files: [file] } });
+    fireEvent.change(view.getByLabelText('Upload social'), {
+      target: { files: [file] },
+    });
 
     await waitFor(() =>
       expect(api.attachEventMedia).toHaveBeenCalledWith('evt_1', 'social', {
@@ -119,7 +146,11 @@ describe('EventMediaSettings', () => {
       }),
     );
     expect(api.uploadArtifact).toHaveBeenCalledWith(
-      expect.objectContaining({ purpose: 'event_social', eventId: 'evt_1', file }),
+      expect.objectContaining({
+        purpose: 'event_social',
+        eventId: 'evt_1',
+        file,
+      }),
     );
 
     api.removeEventMedia.mockResolvedValue({ ok: true, data: undefined });

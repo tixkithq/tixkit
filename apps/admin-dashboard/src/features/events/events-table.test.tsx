@@ -77,6 +77,24 @@ vi.mock('@/components/data-table', async (importOriginal) => {
   };
 });
 
+vi.mock('./authenticated-event-image', () => ({
+  AuthenticatedEventImage: ({
+    source,
+  }: {
+    source?: {
+      url: string;
+      altText: string;
+      width: number;
+      height: number;
+    } | null;
+  }) =>
+    source ? (
+      <img src={source.url} alt={source.altText} width={source.width} height={source.height} />
+    ) : (
+      <span data-testid="event-image-fallback" />
+    ),
+}));
+
 beforeEach(() => {
   permissionsMock.can.mockImplementation((permission?: string) => permission === 'events.write');
   eventRows.current = [];
@@ -96,6 +114,43 @@ describe('Events table columns', () => {
       (c) => (c as unknown as { accessorKey?: string }).accessorKey === 'title',
     );
     expect(titleCol).toBeDefined();
+  });
+
+  it('renders the optimized thumbnail in the event title cell', () => {
+    const columns = getEventColumns();
+    const titleColumn = columns.find(
+      (column) => (column as unknown as { accessorKey?: string }).accessorKey === 'title',
+    );
+    const cell = titleColumn?.cell as unknown as (context: {
+      row: { original: Record<string, unknown> };
+    }) => React.ReactNode;
+
+    render(
+      cell({
+        row: {
+          original: {
+            id: 'evt_1',
+            title: 'Rooftop Showcase',
+            thumbnail: {
+              renditionId: 'emr_cover',
+              role: 'cover',
+              variant: 'card',
+              altText: 'Rooftop stage at sunset',
+              width: 480,
+              height: 270,
+              checksumSha256: 'a'.repeat(64),
+              url: '/v1/events/evt_1/media/renditions/emr_cover',
+            },
+          },
+        },
+      }),
+    );
+
+    const thumbnail = screen.getByRole('img', {
+      name: 'Rooftop stage at sunset',
+    });
+    expect(thumbnail).toHaveAttribute('src', '/v1/events/evt_1/media/renditions/emr_cover');
+    expect(screen.getByRole('link', { name: 'Rooftop Showcase' })).toBeInTheDocument();
   });
 
   it('status column has accessorKey', () => {

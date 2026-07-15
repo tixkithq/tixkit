@@ -1,0 +1,62 @@
+---
+title: API migration from 2026-08-04 to 2026-08-05
+description: Adopt optimized organizer event thumbnails and authenticated draft-media delivery.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-08-05
+prerequisites:
+  - An integration using API version 2026-08-04
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /self-hosting/configuration
+---
+
+API version `2026-08-05` adds optimized organizer event thumbnails without changing the retained
+`2026-08-04` contract. Event list and detail responses may include a nullable `thumbnail` summary
+with the selected role, `card` or legacy `thumbnail` variant, intrinsic dimensions, checksum, alt
+text and a tenant-scoped organizer URL. The JavaScript SDK exposes the same `EventThumbnail` type.
+
+## Generate square and card renditions
+
+New poster, cover and social uploads generate four immutable, metadata-stripped WebP renditions:
+
+- a 320×320 `thumbnail` bounded to 150,000 bytes;
+- a 480×270 `card` bounded to 200,000 bytes;
+- the role-specific `page` rendition bounded to 600,000 bytes;
+- a 1200×630 `social` rendition bounded to 400,000 bytes.
+
+Existing assets remain readable. Organizer thumbnail selection prefers a cover, poster or social
+`card` in that order, then applies the same role order to retained legacy `thumbnail` renditions. It
+never falls back to an original upload artifact.
+
+This release expands the `EventMediaRendition.variant` and
+`PublicEventMediaRendition.variant` enums with `card`. Strict or exhaustive enum consumers must add
+the `card` case before sending `X-Tixkit-Version: 2026-08-05`. Consumers that deserialize unknown
+enum values defensively require no special migration beyond adopting the new rendition when useful.
+
+## Render organizer media safely
+
+`GET /v1/events/{eventId}/media/renditions/{renditionId}` streams a rendition only after
+`events.read` authorization and tenant, organization, brand and event scope checks. It supports
+draft and private organizer previews and returns `private, max-age=31536000, immutable` caching.
+Use `events.downloadMediaRendition(eventId, renditionId)` in the JavaScript SDK when you need the
+authenticated binary response.
+
+The existing `url` in `EventMediaRendition` remains the publication-aware public URL for backward
+compatibility. The additive `organizerUrl` points to the authenticated route and is returned by
+event media list and attach operations. Public URLs continue to reject drafts and private events
+and retain public immutable caching.
+
+Browser clients must never attach credentials to arbitrary media URLs. Resolve only the
+same-origin organizer rendition path, abort requests when options leave the viewport, and use the
+returned blob through a revocable object URL. The Tixkit admin dashboard implements these bounds
+and lazy-loads selector images to avoid unbounded request fanout.
+
+Durable webhook envelopes and the agent action-registry contract remain at their independently
+versioned releases. Synthetic test/replay API-version fields and SDK request headers advance to
+`2026-08-05`.

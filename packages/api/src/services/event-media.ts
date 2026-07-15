@@ -13,8 +13,20 @@ import {
 
 export type EventMediaRole = 'poster' | 'cover' | 'social';
 
+export type EventMediaThumbnail = {
+  renditionId: string;
+  role: EventMediaRole;
+  variant: 'card' | 'thumbnail';
+  altText: string;
+  width: number;
+  height: number;
+  checksumSha256: string;
+  url: string;
+};
+
 export const EVENT_MEDIA_RENDITION_MAX_BYTES = {
   thumbnail: 150_000,
+  card: 200_000,
   page: 600_000,
   social: 400_000,
 } as const;
@@ -30,23 +42,26 @@ const PURPOSE_BY_ROLE: Record<EventMediaRole, string[]> = {
 const TARGETS: Record<
   EventMediaRole,
   Array<{
-    variant: 'thumbnail' | 'page' | 'social';
+    variant: 'thumbnail' | 'card' | 'page' | 'social';
     width: number;
     height: number;
   }>
 > = {
   poster: [
-    { variant: 'thumbnail', width: 320, height: 400 },
+    { variant: 'thumbnail', width: 320, height: 320 },
+    { variant: 'card', width: 480, height: 270 },
     { variant: 'page', width: 1080, height: 1350 },
     { variant: 'social', width: 1200, height: 630 },
   ],
   cover: [
-    { variant: 'thumbnail', width: 480, height: 270 },
+    { variant: 'thumbnail', width: 320, height: 320 },
+    { variant: 'card', width: 480, height: 270 },
     { variant: 'page', width: 1600, height: 900 },
     { variant: 'social', width: 1200, height: 630 },
   ],
   social: [
-    { variant: 'thumbnail', width: 480, height: 252 },
+    { variant: 'thumbnail', width: 320, height: 320 },
+    { variant: 'card', width: 480, height: 270 },
     { variant: 'page', width: 1200, height: 630 },
     { variant: 'social', width: 1200, height: 630 },
   ],
@@ -62,7 +77,11 @@ async function stageRenditionCleanup(
     tenantId: string;
     organizationId: string;
     reason: 'event-media-replaced' | 'event-media-removed';
-    renditions: Array<{ bucket: string; object_key: string; checksum_sha256: string }>;
+    renditions: Array<{
+      bucket: string;
+      object_key: string;
+      checksum_sha256: string;
+    }>;
   },
 ): Promise<void> {
   const now = new Date();
@@ -237,7 +256,7 @@ export async function attachEventMedia(input: {
   const renditions: Array<{
     id: string;
     asset_id: string;
-    variant: 'thumbnail' | 'page' | 'social';
+    variant: 'thumbnail' | 'card' | 'page' | 'social';
     width: number;
     height: number;
     format: string;
@@ -479,6 +498,125 @@ export async function streamEventMediaRendition(db: Database, renditionId: strin
       objectKey: rendition.object_key,
       contentType: rendition.content_type,
       fileName: `${rendition.event_id}-${rendition.variant}.webp`,
+    })),
+    checksumSha256: rendition.checksum_sha256,
+  };
+}
+
+const DASHBOARD_RENDITION_PRIORITY: Readonly<
+  Record<'card' | 'thumbnail', Readonly<Record<EventMediaRole, number>>>
+> = {
+  card: { cover: 0, poster: 1, social: 2 },
+  thumbnail: { cover: 3, poster: 4, social: 5 },
+};
+
+type EventMediaThumbnailRow = {
+  rendition_id: string;
+  width: number;
+  height: number;
+  checksum_sha256: string;
+  event_id: string;
+  role: string;
+  variant: string;
+  alt_text: string;
+};
+
+export function resolveEventMediaThumbnails(
+  rows: EventMediaThumbnailRow[],
+): Map<string, EventMediaThumbnail> {
+  const result = new Map<string, EventMediaThumbnail>();
+  for (const row of rows) {
+    if (
+      (row.role !== 'cover' && row.role !== 'poster' && row.role !== 'social') ||
+      (row.variant !== 'card' && row.variant !== 'thumbnail')
+    )
+      continue;
+    const existing = result.get(row.event_id);
+    if (
+      existing &&
+      DASHBOARD_RENDITION_PRIORITY[existing.variant][existing.role] <=
+        DASHBOARD_RENDITION_PRIORITY[row.variant][row.role]
+    )
+      continue;
+    result.set(row.event_id, {
+      renditionId: row.rendition_id,
+      role: row.role,
+      variant: row.variant,
+      altText: row.alt_text,
+      width: row.width,
+      height: row.height,
+      checksumSha256: row.checksum_sha256,
+      url: `/v1/events/${row.event_id}/media/renditions/${row.rendition_id}`,
+    });
+  }
+  return result;
+}
+
+/**
+ * Resolves one bounded, optimized rendition per event for organizer surfaces.
+ * The role order is deterministic and deliberately never falls back to an
+ * original upload artifact.
+ */
+export async function loadEventMediaThumbnails(
+  db: Database,
+  input: { tenantId: string; eventIds: string[] },
+): Promise<Map<string, EventMediaThumbnail>> {
+  const eventIds = [...new Set(input.eventIds)];
+  if (eventIds.length === 0) return new Map();
+  const rows = await db
+    .selectFrom('event_media_renditions as rendition')
+    .innerJoin('event_media_assets as asset', 'asset.id', 'rendition.asset_id')
+    .select([
+      'rendition.id as rendition_id',
+      'rendition.width',
+      'rendition.height',
+      'rendition.checksum_sha256',
+      'rendition.variant',
+      'asset.event_id',
+      'asset.role',
+      'asset.alt_text',
+    ])
+    .where('asset.tenant_id', '=', input.tenantId)
+    .where('asset.event_id', 'in', eventIds)
+    .where('rendition.variant', 'in', ['card', 'thumbnail'])
+    .execute();
+  return resolveEventMediaThumbnails(rows);
+}
+
+/** Streams a rendition only after every persisted ownership dimension matches. */
+export async function streamScopedEventMediaRendition(
+  db: Database,
+  input: {
+    renditionId: string;
+    tenantId: string;
+    organizationId: string;
+    brandId: string;
+    eventId: string;
+  },
+) {
+  const rendition = await db
+    .selectFrom('event_media_renditions as rendition')
+    .innerJoin('event_media_assets as asset', 'asset.id', 'rendition.asset_id')
+    .select([
+      'rendition.bucket',
+      'rendition.object_key',
+      'rendition.content_type',
+      'rendition.variant',
+      'rendition.checksum_sha256',
+    ])
+    .where('rendition.id', '=', input.renditionId)
+    .where('asset.tenant_id', '=', input.tenantId)
+    .where('asset.organization_id', '=', input.organizationId)
+    .where('asset.brand_id', '=', input.brandId)
+    .where('asset.event_id', '=', input.eventId)
+    .executeTakeFirst();
+  if (!rendition) throw new NotFoundError('EventMediaRendition', input.renditionId);
+  return {
+    ...(await streamPublicUploadArtifact({
+      bucket: rendition.bucket,
+      objectKey: rendition.object_key,
+      contentType: rendition.content_type,
+      fileName: `${input.eventId}-${rendition.variant}.webp`,
     })),
     checksumSha256: rendition.checksum_sha256,
   };

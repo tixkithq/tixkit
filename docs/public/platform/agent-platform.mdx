@@ -7,7 +7,7 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-08-04
+last_verified: 2026-08-05
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
@@ -30,6 +30,7 @@ related:
   - /reference/migrations/2026-08-01-to-2026-08-02
   - /reference/migrations/2026-08-02-to-2026-08-03
   - /reference/migrations/2026-08-03-to-2026-08-04
+  - /reference/migrations/2026-08-04-to-2026-08-05
 keywords:
   - agents
   - delegation
@@ -45,7 +46,7 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-08-04`, action protocol `2026-07-22`, plan protocol `2026-07-27` and action-registry contract `2026-08-04` support these sponsor-controlled operations:
+API version `2026-08-05`, action protocol `2026-07-22`, plan protocol `2026-07-27` and action-registry contract `2026-08-04` support these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
@@ -204,7 +205,7 @@ npm install --save-dev @tixkit/contract-tests
 ```json
 {
   "baseUrl": "https://sandbox.example.test",
-  "apiVersion": "2026-08-04",
+  "apiVersion": "2026-08-05",
   "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
   "agentClientId": "tk_agent_example",
   "agentClientSecretEnv": "TIXKIT_CONFORMANCE_AGENT_SECRET",

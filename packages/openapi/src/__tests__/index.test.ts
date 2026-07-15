@@ -88,6 +88,27 @@ describe('openApiSpec', () => {
         .content['image/webp'].schema,
     ).toMatchObject({ format: 'binary' });
     expect(
+      openApiSpec.paths['/events/{eventId}/media/renditions/{renditionId}'].get.responses['200']
+        .content['image/webp'].schema,
+    ).toMatchObject({ format: 'binary' });
+    expect(
+      openApiSpec.paths['/events/{eventId}/media/renditions/{renditionId}'].get.responses['200']
+        .headers['Cache-Control'].description,
+    ).toBe('private, max-age=31536000, immutable');
+    expect(openApiSpec.components.schemas.Event.properties.thumbnail).toEqual({
+      oneOf: [{ $ref: '#/components/schemas/EventThumbnail' }, { type: 'null' }],
+    });
+    expect(openApiSpec.components.schemas.EventThumbnail.properties.variant.enum).toEqual([
+      'card',
+      'thumbnail',
+    ]);
+    expect(openApiSpec.components.schemas.EventMediaRendition.properties.variant.enum).toEqual([
+      'thumbnail',
+      'card',
+      'page',
+      'social',
+    ]);
+    expect(
       Object.prototype.hasOwnProperty.call(
         openApiSpec.paths,
         '/public/event-media/{purpose}/{artifactId}',
@@ -101,7 +122,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-04');
+    expect(openApiSpec.info.version).toBe('2026-08-05');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -336,7 +357,10 @@ describe('openApiSpec', () => {
       format: 'date-time',
       pattern: expect.stringContaining('\\.000Z'),
     });
-    expect(action.properties.kind).toEqual({ type: 'string', const: 'report.read' });
+    expect(action.properties.kind).toEqual({
+      type: 'string',
+      const: 'report.read',
+    });
     expect(action.properties.target.properties).toMatchObject({
       resourceType: { type: 'string', const: 'event' },
       apiOperation: { type: 'string', const: 'reports.get' },
@@ -504,11 +528,18 @@ describe('openApiSpec', () => {
         'complianceResultSha256',
       ]),
     );
-    expect(result.properties.untrustedContentPaths).toMatchObject({ maxItems: 0, items: false });
+    expect(result.properties.untrustedContentPaths).toMatchObject({
+      maxItems: 0,
+      items: false,
+    });
     expect(prepare.responses).toMatchObject({
       '400': { description: expect.stringContaining('Idempotency-Key') },
-      '404': { description: 'Current principal, delegation, sponsor or event unavailable' },
-      '409': { description: expect.stringContaining('action policy unavailable') },
+      '404': {
+        description: 'Current principal, delegation, sponsor or event unavailable',
+      },
+      '409': {
+        description: expect.stringContaining('action policy unavailable'),
+      },
     });
     expect(prepare.responses['404'].description).not.toContain('template');
     expect(openApiSpec.paths).not.toHaveProperty('/agent/campaign-preparations/{actionId}/send');

@@ -441,6 +441,12 @@ describe('TixkitClient', () => {
     });
 
     await client.events.removeMedia('evt_1', 'poster');
+
+    await client.events.downloadMediaRendition('evt_1', 'emr_1');
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.test/v1/events/evt_1/media/renditions/emr_1',
+      expect.objectContaining({ method: 'GET' }),
+    );
     expect(getCall(fetchMock, 2)).toMatchObject({
       method: 'DELETE',
       url: 'https://api.test/v1/events/evt_1/media/poster',
@@ -3691,7 +3697,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-08-04',
+        'X-Tixkit-Version': '2026-08-05',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

@@ -117,6 +117,77 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   return requestOnce<T>(path, options);
 }
 
+function authenticatedEventMediaUrl(path: string): string | undefined {
+  try {
+    const base = new URL(API_BASE_URL);
+    const resolved = new URL(path, `${API_BASE_URL}/`);
+    if (
+      resolved.origin !== base.origin ||
+      resolved.username ||
+      resolved.password ||
+      resolved.search ||
+      resolved.hash ||
+      !/^\/v1\/events\/[^/]+\/media\/renditions\/[^/]+$/u.test(resolved.pathname)
+    )
+      return undefined;
+    return resolved.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export async function requestBlob(
+  path: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ApiResult<Blob>> {
+  const url = authenticatedEventMediaUrl(path);
+  if (!url) {
+    return err<Blob>(apiError('invalid_media_url', 'The authenticated event media URL is invalid'));
+  }
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    const headers = new Headers(await getAdminApiAuthHeaders());
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+      credentials: 'include',
+    });
+    clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
+    if (!response.ok) {
+      return err<Blob>(
+        apiError(
+          'http_error',
+          `Image request failed with status ${response.status}`,
+          response.status,
+        ),
+      );
+    }
+    return ok(await response.blob());
+  } catch (cause) {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
+    if (cause instanceof Error && cause.name === 'AbortError') {
+      return err<Blob>(
+        apiError(
+          options.signal?.aborted ? 'cancelled' : 'timeout',
+          options.signal?.aborted
+            ? 'The image request was cancelled'
+            : 'The image request timed out',
+        ),
+      );
+    }
+    return err<Blob>(
+      apiError('network_error', cause instanceof Error ? cause.message : 'Unable to load image'),
+    );
+  }
+}
+
 async function requestOnce<T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> {
   const url = `${API_BASE_URL}${path}`;
   const controller = new AbortController();
@@ -152,7 +223,12 @@ async function requestOnce<T>(path: string, options: RequestInit = {}): Promise<
 
     if (!res.ok) {
       const body = json as {
-        error?: { code?: string; message?: string; details?: unknown; requestId?: string };
+        error?: {
+          code?: string;
+          message?: string;
+          details?: unknown;
+          requestId?: string;
+        };
       } | null;
       return err<T>(
         apiError(

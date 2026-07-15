@@ -311,7 +311,9 @@ describe('upload artifact service', () => {
       sizeBytes: 1024,
     });
 
-    expect(s3ClientOptions.at(-1)).toMatchObject({ endpoint: 'http://localhost:59002' });
+    expect(s3ClientOptions.at(-1)).toMatchObject({
+      endpoint: 'http://localhost:59002',
+    });
   });
 
   it('creates scoped presigned PUT artifacts without storing the public completion token', async () => {
@@ -999,7 +1001,10 @@ describe('upload artifact service', () => {
           size_bytes: 10,
           checksum_sha256: 'd'.repeat(64),
           metadata: JSON.stringify({
-            migrationImport: { jobId: 'imp_terminal', registeredAt: now.toISOString() },
+            migrationImport: {
+              jobId: 'imp_terminal',
+              registeredAt: now.toISOString(),
+            },
           }),
           consumed_at: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000),
           expires_at: new Date(now.getTime() - 60_000),
@@ -1290,7 +1295,9 @@ describe('upload artifact service', () => {
     s3Send
       .mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' })
       .mockResolvedValueOnce({
-        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+        Body: {
+          transformToByteArray: async () => new TextEncoder().encode('clean'),
+        },
       })
       .mockResolvedValue({});
 
@@ -1324,7 +1331,9 @@ describe('upload artifact service', () => {
         return { ContentLength: 5, ContentType: 'text/plain' };
       })
       .mockResolvedValueOnce({
-        Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
+        Body: {
+          transformToByteArray: async () => new TextEncoder().encode('clean'),
+        },
       })
       .mockResolvedValue({});
 
@@ -1334,7 +1343,10 @@ describe('upload artifact service', () => {
       'already in progress',
     );
     releaseHead();
-    await expect(owner).resolves.toMatchObject({ status: 'uploaded', scanStatus: 'clean' });
+    await expect(owner).resolves.toMatchObject({
+      status: 'uploaded',
+      scanStatus: 'clean',
+    });
     expect(s3Send.mock.calls.filter(([command]) => command.input.Body)).toHaveLength(1);
   });
 
@@ -2008,20 +2020,27 @@ describe('upload artifact service', () => {
       createdBy: 'usr_1',
     });
 
+    expect(media.renditions.map(({ variant }) => variant)).toEqual([
+      'thumbnail',
+      'card',
+      'page',
+      'social',
+    ]);
     expect(media.renditions.map(({ width, height }) => [width, height])).toEqual([
+      [320, 320],
       [480, 270],
       [1600, 900],
       [1200, 630],
     ]);
-    expect(writes).toHaveLength(3);
+    expect(writes).toHaveLength(4);
     for (const rendition of media.renditions)
       expect(rendition.sizeBytes).toBeLessThanOrEqual(
         EVENT_MEDIA_RENDITION_MAX_BYTES[rendition.variant],
       );
-    expect(new Set(writes.map((write) => write.Key))).toHaveLength(3);
+    expect(new Set(writes.map((write) => write.Key))).toHaveLength(4);
     expect(writes.every((write) => String(write.Key).includes('/emr_'))).toBe(true);
     expect(tables.event_media_assets).toHaveLength(1);
-    expect(tables.event_media_renditions).toHaveLength(3);
+    expect(tables.event_media_renditions).toHaveLength(4);
     expect(tables.upload_artifacts).toHaveLength(1);
   });
 
@@ -2040,10 +2059,20 @@ describe('upload artifact service', () => {
         writes.push(command.input);
         return {};
       }
-      return { Body: { transformToByteArray: async () => original }, ContentType: 'image/png' };
+      return {
+        Body: { transformToByteArray: async () => original },
+        ContentType: 'image/png',
+      };
     });
     const { db, tables } = createMockDb({
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+        },
+      ],
       upload_artifacts: [
         {
           id: 'upl_social_entropy',
@@ -2058,7 +2087,9 @@ describe('upload artifact service', () => {
           object_key: 'uploads/social-entropy.png',
           checksum_sha256: checksum,
           size_bytes: original.length,
-          metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'png' } }),
+          metadata: JSON.stringify({
+            image: { width: 1600, height: 1000, format: 'png' },
+          }),
         },
       ],
     });
@@ -2076,13 +2107,13 @@ describe('upload artifact service', () => {
       createdBy: 'usr_1',
     });
 
-    expect(writes).toHaveLength(3);
+    expect(writes).toHaveLength(4);
     const social = media.renditions.find(({ variant }) => variant === 'social');
     expect(social).toBeDefined();
     expect(social!.sizeBytes).toBeLessThanOrEqual(EVENT_MEDIA_RENDITION_MAX_BYTES.social);
-    expect((writes[2]!.Body as Buffer).byteLength).toBe(social!.sizeBytes);
+    expect((writes[3]!.Body as Buffer).byteLength).toBe(social!.sizeBytes);
     expect(tables.event_media_assets).toHaveLength(1);
-    expect(tables.event_media_renditions).toHaveLength(3);
+    expect(tables.event_media_renditions).toHaveLength(4);
   });
 
   it('removes staged renditions and preserves the database when no quality meets a budget', async () => {
@@ -2106,10 +2137,20 @@ describe('upload artifact service', () => {
         deletes.push(key);
         return {};
       }
-      return { Body: { transformToByteArray: async () => original }, ContentType: 'image/png' };
+      return {
+        Body: { transformToByteArray: async () => original },
+        ContentType: 'image/png',
+      };
     });
     const { db, tables } = createMockDb({
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+        },
+      ],
       upload_artifacts: [
         {
           id: 'upl_cover_entropy',
@@ -2124,7 +2165,9 @@ describe('upload artifact service', () => {
           object_key: 'uploads/cover-entropy.png',
           checksum_sha256: checksum,
           size_bytes: original.length,
-          metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'png' } }),
+          metadata: JSON.stringify({
+            image: { width: 1600, height: 1000, format: 'png' },
+          }),
         },
       ],
     });
@@ -2143,7 +2186,7 @@ describe('upload artifact service', () => {
         createdBy: 'usr_1',
       }),
     ).rejects.toThrow('page event media rendition exceeds its 600000-byte performance budget');
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(2);
     expect(deletes).toEqual(writes);
     expect(tables.event_media_assets ?? []).toHaveLength(0);
     expect(tables.event_media_renditions ?? []).toHaveLength(0);
@@ -2171,7 +2214,14 @@ describe('upload artifact service', () => {
       return { Body: { transformToByteArray: async () => original } };
     });
     const { db, tables } = createMockDb({
-      events: [{ id: 'evt_1', tenant_id: 'tnt_1', organization_id: 'org_1', brand_id: 'brd_1' }],
+      events: [
+        {
+          id: 'evt_1',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+        },
+      ],
       upload_artifacts: [
         {
           id: 'upl_cover',
@@ -2186,7 +2236,9 @@ describe('upload artifact service', () => {
           object_key: 'uploads/original.jpg',
           checksum_sha256: checksum,
           size_bytes: original.length,
-          metadata: JSON.stringify({ image: { width: 1600, height: 1000, format: 'jpeg' } }),
+          metadata: JSON.stringify({
+            image: { width: 1600, height: 1000, format: 'jpeg' },
+          }),
         },
       ],
     });
@@ -2257,7 +2309,9 @@ describe('upload artifact routes', () => {
       url: `/upload-artifacts/${tables.upload_artifacts[0]?.id}/download`,
     });
     expect(download.statusCode, download.body).toBe(200);
-    expect(download.json()).toMatchObject({ downloadUrl: expect.stringContaining('https://') });
+    expect(download.json()).toMatchObject({
+      downloadUrl: expect.stringContaining('https://'),
+    });
     await app.close();
   });
 
@@ -2368,15 +2422,37 @@ describe('upload artifact routes', () => {
       contentType: 'application/vnd.tixkit.portable+json',
       sizeBytes: 4096,
     };
-    const invalidCases: Array<{ payload: Record<string, unknown>; expectedStatus: number }> = [
+    const invalidCases: Array<{
+      payload: Record<string, unknown>;
+      expectedStatus: number;
+    }> = [
       { payload: base, expectedStatus: 400 },
-      { payload: { ...base, organizationId: 'org_other' }, expectedStatus: 404 },
-      { payload: { ...base, organizationId: 'org_1', brandId: 'brd_1' }, expectedStatus: 400 },
-      { payload: { ...base, organizationId: 'org_1', eventId: 'evt_1' }, expectedStatus: 400 },
-      { payload: { ...base, organizationId: 'org_1', brandId: '' }, expectedStatus: 400 },
-      { payload: { ...base, organizationId: 'org_1', eventId: '' }, expectedStatus: 400 },
       {
-        payload: { ...base, organizationId: 'org_1', sizeBytes: 50 * 1024 * 1024 + 1 },
+        payload: { ...base, organizationId: 'org_other' },
+        expectedStatus: 404,
+      },
+      {
+        payload: { ...base, organizationId: 'org_1', brandId: 'brd_1' },
+        expectedStatus: 400,
+      },
+      {
+        payload: { ...base, organizationId: 'org_1', eventId: 'evt_1' },
+        expectedStatus: 400,
+      },
+      {
+        payload: { ...base, organizationId: 'org_1', brandId: '' },
+        expectedStatus: 400,
+      },
+      {
+        payload: { ...base, organizationId: 'org_1', eventId: '' },
+        expectedStatus: 400,
+      },
+      {
+        payload: {
+          ...base,
+          organizationId: 'org_1',
+          sizeBytes: 50 * 1024 * 1024 + 1,
+        },
         expectedStatus: 400,
       },
       {

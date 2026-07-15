@@ -38,6 +38,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { AuthenticatedEventImage } from '@/features/events/authenticated-event-image';
 import {
   Table,
   TableBody,
@@ -82,7 +83,12 @@ const EXPORT_OPTIONS: Array<{
     ariaLabel: 'Export sales CSV',
     requiredPermission: 'orders.read',
   },
-  { type: 'tax', label: 'Tax', ariaLabel: 'Export tax CSV', requiredPermission: 'orders.read' },
+  {
+    type: 'tax',
+    label: 'Tax',
+    ariaLabel: 'Export tax CSV',
+    requiredPermission: 'orders.read',
+  },
   {
     type: 'attendees',
     label: 'Attendees',
@@ -232,7 +238,11 @@ export function ReportsView({ eventId }: ReportsViewProps) {
       return;
     }
 
-    const queuedExport = { ...result.data, type: exportType, format: 'csv' as const };
+    const queuedExport = {
+      ...result.data,
+      type: exportType,
+      format: 'csv' as const,
+    };
     setLastExport(queuedExport);
     setExportingType(null);
     toast.success(`Export queued (${result.data.exportId})`);
@@ -294,7 +304,14 @@ export function ReportsView({ eventId }: ReportsViewProps) {
               <SelectContent>
                 {events.map((event) => (
                   <SelectItem key={event.id} value={event.id}>
-                    {event.title}
+                    <span className="flex items-center gap-2">
+                      <AuthenticatedEventImage
+                        source={event.thumbnail}
+                        className="size-7 rounded"
+                        fallbackClassName="size-7"
+                      />
+                      <span className="truncate">{event.title}</span>
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

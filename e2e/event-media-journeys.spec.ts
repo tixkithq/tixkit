@@ -81,10 +81,13 @@ test.describe('role-based event media journeys', () => {
       buffer: await readFile('apps/admin-dashboard/public/brand/tixkit-symbol.png'),
     });
 
-    await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByRole('heading', { name: 'poster', exact: true }).scrollIntoViewIfNeeded();
     const preview = page.getByAltText(altText);
     await expect(preview).toBeVisible();
-    await expect(preview).toHaveAttribute('src', /\/v1\/public\/event-media\/renditions\//u);
+    await expect(preview).toHaveAttribute('src', /^blob:/u);
 
     const mediaResponse = await request.get(`${apiBaseUrl}/v1/events/${seeded.event.id}/media`);
     expect(mediaResponse.status()).toBe(200);
@@ -94,18 +97,20 @@ test.describe('role-based event media journeys', () => {
       original: { checksumSha256: string };
       renditions: Array<{
         id: string;
-        variant: 'thumbnail' | 'page' | 'social';
+        variant: 'thumbnail' | 'card' | 'page' | 'social';
         checksumSha256: string;
         sizeBytes: number;
         width: number;
         height: number;
         url: string;
+        organizerUrl: string;
       }>;
     }>;
     const poster = media.find((asset) => asset.role === 'poster');
     expect(poster).toMatchObject({ altText });
     expect(poster?.original.checksumSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(poster?.renditions.map((rendition) => rendition.variant).sort()).toEqual([
+      'card',
       'page',
       'social',
       'thumbnail',
@@ -113,23 +118,32 @@ test.describe('role-based event media journeys', () => {
     expect(
       poster?.renditions.every((rendition) => /^[a-f0-9]{64}$/u.test(rendition.checksumSha256)),
     ).toBe(true);
-    const renditionBudgets = { thumbnail: 150_000, page: 600_000, social: 400_000 } as const;
+    const renditionBudgets = {
+      thumbnail: 150_000,
+      card: 200_000,
+      page: 600_000,
+      social: 400_000,
+    } as const;
     const renditionDimensions = {
-      thumbnail: [320, 400],
+      thumbnail: [320, 320],
+      card: [480, 270],
       page: [1080, 1350],
       social: [1200, 630],
     } as const;
     for (const rendition of poster!.renditions) {
       expect(rendition.sizeBytes).toBeLessThanOrEqual(renditionBudgets[rendition.variant]);
       expect([rendition.width, rendition.height]).toEqual(renditionDimensions[rendition.variant]);
-      const delivered = await request.get(`${apiBaseUrl}${rendition.url}`);
+      const delivered = await request.get(`${apiBaseUrl}${rendition.organizerUrl}`);
       expect(delivered.status()).toBe(200);
-      expect(delivered.headers()['cache-control']).toBe('public, max-age=31536000, immutable');
+      expect(delivered.headers()['cache-control']).toBe('private, max-age=31536000, immutable');
       const deliveredBody = await delivered.body();
       expect(deliveredBody.byteLength).toBe(rendition.sizeBytes);
       expect(createHash('sha256').update(deliveredBody).digest('hex')).toBe(
         rendition.checksumSha256,
       );
+      const publicDelivery = await request.get(`${apiBaseUrl}${rendition.url}`);
+      expect(publicDelivery.status()).toBe(200);
+      expect(publicDelivery.headers()['cache-control']).toBe('public, max-age=31536000, immutable');
     }
 
     const concurrentReplacement = {
@@ -154,7 +168,7 @@ test.describe('role-based event media journeys', () => {
     expect(concurrentStatuses).toEqual([200, 400]);
     await expect
       .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-replaced'))
-      .toHaveLength(3);
+      .toHaveLength(4);
 
     const replaced = page.waitForResponse(
       (response) =>
@@ -169,7 +183,7 @@ test.describe('role-based event media journeys', () => {
     expect((await replaced).status()).toBe(200);
     await expect
       .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-replaced'))
-      .toHaveLength(6);
+      .toHaveLength(8);
     await expectNoAxeViolations(
       page,
       testInfo,
@@ -225,6 +239,7 @@ test.describe('role-based event media journeys', () => {
         : responsiveMediaViewports[1],
     );
     await page.goto(`${adminBaseUrl}/events/${seeded.event.id}/settings`);
+    await page.getByRole('heading', { name: 'poster', exact: true }).scrollIntoViewIfNeeded();
     await expect(page.getByAltText(altText)).toBeVisible();
 
     const confirmation = new Promise<void>((resolve, reject) => {
@@ -259,7 +274,7 @@ test.describe('role-based event media journeys', () => {
     await expect(page.getByAltText(altText)).toHaveCount(0);
     await expect
       .poll(async () => readEventMediaCleanupJobs(seeded.event.id, 'event-media-removed'))
-      .toHaveLength(3);
+      .toHaveLength(4);
     await expect.poll(() => countEventMediaRemovalAudits(seeded.event.id)).toBe(1);
     expect(
       (await request.delete(`${apiBaseUrl}/v1/events/${seeded.event.id}/media/poster`)).status(),
@@ -272,7 +287,7 @@ test.describe('role-based event media journeys', () => {
   }, testInfo) => {
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
     const seeded = await seedFreeCheckoutEvent(request, `media-admin-${Date.now()}`);
-    const renditionUrl = `${apiBaseUrl}/v1/public/event-media/renditions/emr_e2e_cover`;
+    const renditionUrl = `${apiBaseUrl}/v1/events/${seeded.event.id}/media/renditions/emr_e2e_cover`;
 
     await page.route(`${apiBaseUrl}/v1/events/${seeded.event.id}/media`, (route) =>
       route.fulfill({
@@ -302,6 +317,7 @@ test.describe('role-based event media journeys', () => {
                 checksumSha256: 'b'.repeat(64),
                 sizeBytes: transparentPixel.byteLength,
                 url: '/v1/public/event-media/renditions/emr_e2e_cover',
+                organizerUrl: `/v1/events/${seeded.event.id}/media/renditions/emr_e2e_cover`,
               },
             ],
           },
@@ -309,7 +325,11 @@ test.describe('role-based event media journeys', () => {
       }),
     );
     await page.route(renditionUrl, (route) =>
-      route.fulfill({ status: 200, contentType: 'image/png', body: transparentPixel }),
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: transparentPixel,
+      }),
     );
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -318,8 +338,11 @@ test.describe('role-based event media journeys', () => {
       test.skip(true, 'runtime admin server requires live Clerk authentication');
 
     await expect(
-      page.getByRole('heading', { name: 'Event poster, cover, and social images' }),
+      page.getByRole('heading', {
+        name: 'Event poster, cover, and social images',
+      }),
     ).toBeVisible();
+    await page.getByRole('heading', { name: 'cover', exact: true }).scrollIntoViewIfNeeded();
     await expect(page.getByAltText('Audience beneath violet stage lights')).toBeVisible();
     await expect(page.getByRole('slider', { name: 'cover horizontal focal point' })).toHaveValue(
       '0.35',
@@ -346,9 +369,16 @@ test.describe('role-based event media journeys', () => {
     await requireReachable(page, checkoutBaseUrl, 'checkout app');
     const suffix = `media-buyer-${testInfo.project.name}-${Date.now()}`;
     const seeded = await seedFreeCheckoutEvent(request, suffix);
-    const media = await seedEventMediaFixture({ eventId: seeded.event.id, suffix });
+    const media = await seedEventMediaFixture({
+      eventId: seeded.event.id,
+      suffix,
+    });
     await page.route(`${apiBaseUrl}${media.renditionPath}`, (route) =>
-      route.fulfill({ status: 200, contentType: 'image/png', body: transparentPixel }),
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: transparentPixel,
+      }),
     );
 
     await page.goto(`${checkoutBaseUrl}/e/${seeded.event.id}`);

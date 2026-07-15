@@ -200,10 +200,22 @@ export type AdminEventListItem = {
   capacity?: number | null;
   minimumAge?: number | null;
   coverImageUrl?: string | null;
+  thumbnail?: AdminEventThumbnail | null;
   externalUrl?: string | null;
   resalePolicy: AdminResalePolicy;
   checkIns: number;
   updatedAt: string;
+};
+
+export type AdminEventThumbnail = {
+  renditionId: string;
+  role: AdminEventMediaRole;
+  variant: 'card' | 'thumbnail';
+  altText: string;
+  width: number;
+  height: number;
+  checksumSha256: string;
+  url: string;
 };
 
 export type AdminSavedVenue = {
@@ -244,13 +256,14 @@ export type AdminEventMediaAsset = {
   altText: string;
   renditions: Array<{
     id: string;
-    variant: 'thumbnail' | 'page' | 'social';
+    variant: 'thumbnail' | 'card' | 'page' | 'social';
     width: number;
     height: number;
     format: string;
     checksumSha256: string;
     sizeBytes: number;
     url: string;
+    organizerUrl?: string;
   }>;
 };
 
@@ -262,6 +275,7 @@ function normalizeAdminEventMediaAsset(asset: AdminEventMediaAsset): AdminEventM
       url: rendition.url.startsWith('/')
         ? `${getAdminApiBaseUrl()}${rendition.url}`
         : rendition.url,
+      organizerUrl: rendition.organizerUrl,
     })),
   };
 }
@@ -2897,6 +2911,24 @@ function normalizeEvent(
   const venue = asRecord(value.venue);
   const seo = asRecord(value.seo);
   const resalePolicy = normalizeResalePolicy(value.resalePolicy ?? value.resale_policy);
+  const rawThumbnail = asRecord(value.thumbnail);
+  const thumbnailRole = rawThumbnail?.role;
+  const thumbnail =
+    rawThumbnail &&
+    (thumbnailRole === 'poster' || thumbnailRole === 'cover' || thumbnailRole === 'social') &&
+    (rawThumbnail.variant === 'card' || rawThumbnail.variant === 'thumbnail') &&
+    typeof rawThumbnail.url === 'string'
+      ? {
+          renditionId: String(rawThumbnail.renditionId ?? rawThumbnail.rendition_id ?? ''),
+          role: thumbnailRole as AdminEventMediaRole,
+          variant: rawThumbnail.variant as AdminEventThumbnail['variant'],
+          altText: String(rawThumbnail.altText ?? rawThumbnail.alt_text ?? ''),
+          width: finiteNumber(rawThumbnail.width),
+          height: finiteNumber(rawThumbnail.height),
+          checksumSha256: String(rawThumbnail.checksumSha256 ?? rawThumbnail.checksum_sha256 ?? ''),
+          url: rawThumbnail.url,
+        }
+      : null;
   const visibility =
     value.visibility === 'unlisted' || value.visibility === 'private' ? value.visibility : 'public';
   return {
@@ -2949,6 +2981,7 @@ function normalizeEvent(
         ? null
         : finiteNumber(value.minimumAge ?? value.minimum_age),
     coverImageUrl: stringValue(value.coverImageUrl ?? value.cover_image_url, undefined),
+    thumbnail,
     externalUrl: stringValue(value.externalUrl ?? value.external_url, undefined),
     version: finiteNumber(value.version, 1),
     lastSetupSection: stringValue(value.lastSetupSection ?? value.last_setup_section, undefined),
@@ -5210,7 +5243,10 @@ export const adminApi: AdminApi = {
 
   async removeEventMedia(eventId, role) {
     return withFixture(
-      () => request<undefined>(`/v1/events/${eventId}/media/${role}`, { method: 'DELETE' }),
+      () =>
+        request<undefined>(`/v1/events/${eventId}/media/${role}`, {
+          method: 'DELETE',
+        }),
       () => ok(undefined),
     );
   },
@@ -5418,7 +5454,11 @@ export const adminApi: AdminApi = {
 
   async createSavedVenue(input) {
     return withFixture(
-      () => request<AdminSavedVenue>('/v1/venues', { method: 'POST', body: JSON.stringify(input) }),
+      () =>
+        request<AdminSavedVenue>('/v1/venues', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
       () => err(apiError('fixture_unavailable', 'Saved venues require the live API', 400)),
     );
   },
@@ -5443,7 +5483,11 @@ export const adminApi: AdminApi = {
 
   async reportOnboardingEvent(input) {
     return withFixture(
-      () => request<void>('/v1/onboarding-events', { method: 'POST', body: JSON.stringify(input) }),
+      () =>
+        request<void>('/v1/onboarding-events', {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
       () => ok(undefined),
     );
   },
