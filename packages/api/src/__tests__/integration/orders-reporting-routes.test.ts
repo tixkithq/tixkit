@@ -958,7 +958,7 @@ describe('order routes', () => {
         message: 'Refund workflow started',
       }),
       status: 'completed',
-      expires_at: new Date('2026-08-02T00:00:00.000Z'),
+      expires_at: new Date('2026-08-03T00:00:00.000Z'),
     };
     const app = await setupApp(orderRoutes, makePrincipal());
 
@@ -1002,7 +1002,7 @@ describe('order routes', () => {
         message: 'Refund workflow started',
       }),
       status: 'completed',
-      expires_at: new Date('2026-08-02T00:00:00.000Z'),
+      expires_at: new Date('2026-08-03T00:00:00.000Z'),
     };
     const app = await setupApp(orderRoutes, makePrincipal());
 

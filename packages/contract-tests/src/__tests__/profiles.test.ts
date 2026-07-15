@@ -494,6 +494,63 @@ describe('third-party contract profiles', () => {
       observedAt: '2026-07-14T11:58:45.000Z',
       untrustedContentPaths: ['content', 'preview.discovery'] as const,
     };
+    const campaignPreparePayload = {
+      audience: 'all' as const,
+      channel: 'email' as const,
+      requestedAttendeeIds: [] as string[],
+      templateVersions: [
+        {
+          channel: 'email' as const,
+          templateKey: 'event-announcement',
+          versionId: 'template_version_primary',
+          contentSha256: '1'.repeat(64),
+        },
+      ],
+      contentVersionSha256: agentSha256([
+        {
+          channel: 'email',
+          templateKey: 'event-announcement',
+          versionId: 'template_version_primary',
+          contentSha256: '1'.repeat(64),
+        },
+      ]),
+      audienceSnapshotSha256: '3'.repeat(64),
+      exclusionSnapshotSha256: '4'.repeat(64),
+      complianceResultSha256: '5'.repeat(64),
+      audienceCount: 3,
+      eligibleRecipientCount: 1,
+      eligibleDeliveryCount: 1,
+      suppressedDeliveryCount: 1,
+      consentExclusionCount: 1,
+      missingContactCount: 1,
+    };
+    const campaignPrepareAction = {
+      id: `act_${'5'.repeat(48)}`,
+      protocolVersion: '2026-07-22' as const,
+      agentPrincipalId,
+      sponsorPrincipalId: 'sponsor_primary',
+      delegationGrantId,
+      kind: 'campaign.prepare' as const,
+      autonomy: 'prepare' as const,
+      target: {
+        tenantId: 'tenant_primary',
+        resourceType: 'event',
+        resourceId: 'event_primary',
+        resourceVersion: 7,
+        apiOperation: 'campaigns.prepare',
+      },
+      payload: campaignPreparePayload,
+      idempotencyKey: 'agent.conformance.0001.campaign.prepare',
+      expectedPolicyVersion: 3,
+      preparedAt: '2026-07-14T11:58:50.000Z',
+    };
+    const campaignPrepareResult = {
+      resourceId: 'event_primary',
+      resourceVersion: 7,
+      ...campaignPreparePayload,
+      observedAt: '2026-07-14T11:58:50.000Z',
+      untrustedContentPaths: [] as const,
+    };
     const eventUpdateBefore = {
       description: eventProjection.description,
       title: eventProjection.title,
@@ -671,12 +728,13 @@ describe('third-party contract profiles', () => {
       headers: Record<string, string>;
     }> = [];
     const contractInput = {
-      apiVersion: '2026-08-02',
+      apiVersion: '2026-08-03',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: `tk_agent_${'e'.repeat(48)}`,
       agentClientSecret: 'secret_value',
       delegationGrantId: delegationGrantId,
       resourceId: 'event_primary',
+      campaignEmailTemplateKey: 'event-announcement',
       planId: 'plan_conformance_primary',
       idempotencyPrefix: 'agent.conformance.0001',
       execute: async (request) => {
@@ -892,6 +950,16 @@ describe('third-party contract profiles', () => {
                 : agentSha256(returnedResult),
           });
         }
+        if (request.path === '/v1/agent/campaign-preparations') {
+          return response(201, {
+            action: campaignPrepareAction,
+            actionDigest: agentSha256(campaignPrepareAction),
+            expiresAt: '2026-07-14T12:08:50.000Z',
+            authorization: { allowed: true },
+            result: campaignPrepareResult,
+            resultSha256: agentSha256(campaignPrepareResult),
+          });
+        }
         if (request.path === '/v1/agent/event-updates') {
           eventUpdatePrepareCall += 1;
           const returnedAction =
@@ -1045,7 +1113,9 @@ describe('third-party contract profiles', () => {
           });
         if (
           request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
-          request.path === `/v1/agent/actions/${contentPrepareActionId}/executions`
+          request.path === `/v1/agent/actions/${contentPrepareActionId}/executions` ||
+          request.path === `/v1/agent/actions/${campaignPrepareAction.id}/approvals` ||
+          request.path === `/v1/agent/actions/${campaignPrepareAction.id}/executions`
         )
           return response(404, { code: 'AGENT_ACTION_NOT_FOUND' });
         if (request.path.endsWith('/approvals'))
@@ -1146,6 +1216,9 @@ describe('third-party contract profiles', () => {
     ).toHaveLength(2);
     expect(
       requests.filter((request) => request.path === '/v1/agent/content-preparations'),
+    ).toHaveLength(2);
+    expect(
+      requests.filter((request) => request.path === '/v1/agent/campaign-preparations'),
     ).toHaveLength(2);
     expect(
       requests.find((request) => request.path === '/v1/agent/content-preparations')?.body,
@@ -1444,6 +1517,7 @@ describe('third-party contract profiles', () => {
       agentClientSecret: 'agent_secret',
       delegationGrantId: 'delegation_primary',
       resourceId: 'event_primary',
+      campaignEmailTemplateKey: 'event-announcement',
       planId: '../invalid',
       idempotencyPrefix: 'short',
       execute: executed,

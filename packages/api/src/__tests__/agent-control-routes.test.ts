@@ -395,6 +395,51 @@ describe('agent control routes', () => {
     await deniedApp.close();
   });
 
+  it('maps campaign preparation exclusively to live messaging write authority', async () => {
+    const principalId = `agt_${'5'.repeat(48)}`;
+    const registeredPrincipal: AgentPrincipal = {
+      id: principalId,
+      tenantId,
+      sponsorPrincipalId: sponsorId,
+      kind: 'third_party',
+      capabilities: ['campaigns.prepare'],
+      maximumAutonomy: 'prepare',
+      protocolVersion: AGENT_PROTOCOL_VERSION,
+      state: 'active',
+      registeredAt: now.toISOString(),
+    };
+    const repository = store({ getPrincipal: vi.fn(async () => registeredPrincipal) });
+    const request = {
+      method: 'POST' as const,
+      url: '/agent-delegations',
+      headers: { 'idempotency-key': idempotencyKey },
+      payload: {
+        id: 'event_campaign_preparer',
+        agentPrincipalId: principalId,
+        capabilities: ['campaigns.prepare'],
+        resourceScopes: ['event:event_agent_route_01'],
+        expiresAt: '2026-07-15T12:00:00.000Z',
+      },
+    };
+
+    const allowedApp = await testApp(
+      sponsor({ scopes: ['developers.write', 'messages.write'] }),
+      repository,
+    );
+    expect((await allowedApp.inject(request)).statusCode).toBe(201);
+    expect(repository.grantDelegation).toHaveBeenCalledOnce();
+    await allowedApp.close();
+
+    vi.mocked(repository.grantDelegation).mockClear();
+    const deniedApp = await testApp(
+      sponsor({ scopes: ['developers.write', 'events.write'] }),
+      repository,
+    );
+    expect((await deniedApp.inject(request)).statusCode).toBe(403);
+    expect(repository.grantDelegation).not.toHaveBeenCalled();
+    await deniedApp.close();
+  });
+
   it('rejects forged delegation fields, excessive lifetime, and missing live capability grants', async () => {
     const repository = store();
     const app = await testApp(sponsor({ scopes: ['developers.write', 'events.read'] }), repository);

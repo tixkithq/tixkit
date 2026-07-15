@@ -10,7 +10,7 @@ Next.js App Router applications.
 
 ## Status
 
-Public SDK at version 0.1.0 and API version `2026-08-02`; pre-1.0 exports may evolve with release notes.
+Public SDK at version 0.1.0 and API version `2026-08-03`; pre-1.0 exports may evolve with release notes.
 
 ## Installation
 
@@ -42,7 +42,7 @@ bun run --filter @tixkit/next typecheck && bun run --filter @tixkit/next lint &&
 
 ## Compatibility
 
-Tracks API version `2026-08-02`; framework peer versions and subpath exports are the compatibility boundary.
+Tracks API version `2026-08-03`; framework peer versions and subpath exports are the compatibility boundary.
 
 ## Related guides
 

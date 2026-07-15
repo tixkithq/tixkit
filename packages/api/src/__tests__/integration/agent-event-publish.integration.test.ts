@@ -8,6 +8,7 @@ import {
   DurableAgentExecutionService,
   buildAgentPlanDefinition,
   validateAgentContentPrepareResult,
+  validateAgentCampaignPrepareResult,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
   type AgentAction,
@@ -201,6 +202,54 @@ describe.sequential.each(driverCases)(
         .where('id', '=', 'cdoc_agent_confirm')
         .execute();
       await db
+        .insertInto('content_documents')
+        .values({
+          id: 'cdoc_agent_campaign_sms',
+          tenant_id: tenant.id,
+          organization_id: organization.id,
+          brand_id: brand.id,
+          event_id: event.id,
+          channel: 'sms',
+          key: 'event-announcement-sms',
+          name: 'Event announcement SMS',
+          status: 'draft',
+          locale: 'en',
+          current_draft_version_id: null,
+          published_version_id: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await db
+        .insertInto('content_document_versions')
+        .values({
+          id: 'cver_agent_campaign_sms',
+          document_id: 'cdoc_agent_campaign_sms',
+          version_number: 1,
+          status: 'published',
+          schema_version: 1,
+          subject: null,
+          preview_text: null,
+          content_json: JSON.stringify({ body: 'Event update' }),
+          rendered_html: null,
+          rendered_text: 'Event update',
+          variables: '[]',
+          validation: '{}',
+          created_by: 'user_sponsor',
+          created_at: now,
+          published_at: now,
+        })
+        .execute();
+      await db
+        .updateTable('content_documents')
+        .set({
+          status: 'published',
+          current_draft_version_id: 'cver_agent_campaign_sms',
+          published_version_id: 'cver_agent_campaign_sms',
+        })
+        .where('id', '=', 'cdoc_agent_campaign_sms')
+        .execute();
+      await db
         .insertInto('event_readiness_acknowledgements')
         .values({
           id: 'era_agent_checkout',
@@ -270,6 +319,17 @@ describe.sequential.each(driverCases)(
             created_at: now,
             updated_at: now,
           },
+          {
+            id: 'pg_agent_messages_write',
+            tenant_id: tenant.id,
+            principal_type: 'user',
+            principal_id: 'user_sponsor',
+            permission: 'messages.write',
+            scope_type: 'tenant',
+            scope_id: null,
+            created_at: now,
+            updated_at: now,
+          },
         ])
         .execute();
       await db
@@ -285,6 +345,7 @@ describe.sequential.each(driverCases)(
             'events.prepare',
             'readiness.read',
             'content.prepare',
+            'campaigns.prepare',
           ]),
           maximum_autonomy: 'execute_with_approval',
           protocol_version: AGENT_PROTOCOL_VERSION,
@@ -306,9 +367,15 @@ describe.sequential.each(driverCases)(
             'events.prepare',
             'readiness.read',
             'content.prepare',
+            'campaigns.prepare',
           ]),
           resource_scopes: JSON.stringify([`event:${event.id}`]),
-          permission_snapshot: JSON.stringify(['events:publish', 'events:read', 'events:write']),
+          permission_snapshot: JSON.stringify([
+            'events:publish',
+            'events:read',
+            'events:write',
+            'messages:write',
+          ]),
           issued_at: new Date(now.getTime() - 60_000),
           expires_at: new Date(now.getTime() + 3_600_000),
           revoked_at: null,
@@ -403,6 +470,14 @@ describe.sequential.each(driverCases)(
           {
             tenant_id: tenant.id,
             action_kind: 'content.prepare',
+            allowed: true,
+            risk_allowed: true,
+            policy_version: 1,
+            updated_at: now,
+          },
+          {
+            tenant_id: tenant.id,
+            action_kind: 'campaign.prepare',
             allowed: true,
             risk_allowed: true,
             policy_version: 1,
@@ -2498,6 +2573,517 @@ describe.sequential.each(driverCases)(
           actionId: prepared.action.id,
         }),
       ).resolves.toBeUndefined();
+    });
+
+    it('prepares an exact consent and suppression aware campaign without queueing delivery', async () => {
+      const event = await db
+        .selectFrom('events')
+        .select(['id', 'tenant_id', 'organization_id', 'brand_id', 'version'])
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const now = new Date();
+      const checkoutSessionId = `chk_agent_campaign_${driver}`;
+      const orderId = `ord_agent_campaign_${driver}`;
+      await db
+        .insertInto('checkout_sessions')
+        .values({
+          id: checkoutSessionId,
+          tenant_id: event.tenant_id,
+          event_id: event.id,
+          brand_id: event.brand_id,
+          status: 'completed',
+          hold_id: null,
+          currency: 'USD',
+          cart: JSON.stringify({ items: [{ ticketTypeId: 'tt_agent_publish', quantity: 3 }] }),
+          buyer: JSON.stringify({ email: 'campaign-buyer@example.test' }),
+          quote: JSON.stringify({ totalCents: 0 }),
+          payment_intent_id: null,
+          order_id: orderId,
+          success_url: null,
+          cancel_url: null,
+          expires_at: new Date(now.getTime() + 86_400_000),
+          idempotency_key: `campaign-checkout-${driver}`,
+          client_token: `campaign-client-${driver}`,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await db
+        .insertInto('orders')
+        .values({
+          id: orderId,
+          tenant_id: event.tenant_id,
+          organization_id: event.organization_id,
+          brand_id: event.brand_id,
+          event_id: event.id,
+          checkout_session_id: checkoutSessionId,
+          order_number: `TK-AGENT-CAMPAIGN-${driver}`,
+          status: 'paid',
+          currency: 'USD',
+          subtotal_cents: 0,
+          discount_cents: 0,
+          tax_cents: 0,
+          fee_cents: 0,
+          total_cents: 0,
+          refunded_cents: 0,
+          buyer_email: 'campaign-buyer@example.test',
+          buyer_first_name: 'Campaign',
+          buyer_last_name: 'Buyer',
+          buyer_phone: null,
+          payment_intent_id: null,
+          payment_provider: null,
+          sales_channel: 'online',
+          operator_id: null,
+          tender_type: null,
+          paid_at: now,
+          refunded_at: null,
+          cancelled_at: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const attendees = [
+        {
+          id: 'att_campaign_eligible',
+          email: 'eligible@example.test',
+          phone: '+15550000001',
+        },
+        {
+          id: 'att_campaign_no_consent',
+          email: 'no-consent@example.test',
+          phone: '+15550000002',
+        },
+        {
+          id: 'att_campaign_suppressed',
+          email: 'suppressed@example.test',
+          phone: '+15550000003',
+        },
+      ];
+      await db
+        .insertInto('attendees')
+        .values(
+          attendees.map((attendee) => ({
+            id: attendee.id,
+            tenant_id: event.tenant_id,
+            order_id: orderId,
+            event_id: event.id,
+            event_occurrence_id: null,
+            ticket_type_id: 'tt_agent_publish',
+            ticket_id: null,
+            first_name: 'Campaign',
+            last_name: attendee.id,
+            email: attendee.email,
+            phone: attendee.phone,
+            status: 'confirmed',
+            custom_answers: null,
+            checked_in_at: null,
+            check_in_device_id: null,
+            created_at: now,
+            updated_at: now,
+          })),
+        )
+        .execute();
+      await db
+        .insertInto('message_consents')
+        .values(
+          [attendees[0]!, attendees[2]!].map((attendee) => ({
+            id: `consent_${attendee.id}`,
+            tenant_id: event.tenant_id,
+            attendee_id: attendee.id,
+            email: attendee.email,
+            phone: attendee.phone,
+            email_opt_in: true,
+            sms_opt_in: true,
+            consent_text: 'Receive event updates',
+            consent_version: '1',
+            consented_at: now,
+            revoked_at: null,
+            created_at: now,
+          })),
+        )
+        .execute();
+      await db
+        .insertInto('email_suppressions')
+        .values({
+          id: 'supp_agent_campaign',
+          tenant_id: event.tenant_id,
+          email: 'Suppressed@Example.Test',
+          reason: 'complaint',
+          bounce_type: null,
+          source: 'test',
+          created_at: now,
+        })
+        .execute();
+
+      const before = {
+        emailJobs: await db.selectFrom('email_jobs').select('id').execute(),
+        smsJobs: await db.selectFrom('sms_jobs').select('id').execute(),
+      };
+      const service = new AgentActionService(db);
+      const request = {
+        tenantId: event.tenant_id,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-campaign-prepare-${driver}-0001`,
+        kind: 'campaign.prepare' as const,
+        delegationGrantId: action.delegationGrantId,
+        resourceId: event.id,
+        audience: 'all' as const,
+        channel: 'email' as const,
+        emailTemplateKey: 'order-confirmed',
+      };
+      const prepared = await service.prepare(request);
+      expect(prepared.result).toMatchObject({
+        audience: 'all',
+        channel: 'email',
+        requestedAttendeeIds: [],
+        audienceCount: 3,
+        eligibleRecipientCount: 1,
+        eligibleDeliveryCount: 1,
+        suppressedDeliveryCount: 2,
+        consentExclusionCount: 1,
+        missingContactCount: 0,
+        untrustedContentPaths: [],
+      });
+      expect(prepared.result.templateVersions).toEqual([
+        expect.objectContaining({
+          channel: 'email',
+          templateKey: 'order-confirmed',
+          versionId: 'cver_agent_confirm',
+        }),
+      ]);
+      expect(() =>
+        validateAgentCampaignPrepareResult(prepared.action, prepared.result),
+      ).not.toThrow();
+      expect(await service.prepare(request)).toEqual(prepared);
+      expect(await db.selectFrom('email_jobs').select('id').execute()).toEqual(before.emailJobs);
+      expect(await db.selectFrom('sms_jobs').select('id').execute()).toEqual(before.smsJobs);
+
+      await expect(
+        service.prepare({
+          ...request,
+          audience: 'specific',
+          attendeeIds: ['att_campaign_eligible'],
+        }),
+      ).rejects.toThrow('AGENT_ACTION_IDEMPOTENCY_CONFLICT');
+
+      const bothPrepared = await service.prepare({
+        ...request,
+        idempotencyKey: `agent-campaign-prepare-${driver}-both`,
+        channel: 'both',
+        smsTemplateKey: 'event-announcement-sms',
+      });
+      expect(bothPrepared.result).toMatchObject({
+        audienceCount: 3,
+        eligibleRecipientCount: 2,
+        eligibleDeliveryCount: 3,
+        suppressedDeliveryCount: 3,
+        consentExclusionCount: 2,
+        missingContactCount: 0,
+      });
+
+      const principalCapabilities = JSON.stringify([
+        'events.execute',
+        'events.read',
+        'events.prepare',
+        'readiness.read',
+        'content.prepare',
+        'campaigns.prepare',
+      ]);
+      const delegationCapabilities = principalCapabilities;
+      const delegationScopes = JSON.stringify([`event:${event.id}`]);
+      const assertCampaignAuthorityDenied = async (
+        surface: string,
+        expectedCode:
+          | 'AGENT_ACTION_PRINCIPAL_DENIED'
+          | 'AGENT_ACTION_DELEGATION_DENIED'
+          | 'AGENT_ACTION_RESOURCE_DENIED',
+        change: () => Promise<unknown>,
+        restore: () => Promise<unknown>,
+      ) => {
+        const idempotencyKey = `agent-campaign-prepare-${driver}-${surface}-denied`;
+        await change();
+        try {
+          await expect(service.prepare({ ...request, idempotencyKey })).rejects.toThrow(
+            expectedCode,
+          );
+          expect(
+            await db
+              .selectFrom('agent_actions')
+              .select('id')
+              .where('tenant_id', '=', event.tenant_id)
+              .where('idempotency_key', '=', idempotencyKey)
+              .execute(),
+          ).toEqual([]);
+        } finally {
+          await restore();
+        }
+      };
+      await assertCampaignAuthorityDenied(
+        'principal-capability',
+        'AGENT_ACTION_PRINCIPAL_DENIED',
+        () =>
+          db
+            .updateTable('agent_principals')
+            .set({ capabilities: JSON.stringify(['events.execute', 'events.read']) })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.agentPrincipalId)
+            .executeTakeFirstOrThrow(),
+        () =>
+          db
+            .updateTable('agent_principals')
+            .set({ capabilities: principalCapabilities })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.agentPrincipalId)
+            .executeTakeFirstOrThrow(),
+      );
+      await assertCampaignAuthorityDenied(
+        'delegation-capability',
+        'AGENT_ACTION_DELEGATION_DENIED',
+        () =>
+          db
+            .updateTable('agent_delegations')
+            .set({ capabilities: JSON.stringify(['events.execute', 'events.read']) })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow(),
+        () =>
+          db
+            .updateTable('agent_delegations')
+            .set({ capabilities: delegationCapabilities })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow(),
+      );
+      await assertCampaignAuthorityDenied(
+        'delegation-scope',
+        'AGENT_ACTION_DELEGATION_DENIED',
+        () =>
+          db
+            .updateTable('agent_delegations')
+            .set({ resource_scopes: '[]' })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow(),
+        () =>
+          db
+            .updateTable('agent_delegations')
+            .set({ resource_scopes: delegationScopes })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow(),
+      );
+      await assertCampaignAuthorityDenied(
+        'delegation-revocation',
+        'AGENT_ACTION_DELEGATION_DENIED',
+        () =>
+          db
+            .updateTable('agent_delegations')
+            .set({ revoked_at: new Date() })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow(),
+        () =>
+          db
+            .updateTable('agent_delegations')
+            .set({ revoked_at: null })
+            .where('tenant_id', '=', event.tenant_id)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow(),
+      );
+      for (const column of ['allowed', 'risk_allowed'] as const) {
+        await assertCampaignAuthorityDenied(
+          `policy-${column}`,
+          'AGENT_ACTION_RESOURCE_DENIED',
+          () =>
+            db
+              .updateTable('agent_action_policies')
+              .set({ [column]: false })
+              .where('tenant_id', '=', event.tenant_id)
+              .where('action_kind', '=', 'campaign.prepare')
+              .executeTakeFirstOrThrow(),
+          () =>
+            db
+              .updateTable('agent_action_policies')
+              .set({ [column]: true })
+              .where('tenant_id', '=', event.tenant_id)
+              .where('action_kind', '=', 'campaign.prepare')
+              .executeTakeFirstOrThrow(),
+        );
+      }
+
+      await db
+        .updateTable('attendees')
+        .set({ email: 'replacement@example.test', phone: '+15559999999', updated_at: new Date() })
+        .where('id', '=', 'att_campaign_eligible')
+        .execute();
+      await expect(service.prepare(request)).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+      const changedEmailPrepared = await service.prepare({
+        ...request,
+        idempotencyKey: `agent-campaign-prepare-${driver}-changed-email`,
+      });
+      expect(changedEmailPrepared.result).toMatchObject({
+        eligibleRecipientCount: 0,
+        eligibleDeliveryCount: 0,
+        suppressedDeliveryCount: 3,
+        consentExclusionCount: 2,
+      });
+      const { emailTemplateKey: omittedEmailTemplateKey, ...campaignRequestWithoutEmail } = request;
+      void omittedEmailTemplateKey;
+      const changedPhonePrepared = await service.prepare({
+        ...campaignRequestWithoutEmail,
+        idempotencyKey: `agent-campaign-prepare-${driver}-changed-phone`,
+        channel: 'sms',
+        smsTemplateKey: 'event-announcement-sms',
+      });
+      expect(changedPhonePrepared.result).toMatchObject({
+        eligibleRecipientCount: 1,
+        eligibleDeliveryCount: 1,
+        suppressedDeliveryCount: 2,
+        consentExclusionCount: 2,
+      });
+      await db
+        .updateTable('attendees')
+        .set({
+          email: attendees[0]!.email,
+          phone: attendees[0]!.phone,
+          updated_at: new Date(),
+        })
+        .where('id', '=', 'att_campaign_eligible')
+        .execute();
+
+      const consentEvidenceRequest = {
+        ...request,
+        idempotencyKey: `agent-campaign-prepare-${driver}-consent-evidence`,
+      };
+      const consentEvidencePrepared = await service.prepare(consentEvidenceRequest);
+      await db
+        .updateTable('message_consents')
+        .set({
+          consent_text: 'Receive revised event updates',
+          consent_version: '2',
+          consented_at: new Date(now.getTime() + 1_000),
+        })
+        .where('id', '=', 'consent_att_campaign_eligible')
+        .execute();
+      await expect(service.prepare(consentEvidenceRequest)).rejects.toThrow(
+        'AGENT_ACTION_RESOURCE_DENIED',
+      );
+      expect(consentEvidencePrepared.result.complianceResultSha256).not.toBe(
+        (
+          await service.prepare({
+            ...request,
+            idempotencyKey: `agent-campaign-prepare-${driver}-consent-evidence-current`,
+          })
+        ).result.complianceResultSha256,
+      );
+
+      const suppressionEvidenceRequest = {
+        ...request,
+        idempotencyKey: `agent-campaign-prepare-${driver}-suppression-evidence`,
+      };
+      await service.prepare(suppressionEvidenceRequest);
+      await db.deleteFrom('email_suppressions').where('id', '=', 'supp_agent_campaign').execute();
+      await db
+        .insertInto('email_suppressions')
+        .values({
+          id: 'supp_agent_campaign_replacement',
+          tenant_id: event.tenant_id,
+          email: 'SUPPRESSED@example.test',
+          reason: 'complaint',
+          bounce_type: null,
+          source: 'test',
+          created_at: new Date(now.getTime() + 2_000),
+        })
+        .execute();
+      await expect(service.prepare(suppressionEvidenceRequest)).rejects.toThrow(
+        'AGENT_ACTION_RESOURCE_DENIED',
+      );
+
+      const templateEvidenceRequest = {
+        ...request,
+        idempotencyKey: `agent-campaign-prepare-${driver}-template-evidence`,
+      };
+      await service.prepare(templateEvidenceRequest);
+      await db
+        .updateTable('content_document_versions')
+        .set({ content_json: JSON.stringify({ body: 'Changed published content' }) })
+        .where('id', '=', 'cver_agent_confirm')
+        .execute();
+      await expect(service.prepare(templateEvidenceRequest)).rejects.toThrow(
+        'AGENT_ACTION_RESOURCE_DENIED',
+      );
+      await db
+        .updateTable('content_document_versions')
+        .set({ content_json: '{}' })
+        .where('id', '=', 'cver_agent_confirm')
+        .execute();
+
+      await db
+        .updateTable('attendees')
+        .set({ status: 'checked_in', checked_in_at: new Date() })
+        .where('id', '=', 'att_campaign_eligible')
+        .execute();
+      const checkedInRequest = {
+        ...request,
+        idempotencyKey: `agent-campaign-prepare-${driver}-checked-in`,
+        audience: 'checked_in' as const,
+      };
+      const checkedInPrepared = await service.prepare(checkedInRequest);
+      expect(checkedInPrepared.result.audienceCount).toBe(1);
+      await db
+        .updateTable('attendees')
+        .set({ status: 'checked_in', checked_in_at: new Date() })
+        .where('id', '=', 'att_campaign_no_consent')
+        .execute();
+      await expect(service.prepare(checkedInRequest)).rejects.toThrow(
+        'AGENT_ACTION_RESOURCE_DENIED',
+      );
+      await db
+        .updateTable('attendees')
+        .set({ status: 'confirmed', checked_in_at: null })
+        .where('id', 'in', ['att_campaign_eligible', 'att_campaign_no_consent'])
+        .execute();
+
+      await db
+        .updateTable('permission_grants')
+        .set({ permission: 'reports.read' })
+        .where('id', '=', 'pg_agent_messages_write')
+        .execute();
+      await expect(
+        service.prepare({
+          ...request,
+          idempotencyKey: `agent-campaign-prepare-${driver}-permission-denied`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+      await db
+        .updateTable('permission_grants')
+        .set({ permission: 'messages.write' })
+        .where('id', '=', 'pg_agent_messages_write')
+        .execute();
+
+      const revocationRequest = {
+        ...request,
+        idempotencyKey: `agent-campaign-prepare-${driver}-revocation`,
+      };
+      const revocationPrepared = await service.prepare(revocationRequest);
+
+      await db
+        .updateTable('message_consents')
+        .set({ revoked_at: new Date() })
+        .where('id', '=', 'consent_att_campaign_eligible')
+        .execute();
+      await expect(service.prepare(revocationRequest)).rejects.toThrow(
+        'AGENT_ACTION_RESOURCE_DENIED',
+      );
+      await expect(
+        service.getForAgent({
+          tenantId: revocationRequest.tenantId,
+          agentPrincipalId: revocationRequest.agentPrincipalId,
+          actionId: revocationPrepared.action.id,
+        }),
+      ).resolves.toBeUndefined();
+      expect(await db.selectFrom('email_jobs').select('id').execute()).toEqual(before.emailJobs);
+      expect(await db.selectFrom('sms_jobs').select('id').execute()).toEqual(before.smsJobs);
     });
 
     it('denies event.prepare before evaluation when sponsor write permission is missing', async () => {

@@ -80,6 +80,7 @@ if (profile === 'agent-platform' && fixture && typeof fixture === 'object') {
     agentClientSecretEnv: string;
     delegationGrantId: string;
     resourceId: string;
+    campaignEmailTemplateKey: string;
     planId: string;
     idempotencyPrefix: string;
   };

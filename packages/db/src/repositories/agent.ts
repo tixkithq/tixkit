@@ -46,6 +46,7 @@ function delegationPermissionSnapshot(capabilities: readonly AgentCapability[]):
       permissions.add('events:read');
     else if (capability === 'events.prepare' || capability === 'content.prepare')
       permissions.add('events:write');
+    else if (capability === 'campaigns.prepare') permissions.add('messages:write');
     else if (capability === 'events.execute') {
       permissions.add('events:write');
       permissions.add('events:publish');
@@ -61,9 +62,11 @@ async function assertDelegationAuthority(
 ): Promise<string[]> {
   const permissionSnapshot = delegationPermissionSnapshot(delegation.capabilities);
   const requiredProductPermissions = new Set(
-    permissionSnapshot.map((permission) =>
-      permission === 'events:read' ? 'events.read' : 'events.write',
-    ),
+    permissionSnapshot.map((permission) => {
+      if (permission === 'events:read') return 'events.read';
+      if (permission === 'messages:write') return 'messages.write';
+      return 'events.write';
+    }),
   );
   const grants = await db
     .selectFrom('permission_grants')

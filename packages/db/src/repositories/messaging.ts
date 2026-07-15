@@ -1,4 +1,5 @@
 import { BaseRepository } from './base.js';
+import { sql } from 'kysely';
 import { ulid } from 'ulid';
 
 function escapeLikePattern(value: string): string {
@@ -485,11 +486,12 @@ export class EmailProviderEventRepository extends BaseRepository {
 
 export class EmailSuppressionRepository extends BaseRepository {
   async findByEmail(tenantId: string, email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
     return this.db
       .selectFrom('email_suppressions')
       .selectAll()
       .where('tenant_id', '=', tenantId)
-      .where('email', '=', email)
+      .where(sql<string>`lower(trim(email))`, '=', normalizedEmail)
       .executeTakeFirst();
   }
 
@@ -506,7 +508,7 @@ export class EmailSuppressionRepository extends BaseRepository {
       {
         id,
         tenant_id: input.tenantId,
-        email: input.email,
+        email: input.email.trim().toLowerCase(),
         reason: input.reason,
         bounce_type: input.bounceType ?? null,
         source: input.source,
@@ -809,11 +811,12 @@ export class MessageConsentRepository extends BaseRepository {
 
   async revokeEmailOptInByEmail(input: { tenantId: string; email: string; revokedAt?: Date }) {
     const revokedAt = input.revokedAt ?? new Date();
+    const normalizedEmail = input.email.trim().toLowerCase();
     return this.db
       .updateTable('message_consents')
       .set({ email_opt_in: false, revoked_at: revokedAt })
       .where('tenant_id', '=', input.tenantId)
-      .where('email', '=', input.email)
+      .where(sql<string>`lower(trim(email))`, '=', normalizedEmail)
       .where('email_opt_in', '=', true)
       .where('revoked_at', 'is', null)
       .execute();
@@ -821,11 +824,12 @@ export class MessageConsentRepository extends BaseRepository {
 
   async revokeSmsOptInByPhone(input: { tenantId: string; phone: string; revokedAt?: Date }) {
     const revokedAt = input.revokedAt ?? new Date();
+    const normalizedPhone = input.phone.trim();
     return this.db
       .updateTable('message_consents')
       .set({ sms_opt_in: false, revoked_at: revokedAt })
       .where('tenant_id', '=', input.tenantId)
-      .where('phone', '=', input.phone)
+      .where(sql<string>`trim(phone)`, '=', normalizedPhone)
       .where('sms_opt_in', '=', true)
       .where('revoked_at', 'is', null)
       .execute();

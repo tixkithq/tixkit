@@ -86,6 +86,50 @@ const adminTableQueryParameterRefs = [
   { $ref: '#/components/parameters/AdminTableIncludeTotal' },
 ] as const;
 
+const agentCampaignPrepareProperties = {
+  audience: { type: 'string', enum: ['all', 'checked_in', 'not_checked_in', 'specific'] },
+  channel: { type: 'string', enum: ['email', 'sms', 'both'] },
+  requestedAttendeeIds: {
+    type: 'array',
+    maxItems: 1000,
+    uniqueItems: true,
+    items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+  },
+  templateVersions: {
+    type: 'array',
+    minItems: 1,
+    maxItems: 2,
+    items: { $ref: '#/components/schemas/AgentCampaignTemplateVersion' },
+  },
+  contentVersionSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  audienceSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  exclusionSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  complianceResultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  audienceCount: { type: 'integer', minimum: 1 },
+  eligibleRecipientCount: { type: 'integer', minimum: 0 },
+  eligibleDeliveryCount: { type: 'integer', minimum: 0 },
+  suppressedDeliveryCount: { type: 'integer', minimum: 0 },
+  consentExclusionCount: { type: 'integer', minimum: 0 },
+  missingContactCount: { type: 'integer', minimum: 0 },
+} as const;
+
+const agentCampaignPrepareRequired = [
+  'audience',
+  'channel',
+  'requestedAttendeeIds',
+  'templateVersions',
+  'contentVersionSha256',
+  'audienceSnapshotSha256',
+  'exclusionSnapshotSha256',
+  'complianceResultSha256',
+  'audienceCount',
+  'eligibleRecipientCount',
+  'eligibleDeliveryCount',
+  'suppressedDeliveryCount',
+  'consentExclusionCount',
+  'missingContactCount',
+] as const;
+
 function adminTablePageSchema(itemSchema: OpenApiReference) {
   return {
     type: 'object',
@@ -573,7 +617,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-02',
+    version: '2026-08-03',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5290,7 +5334,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-02, including bounded content preparation.',
+          'Explicit agent identity for API 2026-08-03, including bounded content and campaign preparation.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5334,10 +5378,59 @@ const rawOpenApiSpec = {
         ],
         additionalProperties: false,
       },
+      AgentPrincipal20260803: {
+        type: 'object',
+        description:
+          'Explicit agent identity for API 2026-08-03, including consent-aware campaign preparation.',
+        properties: {
+          id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          kind: { type: 'string', enum: ['third_party', 'self_hosted'] },
+          sponsorPrincipalId: { type: 'string' },
+          capabilities: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 6,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              enum: [
+                'events.read',
+                'events.prepare',
+                'events.execute',
+                'readiness.read',
+                'content.prepare',
+                'campaigns.prepare',
+              ],
+            },
+          },
+          maximumAutonomy: {
+            type: 'string',
+            enum: ['read', 'recommend', 'prepare', 'execute_with_approval'],
+          },
+          protocolVersion: { type: 'string' },
+          state: { type: 'string', enum: ['active', 'suspended', 'revoked'] },
+          registeredAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'kind',
+          'sponsorPrincipalId',
+          'capabilities',
+          'maximumAutonomy',
+          'protocolVersion',
+          'state',
+          'registeredAt',
+        ],
+        additionalProperties: false,
+      },
       AgentPrincipalResponse: {
         anyOf: [
           { $ref: '#/components/schemas/AgentPrincipal' },
           { $ref: '#/components/schemas/AgentPrincipal20260802' },
+          { $ref: '#/components/schemas/AgentPrincipal20260803' },
         ],
       },
       AgentOAuthClient: {
@@ -5395,7 +5488,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-02 agent identity, including bounded content preparation.',
+          'Live explicit API 2026-08-03 agent identity, including bounded content and campaign preparation.',
         properties: {
           principal: {
             allOf: [
@@ -5429,10 +5522,42 @@ const rawOpenApiSpec = {
         required: ['principal', 'authentication', 'delegationRequired', 'supportedProtocolVersion'],
         additionalProperties: false,
       },
+      AgentSession20260803: {
+        type: 'object',
+        description:
+          'Live explicit API 2026-08-03 agent identity, including consent-aware campaign preparation.',
+        properties: {
+          principal: {
+            allOf: [
+              { $ref: '#/components/schemas/AgentPrincipal20260803' },
+              {
+                type: 'object',
+                properties: { updatedAt: { type: 'string', format: 'date-time' } },
+                required: ['updatedAt'],
+              },
+            ],
+          },
+          authentication: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              grantType: { type: 'string', const: 'client_credentials' },
+              scope: { type: 'string', const: 'agent.invoke' },
+              productPermissions: { type: 'array', maxItems: 0, items: { type: 'string' } },
+            },
+            required: ['grantType', 'scope', 'productPermissions'],
+          },
+          delegationRequired: { type: 'boolean', const: true },
+          supportedProtocolVersion: { type: 'string' },
+        },
+        required: ['principal', 'authentication', 'delegationRequired', 'supportedProtocolVersion'],
+        additionalProperties: false,
+      },
       AgentSessionResponse: {
         anyOf: [
           { $ref: '#/components/schemas/AgentSession' },
           { $ref: '#/components/schemas/AgentSession20260802' },
+          { $ref: '#/components/schemas/AgentSession20260803' },
         ],
       },
       AgentAction: {
@@ -6650,6 +6775,95 @@ const rawOpenApiSpec = {
           'untrustedContentPaths',
         ],
       },
+      AgentCampaignTemplateVersion: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          channel: { type: 'string', enum: ['email', 'sms'] },
+          templateKey: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$',
+            example: 'event-announcement',
+          },
+          versionId: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+          },
+          contentSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: ['channel', 'templateKey', 'versionId', 'contentSha256'],
+      },
+      AgentCampaignPreparePayload: {
+        type: 'object',
+        description:
+          'Exact content, audience, exclusion and consent/suppression snapshot prepared without delivery side effects.',
+        additionalProperties: false,
+        properties: agentCampaignPrepareProperties,
+        required: agentCampaignPrepareRequired,
+      },
+      AgentCampaignPrepareAction: {
+        type: 'object',
+        description:
+          'Server-derived, event-version-bound, consent/suppression-aware campaign preparation with no send authority.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          protocolVersion: { type: 'string', const: '2026-07-22' },
+          agentPrincipalId: { type: 'string' },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: { type: 'string' },
+          kind: { type: 'string', const: 'campaign.prepare' },
+          autonomy: { type: 'string', const: 'prepare' },
+          target: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              tenantId: { type: 'string' },
+              resourceType: { type: 'string', const: 'event' },
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 1 },
+              apiOperation: { type: 'string', const: 'campaigns.prepare' },
+            },
+            required: ['tenantId', 'resourceType', 'resourceId', 'resourceVersion', 'apiOperation'],
+          },
+          payload: { $ref: '#/components/schemas/AgentCampaignPreparePayload' },
+          idempotencyKey: { type: 'string', minLength: 16, maxLength: 127 },
+          expectedPolicyVersion: { type: 'integer', minimum: 1 },
+          preparedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'protocolVersion',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'kind',
+          'autonomy',
+          'target',
+          'payload',
+          'idempotencyKey',
+          'expectedPolicyVersion',
+          'preparedAt',
+        ],
+      },
+      AgentCampaignPrepareResult: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ...agentCampaignPrepareProperties,
+          resourceId: { type: 'string' },
+          resourceVersion: { type: 'integer', minimum: 1 },
+          observedAt: { type: 'string', format: 'date-time' },
+          untrustedContentPaths: { type: 'array', maxItems: 0, items: false },
+        },
+        required: [
+          ...agentCampaignPrepareRequired,
+          'resourceId',
+          'resourceVersion',
+          'observedAt',
+          'untrustedContentPaths',
+        ],
+      },
       AgentEventUpdateAction: {
         type: 'object',
         description:
@@ -6913,6 +7127,39 @@ const rawOpenApiSpec = {
             required: ['allowed', 'eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
           },
           result: { $ref: '#/components/schemas/AgentContentPrepareResult' },
+          resultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: [
+          'action',
+          'actionDigest',
+          'expiresAt',
+          'authorization',
+          'result',
+          'resultSha256',
+        ],
+      },
+      PreparedAgentCampaignPrepareAction: {
+        type: 'object',
+        description:
+          'Immutable direct campaign preparation with exact content, audience and compliance digests and no product or delivery side effects.',
+        additionalProperties: false,
+        properties: {
+          action: { $ref: '#/components/schemas/AgentCampaignPrepareAction' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          authorization: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              allowed: { type: 'boolean', const: true },
+              eligibleForApproval: { type: 'boolean', const: false },
+              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              checkedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['allowed', 'eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
+          },
+          result: { $ref: '#/components/schemas/AgentCampaignPrepareResult' },
           resultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
         },
         required: [
@@ -7349,7 +7596,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-02 authority grant, including bounded content preparation.',
+          'Time-bounded API 2026-08-03 authority grant, including bounded content and campaign preparation.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -7403,10 +7650,62 @@ const rawOpenApiSpec = {
         ],
         additionalProperties: false,
       },
+      AgentDelegation20260803: {
+        type: 'object',
+        description:
+          'Time-bounded API 2026-08-03 authority grant, including consent-aware campaign preparation.',
+        properties: {
+          id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          agentPrincipalId: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          sponsorPrincipalId: { type: 'string' },
+          capabilities: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 6,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              enum: [
+                'events.read',
+                'events.prepare',
+                'events.execute',
+                'readiness.read',
+                'content.prepare',
+                'campaigns.prepare',
+              ],
+            },
+          },
+          resourceScopes: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            uniqueItems: true,
+            items: { type: 'string', pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+          },
+          permissionSnapshot: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+          issuedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          revokedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'capabilities',
+          'resourceScopes',
+          'permissionSnapshot',
+          'issuedAt',
+          'expiresAt',
+        ],
+        additionalProperties: false,
+      },
       AgentDelegationResponse: {
         anyOf: [
           { $ref: '#/components/schemas/AgentDelegation' },
           { $ref: '#/components/schemas/AgentDelegation20260802' },
+          { $ref: '#/components/schemas/AgentDelegation20260803' },
         ],
       },
       AgentMemoryNamespaceRequest: {
@@ -12395,6 +12694,7 @@ const rawOpenApiSpec = {
                   anyOf: [
                     { $ref: '#/components/schemas/AgentPrincipal' },
                     { $ref: '#/components/schemas/AgentPrincipal20260802' },
+                    { $ref: '#/components/schemas/AgentPrincipal20260803' },
                   ],
                 },
               },
@@ -12425,6 +12725,7 @@ const rawOpenApiSpec = {
                   anyOf: [
                     { $ref: '#/components/schemas/AgentPrincipal' },
                     { $ref: '#/components/schemas/AgentPrincipal20260802' },
+                    { $ref: '#/components/schemas/AgentPrincipal20260803' },
                   ],
                 },
               },
@@ -13193,6 +13494,145 @@ const rawOpenApiSpec = {
         },
       },
     },
+    '/agent/campaign-preparations': {
+      post: {
+        summary: 'Prepare a consent and suppression aware campaign without sending it',
+        description:
+          'Experimental/private beta. Requires Agent OAuth plus campaigns.prepare capability, exact event scope and live sponsor messages.write authority. The server resolves immutable published content versions and an exact audience/compliance snapshot. It persists action, result and audit evidence only and exposes no send, approval or execution route.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [{ $ref: '#/components/parameters/AgentActionIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  delegationGrantId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  resourceId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  audience: {
+                    type: 'string',
+                    enum: ['all', 'checked_in', 'not_checked_in', 'specific'],
+                  },
+                  attendeeIds: {
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: 1000,
+                    uniqueItems: true,
+                    items: {
+                      type: 'string',
+                      pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                    },
+                  },
+                  channel: { type: 'string', enum: ['email', 'sms', 'both'] },
+                  emailTemplateKey: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$',
+                    example: 'event-announcement-email',
+                  },
+                  smsTemplateKey: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$',
+                    example: 'event-announcement-sms',
+                  },
+                },
+                required: ['delegationGrantId', 'resourceId', 'audience', 'channel'],
+                // oxlint-disable unicorn/no-thenable -- `then` is a JSON Schema conditional keyword.
+                allOf: [
+                  {
+                    if: { properties: { audience: { const: 'specific' } }, required: ['audience'] },
+                    ['then']: { required: ['attendeeIds'] },
+                    else: { not: { required: ['attendeeIds'] } },
+                  },
+                  {
+                    if: {
+                      properties: { channel: { enum: ['email', 'both'] } },
+                      required: ['channel'],
+                    },
+                    ['then']: { required: ['emailTemplateKey'] },
+                    else: { not: { required: ['emailTemplateKey'] } },
+                  },
+                  {
+                    if: {
+                      properties: { channel: { enum: ['sms', 'both'] } },
+                      required: ['channel'],
+                    },
+                    ['then']: { required: ['smsTemplateKey'] },
+                    else: { not: { required: ['smsTemplateKey'] } },
+                  },
+                ],
+                // oxlint-enable unicorn/no-thenable
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Immutable direct campaign preparation with exact published content, audience, exclusion and compliance digests. Exact still-authorized replays return identical evidence.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentCampaignPrepareAction' },
+              },
+            },
+          },
+          '400': {
+            description:
+              'Missing or invalid Idempotency-Key, audience, channel or template selection, or unavailable published template',
+          },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': {
+            description: 'Current principal, delegation, sponsor or event unavailable',
+          },
+          '409': {
+            description:
+              'Idempotency key reused with a different request or required current action policy unavailable',
+          },
+        },
+      },
+    },
+    '/agent/campaign-preparations/{actionId}': {
+      get: {
+        summary: 'Get a direct campaign preparation result',
+        description:
+          'Requires the exact agent or sponsor and reauthorizes capability, delegation, live sponsor permission, policy and event version before returning persisted evidence. Replay fails closed if content, audience, consent or suppression state changed.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Immutable direct campaign preparation and required result evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentCampaignPrepareAction' },
+              },
+            },
+          },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '404': {
+            description:
+              'Action, current authority, resource or snapshot is outside the caller scope',
+          },
+        },
+      },
+    },
     '/agent/event-updates': {
       post: {
         summary: 'Prepare a consequential event update for fresh human approval',
@@ -13838,6 +14278,7 @@ const rawOpenApiSpec = {
                   anyOf: [
                     { $ref: '#/components/schemas/AgentSession' },
                     { $ref: '#/components/schemas/AgentSession20260802' },
+                    { $ref: '#/components/schemas/AgentSession20260803' },
                   ],
                 },
               },
@@ -13920,6 +14361,7 @@ const rawOpenApiSpec = {
                   anyOf: [
                     { $ref: '#/components/schemas/AgentDelegation' },
                     { $ref: '#/components/schemas/AgentDelegation20260802' },
+                    { $ref: '#/components/schemas/AgentDelegation20260803' },
                   ],
                 },
               },

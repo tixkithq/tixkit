@@ -4736,6 +4736,24 @@ describe('messaging endpoint', () => {
           created_at: now,
           updated_at: now,
         },
+        {
+          id: 'att_2',
+          tenant_id: 'tnt_1',
+          order_id: 'ord_1',
+          event_id: 'evt_1',
+          ticket_type_id: 'tt_1',
+          ticket_id: 'tkt_2',
+          first_name: 'Changed',
+          last_name: 'Contact',
+          email: 'new-contact@test.com',
+          phone: '+15550000004',
+          status: 'confirmed',
+          custom_answers: null,
+          checked_in_at: null,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        },
       ],
       message_consents: [
         {
@@ -4746,6 +4764,20 @@ describe('messaging endpoint', () => {
           phone: '+15550000002',
           email_opt_in: true,
           sms_opt_in: false,
+          consent_text: 'Updates',
+          consent_version: 'v1',
+          consented_at: now,
+          revoked_at: null,
+          created_at: now,
+        },
+        {
+          id: 'msc_2',
+          tenant_id: 'tnt_1',
+          attendee_id: 'att_2',
+          email: 'old-contact@test.com',
+          phone: '+15550000003',
+          email_opt_in: true,
+          sms_opt_in: true,
           consent_text: 'Updates',
           consent_version: 'v1',
           consented_at: now,
@@ -4848,10 +4880,10 @@ describe('messaging endpoint', () => {
     });
     expect(preview.statusCode).toBe(200);
     expect(preview.json()).toMatchObject({
-      audienceCount: 1,
+      audienceCount: 2,
       eligibleCount: 1,
-      suppressedRecipients: 1,
-      consentExclusions: 1,
+      suppressedRecipients: 3,
+      consentExclusions: 3,
       skippedRecipients: 0,
       recipients: [{ id: 'att_1' }],
     });
@@ -4883,9 +4915,9 @@ describe('messaging endpoint', () => {
       campaignEmailTemplateKey: 'attendee-email',
       campaignSmsTemplateKey: 'attendee-message',
       campaignAudienceAttendeeIds: [],
-      campaignAudienceCount: 1,
-      campaignSuppressedRecipients: 1,
-      campaignConsentExclusions: 1,
+      campaignAudienceCount: 2,
+      campaignSuppressedRecipients: 3,
+      campaignConsentExclusions: 3,
       campaignSkippedRecipients: 0,
     });
     expect(

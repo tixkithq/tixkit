@@ -229,17 +229,19 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     await db
       .insertInto('permission_grants')
       .values([
-        ...['developers.write', 'events.read', 'events.write'].map((permission, index) => ({
-          id: `pg_agent_control_${index}`,
-          tenant_id: tenantId,
-          principal_type: 'user' as const,
-          principal_id: 'user_actor',
-          permission,
-          scope_type: 'tenant' as const,
-          scope_id: null,
-          created_at: now,
-          updated_at: now,
-        })),
+        ...['developers.write', 'events.read', 'events.write', 'messages.write'].map(
+          (permission, index) => ({
+            id: `pg_agent_control_${index}`,
+            tenant_id: tenantId,
+            principal_type: 'user' as const,
+            principal_id: 'user_actor',
+            permission,
+            scope_type: 'tenant' as const,
+            scope_id: null,
+            created_at: now,
+            updated_at: now,
+          }),
+        ),
         {
           id: 'pg_agent_control_other',
           tenant_id: tenantId,
@@ -431,6 +433,11 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
   });
 
   it('atomically consumes one approval and converges concurrent idempotent reservations', async () => {
+    const controlEventCountBefore = await db
+      .selectFrom('agent_control_events')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .execute();
     const repository = new AgentExecutionRepository(db);
     const approved = approval(tenantId);
     const sharedPreparationKey = 'shared-agent-preparation-key-2026';
@@ -469,6 +476,23 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     await expect(
       repository.grantDelegation(grantedDelegation, controlAudit('grant_duplicate_ref')),
     ).rejects.toThrow('AGENT_CONTROL_REFERENCE_CONFLICT');
+    const campaignPrincipal = {
+      ...principal(tenantId),
+      id: 'agent_campaign_prepare',
+      capabilities: ['campaigns.prepare'] as const,
+    };
+    await repository.registerPrincipal(campaignPrincipal, controlAudit('register_campaign'));
+    const campaignDelegation = await repository.grantDelegation(
+      {
+        ...delegation(tenantId),
+        id: 'delegation_campaign_prepare',
+        agentPrincipalId: campaignPrincipal.id,
+        capabilities: ['campaigns.prepare'],
+        permissionSnapshot: ['messages:write'],
+      },
+      controlAudit('grant_campaign'),
+    );
+    expect(campaignDelegation.permissionSnapshot).toEqual(['messages:write']);
     await expect(
       repository.grantDelegation(
         {
@@ -597,13 +621,15 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         controlAudit('grant_excess'),
       ),
     ).rejects.toThrow('AGENT_DELEGATION_CAPABILITY_UNSUPPORTED');
-    expect(
-      await db
-        .selectFrom('agent_control_events')
-        .select('id')
-        .where('tenant_id', '=', tenantId)
-        .execute(),
-    ).toHaveLength(8);
+    const controlEvents = await db
+      .selectFrom('agent_control_events')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .execute();
+    expect(controlEvents).toHaveLength(controlEventCountBefore.length + 7);
+    expect(controlEvents.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(['register_campaign', 'grant_campaign']),
+    );
     await persistApproval(db, approved);
     const results = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>

@@ -1,20 +1,25 @@
 import { agentSha256, installAgentProtocolSchemaKeywords } from '@tixkit/agent-protocol';
 import currentAgentSchema from '@tixkit/agent-protocol/schema' with { type: 'json' };
 import retainedAgentSchema from '@tixkit/agent-protocol/schemas/2026-07-22' with { type: 'json' };
-import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-02' with { type: 'json' };
+import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-03' with { type: 'json' };
 import retainedActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-27' with { type: 'json' };
 import { runAgentPlatformContract } from '@tixkit/contract-tests';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 
 if (
-  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-08-02' ||
+  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-08-03' ||
   retainedAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-07-22' ||
   currentAgentSchema.allOf[0]?.$ref !== retainedAgentSchema.$id ||
   !currentAgentSchema.allOf.some(
     (entry) => entry.then?.properties?.autonomy?.const === 'prepare',
   ) ||
-  !currentAgentSchema.allOf.some((entry) => entry.if?.properties?.kind?.const === 'content.prepare')
+  !currentAgentSchema.allOf.some(
+    (entry) => entry.if?.properties?.kind?.const === 'content.prepare',
+  ) ||
+  !currentAgentSchema.allOf.some(
+    (entry) => entry.if?.properties?.kind?.const === 'campaign.prepare',
+  )
 )
   throw new Error('packed agent protocol schema exports do not enforce the current contract');
 
@@ -34,7 +39,15 @@ const validateEventUpdatePayload = ajv.getSchema(
 const validateContentPreparePayload = ajv.getSchema(
   `${currentActionContracts.$id}#/$defs/contentPrepareResolvedPayload`,
 );
-if (!validateEventPreparePayload || !validateEventUpdatePayload || !validateContentPreparePayload)
+const validateCampaignPreparePayload = ajv.getSchema(
+  `${currentActionContracts.$id}#/$defs/campaignPrepareResolvedPayload`,
+);
+if (
+  !validateEventPreparePayload ||
+  !validateEventUpdatePayload ||
+  !validateContentPreparePayload ||
+  !validateCampaignPreparePayload
+)
   throw new Error('packed agent action contracts did not expose typed event change validation');
 
 const mutation = process.argv[2] || 'none';
@@ -188,6 +201,51 @@ if (
   })
 )
   throw new Error('packed current action schema accepted content.prepare autonomy escalation');
+const campaignPreparePayload = {
+  audience: 'all',
+  channel: 'email',
+  requestedAttendeeIds: [],
+  templateVersions: [
+    {
+      channel: 'email',
+      templateKey: 'event-announcement',
+      versionId: 'template_version_primary',
+      contentSha256: '1'.repeat(64),
+    },
+  ],
+  contentVersionSha256: agentSha256([
+    {
+      channel: 'email',
+      templateKey: 'event-announcement',
+      versionId: 'template_version_primary',
+      contentSha256: '1'.repeat(64),
+    },
+  ]),
+  audienceSnapshotSha256: '3'.repeat(64),
+  exclusionSnapshotSha256: '4'.repeat(64),
+  complianceResultSha256: '5'.repeat(64),
+  audienceCount: 3,
+  eligibleRecipientCount: 1,
+  eligibleDeliveryCount: 1,
+  suppressedDeliveryCount: 1,
+  consentExclusionCount: 1,
+  missingContactCount: 1,
+};
+const campaignPrepareAction = {
+  id: `act_${'5'.repeat(48)}`,
+  ...base,
+  kind: 'campaign.prepare',
+  autonomy: 'prepare',
+  target: { ...initialTarget, apiOperation: 'campaigns.prepare' },
+  payload: campaignPreparePayload,
+  idempotencyKey: 'agent.conformance.packed.campaign.prepare',
+  preparedAt: '2026-07-14T11:58:50.000Z',
+};
+if (
+  !validateCurrentAction(campaignPrepareAction) ||
+  !validateCampaignPreparePayload(campaignPreparePayload)
+)
+  throw new Error('packed agent schemas rejected a valid campaign.prepare action');
 const eventUpdateAfter = {
   description: 'Organizer-approved updated description.',
   title: 'Contract-updated event',
@@ -249,6 +307,7 @@ let planSha256 = '';
 let eventCalls = 0;
 let eventPrepareCalls = 0;
 let contentPrepareCalls = 0;
+let campaignPrepareCalls = 0;
 let eventUpdateCalls = 0;
 let eventUpdateExecutionCalls = 0;
 const response = (status, body) => ({
@@ -380,6 +439,29 @@ const execute = async (request) => {
         contentMutation === 'result_digest' ? '0'.repeat(64) : agentSha256(preparedResult),
     });
   }
+  if (request.path === '/v1/agent/campaign-preparations') {
+    campaignPrepareCalls += 1;
+    const result = {
+      resourceId: initialTarget.resourceId,
+      resourceVersion: initialTarget.resourceVersion,
+      ...campaignPreparePayload,
+      ...(mutation === 'campaign_compliance' ? { complianceResultSha256: '6'.repeat(64) } : {}),
+      observedAt:
+        mutation === 'campaign_replay' && campaignPrepareCalls === 2
+          ? '2026-07-14T11:58:51.000Z'
+          : '2026-07-14T11:58:50.000Z',
+      untrustedContentPaths: [],
+    };
+    return response(201, {
+      action: campaignPrepareAction,
+      actionDigest:
+        mutation === 'campaign_action_digest' ? '0'.repeat(64) : agentSha256(campaignPrepareAction),
+      expiresAt: '2026-07-14T12:08:50.000Z',
+      authorization: { allowed: true },
+      result,
+      resultSha256: mutation === 'campaign_result_digest' ? '0'.repeat(64) : agentSha256(result),
+    });
+  }
   if (request.path === '/v1/agent/event-updates') {
     eventUpdateCalls += 1;
     const returnedPreview = {
@@ -484,7 +566,9 @@ const execute = async (request) => {
     });
   if (
     request.path === `/v1/agent/actions/${contentPrepareActionId}/approvals` ||
-    request.path === `/v1/agent/actions/${contentPrepareActionId}/executions`
+    request.path === `/v1/agent/actions/${contentPrepareActionId}/executions` ||
+    request.path === `/v1/agent/actions/${campaignPrepareAction.id}/approvals` ||
+    request.path === `/v1/agent/actions/${campaignPrepareAction.id}/executions`
   )
     return response(404, { code: 'AGENT_ACTION_NOT_FOUND' });
   if (request.path.endsWith('/approvals'))
@@ -571,12 +655,13 @@ const execute = async (request) => {
 };
 
 const result = await runAgentPlatformContract({
-  apiVersion: '2026-08-02',
+  apiVersion: '2026-08-03',
   sponsorAccessToken: 'sponsor_token',
   agentClientId: `tk_agent_${'e'.repeat(48)}`,
   agentClientSecret: 'secret_value',
   delegationGrantId: base.delegationGrantId,
   resourceId: target.resourceId,
+  campaignEmailTemplateKey: 'event-announcement',
   planId: 'plan_conformance_packed',
   idempotencyPrefix: 'agent.conformance.packed',
   execute,
@@ -587,6 +672,7 @@ process.stdout.write(
     eventCalls,
     eventPrepareCalls,
     contentPrepareCalls,
+    campaignPrepareCalls,
     eventUpdateCalls,
     eventUpdateExecutionCalls,
   }),

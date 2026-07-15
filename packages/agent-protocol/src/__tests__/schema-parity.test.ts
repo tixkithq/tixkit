@@ -21,7 +21,7 @@ const retainedSchemaText = readFileSync(
 );
 const retainedSchema = JSON.parse(retainedSchemaText) as Record<string, unknown>;
 const currentSchema = JSON.parse(
-  readFileSync(new URL('../../schemas/agent-protocol-2026-08-02.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../schemas/agent-protocol-2026-08-03.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
 const retainedOverlayText = readFileSync(
   new URL('../../schemas/agent-protocol-2026-07-31.json', import.meta.url),
@@ -38,6 +38,14 @@ ajv.addSchema(
   JSON.parse(
     readFileSync(
       new URL('../../schemas/agent-action-contracts-2026-07-27.json', import.meta.url),
+      'utf8',
+    ),
+  ),
+);
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-08-03.json', import.meta.url),
       'utf8',
     ),
   ),
@@ -130,7 +138,34 @@ function action(kind: AgentActionKind): AgentAction {
                     contentPreviewSha256: agentSha256(projection),
                   };
                 })()
-              : {},
+              : kind === 'campaign.prepare'
+                ? (() => {
+                    const templateVersions = [
+                      {
+                        channel: 'email' as const,
+                        templateKey: 'event-reminder',
+                        versionId: 'version_primary',
+                        contentSha256: '1'.repeat(64),
+                      },
+                    ];
+                    return {
+                      audience: 'all' as const,
+                      channel: 'email' as const,
+                      requestedAttendeeIds: [],
+                      templateVersions,
+                      contentVersionSha256: agentSha256(templateVersions),
+                      audienceSnapshotSha256: '2'.repeat(64),
+                      exclusionSnapshotSha256: '3'.repeat(64),
+                      complianceResultSha256: '4'.repeat(64),
+                      audienceCount: 1,
+                      eligibleRecipientCount: 1,
+                      eligibleDeliveryCount: 1,
+                      suppressedDeliveryCount: 0,
+                      consentExclusionCount: 0,
+                      missingContactCount: 0,
+                    };
+                  })()
+                : {},
     idempotencyKey: `agent-action-${kind}-2026-07-12`,
     expectedPolicyVersion: 1,
     preparedAt: '2026-07-12T12:00:00.000Z',

@@ -44,6 +44,52 @@ const base = {
 };
 
 describe('OpenAPI compatibility', () => {
+  it('accepts additive anyOf response alternatives while preserving every prior branch', () => {
+    const previous = {
+      ...base,
+      components: {
+        schemas: {
+          ...base.components.schemas,
+          ThingResponse: {
+            anyOf: [
+              { $ref: '#/components/schemas/Thing' },
+              { $ref: '#/components/schemas/Thing20260802' },
+            ],
+          },
+          Thing20260802: { type: 'object', properties: { id: { type: 'string' } } },
+        },
+      },
+    };
+    const current = {
+      ...previous,
+      components: {
+        schemas: {
+          ...previous.components.schemas,
+          ThingResponse: {
+            anyOf: [
+              ...previous.components.schemas.ThingResponse.anyOf,
+              { $ref: '#/components/schemas/Thing20260803' },
+            ],
+          },
+          Thing20260803: { type: 'object', properties: { id: { type: 'string' } } },
+        },
+      },
+    };
+    const changes = compareOpenApi(previous as never, current as never);
+    expect(changes).toContainEqual(
+      expect.objectContaining({ category: 'schema-anyOf-widened', severity: 'compatible' }),
+    );
+    expect(changes.filter((change) => change.severity === 'breaking')).toEqual([]);
+
+    const narrowed = structuredClone(current);
+    narrowed.components.schemas.ThingResponse.anyOf = [
+      { $ref: '#/components/schemas/Thing20260803' },
+    ];
+    expect(compareOpenApi(previous as never, narrowed as never)).toContainEqual(
+      expect.objectContaining({ category: 'schema-anyOf-changed', severity: 'breaking' }),
+    );
+  });
+
   it('accepts an additional authentication alternative without weakening existing clients', () => {
     const current = {
       ...base,

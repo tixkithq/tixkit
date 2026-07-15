@@ -8,6 +8,7 @@ import {
   validateAgentContentPrepareDocument,
   validateAgentContentPreparePreview,
   validateAgentContentPrepareValidation,
+  validateAgentCampaignPreparePayload,
   validateAgentEventPrepareProjection,
   validateAgentEventPrepareResolvedChanges,
   type AgentAction,
@@ -15,6 +16,7 @@ import {
   type ContentPreparePayload,
   type AgentApproval,
   type AgentCapability,
+  type CampaignPreparePayload,
 } from './protocol.js';
 import {
   validateAgentActionResultForAction,
@@ -25,7 +27,7 @@ import {
 export const AGENT_PLATFORM_PROTOCOL_VERSION = '2026-07-27' as const;
 export const AGENT_PLATFORM_PLAN_DIGEST_DOMAIN =
   'tixkit.agent-plan-definition.v2026-07-27' as const;
-export const AGENT_ACTION_CONTRACT_VERSION = '2026-08-02' as const;
+export const AGENT_ACTION_CONTRACT_VERSION = '2026-08-03' as const;
 
 export type AgentRiskClass = 'read_only' | 'low' | 'high' | 'critical';
 export type AgentReversibilityMode = 'none' | 'reversible' | 'compensatable';
@@ -256,6 +258,27 @@ export interface AgentContentPrepareResult extends Readonly<Record<string, unkno
   preview: ContentPreparePayload['preview'];
   validation: ContentPreparePayload['validation'];
   untrustedContentPaths: readonly ['content', 'preview.discovery'];
+}
+
+export interface AgentCampaignPrepareResult extends Readonly<Record<string, unknown>> {
+  resourceId: string;
+  resourceVersion: number;
+  observedAt: string;
+  audience: CampaignPreparePayload['audience'];
+  channel: CampaignPreparePayload['channel'];
+  requestedAttendeeIds: readonly string[];
+  templateVersions: CampaignPreparePayload['templateVersions'];
+  contentVersionSha256: string;
+  audienceSnapshotSha256: string;
+  exclusionSnapshotSha256: string;
+  complianceResultSha256: string;
+  audienceCount: number;
+  eligibleRecipientCount: number;
+  eligibleDeliveryCount: number;
+  suppressedDeliveryCount: number;
+  consentExclusionCount: number;
+  missingContactCount: number;
+  untrustedContentPaths: readonly [];
 }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$/u;
@@ -1211,6 +1234,55 @@ export function validateAgentContentPrepareResult(
   );
 }
 
+export function validateAgentCampaignPrepareResult(
+  action: AgentAction,
+  result: AgentCampaignPrepareResult,
+): void {
+  assert(action.kind === 'campaign.prepare', 'agent campaign prepare action kind is invalid');
+  assertExactKeys(result, [
+    'resourceId',
+    'resourceVersion',
+    'observedAt',
+    'audience',
+    'channel',
+    'requestedAttendeeIds',
+    'templateVersions',
+    'contentVersionSha256',
+    'audienceSnapshotSha256',
+    'exclusionSnapshotSha256',
+    'complianceResultSha256',
+    'audienceCount',
+    'eligibleRecipientCount',
+    'eligibleDeliveryCount',
+    'suppressedDeliveryCount',
+    'consentExclusionCount',
+    'missingContactCount',
+    'untrustedContentPaths',
+  ]);
+  assert(
+    action.autonomy === 'prepare' &&
+      action.target.resourceType === 'event' &&
+      action.target.apiOperation === 'campaigns.prepare' &&
+      result.resourceId === action.target.resourceId &&
+      result.resourceVersion === action.target.resourceVersion &&
+      Array.isArray(result.untrustedContentPaths) &&
+      result.untrustedContentPaths.length === 0,
+    'agent campaign prepare target binding is invalid',
+  );
+  validateAgentCampaignPreparePayload(action.payload);
+  const projection = { ...result } as Record<string, unknown>;
+  delete projection.resourceId;
+  delete projection.resourceVersion;
+  delete projection.observedAt;
+  delete projection.untrustedContentPaths;
+  validateAgentCampaignPreparePayload(projection);
+  assert(
+    canonicalAgentJson(action.payload) === canonicalAgentJson(projection),
+    'agent campaign prepare snapshot binding is invalid',
+  );
+  validDate(result.observedAt);
+}
+
 function validateAgentEventChangePreview(
   action: AgentAction,
   result: AgentEventPrepareResult,
@@ -1283,7 +1355,7 @@ function validateAgentEventChangePreview(
   );
 }
 
-const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-08-02';
+const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-08-03';
 // Updated only alongside the immutable schema and verified by schema-parity tests.
 export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27 =
   'fd74b30a8ba72341fcf4fa6984dca901ba7dec95cf305dc98f5cc38c184b092f' as const;
@@ -1295,8 +1367,10 @@ export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_31 =
   'e4bc8989e8763f8089eff14f24e35677c62148dbd6ced92f555ad54a346d9bd3' as const;
 export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_01 =
   '335e70ca4930b26cfe47b866eedeaacea9c802b5f844e2e26c2e9f40201b8984' as const;
-export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_02 =
   'a12327ff58bee27b566408ddc4c054e49463a851c1d5a36974575bc592578626' as const;
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+  '90a370a02930c77d2726a78a03ebd77e679184396165727b0f72cf9af0308aea' as const;
 
 const riskByKind: Readonly<Record<AgentActionKind, AgentRiskClass>> = {
   'event.read': 'read_only',
@@ -1325,7 +1399,7 @@ const reversibilityByKind: Readonly<Record<AgentActionKind, AgentPlanReversibili
   'report.read': { mode: 'none' },
   'event.prepare': { mode: 'reversible' },
   'content.prepare': { mode: 'none' },
-  'campaign.prepare': { mode: 'reversible' },
+  'campaign.prepare': { mode: 'none' },
   'event.update': { mode: 'none' },
   'event.publish': { mode: 'none' },
   'inventory.change': {
@@ -1364,7 +1438,12 @@ const materialDigestsByKind: Readonly<Record<AgentActionKind, readonly string[]>
   'report.read': [],
   'event.prepare': ['changePreviewSha256'],
   'content.prepare': ['contentPreviewSha256'],
-  'campaign.prepare': ['contentVersionSha256', 'audienceSnapshotSha256'],
+  'campaign.prepare': [
+    'audienceSnapshotSha256',
+    'exclusionSnapshotSha256',
+    'complianceResultSha256',
+    'contentVersionSha256',
+  ],
   'event.update': ['changePreviewSha256'],
   'event.publish': ['readinessSnapshotSha256'],
   'inventory.change': ['inventorySnapshotSha256', 'changePreviewSha256'],
@@ -1401,6 +1480,7 @@ const actions = (Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]).map
       kind === 'readiness.read' ||
       kind === 'event.prepare' ||
       kind === 'content.prepare' ||
+      kind === 'campaign.prepare' ||
       kind === 'event.update';
     const schemaPrefix =
       kind === 'event.publish'
@@ -1413,9 +1493,11 @@ const actions = (Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]).map
               ? 'eventPrepare'
               : kind === 'content.prepare'
                 ? 'contentPrepare'
-                : kind === 'event.update'
-                  ? 'eventUpdate'
-                  : undefined;
+                : kind === 'campaign.prepare'
+                  ? 'campaignPrepare'
+                  : kind === 'event.update'
+                    ? 'eventUpdate'
+                    : undefined;
     return {
       kind,
       availability: implemented ? 'implemented' : 'reserved',
@@ -1478,7 +1560,7 @@ export const AGENT_ACTION_REGISTRY: AgentActionRegistry = {
   actionProtocolVersion: AGENT_PROTOCOL_VERSION,
   actions,
   registrySha256: agentSha256({
-    domain: 'tixkit.agent-action-registry.v2026-08-02',
+    domain: 'tixkit.agent-action-registry.v2026-08-03',
     protocolVersion: AGENT_ACTION_CONTRACT_VERSION,
     actionProtocolVersion: AGENT_PROTOCOL_VERSION,
     actions,
@@ -1545,6 +1627,7 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
           definition.kind === 'readiness.read' ||
           definition.kind === 'event.prepare' ||
           definition.kind === 'content.prepare' ||
+          definition.kind === 'campaign.prepare' ||
           definition.kind === 'event.update',
         'unimplemented agent action is advertised',
       );
@@ -1577,7 +1660,7 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
   assert(
     registry.registrySha256 ===
       agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-08-02',
+        domain: 'tixkit.agent-action-registry.v2026-08-03',
         ...material,
       }),
     'agent registry digest is invalid',

@@ -33,6 +33,31 @@ const prepareEventChangesSchema = readReadinessSchema
   .strict();
 const prepareEventUpdateSchema = prepareEventChangesSchema;
 const prepareContentSchema = readReadinessSchema.extend({ content: z.unknown() }).strict();
+const templateKeySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
+const prepareCampaignSchema = readReadinessSchema
+  .extend({
+    audience: z.enum(['all', 'checked_in', 'not_checked_in', 'specific']),
+    attendeeIds: z.array(idSchema).max(1_000).optional(),
+    channel: z.enum(['email', 'sms', 'both']),
+    emailTemplateKey: templateKeySchema.optional(),
+    smsTemplateKey: templateKeySchema.optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.audience === 'specific' && !value.attendeeIds?.length)
+      context.addIssue({ code: 'custom', path: ['attendeeIds'], message: 'required' });
+    if (value.audience !== 'specific' && value.attendeeIds !== undefined)
+      context.addIssue({ code: 'custom', path: ['attendeeIds'], message: 'not allowed' });
+    if (value.attendeeIds && new Set(value.attendeeIds).size !== value.attendeeIds.length)
+      context.addIssue({ code: 'custom', path: ['attendeeIds'], message: 'must be unique' });
+    if ((value.channel === 'email' || value.channel === 'both') && !value.emailTemplateKey)
+      context.addIssue({ code: 'custom', path: ['emailTemplateKey'], message: 'required' });
+    if (value.channel === 'sms' && value.emailTemplateKey !== undefined)
+      context.addIssue({ code: 'custom', path: ['emailTemplateKey'], message: 'not allowed' });
+    if ((value.channel === 'sms' || value.channel === 'both') && !value.smsTemplateKey)
+      context.addIssue({ code: 'custom', path: ['smsTemplateKey'], message: 'required' });
+    if (value.channel === 'email' && value.smsTemplateKey !== undefined)
+      context.addIssue({ code: 'custom', path: ['smsTemplateKey'], message: 'not allowed' });
+  });
 const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{48}$/u) }).strict();
 const approvalParamsSchema = actionParamsSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
@@ -64,11 +89,17 @@ export interface AgentActionRouteService {
       | 'readiness.read'
       | 'event.prepare'
       | 'content.prepare'
+      | 'campaign.prepare'
       | 'event.update';
     delegationGrantId: string;
     resourceId: string;
     changes?: Readonly<Record<string, unknown>>;
     content?: unknown;
+    audience?: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+    attendeeIds?: readonly string[];
+    channel?: 'email' | 'sms' | 'both';
+    emailTemplateKey?: string;
+    smsTemplateKey?: string;
   }): Promise<PreparedAgentAction>;
   getForAgent(input: {
     tenantId: string;
@@ -184,6 +215,8 @@ function translateAgentActionError(key: string, error: unknown): never {
     message === 'AGENT_ACTION_CONTENT_PREVIEW_TOO_LARGE'
   )
     throw new ValidationError('Agent event-page content is invalid or unsupported');
+  if (message.startsWith('AGENT_ACTION_CAMPAIGN_'))
+    throw new ValidationError('Agent campaign preparation is invalid or unavailable');
   if (message === 'AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT')
     throw new IdempotencyConflictError(key);
   if (message === 'AGENT_ACTION_APPROVAL_SCOPE_DENIED')
@@ -330,6 +363,30 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
           agentPrincipalId: actor.id,
           idempotencyKey: key,
           kind: 'content.prepare',
+          ...body,
+        });
+        reply.header('Cache-Control', 'no-store');
+        return reply.status(201).send(prepared);
+      } catch (error) {
+        translateAgentActionError(key, error);
+      }
+    },
+  );
+
+  app.post(
+    '/agent/campaign-preparations',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      requireAgent(actor);
+      const key = idempotencyKey(request.headers);
+      const body = parseBody(prepareCampaignSchema, request.body);
+      try {
+        const prepared = await service.prepare({
+          tenantId: actor.tenantId,
+          agentPrincipalId: actor.id,
+          idempotencyKey: key,
+          kind: 'campaign.prepare',
           ...body,
         });
         reply.header('Cache-Control', 'no-store');
@@ -501,6 +558,35 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
             : undefined;
       if (!action || action.action.kind !== 'content.prepare')
         throw new NotFoundError('AgentContentPreparation', actionId);
+      reply.header('Cache-Control', 'no-store');
+      return action;
+    },
+  );
+
+  app.get(
+    '/agent/campaign-preparations/:actionId',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      if (actor.type === 'agent') requireAgent(actor);
+      else requireHumanSponsor(actor);
+      const { actionId } = parseBody(actionParamsSchema, request.params);
+      const action =
+        actor.type === 'agent'
+          ? await service.getForAgent({
+              tenantId: actor.tenantId,
+              agentPrincipalId: actor.id,
+              actionId,
+            })
+          : actor.type === 'user'
+            ? await service.getForSponsor({
+                tenantId: actor.tenantId,
+                sponsorPrincipalId: actor.id,
+                actionId,
+              })
+            : undefined;
+      if (!action || action.action.kind !== 'campaign.prepare')
+        throw new NotFoundError('AgentCampaignPreparation', actionId);
       reply.header('Cache-Control', 'no-store');
       return action;
     },

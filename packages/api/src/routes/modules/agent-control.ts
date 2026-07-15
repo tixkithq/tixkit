@@ -28,6 +28,7 @@ const agentCapabilitySchema = z.enum([
   'events.execute',
   'readiness.read',
   'content.prepare',
+  'campaigns.prepare',
 ]);
 const agentCapabilitiesSchema = z
   .array(agentCapabilitySchema)
@@ -155,7 +156,9 @@ function assertCapabilities(principal: Principal, capabilities: readonly AgentCa
     const required =
       capability === 'events.read' || capability === 'readiness.read'
         ? 'events.read'
-        : 'events.write';
+        : capability === 'campaigns.prepare'
+          ? 'messages.write'
+          : 'events.write';
     if (!ClerkAuthService.hasPermission(principal, required))
       throw new ForbiddenError(`Sponsor does not currently hold authority for ${capability}`);
   }

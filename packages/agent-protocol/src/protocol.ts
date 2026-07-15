@@ -125,6 +125,30 @@ export interface ContentPreparePayload extends Readonly<Record<string, unknown>>
   contentPreviewSha256: string;
 }
 
+export interface CampaignPrepareTemplateVersion extends Readonly<Record<string, unknown>> {
+  channel: 'email' | 'sms';
+  templateKey: string;
+  versionId: string;
+  contentSha256: string;
+}
+
+export interface CampaignPreparePayload extends Readonly<Record<string, unknown>> {
+  audience: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+  channel: 'email' | 'sms' | 'both';
+  requestedAttendeeIds: readonly string[];
+  templateVersions: readonly CampaignPrepareTemplateVersion[];
+  contentVersionSha256: string;
+  audienceSnapshotSha256: string;
+  exclusionSnapshotSha256: string;
+  complianceResultSha256: string;
+  audienceCount: number;
+  eligibleRecipientCount: number;
+  eligibleDeliveryCount: number;
+  suppressedDeliveryCount: number;
+  consentExclusionCount: number;
+  missingContactCount: number;
+}
+
 export interface AgentPlan {
   id: string;
   protocolVersion: typeof AGENT_PROTOCOL_VERSION;
@@ -233,6 +257,7 @@ export class AgentProtocolValidationError extends Error {}
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$/u;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/u;
+const TEMPLATE_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SCOPE = /^[a-z][a-z0-9_-]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/u;
 const OPERATION = /^[a-z][a-z0-9_.-]{2,127}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
@@ -356,7 +381,7 @@ export const AGENT_ACTION_DESCRIPTORS: Readonly<Record<AgentActionKind, AgentAct
   },
   'campaign.prepare': {
     capability: 'campaigns.prepare',
-    sponsorPermission: 'campaigns:write',
+    sponsorPermission: 'messages:write',
     resourceTypes: ['event'],
     apiOperation: 'campaigns.prepare',
     consequential: false,
@@ -384,7 +409,7 @@ export const AGENT_ACTION_DESCRIPTORS: Readonly<Record<AgentActionKind, AgentAct
   },
   'campaign.send': {
     capability: 'campaigns.execute',
-    sponsorPermission: 'campaigns:send',
+    sponsorPermission: 'messages:write',
     resourceTypes: ['event'],
     apiOperation: 'campaigns.send',
     consequential: true,
@@ -497,7 +522,7 @@ type AgentSchemaKeywordDefinition =
   | {
       keyword: string;
       schemaType: 'boolean';
-      type: 'array';
+      type: 'array' | 'object';
       validate: (enabled: boolean, data: unknown) => boolean;
     };
 
@@ -547,6 +572,26 @@ export function installAgentProtocolSchemaKeywords(host: AgentSchemaKeywordHost)
             (index === 0 || (typeof data[index - 1] === 'string' && data[index - 1] < value)),
         )),
   });
+  host.addKeyword({
+    keyword: 'x-tixkit-campaignPrepareCoherent',
+    schemaType: 'boolean',
+    type: 'object',
+    validate: (enabled, data) => {
+      if (!enabled) return true;
+      try {
+        if (!isPlainObject(data)) return false;
+        const payload = { ...data };
+        delete payload.resourceId;
+        delete payload.resourceVersion;
+        delete payload.observedAt;
+        delete payload.untrustedContentPaths;
+        validateAgentCampaignPreparePayload(payload);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
 
 function validateAction(action: AgentAction): void {
@@ -579,6 +624,7 @@ function validateAction(action: AgentAction): void {
   if (Buffer.byteLength(canonicalAgentJson(action.payload)) > 256 * 1024)
     throw new AgentProtocolValidationError('action payload exceeds 256 KiB');
   if (action.kind === 'campaign.send') validateCampaignSendPayload(action.payload);
+  if (action.kind === 'campaign.prepare') validateAgentCampaignPreparePayload(action.payload);
   if (action.kind === 'event.publish') validateEventPublishPayload(action.payload);
   if (action.kind === 'content.prepare') validateContentPreparePayload(action.payload);
   if (action.kind === 'event.prepare' || action.kind === 'event.update')
@@ -1201,6 +1247,101 @@ function validateContentPreparePayload(payload: Readonly<Record<string, unknown>
   validateAgentContentPrepareValidation(validation);
   validateAgentContentPrepareDocument(payload.content);
   validateAgentContentPreparePreview(preview);
+}
+
+export function validateAgentCampaignPreparePayload(value: unknown): void {
+  const expected = [
+    'audience',
+    'audienceCount',
+    'audienceSnapshotSha256',
+    'channel',
+    'complianceResultSha256',
+    'consentExclusionCount',
+    'contentVersionSha256',
+    'eligibleDeliveryCount',
+    'eligibleRecipientCount',
+    'exclusionSnapshotSha256',
+    'missingContactCount',
+    'requestedAttendeeIds',
+    'suppressedDeliveryCount',
+    'templateVersions',
+  ];
+  if (!isPlainObject(value))
+    throw new AgentProtocolValidationError('campaign prepare payload is invalid');
+  const templateVersions = value.templateVersions;
+  const audienceCount = value.audienceCount;
+  const eligibleRecipientCount = value.eligibleRecipientCount;
+  const eligibleDeliveryCount = value.eligibleDeliveryCount;
+  const suppressedDeliveryCount = value.suppressedDeliveryCount;
+  const consentExclusionCount = value.consentExclusionCount;
+  const missingContactCount = value.missingContactCount;
+  const requestedAttendeeIds = value.requestedAttendeeIds;
+  const expectedTemplateChannels = value.channel === 'both' ? ['email', 'sms'] : [value.channel];
+  const expectedDeliveryCount =
+    typeof audienceCount === 'number' && (value.channel === 'email' || value.channel === 'sms')
+      ? audienceCount
+      : typeof audienceCount === 'number' && value.channel === 'both'
+        ? audienceCount * 2
+        : -1;
+  if (
+    JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(expected) ||
+    !['all', 'checked_in', 'not_checked_in', 'specific'].includes(String(value.audience)) ||
+    !['email', 'sms', 'both'].includes(String(value.channel)) ||
+    !Array.isArray(requestedAttendeeIds) ||
+    requestedAttendeeIds.length > 1_000 ||
+    requestedAttendeeIds.some(
+      (id, index) =>
+        typeof id !== 'string' ||
+        !ID.test(id) ||
+        (index > 0 &&
+          typeof requestedAttendeeIds[index - 1] === 'string' &&
+          requestedAttendeeIds[index - 1] >= id),
+    ) ||
+    (value.audience === 'specific'
+      ? requestedAttendeeIds.length === 0
+      : requestedAttendeeIds.length !== 0) ||
+    !Array.isArray(templateVersions) ||
+    templateVersions.length !== expectedTemplateChannels.length ||
+    templateVersions.some(
+      (entry, index) =>
+        !isPlainObject(entry) ||
+        JSON.stringify(Object.keys(entry).sort()) !==
+          JSON.stringify(['channel', 'contentSha256', 'templateKey', 'versionId']) ||
+        entry.channel !== expectedTemplateChannels[index] ||
+        typeof entry.templateKey !== 'string' ||
+        !TEMPLATE_KEY.test(entry.templateKey) ||
+        typeof entry.versionId !== 'string' ||
+        !ID.test(entry.versionId) ||
+        typeof entry.contentSha256 !== 'string' ||
+        !SHA256.test(entry.contentSha256),
+    ) ||
+    ![
+      value.contentVersionSha256,
+      value.audienceSnapshotSha256,
+      value.exclusionSnapshotSha256,
+      value.complianceResultSha256,
+    ].every((digest) => typeof digest === 'string' && SHA256.test(digest)) ||
+    ![
+      audienceCount,
+      eligibleRecipientCount,
+      eligibleDeliveryCount,
+      suppressedDeliveryCount,
+      consentExclusionCount,
+      missingContactCount,
+    ].every(
+      (count) => Number.isSafeInteger(count) && Number(count) >= 0 && Number(count) <= 2_000_000,
+    ) ||
+    Number(audienceCount) < 1 ||
+    Number(eligibleRecipientCount) > Number(audienceCount) ||
+    Number(eligibleRecipientCount) > Number(eligibleDeliveryCount) ||
+    Number(consentExclusionCount) > Number(suppressedDeliveryCount) ||
+    Number(eligibleDeliveryCount) +
+      Number(suppressedDeliveryCount) +
+      Number(missingContactCount) !==
+      expectedDeliveryCount ||
+    value.contentVersionSha256 !== agentSha256(templateVersions)
+  )
+    throw new AgentProtocolValidationError('campaign prepare payload is invalid');
 }
 
 function validateCampaignSendPayload(payload: Readonly<Record<string, unknown>>): void {

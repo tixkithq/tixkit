@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-08-02';
+export const TIXKIT_API_VERSION = '2026-08-03';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1522,7 +1522,8 @@ export type AgentCapability =
   | 'events.prepare'
   | 'events.execute'
   | 'readiness.read'
-  | 'content.prepare';
+  | 'content.prepare'
+  | 'campaigns.prepare';
 
 export type AgentPrincipal = {
   id: string;
@@ -1791,6 +1792,50 @@ export type AgentContentPrepareResult = AgentContentPreparePayload & {
   untrustedContentPaths: ['content', 'preview.discovery'];
 };
 
+export type AgentCampaignTemplateVersion = {
+  channel: 'email' | 'sms';
+  templateKey: string;
+  versionId: string;
+  contentSha256: string;
+};
+
+export type AgentCampaignPreparePayload = {
+  audience: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+  channel: 'email' | 'sms' | 'both';
+  requestedAttendeeIds: string[];
+  templateVersions: AgentCampaignTemplateVersion[];
+  contentVersionSha256: string;
+  audienceSnapshotSha256: string;
+  exclusionSnapshotSha256: string;
+  complianceResultSha256: string;
+  audienceCount: number;
+  eligibleRecipientCount: number;
+  eligibleDeliveryCount: number;
+  suppressedDeliveryCount: number;
+  consentExclusionCount: number;
+  missingContactCount: number;
+};
+
+export type AgentCampaignPrepareAction = AgentActionBase & {
+  kind: 'campaign.prepare';
+  autonomy: 'prepare';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'campaigns.prepare';
+  };
+  payload: AgentCampaignPreparePayload;
+};
+
+export type AgentCampaignPrepareResult = AgentCampaignPreparePayload & {
+  resourceId: string;
+  resourceVersion: number;
+  observedAt: string;
+  untrustedContentPaths: [];
+};
+
 export type AgentReadinessReadResult = {
   resourceId: string;
   resourceVersion: number;
@@ -1895,6 +1940,21 @@ export type PreparedAgentContentPrepareAction = {
     checkedAt: string;
   };
   result: AgentContentPrepareResult;
+  resultSha256: string;
+};
+
+export type PreparedAgentCampaignPrepareAction = {
+  action: AgentCampaignPrepareAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  result: AgentCampaignPrepareResult;
   resultSha256: string;
 };
 
@@ -4752,6 +4812,23 @@ class AgentActionResource {
     });
   }
 
+  async prepareCampaign(input: {
+    delegationGrantId: string;
+    resourceId: string;
+    audience: 'all' | 'checked_in' | 'not_checked_in' | 'specific';
+    attendeeIds?: string[];
+    channel: 'email' | 'sms' | 'both';
+    emailTemplateKey?: string;
+    smsTemplateKey?: string;
+    idempotencyKey: string;
+  }): Promise<PreparedAgentCampaignPrepareAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/campaign-preparations', {
+      body,
+      idempotencyKey,
+    });
+  }
+
   async get(actionId: string): Promise<PreparedAgentAction> {
     return this.client.request('GET', `/agent/actions/${actionId}`);
   }
@@ -4774,6 +4851,10 @@ class AgentActionResource {
 
   async getContentPreparation(actionId: string): Promise<PreparedAgentContentPrepareAction> {
     return this.client.request('GET', `/agent/content-preparations/${actionId}`);
+  }
+
+  async getCampaignPreparation(actionId: string): Promise<PreparedAgentCampaignPrepareAction> {
+    return this.client.request('GET', `/agent/campaign-preparations/${actionId}`);
   }
 
   async approveEventUpdate(input: {

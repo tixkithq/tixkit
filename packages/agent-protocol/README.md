@@ -10,7 +10,7 @@ The shared Tixkit API and Self-Hosted runtime, third-party Platform API agents, 
 
 ## Status
 
-Experimental organizer-first action protocol at version `2026-07-22`, with immutable plans at platform protocol version `2026-07-27` and additive action-registry contracts at version `2026-08-02`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
+Experimental organizer-first action protocol at version `2026-07-22`, with immutable plans at platform protocol version `2026-07-27` and additive action-registry contracts at version `2026-08-03`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Use `buildAgentPlanDefinition` for new plans. It hashes immutable assumptions, e
 
 ## Public exports
 
-The root exports protocol versions and the digest-bound action registry; principal, delegation, action, immutable plan definition, mutable plan state, approval, authorization and audit contracts; canonical hashing and validation helpers; `DurableAgentExecutionService`; execution-store and invoker interfaces; and scoped memory normalization and validation contracts. `./schema` resolves to the current `2026-08-02` full-action validation overlay, which retains the `2026-07-22` wire protocol and enforces exact autonomy plus typed `content.prepare` and `event.update` payloads. Retained action schemas use explicit `./schemas/2026-07-11`, `./schemas/2026-07-22`, `./schemas/2026-07-31`, `./schemas/2026-08-01` and `./schemas/2026-08-02` exports; immutable platform schemas retain every version through `./schemas/agent-action-contracts/2026-08-02`. The registry marks `event.publish` as plan-supported and `event.read`, `readiness.read`, `event.prepare`, `content.prepare` and `event.update` as direct-only; reserved actions remain unavailable.
+The root exports protocol versions and the digest-bound action registry; principal, delegation, action, immutable plan definition, mutable plan state, approval, authorization and audit contracts; canonical hashing and validation helpers; `DurableAgentExecutionService`; execution-store and invoker interfaces; and scoped memory normalization and validation contracts. `./schema` resolves to the current `2026-08-03` full-action validation overlay, which retains the `2026-07-22` wire protocol and enforces exact autonomy plus typed `content.prepare`, `campaign.prepare` and `event.update` payloads. Retained action schemas use explicit `./schemas/2026-07-11`, `./schemas/2026-07-22`, `./schemas/2026-07-31`, `./schemas/2026-08-01`, `./schemas/2026-08-02` and `./schemas/2026-08-03` exports; immutable platform schemas retain every version through `./schemas/agent-action-contracts/2026-08-03`. The registry marks `event.publish` as plan-supported and `event.read`, `readiness.read`, `event.prepare`, `content.prepare`, `campaign.prepare` and `event.update` as direct-only; reserved actions remain unavailable.
 
 ## Runtime
 
@@ -37,7 +37,7 @@ import { installAgentProtocolSchemaKeywords } from '@tixkit/agent-protocol';
 import currentSchema from '@tixkit/agent-protocol/schema' with { type: 'json' };
 import retainedSchema from '@tixkit/agent-protocol/schemas/2026-07-22' with { type: 'json' };
 import retainedActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-27' with { type: 'json' };
-import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-02' with { type: 'json' };
+import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-03' with { type: 'json' };
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 
@@ -62,7 +62,7 @@ Authorization is the intersection of agent capability, sponsor permission, deleg
 
 ## Compatibility
 
-Managed Cloud releases must pin action protocol version `2026-07-22`, current action validation schema version `2026-08-02`, platform plan protocol version `2026-07-27`, action-registry contract version `2026-08-02`, and the registry/schema digests through their Cloud/core compatibility manifest. Changes to canonical bytes, action or plan digests, authorization inputs, approval semantics, registry policy, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. Immutable prior action schemas remain exported byte-for-byte at their versioned paths; `./schema` advances to the `2026-08-02` overlay so default consumers enforce the runtime's fail-closed autonomy, content-preparation and update-payload contracts.
+Managed Cloud releases must pin action protocol version `2026-07-22`, current action validation schema version `2026-08-03`, platform plan protocol version `2026-07-27`, action-registry contract version `2026-08-03`, and the registry/schema digests through their Cloud/core compatibility manifest. Changes to canonical bytes, action or plan digests, authorization inputs, approval semantics, registry policy, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. Immutable prior action schemas remain exported byte-for-byte at their versioned paths; `./schema` advances to the `2026-08-03` overlay so default consumers enforce the runtime's fail-closed autonomy, content/campaign-preparation and update-payload contracts.
 
 HTTP API release `2026-07-29` retains byte-for-byte readability for serialized `2026-07-27` plan definitions, states and digests. It adds the direct-only `readiness.read` adapter and immutable action-registry schema without changing action protocol bytes or allowing direct reads into a plan. Readiness results are canonical, digest-bound and durable, but do not create approval or execution records.
 
@@ -73,6 +73,8 @@ HTTP API release `2026-07-31` retains every `2026-07-30` schema byte-for-byte an
 HTTP API release `2026-08-01` retains every `2026-07-31` schema byte-for-byte and adds direct-only, high-risk `event.update`. Preparation binds the normalized preview to the exact event version; fresh human approval is mandatory; execution re-resolves venue, slug and owned-media state under a serializable lock, applies one optimistic update, and commits agent attribution plus durable effect evidence atomically. Automatic compensation remains unavailable; an inverse update requires a fresh version-bound action and approval.
 
 HTTP API release `2026-08-02` retains every `2026-08-01` schema byte-for-byte and adds direct-only, mutation-free `content.prepare` for event pages. The server accepts only the safe initial Puck component subset, rejects custom embeds and populated zones, canonicalizes bounded input, derives discovery output from the locked event snapshot, and binds content, validation, preview and resource version to immutable result digests. It creates no approval, execution, plan or product mutation authority.
+
+HTTP API release `2026-08-03` retains every `2026-08-02` schema byte-for-byte and adds direct-only, mutation-free `campaign.prepare`. It binds exact published content versions, audience membership, consent and suppression evidence, aggregate eligibility and all four material digests to one event version. Re-evaluation drift fails closed, no contact data is returned, and the operation creates no delivery job, approval, execution, plan or product mutation authority.
 
 ## Related guides
 

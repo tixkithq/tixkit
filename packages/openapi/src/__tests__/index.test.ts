@@ -101,7 +101,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-02');
+    expect(openApiSpec.info.version).toBe('2026-08-03');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -438,6 +438,44 @@ describe('openApiSpec', () => {
         'application/json'
       ].schema,
     ).toEqual({ $ref: '#/components/schemas/PreparedAgentAction' });
+  });
+
+  it('publishes consent-aware campaign preparation without send authority', () => {
+    const prepare = openApiSpec.paths['/agent/campaign-preparations'].post;
+    const inspect = openApiSpec.paths['/agent/campaign-preparations/{actionId}'].get;
+    const request = prepare.requestBody.content['application/json'].schema;
+    const action = openApiSpec.components.schemas.AgentCampaignPrepareAction;
+    const payload = openApiSpec.components.schemas.AgentCampaignPreparePayload;
+    const result = openApiSpec.components.schemas.AgentCampaignPrepareResult;
+    expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(request.additionalProperties).toBe(false);
+    expect(request.required).toEqual(['delegationGrantId', 'resourceId', 'audience', 'channel']);
+    expect(action.properties).toMatchObject({
+      kind: { type: 'string', const: 'campaign.prepare' },
+      autonomy: { type: 'string', const: 'prepare' },
+    });
+    expect(action.properties.target.properties.apiOperation).toEqual({
+      type: 'string',
+      const: 'campaigns.prepare',
+    });
+    expect(payload.additionalProperties).toBe(false);
+    expect(payload.required).toEqual(
+      expect.arrayContaining([
+        'contentVersionSha256',
+        'audienceSnapshotSha256',
+        'exclusionSnapshotSha256',
+        'complianceResultSha256',
+      ]),
+    );
+    expect(result.properties.untrustedContentPaths).toMatchObject({ maxItems: 0, items: false });
+    expect(prepare.responses).toMatchObject({
+      '400': { description: expect.stringContaining('Idempotency-Key') },
+      '404': { description: 'Current principal, delegation, sponsor or event unavailable' },
+      '409': { description: expect.stringContaining('action policy unavailable') },
+    });
+    expect(prepare.responses['404'].description).not.toContain('template');
+    expect(openApiSpec.paths).not.toHaveProperty('/agent/campaign-preparations/{actionId}/send');
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

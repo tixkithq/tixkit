@@ -14,6 +14,7 @@ import {
 import type {
   PreparedAgentAction,
   PreparedAgentContentPrepareAction,
+  PreparedAgentCampaignPrepareAction,
   PreparedAgentEventPrepareAction,
   PreparedAgentEventReadAction,
   PreparedAgentEventUpdateAction,
@@ -223,6 +224,56 @@ const contentPreparePrepared: PreparedAgentContentPrepareAction = {
     untrustedContentPaths: ['content', 'preview.discovery'],
   },
   resultSha256: '4'.repeat(64),
+};
+const campaignPreparePayload = {
+  audience: 'all' as const,
+  channel: 'email' as const,
+  requestedAttendeeIds: [],
+  templateVersions: [
+    {
+      channel: 'email' as const,
+      templateKey: 'event-reminder',
+      versionId: 'version_primary',
+      contentSha256: '1'.repeat(64),
+    },
+  ],
+  contentVersionSha256: '2'.repeat(64),
+  audienceSnapshotSha256: '3'.repeat(64),
+  exclusionSnapshotSha256: '4'.repeat(64),
+  complianceResultSha256: '5'.repeat(64),
+  audienceCount: 10,
+  eligibleRecipientCount: 7,
+  eligibleDeliveryCount: 7,
+  suppressedDeliveryCount: 2,
+  consentExclusionCount: 1,
+  missingContactCount: 1,
+};
+const campaignPreparePrepared: PreparedAgentCampaignPrepareAction = {
+  action: {
+    ...action,
+    id: `act_${'9'.repeat(48)}`,
+    kind: 'campaign.prepare',
+    autonomy: 'prepare',
+    target: { ...action.target, apiOperation: 'campaigns.prepare' },
+    payload: campaignPreparePayload,
+  },
+  actionDigest: 'a'.repeat(64),
+  expiresAt: '2026-07-14T12:15:00.000Z',
+  authorization: {
+    allowed: true,
+    eligibleForApproval: false,
+    reasons: [],
+    snapshotSha256: 'b'.repeat(64),
+    checkedAt: '2026-07-14T12:00:00.000Z',
+  },
+  result: {
+    resourceId: 'event_primary',
+    resourceVersion: 7,
+    ...campaignPreparePayload,
+    observedAt: '2026-07-14T12:00:00.000Z',
+    untrustedContentPaths: [],
+  },
+  resultSha256: 'c'.repeat(64),
 };
 const eventUpdatePrepared: PreparedAgentEventUpdateAction = {
   action: {
@@ -605,6 +656,79 @@ describe('agent action routes', () => {
         },
       });
       expect(invalid.statusCode).toBe(400);
+    }
+    expect(prepare).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('prepares a consent-aware campaign without exposing a send route', async () => {
+    const prepare = vi.fn(async () => campaignPreparePrepared);
+    const getForAgent = vi.fn(async () => campaignPreparePrepared);
+    const { app } = await setup({ service: { prepare, getForAgent } });
+    const request = {
+      delegationGrantId: 'dlg_primary',
+      resourceId: 'event_primary',
+      audience: 'all',
+      channel: 'email',
+      emailTemplateKey: 'event-reminder',
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/campaign-preparations',
+      headers: { 'idempotency-key': 'agent-campaign-prepare-route-0001' },
+      payload: request,
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(prepare).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      idempotencyKey: 'agent-campaign-prepare-route-0001',
+      kind: 'campaign.prepare',
+      ...request,
+    });
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(campaignPreparePrepared)));
+
+    const dedicated = await app.inject({
+      method: 'GET',
+      url: `/agent/campaign-preparations/${campaignPreparePrepared.action.id}`,
+    });
+    expect(dedicated.statusCode).toBe(200);
+    expect(dedicated.headers['cache-control']).toBe('no-store');
+    expect(dedicated.json()).toEqual(JSON.parse(JSON.stringify(campaignPreparePrepared)));
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/agent/campaign-preparations/${campaignPreparePrepared.action.id}/send`,
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    for (const payload of [
+      { ...request, audience: 'specific', attendeeIds: [] },
+      { ...request, attendeeIds: ['attendee_1'] },
+      { ...request, audience: 'specific', attendeeIds: ['attendee_1', 'attendee_1'] },
+      { ...request, channel: 'both' },
+      { ...request, smsTemplateKey: 'irrelevant-sms-template' },
+      {
+        ...request,
+        channel: 'sms',
+        emailTemplateKey: 'irrelevant-email-template',
+        smsTemplateKey: 'event-announcement-sms',
+      },
+      { ...request, complianceResultSha256: 'f'.repeat(64) },
+    ]) {
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/agent/campaign-preparations',
+            headers: { 'idempotency-key': 'agent-campaign-invalid-route-0001' },
+            payload,
+          })
+        ).statusCode,
+      ).toBe(400);
     }
     expect(prepare).toHaveBeenCalledTimes(1);
     await app.close();

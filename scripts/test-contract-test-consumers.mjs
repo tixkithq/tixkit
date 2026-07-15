@@ -160,6 +160,7 @@ try {
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
       delegationGrantId: 'delegation_primary',
       resourceId: 'event_primary',
+      campaignEmailTemplateKey: 'event-announcement',
       planId: '../invalid',
       idempotencyPrefix: 'short',
     }),
@@ -190,12 +191,13 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
-      apiVersion: '2026-08-02',
+      apiVersion: '2026-08-03',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
       delegationGrantId: 'delegation_primary',
       resourceId: 'event_primary',
+      campaignEmailTemplateKey: 'event-announcement',
       planId: 'plan_remote_http_rejected',
       idempotencyPrefix: 'agent.conformance.remote-http',
     }),
@@ -241,6 +243,10 @@ try {
     'content_untrusted_paths',
     'content_result_digest',
     'content_replay',
+    'campaign_action_digest',
+    'campaign_compliance',
+    'campaign_result_digest',
+    'campaign_replay',
     'update_action_digest',
     'update_preview',
     'update_preview_digest',
@@ -281,6 +287,13 @@ try {
         `Packed agent-platform ${mutation} did not prove exact content-prepare replay`,
       );
     if (
+      (mutation === 'none' || mutation.startsWith('campaign_')) &&
+      packedOutput.campaignPrepareCalls !== 2
+    )
+      throw new Error(
+        `Packed agent-platform ${mutation} did not prove exact campaign-prepare replay`,
+      );
+    if (
       (mutation === 'none' || mutation.startsWith('update_')) &&
       packedOutput.eventUpdateCalls !== 2
     )
@@ -305,6 +318,7 @@ try {
           'AGENT_PLATFORM_EVENT_READ_REPLAY',
           'AGENT_PLATFORM_EVENT_PREPARE_SCHEMA',
           'AGENT_PLATFORM_CONTENT_PREPARE_SCHEMA',
+          'AGENT_PLATFORM_CAMPAIGN_PREPARE_SCHEMA',
           'AGENT_PLATFORM_EVENT_UPDATE_SCHEMA',
           'AGENT_PLATFORM_EVENT_UPDATE_APPROVAL_SCHEMA',
           'AGENT_PLATFORM_EVENT_UPDATE_EXECUTION_SCHEMA',
@@ -335,7 +349,7 @@ if (captured.headers.authorization !== 'Bearer tk_sandbox') throw new Error('Pac
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
-    'Built and executed 4 packed contract profiles, including agent event-read/event-prepare/content-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, and the packed SDK wire contract.',
+    'Built and executed 4 packed contract profiles, including agent event-read/event-prepare/content-prepare/campaign-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, and the packed SDK wire contract.',
   );
 } finally {
   await rm(temp, { recursive: true, force: true });

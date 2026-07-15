@@ -22,6 +22,7 @@ import {
   AGENT_PLATFORM_PROTOCOL_VERSION,
   buildAgentPlanDefinition,
   validateAgentActionRegistry,
+  validateAgentCampaignPrepareResult,
   validateAgentContentPrepareResult,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
@@ -36,6 +37,7 @@ import {
   type AgentPlanState,
   type AgentEventReadResult,
   type AgentContentPrepareResult,
+  type AgentCampaignPrepareResult,
   type AgentEventPrepareResult,
   type AgentEventUpdatePreview,
   type AgentReadinessReadResult,
@@ -138,6 +140,73 @@ function action(): AgentAction {
 }
 
 describe('agent platform contracts', () => {
+  it('binds campaign preparation to exact content, audience, exclusion, and compliance digests', () => {
+    const templateVersions = [
+      {
+        channel: 'email' as const,
+        templateKey: 'event-reminder',
+        versionId: 'version_primary',
+        contentSha256: '1'.repeat(64),
+      },
+    ];
+    const payload = {
+      audience: 'all' as const,
+      channel: 'email' as const,
+      requestedAttendeeIds: [],
+      templateVersions,
+      contentVersionSha256: agentSha256(templateVersions),
+      audienceSnapshotSha256: '2'.repeat(64),
+      exclusionSnapshotSha256: '3'.repeat(64),
+      complianceResultSha256: '4'.repeat(64),
+      audienceCount: 5,
+      eligibleRecipientCount: 3,
+      eligibleDeliveryCount: 3,
+      suppressedDeliveryCount: 1,
+      consentExclusionCount: 1,
+      missingContactCount: 1,
+    };
+    const campaignAction: AgentAction = {
+      ...action(),
+      kind: 'campaign.prepare',
+      autonomy: 'prepare',
+      target: { ...action().target, apiOperation: 'campaigns.prepare' },
+      payload,
+    };
+    const result: AgentCampaignPrepareResult = {
+      resourceId: campaignAction.target.resourceId,
+      resourceVersion: campaignAction.target.resourceVersion,
+      ...payload,
+      observedAt: createdAt,
+      untrustedContentPaths: [],
+    };
+    expect(() => agentActionDigest(campaignAction)).not.toThrow();
+    expect(() => validateAgentCampaignPrepareResult(campaignAction, result)).not.toThrow();
+    expect(() =>
+      validateAgentCampaignPrepareResult(campaignAction, {
+        ...result,
+        complianceResultSha256: '5'.repeat(64),
+      }),
+    ).toThrow('snapshot binding');
+    expect(() =>
+      agentActionDigest({
+        ...campaignAction,
+        payload: { ...payload, eligibleDeliveryCount: 4 },
+      }),
+    ).toThrow('campaign prepare payload');
+    expect(() =>
+      agentActionDigest({
+        ...campaignAction,
+        payload: {
+          ...payload,
+          templateVersions: [
+            ...templateVersions,
+            { ...templateVersions[0], channel: 'sms' as const },
+          ],
+        },
+      }),
+    ).toThrow('campaign prepare payload');
+  });
+
   it('validates exact direct content preparation results and untrusted output paths', () => {
     const projection = {
       channel: 'event_page' as const,
@@ -749,6 +818,10 @@ describe('agent platform contracts', () => {
         planSupport: 'direct_only',
       }),
       expect.objectContaining({
+        kind: 'campaign.prepare',
+        planSupport: 'direct_only',
+      }),
+      expect.objectContaining({
         kind: 'event.update',
         planSupport: 'direct_only',
       }),
@@ -757,6 +830,19 @@ describe('agent platform contracts', () => {
         planSupport: 'supported',
       }),
     ]);
+    expect(
+      AGENT_ACTION_REGISTRY.actions.find((item) => item.kind === 'campaign.prepare'),
+    ).toMatchObject({
+      preconditions: {
+        requiredMaterialDigests: [
+          'audienceSnapshotSha256',
+          'exclusionSnapshotSha256',
+          'complianceResultSha256',
+          'contentVersionSha256',
+        ],
+      },
+      reversibility: { mode: 'none' },
+    });
     for (const definition of AGENT_ACTION_REGISTRY.actions.filter(
       (item) => item.availability === 'reserved',
     )) {
@@ -787,7 +873,7 @@ describe('agent platform contracts', () => {
       ...AGENT_ACTION_REGISTRY,
       actions: substitutedActions,
       registrySha256: agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-08-02',
+        domain: 'tixkit.agent-action-registry.v2026-08-03',
         protocolVersion: AGENT_ACTION_REGISTRY.protocolVersion,
         actionProtocolVersion: AGENT_ACTION_REGISTRY.actionProtocolVersion,
         actions: substitutedActions,
@@ -802,7 +888,7 @@ describe('agent platform contracts', () => {
       'utf8',
     );
     const contractsSchemaText = readFileSync(
-      new URL('../../schemas/agent-action-contracts-2026-08-02.json', import.meta.url),
+      new URL('../../schemas/agent-action-contracts-2026-08-03.json', import.meta.url),
       'utf8',
     );
     expect(createHash('sha256').update(contractsSchemaText).digest('hex')).toBe(
@@ -927,6 +1013,15 @@ describe('agent platform contracts', () => {
     )!;
     const validateContentPrepareResult = ajv.getSchema(
       `${contracts.$id}#/$defs/contentPrepareResult`,
+    )!;
+    const validateCampaignPrepare = ajv.getSchema(
+      `${contracts.$id}#/$defs/campaignPreparePrepareInput`,
+    )!;
+    const validateCampaignPreparePayload = ajv.getSchema(
+      `${contracts.$id}#/$defs/campaignPrepareResolvedPayload`,
+    )!;
+    const validateCampaignPrepareResult = ajv.getSchema(
+      `${contracts.$id}#/$defs/campaignPrepareResult`,
     )!;
     const validateEventUpdatePrepare = ajv.getSchema(
       `${contracts.$id}#/$defs/eventUpdatePrepareInput`,
@@ -1339,6 +1434,81 @@ describe('agent platform contracts', () => {
       expect(() =>
         validateAgentContentPrepareResult(candidateAction, candidateResult),
       ).not.toThrow();
+    }
+    const campaignTemplateVersions = [
+      {
+        channel: 'email' as const,
+        templateKey: 'event-announcement',
+        versionId: 'template_version_primary',
+        contentSha256: '1'.repeat(64),
+      },
+    ];
+    const campaignPayload = {
+      audience: 'all' as const,
+      channel: 'email' as const,
+      requestedAttendeeIds: [] as string[],
+      templateVersions: campaignTemplateVersions,
+      contentVersionSha256: agentSha256(campaignTemplateVersions),
+      audienceSnapshotSha256: '2'.repeat(64),
+      exclusionSnapshotSha256: '3'.repeat(64),
+      complianceResultSha256: '4'.repeat(64),
+      audienceCount: 3,
+      eligibleRecipientCount: 1,
+      eligibleDeliveryCount: 1,
+      suppressedDeliveryCount: 1,
+      consentExclusionCount: 1,
+      missingContactCount: 1,
+    };
+    const campaignAction: AgentAction = {
+      ...action(),
+      kind: 'campaign.prepare',
+      autonomy: 'prepare',
+      target: { ...action().target, apiOperation: 'campaigns.prepare' },
+      payload: campaignPayload,
+    };
+    const campaignResult: AgentCampaignPrepareResult = {
+      resourceId: 'event_primary',
+      resourceVersion: 7,
+      ...campaignPayload,
+      observedAt: createdAt,
+      untrustedContentPaths: [],
+    };
+    expect(
+      validateCampaignPrepare({
+        kind: 'campaign.prepare',
+        delegationGrantId: 'delegation_primary',
+        resourceId: 'event_primary',
+        audience: 'all',
+        channel: 'email',
+        emailTemplateKey: 'event-announcement',
+      }),
+      ajv.errorsText(validateCampaignPrepare.errors),
+    ).toBe(true);
+    expect(
+      validateCampaignPreparePayload(campaignPayload),
+      ajv.errorsText(validateCampaignPreparePayload.errors),
+    ).toBe(true);
+    expect(
+      validateCampaignPrepareResult(campaignResult),
+      ajv.errorsText(validateCampaignPrepareResult.errors),
+    ).toBe(true);
+    expect(() => validateAgentCampaignPrepareResult(campaignAction, campaignResult)).not.toThrow();
+    for (const invalid of [
+      { ...campaignPayload, requestedAttendeeIds: ['attendee_1'] },
+      { ...campaignPayload, contentVersionSha256: '5'.repeat(64) },
+      { ...campaignPayload, missingContactCount: 0 },
+      {
+        ...campaignPayload,
+        templateVersions: [{ ...campaignTemplateVersions[0]!, unexpected: true }],
+      },
+    ]) {
+      expect(validateCampaignPreparePayload(invalid), JSON.stringify(invalid)).toBe(false);
+      expect(() =>
+        validateAgentCampaignPrepareResult({ ...campaignAction, payload: invalid } as AgentAction, {
+          ...campaignResult,
+          ...invalid,
+        }),
+      ).toThrow('campaign prepare');
     }
     const eventUpdateAction: AgentAction = {
       ...eventPrepareAction,

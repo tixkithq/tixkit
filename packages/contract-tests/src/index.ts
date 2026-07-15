@@ -12,6 +12,7 @@ import {
   agentSha256,
   buildAgentPlanDefinition,
   validateAgentActionResultForAction,
+  validateAgentCampaignPrepareResult,
   validateAgentContentPrepareResult,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
@@ -20,6 +21,7 @@ import {
   type AgentAction,
   type AgentActionResult,
   type AgentApproval,
+  type AgentCampaignPrepareResult,
   type AgentContentPrepareResult,
   type AgentExecution,
   type AgentEventReadResult,
@@ -30,7 +32,7 @@ import {
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-02' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-03' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -52,6 +54,7 @@ export interface AgentPlatformContractInput {
   agentClientSecret: string;
   delegationGrantId: string;
   resourceId: string;
+  campaignEmailTemplateKey: string;
   planId: string;
   idempotencyPrefix: string;
   execute(request: AgentPlatformContractRequest): Promise<AgentPlatformContractResponse>;
@@ -482,6 +485,7 @@ export async function runAgentPlatformContract(
     !input.agentClientSecret ||
     !input.delegationGrantId ||
     !input.resourceId ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(input.campaignEmailTemplateKey) ||
     !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,62}$/u.test(input.planId) ||
     input.idempotencyPrefix.length < 16 ||
     input.idempotencyPrefix.length > 180 ||
@@ -794,6 +798,99 @@ export async function runAgentPlatformContract(
         'Idempotency-Key': `${input.idempotencyPrefix}.content.prepare.execution`,
       },
       body: { actionDigest: contentActionDigest },
+    },
+    404,
+  );
+  const campaignPrepareRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: '/v1/agent/campaign-preparations',
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.campaign.prepare`,
+    },
+    body: {
+      delegationGrantId: input.delegationGrantId,
+      resourceId: input.resourceId,
+      audience: 'all',
+      channel: 'email',
+      emailTemplateKey: input.campaignEmailTemplateKey,
+    },
+  };
+  const campaignPrepareResponse = await request('campaign-prepare', campaignPrepareRequest, 201);
+  const campaignPrepareReplay = await request(
+    'campaign-prepare-replay',
+    campaignPrepareRequest,
+    201,
+  );
+  const preparedCampaign = objectBody(campaignPrepareResponse?.body);
+  const campaignAction = objectBody(preparedCampaign?.action) as unknown as AgentAction | undefined;
+  const campaignResult = objectBody(preparedCampaign?.result);
+  const campaignAuthorization = objectBody(preparedCampaign?.authorization);
+  let campaignActionDigest: string | undefined;
+  let campaignResultDigest: string | undefined;
+  let campaignValidationFailure: string | undefined;
+  try {
+    if (!campaignAction || !campaignResult) throw new Error('invalid campaign prepare response');
+    validateAgentCampaignPrepareResult(
+      campaignAction,
+      campaignResult as unknown as AgentCampaignPrepareResult,
+    );
+    campaignActionDigest = agentActionDigest(campaignAction);
+    campaignResultDigest = agentSha256(campaignResult);
+  } catch (error) {
+    campaignValidationFailure = error instanceof Error ? error.message : 'unknown validation error';
+  }
+  if (
+    !campaignAction ||
+    campaignAction.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    campaignAction.kind !== 'campaign.prepare' ||
+    campaignAction.autonomy !== 'prepare' ||
+    campaignAction.agentPrincipalId !== principal.id ||
+    campaignAction.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    campaignAction.delegationGrantId !== input.delegationGrantId ||
+    campaignAction.target.resourceType !== 'event' ||
+    campaignAction.target.resourceId !== input.resourceId ||
+    campaignAction.target.apiOperation !== 'campaigns.prepare' ||
+    campaignActionDigest !== preparedCampaign?.actionDigest ||
+    campaignResultDigest !== preparedCampaign?.resultSha256 ||
+    campaignAuthorization?.allowed !== true ||
+    preparedCampaign?.dryRun !== undefined ||
+    campaignResult?.complianceResultSha256 !==
+      objectBody(campaignAction.payload)?.complianceResultSha256 ||
+    campaignResult?.eligibleDeliveryCount === undefined ||
+    agentSha256(campaignPrepareResponse?.body) !== agentSha256(campaignPrepareReplay?.body) ||
+    !Array.isArray(campaignResult?.untrustedContentPaths) ||
+    campaignResult.untrustedContentPaths.length !== 0
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_CAMPAIGN_PREPARE_SCHEMA',
+      message: `Direct campaign preparation, exact compliance snapshot or replay evidence is invalid.${campaignValidationFailure ? ` ${campaignValidationFailure}` : ''}`,
+    });
+    return result(findings);
+  }
+  await request(
+    'campaign-prepare-approval-rejected',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(campaignAction.id)}/approvals`,
+      headers: {
+        ...headers(input.sponsorAccessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.campaign.prepare.approval`,
+      },
+      body: { actionDigest: campaignActionDigest },
+    },
+    404,
+  );
+  await request(
+    'campaign-prepare-execution-rejected',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(campaignAction.id)}/executions`,
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.campaign.prepare.execution`,
+      },
+      body: { actionDigest: campaignActionDigest },
     },
     404,
   );

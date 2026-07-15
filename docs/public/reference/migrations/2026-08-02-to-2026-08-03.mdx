@@ -1,0 +1,35 @@
+---
+title: API migration from 2026-08-02 to 2026-08-03
+description: Adopt mutation-free, consent and suppression aware campaign preparation through the shared agent protocol.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-08-03
+prerequisites:
+  - An integration using API version 2026-08-02
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-08-03` adds the direct-only, mutation-free `campaign.prepare` adapter. The action wire protocol remains `2026-07-22`, immutable plan definitions remain `2026-07-27`, and the action-registry contract advances to `2026-08-03`. Every `2026-08-02` schema remains available unchanged.
+
+## Grant the bounded capability
+
+Add `campaigns.prepare` to the explicit agent principal and event-scoped delegation. The sponsor must retain accepted tenant membership and live `messages.write` authority for the event. The delegation's server-derived protocol permission snapshot is `messages:write`, and tenant action and risk policies must allow `campaign.prepare`. This capability does not imply campaign sending, cannot enter a plan, and cannot create an approval or execution.
+
+## Prepare exact content and audience evidence
+
+Send `POST /v1/agent/campaign-preparations` with an idempotency key, `delegationGrantId`, event `resourceId`, one audience, one channel, and the required published template keys. `specific` audiences require 1–1,000 unique attendee identifiers; other audiences reject attendee identifiers. `email`, `sms`, and `both` require exactly their matching template keys. Unknown input fields fail closed.
+
+The server locks the event, resolves exact published email and SMS content versions, and evaluates the audience through the same consent and suppression rules used by organizer campaign delivery. It records separate SHA-256 bindings for content versions, the matched audience, exclusions, and the complete compliance decision. The result reports only aggregate eligibility and exclusion counts plus immutable version identifiers and digests; it does not expose attendee contact data.
+
+Retrieve persisted evidence with `GET /v1/agent/campaign-preparations/{actionId}`. Exact replay re-resolves content, audience, consent and suppression state and returns identical evidence only when the current projection still matches the persisted action. Template publication changes, attendee or check-in changes, consent changes, suppression changes, event or policy version drift, capability or delegation revocation, sponsor permission loss, and persisted-evidence substitution fail closed.
+
+Preparation writes only action, result and audit evidence. It creates no email or SMS jobs and exposes no send, approval or execution route. Campaign sending remains a separate consequential action outside this release and requires exact content and audience approval plus fresh consent and suppression evaluation.
+
+Pin the registry through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-03` and the full action overlay through `@tixkit/agent-protocol/schema` or `./schemas/2026-08-03`. Durable webhook envelopes remain at `2026-01-01`; synthetic test/replay API-version fields and SDK request headers advance to `2026-08-03`.

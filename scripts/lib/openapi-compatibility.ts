@@ -24,6 +24,14 @@ function compareSchema(
   const referenceWidened =
     priorReference !== undefined &&
     array(after.anyOf).some((entry) => object(entry).$ref === priorReference);
+  const priorAnyOf = array(before.anyOf);
+  const currentAnyOf = array(after.anyOf);
+  const anyOfWidened =
+    priorAnyOf.length > 0 &&
+    currentAnyOf.length >= priorAnyOf.length &&
+    priorAnyOf.every((priorEntry) =>
+      currentAnyOf.some((currentEntry) => stable(currentEntry) === stable(priorEntry)),
+    );
   const beforeConstType =
     before.const === null ? 'null' : before.const === undefined ? undefined : typeof before.const;
   for (const key of ['type', 'format', 'const', '$ref', 'pattern']) {
@@ -49,6 +57,13 @@ function compareSchema(
       path,
       message: 'The prior response schema remains accepted by an additive anyOf branch.',
     });
+  if (anyOfWidened && stable(before.anyOf) !== stable(after.anyOf))
+    changes.push({
+      severity: 'compatible',
+      category: 'schema-anyOf-widened',
+      path,
+      message: 'Every prior anyOf branch remains accepted and new alternatives were added.',
+    });
   if (before.nullable === true && after.nullable !== true)
     changes.push({
       severity: 'breaking',
@@ -65,7 +80,7 @@ function compareSchema(
     });
   for (const key of ['oneOf', 'anyOf', 'allOf', 'not']) {
     if (
-      !(key === 'anyOf' && referenceWidened) &&
+      !(key === 'anyOf' && (referenceWidened || anyOfWidened)) &&
       (before[key] !== undefined || after[key] !== undefined) &&
       stable(before[key]) !== stable(after[key])
     )

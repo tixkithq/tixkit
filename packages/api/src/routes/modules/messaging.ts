@@ -6,9 +6,7 @@ import {
   EmailJobRepository,
   EmailProviderEventRepository,
   EmailProviderRouteRepository,
-  EmailSuppressionRepository,
   EventRepository,
-  MessageConsentRepository,
   SmsDeliveryRepository,
   SmsJobRepository,
   SmsProviderEventRepository,
@@ -30,39 +28,12 @@ import {
 } from '@tixkit/domain/messaging';
 import { renderMessagePreviewSchema, sendMessageSchema } from '../../http/schemas.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
-
-type MessageAudience = 'all' | 'checked_in' | 'not_checked_in' | 'specific';
-type MessageChannel = 'email' | 'sms' | 'both';
-
-type MessageAttendee = {
-  id: string;
-  event_id?: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  email: string | null;
-  phone: string | null;
-  status: string;
-};
-
-type ChannelDecision =
-  | {
-      status: 'eligible';
-      attendee: MessageAttendee;
-      consentExcluded: false;
-      suppressionExcluded: false;
-    }
-  | {
-      status: 'suppressed';
-      attendee: MessageAttendee;
-      consentExcluded: boolean;
-      suppressionExcluded: boolean;
-    }
-  | {
-      status: 'missing_contact';
-      attendee: MessageAttendee;
-      consentExcluded: false;
-      suppressionExcluded: false;
-    };
+import {
+  resolveMessageAudience,
+  type MessageAttendee,
+  type MessageAudience,
+  type MessageChannel,
+} from '../../services/message-audience.js';
 
 type QueuedEmailJob = {
   jobId: string;
@@ -792,172 +763,6 @@ function rawAudienceFromVariables(variables: Record<string, unknown>): MessageAu
     return audience;
   }
   return undefined;
-}
-
-async function loadMessageAudienceAttendees(input: {
-  db: Database;
-  tenantId: string;
-  eventId: string;
-  audience: MessageAudience;
-  attendeeIds?: string[];
-}) {
-  let attendeeQuery = input.db
-    .selectFrom('attendees')
-    .select(['id', 'tenant_id', 'event_id', 'first_name', 'last_name', 'email', 'phone', 'status'])
-    .where('tenant_id', '=', input.tenantId)
-    .where('event_id', '=', input.eventId)
-    .where('status', 'in', ['confirmed', 'checked_in']);
-
-  if (input.audience === 'checked_in') {
-    attendeeQuery = attendeeQuery.where('status', '=', 'checked_in');
-  } else if (input.audience === 'not_checked_in') {
-    attendeeQuery = attendeeQuery.where('status', '=', 'confirmed');
-  } else if (input.audience === 'specific') {
-    attendeeQuery = attendeeQuery.where('id', 'in', input.attendeeIds ?? []);
-  }
-
-  const rows = await attendeeQuery.execute();
-  const requested = new Set(input.attendeeIds ?? []);
-  return rows
-    .filter(
-      (attendee) =>
-        typeof attendee.id === 'string' &&
-        (typeof attendee.tenant_id !== 'string' || attendee.tenant_id === input.tenantId) &&
-        (typeof attendee.event_id !== 'string' || attendee.event_id === input.eventId) &&
-        (attendee.status === 'confirmed' || attendee.status === 'checked_in') &&
-        (input.audience !== 'specific' || requested.has(attendee.id)) &&
-        (input.audience !== 'checked_in' || attendee.status === 'checked_in') &&
-        (input.audience !== 'not_checked_in' || attendee.status === 'confirmed'),
-    )
-    .map((attendee) => ({
-      id: attendee.id,
-      event_id: attendee.event_id,
-      first_name: attendee.first_name ?? null,
-      last_name: attendee.last_name ?? null,
-      email: attendee.email ?? null,
-      phone: attendee.phone ?? null,
-      status: attendee.status,
-    }));
-}
-
-async function resolveMessageAudience(input: {
-  db: Database;
-  tenantId: string;
-  eventId: string;
-  audience: MessageAudience;
-  attendeeIds?: string[];
-  channel: MessageChannel;
-}) {
-  const attendees = await loadMessageAudienceAttendees(input);
-  const consents = await new MessageConsentRepository(input.db).findActiveByAttendeeIds(
-    input.tenantId,
-    attendees.map((attendee) => attendee.id),
-  );
-  const consentByAttendee = new Map<string, (typeof consents)[number]>();
-  for (const consent of consents) {
-    if (!consentByAttendee.has(consent.attendee_id)) {
-      consentByAttendee.set(consent.attendee_id, consent);
-    }
-  }
-
-  const emailSuppressionByAttendee = new Map<string, Record<string, unknown>>();
-  if (input.channel === 'email' || input.channel === 'both') {
-    const suppressionRepo = new EmailSuppressionRepository(input.db);
-    const suppressions = await Promise.all(
-      attendees.map(async (attendee) => {
-        if (!attendee.email) return undefined;
-        const suppression = await suppressionRepo.findByEmail(input.tenantId, attendee.email);
-        return suppression ? { attendeeId: attendee.id, suppression } : undefined;
-      }),
-    );
-    for (const result of suppressions) {
-      if (result) emailSuppressionByAttendee.set(result.attendeeId, result.suppression);
-    }
-  }
-
-  let skippedRecipients = 0;
-  let suppressedRecipients = 0;
-  let consentExclusions = 0;
-  const eligibleRecipientIds = new Set<string>();
-  const emailDecisions: ChannelDecision[] = [];
-  const smsDecisions: ChannelDecision[] = [];
-  for (const attendee of attendees) {
-    const consent = consentByAttendee.get(attendee.id);
-    if (input.channel === 'email' || input.channel === 'both') {
-      if (!attendee.email) {
-        skippedRecipients += 1;
-        emailDecisions.push({
-          attendee,
-          status: 'missing_contact',
-          consentExcluded: false,
-          suppressionExcluded: false,
-        });
-      } else if (
-        !consent?.email_opt_in ||
-        consent.revoked_at ||
-        emailSuppressionByAttendee.has(attendee.id)
-      ) {
-        const consentExcluded = !consent?.email_opt_in || Boolean(consent.revoked_at);
-        const suppressionExcluded = emailSuppressionByAttendee.has(attendee.id);
-        suppressedRecipients += 1;
-        consentExclusions += consentExcluded ? 1 : 0;
-        emailDecisions.push({
-          attendee,
-          status: 'suppressed',
-          consentExcluded,
-          suppressionExcluded,
-        });
-      } else {
-        eligibleRecipientIds.add(attendee.id);
-        emailDecisions.push({
-          attendee,
-          status: 'eligible',
-          consentExcluded: false,
-          suppressionExcluded: false,
-        });
-      }
-    }
-    if (input.channel === 'sms' || input.channel === 'both') {
-      if (!attendee.phone) {
-        skippedRecipients += 1;
-        smsDecisions.push({
-          attendee,
-          status: 'missing_contact',
-          consentExcluded: false,
-          suppressionExcluded: false,
-        });
-      } else if (!consent?.sms_opt_in || consent.revoked_at) {
-        suppressedRecipients += 1;
-        consentExclusions += 1;
-        smsDecisions.push({
-          attendee,
-          status: 'suppressed',
-          consentExcluded: true,
-          suppressionExcluded: false,
-        });
-      } else {
-        eligibleRecipientIds.add(attendee.id);
-        smsDecisions.push({
-          attendee,
-          status: 'eligible',
-          consentExcluded: false,
-          suppressionExcluded: false,
-        });
-      }
-    }
-  }
-
-  return {
-    attendees,
-    consentByAttendee,
-    emailSuppressionByAttendee,
-    emailDecisions,
-    smsDecisions,
-    eligibleRecipients: attendees.filter((attendee) => eligibleRecipientIds.has(attendee.id)),
-    skippedRecipients,
-    suppressedRecipients,
-    consentExclusions,
-  };
 }
 
 async function loadAuthorizedCampaign(
