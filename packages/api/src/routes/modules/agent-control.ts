@@ -27,13 +27,14 @@ const agentCapabilitySchema = z.enum([
   'events.prepare',
   'events.execute',
   'readiness.read',
+  'reports.read',
   'content.prepare',
   'campaigns.prepare',
 ]);
 const agentCapabilitiesSchema = z
   .array(agentCapabilitySchema)
   .min(1)
-  .max(5)
+  .max(7)
   .refine((capabilities) => new Set(capabilities).size === capabilities.length, {
     message: 'Agent capabilities must be unique',
   });
@@ -156,9 +157,11 @@ function assertCapabilities(principal: Principal, capabilities: readonly AgentCa
     const required =
       capability === 'events.read' || capability === 'readiness.read'
         ? 'events.read'
-        : capability === 'campaigns.prepare'
-          ? 'messages.write'
-          : 'events.write';
+        : capability === 'reports.read'
+          ? 'reports.read'
+          : capability === 'campaigns.prepare'
+            ? 'messages.write'
+            : 'events.write';
     if (!ClerkAuthService.hasPermission(principal, required))
       throw new ForbiddenError(`Sponsor does not currently hold authority for ${capability}`);
   }

@@ -229,19 +229,23 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     await db
       .insertInto('permission_grants')
       .values([
-        ...['developers.write', 'events.read', 'events.write', 'messages.write'].map(
-          (permission, index) => ({
-            id: `pg_agent_control_${index}`,
-            tenant_id: tenantId,
-            principal_type: 'user' as const,
-            principal_id: 'user_actor',
-            permission,
-            scope_type: 'tenant' as const,
-            scope_id: null,
-            created_at: now,
-            updated_at: now,
-          }),
-        ),
+        ...[
+          'developers.write',
+          'events.read',
+          'events.write',
+          'messages.write',
+          'reports.read',
+        ].map((permission, index) => ({
+          id: `pg_agent_control_${index}`,
+          tenant_id: tenantId,
+          principal_type: 'user' as const,
+          principal_id: 'user_actor',
+          permission,
+          scope_type: 'tenant' as const,
+          scope_id: null,
+          created_at: now,
+          updated_at: now,
+        })),
         {
           id: 'pg_agent_control_other',
           tenant_id: tenantId,
@@ -493,6 +497,24 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       controlAudit('grant_campaign'),
     );
     expect(campaignDelegation.permissionSnapshot).toEqual(['messages:write']);
+    const reportPrincipal = {
+      ...principal(tenantId),
+      id: 'agent_report_read',
+      capabilities: ['reports.read'] as const,
+      maximumAutonomy: 'read' as const,
+    };
+    await repository.registerPrincipal(reportPrincipal, controlAudit('register_report'));
+    const reportDelegation = await repository.grantDelegation(
+      {
+        ...delegation(tenantId),
+        id: 'delegation_report_read',
+        agentPrincipalId: reportPrincipal.id,
+        capabilities: ['reports.read'],
+        permissionSnapshot: ['reports:read'],
+      },
+      controlAudit('grant_report'),
+    );
+    expect(reportDelegation.permissionSnapshot).toEqual(['reports:read']);
     await expect(
       repository.grantDelegation(
         {
@@ -626,9 +648,14 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       .select('id')
       .where('tenant_id', '=', tenantId)
       .execute();
-    expect(controlEvents).toHaveLength(controlEventCountBefore.length + 7);
+    expect(controlEvents).toHaveLength(controlEventCountBefore.length + 9);
     expect(controlEvents.map(({ id }) => id)).toEqual(
-      expect.arrayContaining(['register_campaign', 'grant_campaign']),
+      expect.arrayContaining([
+        'register_campaign',
+        'grant_campaign',
+        'register_report',
+        'grant_report',
+      ]),
     );
     await persistApproval(db, approved);
     const results = await Promise.all(
