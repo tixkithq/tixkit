@@ -85,6 +85,7 @@
           "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
         },
         "runnerLabel": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
         "database": {
           "type": "object",
           "additionalProperties": false,

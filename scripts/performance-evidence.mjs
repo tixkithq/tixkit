@@ -90,7 +90,17 @@ function validateIdentity(identity, label = 'identity') {
   if (!identity || typeof identity !== 'object' || Array.isArray(identity)) {
     throw new Error(`${label} must be an object`);
   }
-  assertExactKeys(identity, ['gitSha', 'runnerLabel', 'database', 'workload'], label);
+  assertExactKeys(
+    identity,
+    [
+      'gitSha',
+      'runnerLabel',
+      'database',
+      'workload',
+      ...(identity.profile === undefined ? [] : ['profile']),
+    ],
+    label,
+  );
   assertExactKeys(identity.database, ['engine', 'version'], `${label}.database`);
   const gitSha = requireString(identity.gitSha, `${label}.gitSha`);
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(gitSha)) {
@@ -108,6 +118,9 @@ function validateIdentity(identity, label = 'identity') {
       engine: requireString(identity.database?.engine, `${label}.database.engine`),
       version: requireString(identity.database?.version, `${label}.database.version`),
     },
+    ...(identity.profile === undefined
+      ? {}
+      : { profile: requireString(identity.profile, `${label}.profile`) }),
     workload,
   });
 }
@@ -120,6 +133,9 @@ function identityFromOptions(options) {
       engine: requireString(options.dbEngine, 'database engine'),
       version: requireString(options.dbVersion, 'database version'),
     },
+    ...(options.profile === undefined
+      ? {}
+      : { profile: requireString(options.profile, 'profile') }),
     workload: parseWorkload(requireString(options.workload, 'workload')),
   };
 }

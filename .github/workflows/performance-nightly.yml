@@ -1,0 +1,186 @@
+name: Nightly Performance Evidence
+
+on:
+  schedule:
+    - cron: '27 5 * * *'
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Performance scenario to execute
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - postgresql-trusted-soak
+          - mysql-trusted-soak
+
+concurrency:
+  group: performance-nightly
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  sustained-regression:
+    name: ${{ matrix.scenario }}
+    runs-on: tixkit-epyc-trusted
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        scenario: ${{ fromJSON(inputs.scenario == 'postgresql-trusted-soak' && '["postgresql-trusted-soak"]' || inputs.scenario == 'mysql-trusted-soak' && '["mysql-trusted-soak"]' || '["postgresql-trusted-soak","mysql-trusted-soak"]') }}
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+        env:
+          POSTGRES_USER: tixkit
+          POSTGRES_PASSWORD: tixkit
+          POSTGRES_DB: tixkit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tixkit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mysql:
+        image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
+        env:
+          MYSQL_ROOT_PASSWORD: tixkit
+          MYSQL_DATABASE: tixkit
+          MYSQL_USER: tixkit
+          MYSQL_PASSWORD: tixkit
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -u tixkit -ptixkit"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://tixkit:tixkit@localhost:5432/tixkit
+      DATABASE_URL_MYSQL: mysql://tixkit:tixkit@localhost:3306/tixkit
+    steps:
+      - name: Create unique evidence root
+        id: evidence-root
+        run: |
+          evidence_root="${RUNNER_TEMP}/tixkit-performance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.scenario }}"
+          mkdir -m 700 "${evidence_root}"
+          printf '%s\n' "${GITHUB_SHA} ${{ matrix.scenario }}" > "${evidence_root}/run-identity.txt"
+          echo "EVIDENCE_ROOT=${evidence_root}" >> "${GITHUB_ENV}"
+      - name: Reject untrusted invocation before checkout
+        id: invocation
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            schedule|workflow_dispatch) ;;
+            *) echo 'Performance evidence accepts only schedule or workflow_dispatch.' >&2; exit 1 ;;
+          esac
+          if [ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]; then
+            echo 'Performance evidence must run from the default branch.' >&2
+            exit 1
+          fi
+      - id: checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - id: setup
+        uses: ./.github/actions/setup-js
+      - id: install
+        run: bun install --frozen-lockfile
+      - name: Validate scenario contracts
+        id: contracts
+        run: node --test scripts/__tests__/performance-evidence.test.mjs scripts/__tests__/performance-scenario.test.mjs
+      - name: Migrate performance databases
+        id: migration
+        run: |
+          bun run db:migrate
+          bun run db:migrate:mysql
+          bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
+      - name: Retrieve prior compatible baseline candidate
+        id: baseline
+        env:
+          ARTIFACT_NAME: nightly-performance-${{ matrix.scenario }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.default_branch')"
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${GITHUB_REF_NAME}" != "${default_branch}" ]; then
+            echo 'Manual performance evidence must run from the default branch.' >&2
+            exit 1
+          fi
+          runs_json="${RUNNER_TEMP}/performance-runs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/performance-nightly.yml/runs?branch=${default_branch}&status=success&per_page=50" > "${runs_json}"
+          candidates="${RUNNER_TEMP}/performance-candidates.tsv"
+          RUNS_PATH="${runs_json}" WORKFLOW_PATH='.github/workflows/performance-nightly.yml' \
+            DEFAULT_BRANCH="${default_branch}" CURRENT_RUN_ID="${GITHUB_RUN_ID}" \
+            node --input-type=module -e \
+              "import fs from 'node:fs'; import { eligibleBaselineRuns } from './scripts/performance-scenario.mjs'; const runs=JSON.parse(fs.readFileSync(process.env.RUNS_PATH,'utf8')).workflow_runs; for (const run of eligibleBaselineRuns(runs,{workflowPath:process.env.WORKFLOW_PATH,defaultBranch:process.env.DEFAULT_BRANCH,currentRunId:Number(process.env.CURRENT_RUN_ID)})) console.log(run.id+'\\t'+run.head_sha);" \
+              > "${candidates}"
+          baseline=''
+          baseline_sha=''
+          while IFS=$'\t' read -r run_id head_sha; do
+            [ -n "${run_id}" ] || continue
+            artifact_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
+              --jq '.artifacts[] | select(.name == $ENV.ARTIFACT_NAME and .expired == false) | .id' | head -n 1)"
+            [ -n "${artifact_id}" ] || continue
+            archive="${RUNNER_TEMP}/performance-baseline-${run_id}.zip"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${archive}"
+            evidence_entry="$(unzip -Z1 "${archive}" | awk '$0 ~ /(^|\/)evidence\.json$/ { print; exit }')"
+            [ -n "${evidence_entry}" ] || continue
+            baseline="${RUNNER_TEMP}/performance-baseline.json"
+            unzip -p "${archive}" "${evidence_entry}" > "${baseline}"
+            baseline_sha="${head_sha}"
+            break
+          done < "${candidates}"
+          if [ -z "${baseline}" ]; then
+            echo 'No successful retained baseline exists; this run will establish a candidate.'
+          fi
+          echo "path=${baseline}" >> "${GITHUB_OUTPUT}"
+          echo "git-sha=${baseline_sha}" >> "${GITHUB_OUTPUT}"
+      - name: Run bounded sustained regression scenario
+        id: scenario
+        env:
+          BASELINE_PATH: ${{ steps.baseline.outputs.path }}
+          BASELINE_GIT_SHA: ${{ steps.baseline.outputs.git-sha }}
+          SCENARIO_ID: ${{ matrix.scenario }}
+        run: |
+          set -euo pipefail
+          output="${EVIDENCE_ROOT}/scenario"
+          baseline_args=()
+          if [ -n "${BASELINE_PATH}" ]; then
+            baseline_args=(--baseline "${BASELINE_PATH}" --baseline-git-sha "${BASELINE_GIT_SHA}")
+          fi
+          node scripts/performance-scenario.mjs \
+            --config performance-scenarios.nightly.json \
+            --scenario "${SCENARIO_ID}" \
+            --output "${output}" \
+            --git-sha "${GITHUB_SHA}" \
+            "${baseline_args[@]}"
+      - name: Record bounded workflow failure evidence
+        if: ${{ always() && job.status != 'success' }}
+        env:
+          JOB_STATUS: ${{ job.status }}
+          SCENARIO_ID: ${{ matrix.scenario }}
+          INVOCATION_OUTCOME: ${{ steps.invocation.outcome }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          CONTRACTS_OUTCOME: ${{ steps.contracts.outcome }}
+          MIGRATION_OUTCOME: ${{ steps.migration.outcome }}
+          BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
+          SCENARIO_OUTCOME: ${{ steps.scenario.outcome }}
+        run: |
+          node -e "const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path'); const phases=['invocation','checkout','setup','install','contracts','migration','baseline','scenario']; const phase=phases.find(p=>['failure','cancelled'].includes(process.env[p.toUpperCase()+'_OUTCOME']))||'workflow'; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const payload={schemaVersion:'tixkit-performance-scenario-failure-v1',status:'failed',scope:'workflow',scenarioId:process.env.SCENARIO_ID.slice(0,63),phase,failedAt:new Date().toISOString(),error:('workflow '+process.env.JOB_STATUS).slice(0,500)}; const value={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(path.join(process.env.EVIDENCE_ROOT,'workflow-failure.json'),JSON.stringify(value,null,2)+'\\n',{flag:'wx',mode:0o600});"
+      - name: Upload raw, aggregate, trend, and failure evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-performance-${{ matrix.scenario }}
+          path: ${{ env.EVIDENCE_ROOT }}
+          if-no-files-found: error
+          retention-days: 90

@@ -152,6 +152,27 @@ test('rejects sample identity mismatch', () => {
   );
 });
 
+test('binds an optional deployment profile and rejects profile drift', () => {
+  const profiledIdentity = {
+    ...identity,
+    profile: 'trusted-single-host-regression',
+  };
+  const profiled = [10, 11, 12].map((latencyMs) =>
+    sample(latencyMs, 20, { identity: profiledIdentity }),
+  );
+  const evidence = aggregate(profiled);
+  assert.equal(evidence.identity.profile, 'trusted-single-host-regression');
+  assert.equal(validators().evidence(evidence), true);
+
+  const drifted = sample(13, 20, {
+    identity: { ...profiledIdentity, profile: 'production' },
+  });
+  assert.throws(
+    () => aggregate([profiled[0], drifted, profiled[2]]),
+    /sample-2.json identity mismatch/,
+  );
+});
+
 test('rejects a tampered sample checksum', () => {
   const tampered = {
     ...sample(12, 22),
