@@ -66,6 +66,7 @@
     "validate:public-repository": "node scripts/rehearse-public-repository.mjs",
     "rehearse:repository-cutover": "node scripts/rehearse-repository-cutover.mjs",
     "rehearse:repository-history-cutover": "node scripts/rehearse-repository-history-cutover.mjs",
+    "validate:repository-content-review": "node scripts/validate-repository-content-review.mjs",
     "audit:repository-history": "node scripts/audit-repository-history.mjs",
     "validate:cloud-core-consumer": "node scripts/validate-cloud-core-consumer.mjs",
     "verify:cloud-core-install": "node scripts/verify-cloud-core-install.mjs",

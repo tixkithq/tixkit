@@ -13,9 +13,11 @@ const forbiddenTrackedPaths = [
   'scripts/__tests__/export-oss.test.mjs',
   'scripts/__tests__/repository-cutover-rehearsal.test.mjs',
   'scripts/__tests__/repository-history-cutover.test.mjs',
+  'scripts/__tests__/repository-content-review.test.mjs',
   'scripts/export-oss.mjs',
   'scripts/rehearse-repository-cutover.mjs',
   'scripts/rehearse-repository-history-cutover.mjs',
+  'scripts/validate-repository-content-review.mjs',
 ];
 
 function sourceTokens(source) {

@@ -17,6 +17,8 @@ const boundaryControlPaths = new Set([
   'scripts/__tests__/repository-cutover-rehearsal.test.mjs',
   'scripts/rehearse-repository-history-cutover.mjs',
   'scripts/__tests__/repository-history-cutover.test.mjs',
+  'scripts/validate-repository-content-review.mjs',
+  'scripts/__tests__/repository-content-review.test.mjs',
 ]);
 
 export function loadPublicDistribution(root) {
