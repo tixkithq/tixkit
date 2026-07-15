@@ -160,6 +160,8 @@ export interface AgentActionTable {
   authorization_snapshot_sha256: string;
   authorization_reasons: string;
   dry_run_json: string;
+  result_json: Generated<string | null>;
+  result_sha256: Generated<string | null>;
   eligible_for_approval: boolean | number;
   prepared_at: Timestamp;
   expires_at: Timestamp;

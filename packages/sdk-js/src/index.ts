@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-28';
+export const TIXKIT_API_VERSION = '2026-07-29';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1597,12 +1597,21 @@ export type AgentSession = {
   supportedProtocolVersion: string;
 };
 
-export type AgentAction = {
+type AgentActionBase = {
   id: string;
   protocolVersion: '2026-07-22';
   agentPrincipalId: string;
   sponsorPrincipalId: string;
   delegationGrantId: string;
+  payload: {
+    readinessSnapshotSha256: string;
+  };
+  idempotencyKey: string;
+  expectedPolicyVersion: number;
+  preparedAt: string;
+};
+
+export type AgentAction = AgentActionBase & {
   kind: 'event.publish';
   autonomy: 'execute_with_approval';
   target: {
@@ -1612,12 +1621,29 @@ export type AgentAction = {
     resourceVersion: number;
     apiOperation: 'events.publish';
   };
-  payload: {
-    readinessSnapshotSha256: string;
+};
+
+export type AgentReadinessReadAction = AgentActionBase & {
+  kind: 'readiness.read';
+  autonomy: 'read';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'events.readiness.get';
   };
-  idempotencyKey: string;
-  expectedPolicyVersion: number;
-  preparedAt: string;
+};
+
+export type AgentReadinessReadResult = {
+  resourceId: string;
+  resourceVersion: number;
+  status: 'ready' | 'blocked';
+  readinessSnapshotSha256: string;
+  generatedAt: string;
+  published: boolean;
+  blockerReasonCodes: string[];
+  warningReasonCodes: string[];
 };
 
 export type PreparedAgentAction = {
@@ -1635,6 +1661,26 @@ export type PreparedAgentAction = {
     readinessSnapshotSha256: string;
     blockingReasonCodes: string[];
   };
+};
+
+export type PreparedAgentReadinessReadAction = {
+  action: AgentReadinessReadAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  dryRun: {
+    launchable: boolean;
+    readinessSnapshotSha256: string;
+    blockingReasonCodes: string[];
+  };
+  result: AgentReadinessReadResult;
+  resultSha256: string;
 };
 
 export type AgentApproval = {
@@ -4409,8 +4455,24 @@ class AgentActionResource {
     });
   }
 
+  async readReadiness(input: {
+    delegationGrantId: string;
+    resourceId: string;
+    idempotencyKey: string;
+  }): Promise<PreparedAgentReadinessReadAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/readiness', {
+      body,
+      idempotencyKey,
+    });
+  }
+
   async get(actionId: string): Promise<PreparedAgentAction> {
     return this.client.request('GET', `/agent/actions/${actionId}`);
+  }
+
+  async getReadiness(actionId: string): Promise<PreparedAgentReadinessReadAction> {
+    return this.client.request('GET', `/agent/readiness/${actionId}`);
   }
 
   async approve(input: {

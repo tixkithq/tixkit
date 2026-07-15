@@ -18,6 +18,7 @@ import {
 export const AGENT_PLATFORM_PROTOCOL_VERSION = '2026-07-27' as const;
 export const AGENT_PLATFORM_PLAN_DIGEST_DOMAIN =
   'tixkit.agent-plan-definition.v2026-07-27' as const;
+export const AGENT_ACTION_CONTRACT_VERSION = '2026-07-29' as const;
 
 export type AgentRiskClass = 'read_only' | 'low' | 'high' | 'critical';
 export type AgentReversibilityMode = 'none' | 'reversible' | 'compensatable';
@@ -147,6 +148,7 @@ export interface AgentSchemaReference {
 export interface AgentActionRegistryDefinition {
   kind: AgentActionKind;
   availability: 'implemented' | 'reserved';
+  planSupport: 'supported' | 'direct_only' | 'unavailable';
   prepareInputSchema: AgentSchemaReference;
   resolvedPayloadSchema: AgentSchemaReference;
   resultSchema: AgentSchemaReference;
@@ -187,10 +189,21 @@ export interface AgentActionIdempotencyPhase {
 }
 
 export interface AgentActionRegistry {
-  protocolVersion: typeof AGENT_PLATFORM_PROTOCOL_VERSION;
+  protocolVersion: typeof AGENT_ACTION_CONTRACT_VERSION;
   actionProtocolVersion: typeof AGENT_PROTOCOL_VERSION;
   actions: readonly AgentActionRegistryDefinition[];
   registrySha256: string;
+}
+
+export interface AgentReadinessReadResult extends Readonly<Record<string, unknown>> {
+  resourceId: string;
+  resourceVersion: number;
+  status: 'ready' | 'blocked';
+  readinessSnapshotSha256: string;
+  generatedAt: string;
+  published: boolean;
+  blockerReasonCodes: readonly string[];
+  warningReasonCodes: readonly string[];
 }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$/u;
@@ -282,7 +295,8 @@ function assertPlanStep(step: AgentPlanStep, createdAt: number, expiresAt: numbe
     (definition) => definition.kind === step.actionKind,
   );
   assert(
-    registryDefinition?.availability === 'implemented',
+    registryDefinition?.availability === 'implemented' &&
+      registryDefinition.planSupport === 'supported',
     'agent plan step action is not implemented',
   );
   assert(
@@ -904,10 +918,58 @@ export function validateAgentPlanStateTransition(
   }
 }
 
-const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-07-27';
+export function validateAgentReadinessReadResult(
+  action: AgentAction,
+  result: AgentReadinessReadResult,
+): void {
+  assert(action.kind === 'readiness.read', 'agent readiness result action kind is invalid');
+  assertExactKeys(action.payload, ['readinessSnapshotSha256']);
+  assertExactKeys(result, [
+    'resourceId',
+    'resourceVersion',
+    'status',
+    'readinessSnapshotSha256',
+    'generatedAt',
+    'published',
+    'blockerReasonCodes',
+    'warningReasonCodes',
+  ]);
+  assert(
+    action.autonomy === 'read' &&
+      action.target.resourceType === 'event' &&
+      action.target.apiOperation === 'events.readiness.get' &&
+      result.resourceId === action.target.resourceId &&
+      result.resourceVersion === action.target.resourceVersion,
+    'agent readiness result target binding is invalid',
+  );
+  assert(
+    typeof action.payload.readinessSnapshotSha256 === 'string' &&
+      SHA256.test(action.payload.readinessSnapshotSha256) &&
+      result.readinessSnapshotSha256 === action.payload.readinessSnapshotSha256,
+    'agent readiness result digest binding is invalid',
+  );
+  validDate(result.generatedAt);
+  assert(typeof result.published === 'boolean', 'agent readiness publication state is invalid');
+  for (const reasons of [result.blockerReasonCodes, result.warningReasonCodes]) {
+    assert(Array.isArray(reasons) && reasons.length <= 100, 'agent readiness reasons are invalid');
+    assertUnique(reasons, (item) => item, 'agent readiness reasons must be unique');
+    assert(
+      reasons.every((item) => REASON_CODE.test(item)),
+      'agent readiness reason code is invalid',
+    );
+  }
+  assert(
+    result.status === (result.blockerReasonCodes.length === 0 ? 'ready' : 'blocked'),
+    'agent readiness status is inconsistent',
+  );
+}
+
+const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-07-29';
 // Updated only alongside the immutable schema and verified by schema-parity tests.
-export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27 =
   'fd74b30a8ba72341fcf4fa6984dca901ba7dec95cf305dc98f5cc38c184b092f' as const;
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+  '13c927eacc6b21b14a5637f95b479aa6ae0707db75bc1a508e489bb0ff813f83' as const;
 
 const riskByKind: Readonly<Record<AgentActionKind, AgentRiskClass>> = {
   'event.read': 'read_only',
@@ -988,18 +1050,26 @@ function schemaReference(jsonPointer: string): AgentSchemaReference {
 const actions = (Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]).map(
   (kind): AgentActionRegistryDefinition => {
     const descriptor = AGENT_ACTION_DESCRIPTORS[kind];
-    const implemented = kind === 'event.publish';
+    const implemented = kind === 'event.publish' || kind === 'readiness.read';
+    const schemaPrefix =
+      kind === 'event.publish'
+        ? 'eventPublish'
+        : kind === 'readiness.read'
+          ? 'readinessRead'
+          : undefined;
     return {
       kind,
       availability: implemented ? 'implemented' : 'reserved',
+      planSupport:
+        kind === 'event.publish' ? 'supported' : implemented ? 'direct_only' : 'unavailable',
       prepareInputSchema: schemaReference(
-        implemented ? '#/$defs/eventPublishPrepareInput' : '#/$defs/reservedAction',
+        schemaPrefix ? `#/$defs/${schemaPrefix}PrepareInput` : '#/$defs/reservedAction',
       ),
       resolvedPayloadSchema: schemaReference(
-        implemented ? '#/$defs/eventPublishResolvedPayload' : '#/$defs/reservedAction',
+        schemaPrefix ? `#/$defs/${schemaPrefix}ResolvedPayload` : '#/$defs/reservedAction',
       ),
       resultSchema: schemaReference(
-        implemented ? '#/$defs/eventPublishResult' : '#/$defs/reservedAction',
+        schemaPrefix ? `#/$defs/${schemaPrefix}Result` : '#/$defs/reservedAction',
       ),
       requiredCapabilities: [descriptor.capability],
       requiredSponsorPermissions: [descriptor.sponsorPermission],
@@ -1045,12 +1115,12 @@ const actions = (Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]).map
 );
 
 export const AGENT_ACTION_REGISTRY: AgentActionRegistry = {
-  protocolVersion: AGENT_PLATFORM_PROTOCOL_VERSION,
+  protocolVersion: AGENT_ACTION_CONTRACT_VERSION,
   actionProtocolVersion: AGENT_PROTOCOL_VERSION,
   actions,
   registrySha256: agentSha256({
-    domain: 'tixkit.agent-action-registry.v2026-07-27',
-    protocolVersion: AGENT_PLATFORM_PROTOCOL_VERSION,
+    domain: 'tixkit.agent-action-registry.v2026-07-29',
+    protocolVersion: AGENT_ACTION_CONTRACT_VERSION,
     actionProtocolVersion: AGENT_PROTOCOL_VERSION,
     actions,
   }),
@@ -1058,7 +1128,7 @@ export const AGENT_ACTION_REGISTRY: AgentActionRegistry = {
 
 export function validateAgentActionRegistry(registry: AgentActionRegistry): void {
   assert(
-    registry.protocolVersion === AGENT_PLATFORM_PROTOCOL_VERSION,
+    registry.protocolVersion === AGENT_ACTION_CONTRACT_VERSION,
     'agent registry version is invalid',
   );
   assert(
@@ -1110,7 +1180,10 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
       );
     }
     if (definition.availability === 'implemented')
-      assert(definition.kind === 'event.publish', 'unimplemented agent action is advertised');
+      assert(
+        definition.kind === 'event.publish' || definition.kind === 'readiness.read',
+        'unimplemented agent action is advertised',
+      );
     else
       assert(
         definition.prepareInputSchema.jsonPointer === '#/$defs/reservedAction' &&
@@ -1118,6 +1191,15 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
           definition.resultSchema.jsonPointer === '#/$defs/reservedAction',
         'reserved agent action exposes executable schemas',
       );
+    assert(
+      definition.planSupport ===
+        (definition.kind === 'event.publish'
+          ? 'supported'
+          : definition.availability === 'implemented'
+            ? 'direct_only'
+            : 'unavailable'),
+      'agent registry plan support is invalid',
+    );
     assert(
       definition.approvalPolicy.mode === (descriptor.consequential ? 'fresh_action' : 'none'),
       'agent registry approval policy is invalid',
@@ -1130,7 +1212,7 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
   const { registrySha256: _digest, ...material } = registry;
   assert(
     registry.registrySha256 ===
-      agentSha256({ domain: 'tixkit.agent-action-registry.v2026-07-27', ...material }),
+      agentSha256({ domain: 'tixkit.agent-action-registry.v2026-07-29', ...material }),
     'agent registry digest is invalid',
   );
   assert(

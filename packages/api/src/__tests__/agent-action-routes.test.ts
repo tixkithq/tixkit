@@ -11,9 +11,12 @@ import {
   agentActionRoutes,
   type AgentActionRouteService,
 } from '../routes/modules/agent-actions.js';
-import type { PreparedAgentAction } from '../services/agent-actions.js';
+import type {
+  PreparedAgentAction,
+  PreparedAgentReadinessAction,
+} from '../services/agent-actions.js';
 
-const action: AgentAction = {
+const action = {
   id: 'act_primary',
   protocolVersion: AGENT_PROTOCOL_VERSION,
   agentPrincipalId: 'agent_primary',
@@ -23,16 +26,16 @@ const action: AgentAction = {
   autonomy: 'execute_with_approval',
   target: {
     tenantId: 'tenant_primary',
-    resourceType: 'event',
+    resourceType: 'event' as const,
     resourceId: 'event_primary',
     resourceVersion: 7,
-    apiOperation: 'events.publish',
+    apiOperation: 'events.publish' as const,
   },
   payload: { readinessSnapshotSha256: 'a'.repeat(64) },
   idempotencyKey: 'agent-action-route-0001',
   expectedPolicyVersion: 3,
   preparedAt: '2026-07-14T12:00:00.000Z',
-};
+} satisfies AgentAction;
 const prepared: PreparedAgentAction = {
   action,
   actionDigest: 'b'.repeat(64),
@@ -48,6 +51,40 @@ const prepared: PreparedAgentAction = {
     readinessSnapshotSha256: 'a'.repeat(64),
     blockingReasonCodes: [],
   },
+};
+const readinessPrepared: PreparedAgentReadinessAction = {
+  action: {
+    ...action,
+    id: `act_${'e'.repeat(48)}`,
+    kind: 'readiness.read',
+    autonomy: 'read',
+    target: { ...action.target, apiOperation: 'events.readiness.get' },
+  },
+  actionDigest: 'd'.repeat(64),
+  expiresAt: '2026-07-14T12:15:00.000Z',
+  authorization: {
+    allowed: true,
+    eligibleForApproval: false,
+    reasons: [],
+    snapshotSha256: 'c'.repeat(64),
+    checkedAt: '2026-07-14T12:00:00.000Z',
+  },
+  dryRun: {
+    launchable: true,
+    readinessSnapshotSha256: 'a'.repeat(64),
+    blockingReasonCodes: [],
+  },
+  result: {
+    resourceId: 'event_primary',
+    resourceVersion: 7,
+    status: 'ready',
+    readinessSnapshotSha256: 'a'.repeat(64),
+    generatedAt: '2026-07-14T12:00:00.000Z',
+    published: false,
+    blockerReasonCodes: [],
+    warningReasonCodes: [],
+  },
+  resultSha256: 'f'.repeat(64),
 };
 const executionEvidence: AgentExecutionEvidence = {
   execution: {
@@ -186,6 +223,68 @@ describe('agent action routes', () => {
       resourceId: 'event_primary',
     });
     expect(response.json()).toEqual(JSON.parse(JSON.stringify(prepared)));
+    await app.close();
+  });
+
+  it('accepts readiness.read without caller-supplied result or identity fields', async () => {
+    const prepare = vi.fn(async () => readinessPrepared);
+    const { app } = await setup({ service: { prepare } });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/readiness',
+      headers: { 'idempotency-key': 'agent-readiness-route-0001' },
+      payload: {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(prepare).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      idempotencyKey: 'agent-readiness-route-0001',
+      kind: 'readiness.read',
+      delegationGrantId: 'dlg_primary',
+      resourceId: 'event_primary',
+    });
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(readinessPrepared)));
+    await app.close();
+  });
+
+  it('keeps event publish preparation closed to readiness requests', async () => {
+    const { app, service } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/actions',
+      headers: { 'idempotency-key': 'agent-readiness-wrong-route-0001' },
+      payload: {
+        kind: 'readiness.read',
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(service.prepare).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns direct readiness evidence only from its dedicated retrieval route', async () => {
+    const getForAgent = vi.fn(async () => readinessPrepared);
+    const { app } = await setup({ service: { getForAgent } });
+    const actionId = readinessPrepared.action.id;
+    const readinessResponse = await app.inject({
+      method: 'GET',
+      url: `/agent/readiness/${actionId}`,
+    });
+    expect(readinessResponse.statusCode).toBe(200);
+    expect(readinessResponse.headers['cache-control']).toBe('no-store');
+    expect(readinessResponse.json()).toEqual(JSON.parse(JSON.stringify(readinessPrepared)));
+    const publishResponse = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/${actionId}`,
+    });
+    expect(publishResponse.statusCode).toBe(404);
     await app.close();
   });
 

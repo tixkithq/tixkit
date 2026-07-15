@@ -308,6 +308,7 @@
       "distribution/public-release-manifest.schema.json",
       "packages/agent-protocol/schemas/agent-protocol-2026-07-22.json",
       "packages/agent-protocol/schemas/agent-action-contracts-2026-07-27.json",
+      "packages/agent-protocol/schemas/agent-action-contracts-2026-07-29.json",
       "packages/agent-protocol/schemas/agent-plan-2026-07-27.json",
       "packages/agent-protocol/schemas/agent-protocol-2026-07-11.json",
       "packages/portability/schemas/portable-bundle-2026-07-12.json",

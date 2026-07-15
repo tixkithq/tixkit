@@ -158,6 +158,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-07-28 plan-bound execution',
         routeId: 'apiMigration20260727To20260728',
       },
+      {
+        label: 'Adopt 2026-07-29 direct readiness reads',
+        routeId: 'apiMigration20260728To20260729',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

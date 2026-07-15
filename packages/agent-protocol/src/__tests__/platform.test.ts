@@ -12,10 +12,12 @@ import {
 } from '../protocol.js';
 import {
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256,
+  AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27,
   AGENT_ACTION_REGISTRY,
   AGENT_PLATFORM_PROTOCOL_VERSION,
   buildAgentPlanDefinition,
   validateAgentActionRegistry,
+  validateAgentReadinessReadResult,
   validateAgentPlanActionBindings,
   validateAgentPlanDefinition,
   validateAgentPlanState,
@@ -23,6 +25,7 @@ import {
   validateAgentPlanStepApprovalBinding,
   type AgentPlanDefinition,
   type AgentPlanState,
+  type AgentReadinessReadResult,
 } from '../platform.js';
 
 const createdAt = '2026-07-14T12:00:00.000Z';
@@ -167,6 +170,19 @@ describe('agent platform contracts', () => {
             ...base.steps[0]!,
             actionKind: 'refund.issue',
             approvalRequirement: { mode: 'fresh_action', riskClass: 'critical' },
+            reversibility: { mode: 'none' },
+          },
+        ],
+      }),
+    ).toThrow('not implemented');
+    expect(() =>
+      buildAgentPlanDefinition({
+        ...base,
+        steps: [
+          {
+            ...base.steps[0]!,
+            actionKind: 'readiness.read',
+            approvalRequirement: { mode: 'none', riskClass: 'read_only' },
             reversibility: { mode: 'none' },
           },
         ],
@@ -599,7 +615,10 @@ describe('agent platform contracts', () => {
     expect(() => validateAgentActionRegistry(AGENT_ACTION_REGISTRY)).not.toThrow();
     expect(
       AGENT_ACTION_REGISTRY.actions.filter((item) => item.availability === 'implemented'),
-    ).toEqual([expect.objectContaining({ kind: 'event.publish' })]);
+    ).toEqual([
+      expect.objectContaining({ kind: 'readiness.read', planSupport: 'direct_only' }),
+      expect.objectContaining({ kind: 'event.publish', planSupport: 'supported' }),
+    ]);
     for (const definition of AGENT_ACTION_REGISTRY.actions.filter(
       (item) => item.availability === 'reserved',
     )) {
@@ -627,7 +646,7 @@ describe('agent platform contracts', () => {
       ...AGENT_ACTION_REGISTRY,
       actions: substitutedActions,
       registrySha256: agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-07-27',
+        domain: 'tixkit.agent-action-registry.v2026-07-29',
         protocolVersion: AGENT_ACTION_REGISTRY.protocolVersion,
         actionProtocolVersion: AGENT_ACTION_REGISTRY.actionProtocolVersion,
         actions: substitutedActions,
@@ -642,7 +661,7 @@ describe('agent platform contracts', () => {
       'utf8',
     );
     const contractsSchemaText = readFileSync(
-      new URL('../../schemas/agent-action-contracts-2026-07-27.json', import.meta.url),
+      new URL('../../schemas/agent-action-contracts-2026-07-29.json', import.meta.url),
       'utf8',
     );
     expect(createHash('sha256').update(contractsSchemaText).digest('hex')).toBe(
@@ -696,11 +715,24 @@ describe('agent platform contracts', () => {
     expect(validatePlan(semanticOnlyInvalid), ajv.errorsText(validatePlan.errors)).toBe(true);
     expect(() => validateAgentPlanDefinition(semanticOnlyInvalid)).toThrow();
 
+    const priorContractsText = readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-07-27.json', import.meta.url),
+      'utf8',
+    );
+    expect(createHash('sha256').update(priorContractsText).digest('hex')).toBe(
+      AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27,
+    );
+    const priorContracts = JSON.parse(priorContractsText) as { $id: string };
+    ajv.addSchema(priorContracts);
     const contracts = JSON.parse(contractsSchemaText) as { $id: string };
     ajv.addSchema(contracts);
     const validatePrepare = ajv.getSchema(`${contracts.$id}#/$defs/eventPublishPrepareInput`)!;
     const validateResult = ajv.getSchema(`${contracts.$id}#/$defs/eventPublishResult`)!;
     const validateRegistry = ajv.getSchema(`${contracts.$id}#/$defs/agentActionRegistry`)!;
+    const validateReadinessPrepare = ajv.getSchema(
+      `${contracts.$id}#/$defs/readinessReadPrepareInput`,
+    )!;
+    const validateReadinessResult = ajv.getSchema(`${contracts.$id}#/$defs/readinessReadResult`)!;
     expect(
       validatePrepare({
         kind: 'event.publish',
@@ -716,6 +748,38 @@ describe('agent platform contracts', () => {
     expect(validateRegistry(AGENT_ACTION_REGISTRY), ajv.errorsText(validateRegistry.errors)).toBe(
       true,
     );
+    const readinessAction: AgentAction = {
+      ...action(),
+      kind: 'readiness.read',
+      autonomy: 'read',
+      target: { ...action().target, apiOperation: 'events.readiness.get' },
+    };
+    const readinessResult: AgentReadinessReadResult = {
+      resourceId: 'event_primary',
+      resourceVersion: 7,
+      status: 'blocked',
+      readinessSnapshotSha256: 'd'.repeat(64),
+      generatedAt: createdAt,
+      published: false,
+      blockerReasonCodes: ['event_unpublished'],
+      warningReasonCodes: [],
+    };
+    expect(
+      validateReadinessPrepare({
+        kind: 'readiness.read',
+        delegationGrantId: 'delegation_primary',
+        resourceId: 'event_primary',
+      }),
+      ajv.errorsText(validateReadinessPrepare.errors),
+    ).toBe(true);
+    expect(validateReadinessResult(readinessResult)).toBe(true);
+    expect(() => validateAgentReadinessReadResult(readinessAction, readinessResult)).not.toThrow();
+    expect(() =>
+      validateAgentReadinessReadResult(readinessAction, {
+        ...readinessResult,
+        status: 'ready',
+      }),
+    ).toThrow('inconsistent');
     expect(
       validateResult({ resourceId: 'event_primary', resourceVersion: 8, status: 'failed' }),
     ).toBe(false);

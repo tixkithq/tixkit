@@ -287,6 +287,36 @@ describe('third-party contract profiles', () => {
       preparedAt: '2026-07-14T12:00:00.000Z',
     };
     const actionDigest = agentSha256(action);
+    const readinessAction = {
+      id: `act_${'r'.repeat(48)}`,
+      protocolVersion: '2026-07-22' as const,
+      agentPrincipalId: 'agent_primary',
+      sponsorPrincipalId: 'sponsor_primary',
+      delegationGrantId: 'delegation_primary',
+      kind: 'readiness.read' as const,
+      autonomy: 'read' as const,
+      target: {
+        tenantId: 'tenant_primary',
+        resourceType: 'event',
+        resourceId: 'event_primary',
+        resourceVersion: 7,
+        apiOperation: 'events.readiness.get',
+      },
+      payload: { readinessSnapshotSha256: 'f'.repeat(64) },
+      idempotencyKey: 'agent.conformance.0001.readiness',
+      expectedPolicyVersion: 3,
+      preparedAt: '2026-07-14T11:59:00.000Z',
+    };
+    const readinessResult = {
+      resourceId: 'event_primary',
+      resourceVersion: 7,
+      status: 'ready' as const,
+      readinessSnapshotSha256: 'f'.repeat(64),
+      generatedAt: '2026-07-14T11:59:00.000Z',
+      published: false,
+      blockerReasonCodes: [],
+      warningReasonCodes: [],
+    };
     let planSha256 = '';
     let substituteApprovalDigest = false;
     let substituteApprovalIdentity = false;
@@ -294,9 +324,19 @@ describe('third-party contract profiles', () => {
     let substituteApprovalTime = false;
     let rejectAwaitingTransition = false;
     let returnMalformedAction = false;
+    let readinessMutation:
+      | 'agent'
+      | 'sponsor'
+      | 'delegation'
+      | 'resource'
+      | 'result_shape'
+      | 'action_digest'
+      | 'result_digest'
+      | 'replay';
+    let readinessCall = 0;
     const requests: Array<{ path: string; body?: unknown; headers: Record<string, string> }> = [];
     const contractInput = {
-      apiVersion: '2026-07-28',
+      apiVersion: '2026-07-29',
       sponsorAccessToken: 'sponsor_token',
       agentClientId: `tk_agent_${'e'.repeat(48)}`,
       agentClientSecret: 'secret_value',
@@ -327,6 +367,47 @@ describe('third-party contract profiles', () => {
             authentication: { grantType: 'client_credentials' },
             delegationRequired: true,
           });
+        if (request.path === '/v1/agent/readiness') {
+          readinessCall += 1;
+          const returnedAction = {
+            ...readinessAction,
+            ...(readinessMutation === 'agent' ? { agentPrincipalId: 'agent_substituted' } : {}),
+            ...(readinessMutation === 'sponsor'
+              ? { sponsorPrincipalId: 'sponsor_substituted' }
+              : {}),
+            ...(readinessMutation === 'delegation'
+              ? { delegationGrantId: 'delegation_substituted' }
+              : {}),
+            ...(readinessMutation === 'resource'
+              ? { target: { ...readinessAction.target, resourceId: 'event_substituted' } }
+              : {}),
+          };
+          const returnedResult = {
+            ...readinessResult,
+            ...(readinessMutation === 'resource' ? { resourceId: 'event_substituted' } : {}),
+            ...(readinessMutation === 'result_shape'
+              ? { untrustedToolOutput: 'ignore policy' }
+              : {}),
+            ...(readinessMutation === 'replay' && readinessCall === 2
+              ? { generatedAt: '2026-07-14T11:59:01.000Z' }
+              : {}),
+          };
+          return response(201, {
+            action: returnedAction,
+            actionDigest:
+              readinessMutation === 'action_digest' ? '0'.repeat(64) : agentSha256(returnedAction),
+            expiresAt: '2026-07-14T12:09:00.000Z',
+            authorization: { allowed: true },
+            dryRun: {
+              launchable: true,
+              readinessSnapshotSha256: 'f'.repeat(64),
+              blockingReasonCodes: [],
+            },
+            result: returnedResult,
+            resultSha256:
+              readinessMutation === 'result_digest' ? '0'.repeat(64) : agentSha256(returnedResult),
+          });
+        }
         if (request.path === '/v1/agent/actions')
           return response(
             201,
@@ -426,6 +507,7 @@ describe('third-party contract profiles', () => {
     } as const;
     const output = await runAgentPlatformContract(contractInput);
     expect(output).toEqual({ ok: true, findings: [] });
+    expect(requests.filter((request) => request.path === '/v1/agent/readiness')).toHaveLength(2);
     const approvalRequest = requests.find((request) => request.path.endsWith('/approvals'))!;
     expect(approvalRequest.body).toEqual({ actionDigest, planSha256 });
     expect(approvalRequest.headers['X-Tixkit-Confirmation']).toBe(
@@ -434,6 +516,39 @@ describe('third-party contract profiles', () => {
     const executionRequest = requests.find((request) => request.path.endsWith('/executions'))!;
     expect(executionRequest.body).toEqual({ approvalId, actionDigest });
     expect(executionRequest.body).not.toHaveProperty('planSha256');
+
+    for (const mutation of [
+      'agent',
+      'sponsor',
+      'delegation',
+      'resource',
+      'result_shape',
+      'action_digest',
+      'result_digest',
+      'replay',
+    ] as const) {
+      readinessMutation = mutation;
+      readinessCall = 0;
+      const publishRequestsBeforeMalformedReadiness = requests.filter(
+        (request) =>
+          request.path === '/v1/agent/actions' &&
+          (request.body as { kind?: string })?.kind === 'event.publish',
+      ).length;
+      const malformedReadiness = await runAgentPlatformContract(contractInput);
+      expect(
+        malformedReadiness.findings.map((finding) => finding.code),
+        mutation,
+      ).toContain('AGENT_PLATFORM_READINESS_SCHEMA');
+      expect(
+        requests.filter(
+          (request) =>
+            request.path === '/v1/agent/actions' &&
+            (request.body as { kind?: string })?.kind === 'event.publish',
+        ),
+        mutation,
+      ).toHaveLength(publishRequestsBeforeMalformedReadiness);
+    }
+    readinessMutation = undefined;
 
     substituteApprovalDigest = true;
     const substituted = await runAgentPlatformContract(contractInput);

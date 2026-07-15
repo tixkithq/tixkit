@@ -573,7 +573,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-28',
+    version: '2026-07-29',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5368,6 +5368,92 @@ const rawOpenApiSpec = {
           'preparedAt',
         ],
       },
+      AgentReadinessReadAction: {
+        type: 'object',
+        description:
+          'Server-derived immutable direct readiness action. It is not approval-, execution- or plan-eligible.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          protocolVersion: { type: 'string', const: '2026-07-22' },
+          agentPrincipalId: { type: 'string' },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: { type: 'string' },
+          kind: { type: 'string', const: 'readiness.read' },
+          autonomy: { type: 'string', const: 'read' },
+          target: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              tenantId: { type: 'string' },
+              resourceType: { type: 'string', const: 'event' },
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 1 },
+              apiOperation: { type: 'string', const: 'events.readiness.get' },
+            },
+            required: ['tenantId', 'resourceType', 'resourceId', 'resourceVersion', 'apiOperation'],
+          },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            },
+            required: ['readinessSnapshotSha256'],
+          },
+          idempotencyKey: { type: 'string', minLength: 16, maxLength: 127 },
+          expectedPolicyVersion: { type: 'integer', minimum: 1 },
+          preparedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'protocolVersion',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'kind',
+          'autonomy',
+          'target',
+          'payload',
+          'idempotencyKey',
+          'expectedPolicyVersion',
+          'preparedAt',
+        ],
+      },
+      AgentReadinessReadResult: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          resourceId: { type: 'string' },
+          resourceVersion: { type: 'integer', minimum: 1 },
+          status: { type: 'string', enum: ['ready', 'blocked'] },
+          readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          generatedAt: { type: 'string', format: 'date-time' },
+          published: { type: 'boolean' },
+          blockerReasonCodes: {
+            type: 'array',
+            maxItems: 100,
+            uniqueItems: true,
+            items: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$' },
+          },
+          warningReasonCodes: {
+            type: 'array',
+            maxItems: 100,
+            uniqueItems: true,
+            items: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$' },
+          },
+        },
+        required: [
+          'resourceId',
+          'resourceVersion',
+          'status',
+          'readinessSnapshotSha256',
+          'generatedAt',
+          'published',
+          'blockerReasonCodes',
+          'warningReasonCodes',
+        ],
+      },
       PreparedAgentAction: {
         type: 'object',
         description:
@@ -5404,6 +5490,54 @@ const rawOpenApiSpec = {
           },
         },
         required: ['action', 'actionDigest', 'expiresAt', 'authorization', 'dryRun'],
+      },
+      PreparedAgentReadinessReadAction: {
+        type: 'object',
+        description:
+          'Immutable direct readiness action with required canonical result evidence. It cannot carry approval or execution evidence.',
+        additionalProperties: false,
+        properties: {
+          action: { $ref: '#/components/schemas/AgentReadinessReadAction' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          authorization: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              allowed: { type: 'boolean', const: true },
+              eligibleForApproval: { type: 'boolean', const: false },
+              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              checkedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['allowed', 'eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
+          },
+          dryRun: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              launchable: { type: 'boolean' },
+              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              blockingReasonCodes: {
+                type: 'array',
+                uniqueItems: true,
+                items: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$' },
+              },
+            },
+            required: ['launchable', 'readinessSnapshotSha256', 'blockingReasonCodes'],
+          },
+          result: { $ref: '#/components/schemas/AgentReadinessReadResult' },
+          resultSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: [
+          'action',
+          'actionDigest',
+          'expiresAt',
+          'authorization',
+          'dryRun',
+          'result',
+          'resultSha256',
+        ],
       },
       AgentApproval: {
         type: 'object',
@@ -10860,7 +10994,7 @@ const rawOpenApiSpec = {
       post: {
         summary: 'Prepare and dry-run a typed agent action',
         description:
-          'Experimental/private beta. Requires Agent OAuth. The server derives the authenticated agent, tenant, sponsor, protocol, action identifier, exact event operation, current resource and policy versions, readiness snapshot, payload, digest and timestamps. Only event.publish is enabled. This operation has no product effect and never grants approval.',
+          'Experimental/private beta. Requires Agent OAuth. The server derives the authenticated agent, tenant, sponsor, protocol, action identifier, exact event operation, current resource and policy versions, readiness snapshot, payload, digest and timestamps. event.publish prepares a no-effect approval candidate.',
         security: [{ AgentOAuth: ['agent.invoke'] }],
         parameters: [{ $ref: '#/components/parameters/AgentActionIdempotencyKey' }],
         requestBody: {
@@ -10889,7 +11023,7 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description:
-              'Immutable prepared action and no-effect authorization/readiness dry-run. Exact replays return identical evidence.',
+              'Immutable event-publish action with authorization/readiness evidence. Exact replays return identical evidence.',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/PreparedAgentAction' } },
             },
@@ -10901,6 +11035,85 @@ const rawOpenApiSpec = {
             description: 'Agent, delegation or resource is outside the authenticated scope',
           },
           '409': { description: 'Idempotency conflict or action policy is unavailable' },
+        },
+      },
+    },
+    '/agent/readiness': {
+      post: {
+        summary: 'Read event readiness through a direct agent action',
+        description:
+          'Experimental/private beta. Requires Agent OAuth. Returns immutable, canonical and digest-bound readiness evidence only after reauthorizing the current principal, delegation, sponsor, resource and tenant policy intersection. It never creates approval, plan or execution authority.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [{ $ref: '#/components/parameters/AgentActionIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  delegationGrantId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  resourceId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                },
+                required: ['delegationGrantId', 'resourceId'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Immutable direct readiness action with required result and result digest. Exact still-authorized replays return identical evidence.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentReadinessReadAction' },
+              },
+            },
+          },
+          '400': { description: 'Invalid typed request or idempotency key' },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': {
+            description:
+              'Current agent, delegation, sponsor, policy or resource authority is unavailable',
+          },
+          '409': { description: 'Idempotency conflict or readiness policy is unavailable' },
+        },
+      },
+    },
+    '/agent/readiness/{actionId}': {
+      get: {
+        summary: 'Get a direct readiness result',
+        description:
+          'Requires the exact agent or sponsor and reauthorizes the current principal, delegation, sponsor events.read permission, event scope, resource version and action/risk policy before returning persisted evidence.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Immutable direct readiness action and required result evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentReadinessReadAction' },
+              },
+            },
+          },
+          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
+          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '404': { description: 'Action or current authority is outside the caller scope' },
         },
       },
     },
@@ -10926,7 +11139,9 @@ const rawOpenApiSpec = {
             },
           },
           '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
-          '403': { description: 'Human sponsor lacks current events.write authority' },
+          '403': {
+            description: 'Human sponsor lacks current events.read or events.write authority',
+          },
           '404': { description: 'Action not found for this agent or sponsor' },
         },
       },

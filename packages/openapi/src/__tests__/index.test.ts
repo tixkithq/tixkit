@@ -96,7 +96,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-28');
+    expect(openApiSpec.info.version).toBe('2026-07-29');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -253,6 +253,32 @@ describe('openApiSpec', () => {
         resourceVersion: execution.resourceVersion,
       });
     }
+  });
+
+  it('adds direct readiness as a separate required-result contract without widening publish', () => {
+    const readiness = openApiSpec.paths['/agent/readiness'].post;
+    const inspect = openApiSpec.paths['/agent/readiness/{actionId}'].get;
+    const publishAction = openApiSpec.components.schemas.AgentAction;
+    const publishPrepared = openApiSpec.components.schemas.PreparedAgentAction;
+    const readinessAction = openApiSpec.components.schemas.AgentReadinessReadAction;
+    const readinessPrepared = openApiSpec.components.schemas.PreparedAgentReadinessReadAction;
+    expect(readiness.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(readiness.requestBody.content['application/json'].schema).toMatchObject({
+      additionalProperties: false,
+      required: ['delegationGrantId', 'resourceId'],
+    });
+    expect(publishAction.properties.kind).toEqual({ type: 'string', const: 'event.publish' });
+    expect(publishAction).not.toHaveProperty('oneOf');
+    expect(publishPrepared.properties).not.toHaveProperty('result');
+    expect(publishPrepared.properties).not.toHaveProperty('resultSha256');
+    expect(publishPrepared.properties.authorization.properties).not.toHaveProperty('allowed');
+    expect(readinessAction.properties.kind).toEqual({ type: 'string', const: 'readiness.read' });
+    expect(readinessPrepared.required).toEqual(expect.arrayContaining(['result', 'resultSha256']));
+    expect(readinessPrepared.properties.authorization.required).toContain('allowed');
+    expect(
+      openApiSpec.components.schemas.AgentReadinessReadResult.properties.blockerReasonCodes.items,
+    ).toMatchObject({ pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$' });
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

@@ -21,16 +21,23 @@ const prepareActionSchema = z
     resourceId: idSchema,
   })
   .strict();
+const readReadinessSchema = z
+  .object({
+    delegationGrantId: idSchema,
+    resourceId: idSchema,
+  })
+  .strict();
 const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{48}$/u) }).strict();
 const approvalParamsSchema = actionParamsSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
   .strict();
-const actionDigestSchema = z
-  .object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$/u) })
-  .strict();
+const actionDigestSchema = z.object({ actionDigest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
 const approvalSchema = actionDigestSchema
   .extend({
-    planSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+    planSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
   })
   .strict();
 const executionSchema = actionDigestSchema
@@ -45,7 +52,7 @@ export interface AgentActionRouteService {
     tenantId: string;
     agentPrincipalId: string;
     idempotencyKey: string;
-    kind: 'event.publish';
+    kind: 'event.publish' | 'readiness.read';
     delegationGrantId: string;
     resourceId: string;
   }): Promise<PreparedAgentAction>;
@@ -197,10 +204,30 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
     }
   });
 
+  app.post('/agent/readiness', { config: { agentAccess: true } }, async (request, reply) => {
+    const actor = request.principal!;
+    requireAgent(actor);
+    const key = idempotencyKey(request.headers);
+    const body = parseBody(readReadinessSchema, request.body);
+    try {
+      const prepared = await service.prepare({
+        tenantId: actor.tenantId,
+        agentPrincipalId: actor.id,
+        idempotencyKey: key,
+        kind: 'readiness.read',
+        ...body,
+      });
+      reply.header('Cache-Control', 'no-store');
+      return reply.status(201).send(prepared);
+    } catch (error) {
+      translateAgentActionError(key, error);
+    }
+  });
+
   app.get('/agent/actions/:actionId', { config: { agentAccess: true } }, async (request, reply) => {
     const actor = request.principal!;
     if (actor.type === 'agent') requireAgent(actor);
-    else requireHumanApprover(actor);
+    else requireHumanSponsor(actor);
     const { actionId } = parseBody(actionParamsSchema, request.params);
     const action =
       actor.type === 'agent'
@@ -217,9 +244,39 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
             })
           : undefined;
     if (!action) throw new NotFoundError('AgentAction', actionId);
+    if (action.action.kind !== 'event.publish') throw new NotFoundError('AgentAction', actionId);
     reply.header('Cache-Control', 'no-store');
     return action;
   });
+
+  app.get(
+    '/agent/readiness/:actionId',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      if (actor.type === 'agent') requireAgent(actor);
+      else requireHumanSponsor(actor);
+      const { actionId } = parseBody(actionParamsSchema, request.params);
+      const action =
+        actor.type === 'agent'
+          ? await service.getForAgent({
+              tenantId: actor.tenantId,
+              agentPrincipalId: actor.id,
+              actionId,
+            })
+          : actor.type === 'user'
+            ? await service.getForSponsor({
+                tenantId: actor.tenantId,
+                sponsorPrincipalId: actor.id,
+                actionId,
+              })
+            : undefined;
+      if (!action || action.action.kind !== 'readiness.read')
+        throw new NotFoundError('AgentReadiness', actionId);
+      reply.header('Cache-Control', 'no-store');
+      return action;
+    },
+  );
 
   app.post('/agent/actions/:actionId/approvals', async (request, reply) => {
     const actor = request.principal!;

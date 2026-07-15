@@ -1,0 +1,39 @@
+---
+title: API migration from 2026-07-28 to 2026-07-29
+description: Adopt direct, durable readiness evidence and the additive action-registry contract.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-29
+prerequisites:
+  - An integration using API version 2026-07-28
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-29` adds a direct, read-only `readiness.read` action. The action protocol remains `2026-07-22`, and immutable plan definitions remain at plan protocol `2026-07-27`. The action-registry contract advances independently to `2026-07-29`; consumers can retain the prior registry through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-27` and pin the new contract through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-29`.
+
+## Request readiness evidence
+
+Send `POST /v1/agent/readiness` with the event `resourceId`, a valid event-scoped `delegationGrantId`, and an idempotency key. The separate additive operation preserves the `2026-07-28` event-publication response schema byte for byte. Authorization requires all of the following:
+
+- an active agent principal with `readiness.read` capability;
+- an active delegation containing `readiness.read` and scope `event:<resourceId>`;
+- a live sponsor permission snapshot containing `events:read` and current sponsor `events.read` authority;
+- a tenant action policy for `readiness.read` whose action and risk decisions both allow the operation; and
+- the current event resource and policy versions.
+
+The server derives the tenant, agent, sponsor, action identity, target version, readiness snapshot and timestamps. On success, the response includes the prepared action, action digest, authorization evidence, dry-run evidence, required `result` and required `resultSha256`. Retrieve the same evidence through `GET /v1/agent/readiness/{actionId}`. The result contains `resourceId`, `resourceVersion`, `status`, `readinessSnapshotSha256`, `generatedAt`, `published`, `blockerReasonCodes` and `warningReasonCodes`.
+
+`readiness.read` is direct-only. It never accepts approval, never creates an execution record and cannot be included in a `2026-07-27` plan. Exact idempotent replay returns the identical action and result evidence while current authority remains valid; revocation, scope loss, sponsor permission or membership loss, policy denial, or resource/policy version drift fails closed. Reusing the key for different intent fails with a conflict. The operation does not mutate the event or any product state.
+
+## Persist and roll back result evidence
+
+Migration `0086_agent_action_results` adds nullable `agent_actions.result_json` and `agent_actions.result_sha256`. Every persisted readiness action requires both fields, canonical result validation and a matching SHA-256 digest. Non-readiness actions reject unexpected result evidence. Rollback refuses to remove the columns while any result evidence exists.
+
+Durable domain webhook envelopes remain at `2026-01-01`. Synthetic `test.ping.apiVersion`, SDK version headers and `X-Tixkit-API-Version` report `2026-07-29`.

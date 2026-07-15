@@ -3194,6 +3194,55 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('agentActions prepares the direct readiness.read adapter without an approval payload', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const prepared = await client.agentActions.readReadiness({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      idempotencyKey: 'agent-readiness-read-0001',
+    });
+    const assertReadinessResponseType = (value: typeof prepared) => {
+      void value.resultSha256;
+      void value.result.status;
+    };
+    void assertReadinessResponseType;
+    const assertPublishResponseType = async () => {
+      const publishPrepared = await client.agentActions.prepare({
+        kind: 'event.publish',
+        delegationGrantId: 'dlg_1',
+        resourceId: 'evt_1',
+        idempotencyKey: 'agent-publish-type-only-0001',
+      });
+      // @ts-expect-error event.publish responses cannot carry direct readiness results.
+      void publishPrepared.result;
+    };
+    void assertPublishResponseType;
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/readiness',
+      headers: { 'Idempotency-Key': 'agent-readiness-read-0001' },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+    });
+    const actionId = `act_${'a'.repeat(48)}`;
+    const inspected = await client.agentActions.getReadiness(actionId);
+    const assertInspectedReadinessType = (value: typeof inspected) => {
+      void value.resultSha256;
+    };
+    void assertInspectedReadinessType;
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/readiness/${actionId}`,
+    });
+  });
+
   it('agentActions binds planned approval intent to the plan digest', async () => {
     const fm = mockFetch(201, {});
     const client = new TixkitClient({
@@ -3280,7 +3329,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-07-28',
+        'X-Tixkit-Version': '2026-07-29',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

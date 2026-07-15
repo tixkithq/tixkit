@@ -94,6 +94,18 @@ describe('published agent schema parity', () => {
     }
   });
 
+  it('retains the reserved 2026-07-22 readiness payload boundary for old consumers', () => {
+    const reservedReadiness = {
+      ...action('readiness.read'),
+      payload: {
+        readinessSnapshotSha256: 'a'.repeat(64),
+        legacyOrchestratorEvidence: { status: 'observed' },
+      },
+    };
+    expect(validate(reservedReadiness), ajv.errorsText(validate.errors)).toBe(true);
+    expect(() => agentActionDigest(reservedReadiness)).not.toThrow();
+  });
+
   it('rejects semantic substitution in both schema and runtime for every action kind', () => {
     for (const kind of Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]) {
       const item = {

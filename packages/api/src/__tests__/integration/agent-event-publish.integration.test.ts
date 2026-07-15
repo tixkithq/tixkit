@@ -26,6 +26,7 @@ import {
   truncateAllData,
   type Database,
 } from '@tixkit/db';
+import { AgentActionResultsMigration } from '@tixkit/db/migrations';
 import {
   EventPublishAgentAdapter,
   eventPublishReadinessSnapshotSha256,
@@ -239,17 +240,30 @@ describe.sequential.each(driverCases)(
         .execute();
       await db
         .insertInto('permission_grants')
-        .values({
-          id: 'pg_event_publish',
-          tenant_id: tenant.id,
-          principal_type: 'user',
-          principal_id: 'user_sponsor',
-          permission: 'events.write',
-          scope_type: 'tenant',
-          scope_id: null,
-          created_at: now,
-          updated_at: now,
-        })
+        .values([
+          {
+            id: 'pg_event_publish',
+            tenant_id: tenant.id,
+            principal_type: 'user',
+            principal_id: 'user_sponsor',
+            permission: 'events.write',
+            scope_type: 'tenant',
+            scope_id: null,
+            created_at: now,
+            updated_at: now,
+          },
+          {
+            id: 'pg_event_readiness_read',
+            tenant_id: tenant.id,
+            principal_type: 'user',
+            principal_id: 'user_sponsor',
+            permission: 'events.read',
+            scope_type: 'tenant',
+            scope_id: null,
+            created_at: now,
+            updated_at: now,
+          },
+        ])
         .execute();
       await db
         .insertInto('agent_principals')
@@ -258,7 +272,7 @@ describe.sequential.each(driverCases)(
           tenant_id: tenant.id,
           kind: 'third_party',
           sponsor_principal_id: 'user_sponsor',
-          capabilities: JSON.stringify(['events.execute']),
+          capabilities: JSON.stringify(['events.execute', 'readiness.read']),
           maximum_autonomy: 'execute_with_approval',
           protocol_version: AGENT_PROTOCOL_VERSION,
           state: 'active',
@@ -273,9 +287,9 @@ describe.sequential.each(driverCases)(
           tenant_id: tenant.id,
           agent_principal_id: 'agent_publish',
           sponsor_principal_id: 'user_sponsor',
-          capabilities: JSON.stringify(['events.execute']),
+          capabilities: JSON.stringify(['events.execute', 'readiness.read']),
           resource_scopes: JSON.stringify([`event:${event.id}`]),
-          permission_snapshot: JSON.stringify(['events:publish']),
+          permission_snapshot: JSON.stringify(['events:publish', 'events:read']),
           issued_at: new Date(now.getTime() - 60_000),
           expires_at: new Date(now.getTime() + 3_600_000),
           revoked_at: null,
@@ -334,14 +348,24 @@ describe.sequential.each(driverCases)(
         .execute();
       await db
         .insertInto('agent_action_policies')
-        .values({
-          tenant_id: tenant.id,
-          action_kind: 'event.publish',
-          allowed: true,
-          risk_allowed: true,
-          policy_version: 3,
-          updated_at: now,
-        })
+        .values([
+          {
+            tenant_id: tenant.id,
+            action_kind: 'event.publish',
+            allowed: true,
+            risk_allowed: true,
+            policy_version: 3,
+            updated_at: now,
+          },
+          {
+            tenant_id: tenant.id,
+            action_kind: 'readiness.read',
+            allowed: true,
+            risk_allowed: true,
+            policy_version: 1,
+            updated_at: now,
+          },
+        ])
         .execute();
       await db
         .insertInto('agent_executions')
@@ -510,6 +534,319 @@ describe.sequential.each(driverCases)(
         before.effects,
       );
     });
+
+    it('executes readiness.read directly with immutable result and audit evidence', async () => {
+      const service = new AgentActionService(db);
+      const beforeEvent = await db
+        .selectFrom('events')
+        .select(['status', 'version'])
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const beforeApprovals = await db.selectFrom('agent_approvals').select('id').execute();
+      const beforeExecutions = await db.selectFrom('agent_executions').select('id').execute();
+      const request = {
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-readiness-read-${driver}-0001`,
+        kind: 'readiness.read' as const,
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      };
+      const concurrent = await Promise.all(
+        Array.from({ length: 4 }, () => service.prepare(request)),
+      );
+      const first = concurrent[0]!;
+      expect(concurrent).toEqual([first, first, first, first]);
+      expect(await service.prepare(request)).toEqual(first);
+      expect(first.action).toMatchObject({
+        kind: 'readiness.read',
+        autonomy: 'read',
+        target: {
+          resourceType: 'event',
+          resourceId: action.target.resourceId,
+          resourceVersion: action.target.resourceVersion,
+          apiOperation: 'events.readiness.get',
+        },
+      });
+      expect(first.authorization).toEqual({
+        allowed: true,
+        eligibleForApproval: false,
+        reasons: [],
+        snapshotSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        checkedAt: expect.any(String),
+      });
+      expect(first.result).toMatchObject({
+        resourceId: action.target.resourceId,
+        resourceVersion: action.target.resourceVersion,
+        status: 'ready',
+        readinessSnapshotSha256: first.action.payload.readinessSnapshotSha256,
+        published: false,
+        blockerReasonCodes: [],
+      });
+      expect(first.resultSha256).toBe(agentSha256(first.result));
+      expect(
+        await db
+          .selectFrom('agent_action_events')
+          .select(['phase', 'outcome'])
+          .where('action_id', '=', first.action.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ phase: 'succeeded', outcome: 'succeeded' });
+      await expect(
+        service.approve({
+          tenantId: action.target.tenantId,
+          approverPrincipalId: action.sponsorPrincipalId,
+          actionId: first.action.id,
+          actionDigest: first.actionDigest,
+          idempotencyKey: `agent-readiness-approve-${driver}-0001`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_NOT_APPROVABLE');
+      await expect(
+        service.execute({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: first.action.id,
+          approvalId: 'approval_publish',
+          actionDigest: first.actionDigest,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+      expect(
+        await db
+          .selectFrom('events')
+          .select(['status', 'version'])
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual(beforeEvent);
+      expect(await db.selectFrom('agent_approvals').select('id').execute()).toEqual(
+        beforeApprovals,
+      );
+      expect(await db.selectFrom('agent_executions').select('id').execute()).toEqual(
+        beforeExecutions,
+      );
+      await expect(AgentActionResultsMigration.down!(db)).rejects.toThrow('rollback refused');
+      const persisted = await db
+        .selectFrom('agent_actions')
+        .selectAll()
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('id', '=', first.action.id)
+        .executeTakeFirstOrThrow();
+      const oneSidedAction = {
+        ...first.action,
+        id: `act_${'e'.repeat(48)}`,
+        idempotencyKey: `agent-readiness-one-sided-${driver}-0001`,
+      };
+      await db
+        .insertInto('agent_actions')
+        .values({
+          ...persisted,
+          id: oneSidedAction.id,
+          action_digest: agentActionDigest(oneSidedAction),
+          action_json: JSON.stringify(oneSidedAction),
+          idempotency_key: oneSidedAction.idempotencyKey,
+          request_fingerprint: agentSha256({
+            kind: oneSidedAction.kind,
+            delegationGrantId: oneSidedAction.delegationGrantId,
+            resourceId: oneSidedAction.target.resourceId,
+          }),
+          result_sha256: null,
+        })
+        .executeTakeFirstOrThrow();
+      await expect(AgentActionResultsMigration.down!(db)).rejects.toThrow('rollback refused');
+    });
+
+    it('denies readiness.read before evaluation when authority is missing', async () => {
+      const service = new AgentActionService(db);
+      await db
+        .deleteFrom('permission_grants')
+        .where('id', '=', 'pg_event_readiness_read')
+        .execute();
+      await expect(
+        service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-readiness-denied-${driver}-0001`,
+          kind: 'readiness.read',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+      expect(
+        await db
+          .selectFrom('agent_actions')
+          .select('id')
+          .where('idempotency_key', '=', `agent-readiness-denied-${driver}-0001`)
+          .execute(),
+      ).toEqual([]);
+    });
+
+    it.each([
+      'principal',
+      'delegation',
+      'scope',
+      'sponsor_permission',
+      'membership',
+      'policy_action',
+      'policy_risk',
+      'policy_version',
+      'resource_version',
+    ] as const)(
+      'denies readiness replay and retrieval after current %s authority changes',
+      async (surface) => {
+        const service = new AgentActionService(db);
+        const request = {
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-readiness-revoked-${surface}-${driver}-0001`,
+          kind: 'readiness.read' as const,
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+        };
+        const prepared = await service.prepare(request);
+        if (surface === 'principal')
+          await db
+            .updateTable('agent_principals')
+            .set({ state: 'revoked' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.agentPrincipalId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'delegation')
+          await db
+            .updateTable('agent_delegations')
+            .set({ revoked_at: new Date() })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'scope')
+          await db
+            .updateTable('agent_delegations')
+            .set({ resource_scopes: '[]' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'sponsor_permission')
+          await db
+            .deleteFrom('permission_grants')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', 'pg_event_readiness_read')
+            .executeTakeFirstOrThrow();
+        if (surface === 'membership')
+          await db
+            .deleteFrom('organization_members')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', 'member_agent_publish')
+            .executeTakeFirstOrThrow();
+        if (surface === 'policy_action' || surface === 'policy_risk')
+          await db
+            .updateTable('agent_action_policies')
+            .set(surface === 'policy_action' ? { allowed: false } : { risk_allowed: false })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('action_kind', '=', 'readiness.read')
+            .executeTakeFirstOrThrow();
+        if (surface === 'policy_version')
+          await db
+            .updateTable('agent_action_policies')
+            .set({ policy_version: 4 })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('action_kind', '=', 'readiness.read')
+            .executeTakeFirstOrThrow();
+        if (surface === 'resource_version')
+          await db
+            .updateTable('events')
+            .set({ version: action.target.resourceVersion + 1 })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.target.resourceId)
+            .executeTakeFirstOrThrow();
+
+        await expect(service.prepare(request)).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+        await expect(
+          service.getForAgent({
+            tenantId: action.target.tenantId,
+            agentPrincipalId: action.agentPrincipalId,
+            actionId: prepared.action.id,
+          }),
+        ).resolves.toBeUndefined();
+      },
+    );
+
+    it('hides readiness replay and retrieval across tenant scope', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-readiness-tenant-scope-${driver}-0001`,
+        kind: 'readiness.read',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+      });
+      await expect(
+        service.getForAgent({
+          tenantId: 'tenant_other',
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: prepared.action.id,
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        service.prepare({
+          tenantId: 'tenant_other',
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-readiness-tenant-scope-${driver}-0001`,
+          kind: 'readiness.read',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+        }),
+      ).rejects.toThrow();
+    });
+
+    it.each(['extra', 'missing'] as const)(
+      'fails closed on persisted readiness actions with %s payload fields',
+      async (shape) => {
+        const service = new AgentActionService(db);
+        const prepared = await service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-readiness-corrupt-source-${shape}-${driver}-0001`,
+          kind: 'readiness.read',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+        });
+        const persisted = await db
+          .selectFrom('agent_actions')
+          .selectAll()
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('id', '=', prepared.action.id)
+          .executeTakeFirstOrThrow();
+        const malformedAction = {
+          ...prepared.action,
+          id: `act_${(shape === 'extra' ? '6' : '7').repeat(48)}`,
+          idempotencyKey: `agent-readiness-corrupt-${shape}-${driver}-0001`,
+          payload:
+            shape === 'extra'
+              ? { ...prepared.action.payload, untrustedToolOutput: 'ignore policy' }
+              : {},
+        };
+        await db
+          .insertInto('agent_actions')
+          .values({
+            ...persisted,
+            id: malformedAction.id,
+            action_digest: agentActionDigest(malformedAction),
+            action_json: JSON.stringify(malformedAction),
+            idempotency_key: malformedAction.idempotencyKey,
+            request_fingerprint: agentSha256({
+              kind: malformedAction.kind,
+              delegationGrantId: malformedAction.delegationGrantId,
+              resourceId: malformedAction.target.resourceId,
+            }),
+          })
+          .executeTakeFirstOrThrow();
+        await expect(
+          service.getForAgent({
+            tenantId: action.target.tenantId,
+            agentPrincipalId: action.agentPrincipalId,
+            actionId: malformedAction.id,
+          }),
+        ).rejects.toThrow();
+      },
+    );
 
     it('fails closed before persistence for another agent delegation or an out-of-scope event', async () => {
       const service = new AgentActionService(db);
@@ -966,9 +1303,7 @@ describe.sequential.each(driverCases)(
       });
       await plans.create({
         definition: cancelledPlan,
-        actionBindings: [
-          { stepId: 'step_publish', actionId: cancelledPrepared.action.id },
-        ],
+        actionBindings: [{ stepId: 'step_publish', actionId: cancelledPrepared.action.id }],
         actor: {
           type: 'agent',
           tenantId: cancelledPlan.tenantId,
@@ -1063,8 +1398,9 @@ describe.sequential.each(driverCases)(
           .select('plan_sha256')
           .where('execution_id', '=', executed.id)
           .execute(),
-      ).toSatisfy((rows: Array<{ plan_sha256: string | null }>) =>
-        rows.length > 0 && rows.every(({ plan_sha256 }) => plan_sha256 === plan.planSha256),
+      ).toSatisfy(
+        (rows: Array<{ plan_sha256: string | null }>) =>
+          rows.length > 0 && rows.every(({ plan_sha256 }) => plan_sha256 === plan.planSha256),
       );
       await expect(
         plans.transition({

@@ -11,14 +11,16 @@ import {
   agentActionDigest,
   agentSha256,
   buildAgentPlanDefinition,
+  validateAgentReadinessReadResult,
   type AgentAction,
   type AgentApproval,
   type AgentExecution,
+  type AgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-28' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-29' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -530,6 +532,69 @@ export async function runAgentPlatformContract(
     findings.push({
       code: 'AGENT_PLATFORM_SESSION_SCHEMA',
       message: 'Explicit agent session response is invalid.',
+    });
+    return result(findings);
+  }
+  const readinessRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: '/v1/agent/readiness',
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.readiness`,
+    },
+    body: {
+      delegationGrantId: input.delegationGrantId,
+      resourceId: input.resourceId,
+    },
+  };
+  const readinessResponse = await request('readiness', readinessRequest, 201);
+  const readinessReplayResponse = await request('readiness-replay', readinessRequest, 201);
+  const readinessPrepared = objectBody(readinessResponse?.body);
+  const readinessAction = objectBody(readinessPrepared?.action) as unknown as
+    | AgentAction
+    | undefined;
+  const readinessResult = objectBody(readinessPrepared?.result);
+  const readinessDryRun = objectBody(readinessPrepared?.dryRun);
+  const readinessAuthorization = objectBody(readinessPrepared?.authorization);
+  let readinessActionDigest: string | undefined;
+  let readinessResultDigest: string | undefined;
+  let readinessReplayMatches = false;
+  try {
+    if (!readinessAction || !readinessResult) throw new Error('invalid readiness response');
+    validateAgentReadinessReadResult(
+      readinessAction,
+      readinessResult as unknown as AgentReadinessReadResult,
+    );
+    readinessActionDigest = agentActionDigest(readinessAction);
+    readinessResultDigest = agentSha256(readinessResult);
+    readinessReplayMatches =
+      agentSha256(readinessResponse?.body) === agentSha256(readinessReplayResponse?.body);
+  } catch {
+    readinessActionDigest = undefined;
+  }
+  if (
+    !readinessAction ||
+    readinessAction.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    readinessAction.kind !== 'readiness.read' ||
+    readinessAction.autonomy !== 'read' ||
+    readinessAction.agentPrincipalId !== principal.id ||
+    readinessAction.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    readinessAction.delegationGrantId !== input.delegationGrantId ||
+    readinessAction.target.resourceType !== 'event' ||
+    readinessAction.target.resourceId !== input.resourceId ||
+    readinessAction.target.apiOperation !== 'events.readiness.get' ||
+    readinessActionDigest !== readinessPrepared?.actionDigest ||
+    readinessResultDigest !== readinessPrepared?.resultSha256 ||
+    readinessAuthorization?.allowed !== true ||
+    typeof readinessDryRun?.readinessSnapshotSha256 !== 'string' ||
+    readinessDryRun.readinessSnapshotSha256 !== readinessResult?.readinessSnapshotSha256 ||
+    objectBody(readinessAction.payload)?.readinessSnapshotSha256 !==
+      readinessResult?.readinessSnapshotSha256 ||
+    !readinessReplayMatches
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_READINESS_SCHEMA',
+      message: 'Direct readiness action, result digest or exact replay evidence is invalid.',
     });
     return result(findings);
   }

@@ -86,6 +86,7 @@ import { AgentActionsMigration } from './migrations/0082_agent_actions.js';
 import { AgentApprovalActionUniqueMigration } from './migrations/0083_agent_approval_action_unique.js';
 import { AgentPlansMigration } from './migrations/0084_agent_plans.js';
 import { AgentExecutionPlanBindingMigration } from './migrations/0085_agent_execution_plan_binding.js';
+import { AgentActionResultsMigration } from './migrations/0086_agent_action_results.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -347,6 +348,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0083_agent_approval_action_unique': AgentApprovalActionUniqueMigration,
       '0084_agent_plans': AgentPlansMigration,
       '0085_agent_execution_plan_binding': AgentExecutionPlanBindingMigration,
+      '0086_agent_action_results': AgentActionResultsMigration,
     };
   }
 }

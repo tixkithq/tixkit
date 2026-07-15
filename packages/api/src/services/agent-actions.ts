@@ -13,6 +13,8 @@ import {
   type AgentExecution,
   type AgentExecutionEvidence,
   type AgentPrincipal,
+  type AgentReadinessReadResult,
+  validateAgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 import { AgentExecutionRepository, sql, type Database } from '@tixkit/db';
 import type { Selectable, Transaction } from 'kysely';
@@ -28,22 +30,52 @@ type Executor = Database | Transaction<import('@tixkit/db').DB>;
 const ACTION_TTL_MILLISECONDS = 15 * 60 * 1000;
 const APPROVAL_TTL_MILLISECONDS = 5 * 60 * 1000;
 
-export interface PreparedAgentAction {
-  action: AgentAction;
+type EventPublishAgentAction = AgentAction & {
+  kind: 'event.publish';
+  autonomy: 'execute_with_approval';
+  target: AgentAction['target'] & { resourceType: 'event'; apiOperation: 'events.publish' };
+};
+
+type ReadinessReadAgentAction = AgentAction & {
+  kind: 'readiness.read';
+  autonomy: 'read';
+  target: AgentAction['target'] & { resourceType: 'event'; apiOperation: 'events.readiness.get' };
+};
+
+interface PreparedAgentActionBase {
   actionDigest: string;
   expiresAt: string;
-  authorization: {
-    eligibleForApproval: boolean;
-    reasons: readonly string[];
-    snapshotSha256: string;
-    checkedAt: string;
-  };
   dryRun: {
     launchable: boolean;
     readinessSnapshotSha256: string;
     blockingReasonCodes: readonly string[];
   };
 }
+
+export interface PreparedAgentEventPublishAction extends PreparedAgentActionBase {
+  action: EventPublishAgentAction;
+  authorization: {
+    eligibleForApproval: boolean;
+    reasons: readonly string[];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+}
+
+export interface PreparedAgentReadinessAction extends PreparedAgentActionBase {
+  action: ReadinessReadAgentAction;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: readonly [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  result: AgentReadinessReadResult;
+  resultSha256: string;
+}
+
+export type PreparedAgentAction = PreparedAgentEventPublishAction | PreparedAgentReadinessAction;
 
 function parseStrings(value: string, field: string): string[] {
   const parsed: unknown = JSON.parse(value);
@@ -136,12 +168,23 @@ function stableId(
 }
 
 function requestFingerprint(input: {
-  kind: 'event.publish';
+  kind: 'event.publish' | 'readiness.read';
   delegationGrantId: string;
   resourceId: string;
 }): string {
   return agentSha256(input);
 }
+
+interface PrepareAgentActionInput {
+  tenantId: string;
+  agentPrincipalId: string;
+  idempotencyKey: string;
+  delegationGrantId: string;
+  resourceId: string;
+}
+
+type PrepareEventPublishActionInput = PrepareAgentActionInput & { kind: 'event.publish' };
+type PrepareReadinessActionInput = PrepareAgentActionInput & { kind: 'readiness.read' };
 
 function toPrincipal(row: {
   id: string;
@@ -205,14 +248,11 @@ export class AgentActionService {
     private readonly eventPublishCheckpoints: EventPublishAgentAdapterCheckpoints = {},
   ) {}
 
-  async prepare(input: {
-    tenantId: string;
-    agentPrincipalId: string;
-    idempotencyKey: string;
-    kind: 'event.publish';
-    delegationGrantId: string;
-    resourceId: string;
-  }): Promise<PreparedAgentAction> {
+  async prepare(input: PrepareEventPublishActionInput): Promise<PreparedAgentEventPublishAction>;
+  async prepare(input: PrepareReadinessActionInput): Promise<PreparedAgentReadinessAction>;
+  async prepare(
+    input: PrepareEventPublishActionInput | PrepareReadinessActionInput,
+  ): Promise<PreparedAgentAction> {
     const fingerprint = requestFingerprint(input);
     return executeAgentActionTransaction(this.db, async (tx) => {
       await tx
@@ -231,7 +271,13 @@ export class AgentActionService {
       if (replay) {
         if (replay.request_fingerprint !== fingerprint)
           throw new Error('AGENT_ACTION_IDEMPOTENCY_CONFLICT');
-        return this.fromRow(replay);
+        const prepared = this.fromRow(replay);
+        if (
+          prepared.action.kind === 'readiness.read' &&
+          !(await this.isCurrentlyReadable(tx, prepared, await databaseNow(tx)))
+        )
+          throw new Error('AGENT_ACTION_RESOURCE_DENIED');
+        return prepared;
       }
 
       const principalRow = await tx
@@ -243,10 +289,12 @@ export class AgentActionService {
         .executeTakeFirst();
       if (!principalRow) throw new Error('AGENT_ACTION_PRINCIPAL_DENIED');
       const principal = toPrincipal(principalRow);
+      const requiredCapability =
+        input.kind === 'event.publish' ? 'events.execute' : 'readiness.read';
       if (
         principal.state !== 'active' ||
         principal.protocolVersion !== AGENT_PROTOCOL_VERSION ||
-        !principal.capabilities.includes('events.execute')
+        !principal.capabilities.includes(requiredCapability)
       )
         throw new Error('AGENT_ACTION_PRINCIPAL_DENIED');
       const delegationRow = await tx
@@ -262,7 +310,7 @@ export class AgentActionService {
       if (
         delegation.agentPrincipalId !== principal.id ||
         delegation.sponsorPrincipalId !== principal.sponsorPrincipalId ||
-        !delegation.capabilities.includes('events.execute') ||
+        !delegation.capabilities.includes(requiredCapability) ||
         !delegation.resourceScopes.includes(`event:${input.resourceId}`) ||
         delegation.revokedAt ||
         new Date(delegation.issuedAt).getTime() > now.getTime() ||
@@ -299,7 +347,7 @@ export class AgentActionService {
         .where('tenant_id', '=', input.tenantId)
         .where('principal_type', '=', 'user')
         .where('principal_id', '=', principal.sponsorPrincipalId)
-        .where('permission', '=', 'events.write')
+        .where('permission', '=', input.kind === 'event.publish' ? 'events.write' : 'events.read')
         .where('scope_type', '=', 'tenant')
         .where('scope_id', 'is', null)
         .forUpdate()
@@ -314,6 +362,8 @@ export class AgentActionService {
         .forUpdate()
         .executeTakeFirst();
       if (!policy) throw new Error('AGENT_ACTION_POLICY_UNAVAILABLE');
+      if (input.kind === 'readiness.read' && (!policy.allowed || !policy.risk_allowed))
+        throw new Error('AGENT_ACTION_RESOURCE_DENIED');
       const readiness = await new ReadinessService(
         tx as Database,
         resolvePaymentMode(),
@@ -322,7 +372,7 @@ export class AgentActionService {
         organizationId: event.organization_id,
         brandId: event.brand_id,
         eventId: event.id,
-        permissions: new Set(['events.write']),
+        permissions: new Set([input.kind === 'event.publish' ? 'events.write' : 'events.read']),
       });
       const readinessSnapshotSha256 = eventPublishReadinessSnapshotSha256(readiness);
       const action: AgentAction = {
@@ -332,13 +382,13 @@ export class AgentActionService {
         sponsorPrincipalId: principal.sponsorPrincipalId,
         delegationGrantId: input.delegationGrantId,
         kind: input.kind,
-        autonomy: 'execute_with_approval',
+        autonomy: input.kind === 'event.publish' ? 'execute_with_approval' : 'read',
         target: {
           tenantId: input.tenantId,
           resourceType: 'event',
           resourceId: event.id,
           resourceVersion: safeInteger(event.version, 'event version'),
-          apiOperation: 'events.publish',
+          apiOperation: input.kind === 'event.publish' ? 'events.publish' : 'events.readiness.get',
         },
         payload: { readinessSnapshotSha256 },
         idempotencyKey: input.idempotencyKey,
@@ -346,22 +396,33 @@ export class AgentActionService {
         preparedAt: now.toISOString(),
       };
       const actionDigest = agentActionDigest(action);
-      const sponsorPermissions = ['events:publish'];
+      const sponsorPermissions = [
+        input.kind === 'event.publish' ? 'events:publish' : 'events:read',
+      ];
       const decision = authorizeAgentAction({
         principal,
         delegation,
         action,
         actionDigest,
         sponsorPermissions,
-        tenantAllowedActions: policy.allowed && policy.risk_allowed ? ['event.publish'] : [],
+        tenantAllowedActions: policy.allowed && policy.risk_allowed ? [input.kind] : [],
         currentResourceVersion: action.target.resourceVersion,
         currentPolicyVersion: action.expectedPolicyVersion,
         now: now.toISOString(),
       });
-      const authorizationReasons = [
-        ...new Set([...decision.reasons, ...(readiness.launchable ? [] : ['event_not_ready'])]),
-      ];
+      const authorizationReasons =
+        input.kind === 'event.publish'
+          ? [
+              ...new Set([
+                ...decision.reasons,
+                ...(readiness.launchable ? [] : ['event_not_ready']),
+              ]),
+            ]
+          : [...decision.reasons];
+      if (input.kind === 'readiness.read' && !decision.allowed)
+        throw new Error('AGENT_ACTION_RESOURCE_DENIED');
       const eligibleForApproval =
+        input.kind === 'event.publish' &&
         readiness.launchable &&
         decision.reasons.length === 1 &&
         decision.reasons[0] === 'approval_required';
@@ -388,6 +449,25 @@ export class AgentActionService {
           ...new Set(readiness.requiredBlockers.flatMap((step) => step.reasonCodes)),
         ],
       };
+      const result: AgentReadinessReadResult | undefined =
+        input.kind === 'readiness.read'
+          ? {
+              resourceId: event.id,
+              resourceVersion: action.target.resourceVersion,
+              status: readiness.launchable ? 'ready' : 'blocked',
+              readinessSnapshotSha256,
+              generatedAt: readiness.generatedAt,
+              published: readiness.published,
+              blockerReasonCodes: [
+                ...new Set(readiness.requiredBlockers.flatMap((step) => step.reasonCodes)),
+              ],
+              warningReasonCodes: [
+                ...new Set(readiness.recommendedWarnings.flatMap((step) => step.reasonCodes)),
+              ],
+            }
+          : undefined;
+      if (result) validateAgentReadinessReadResult(action, result);
+      const resultSha256 = result ? agentSha256(result) : undefined;
       await tx
         .insertInto('agent_actions')
         .values({
@@ -408,6 +488,8 @@ export class AgentActionService {
           authorization_snapshot_sha256: authorizationSnapshotSha256,
           authorization_reasons: JSON.stringify(authorizationReasons),
           dry_run_json: canonicalAgentJson(dryRun),
+          result_json: result ? canonicalAgentJson(result) : null,
+          result_sha256: resultSha256 ?? null,
           eligible_for_approval: eligibleForApproval,
           prepared_at: now,
           expires_at: expiresAt,
@@ -424,27 +506,49 @@ export class AgentActionService {
           sponsor_principal_id: action.sponsorPrincipalId,
           actor_type: 'agent',
           actor_principal_id: action.agentPrincipalId,
-          phase: 'prepared',
+          phase: input.kind === 'readiness.read' ? 'succeeded' : 'prepared',
           approval_id: null,
           execution_id: null,
           idempotency_key: input.idempotencyKey,
           request_fingerprint: fingerprint,
           authorization_sha256: authorizationSnapshotSha256,
-          outcome: eligibleForApproval ? 'approval_required' : 'denied',
+          outcome:
+            input.kind === 'readiness.read'
+              ? 'succeeded'
+              : eligibleForApproval
+                ? 'approval_required'
+                : 'denied',
           occurred_at: now,
         })
         .execute();
-      return {
-        action,
+      const common = {
         actionDigest,
         expiresAt: expiresAt.toISOString(),
+        dryRun,
+      };
+      if (result && resultSha256)
+        return {
+          ...common,
+          action: action as ReadinessReadAgentAction,
+          authorization: {
+            allowed: true as const,
+            eligibleForApproval: false as const,
+            reasons: [] as const,
+            snapshotSha256: authorizationSnapshotSha256,
+            checkedAt: now.toISOString(),
+          },
+          result,
+          resultSha256,
+        };
+      return {
+        ...common,
+        action: action as EventPublishAgentAction,
         authorization: {
           eligibleForApproval,
           reasons: authorizationReasons,
           snapshotSha256: authorizationSnapshotSha256,
           checkedAt: now.toISOString(),
         },
-        dryRun,
       };
     });
   }
@@ -454,14 +558,31 @@ export class AgentActionService {
     agentPrincipalId: string;
     actionId: string;
   }): Promise<PreparedAgentAction | undefined> {
-    const row = await this.db
-      .selectFrom('agent_actions')
-      .selectAll()
-      .where('tenant_id', '=', input.tenantId)
-      .where('agent_principal_id', '=', input.agentPrincipalId)
-      .where('id', '=', input.actionId)
-      .executeTakeFirst();
-    return row ? this.fromRow(row) : undefined;
+    return executeAgentActionTransaction(this.db, async (tx) => {
+      const tenant = await tx
+        .selectFrom('tenants')
+        .select('id')
+        .where('id', '=', input.tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!tenant) return undefined;
+      const row = await tx
+        .selectFrom('agent_actions')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('agent_principal_id', '=', input.agentPrincipalId)
+        .where('id', '=', input.actionId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!row) return undefined;
+      const prepared = this.fromRow(row);
+      if (
+        prepared.action.kind === 'readiness.read' &&
+        !(await this.isCurrentlyReadable(tx, prepared, await databaseNow(tx)))
+      )
+        return undefined;
+      return prepared;
+    });
   }
 
   async getExecutionForAgent(input: {
@@ -487,22 +608,36 @@ export class AgentActionService {
     sponsorPrincipalId: string;
     actionId: string;
   }): Promise<PreparedAgentAction | undefined> {
-    const row = await this.db
-      .selectFrom('agent_actions')
-      .selectAll()
-      .where('tenant_id', '=', input.tenantId)
-      .where('sponsor_principal_id', '=', input.sponsorPrincipalId)
-      .where('id', '=', input.actionId)
-      .executeTakeFirst();
-    if (!row) return undefined;
-    const action = this.fromRow(row);
-    const authorized = await this.hasLiveSponsorAuthority(
-      this.db,
-      input.tenantId,
-      input.sponsorPrincipalId,
-      action.action.target.resourceId,
-    );
-    return authorized ? action : undefined;
+    return executeAgentActionTransaction(this.db, async (tx) => {
+      const tenant = await tx
+        .selectFrom('tenants')
+        .select('id')
+        .where('id', '=', input.tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!tenant) return undefined;
+      const row = await tx
+        .selectFrom('agent_actions')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('sponsor_principal_id', '=', input.sponsorPrincipalId)
+        .where('id', '=', input.actionId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!row) return undefined;
+      const action = this.fromRow(row);
+      const authorized =
+        action.action.kind === 'readiness.read'
+          ? await this.isCurrentlyReadable(tx, action, await databaseNow(tx))
+          : await this.hasLiveSponsorAuthority(
+              tx,
+              input.tenantId,
+              input.sponsorPrincipalId,
+              action.action.target.resourceId,
+              'events.write',
+            );
+      return authorized ? action : undefined;
+    });
   }
 
   async approve(input: {
@@ -535,6 +670,7 @@ export class AgentActionService {
         .executeTakeFirst();
       if (!row) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
       const prepared = this.fromRow(row);
+      if (prepared.action.kind !== 'event.publish') throw new Error('AGENT_ACTION_NOT_APPROVABLE');
       if (prepared.actionDigest !== input.actionDigest)
         throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
       const now = await databaseNow(tx);
@@ -617,10 +753,12 @@ export class AgentActionService {
                 !Array.isArray(step) &&
                 typeof (step as { stepId?: unknown }).stepId === 'string' &&
                 typeof (step as { status?: unknown }).status === 'string'
-                  ? [[
-                      (step as { stepId: string }).stepId,
-                      (step as { status: string }).status,
-                    ] as const]
+                  ? [
+                      [
+                        (step as { stepId: string }).stepId,
+                        (step as { status: string }).status,
+                      ] as const,
+                    ]
                   : [],
               ),
             );
@@ -894,6 +1032,8 @@ export class AgentActionService {
       actionId: input.actionId,
     });
     if (!prepared) throw new Error('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+    if (prepared.action.kind !== 'event.publish')
+      throw new Error('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
     if (prepared.actionDigest !== input.actionDigest)
       throw new Error('AGENT_ACTION_EXECUTION_DIGEST_MISMATCH');
     const approvalRow = await this.db
@@ -1021,6 +1161,7 @@ export class AgentActionService {
     tenantId: string,
     sponsorPrincipalId: string,
     eventId: string,
+    requiredPermission: 'events.read' | 'events.write',
   ): Promise<boolean> {
     const event = await db
       .selectFrom('events')
@@ -1029,34 +1170,89 @@ export class AgentActionService {
       .where('id', '=', eventId)
       .executeTakeFirst();
     if (!event) return false;
-    const [sponsor, membership, permission] = await Promise.all([
-      db
-        .selectFrom('user_profiles')
-        .select('id')
-        .where('tenant_id', '=', tenantId)
-        .where('id', '=', sponsorPrincipalId)
-        .where('status', '=', 'active')
-        .executeTakeFirst(),
-      db
-        .selectFrom('organization_members')
-        .select('id')
-        .where('tenant_id', '=', tenantId)
-        .where('organization_id', '=', event.organization_id)
-        .where('user_id', '=', sponsorPrincipalId)
-        .where('accepted_at', 'is not', null)
-        .executeTakeFirst(),
-      db
-        .selectFrom('permission_grants')
-        .select('id')
-        .where('tenant_id', '=', tenantId)
-        .where('principal_type', '=', 'user')
-        .where('principal_id', '=', sponsorPrincipalId)
-        .where('permission', '=', 'events.write')
-        .where('scope_type', '=', 'tenant')
-        .where('scope_id', 'is', null)
-        .executeTakeFirst(),
-    ]);
-    return Boolean(sponsor && membership && permission);
+    const sponsor = await db
+      .selectFrom('user_profiles')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', sponsorPrincipalId)
+      .where('status', '=', 'active')
+      .executeTakeFirst();
+    const membership = await db
+      .selectFrom('organization_members')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .where('organization_id', '=', event.organization_id)
+      .where('user_id', '=', sponsorPrincipalId)
+      .where('accepted_at', 'is not', null)
+      .executeTakeFirst();
+    const permissionGrant = await db
+      .selectFrom('permission_grants')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .where('principal_type', '=', 'user')
+      .where('principal_id', '=', sponsorPrincipalId)
+      .where('permission', '=', requiredPermission)
+      .where('scope_type', '=', 'tenant')
+      .where('scope_id', 'is', null)
+      .executeTakeFirst();
+    return Boolean(sponsor && membership && permissionGrant);
+  }
+
+  private async isCurrentlyReadable(
+    tx: Transaction<import('@tixkit/db').DB>,
+    prepared: PreparedAgentAction,
+    now: Date,
+  ): Promise<boolean> {
+    const { action } = prepared;
+    if (action.kind !== 'readiness.read') return false;
+    const principalRow = await tx
+      .selectFrom('agent_principals')
+      .selectAll()
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('id', '=', action.agentPrincipalId)
+      .forUpdate()
+      .executeTakeFirst();
+    const delegationRow = await tx
+      .selectFrom('agent_delegations')
+      .selectAll()
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('id', '=', action.delegationGrantId)
+      .forUpdate()
+      .executeTakeFirst();
+    const event = await tx
+      .selectFrom('events')
+      .select(['id', 'version'])
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('id', '=', action.target.resourceId)
+      .forUpdate()
+      .executeTakeFirst();
+    const policy = await tx
+      .selectFrom('agent_action_policies')
+      .selectAll()
+      .where('tenant_id', '=', action.target.tenantId)
+      .where('action_kind', '=', action.kind)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!principalRow || !delegationRow || !event || !policy) return false;
+    const sponsorAuthorized = await this.hasLiveSponsorAuthority(
+      tx,
+      action.target.tenantId,
+      action.sponsorPrincipalId,
+      action.target.resourceId,
+      'events.read',
+    );
+    const decision = authorizeAgentAction({
+      principal: toPrincipal(principalRow),
+      delegation: toDelegation(delegationRow),
+      action,
+      actionDigest: prepared.actionDigest,
+      sponsorPermissions: sponsorAuthorized ? ['events:read'] : [],
+      tenantAllowedActions: policy.allowed && policy.risk_allowed ? [action.kind] : [],
+      currentResourceVersion: safeInteger(event.version, 'event version'),
+      currentPolicyVersion: safeInteger(policy.policy_version, 'agent policy version'),
+      now: now.toISOString(),
+    });
+    return decision.allowed;
   }
 
   private async assertCurrentlyApprovable(
@@ -1068,6 +1264,7 @@ export class AgentActionService {
     const { action } = prepared;
     if (
       !prepared.authorization.eligibleForApproval ||
+      action.kind !== 'event.publish' ||
       action.sponsorPrincipalId !== approverPrincipalId ||
       new Date(prepared.expiresAt).getTime() <= now.getTime()
     )
@@ -1237,17 +1434,52 @@ export class AgentActionService {
       dryRun.blockingReasonCodes.some((reason) => typeof reason !== 'string')
     )
       throw new Error('persisted agent action dry run is invalid');
-    return {
-      action,
+    let result: AgentReadinessReadResult | undefined;
+    let resultSha256: string | undefined;
+    if (action.kind === 'readiness.read') {
+      if (!row.result_json || !row.result_sha256)
+        throw new Error('persisted agent readiness result is unavailable');
+      const parsedResult: unknown = JSON.parse(row.result_json);
+      if (!parsedResult || typeof parsedResult !== 'object' || Array.isArray(parsedResult))
+        throw new Error('persisted agent readiness result is invalid');
+      result = parsedResult as AgentReadinessReadResult;
+      validateAgentReadinessReadResult(action, result);
+      if (agentSha256(result) !== row.result_sha256)
+        throw new Error('persisted agent readiness result digest is invalid');
+      resultSha256 = row.result_sha256;
+      if (reasons.length !== 0 || Boolean(row.eligible_for_approval))
+        throw new Error('persisted agent readiness authorization is invalid');
+    } else if (row.result_json || row.result_sha256) {
+      throw new Error('persisted event publication action contains an unexpected direct result');
+    }
+    const common = {
       actionDigest: row.action_digest,
       expiresAt: iso(row.expires_at),
+      dryRun: dryRun as PreparedAgentAction['dryRun'],
+    };
+    if (result && resultSha256)
+      return {
+        ...common,
+        action: action as ReadinessReadAgentAction,
+        authorization: {
+          allowed: true,
+          eligibleForApproval: false,
+          reasons: [],
+          snapshotSha256: row.authorization_snapshot_sha256,
+          checkedAt: iso(row.prepared_at),
+        },
+        result,
+        resultSha256,
+      };
+    return {
+      ...common,
+      action: action as EventPublishAgentAction,
       authorization: {
         eligibleForApproval: Boolean(row.eligible_for_approval),
         reasons,
         snapshotSha256: row.authorization_snapshot_sha256,
         checkedAt: iso(row.prepared_at),
       },
-      dryRun: dryRun as PreparedAgentAction['dryRun'],
     };
   }
 }
