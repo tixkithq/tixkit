@@ -1,0 +1,114 @@
+{
+  "from": "2026-08-02",
+  "to": "2026-08-03",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 17
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "schema-anyOf-widened",
+      "path": "POST /agent-principals.responses.201.content.application/json.schema",
+      "message": "Every prior anyOf branch remains accepted and new alternatives were added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-anyOf-widened",
+      "path": "GET /agent-principals/{id}.responses.200.content.application/json.schema",
+      "message": "Every prior anyOf branch remains accepted and new alternatives were added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-anyOf-widened",
+      "path": "GET /agent/session.responses.200.content.application/json.schema",
+      "message": "Every prior anyOf branch remains accepted and new alternatives were added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-anyOf-widened",
+      "path": "POST /agent-delegations.responses.201.content.application/json.schema",
+      "message": "Every prior anyOf branch remains accepted and new alternatives were added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/campaign-preparations",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/campaign-preparations/{actionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-anyOf-widened",
+      "path": "components.schemas.AgentPrincipalResponse",
+      "message": "Every prior anyOf branch remains accepted and new alternatives were added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-anyOf-widened",
+      "path": "components.schemas.AgentSessionResponse",
+      "message": "Every prior anyOf branch remains accepted and new alternatives were added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-anyOf-widened",
+      "path": "components.schemas.AgentDelegationResponse",
+      "message": "Every prior anyOf branch remains accepted and new alternatives were added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPrincipal20260803",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentSession20260803",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentCampaignTemplateVersion",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentCampaignPreparePayload",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentCampaignPrepareAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentCampaignPrepareResult",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PreparedAgentCampaignPrepareAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentDelegation20260803",
+      "message": "A named schema was added."
+    }
+  ]
+}
