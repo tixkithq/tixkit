@@ -1,0 +1,42 @@
+{
+  "from": "2026-07-28",
+  "to": "2026-07-29",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 5
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/readiness",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/readiness/{actionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentReadinessReadAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentReadinessReadResult",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PreparedAgentReadinessReadAction",
+      "message": "A named schema was added."
+    }
+  ]
+}
