@@ -26,14 +26,13 @@ export default function HomePage() {
           ))}
         </div>
       </section>
-      <section className="architecture-summary" aria-labelledby="architecture-at-a-glance">
-        <h2 id="architecture-at-a-glance">Architecture at a glance</h2>
+      <section className="architecture-summary" aria-labelledby="shared-contract">
+        <h2 id="shared-contract">One shared product contract</h2>
         <p>
-          The admin and hosted checkout call a tenant-scoped Fastify API. Kysely repositories
-          persist operational state, while Temporal owns durable workflows. OpenAPI is the contract
-          source for public endpoints and SDK parity.
+          Every path uses the same event, inventory, checkout, order, attendee, webhook, migration,
+          OpenAPI, and SDK contracts. Choose a path first; its guide introduces only the concepts
+          needed for that journey.
         </p>
-        <Link href={docRoutes.selfHostingArchitecture}>Explore the architecture</Link>
       </section>
       <section aria-labelledby="supported-sdks">
         <h2 id="supported-sdks">Supported SDK paths</h2>

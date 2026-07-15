@@ -41,13 +41,12 @@ API version `2026-07-26` and agent protocol `2026-07-22` support these sponsor-c
 - register an agent principal;
 - read a principal sponsored by the current user;
 - revoke a principal and its active delegations atomically;
-- grant time-bounded event delegations;
-- revoke a delegation; and
+- grant and revoke time-bounded event delegations;
 - create, inspect, correct, export and delete separately retained organizer memory;
 - create and revoke sponsor-bound OAuth clients for active agents;
 - exchange client credentials and inspect an explicit, permission-empty agent session;
-- prepare and retrieve an immutable `event.publish` action with a server-authoritative dry run; and
-- issue a short-lived human approval bound to the exact action digest; and
+- prepare and retrieve an immutable `event.publish` action with a server-authoritative dry run;
+- issue a short-lived, digest-bound human approval;
 - revoke an unconsumed approval through an action-bound, digest-bound lifecycle event; and
 - execute one approved `event.publish` action through a durable, idempotent typed operation.
 
@@ -101,7 +100,7 @@ The exact agent or human sponsor inspects durable execution and its ordered immu
 
 ## Memory and managed tools
 
-Human sponsors manage shared memory through `tixkit.agentMemory` or the `/v1/agent-memory` operations. Namespace ownership and organizer provenance are server-derived. Reads and exports are audited, corrections and deletions are version-aware, and each export contains a checksum over that exact timestamped bundle. Deletion removes content while retaining digest-only audit evidence. The durable maintenance workflow physically erases expired content in bounded, retryable batches. Workspace and event scopes recheck current database authorization; project scope remains unavailable until a durable project resource exists.
+Agent memory is separately retained, scoped, inspectable, correctable, exportable and deletable. Human sponsors manage it through `tixkit.agentMemory` or the `/v1/agent-memory` operations. Namespace ownership and organizer provenance are server-derived. Reads and exports are audited, corrections and deletions are version-aware, and each export contains a checksum over that exact timestamped bundle. Deletion removes content while retaining digest-only audit evidence. The durable maintenance workflow physically erases expired content in bounded, retryable batches. Workspace and event scopes recheck current database authorization; project scope remains unavailable until a durable project resource exists.
 
 Memory content accepts only the typed `organizer_preferences` and `project_context` shapes. Credentials, payment data, buyer data and personal contact data fail closed. Agent retrieval remains delegation-bound through the shared repository and is not a generic HTTP read capability.
 

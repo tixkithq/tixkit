@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { adoptionPaths } from '../lib/adoption-paths';
 import { docsSiteConfig } from '../lib/site';
+import { documentationNavigation } from '../../../../docs/navigation';
 
 const original = { ...process.env };
 
@@ -38,6 +39,30 @@ describe('adoption-path information architecture', () => {
     const repositoryRoot = resolve(import.meta.dirname, '../../../..');
     const homePage = readFileSync(resolve(repositoryRoot, 'apps/docs/src/app/page.tsx'), 'utf8');
     expect(homePage).toContain('How do you want to use Tixkit?');
+    expect(homePage).not.toMatch(/\b(?:Kysely|Kubernetes|Redis|Temporal|object storage)\b/i);
+  });
+
+  it('keeps each first task inside its selected adoption path', () => {
+    const [chooser, sell, platform, , , selfHosted] = documentationNavigation;
+    expect(chooser).toMatchObject({
+      label: 'Choose how to use Tixkit',
+      children: [{ routeId: 'sellTickets' }, { routeId: 'platformApi' }, { routeId: 'selfHosted' }],
+    });
+    expect(sell?.children?.slice(0, 3).map((item) => item.routeId)).toEqual([
+      'sellQuickstart',
+      'firstEvent',
+      'testCheckout',
+    ]);
+    expect(platform?.children?.slice(0, 3).map((item) => item.routeId)).toEqual([
+      'platformQuickstart',
+      'firstApiCall',
+      'apiFundamentals',
+    ]);
+    expect(selfHosted?.children?.slice(0, 3).map((item) => item.routeId)).toEqual([
+      'deploymentModel',
+      'localQuickstart',
+      'platformOverview',
+    ]);
   });
 
   it('keeps infrastructure language out of the Sell and Platform entry paths', () => {
@@ -90,5 +115,29 @@ describe('adoption-path information architecture', () => {
       expect(source).toContain('unset TIXKIT_API_KEY');
       expect(source).toContain('curl --fail-with-body --config - <<EOF');
     }
+  });
+
+  it('documents every required agent Platform API safety boundary', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../../..');
+    const source = readFileSync(
+      resolve(repositoryRoot, 'docs/public/platform/agent-platform.mdx'),
+      'utf8',
+    );
+    for (const requiredClause of [
+      /explicit principals/i,
+      /delegation/i,
+      /typed action/i,
+      /dry[- ]run/i,
+      /digest-bound human approval/i,
+      /audit/i,
+      /revok/i,
+      /experimental private beta/i,
+      /not generally available/i,
+    ]) {
+      expect(source).toMatch(requiredClause);
+    }
+    expect(source).toContain(
+      'Agent memory is separately retained, scoped, inspectable, correctable, exportable and deletable.',
+    );
   });
 });

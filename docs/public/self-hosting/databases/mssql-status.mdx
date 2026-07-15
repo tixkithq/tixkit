@@ -1,0 +1,72 @@
+---
+title: Microsoft SQL Server status
+description: Understand the implemented SQL Server dialect surface and its gated validation status.
+audience:
+  - self-hoster
+product_area: self-hosting
+content_type: reference
+status: experimental
+owner: data-platform
+last_verified: 2026-07-14
+prerequisites:
+  - A Microsoft SQL Server test instance
+related:
+  - /self-hosting/databases
+  - /contributing/testing
+keywords:
+  - mssql
+  - sql server
+  - database
+adoption_paths:
+  - self-hosted
+---
+
+PostgreSQL is Tixkit's reference database and MySQL is the tier-one parity target. Microsoft SQL Server support is experimental: the dialect and correctness helpers exist, but operators must not infer full production parity from the presence of the driver.
+
+## Configure the driver
+
+Set `DB_DRIVER=mssql` and provide `DATABASE_URL_MSSQL`:
+
+```bash
+DB_DRIVER=mssql
+DATABASE_URL_MSSQL=sqlserver://<user>:<password>@<host>:1433/<database>?encrypt=true&trustServerCertificate=false
+```
+
+The URL parser also accepts `mssql://`. The Kysely dialect uses `tedious` with `tarn` pooling. `DB_DRIVER=sqlserver` is accepted as an alias.
+
+## Implemented surface
+
+`packages/db/src/dialects/mssql.ts` provides:
+
+| Helper                    | Purpose                                                   |
+| ------------------------- | --------------------------------------------------------- |
+| `parseMssqlConnectionUrl` | Parse SQL Server URLs into `tedious` connection settings. |
+| `createMssqlDialect`      | Create the Kysely dialect and pool.                       |
+| `createMssqlLimitPlugin`  | Rewrite select limits to `TOP` or `OFFSET FETCH`.         |
+| `mssqlObjectIdExists`     | Generate `OBJECT_ID()` existence checks.                  |
+| `mssqlDropTableIfExists`  | Generate conditional table drops.                         |
+| `buildMssqlMergeUpsert`   | Generate `MERGE` upserts.                                 |
+| `mssqlForUpdateTable`     | Add `WITH (UPDLOCK, HOLDLOCK)` to locking reads.          |
+| `executeMssqlForUpdate`   | Execute a locked read through Kysely.                     |
+
+SQL Server migrations must use explicit existence checks and foreign-key cleanup order. Upserts use `MERGE`; correctness-critical locking reads use `WITH (UPDLOCK, HOLDLOCK)` instead of `SELECT ... FOR UPDATE`.
+
+## Validate an installation
+
+Run the local static and unit gates first:
+
+```bash
+bun run --filter @tixkit/db typecheck
+bun run --filter @tixkit/db test:unit
+bun run --filter @tixkit/db lint
+```
+
+Then run the gated integration suite against a disposable SQL Server instance:
+
+```bash
+DB_INTEGRATION_DRIVER=mssql \
+DATABASE_URL_MSSQL=<sqlserver-connection-url> \
+bun run --filter @tixkit/db test:mssql
+```
+
+CI runs the SQL Server job only when `RUN_MSSQL_TESTS` is enabled. A production decision requires current migration, rollback, concurrency, API, workflow, backup, and restore evidence for the exact SQL Server version and topology; the dialect unit suite alone is insufficient.

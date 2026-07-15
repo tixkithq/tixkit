@@ -39,6 +39,12 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     headings: [{"id":"runtime-applications","text":"Runtime applications","level":2},{"id":"backend-boundaries","text":"Backend boundaries","level":2},{"id":"frontend-and-integration-packages","text":"Frontend and integration packages","level":2},{"id":"repository-boundary","text":"Repository boundary","level":2}],
     load: () => import("../../../../docs/public/contributing/architecture.mdx"),
   },
+  "/contributing/contracts/event-page": {
+    sourcePath: "docs/public/contributing/contracts/event-page.mdx",
+    frontmatter: {"title":"Event page Puck contract","description":"Preserve one canonical Puck document across organizer authoring and public checkout rendering.","audience":["contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"organizer-experience","last_verified":"2026-07-14","prerequisites":["Familiarity with the content document lifecycle"],"related":["/contributing/architecture","/contributing/testing"],"keywords":["event page","puck","rendering contract"]},
+    headings: [{"id":"shared-imports","text":"Shared imports","level":2},{"id":"public-payload","text":"Public payload","level":2},{"id":"responsibility-boundary","text":"Responsibility boundary","level":2},{"id":"component-identifiers","text":"Component identifiers","level":2}],
+    load: () => import("../../../../docs/public/contributing/contracts/event-page.mdx"),
+  },
   "/contributing/repository-setup": {
     sourcePath: "docs/public/contributing/repository-setup.mdx",
     frontmatter: {"title":"Set up the repository","description":"Clone Tixkit, install the pinned workspace, start the stack, and run focused validation without hidden assumptions.","audience":["contributor"],"product_area":"contributing","content_type":"quickstart","status":"beta","owner":"documentation-architecture","last_verified":"2026-07-10","prerequisites":["Git, Bun 1.3+, Node.js 20+, and Docker"],"related":["/getting-started/local-quickstart","/contributing/testing"]},
@@ -560,6 +566,12 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     frontmatter: {"title":"Choose and operate a database","description":"Use only the database modes covered by Tixkit migrations, repositories, and compatibility validation.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"reference","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["A supported managed or self-operated relational database"],"related":["/self-hosting/backups-and-restore","/self-hosting/upgrades"]},
     headings: [{"id":"provision-safely","text":"Provision safely","level":2},{"id":"validate-compatibility","text":"Validate compatibility","level":2},{"id":"operational-rule","text":"Operational rule","level":2}],
     load: () => import("../../../../docs/public/self-hosting/databases.mdx"),
+  },
+  "/self-hosting/databases/mssql-status": {
+    sourcePath: "docs/public/self-hosting/databases/mssql-status.mdx",
+    frontmatter: {"title":"Microsoft SQL Server status","description":"Understand the implemented SQL Server dialect surface and its gated validation status.","audience":["self-hoster"],"product_area":"self-hosting","content_type":"reference","status":"experimental","owner":"data-platform","last_verified":"2026-07-14","prerequisites":["A Microsoft SQL Server test instance"],"related":["/self-hosting/databases","/contributing/testing"],"keywords":["mssql","sql server","database"],"adoption_paths":["self-hosted"]},
+    headings: [{"id":"configure-the-driver","text":"Configure the driver","level":2},{"id":"implemented-surface","text":"Implemented surface","level":2},{"id":"validate-an-installation","text":"Validate an installation","level":2}],
+    load: () => import("../../../../docs/public/self-hosting/databases/mssql-status.mdx"),
   },
   "/self-hosting/deployment": {
     sourcePath: "docs/public/self-hosting/deployment.mdx",

@@ -8,24 +8,19 @@ export interface DocumentationNavigationItem {
 
 export const documentationNavigation = [
   {
-    label: 'Getting Started',
+    label: 'Choose how to use Tixkit',
     children: [
       { label: 'Sell tickets with Tixkit', routeId: 'sellTickets' },
-      { label: 'Cloud organizer quickstart', routeId: 'sellQuickstart' },
       { label: 'Add ticketing to my product', routeId: 'platformApi' },
-      { label: 'Platform API quickstart', routeId: 'platformQuickstart' },
       { label: 'Run Tixkit on my infrastructure', routeId: 'selfHosted' },
-      { label: 'Platform overview', routeId: 'platformOverview' },
-      { label: 'Choose a deployment model', routeId: 'deploymentModel' },
-      { label: 'Local quickstart', routeId: 'localQuickstart' },
-      { label: 'Create the first event', routeId: 'firstEvent' },
-      { label: 'Complete a test checkout', routeId: 'testCheckout' },
-      { label: 'Make the first API call', routeId: 'firstApiCall' },
     ],
   },
   {
     label: 'Sell tickets with Tixkit',
     children: [
+      { label: 'Cloud organizer quickstart', routeId: 'sellQuickstart' },
+      { label: 'Create the first event', routeId: 'firstEvent' },
+      { label: 'Complete a test checkout', routeId: 'testCheckout' },
       { label: 'Workspace and organizations', routeId: 'workspace' },
       { label: 'Brands and domains', routeId: 'brands' },
       { label: 'Events', routeId: 'events' },
@@ -58,6 +53,8 @@ export const documentationNavigation = [
   {
     label: 'Add ticketing to my product',
     children: [
+      { label: 'Platform API quickstart', routeId: 'platformQuickstart' },
+      { label: 'Make the first API call', routeId: 'firstApiCall' },
       { label: 'API fundamentals', routeId: 'apiFundamentals' },
       { label: 'Authentication', routeId: 'apiAuthentication' },
       { label: 'Permissions and scopes', routeId: 'apiPermissions' },
@@ -161,11 +158,15 @@ export const documentationNavigation = [
   {
     label: 'Run Tixkit on my infrastructure',
     children: [
+      { label: 'Choose a deployment model', routeId: 'deploymentModel' },
+      { label: 'Local quickstart', routeId: 'localQuickstart' },
+      { label: 'Shared platform overview', routeId: 'platformOverview' },
       { label: 'Architecture', routeId: 'selfHostingArchitecture' },
       { label: 'Compact profile', routeId: 'selfHostingCompact' },
       { label: 'Configuration', routeId: 'selfHostingConfiguration' },
       { label: 'Authentication', routeId: 'selfHostingAuthentication' },
       { label: 'Databases', routeId: 'selfHostingDatabases' },
+      { label: 'Microsoft SQL Server status', routeId: 'selfHostingMssqlStatus' },
       { label: 'Object storage', routeId: 'selfHostingStorage' },
       { label: 'Deployment', routeId: 'selfHostingDeployment' },
       { label: 'Production profile', routeId: 'selfHostingProduction' },
@@ -185,6 +186,7 @@ export const documentationNavigation = [
       { label: 'Add an API route', routeId: 'addApiRoute' },
       { label: 'Add an SDK operation', routeId: 'addSdkOperation' },
       { label: 'Add documentation', routeId: 'addDocumentation' },
+      { label: 'Event page Puck contract', routeId: 'contributorEventPageContract' },
       { label: 'Support', routeId: 'support' },
     ],
   },

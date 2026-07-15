@@ -13,7 +13,6 @@ const publicDocs = [
   'docs/accessibility-conformance-statement.md',
   'docs/email-sms-deliverability-runbook.md',
   'docs/embed-generator.html',
-  'docs/mssql-roadmap.md',
   'docs/performance.md',
   'docs/privacy-retention-policy.md',
   'docs/production-validation-harness.md',
@@ -62,14 +61,12 @@ const exactTargets = new Map([
     'docs/public/operators/messages/email-template-lifecycle.mdx',
   ],
   ['docs/embed-generator.html', 'docs/public/developers/widget/embed-generator.html'],
-  ['docs/mssql-roadmap.md', 'docs/public/self-hosting/databases/mssql-status.mdx'],
   ['docs/performance.md', 'docs/public/reference/performance.mdx'],
   ['docs/privacy-retention-policy.md', 'docs/public/reference/privacy-and-retention.mdx'],
   [
     'docs/production-validation-harness.md',
     'docs/public/contributing/validation/production-harness.mdx',
   ],
-  ['docs/puck-event-page-contract.md', 'docs/public/contributing/contracts/event-page.mdx'],
   [
     'docs/security-tenant-isolation-audit.md',
     'docs/internal/audits/security-tenant-isolation-audit.md',

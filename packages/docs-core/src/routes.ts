@@ -84,6 +84,7 @@ export const docRoutes = {
   selfHostingConfiguration: '/self-hosting/configuration',
   selfHostingAuthentication: '/self-hosting/authentication',
   selfHostingDatabases: '/self-hosting/databases',
+  selfHostingMssqlStatus: '/self-hosting/databases/mssql-status',
   selfHostingStorage: '/self-hosting/object-storage',
   selfHostingDeployment: '/self-hosting/deployment',
   selfHostingProduction: '/self-hosting/production',
@@ -98,6 +99,7 @@ export const docRoutes = {
   addApiRoute: '/contributing/add-an-api-route',
   addSdkOperation: '/contributing/add-an-sdk-operation',
   addDocumentation: '/contributing/add-documentation',
+  contributorEventPageContract: '/contributing/contracts/event-page',
   support: '/support',
 } as const;
 
