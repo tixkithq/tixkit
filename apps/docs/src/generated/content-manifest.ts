@@ -351,6 +351,12 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
     headings: [],
     load: () => import("../../../../docs/public/reference/api/schemas.mdx"),
   },
+  "/reference/capabilities-and-integrations": {
+    sourcePath: "docs/public/reference/capabilities-and-integrations.mdx",
+    frontmatter: {"title":"Capabilities and integrations","description":"Authoritative availability and public-boundary registry for Tixkit integrations.","audience":["developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"platform-integrations","last_verified":"2026-07-15","prerequisites":[],"related":["/operators/messaging","/platform"]},
+    headings: [{"id":"contract-rules","text":"Contract rules","level":2}],
+    load: () => import("../../../../docs/public/reference/capabilities-and-integrations.mdx"),
+  },
   "/reference/migrations/2026-01-01-to-2026-07-12": {
     sourcePath: "docs/public/reference/migrations/2026-01-01-to-2026-07-12.mdx",
     frontmatter: {"title":"Migrate from API 2026-01-01 to 2026-07-12","description":"Replace legacy event upload URLs with role-based public media renditions.","audience":["developer"],"product_area":"api","content_type":"reference","status":"beta","owner":"developer-platform","last_verified":"2026-07-12","prerequisites":["An integration using API version 2026-01-01"],"related":["/reference/api-versions","/reference/api-release-train"]},
@@ -503,7 +509,7 @@ export const contentManifest: Record<string, PublicDocManifestEntry> = {
   },
   "/reference/performance": {
     sourcePath: "docs/public/reference/performance.mdx",
-    frontmatter: {"title":"Performance budgets","description":"Review documentation and platform performance contracts and the commands that reproduce them.","audience":["developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"platform-operations","last_verified":"2026-07-10","prerequisites":["A production build for browser measurements"],"related":["/self-hosting/observability","/contributing/testing"]},
+    frontmatter: {"title":"Performance budgets","description":"Review documentation and platform performance contracts and the commands that reproduce them.","audience":["developer","self-hoster","contributor"],"product_area":"platform","content_type":"reference","status":"beta","owner":"platform-operations","last_verified":"2026-07-15","prerequisites":["A production build for browser measurements"],"related":["/self-hosting/observability","/contributing/testing"]},
     headings: [],
     load: () => import("../../../../docs/public/reference/performance.mdx"),
   },

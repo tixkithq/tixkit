@@ -1,0 +1,383 @@
+{
+  "$schema": "./capability-registry.schema.json",
+  "schemaVersion": 1,
+  "documentation": "docs/public/reference/capabilities-and-integrations.mdx",
+  "capabilities": [
+    {
+      "id": "apple-messages-for-business",
+      "name": "Apple Messages for Business",
+      "classification": "managed-provider-service",
+      "lifecycle": "planned",
+      "availability": { "cloud": "planned", "platformApi": "planned", "selfHosted": "unavailable" },
+      "publicBoundary": {
+        "path": "packages/domain/src/messaging/index.ts",
+        "symbols": ["SmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "managed-cloud",
+        "plaintextCredentialsPortable": false,
+        "portability": "contract-metadata",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Planned managed rich-channel service. Self-Hosted remains unavailable until a versioned public rich-channel extension contract exists."
+    },
+    {
+      "id": "generic-messaging-contracts",
+      "name": "Generic messaging contracts",
+      "classification": "shared-core",
+      "lifecycle": "stable",
+      "availability": {
+        "cloud": "available",
+        "platformApi": "available",
+        "selfHosted": "available"
+      },
+      "publicBoundary": {
+        "path": "packages/domain/src/messaging/index.ts",
+        "symbols": ["EmailTransport", "SmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "contract-metadata",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Public transport contracts are the required boundary for provider delivery; direct database delivery paths are unsupported."
+    },
+    {
+      "id": "managed-email-operations",
+      "name": "Managed email operations",
+      "classification": "managed-provider-service",
+      "lifecycle": "planned",
+      "availability": {
+        "cloud": "planned",
+        "platformApi": "planned",
+        "selfHosted": "unavailable"
+      },
+      "publicBoundary": {
+        "path": "packages/domain/src/messaging/index.ts",
+        "symbols": ["EmailTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "managed-cloud",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Planned Cloud operation may custody credentials and operate delivery, while the public transport contract remains authoritative."
+    },
+    {
+      "id": "managed-routing-intelligence",
+      "name": "Managed routing intelligence",
+      "classification": "managed-intelligence",
+      "lifecycle": "planned",
+      "availability": { "cloud": "planned", "platformApi": "planned", "selfHosted": "unavailable" },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["ProviderRouteSelector"]
+      },
+      "obligations": {
+        "credentialCustody": "managed-cloud",
+        "plaintextCredentialsPortable": false,
+        "portability": "contract-metadata",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Planned managed routing decisions may use private intelligence; public route selection remains the interoperable execution boundary."
+    },
+    {
+      "id": "managed-sms-operations",
+      "name": "Managed SMS operations",
+      "classification": "managed-provider-service",
+      "lifecycle": "planned",
+      "availability": {
+        "cloud": "planned",
+        "platformApi": "planned",
+        "selfHosted": "unavailable"
+      },
+      "publicBoundary": {
+        "path": "packages/domain/src/messaging/index.ts",
+        "symbols": ["SmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "managed-cloud",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Planned Cloud operation may custody credentials and operate delivery; Self-Hosted uses public adapters with operator custody."
+    },
+    {
+      "id": "opencore-email-sdk-adapter",
+      "name": "OpenCore Email SDK adapter",
+      "classification": "public-provider-adapter",
+      "lifecycle": "planned",
+      "availability": {
+        "cloud": "planned",
+        "platformApi": "planned",
+        "selfHosted": "planned"
+      },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["OpenCoreEmailSdkTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "A public contract shim exists, but provider SDK delivery is not production-ready and remains planned on every adoption path."
+    },
+    {
+      "id": "plivo-sms-adapter",
+      "name": "Plivo SMS adapter",
+      "classification": "public-provider-adapter",
+      "lifecycle": "planned",
+      "availability": {
+        "cloud": "planned",
+        "platformApi": "planned",
+        "selfHosted": "planned"
+      },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["PlivoSmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "A public outbound adapter exists, but production delivery and reconciliation evidence is incomplete; availability remains planned."
+    },
+    {
+      "id": "rcs-messaging",
+      "name": "RCS messaging",
+      "classification": "managed-provider-service",
+      "lifecycle": "planned",
+      "availability": { "cloud": "planned", "platformApi": "planned", "selfHosted": "unavailable" },
+      "publicBoundary": {
+        "path": "packages/domain/src/messaging/index.ts",
+        "symbols": ["SmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "managed-cloud",
+        "plaintextCredentialsPortable": false,
+        "portability": "contract-metadata",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Planned managed rich-channel service. Self-Hosted remains unavailable until a versioned public rich-channel extension contract exists."
+    },
+    {
+      "id": "resend-email-adapter",
+      "name": "Resend email adapter",
+      "classification": "public-provider-adapter",
+      "lifecycle": "stable",
+      "availability": {
+        "cloud": "available",
+        "platformApi": "available",
+        "selfHosted": "available"
+      },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["ResendEmailTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Implemented public adapter; deployments retain responsibility for provider credentials and account configuration."
+    },
+    {
+      "id": "smtp-email-adapter",
+      "name": "SMTP email adapter",
+      "classification": "public-provider-adapter",
+      "lifecycle": "planned",
+      "availability": {
+        "cloud": "planned",
+        "platformApi": "planned",
+        "selfHosted": "planned"
+      },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["SmtpEmailTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "A public adapter boundary exists, but network delivery is not production-ready and remains planned on every adoption path."
+    },
+    {
+      "id": "telnyx-sms-adapter",
+      "name": "Telnyx SMS adapter",
+      "classification": "public-provider-adapter",
+      "lifecycle": "stable",
+      "availability": {
+        "cloud": "available",
+        "platformApi": "available",
+        "selfHosted": "available"
+      },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["TelnyxSmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Implemented public adapter; deployments retain responsibility for provider credentials and account configuration."
+    },
+    {
+      "id": "twilio-sms-adapter",
+      "name": "Twilio SMS adapter",
+      "classification": "public-provider-adapter",
+      "lifecycle": "planned",
+      "availability": {
+        "cloud": "planned",
+        "platformApi": "planned",
+        "selfHosted": "planned"
+      },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["TwilioSmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "A public outbound adapter exists, but production delivery and reconciliation evidence is incomplete; availability remains planned."
+    },
+    {
+      "id": "vonage-sms-adapter",
+      "name": "Vonage SMS adapter",
+      "classification": "public-provider-adapter",
+      "lifecycle": "planned",
+      "availability": {
+        "cloud": "planned",
+        "platformApi": "planned",
+        "selfHosted": "planned"
+      },
+      "publicBoundary": {
+        "path": "packages/email-transport/src/index.ts",
+        "symbols": ["VonageSmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "caller-or-operator",
+        "plaintextCredentialsPortable": false,
+        "portability": "configuration-only",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "A public outbound adapter exists, but production delivery and reconciliation evidence is incomplete; availability remains planned."
+    },
+    {
+      "id": "whatsapp-messaging",
+      "name": "WhatsApp messaging",
+      "classification": "managed-provider-service",
+      "lifecycle": "planned",
+      "availability": { "cloud": "planned", "platformApi": "planned", "selfHosted": "unavailable" },
+      "publicBoundary": {
+        "path": "packages/domain/src/messaging/index.ts",
+        "symbols": ["SmsTransport"]
+      },
+      "obligations": {
+        "credentialCustody": "managed-cloud",
+        "plaintextCredentialsPortable": false,
+        "portability": "contract-metadata",
+        "destinationRebinding": "required",
+        "consent": "required",
+        "suppression": "required",
+        "webhooks": "required",
+        "retries": "required",
+        "idempotency": "required",
+        "audit": "required"
+      },
+      "notes": "Planned managed rich-channel service. Self-Hosted remains unavailable until a versioned public rich-channel extension contract exists."
+    }
+  ]
+}

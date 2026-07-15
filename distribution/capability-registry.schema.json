@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/capability-registry.schema.json",
+  "type": "object",
+  "required": ["$schema", "schemaVersion", "documentation", "capabilities"],
+  "properties": {
+    "$schema": { "const": "./capability-registry.schema.json" },
+    "schemaVersion": { "const": 1 },
+    "documentation": { "const": "docs/public/reference/capabilities-and-integrations.mdx" },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/capability" }
+    }
+  },
+  "$defs": {
+    "availability": {
+      "type": "object",
+      "required": ["cloud", "platformApi", "selfHosted"],
+      "properties": {
+        "cloud": { "enum": ["available", "private-beta", "planned", "unavailable"] },
+        "platformApi": { "enum": ["available", "private-beta", "planned", "unavailable"] },
+        "selfHosted": { "enum": ["available", "private-beta", "planned", "unavailable"] }
+      },
+      "additionalProperties": false
+    },
+    "boundary": {
+      "type": "object",
+      "required": ["path", "symbols"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?:packages|apps|docs|scripts|distribution)/",
+          "minLength": 1
+        },
+        "symbols": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "obligations": {
+      "type": "object",
+      "required": [
+        "credentialCustody",
+        "plaintextCredentialsPortable",
+        "portability",
+        "destinationRebinding",
+        "consent",
+        "suppression",
+        "webhooks",
+        "retries",
+        "idempotency",
+        "audit"
+      ],
+      "properties": {
+        "credentialCustody": {
+          "enum": ["operator", "managed-cloud", "caller-or-operator", "none"]
+        },
+        "plaintextCredentialsPortable": { "const": false },
+        "portability": { "enum": ["configuration-only", "contract-metadata", "not-applicable"] },
+        "destinationRebinding": { "enum": ["required", "not-applicable"] },
+        "consent": { "enum": ["required", "not-applicable"] },
+        "suppression": { "enum": ["required", "not-applicable"] },
+        "webhooks": { "enum": ["required", "not-applicable"] },
+        "retries": { "enum": ["required", "not-applicable"] },
+        "idempotency": { "enum": ["required", "not-applicable"] },
+        "audit": { "const": "required" }
+      },
+      "additionalProperties": false
+    },
+    "capability": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "classification",
+        "lifecycle",
+        "availability",
+        "publicBoundary",
+        "obligations",
+        "notes"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "classification": {
+          "enum": [
+            "shared-core",
+            "public-provider-adapter",
+            "managed-provider-service",
+            "managed-intelligence"
+          ]
+        },
+        "lifecycle": { "enum": ["stable", "private-beta", "planned"] },
+        "availability": { "$ref": "#/$defs/availability" },
+        "publicBoundary": { "$ref": "#/$defs/boundary" },
+        "obligations": { "$ref": "#/$defs/obligations" },
+        "notes": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

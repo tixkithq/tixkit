@@ -195,6 +195,7 @@ export const documentationNavigation = [
         routeId: 'apiMigration20260805To20260806',
       },
       { label: 'Accessibility', routeId: 'accessibility' },
+      { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },
     ],
