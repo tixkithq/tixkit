@@ -1,0 +1,132 @@
+{
+  "from": "2026-07-26",
+  "to": "2026-07-27",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 20
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/plans",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/plans/{planId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/plans/{planId}/transitions",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_id",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_sha256",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_timestamp",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_reasonCode",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_assumption",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_projectedChange",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_cost",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_readinessImpact",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_approvalRequirement",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_reversibility",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_planStep",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_agentPlanDefinition",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_stepState",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanProtocol_agentPlanState",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanDefinition",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentPlanState",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PersistedAgentPlan",
+      "message": "A named schema was added."
+    }
+  ]
+}
