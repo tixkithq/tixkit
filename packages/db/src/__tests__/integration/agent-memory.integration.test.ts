@@ -1,4 +1,8 @@
-import { AGENT_PROTOCOL_VERSION, type AgentMemoryNamespace } from '@tixkit/agent-protocol';
+import {
+  AGENT_PROTOCOL_VERSION,
+  canonicalAgentJson,
+  type AgentMemoryNamespace,
+} from '@tixkit/agent-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../../client.js';
 import { runMigrations, truncateAllData } from '../../migrate.js';
@@ -432,7 +436,7 @@ describe.sequential.each(cases)('agent memory lifecycle: $driver', ({ driver, ur
 
   it('expires content using separate retention while preserving only digest audit', async () => {
     const memory = new AgentMemoryRepository(db);
-    await memory.create({
+    const created = await memory.create({
       id: 'memory_expired',
       namespace: namespace(),
       key: 'locale.default',
@@ -441,11 +445,18 @@ describe.sequential.each(cases)('agent memory lifecycle: $driver', ({ driver, ur
       retentionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       audit: audit('create_expired'),
     });
+    expect(created).toBeTruthy();
+    const updatedAt = new Date(Math.floor((Date.now() - 2_000) / 1_000) * 1_000);
+    const retentionExpiresAt = new Date(updatedAt.getTime() + 1_000);
     await db
       .updateTable('agent_memory_entries')
       .set({
-        updated_at: new Date(Date.now() - 2_000),
-        retention_expires_at: new Date(Date.now() - 1_000),
+        provenance: canonicalAgentJson({
+          ...created!.provenance,
+          observedAt: updatedAt.toISOString(),
+        }),
+        updated_at: updatedAt,
+        retention_expires_at: retentionExpiresAt,
       })
       .where('id', '=', 'memory_expired')
       .execute();

@@ -1,5 +1,6 @@
 import {
   AGENT_PROTOCOL_VERSION,
+  agentSha256,
   agentExecutionIdempotencyKey,
   type AgentApproval,
   type AgentAuditRecord,
@@ -423,6 +424,8 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       subject_type: 'resource_owner',
       subject_id: 'oat_legacy_backfill',
     });
+    await AgentOAuthCredentialsMigration.down!(db);
+    await AgentOAuthCredentialsMigration.up!(db);
     await db.deleteFrom('oauth_access_tokens').where('id', '=', 'oat_legacy_backfill').execute();
     await db.deleteFrom('oauth_applications').where('id', '=', 'oapp_legacy_backfill').execute();
   });
@@ -600,7 +603,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         .select('id')
         .where('tenant_id', '=', tenantId)
         .execute(),
-    ).toHaveLength(5);
+    ).toHaveLength(8);
     await persistApproval(db, approved);
     const results = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
@@ -690,7 +693,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         .select('id')
         .where('tenant_id', '=', tenantId)
         .execute(),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
   });
 
   it('enforces tenant scope, live leases, increasing fences, and exact completion ownership', async () => {
@@ -743,12 +746,13 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     });
     expect(new Date(claimAuthority.delegation_issued_at).getTime()).toBeLessThanOrEqual(Date.now());
     expect(new Date(claimAuthority.delegation_expires_at).getTime()).toBeGreaterThan(Date.now());
-    const source = execution(tenantId, persisted.id);
+    const source = await repository.getExecution(tenantId, persisted.id);
+    expect(source).toBeTruthy();
     const claimed = await repository.claim({
       tenantId,
       executionId: persisted.id,
       workerId: 'worker_one',
-      audit: audit(source, 'started_test', 'started'),
+      audit: audit(source!, 'started_test', 'started'),
     });
     expect(claimed).toMatchObject({ state: 'running', fenceToken: 1, leaseOwner: 'worker_one' });
     await expect(
@@ -756,7 +760,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         tenantId,
         executionId: persisted.id,
         workerId: 'worker_two',
-        audit: audit(source, 'started_other', 'started'),
+        audit: audit(source!, 'started_other', 'started'),
       }),
     ).resolves.toBeNull();
     await expect(
@@ -764,7 +768,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         tenantId: 'tenant_missing',
         executionId: 'execution_0',
         workerId: 'worker_one',
-        audit: audit(source, 'started_wrong_tenant', 'started'),
+        audit: audit(source!, 'started_wrong_tenant', 'started'),
       }),
     ).resolves.toBeNull();
     const completed = {
@@ -815,6 +819,100 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
     await expect(
       db.deleteFrom('agent_audit_events').where('id', '=', 'succeeded_test').execute(),
     ).rejects.toThrow(/immutable/u);
+  });
+
+  it('keeps a failed consequential execution terminal after its approval is consumed', async () => {
+    const repository = new AgentExecutionRepository(db);
+    const reserved = await repository.getExecution(tenantId, 'execution_second_agent');
+    expect(reserved).toBeTruthy();
+    const claimed = await repository.claim({
+      tenantId,
+      executionId: reserved!.id,
+      workerId: 'worker_failed_terminal',
+      audit: audit(reserved!, 'started_failed_terminal', 'started'),
+    });
+    expect(claimed).toMatchObject({ state: 'running', fenceToken: 1 });
+    const failed = { ...claimed!, state: 'failed' as const, failureCode: 'TIMEOUT' };
+    await expect(
+      repository.complete({
+        execution: failed,
+        expectedRevision: {
+          fenceToken: claimed!.fenceToken,
+          leaseOwner: claimed!.leaseOwner!,
+        },
+        audit: audit(failed, 'failed_terminal', 'failed'),
+      }),
+    ).resolves.toBe(true);
+    const auditCount = await db
+      .selectFrom('agent_audit_events')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .where('execution_id', '=', reserved!.id)
+      .execute();
+    await expect(
+      repository.claim({
+        tenantId,
+        executionId: reserved!.id,
+        workerId: 'worker_failed_replay',
+        audit: audit(failed, 'started_after_failed', 'started'),
+      }),
+    ).resolves.toMatchObject({ state: 'failed', failureCode: 'TIMEOUT' });
+    expect(
+      await db
+        .selectFrom('agent_audit_events')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('execution_id', '=', reserved!.id)
+        .execute(),
+    ).toHaveLength(auditCount.length);
+
+    const effect = {
+      resourceId: scopedEventId,
+      resourceVersion: failed.resourceVersion,
+      status: 'updated',
+    };
+    await db
+      .insertInto('agent_action_effects')
+      .values({
+        execution_id: failed.id,
+        tenant_id: failed.tenantId,
+        action_digest: failed.actionDigest,
+        resource_type: 'event',
+        resource_id: scopedEventId,
+        operation: 'events.update',
+        idempotency_key: failed.idempotencyKey,
+        expected_policy_version: failed.policyVersion,
+        expected_resource_version: failed.resourceVersion,
+        effect_fence_token: failed.fenceToken,
+        result: JSON.stringify(effect),
+        result_sha256: agentSha256(effect),
+        created_at: new Date(),
+      })
+      .execute();
+    const recovery = await repository.claim({
+      tenantId,
+      executionId: failed.id,
+      workerId: 'worker_failed_effect_recovery',
+      audit: audit(failed, 'started_effect_recovery', 'started'),
+    });
+    expect(recovery).toMatchObject({ state: 'running', fenceToken: failed.fenceToken + 1 });
+    const recoveryAudit = await db
+      .selectFrom('agent_audit_events')
+      .select('reason_codes')
+      .where('id', '=', 'started_effect_recovery')
+      .executeTakeFirstOrThrow();
+    expect(JSON.parse(recoveryAudit.reason_codes)).toEqual(['effect_recovery']);
+    const reconciled = { ...recovery!, state: 'succeeded' as const, result: effect };
+    await expect(
+      repository.complete({
+        execution: reconciled,
+        expectedRevision: {
+          fenceToken: recovery!.fenceToken,
+          leaseOwner: recovery!.leaseOwner!,
+        },
+        audit: audit(reconciled, 'succeeded_effect_recovery', 'succeeded'),
+      }),
+    ).resolves.toBe(true);
   });
 
   it('returns contract-valid evidence only after exact scope and rejects corrupt or excessive state', async () => {
@@ -914,6 +1012,126 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
         actionId: `act_${'9'.repeat(48)}`,
       }),
     ).resolves.toBeUndefined();
+
+    const recoveryApproval = {
+      ...approval(tenantId),
+      id: `apr_${'9'.repeat(48)}`,
+      actionDigest: '8'.repeat(64),
+    };
+    await persistApproval(db, recoveryApproval);
+    const recoveryExecution: AgentExecution = {
+      ...exactExecution,
+      id: `exec_${'9'.repeat(48)}`,
+      actionId: `act_${'7'.repeat(48)}`,
+      actionDigest: recoveryApproval.actionDigest,
+      approvalId: recoveryApproval.id,
+      idempotencyKey: '7'.repeat(64),
+      requestFingerprint: '8'.repeat(64),
+      state: 'reserved',
+      fenceToken: 0,
+      result: undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await repository.reserveAndConsume({
+      execution: recoveryExecution,
+      approval: recoveryApproval,
+      requiredApproverPermission: 'events:write',
+      now: new Date().toISOString(),
+      audit: [
+        audit(recoveryExecution, `aaud_${'a'.repeat(48)}`, 'prepared'),
+        audit(recoveryExecution, `aaud_${'b'.repeat(48)}`, 'authorized'),
+      ],
+    });
+    const recoveryFirstClaim = await repository.claim({
+      tenantId,
+      executionId: recoveryExecution.id,
+      workerId: 'worker_recovery_initial',
+      audit: audit(recoveryExecution, `aaud_${'c'.repeat(48)}`, 'started'),
+    });
+    const failedRecovery = {
+      ...recoveryFirstClaim!,
+      state: 'failed' as const,
+      failureCode: 'TIMEOUT',
+    };
+    await repository.complete({
+      execution: failedRecovery,
+      expectedRevision: {
+        fenceToken: recoveryFirstClaim!.fenceToken,
+        leaseOwner: recoveryFirstClaim!.leaseOwner!,
+      },
+      audit: audit(failedRecovery, `aaud_${'d'.repeat(48)}`, 'failed'),
+    });
+    const recoveryResult = {
+      resourceId: scopedEventId,
+      resourceVersion: recoveryExecution.resourceVersion,
+      status: 'published',
+    };
+    await db
+      .insertInto('agent_action_effects')
+      .values({
+        execution_id: recoveryExecution.id,
+        tenant_id: tenantId,
+        action_digest: recoveryExecution.actionDigest,
+        resource_type: 'event',
+        resource_id: scopedEventId,
+        operation: 'events.update',
+        idempotency_key: recoveryExecution.idempotencyKey,
+        expected_policy_version: recoveryExecution.policyVersion,
+        expected_resource_version: recoveryExecution.resourceVersion,
+        effect_fence_token: failedRecovery.fenceToken,
+        result: JSON.stringify(recoveryResult),
+        result_sha256: agentSha256(recoveryResult),
+        created_at: new Date(),
+      })
+      .execute();
+    const recoveryClaim = await repository.claim({
+      tenantId,
+      executionId: recoveryExecution.id,
+      workerId: 'worker_recovery_effect',
+      audit: audit(failedRecovery, `aaud_${'e'.repeat(48)}`, 'started'),
+    });
+    const recoveryScope = {
+      tenantId,
+      executionId: recoveryExecution.id,
+      actionId: recoveryExecution.actionId,
+      agentPrincipalId: exactPrincipal.id,
+    };
+    await expect(repository.getExecutionEvidence(recoveryScope)).resolves.toMatchObject({
+      execution: { state: 'running', failureCode: 'AGENT_EFFECT_RECOVERY' },
+      audit: [
+        { phase: 'prepared' },
+        { phase: 'authorized' },
+        { phase: 'started' },
+        { phase: 'failed' },
+        { phase: 'started', reasonCodes: ['effect_recovery'] },
+      ],
+    });
+    const recoveredExecution = {
+      ...recoveryClaim!,
+      state: 'succeeded' as const,
+      result: recoveryResult,
+      failureCode: undefined,
+    };
+    await repository.complete({
+      execution: recoveredExecution,
+      expectedRevision: {
+        fenceToken: recoveryClaim!.fenceToken,
+        leaseOwner: recoveryClaim!.leaseOwner!,
+      },
+      audit: audit(recoveredExecution, `aaud_${'f'.repeat(48)}`, 'succeeded'),
+    });
+    await expect(repository.getExecutionEvidence(recoveryScope)).resolves.toMatchObject({
+      execution: { state: 'succeeded', result: recoveryResult },
+      audit: [
+        { phase: 'prepared' },
+        { phase: 'authorized' },
+        { phase: 'started' },
+        { phase: 'failed' },
+        { phase: 'started', reasonCodes: ['effect_recovery'] },
+        { phase: 'succeeded' },
+      ],
+    });
 
     const raceApproval = {
       ...approval(tenantId),
@@ -1247,7 +1465,7 @@ describe.sequential.each(driverCases)('agent execution persistence: $driver', ({
       .selectAll()
       .where('tenant_id', '=', tenantId)
       .execute();
-    expect(controlEvents).toHaveLength(9);
+    expect(controlEvents).toHaveLength(13);
     expect(controlEvents.find(({ id }) => id === 'revoke_test')).toMatchObject({
       actor_principal_id: 'user_actor',
       operation: 'revoke',

@@ -101,7 +101,8 @@ class MemoryStore implements AgentExecutionStore {
       this.execution.tenantId !== input.tenantId
     )
       return null;
-    if (this.execution.state === 'succeeded') return this.execution;
+    if (['succeeded', 'compensated'].includes(this.execution.state)) return this.execution;
+    if (this.execution.state === 'failed' && !this.effect) return this.execution;
     this.execution = {
       ...this.execution,
       state: 'running',
@@ -470,6 +471,71 @@ describe('durable agent execution service', () => {
       }),
     ).resolves.toMatchObject({ state: 'failed' });
     expect(JSON.stringify(oversizedStore.execution)).not.toContain('x'.repeat(200));
+  });
+
+  it.each([
+    { resourceId: 'evt_other', resourceVersion: 8, status: 'published' },
+    { resourceId: 'evt_primary', resourceVersion: 99, status: 'published' },
+    { resourceId: 'evt_primary', resourceVersion: 8, status: 'draft' },
+  ])('rejects action-bound tool output substitution: %o', async (unsafeResult) => {
+    const store = new MemoryStore();
+    const service = new DurableAgentExecutionService(
+      store,
+      {
+        async invoke() {
+          return unsafeResult;
+        },
+      },
+      { now: () => now },
+      {
+        executionId: () => 'execution_substituted_result',
+        auditId: () => `agent_audit_${store.audits.length}`,
+      },
+      {
+        async load({ execution }) {
+          return {
+            ...authorization,
+            approval,
+            approvalExecutionId: execution.id,
+            riskPolicyAllowed: true,
+            observedAt: now.toISOString(),
+          };
+        },
+      },
+    );
+    const reserved = await service.reserve(authorization);
+    await expect(
+      service.run({ action, execution: reserved, workerId: 'worker_substituted_result' }),
+    ).resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_ACTION_FAILED' });
+    expect(store.execution?.result).toBeUndefined();
+  });
+
+  it('treats a failed consequential execution as terminal and requires a fresh action approval', async () => {
+    const { service, store, invocations } = harness();
+    const reserved = await service.reserve(authorization);
+    store.execution = { ...reserved, state: 'failed', failureCode: 'TIMEOUT' };
+    await expect(
+      service.run({ action, execution: reserved, workerId: 'worker_failed_replay' }),
+    ).resolves.toMatchObject({ state: 'failed', failureCode: 'TIMEOUT' });
+    expect(invocations).toHaveLength(0);
+    expect(store.audits.map(({ phase }) => phase)).toEqual(['prepared', 'authorized']);
+  });
+
+  it('reconciles an exact committed effect from failed to succeeded without invoking again', async () => {
+    const { service, store, invocations } = harness();
+    const reserved = await service.reserve(authorization);
+    store.execution = { ...reserved, state: 'failed', failureCode: 'TIMEOUT' };
+    store.effect = { resourceId: 'evt_primary', resourceVersion: 8, status: 'published' };
+    await expect(
+      service.run({ action, execution: reserved, workerId: 'worker_failed_effect_recovery' }),
+    ).resolves.toMatchObject({ state: 'succeeded', result: store.effect });
+    expect(invocations).toHaveLength(0);
+    expect(store.audits.map(({ phase }) => phase)).toEqual([
+      'prepared',
+      'authorized',
+      'started',
+      'succeeded',
+    ]);
   });
 
   it.each([

@@ -69,7 +69,36 @@ export const AgentOAuthCredentialsMigration: Migration = {
       .alterTable('oauth_applications')
       .dropConstraint('oauth_applications_agent_principal_fk')
       .execute();
-    if (process.env.DB_DRIVER === 'mysql' || process.env.DB_DRIVER === 'mssql') {
+    if (process.env.DB_DRIVER === 'mysql') {
+      const accessTenantIndex = await sql<{ index_name: string }>`
+        select index_name
+        from information_schema.statistics
+        where table_schema = database()
+          and table_name = 'oauth_access_tokens'
+          and index_name = 'oauth_access_tokens_tenant_idx'
+        limit 1
+      `.execute(db);
+      if (accessTenantIndex.rows.length === 0)
+        await sql`create index oauth_access_tokens_tenant_idx on oauth_access_tokens (tenant_id)`.execute(
+          db,
+        );
+      const applicationTenantIndex = await sql<{ index_name: string }>`
+        select index_name
+        from information_schema.statistics
+        where table_schema = database()
+          and table_name = 'oauth_applications'
+          and index_name = 'oauth_applications_tenant_idx'
+        limit 1
+      `.execute(db);
+      if (applicationTenantIndex.rows.length === 0)
+        await sql`create index oauth_applications_tenant_idx on oauth_applications (tenant_id)`.execute(
+          db,
+        );
+      await sql`drop index oauth_access_tokens_subject_idx on oauth_access_tokens`.execute(db);
+      await sql`drop index oauth_applications_agent_principal_idx on oauth_applications`.execute(
+        db,
+      );
+    } else if (process.env.DB_DRIVER === 'mssql') {
       await db.schema
         .dropIndex('oauth_access_tokens_subject_idx')
         .on('oauth_access_tokens')

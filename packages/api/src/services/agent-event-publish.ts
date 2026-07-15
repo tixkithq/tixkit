@@ -20,12 +20,15 @@ import type { EventLaunchReadiness } from '@tixkit/domain';
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
 
 function parseStrings(value: string): string[] {
-  const parsed: unknown = JSON.parse(value);
-  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string'))
-    throw Object.assign(new Error('invalid agent authorization state'), {
-      code: 'AGENT_STATE_INVALID',
-    });
-  return parsed;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) return parsed;
+  } catch {
+    // Persisted adapter state is untrusted and must map to the closed error taxonomy below.
+  }
+  throw Object.assign(new Error('invalid agent authorization state'), {
+    code: 'AGENT_STATE_INVALID',
+  });
 }
 
 function iso(value: Date | string): string {

@@ -229,7 +229,11 @@ function assertExecutionEvidenceState(execution: AgentExecution): void {
     (execution.state === 'reserved' &&
       (execution.fenceToken !== 0 || hasLease || execution.result || execution.failureCode)) ||
     (execution.state === 'running' &&
-      (execution.fenceToken < 1 || !leaseIsValid || execution.result || execution.failureCode)) ||
+      (execution.fenceToken < 1 ||
+        !leaseIsValid ||
+        execution.result ||
+        (execution.failureCode !== undefined &&
+          execution.failureCode !== 'AGENT_EFFECT_RECOVERY'))) ||
     (execution.state === 'succeeded' &&
       (execution.fenceToken < 1 ||
         hasLease ||
@@ -269,6 +273,17 @@ const AGENT_AUDIT_PHASE_ORDER: Readonly<Record<AgentAuditRecord['phase'], number
   failed: 4,
   compensated: 4,
 };
+
+function auditPhaseOrder(record: AgentAuditRecord): number {
+  if (
+    record.phase === 'started' &&
+    record.reasonCodes.length === 1 &&
+    record.reasonCodes[0] === 'effect_recovery'
+  )
+    return 5;
+  if (record.phase === 'succeeded' || record.phase === 'compensated') return 6;
+  return AGENT_AUDIT_PHASE_ORDER[record.phase];
+}
 
 function toAuditRecord(row: Selectable<DB['agent_audit_events']>): AgentAuditRecord {
   if (!AGENT_AUDIT_PHASES.has(row.phase as AgentAuditRecord['phase']))
@@ -601,7 +616,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .sort((left, right) => {
           const timestamp = left.occurredAt.localeCompare(right.occurredAt);
           if (timestamp !== 0) return timestamp;
-          const phase = AGENT_AUDIT_PHASE_ORDER[left.phase] - AGENT_AUDIT_PHASE_ORDER[right.phase];
+          const phase = auditPhaseOrder(left) - auditPhaseOrder(right);
           return phase === 0 ? left.id.localeCompare(right.id) : phase;
         })
         .map((record) => {
@@ -618,6 +633,28 @@ export class AgentExecutionRepository implements AgentExecutionStore {
       const expectedStartedRecords = expectedTerminalPhase
         ? lifecycleTail.slice(0, -1)
         : lifecycleTail;
+      const failedIndex = lifecycleTail.findIndex(({ phase }) => phase === 'failed');
+      const recoveryPrefix = failedIndex < 0 ? [] : lifecycleTail.slice(0, failedIndex);
+      const recoverySuffix = failedIndex < 0 ? [] : lifecycleTail.slice(failedIndex + 1);
+      const recoveryInProgress = execution.state === 'running';
+      const recoverySucceeded = execution.state === 'succeeded';
+      const recoveryStarts = recoverySucceeded ? recoverySuffix.slice(0, -1) : recoverySuffix;
+      const validRecoverySequence =
+        failedIndex > 0 &&
+        recoveryPrefix.every(({ phase }) => phase === 'started') &&
+        recoverySuffix.length >= 1 + (recoverySucceeded ? 1 : 0) &&
+        recoveryStarts.every(
+          ({ phase, reasonCodes }) =>
+            phase === 'started' && reasonCodes.length === 1 && reasonCodes[0] === 'effect_recovery',
+        ) &&
+        ((recoveryInProgress && recoverySuffix.every(({ phase }) => phase === 'started')) ||
+          (recoverySucceeded && recoverySuffix.at(-1)?.phase === 'succeeded'));
+      const normalLifecycleInvalid =
+        expectedStartedRecords.some(({ phase }) => phase !== 'started') ||
+        terminalPhases.length !== (expectedTerminalPhase ? 1 : 0) ||
+        (expectedTerminalPhase !== undefined &&
+          (terminalPhases[0]?.phase !== expectedTerminalPhase ||
+            lifecycleTail.at(-1)?.phase !== expectedTerminalPhase));
       if (
         audit.filter(({ phase }) => phase === 'prepared').length !== 1 ||
         audit.filter(({ phase }) => phase === 'authorized').length !== 1 ||
@@ -629,11 +666,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           execution.state === 'failed' ||
           execution.state === 'compensated') &&
           !audit.some(({ phase }) => phase === 'started')) ||
-        expectedStartedRecords.some(({ phase }) => phase !== 'started') ||
-        terminalPhases.length !== (expectedTerminalPhase ? 1 : 0) ||
-        (expectedTerminalPhase !== undefined &&
-          (terminalPhases[0]?.phase !== expectedTerminalPhase ||
-            lifecycleTail.at(-1)?.phase !== expectedTerminalPhase)) ||
+        (!validRecoverySequence && normalLifecycleInvalid) ||
         audit.some(({ occurredAt }) => {
           const timestamp = new Date(occurredAt).getTime();
           return (
@@ -1402,6 +1435,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .where('tenant_id', '=', input.tenantId)
         .where('execution_id', '=', row.id)
         .executeTakeFirst();
+      if (row.state === 'failed' && !committedEffect) return toExecution(row);
       if (committedEffect) {
         const result = JSON.parse(committedEffect.result) as AgentActionResult;
         validateAgentActionResult(result);
@@ -1455,6 +1489,7 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           return null;
       }
       const fenceToken = safeInteger(row.fence_token, 'fence token') + 1;
+      const effectRecovery = row.state === 'failed' || row.failure_code === 'AGENT_EFFECT_RECOVERY';
       const execution = toExecution(row);
       assertAudit(execution, input.audit, ['started']);
       const leaseExpiresAt = new Date(now.getTime() + LEASE_MILLISECONDS);
@@ -1465,18 +1500,24 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           fence_token: fenceToken,
           lease_owner: input.workerId,
           lease_expires_at: leaseExpiresAt,
+          failure_code: effectRecovery ? 'AGENT_EFFECT_RECOVERY' : null,
           updated_at: now,
         })
         .where('tenant_id', '=', input.tenantId)
         .where('id', '=', input.executionId)
         .execute();
-      await appendAudit(tx, input.executionId, { ...input.audit, occurredAt: now.toISOString() });
+      await appendAudit(tx, input.executionId, {
+        ...input.audit,
+        occurredAt: now.toISOString(),
+        reasonCodes: effectRecovery ? ['effect_recovery'] : input.audit.reasonCodes,
+      });
       return toExecution({
         ...row,
         state: 'running',
         fence_token: fenceToken,
         lease_owner: input.workerId,
         lease_expires_at: leaseExpiresAt,
+        failure_code: effectRecovery ? 'AGENT_EFFECT_RECOVERY' : null,
         updated_at: now,
       });
     });

@@ -303,7 +303,7 @@ export class DurableAgentExecutionService {
       claimed.delegationGrantId !== input.action.delegationGrantId
     )
       throw new AgentExecutionConflictError('claimed execution does not match the action');
-    if (claimed.state === 'succeeded' || claimed.state === 'compensated') return claimed;
+    if (['succeeded', 'failed', 'compensated'].includes(claimed.state)) return claimed;
     if (!claimed.leaseOwner || claimed.state !== 'running')
       throw new AgentExecutionConflictError('execution is not claimable');
     const recovered = await this.store.recoverEffect({ execution: claimed, action: input.action });
@@ -383,7 +383,7 @@ export class DurableAgentExecutionService {
         expectedLeaseOwner: claimed.leaseOwner,
         expectedFenceToken: claimed.fenceToken,
       });
-      validateAgentActionResult(result);
+      validateAgentActionResultForAction(input.action, result);
       const completed: AgentExecution = {
         ...claimed,
         state: 'succeeded',

@@ -88,6 +88,44 @@ async function databaseNow(db: Executor): Promise<Date> {
   return new Date(row.now);
 }
 
+function retryableTransactionConflict(error: unknown): boolean {
+  const item = error as {
+    code?: string;
+    errno?: number;
+    number?: number;
+    cause?: { code?: string; errno?: number; number?: number };
+  };
+  const code = item.code ?? item.cause?.code;
+  const errno = item.errno ?? item.cause?.errno;
+  const number = item.number ?? item.cause?.number;
+  return (
+    code === '23505' ||
+    code === '40001' ||
+    code === '40P01' ||
+    code === 'ER_DUP_ENTRY' ||
+    code === 'ER_LOCK_DEADLOCK' ||
+    errno === 1062 ||
+    errno === 1213 ||
+    number === 1205 ||
+    number === 2601 ||
+    number === 2627
+  );
+}
+
+async function executeAgentActionTransaction<T>(
+  db: Database,
+  operation: (tx: Transaction<import('@tixkit/db').DB>) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await db.transaction().setIsolationLevel('serializable').execute(operation);
+    } catch (error) {
+      if (attempt === 4 || !retryableTransactionConflict(error)) throw error;
+    }
+  }
+  throw new Error('AGENT_ACTION_TRANSACTION_RETRY_EXHAUSTED');
+}
+
 function stableId(
   prefix: 'act' | 'aevt' | 'apr' | 'exec' | 'aaud' | 'worker',
   ...parts: readonly string[]
@@ -172,245 +210,239 @@ export class AgentActionService {
     resourceId: string;
   }): Promise<PreparedAgentAction> {
     const fingerprint = requestFingerprint(input);
-    return this.db
-      .transaction()
-      .setIsolationLevel('serializable')
-      .execute(async (tx) => {
-        await tx
-          .selectFrom('tenants')
-          .select('id')
-          .where('id', '=', input.tenantId)
-          .forUpdate()
-          .executeTakeFirstOrThrow();
-        const replay = await tx
-          .selectFrom('agent_actions')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('agent_principal_id', '=', input.agentPrincipalId)
-          .where('idempotency_key', '=', input.idempotencyKey)
-          .executeTakeFirst();
-        if (replay) {
-          if (replay.request_fingerprint !== fingerprint)
-            throw new Error('AGENT_ACTION_IDEMPOTENCY_CONFLICT');
-          return this.fromRow(replay);
-        }
+    return executeAgentActionTransaction(this.db, async (tx) => {
+      await tx
+        .selectFrom('tenants')
+        .select('id')
+        .where('id', '=', input.tenantId)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      const replay = await tx
+        .selectFrom('agent_actions')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('agent_principal_id', '=', input.agentPrincipalId)
+        .where('idempotency_key', '=', input.idempotencyKey)
+        .executeTakeFirst();
+      if (replay) {
+        if (replay.request_fingerprint !== fingerprint)
+          throw new Error('AGENT_ACTION_IDEMPOTENCY_CONFLICT');
+        return this.fromRow(replay);
+      }
 
-        const principalRow = await tx
-          .selectFrom('agent_principals')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('id', '=', input.agentPrincipalId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!principalRow) throw new Error('AGENT_ACTION_PRINCIPAL_DENIED');
-        const principal = toPrincipal(principalRow);
-        if (
-          principal.state !== 'active' ||
-          principal.protocolVersion !== AGENT_PROTOCOL_VERSION ||
-          !principal.capabilities.includes('events.execute')
-        )
-          throw new Error('AGENT_ACTION_PRINCIPAL_DENIED');
-        const delegationRow = await tx
-          .selectFrom('agent_delegations')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('id', '=', input.delegationGrantId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!delegationRow) throw new Error('AGENT_ACTION_DELEGATION_DENIED');
-        const delegation = toDelegation(delegationRow);
-        const now = await databaseNow(tx);
-        if (
-          delegation.agentPrincipalId !== principal.id ||
-          delegation.sponsorPrincipalId !== principal.sponsorPrincipalId ||
-          !delegation.capabilities.includes('events.execute') ||
-          !delegation.resourceScopes.includes(`event:${input.resourceId}`) ||
-          delegation.revokedAt ||
-          new Date(delegation.issuedAt).getTime() > now.getTime() ||
-          new Date(delegation.expiresAt).getTime() <= now.getTime()
-        )
-          throw new Error('AGENT_ACTION_DELEGATION_DENIED');
-        const event = await tx
-          .selectFrom('events')
-          .select(['id', 'organization_id', 'brand_id', 'version'])
-          .where('tenant_id', '=', input.tenantId)
-          .where('id', '=', input.resourceId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!event) throw new Error('AGENT_ACTION_RESOURCE_DENIED');
-        const sponsor = await tx
-          .selectFrom('user_profiles')
-          .select('status')
-          .where('tenant_id', '=', input.tenantId)
-          .where('id', '=', principal.sponsorPrincipalId)
-          .forUpdate()
-          .executeTakeFirst();
-        const membership = await tx
-          .selectFrom('organization_members')
-          .select('id')
-          .where('tenant_id', '=', input.tenantId)
-          .where('organization_id', '=', event.organization_id)
-          .where('user_id', '=', principal.sponsorPrincipalId)
-          .where('accepted_at', 'is not', null)
-          .forUpdate()
-          .executeTakeFirst();
-        const permission = await tx
-          .selectFrom('permission_grants')
-          .select('id')
-          .where('tenant_id', '=', input.tenantId)
-          .where('principal_type', '=', 'user')
-          .where('principal_id', '=', principal.sponsorPrincipalId)
-          .where('permission', '=', 'events.write')
-          .where('scope_type', '=', 'tenant')
-          .where('scope_id', 'is', null)
-          .forUpdate()
-          .executeTakeFirst();
-        if (sponsor?.status !== 'active' || !membership || !permission)
-          throw new Error('AGENT_ACTION_RESOURCE_DENIED');
-        const policy = await tx
-          .selectFrom('agent_action_policies')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('action_kind', '=', input.kind)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!policy) throw new Error('AGENT_ACTION_POLICY_UNAVAILABLE');
-        const readiness = await new ReadinessService(
-          tx as Database,
-          resolvePaymentMode(),
-        ).getEventLaunchReadiness({
-          tenantId: input.tenantId,
-          organizationId: event.organization_id,
-          brandId: event.brand_id,
-          eventId: event.id,
-          permissions: new Set(['events.write']),
-        });
-        const readinessSnapshotSha256 = eventPublishReadinessSnapshotSha256(readiness);
-        const action: AgentAction = {
-          id: stableId('act', input.tenantId, input.agentPrincipalId, input.idempotencyKey),
-          protocolVersion: AGENT_PROTOCOL_VERSION,
-          agentPrincipalId: input.agentPrincipalId,
-          sponsorPrincipalId: principal.sponsorPrincipalId,
-          delegationGrantId: input.delegationGrantId,
-          kind: input.kind,
-          autonomy: 'execute_with_approval',
-          target: {
-            tenantId: input.tenantId,
-            resourceType: 'event',
-            resourceId: event.id,
-            resourceVersion: safeInteger(event.version, 'event version'),
-            apiOperation: 'events.publish',
-          },
-          payload: { readinessSnapshotSha256 },
-          idempotencyKey: input.idempotencyKey,
-          expectedPolicyVersion: safeInteger(policy.policy_version, 'agent policy version'),
-          preparedAt: now.toISOString(),
-        };
-        const actionDigest = agentActionDigest(action);
-        const sponsorPermissions = ['events:publish'];
-        const decision = authorizeAgentAction({
-          principal,
-          delegation,
-          action,
-          actionDigest,
-          sponsorPermissions,
-          tenantAllowedActions: policy.allowed && policy.risk_allowed ? ['event.publish'] : [],
-          currentResourceVersion: action.target.resourceVersion,
-          currentPolicyVersion: action.expectedPolicyVersion,
-          now: now.toISOString(),
-        });
-        const authorizationReasons = [
-          ...new Set([...decision.reasons, ...(readiness.launchable ? [] : ['event_not_ready'])]),
-        ];
-        const eligibleForApproval =
-          readiness.launchable &&
-          decision.reasons.length === 1 &&
-          decision.reasons[0] === 'approval_required';
-        const authorizationSnapshotSha256 = agentSha256({
-          principal,
-          delegation,
-          sponsorPermissions,
-          policy: {
-            allowed: Boolean(policy.allowed),
-            riskAllowed: Boolean(policy.risk_allowed),
-            version: action.expectedPolicyVersion,
-          },
-          resource: action.target,
-          readinessSnapshotSha256,
-          checkedAt: now.toISOString(),
-        });
-        const expiresAt = new Date(
-          Math.min(
-            now.getTime() + ACTION_TTL_MILLISECONDS,
-            new Date(delegation.expiresAt).getTime(),
-          ),
-        );
-        const dryRun = {
-          launchable: readiness.launchable,
-          readinessSnapshotSha256,
-          blockingReasonCodes: [
-            ...new Set(readiness.requiredBlockers.flatMap((step) => step.reasonCodes)),
-          ],
-        };
-        await tx
-          .insertInto('agent_actions')
-          .values({
-            id: action.id,
-            tenant_id: input.tenantId,
-            agent_principal_id: action.agentPrincipalId,
-            sponsor_principal_id: action.sponsorPrincipalId,
-            delegation_grant_id: action.delegationGrantId,
-            action_kind: action.kind,
-            action_digest: actionDigest,
-            action_json: canonicalAgentJson(action),
-            resource_type: action.target.resourceType,
-            resource_id: action.target.resourceId,
-            resource_version: action.target.resourceVersion,
-            policy_version: action.expectedPolicyVersion,
-            idempotency_key: action.idempotencyKey,
-            request_fingerprint: fingerprint,
-            authorization_snapshot_sha256: authorizationSnapshotSha256,
-            authorization_reasons: JSON.stringify(authorizationReasons),
-            dry_run_json: canonicalAgentJson(dryRun),
-            eligible_for_approval: eligibleForApproval,
-            prepared_at: now,
-            expires_at: expiresAt,
-          })
-          .execute();
-        await tx
-          .insertInto('agent_action_events')
-          .values({
-            id: stableId('aevt', action.id, 'prepared'),
-            tenant_id: input.tenantId,
-            action_id: action.id,
-            action_digest: actionDigest,
-            agent_principal_id: action.agentPrincipalId,
-            sponsor_principal_id: action.sponsorPrincipalId,
-            actor_type: 'agent',
-            actor_principal_id: action.agentPrincipalId,
-            phase: 'prepared',
-            approval_id: null,
-            execution_id: null,
-            idempotency_key: input.idempotencyKey,
-            request_fingerprint: fingerprint,
-            authorization_sha256: authorizationSnapshotSha256,
-            outcome: eligibleForApproval ? 'approval_required' : 'denied',
-            occurred_at: now,
-          })
-          .execute();
-        return {
-          action,
-          actionDigest,
-          expiresAt: expiresAt.toISOString(),
-          authorization: {
-            eligibleForApproval,
-            reasons: authorizationReasons,
-            snapshotSha256: authorizationSnapshotSha256,
-            checkedAt: now.toISOString(),
-          },
-          dryRun,
-        };
+      const principalRow = await tx
+        .selectFrom('agent_principals')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.agentPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!principalRow) throw new Error('AGENT_ACTION_PRINCIPAL_DENIED');
+      const principal = toPrincipal(principalRow);
+      if (
+        principal.state !== 'active' ||
+        principal.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+        !principal.capabilities.includes('events.execute')
+      )
+        throw new Error('AGENT_ACTION_PRINCIPAL_DENIED');
+      const delegationRow = await tx
+        .selectFrom('agent_delegations')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.delegationGrantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!delegationRow) throw new Error('AGENT_ACTION_DELEGATION_DENIED');
+      const delegation = toDelegation(delegationRow);
+      const now = await databaseNow(tx);
+      if (
+        delegation.agentPrincipalId !== principal.id ||
+        delegation.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+        !delegation.capabilities.includes('events.execute') ||
+        !delegation.resourceScopes.includes(`event:${input.resourceId}`) ||
+        delegation.revokedAt ||
+        new Date(delegation.issuedAt).getTime() > now.getTime() ||
+        new Date(delegation.expiresAt).getTime() <= now.getTime()
+      )
+        throw new Error('AGENT_ACTION_DELEGATION_DENIED');
+      const event = await tx
+        .selectFrom('events')
+        .select(['id', 'organization_id', 'brand_id', 'version'])
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.resourceId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!event) throw new Error('AGENT_ACTION_RESOURCE_DENIED');
+      const sponsor = await tx
+        .selectFrom('user_profiles')
+        .select('status')
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', principal.sponsorPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      const membership = await tx
+        .selectFrom('organization_members')
+        .select('id')
+        .where('tenant_id', '=', input.tenantId)
+        .where('organization_id', '=', event.organization_id)
+        .where('user_id', '=', principal.sponsorPrincipalId)
+        .where('accepted_at', 'is not', null)
+        .forUpdate()
+        .executeTakeFirst();
+      const permission = await tx
+        .selectFrom('permission_grants')
+        .select('id')
+        .where('tenant_id', '=', input.tenantId)
+        .where('principal_type', '=', 'user')
+        .where('principal_id', '=', principal.sponsorPrincipalId)
+        .where('permission', '=', 'events.write')
+        .where('scope_type', '=', 'tenant')
+        .where('scope_id', 'is', null)
+        .forUpdate()
+        .executeTakeFirst();
+      if (sponsor?.status !== 'active' || !membership || !permission)
+        throw new Error('AGENT_ACTION_RESOURCE_DENIED');
+      const policy = await tx
+        .selectFrom('agent_action_policies')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('action_kind', '=', input.kind)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!policy) throw new Error('AGENT_ACTION_POLICY_UNAVAILABLE');
+      const readiness = await new ReadinessService(
+        tx as Database,
+        resolvePaymentMode(),
+      ).getEventLaunchReadiness({
+        tenantId: input.tenantId,
+        organizationId: event.organization_id,
+        brandId: event.brand_id,
+        eventId: event.id,
+        permissions: new Set(['events.write']),
       });
+      const readinessSnapshotSha256 = eventPublishReadinessSnapshotSha256(readiness);
+      const action: AgentAction = {
+        id: stableId('act', input.tenantId, input.agentPrincipalId, input.idempotencyKey),
+        protocolVersion: AGENT_PROTOCOL_VERSION,
+        agentPrincipalId: input.agentPrincipalId,
+        sponsorPrincipalId: principal.sponsorPrincipalId,
+        delegationGrantId: input.delegationGrantId,
+        kind: input.kind,
+        autonomy: 'execute_with_approval',
+        target: {
+          tenantId: input.tenantId,
+          resourceType: 'event',
+          resourceId: event.id,
+          resourceVersion: safeInteger(event.version, 'event version'),
+          apiOperation: 'events.publish',
+        },
+        payload: { readinessSnapshotSha256 },
+        idempotencyKey: input.idempotencyKey,
+        expectedPolicyVersion: safeInteger(policy.policy_version, 'agent policy version'),
+        preparedAt: now.toISOString(),
+      };
+      const actionDigest = agentActionDigest(action);
+      const sponsorPermissions = ['events:publish'];
+      const decision = authorizeAgentAction({
+        principal,
+        delegation,
+        action,
+        actionDigest,
+        sponsorPermissions,
+        tenantAllowedActions: policy.allowed && policy.risk_allowed ? ['event.publish'] : [],
+        currentResourceVersion: action.target.resourceVersion,
+        currentPolicyVersion: action.expectedPolicyVersion,
+        now: now.toISOString(),
+      });
+      const authorizationReasons = [
+        ...new Set([...decision.reasons, ...(readiness.launchable ? [] : ['event_not_ready'])]),
+      ];
+      const eligibleForApproval =
+        readiness.launchable &&
+        decision.reasons.length === 1 &&
+        decision.reasons[0] === 'approval_required';
+      const authorizationSnapshotSha256 = agentSha256({
+        principal,
+        delegation,
+        sponsorPermissions,
+        policy: {
+          allowed: Boolean(policy.allowed),
+          riskAllowed: Boolean(policy.risk_allowed),
+          version: action.expectedPolicyVersion,
+        },
+        resource: action.target,
+        readinessSnapshotSha256,
+        checkedAt: now.toISOString(),
+      });
+      const expiresAt = new Date(
+        Math.min(now.getTime() + ACTION_TTL_MILLISECONDS, new Date(delegation.expiresAt).getTime()),
+      );
+      const dryRun = {
+        launchable: readiness.launchable,
+        readinessSnapshotSha256,
+        blockingReasonCodes: [
+          ...new Set(readiness.requiredBlockers.flatMap((step) => step.reasonCodes)),
+        ],
+      };
+      await tx
+        .insertInto('agent_actions')
+        .values({
+          id: action.id,
+          tenant_id: input.tenantId,
+          agent_principal_id: action.agentPrincipalId,
+          sponsor_principal_id: action.sponsorPrincipalId,
+          delegation_grant_id: action.delegationGrantId,
+          action_kind: action.kind,
+          action_digest: actionDigest,
+          action_json: canonicalAgentJson(action),
+          resource_type: action.target.resourceType,
+          resource_id: action.target.resourceId,
+          resource_version: action.target.resourceVersion,
+          policy_version: action.expectedPolicyVersion,
+          idempotency_key: action.idempotencyKey,
+          request_fingerprint: fingerprint,
+          authorization_snapshot_sha256: authorizationSnapshotSha256,
+          authorization_reasons: JSON.stringify(authorizationReasons),
+          dry_run_json: canonicalAgentJson(dryRun),
+          eligible_for_approval: eligibleForApproval,
+          prepared_at: now,
+          expires_at: expiresAt,
+        })
+        .execute();
+      await tx
+        .insertInto('agent_action_events')
+        .values({
+          id: stableId('aevt', action.id, 'prepared'),
+          tenant_id: input.tenantId,
+          action_id: action.id,
+          action_digest: actionDigest,
+          agent_principal_id: action.agentPrincipalId,
+          sponsor_principal_id: action.sponsorPrincipalId,
+          actor_type: 'agent',
+          actor_principal_id: action.agentPrincipalId,
+          phase: 'prepared',
+          approval_id: null,
+          execution_id: null,
+          idempotency_key: input.idempotencyKey,
+          request_fingerprint: fingerprint,
+          authorization_sha256: authorizationSnapshotSha256,
+          outcome: eligibleForApproval ? 'approval_required' : 'denied',
+          occurred_at: now,
+        })
+        .execute();
+      return {
+        action,
+        actionDigest,
+        expiresAt: expiresAt.toISOString(),
+        authorization: {
+          eligibleForApproval,
+          reasons: authorizationReasons,
+          snapshotSha256: authorizationSnapshotSha256,
+          checkedAt: now.toISOString(),
+        },
+        dryRun,
+      };
+    });
   }
 
   async getForAgent(input: {
@@ -480,141 +512,135 @@ export class AgentActionService {
       actionId: input.actionId,
       actionDigest: input.actionDigest,
     });
-    return this.db
-      .transaction()
-      .setIsolationLevel('serializable')
-      .execute(async (tx) => {
-        await tx
-          .selectFrom('tenants')
-          .select('id')
-          .where('id', '=', input.tenantId)
-          .forUpdate()
-          .executeTakeFirstOrThrow();
-        const row = await tx
-          .selectFrom('agent_actions')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('id', '=', input.actionId)
-          .where('sponsor_principal_id', '=', input.approverPrincipalId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!row) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
-        const prepared = this.fromRow(row);
-        if (prepared.actionDigest !== input.actionDigest)
-          throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
-        const replay = await tx
-          .selectFrom('agent_action_events')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('actor_principal_id', '=', input.approverPrincipalId)
-          .where('phase', '=', 'approved')
-          .where('idempotency_key', '=', input.idempotencyKey)
-          .forUpdate()
-          .executeTakeFirst();
-        if (replay) {
-          if (
-            replay.request_fingerprint !== fingerprint ||
-            replay.action_id !== input.actionId ||
-            replay.action_digest !== input.actionDigest ||
-            !replay.approval_id
-          )
-            throw new Error('AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT');
-          const approval = await tx
-            .selectFrom('agent_approvals')
-            .selectAll()
-            .where('tenant_id', '=', input.tenantId)
-            .where('id', '=', replay.approval_id)
-            .where('action_id', '=', input.actionId)
-            .executeTakeFirstOrThrow();
-          const replayed = this.approvalFromRow(approval);
-          if (
-            replayed.actionDigest !== input.actionDigest ||
-            replayed.approverPrincipalId !== input.approverPrincipalId ||
-            replayed.policyVersion !== prepared.action.expectedPolicyVersion ||
-            replayed.approverPermissionSnapshot.length !== 1 ||
-            replayed.approverPermissionSnapshot[0] !== 'events:publish'
-          )
-            throw new Error('persisted agent approval binding is invalid');
-          return replayed;
-        }
-        const now = await databaseNow(tx);
-        const authorizationSha256 = await this.assertCurrentlyApprovable(
-          tx,
-          prepared,
-          input.approverPrincipalId,
-          now,
-        );
-        const existing = await tx
+    return executeAgentActionTransaction(this.db, async (tx) => {
+      await tx
+        .selectFrom('tenants')
+        .select('id')
+        .where('id', '=', input.tenantId)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      const row = await tx
+        .selectFrom('agent_actions')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.actionId)
+        .where('sponsor_principal_id', '=', input.approverPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!row) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+      const prepared = this.fromRow(row);
+      if (prepared.actionDigest !== input.actionDigest)
+        throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
+      const replay = await tx
+        .selectFrom('agent_action_events')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('actor_principal_id', '=', input.approverPrincipalId)
+        .where('phase', '=', 'approved')
+        .where('idempotency_key', '=', input.idempotencyKey)
+        .forUpdate()
+        .executeTakeFirst();
+      if (replay) {
+        if (
+          replay.request_fingerprint !== fingerprint ||
+          replay.action_id !== input.actionId ||
+          replay.action_digest !== input.actionDigest ||
+          !replay.approval_id
+        )
+          throw new Error('AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT');
+        const approval = await tx
           .selectFrom('agent_approvals')
-          .select('id')
+          .selectAll()
           .where('tenant_id', '=', input.tenantId)
+          .where('id', '=', replay.approval_id)
           .where('action_id', '=', input.actionId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (existing) throw new Error('AGENT_ACTION_ALREADY_APPROVED');
-        const expiresAt = new Date(
-          Math.min(
-            now.getTime() + APPROVAL_TTL_MILLISECONDS,
-            new Date(prepared.expiresAt).getTime(),
-          ),
-        );
-        const approval: AgentApproval = {
-          id: stableId(
-            'apr',
-            input.tenantId,
-            input.approverPrincipalId,
-            input.actionId,
-            input.idempotencyKey,
-          ),
-          tenantId: input.tenantId,
-          actionDigest: input.actionDigest,
-          approverPrincipalId: input.approverPrincipalId,
-          approverPermissionSnapshot: ['events:publish'],
-          policyVersion: prepared.action.expectedPolicyVersion,
-          approvedAt: now.toISOString(),
-          expiresAt: expiresAt.toISOString(),
-        };
-        await tx
-          .insertInto('agent_approvals')
-          .values({
-            id: approval.id,
-            tenant_id: approval.tenantId,
-            action_id: input.actionId,
-            action_digest: approval.actionDigest,
-            plan_sha256: null,
-            approver_principal_id: approval.approverPrincipalId,
-            approver_permission_snapshot: canonicalAgentJson(approval.approverPermissionSnapshot),
-            policy_version: approval.policyVersion,
-            approved_at: now,
-            expires_at: expiresAt,
-            revoked_at: null,
-            consumed_at: null,
-            consumed_execution_id: null,
-          })
-          .execute();
-        await tx
-          .insertInto('agent_action_events')
-          .values({
-            id: stableId('aevt', input.actionId, 'approved'),
-            tenant_id: input.tenantId,
-            action_id: input.actionId,
-            action_digest: input.actionDigest,
-            agent_principal_id: prepared.action.agentPrincipalId,
-            sponsor_principal_id: prepared.action.sponsorPrincipalId,
-            actor_type: 'user',
-            actor_principal_id: input.approverPrincipalId,
-            phase: 'approved',
-            approval_id: approval.id,
-            execution_id: null,
-            idempotency_key: input.idempotencyKey,
-            request_fingerprint: fingerprint,
-            authorization_sha256: authorizationSha256,
-            outcome: 'approved',
-            occurred_at: now,
-          })
-          .execute();
-        return approval;
-      });
+          .executeTakeFirstOrThrow();
+        const replayed = this.approvalFromRow(approval);
+        if (
+          replayed.actionDigest !== input.actionDigest ||
+          replayed.approverPrincipalId !== input.approverPrincipalId ||
+          replayed.policyVersion !== prepared.action.expectedPolicyVersion ||
+          replayed.approverPermissionSnapshot.length !== 1 ||
+          replayed.approverPermissionSnapshot[0] !== 'events:publish'
+        )
+          throw new Error('persisted agent approval binding is invalid');
+        return replayed;
+      }
+      const now = await databaseNow(tx);
+      const authorizationSha256 = await this.assertCurrentlyApprovable(
+        tx,
+        prepared,
+        input.approverPrincipalId,
+        now,
+      );
+      const existing = await tx
+        .selectFrom('agent_approvals')
+        .select('id')
+        .where('tenant_id', '=', input.tenantId)
+        .where('action_id', '=', input.actionId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (existing) throw new Error('AGENT_ACTION_ALREADY_APPROVED');
+      const expiresAt = new Date(
+        Math.min(now.getTime() + APPROVAL_TTL_MILLISECONDS, new Date(prepared.expiresAt).getTime()),
+      );
+      const approval: AgentApproval = {
+        id: stableId(
+          'apr',
+          input.tenantId,
+          input.approverPrincipalId,
+          input.actionId,
+          input.idempotencyKey,
+        ),
+        tenantId: input.tenantId,
+        actionDigest: input.actionDigest,
+        approverPrincipalId: input.approverPrincipalId,
+        approverPermissionSnapshot: ['events:publish'],
+        policyVersion: prepared.action.expectedPolicyVersion,
+        approvedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+      };
+      await tx
+        .insertInto('agent_approvals')
+        .values({
+          id: approval.id,
+          tenant_id: approval.tenantId,
+          action_id: input.actionId,
+          action_digest: approval.actionDigest,
+          plan_sha256: null,
+          approver_principal_id: approval.approverPrincipalId,
+          approver_permission_snapshot: canonicalAgentJson(approval.approverPermissionSnapshot),
+          policy_version: approval.policyVersion,
+          approved_at: now,
+          expires_at: expiresAt,
+          revoked_at: null,
+          consumed_at: null,
+          consumed_execution_id: null,
+        })
+        .execute();
+      await tx
+        .insertInto('agent_action_events')
+        .values({
+          id: stableId('aevt', input.actionId, 'approved'),
+          tenant_id: input.tenantId,
+          action_id: input.actionId,
+          action_digest: input.actionDigest,
+          agent_principal_id: prepared.action.agentPrincipalId,
+          sponsor_principal_id: prepared.action.sponsorPrincipalId,
+          actor_type: 'user',
+          actor_principal_id: input.approverPrincipalId,
+          phase: 'approved',
+          approval_id: approval.id,
+          execution_id: null,
+          idempotency_key: input.idempotencyKey,
+          request_fingerprint: fingerprint,
+          authorization_sha256: authorizationSha256,
+          outcome: 'approved',
+          occurred_at: now,
+        })
+        .execute();
+      return approval;
+    });
   }
 
   async revokeApproval(input: {
@@ -631,113 +657,110 @@ export class AgentActionService {
       actionDigest: input.actionDigest,
       operation: 'revoke',
     });
-    return this.db
-      .transaction()
-      .setIsolationLevel('serializable')
-      .execute(async (tx) => {
-        await tx
-          .selectFrom('tenants')
-          .select('id')
-          .where('id', '=', input.tenantId)
-          .forUpdate()
-          .executeTakeFirstOrThrow();
-        const action = await tx
-          .selectFrom('agent_actions')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('id', '=', input.actionId)
-          .where('sponsor_principal_id', '=', input.sponsorPrincipalId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!action) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
-        const prepared = this.fromRow(action);
-        if (prepared.actionDigest !== input.actionDigest)
-          throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
-        const replay = await tx
-          .selectFrom('agent_action_events')
-          .selectAll()
-          .where('tenant_id', '=', input.tenantId)
-          .where('actor_principal_id', '=', input.sponsorPrincipalId)
-          .where('phase', '=', 'revoked')
-          .where('idempotency_key', '=', input.idempotencyKey)
-          .forUpdate()
-          .executeTakeFirst();
-        if (replay) {
-          if (
-            replay.request_fingerprint !== fingerprint ||
-            replay.action_id !== input.actionId ||
-            replay.action_digest !== input.actionDigest ||
-            replay.approval_id !== input.approvalId
-          )
-            throw new Error('AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT');
-          const approval = await tx
-            .selectFrom('agent_approvals')
-            .selectAll()
-            .where('tenant_id', '=', input.tenantId)
-            .where('id', '=', input.approvalId)
-            .where('action_id', '=', input.actionId)
-            .executeTakeFirstOrThrow();
-          const replayed = this.approvalFromRow(approval);
-          if (
-            replayed.actionDigest !== input.actionDigest ||
-            replayed.approverPrincipalId !== input.sponsorPrincipalId ||
-            !replayed.revokedAt
-          )
-            throw new Error('persisted agent approval revocation binding is invalid');
-          return replayed;
-        }
+    return executeAgentActionTransaction(this.db, async (tx) => {
+      await tx
+        .selectFrom('tenants')
+        .select('id')
+        .where('id', '=', input.tenantId)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      const action = await tx
+        .selectFrom('agent_actions')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.actionId)
+        .where('sponsor_principal_id', '=', input.sponsorPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!action) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+      const prepared = this.fromRow(action);
+      if (prepared.actionDigest !== input.actionDigest)
+        throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
+      const replay = await tx
+        .selectFrom('agent_action_events')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('actor_principal_id', '=', input.sponsorPrincipalId)
+        .where('phase', '=', 'revoked')
+        .where('idempotency_key', '=', input.idempotencyKey)
+        .forUpdate()
+        .executeTakeFirst();
+      if (replay) {
+        if (
+          replay.request_fingerprint !== fingerprint ||
+          replay.action_id !== input.actionId ||
+          replay.action_digest !== input.actionDigest ||
+          replay.approval_id !== input.approvalId
+        )
+          throw new Error('AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT');
         const approval = await tx
           .selectFrom('agent_approvals')
           .selectAll()
           .where('tenant_id', '=', input.tenantId)
           .where('id', '=', input.approvalId)
           .where('action_id', '=', input.actionId)
-          .where('action_digest', '=', input.actionDigest)
-          .where('approver_principal_id', '=', input.sponsorPrincipalId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!approval) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
-        if (approval.consumed_at) throw new Error('AGENT_ACTION_APPROVAL_ALREADY_CONSUMED');
-        if (approval.revoked_at) throw new Error('AGENT_ACTION_APPROVAL_ALREADY_REVOKED');
-        const now = await databaseNow(tx);
-        await tx
-          .updateTable('agent_approvals')
-          .set({ revoked_at: now })
-          .where('tenant_id', '=', input.tenantId)
-          .where('id', '=', input.approvalId)
-          .where('revoked_at', 'is', null)
-          .where('consumed_at', 'is', null)
           .executeTakeFirstOrThrow();
-        const revoked = this.approvalFromRow({ ...approval, revoked_at: now });
-        await tx
-          .insertInto('agent_action_events')
-          .values({
-            id: stableId('aevt', input.actionId, input.approvalId, 'revoked'),
-            tenant_id: input.tenantId,
-            action_id: input.actionId,
-            action_digest: input.actionDigest,
-            agent_principal_id: prepared.action.agentPrincipalId,
-            sponsor_principal_id: prepared.action.sponsorPrincipalId,
-            actor_type: 'user',
-            actor_principal_id: input.sponsorPrincipalId,
-            phase: 'revoked',
-            approval_id: input.approvalId,
-            execution_id: null,
-            idempotency_key: input.idempotencyKey,
-            request_fingerprint: fingerprint,
-            authorization_sha256: agentSha256({
-              tenantId: input.tenantId,
-              sponsorPrincipalId: input.sponsorPrincipalId,
-              actionId: input.actionId,
-              approvalId: input.approvalId,
-              actionDigest: input.actionDigest,
-            }),
-            outcome: 'revoked',
-            occurred_at: now,
-          })
-          .execute();
-        return revoked;
-      });
+        const replayed = this.approvalFromRow(approval);
+        if (
+          replayed.actionDigest !== input.actionDigest ||
+          replayed.approverPrincipalId !== input.sponsorPrincipalId ||
+          !replayed.revokedAt
+        )
+          throw new Error('persisted agent approval revocation binding is invalid');
+        return replayed;
+      }
+      const approval = await tx
+        .selectFrom('agent_approvals')
+        .selectAll()
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.approvalId)
+        .where('action_id', '=', input.actionId)
+        .where('action_digest', '=', input.actionDigest)
+        .where('approver_principal_id', '=', input.sponsorPrincipalId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!approval) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
+      if (approval.consumed_at) throw new Error('AGENT_ACTION_APPROVAL_ALREADY_CONSUMED');
+      if (approval.revoked_at) throw new Error('AGENT_ACTION_APPROVAL_ALREADY_REVOKED');
+      const now = await databaseNow(tx);
+      await tx
+        .updateTable('agent_approvals')
+        .set({ revoked_at: now })
+        .where('tenant_id', '=', input.tenantId)
+        .where('id', '=', input.approvalId)
+        .where('revoked_at', 'is', null)
+        .where('consumed_at', 'is', null)
+        .executeTakeFirstOrThrow();
+      const revoked = this.approvalFromRow({ ...approval, revoked_at: now });
+      await tx
+        .insertInto('agent_action_events')
+        .values({
+          id: stableId('aevt', input.actionId, input.approvalId, 'revoked'),
+          tenant_id: input.tenantId,
+          action_id: input.actionId,
+          action_digest: input.actionDigest,
+          agent_principal_id: prepared.action.agentPrincipalId,
+          sponsor_principal_id: prepared.action.sponsorPrincipalId,
+          actor_type: 'user',
+          actor_principal_id: input.sponsorPrincipalId,
+          phase: 'revoked',
+          approval_id: input.approvalId,
+          execution_id: null,
+          idempotency_key: input.idempotencyKey,
+          request_fingerprint: fingerprint,
+          authorization_sha256: agentSha256({
+            tenantId: input.tenantId,
+            sponsorPrincipalId: input.sponsorPrincipalId,
+            actionId: input.actionId,
+            approvalId: input.approvalId,
+            actionDigest: input.actionDigest,
+          }),
+          outcome: 'revoked',
+          occurred_at: now,
+        })
+        .execute();
+      return revoked;
+    });
   }
 
   async execute(input: {
@@ -820,11 +843,12 @@ export class AgentActionService {
       )
         throw new AgentExecutionConflictError('persisted agent execution binding is invalid');
       if (['succeeded', 'failed', 'compensated'].includes(existing.state)) return existing;
-      return executionService.run({
+      const completed = await executionService.run({
         action: prepared.action,
         execution: existing,
         workerId: stableId('worker', executionId),
       });
+      return (await repository.getExecution(input.tenantId, executionId)) ?? completed;
     }
     let current: Awaited<ReturnType<EventPublishAgentAdapter['load']>>;
     try {
@@ -864,11 +888,12 @@ export class AgentActionService {
         throw new AgentExecutionConflictError('agent execution reservation conflicted');
       throw error;
     }
-    return executionService.run({
+    const completed = await executionService.run({
       action: prepared.action,
       execution: reserved,
       workerId: stableId('worker', executionId),
     });
+    return (await repository.getExecution(input.tenantId, executionId)) ?? completed;
   }
 
   private async hasLiveSponsorAuthority(
