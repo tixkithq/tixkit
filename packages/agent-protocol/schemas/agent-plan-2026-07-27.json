@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/agent-plan/2026-07-27",
+  "title": "Tixkit Agent Plan Protocol 2026-07-27",
+  "$comment": "Semantic conformance additionally requires validateAgentPlanDefinition, validateAgentPlanActionBindings, and validateAgentPlanStateTransition.",
+  "oneOf": [{ "$ref": "#/$defs/agentPlanDefinition" }, { "$ref": "#/$defs/agentPlanState" }],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "reasonCode": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{1,63}$" },
+    "assumption": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+        },
+        "provenanceType": { "enum": ["user", "system", "tool", "inferred"] },
+        "sourceReference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+        },
+        "verification": { "enum": ["confirmed", "unverified", "rejected"] }
+      },
+      "required": ["id", "statement", "provenanceType", "verification"]
+    },
+    "projectedChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceType": { "$ref": "#/$defs/id" },
+        "resourceId": { "$ref": "#/$defs/id" },
+        "operation": {
+          "enum": ["create", "update", "publish", "send", "refund", "export", "delete"]
+        },
+        "beforeVersion": { "type": "integer", "minimum": 1 },
+        "projectedVersion": { "type": "integer", "minimum": 1 },
+        "previewSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["resourceType", "resourceId", "operation", "previewSha256"]
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "amountMinor": { "type": "integer", "minimum": 0 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "basis": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+        },
+        "quoteSha256": { "$ref": "#/$defs/sha256" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "required": ["amountMinor", "currency", "basis", "quoteSha256", "expiresAt"]
+    },
+    "readinessImpact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "beforeSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "projectedSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "introducedReasonCodes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/reasonCode" }
+        },
+        "resolvedReasonCodes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/reasonCode" }
+        }
+      },
+      "required": [
+        "beforeSnapshotSha256",
+        "projectedSnapshotSha256",
+        "introducedReasonCodes",
+        "resolvedReasonCodes"
+      ]
+    },
+    "approvalRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["none", "fresh_action"] },
+        "riskClass": { "enum": ["read_only", "low", "high", "critical"] }
+      },
+      "required": ["mode", "riskClass"]
+    },
+    "reversibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["none", "reversible", "compensatable"] },
+        "compensationActionKind": {
+          "enum": [
+            "event.read",
+            "readiness.read",
+            "report.read",
+            "event.prepare",
+            "content.prepare",
+            "campaign.prepare",
+            "event.update",
+            "event.publish",
+            "inventory.change",
+            "campaign.send",
+            "refund.issue",
+            "permission.change",
+            "personal_data.export",
+            "credential.change",
+            "domain.change",
+            "provider.change",
+            "migration.execute",
+            "resource.delete"
+          ]
+        },
+        "windowSeconds": { "type": "integer", "minimum": 1, "maximum": 31536000 }
+      },
+      "required": ["mode"],
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "compensatable" } }, "required": ["mode"] },
+          "then": {
+            "properties": { "compensationActionKind": {} },
+            "required": ["compensationActionKind"]
+          },
+          "else": {
+            "properties": {
+              "compensationActionKind": false,
+              "windowSeconds": false
+            }
+          }
+        }
+      ]
+    },
+    "planStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "actionKind": { "const": "event.publish" },
+        "actionProtocolVersion": { "const": "2026-07-22" },
+        "actionDigest": { "$ref": "#/$defs/sha256" },
+        "dependsOnStepIds": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "projectedChanges": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/projectedChange" }
+        },
+        "costs": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/cost" }
+        },
+        "readinessImpact": { "$ref": "#/$defs/readinessImpact" },
+        "approvalRequirement": { "$ref": "#/$defs/approvalRequirement" },
+        "reversibility": { "$ref": "#/$defs/reversibility" }
+      },
+      "required": [
+        "id",
+        "actionKind",
+        "actionProtocolVersion",
+        "actionDigest",
+        "dependsOnStepIds",
+        "projectedChanges",
+        "costs",
+        "readinessImpact",
+        "approvalRequirement",
+        "reversibility"
+      ]
+    },
+    "agentPlanDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "protocolVersion": { "const": "2026-07-27" },
+        "tenantId": { "$ref": "#/$defs/id" },
+        "agentPrincipalId": { "$ref": "#/$defs/id" },
+        "sponsorPrincipalId": { "$ref": "#/$defs/id" },
+        "delegationGrantId": { "$ref": "#/$defs/id" },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "^(?!\\s)[\\s\\S]*\\S$"
+        },
+        "assumptions": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/assumption" }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/planStep" }
+        },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "planSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": [
+        "id",
+        "protocolVersion",
+        "tenantId",
+        "agentPrincipalId",
+        "sponsorPrincipalId",
+        "delegationGrantId",
+        "purpose",
+        "assumptions",
+        "steps",
+        "createdAt",
+        "expiresAt",
+        "planSha256"
+      ]
+    },
+    "stepState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stepId": { "$ref": "#/$defs/id" },
+        "status": {
+          "enum": [
+            "pending",
+            "blocked",
+            "awaiting_approval",
+            "approved",
+            "executing",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "compensated"
+          ]
+        },
+        "approvalId": { "$ref": "#/$defs/id" },
+        "executionId": { "$ref": "#/$defs/id" },
+        "resultSha256": { "$ref": "#/$defs/sha256" },
+        "failureCode": { "type": "string", "pattern": "^[A-Z0-9_]{3,64}$" }
+      },
+      "required": ["stepId", "status"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "enum": ["approved", "executing", "succeeded"] } },
+            "required": ["status"]
+          },
+          "then": { "properties": { "approvalId": {} }, "required": ["approvalId"] }
+        },
+        {
+          "if": {
+            "properties": { "status": { "enum": ["executing", "succeeded"] } },
+            "required": ["status"]
+          },
+          "then": { "properties": { "executionId": {} }, "required": ["executionId"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "succeeded" } }, "required": ["status"] },
+          "then": { "properties": { "resultSha256": {} }, "required": ["resultSha256"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+          "then": {
+            "properties": { "approvalId": {}, "executionId": {}, "failureCode": {} },
+            "required": ["approvalId", "executionId", "failureCode"]
+          }
+        }
+      ]
+    },
+    "agentPlanState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "planId": { "$ref": "#/$defs/id" },
+        "planSha256": { "$ref": "#/$defs/sha256" },
+        "stateVersion": { "type": "integer", "minimum": 1 },
+        "status": {
+          "enum": [
+            "prepared",
+            "awaiting_approval",
+            "executing",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "expired",
+            "compensated"
+          ]
+        },
+        "stepStates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/stepState" }
+        },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "required": ["planId", "planSha256", "stateVersion", "status", "stepStates", "updatedAt"]
+    }
+  }
+}

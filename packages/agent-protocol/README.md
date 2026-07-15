@@ -10,7 +10,7 @@ The shared Tixkit API and Self-Hosted runtime, third-party Platform API agents, 
 
 ## Status
 
-Experimental organizer-first protocol at version `2026-07-22`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
+Experimental organizer-first action protocol at version `2026-07-22`, with additive plan and action-registry contracts at platform protocol version `2026-07-27`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
 
 ## Installation
 
@@ -18,11 +18,11 @@ Use `bun add @tixkit/agent-protocol` after an approved public release, or add it
 
 ## Example
 
-`import { AGENT_PROTOCOL_VERSION, buildAgentPlan } from '@tixkit/agent-protocol'; const plan = buildAgentPlan({ id, protocolVersion: AGENT_PROTOCOL_VERSION, agentPrincipalId, tenantId, purpose: 'Prepare an event launch', actionDigests, createdAt, expiresAt });`
+Use `buildAgentPlanDefinition` for new plans. It hashes immutable assumptions, exact action identities, projected changes, bounded integer-minor-unit costs, readiness impact, fresh per-action approval requirements and honest reversibility. Persist mutable execution progress separately as `AgentPlanState`, and accept state changes only after `validateAgentPlanStateTransition` succeeds with authoritative approval and execution evidence.
 
 ## Public exports
 
-The root exports protocol version and action descriptors; principal, delegation, action, plan, approval, authorization and audit contracts; canonical hashing and validation helpers; `DurableAgentExecutionService`; execution-store and invoker interfaces; and scoped memory normalization and validation contracts. `./schema` exports the versioned JSON Schema.
+The root exports protocol versions and the digest-bound action registry; principal, delegation, action, immutable plan definition, mutable plan state, approval, authorization and audit contracts; canonical hashing and validation helpers; `DurableAgentExecutionService`; execution-store and invoker interfaces; and scoped memory normalization and validation contracts. `./schema` remains the immutable `2026-07-22` Agent Action schema. The additive plan and action-contract schemas use explicit `./schemas/agent-plan/2026-07-27` and `./schemas/agent-action-contracts/2026-07-27` exports.
 
 ## Runtime
 
@@ -42,7 +42,7 @@ Authorization is the intersection of agent capability, sponsor permission, deleg
 
 ## Compatibility
 
-Managed Cloud releases must pin protocol version `2026-07-22` through their Cloud/core compatibility manifest. Changes to canonical bytes, action digests, authorization inputs, approval semantics, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. The immutable `2026-07-11` schema remains exported for compatibility. API version `2026-07-25` adds principal-scoped durable execution without changing the serialized agent protocol schema.
+Managed Cloud releases must pin action protocol version `2026-07-22`, platform protocol version `2026-07-27`, and the registry/schema digests through their Cloud/core compatibility manifest. Changes to canonical bytes, action or plan digests, authorization inputs, approval semantics, registry policy, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. The immutable `2026-07-11` and `2026-07-22` action schemas remain exported byte-for-byte; `./schema` intentionally continues to resolve to `2026-07-22`.
 
 ## Related guides
 

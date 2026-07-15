@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27",
+  "title": "Tixkit Agent Action Contracts 2026-07-27",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "reservedAction": false,
+    "eventPublishPrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "event.publish" },
+        "delegationGrantId": { "$ref": "#/$defs/id" },
+        "resourceId": { "$ref": "#/$defs/id" }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId"]
+    },
+    "eventPublishResolvedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readinessSnapshotSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["readinessSnapshotSha256"]
+    },
+    "eventPublishResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": { "$ref": "#/$defs/id" },
+        "resourceVersion": { "type": "integer", "minimum": 1 },
+        "status": { "const": "published" }
+      },
+      "required": ["resourceId", "resourceVersion", "status"]
+    },
+    "schemaReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaId": { "const": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27" },
+        "schemaSha256": { "$ref": "#/$defs/sha256" },
+        "jsonPointer": { "type": "string", "pattern": "^#\\/\\$defs\\/[A-Za-z][A-Za-z0-9]+$" }
+      },
+      "required": ["schemaId", "schemaSha256", "jsonPointer"]
+    },
+    "idempotencyPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keySource": { "enum": ["caller", "derived"] },
+        "scope": { "const": "agent_action" },
+        "replay": { "const": "exact_result" },
+        "intentMismatch": { "const": "conflict" }
+      },
+      "required": ["keySource", "scope", "replay", "intentMismatch"]
+    },
+    "reversibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["none", "reversible", "compensatable"] },
+        "compensationActionKind": {
+          "enum": [
+            "event.read",
+            "readiness.read",
+            "report.read",
+            "event.prepare",
+            "content.prepare",
+            "campaign.prepare",
+            "event.update",
+            "event.publish",
+            "inventory.change",
+            "campaign.send",
+            "refund.issue",
+            "permission.change",
+            "personal_data.export",
+            "credential.change",
+            "domain.change",
+            "provider.change",
+            "migration.execute",
+            "resource.delete"
+          ]
+        },
+        "windowSeconds": { "type": "integer", "minimum": 1, "maximum": 31536000 }
+      },
+      "required": ["mode"]
+    },
+    "registryAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "event.read",
+            "readiness.read",
+            "report.read",
+            "event.prepare",
+            "content.prepare",
+            "campaign.prepare",
+            "event.update",
+            "event.publish",
+            "inventory.change",
+            "campaign.send",
+            "refund.issue",
+            "permission.change",
+            "personal_data.export",
+            "credential.change",
+            "domain.change",
+            "provider.change",
+            "migration.execute",
+            "resource.delete"
+          ]
+        },
+        "availability": { "enum": ["implemented", "reserved"] },
+        "prepareInputSchema": { "$ref": "#/$defs/schemaReference" },
+        "resolvedPayloadSchema": { "$ref": "#/$defs/schemaReference" },
+        "resultSchema": { "$ref": "#/$defs/schemaReference" },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,63}$" }
+        },
+        "requiredSponsorPermissions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,31}:[a-z][a-z0-9_-]{1,63}$" }
+        },
+        "resourceScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resourceTypes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/id" }
+            },
+            "scopeTemplate": { "const": "{resourceType}:{resourceId}" }
+          },
+          "required": ["resourceTypes", "scopeTemplate"]
+        },
+        "preconditions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resourceVersion": { "const": "exact" },
+            "policyVersion": { "const": "exact" },
+            "requiredMaterialDigests": {
+              "type": "array",
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]{1,63}$" }
+            }
+          },
+          "required": ["resourceVersion", "policyVersion", "requiredMaterialDigests"]
+        },
+        "riskClass": { "enum": ["read_only", "low", "high", "critical"] },
+        "reversibility": { "$ref": "#/$defs/reversibility" },
+        "approvalPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["none", "fresh_action"] },
+            "ttlSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+            "confirmationRequired": { "type": "boolean" }
+          },
+          "required": ["mode", "confirmationRequired"]
+        },
+        "idempotency": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "prepare": { "$ref": "#/$defs/idempotencyPhase" },
+            "approve": { "$ref": "#/$defs/idempotencyPhase" },
+            "execute": { "$ref": "#/$defs/idempotencyPhase" }
+          },
+          "required": ["prepare", "approve", "execute"]
+        },
+        "executionBoundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["api", "durable_workflow"] },
+            "operation": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$" }
+          },
+          "required": ["kind", "operation"]
+        }
+      },
+      "required": [
+        "kind",
+        "availability",
+        "prepareInputSchema",
+        "resolvedPayloadSchema",
+        "resultSchema",
+        "requiredCapabilities",
+        "requiredSponsorPermissions",
+        "resourceScope",
+        "preconditions",
+        "riskClass",
+        "reversibility",
+        "approvalPolicy",
+        "idempotency",
+        "executionBoundary"
+      ]
+    },
+    "agentActionRegistry": {
+      "$comment": "Semantic conformance additionally requires validateAgentActionRegistry against the canonical pinned registry digest.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": { "const": "2026-07-27" },
+        "actionProtocolVersion": { "const": "2026-07-22" },
+        "actions": {
+          "type": "array",
+          "minItems": 18,
+          "maxItems": 18,
+          "items": { "$ref": "#/$defs/registryAction" }
+        },
+        "registrySha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["protocolVersion", "actionProtocolVersion", "actions", "registrySha256"]
+    }
+  }
+}
