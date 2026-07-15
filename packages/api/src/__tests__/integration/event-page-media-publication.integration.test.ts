@@ -242,7 +242,7 @@ describeWithIntegrationDatabase('event-page publication and media serialization'
     restoreDatabaseDriver(previousDriver);
   });
 
-  it('serializes publication against concurrent media removal and never exposes logical refs', async () => {
+  it('serializes publication against concurrent media removal and preserves referenced assets', async () => {
     const publish = app.inject({
       method: 'POST',
       url: `/content-documents/${documentId}/versions/${versionId}/publish`,
@@ -258,12 +258,22 @@ describeWithIntegrationDatabase('event-page publication and media serialization'
     expect(removalSettled).toBe(false);
     releasePublish?.();
     expect((await publish).statusCode).toBe(200);
-    expect((await removal).statusCode).toBe(204);
+    const removalResponse = await removal;
+    expect(removalResponse.statusCode).toBe(409);
+    expect(removalResponse.json()).toMatchObject({
+      error: {
+        code: 'CONFLICT',
+        details: {
+          code: 'EVENT_MEDIA_ROLE_REFERENCED',
+          role: 'cover',
+        },
+      },
+    });
     const stored = await new ContentRepository(db).findDocumentById(documentId);
     expect(stored?.publishedVersionId).toBe(versionId);
     expect(
       await db.selectFrom('event_media_assets').select('id').where('id', '=', assetId).execute(),
-    ).toEqual([]);
+    ).toEqual([{ id: assetId }]);
     const publicPage = await app.inject({
       method: 'GET',
       url: `/public/events/${eventId}/content-page`,
@@ -271,5 +281,6 @@ describeWithIntegrationDatabase('event-page publication and media serialization'
     expect(publicPage.statusCode, publicPage.body).toBe(200);
     expect(publicPage.body).not.toContain('tixkit:event-media:');
     expect(publicPage.body).not.toContain('/v1/upload-artifacts/');
+    expect(publicPage.body).toContain('/v1/public/event-media/renditions/');
   }, 30_000);
 });

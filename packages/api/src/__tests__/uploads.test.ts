@@ -2045,6 +2045,88 @@ describe('upload artifact service', () => {
     expect(tables.upload_artifacts).toHaveLength(1);
   });
 
+  it('uses post-orientation dimensions for focal-point rendition geometry', async () => {
+    const sourceSvg = Buffer.from(`
+      <svg width="1200" height="800" xmlns="http://www.w3.org/2000/svg">
+        <rect width="600" height="400" x="0" y="0" fill="#dc2626" />
+        <rect width="600" height="400" x="600" y="0" fill="#2563eb" />
+        <rect width="600" height="400" x="0" y="400" fill="#16a34a" />
+        <rect width="600" height="400" x="600" y="400" fill="#eab308" />
+      </svg>
+    `);
+    const original = await sharp(sourceSvg).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+    const checksum = createHash('sha256').update(original).digest('hex');
+    const writes: Array<Record<string, unknown>> = [];
+    s3Send.mockImplementation(async (command: { input: Record<string, unknown> }) => {
+      if (command.input.Body) writes.push(command.input);
+      return command.input.Body
+        ? {}
+        : {
+            Body: { transformToByteArray: async () => original },
+            ContentType: 'image/jpeg',
+          };
+    });
+    const { db, tables } = createMockDb({
+      events: [
+        {
+          id: 'evt_oriented',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+        },
+      ],
+      upload_artifacts: [
+        {
+          id: 'upl_oriented',
+          tenant_id: 'tnt_1',
+          organization_id: 'org_1',
+          brand_id: 'brd_1',
+          event_id: 'evt_oriented',
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          bucket: 'tixkit',
+          object_key: 'uploads/oriented.jpg',
+          checksum_sha256: checksum,
+          size_bytes: original.length,
+          metadata: JSON.stringify({
+            image: { width: 1200, height: 800, format: 'jpeg' },
+          }),
+        },
+      ],
+    });
+
+    await attachEventMedia({
+      db,
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      brandId: 'brd_1',
+      eventId: 'evt_oriented',
+      uploadArtifactId: 'upl_oriented',
+      role: 'cover',
+      altText: 'Four colored stage quadrants',
+      focalPoint: { x: 0.5, y: 0.5 },
+      createdBy: 'usr_1',
+    });
+
+    const normalized = await sharp(original).rotate().toBuffer();
+    const expectedPage = await sharp(normalized)
+      .resize(1600, 2400, { fit: 'fill' })
+      .extract({ left: 0, top: 750, width: 1600, height: 900 })
+      .webp({ quality: 82, effort: 5 })
+      .toBuffer();
+    const pageObjectKey = tables.event_media_renditions.find(
+      (rendition) => rendition.variant === 'page',
+    )?.object_key;
+    const pageWrite = writes.find((write) => write.Key === pageObjectKey);
+    expect(pageWrite).toBeDefined();
+    expect(
+      createHash('sha256')
+        .update(pageWrite!.Body as Buffer)
+        .digest('hex'),
+    ).toBe(createHash('sha256').update(expectedPage).digest('hex'));
+  });
+
   it('reduces WebP quality until a high-entropy social rendition meets its byte budget', async () => {
     const original = await deterministicNoisePng();
     const checksum = createHash('sha256').update(original).digest('hex');

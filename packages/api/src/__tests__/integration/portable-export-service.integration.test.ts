@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createDb,
   BrandRepository,
+  ContentRepository,
   EventRepository,
   OrganizationRepository,
   PortableExportAuthorizationRepository,
@@ -12,6 +13,10 @@ import {
   truncateAllData,
   type Database,
 } from '@tixkit/db';
+import {
+  createDefaultEventPageDocument,
+  eventPageMediaReference,
+} from '@tixkit/content-event-page';
 import {
   canonicalPortableJson,
   parsePortableJson,
@@ -989,6 +994,292 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
       height: 1000,
     });
     expect(metadata.exif).toBeUndefined();
+    const socialAssetId = `ema_social_${driver}`;
+    await db
+      .insertInto('event_media_assets')
+      .values({
+        id: socialAssetId,
+        tenant_id: tenantId,
+        organization_id: organizationId,
+        brand_id: brand.id,
+        event_id: event.id,
+        upload_artifact_id: uploadId,
+        role: 'social',
+        width: 1600,
+        height: 1000,
+        format: 'jpeg',
+        checksum_sha256: checksum,
+        size_bytes: original.byteLength,
+        focal_x: '0.5',
+        focal_y: '0.5',
+        alt_text: 'Purple social preview',
+        created_by: 'usr_exporter',
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
+    await db
+      .insertInto('event_media_renditions')
+      .values({
+        id: `emr_social_guard_${driver}`,
+        asset_id: socialAssetId,
+        variant: 'social',
+        width: 1200,
+        height: 630,
+        format: 'webp',
+        content_type: 'image/webp',
+        bucket: 'media',
+        object_key: `event-media/${event.id}/${socialAssetId}/social.webp`,
+        checksum_sha256: 'd'.repeat(64),
+        size_bytes: 768,
+        created_at: now,
+      })
+      .execute();
+    const content = new ContentRepository(db);
+    const mediaDocument = await content.createDocument({
+      tenantId,
+      organizationId,
+      brandId: brand.id,
+      eventId: event.id,
+      channel: 'event_page',
+      key: 'media-removal-guard',
+      name: 'Media removal guard',
+      locale: 'en',
+    });
+    const explicitRenditionUrl = `/v1/public/event-media/renditions/emr_media_${driver}`;
+    const mediaVersion = await content.createVersion({
+      documentId: mediaDocument.id,
+      contentJson: createDefaultEventPageDocument({
+        eventId: event.id,
+        eventTitle: 'Portable media event',
+        coverImageUrl: explicitRenditionUrl,
+      }),
+      variables: [],
+      validation: { valid: true, severity: 'warning', issues: [] },
+      createdBy: 'usr_exporter',
+    });
+    await db
+      .updateTable('content_document_versions')
+      .set({ status: 'published', published_at: now })
+      .where('id', '=', mediaVersion.id)
+      .execute();
+    await db
+      .updateTable('content_documents')
+      .set({
+        status: 'published',
+        published_version_id: mediaVersion.id,
+        current_draft_version_id: null,
+        updated_at: now,
+      })
+      .where('id', '=', mediaDocument.id)
+      .execute();
+    const explicitUrlConflict = await removeEventMedia({
+      db,
+      tenantId,
+      organizationId,
+      brandId: brand.id,
+      eventId: event.id,
+      role: 'cover',
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(explicitUrlConflict).toMatchObject({
+      code: 'CONFLICT',
+      details: {
+        code: 'EVENT_MEDIA_ROLE_REFERENCED',
+        role: 'cover',
+        referenceCount: 5,
+        references: expect.arrayContaining([
+          expect.objectContaining({
+            path: 'editor.data.root.props.coverImageUrl',
+          }),
+        ]),
+      },
+    });
+    expect(
+      await db
+        .selectFrom('media_object_cleanup_jobs')
+        .select('id')
+        .where('object_key', 'in', [
+          `event-media/${event.id}/${assetId}/page.webp`,
+          `event-media/${event.id}/${assetId}/thumbnail.webp`,
+        ])
+        .execute(),
+    ).toEqual([]);
+    await db
+      .updateTable('content_document_versions')
+      .set({ content_json: '{"schemaVersion":"2", "escaped":"tixkit:event-media:\\u0073ocial"' })
+      .where('id', '=', mediaVersion.id)
+      .execute();
+    await expect(
+      removeEventMedia({
+        db,
+        tenantId,
+        organizationId,
+        brandId: brand.id,
+        eventId: event.id,
+        role: 'social',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      details: {
+        code: 'EVENT_MEDIA_ROLE_REFERENCED',
+        role: 'social',
+        referenceCount: 1,
+        references: [
+          expect.objectContaining({
+            path: 'unparseable-published-content',
+          }),
+        ],
+      },
+    });
+    expect(
+      await db
+        .selectFrom('media_object_cleanup_jobs')
+        .select('id')
+        .where('object_key', '=', `event-media/${event.id}/${socialAssetId}/social.webp`)
+        .execute(),
+    ).toEqual([]);
+    const boundedReferenceDocument = createDefaultEventPageDocument({
+      eventId: event.id,
+      eventTitle: 'Portable media event',
+      coverImageUrl: eventPageMediaReference('cover'),
+    });
+    const overlongZoneName = 'overflow-zone-'.repeat(20);
+    boundedReferenceDocument.editor.data.zones = {
+      [overlongZoneName]: Array.from({ length: 60 }, (_, index) => ({
+        type: 'Media' as const,
+        props: {
+          id: `overflow-media-${index}`,
+          imageUrl: eventPageMediaReference('cover'),
+          imageAlt: 'Purple event cover',
+        },
+      })),
+    };
+    await db
+      .updateTable('content_document_versions')
+      .set({ content_json: JSON.stringify(boundedReferenceDocument) })
+      .where('id', '=', mediaVersion.id)
+      .execute();
+    await expect(
+      removeEventMedia({
+        db,
+        tenantId,
+        organizationId,
+        brandId: brand.id,
+        eventId: event.id,
+        role: 'social',
+      }),
+    ).resolves.toBe(true);
+    expect(
+      await db
+        .selectFrom('event_media_assets')
+        .select('id')
+        .where('id', '=', assetId)
+        .executeTakeFirst(),
+    ).toBeDefined();
+    const boundedConflict = await removeEventMedia({
+      db,
+      tenantId,
+      organizationId,
+      brandId: brand.id,
+      eventId: event.id,
+      role: 'cover',
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(boundedConflict).toMatchObject({
+      code: 'CONFLICT',
+      details: {
+        code: 'EVENT_MEDIA_ROLE_REFERENCED',
+        role: 'cover',
+        referenceCount: 65,
+      },
+    });
+    const boundedDetails = (
+      boundedConflict as {
+        details: {
+          references: Array<{
+            documentId: string;
+            versionId: string;
+            surface: string;
+            path: string;
+          }>;
+        };
+      }
+    ).details;
+    expect(boundedDetails.references).toHaveLength(50);
+    expect(
+      boundedDetails.references.every((reference) =>
+        Object.values(reference).every((value) => value.length <= 200),
+      ),
+    ).toBe(true);
+    expect(boundedDetails.references.some((reference) => reference.path.length === 200)).toBe(true);
+    expect(
+      await db
+        .selectFrom('event_media_assets')
+        .select('id')
+        .where('id', '=', assetId)
+        .executeTakeFirst(),
+    ).toBeDefined();
+    await db
+      .updateTable('content_documents')
+      .set({ status: 'archived', updated_at: new Date() })
+      .where('id', '=', mediaDocument.id)
+      .execute();
+    const foreignTenant = await new TenantRepository(db).create({
+      name: `Foreign media ${driver}`,
+    });
+    const foreignOrganization = await new OrganizationRepository(db).create({
+      tenantId: foreignTenant.id,
+      name: `Foreign media ${driver}`,
+      slug: `foreign-media-${driver}`,
+    });
+    const foreignBrand = await new BrandRepository(db).create({
+      tenantId: foreignTenant.id,
+      organizationId: foreignOrganization.id,
+      name: `Foreign media ${driver}`,
+      slug: `foreign-media-${driver}`,
+    });
+    const foreignContent = new ContentRepository(db);
+    const foreignDocument = await foreignContent.createDocument({
+      tenantId: foreignTenant.id,
+      organizationId: foreignOrganization.id,
+      brandId: foreignBrand.id,
+      eventId: event.id,
+      channel: 'event_page',
+      key: 'foreign-media-removal-guard',
+      name: 'Foreign media removal guard',
+      locale: 'en',
+    });
+    const foreignVersion = await foreignContent.createVersion({
+      documentId: foreignDocument.id,
+      contentJson: createDefaultEventPageDocument({
+        eventId: event.id,
+        eventTitle: 'Foreign media reference',
+        coverImageUrl: eventPageMediaReference('cover'),
+      }),
+      variables: [],
+      validation: { valid: true, severity: 'warning', issues: [] },
+      createdBy: 'usr_foreign',
+    });
+    await db
+      .updateTable('content_document_versions')
+      .set({ status: 'published', published_at: now })
+      .where('id', '=', foreignVersion.id)
+      .execute();
+    await db
+      .updateTable('content_documents')
+      .set({
+        status: 'published',
+        published_version_id: foreignVersion.id,
+        current_draft_version_id: null,
+        updated_at: now,
+      })
+      .where('id', '=', foreignDocument.id)
+      .execute();
     await expect(
       removeEventMedia({
         db,
@@ -1021,6 +1312,29 @@ describe.sequential.each(cases)('portable export service: $driver', ({ driver, u
         }),
       ]),
     );
+    await db
+      .updateTable('content_documents')
+      .set({ published_version_id: null, current_draft_version_id: null })
+      .where('id', '=', mediaDocument.id)
+      .execute();
+    await db
+      .deleteFrom('content_document_versions')
+      .where('document_id', '=', mediaDocument.id)
+      .execute();
+    await db.deleteFrom('content_documents').where('id', '=', mediaDocument.id).execute();
+    await db
+      .updateTable('content_documents')
+      .set({ published_version_id: null, current_draft_version_id: null })
+      .where('id', '=', foreignDocument.id)
+      .execute();
+    await db
+      .deleteFrom('content_document_versions')
+      .where('document_id', '=', foreignDocument.id)
+      .execute();
+    await db.deleteFrom('content_documents').where('id', '=', foreignDocument.id).execute();
+    await db.deleteFrom('brands').where('id', '=', foreignBrand.id).execute();
+    await db.deleteFrom('organizations').where('id', '=', foreignOrganization.id).execute();
+    await db.deleteFrom('tenants').where('id', '=', foreignTenant.id).execute();
     await db.deleteFrom('upload_artifacts').where('id', '=', uploadId).execute();
     await db.deleteFrom('events').where('id', '=', event.id).execute();
     await db.deleteFrom('brands').where('id', '=', brand.id).execute();

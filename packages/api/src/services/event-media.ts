@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { ulid } from 'ulid';
 import { bumpEventPublicRevision, type Database } from '@tixkit/db';
-import { NotFoundError, ValidationError } from '@tixkit/domain';
+import {
+  collectEventPageMediaReferences,
+  normalizeEventPageDocumentV2,
+  type EventPageDocumentV2,
+} from '@tixkit/content-event-page';
+import { ConflictError, NotFoundError, ValidationError } from '@tixkit/domain';
 import {
   deleteEventMediaRendition,
   parseUploadArtifactMetadata,
@@ -32,6 +37,8 @@ export const EVENT_MEDIA_RENDITION_MAX_BYTES = {
 } as const;
 
 const RENDITION_QUALITY_STEPS = [82, 76, 70, 64, 58, 52, 46, 40] as const;
+const EVENT_MEDIA_CONFLICT_REFERENCE_LIMIT = 50;
+const EVENT_MEDIA_CONFLICT_FIELD_MAX_LENGTH = 200;
 
 const PURPOSE_BY_ROLE: Record<EventMediaRole, string[]> = {
   poster: ['event_poster'],
@@ -69,6 +76,56 @@ const TARGETS: Record<
 
 function id(prefix: string): string {
   return `${prefix}_${ulid()}`;
+}
+
+type EventPageImageSource = {
+  surface: 'page' | 'social';
+  path: string;
+  value: string;
+};
+
+function collectEventPageImageSources(document: EventPageDocumentV2): EventPageImageSource[] {
+  const sources: EventPageImageSource[] = [];
+  const add = (value: unknown, surface: 'page' | 'social', path: string): void => {
+    if (typeof value === 'string') sources.push({ value, surface, path });
+  };
+  add(
+    document.editor.data.root.props.coverImageUrl,
+    'page',
+    'editor.data.root.props.coverImageUrl',
+  );
+  add(
+    document.editor.data.root.props.socialImageUrl,
+    'social',
+    'editor.data.root.props.socialImageUrl',
+  );
+  add(document.settings.discovery.coverImageUrl, 'page', 'settings.discovery.coverImageUrl');
+  add(document.settings.discovery.socialImageUrl, 'social', 'settings.discovery.socialImageUrl');
+  const addComponent = (
+    component: EventPageDocumentV2['editor']['data']['content'][number],
+    path: string,
+  ): void => {
+    if (
+      component.type !== 'EventHeader' &&
+      component.type !== 'EventDescription' &&
+      component.type !== 'Media'
+    )
+      return;
+    add(component.props.imageUrl, 'page', `${path}.props.imageUrl`);
+  };
+  document.editor.data.content.forEach((component, index) => {
+    addComponent(component, `editor.data.content.${index}`);
+  });
+  for (const [zoneName, components] of Object.entries(document.editor.data.zones ?? {})) {
+    components.forEach((component, index) => {
+      addComponent(component, `editor.data.zones.${zoneName}.${index}`);
+    });
+  }
+  return sources;
+}
+
+function boundedConflictField(value: string): string {
+  return value.slice(0, EVENT_MEDIA_CONFLICT_FIELD_MAX_LENGTH);
 }
 
 async function stageRenditionCleanup(
@@ -229,12 +286,18 @@ export async function attachEventMedia(input: {
     (format !== 'jpeg' && format !== 'png' && format !== 'webp')
   )
     throw new ValidationError('Event media upload is missing verified image metadata');
-  const normalized = await sharp(buffer, {
+  const normalizedImage = await sharp(buffer, {
     limitInputPixels: 40_000_000,
     sequentialRead: true,
   })
     .rotate()
-    .toBuffer();
+    .toBuffer({ resolveWithObject: true });
+  const normalized = normalizedImage.data;
+  const normalizedWidth = normalizedImage.info.width;
+  const normalizedHeight = normalizedImage.info.height;
+  if (!normalizedWidth || !normalizedHeight) {
+    throw new ValidationError('Event media upload has invalid normalized dimensions');
+  }
   const existing = await input.db
     .selectFrom('event_media_assets')
     .select(['id', 'updated_at', 'upload_artifact_id'])
@@ -271,7 +334,7 @@ export async function attachEventMedia(input: {
     for (const target of TARGETS[input.role]) {
       const rendered = await renderAtFocalPoint(
         normalized,
-        { width, height },
+        { width: normalizedWidth, height: normalizedHeight },
         target,
         input.focalPoint,
       );
@@ -477,9 +540,79 @@ export async function removeEventMedia(input: {
     if (!asset) return false;
     const renditions = await transaction
       .selectFrom('event_media_renditions')
-      .select(['bucket', 'object_key', 'checksum_sha256'])
+      .select(['id', 'bucket', 'object_key', 'checksum_sha256'])
       .where('asset_id', '=', asset.id)
       .execute();
+    const renditionUrls = new Set(
+      renditions.map((rendition) => `/v1/public/event-media/renditions/${rendition.id}`),
+    );
+    const publishedDocuments = await transaction
+      .selectFrom('content_documents as document')
+      .innerJoin(
+        'content_document_versions as version',
+        'version.id',
+        'document.published_version_id',
+      )
+      .select(['document.id', 'version.id as version_id', 'version.content_json'])
+      .where('document.tenant_id', '=', input.tenantId)
+      .where('document.organization_id', '=', input.organizationId)
+      .where('document.brand_id', '=', input.brandId)
+      .where('document.event_id', '=', input.eventId)
+      .where('document.channel', '=', 'event_page')
+      .where('document.status', '=', 'published')
+      .where('version.status', '=', 'published')
+      .forUpdate()
+      .execute();
+    const references: Array<{
+      documentId: string;
+      versionId: string;
+      surface: string;
+      path: string;
+    }> = [];
+    for (const document of publishedDocuments) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(document.content_json);
+      } catch {
+        parsed = undefined;
+      }
+      const normalized = normalizeEventPageDocumentV2(parsed);
+      if (normalized) {
+        for (const reference of collectEventPageMediaReferences(normalized)) {
+          if (reference.role !== input.role) continue;
+          references.push({
+            documentId: boundedConflictField(document.id),
+            versionId: boundedConflictField(document.version_id),
+            surface: boundedConflictField(reference.surface),
+            path: boundedConflictField(reference.path),
+          });
+        }
+        for (const source of collectEventPageImageSources(normalized)) {
+          if (!renditionUrls.has(source.value)) continue;
+          references.push({
+            documentId: boundedConflictField(document.id),
+            versionId: boundedConflictField(document.version_id),
+            surface: boundedConflictField(source.surface),
+            path: boundedConflictField(source.path),
+          });
+        }
+      } else {
+        references.push({
+          documentId: boundedConflictField(document.id),
+          versionId: boundedConflictField(document.version_id),
+          surface: 'unknown',
+          path: 'unparseable-published-content',
+        });
+      }
+    }
+    if (references.length > 0) {
+      throw new ConflictError('Event media role is referenced by published content', {
+        code: 'EVENT_MEDIA_ROLE_REFERENCED',
+        role: input.role,
+        referenceCount: references.length,
+        references: references.slice(0, EVENT_MEDIA_CONFLICT_REFERENCE_LIMIT),
+      });
+    }
     await stageRenditionCleanup(transaction as typeof input.db, {
       tenantId: input.tenantId,
       organizationId: input.organizationId,
