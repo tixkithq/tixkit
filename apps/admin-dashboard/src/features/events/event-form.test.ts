@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildEventDatePayload, buildEventUpdatePayload, eventSchema } from './event-form';
+import {
+  buildEventDatePayload,
+  buildEventUpdatePayload,
+  eventSchema,
+  planEventFormRecovery,
+  type EventFormRecoverySnapshot,
+  type EventFormValues,
+} from './event-form';
 
 const validBase = {
   title: 'Test Event',
@@ -199,5 +206,135 @@ describe('buildEventUpdatePayload', () => {
       },
       visibility: 'private',
     });
+  });
+});
+
+describe('planEventFormRecovery', () => {
+  const base = {
+    title: 'Base title',
+    slug: 'base-title',
+    description: 'Base description',
+    startsAt: '2026-08-15T19:00',
+    endsAt: '2026-08-15T21:00',
+    timezone: 'America/Chicago',
+    status: 'draft' as const,
+    visibility: 'public' as const,
+    venueName: 'Base Hall',
+    address: '1 Main St',
+    city: 'Chicago',
+    region: 'IL',
+    postalCode: '60601',
+    country: 'US',
+    capacity: 100,
+    minimumAge: 18,
+    coverImageUrl: '',
+    externalUrl: '',
+    seoTitle: 'Base SEO',
+    seoDescription: 'Base SEO description',
+    seoImageUrl: '',
+    currency: 'USD',
+  } satisfies EventFormValues;
+
+  const recovery = (
+    values: EventFormValues,
+    dirtyFields: Array<keyof EventFormValues>,
+    overrides: Partial<EventFormRecoverySnapshot> = {},
+  ): EventFormRecoverySnapshot => ({
+    schemaVersion: 1,
+    values,
+    baseValues: base,
+    dirtyFields,
+    selectedVenueId: 'ven_base',
+    baseSelectedVenueId: 'ven_base',
+    ...overrides,
+  });
+
+  it('merges unrelated local and remote fields without a conflict', () => {
+    const plan = planEventFormRecovery(
+      { ...base, description: 'Remote description' },
+      recovery({ ...base, title: 'My title' }, ['title']),
+      'ven_base',
+    );
+
+    expect(plan.values).toMatchObject({
+      title: 'My title',
+      description: 'Remote description',
+    });
+    expect(plan.conflicts).toEqual([]);
+  });
+
+  it('requires an explicit choice when the same scalar changed in both versions', () => {
+    const plan = planEventFormRecovery(
+      { ...base, title: 'Remote title' },
+      recovery({ ...base, title: 'My title' }, ['title']),
+      'ven_base',
+    );
+
+    expect(plan.values.title).toBe('My title');
+    expect(plan.conflicts).toEqual(['title']);
+  });
+
+  it('treats schedule, venue, and SEO patch fields as atomic conflict groups', () => {
+    const local = {
+      ...base,
+      startsAt: '2026-08-15T20:00',
+      venueName: 'My Hall',
+      seoTitle: 'My SEO',
+    };
+    const latest = {
+      ...base,
+      timezone: 'America/New_York',
+      city: 'Evanston',
+      seoDescription: 'Remote SEO description',
+    };
+    const plan = planEventFormRecovery(
+      latest,
+      recovery(local, ['startsAt', 'venueName', 'seoTitle'], {
+        selectedVenueId: 'ven_local',
+      }),
+      'ven_remote',
+    );
+
+    expect(plan.conflicts).toEqual(expect.arrayContaining(['schedule', 'venue', 'seo']));
+    expect(plan.selectedVenueId).toBe('ven_local');
+    expect(plan.values).toMatchObject({
+      startsAt: '2026-08-15T20:00',
+      timezone: 'America/Chicago',
+      venueName: 'My Hall',
+      city: 'Chicago',
+      seoTitle: 'My SEO',
+      seoDescription: 'Base SEO description',
+    });
+  });
+
+  it('detects a remote-only saved venue binding change against local venue edits', () => {
+    const plan = planEventFormRecovery(
+      base,
+      recovery({ ...base, venueName: 'My Hall' }, ['venueName']),
+      'ven_remote',
+    );
+    expect(plan.conflicts).toContain('venue');
+    expect(plan.selectedVenueId).toBe('ven_base');
+  });
+
+  it('does not conflict when both versions converged on the same value', () => {
+    const plan = planEventFormRecovery(
+      { ...base, title: 'Shared title' },
+      recovery({ ...base, title: 'Shared title' }, ['title']),
+      'ven_base',
+    );
+    expect(plan.conflicts).toEqual([]);
+    expect(plan.values.title).toBe('Shared title');
+  });
+
+  it('fails conservatively when an older recovery snapshot has no base values', () => {
+    const plan = planEventFormRecovery(
+      base,
+      recovery({ ...base, title: 'Recovered title' }, ['title'], {
+        baseValues: undefined,
+        baseSelectedVenueId: undefined,
+      }),
+    );
+    expect(plan.conflicts).toEqual(expect.arrayContaining(['title', 'venue']));
   });
 });
