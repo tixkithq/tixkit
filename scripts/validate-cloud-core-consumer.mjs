@@ -546,7 +546,7 @@ export function validateCloudCoreConsumer(compatibility, publicRelease, cloudRoo
     violations.push('agent protocol status and version are inconsistent');
   if (
     agentProtocol.status === 'supported' &&
-    (agentContractVersions.length !== 1 || agentContractVersions[0] !== agentProtocol.version)
+    agentContractVersions.filter((version) => version === agentProtocol.version).length !== 1
   )
     violations.push('supported agent protocol must match exactly one released contract');
   if (agentProtocol.status === 'unavailable' && agentContractVersions.length > 0)

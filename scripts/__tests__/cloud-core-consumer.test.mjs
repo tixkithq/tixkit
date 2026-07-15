@@ -1048,6 +1048,9 @@ test('public contract pins distinguish the active OpenAPI from historical releas
 test('Cloud accepts the release builder contract inventory without fixture filtering', () => {
   const manifest = compatibilityManifest();
   manifest.core.contracts = publicContractPins(distribution, activeApiContract);
+  assert.ok(
+    manifest.core.contracts.filter(({ name }) => name.includes('agent-protocol-')).length > 1,
+  );
   const cloudRoot = cloudFixture(manifest);
   try {
     assert.deepEqual(validateCloudCoreConsumer(manifest, publicRelease(manifest), cloudRoot), []);
