@@ -164,6 +164,43 @@ function parseStrings(value: string, field: string): string[] {
   return parsed;
 }
 
+function eventUpdateState(
+  row: Selectable<DB['events']>,
+  fields: readonly string[],
+): Readonly<Record<string, unknown>> {
+  const json = (value: unknown, fallback: unknown): unknown => {
+    if (value === null) return fallback;
+    if (typeof value === 'object') return value;
+    if (typeof value !== 'string') throw new Error('AGENT_EFFECT_RESOURCE_STATE_INVALID');
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      throw new Error('AGENT_EFFECT_RESOURCE_STATE_INVALID');
+    }
+  };
+  const projection: Readonly<Record<string, unknown>> = {
+    title: row.title,
+    slug: row.slug,
+    description: row.description ?? null,
+    currency: row.currency ?? 'USD',
+    timezone: row.timezone,
+    startsAt: iso(row.starts_at),
+    endsAt: row.ends_at === null ? null : iso(row.ends_at),
+    venue: json(row.venue, null),
+    venueId: row.venue_id ?? null,
+    visibility: row.visibility,
+    seo: json(row.seo, {}),
+    capacity: row.capacity ?? null,
+    minimumAge: row.minimum_age ?? null,
+    coverImageUrl: row.cover_image_url ?? null,
+    externalUrl: row.external_url ?? null,
+    coverImageAlt: row.cover_image_alt ?? null,
+    seoUseCoverImage: Boolean(row.seo_use_cover_image),
+    lastSetupSection: row.last_setup_section ?? null,
+  };
+  return Object.fromEntries(fields.map((field) => [field, projection[field]]));
+}
+
 function toExecution(row: Selectable<DB['agent_executions']>): AgentExecution {
   return {
     id: row.id,
@@ -1455,7 +1492,10 @@ export class AgentExecutionRepository implements AgentExecutionStore {
           throw new Error('AGENT_AUDIT_PHASE_MISMATCH');
         for (const record of input.audit) {
           assertAudit(input.execution, record, ['prepared', 'authorized']);
-          await appendAudit(tx, input.execution.id, { ...record, occurredAt: now.toISOString() });
+          await appendAudit(tx, input.execution.id, {
+            ...record,
+            occurredAt: now.toISOString(),
+          });
         }
         const created = await tx
           .selectFrom('agent_executions')
@@ -1648,7 +1688,10 @@ export class AgentExecutionRepository implements AgentExecutionStore {
         .where('lease_owner', '=', input.expectedRevision.leaseOwner)
         .executeTakeFirst();
       if (Number(completed.numUpdatedRows) !== 1) return false;
-      await appendAudit(tx, input.execution.id, { ...input.audit, occurredAt: now.toISOString() });
+      await appendAudit(tx, input.execution.id, {
+        ...input.audit,
+        occurredAt: now.toISOString(),
+      });
       return true;
     });
   }
@@ -1680,17 +1723,21 @@ export class AgentExecutionRepository implements AgentExecutionStore {
     const result = JSON.parse(row.result) as AgentActionResult;
     validateAgentActionResultForAction(input.action, result);
     if (agentSha256(result) !== row.result_sha256) throw new Error('AGENT_EFFECT_RESULT_INVALID');
-    if (input.action.kind === 'event.publish') {
+    if (input.action.kind === 'event.publish' || input.action.kind === 'event.update') {
       const event = await this.db
         .selectFrom('events')
-        .select(['status', 'version'])
+        .selectAll()
         .where('tenant_id', '=', input.execution.tenantId)
         .where('id', '=', input.action.target.resourceId)
         .executeTakeFirst();
       if (
         !event ||
-        event.status !== 'published' ||
-        Number(event.version) !== result.resourceVersion
+        (input.action.kind === 'event.publish' && event.status !== 'published') ||
+        Number(event.version) !== result.resourceVersion ||
+        (input.action.kind === 'event.update' &&
+          agentSha256(
+            eventUpdateState(event, Object.keys(input.action.payload.changes ?? {}).sort()),
+          ) !== agentSha256(input.action.payload.changes))
       )
         throw new Error('AGENT_EFFECT_RESOURCE_STATE_INVALID');
     }

@@ -1,0 +1,43 @@
+---
+title: API migration from 2026-07-31 to 2026-08-01
+description: Adopt approval-bound, version-safe event updates through the shared agent protocol.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-08-01
+prerequisites:
+  - An integration using API version 2026-07-31
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-08-01` adds the direct-only, consequential `event.update` adapter. The action wire protocol remains `2026-07-22`, immutable plan definitions remain `2026-07-27`, and the action-registry contract advances to `2026-08-01`. Every `2026-07-31` schema remains available unchanged.
+
+## Prepare the exact update
+
+Send `POST /v1/agent/event-updates` with an event-scoped `delegationGrantId`, event `resourceId`, non-empty `changes`, and an idempotency key. The accepted changes match the non-status generic event PATCH surface. Identity, sponsor, tenant, version, policy, operation, and preparation time remain server-owned.
+
+Preparation resolves slug, venue, owned media, dates, and normalized values through the organizer event-update rules without mutating product state. The returned `preview` binds the current resource version, sorted changed fields, complete before/after projections, `changePreviewSha256`, observation time, and untrusted-content paths. `previewSha256` binds the persisted preview as returned. Retrieve it with `GET /v1/agent/event-updates/{actionId}`.
+
+The action is eligible for approval only when the active explicit principal and delegation contain `events.execute`, the exact event scope is present, the delegation snapshot and live sponsor both grant `events:write`, membership is accepted, and current tenant action and risk policies allow `event.update`.
+
+## Approve and execute
+
+The exact human sponsor approves through `POST /v1/agent/event-updates/{actionId}/approvals`, supplying `actionDigest`, a unique idempotency key, and confirmation `approve:<actionId>:<actionDigest>`. Approval is fresh, short-lived, immutable, and records the exact `events:write` permission snapshot. Revoke an unconsumed approval through `POST /v1/agent/event-updates/{actionId}/approvals/{approvalId}/revoke`. `event.update` is direct-only in this release and cannot be inserted into an immutable plan.
+
+The explicit agent executes through `POST /v1/agent/event-updates/{actionId}/executions`. Both `Idempotency-Key` and `X-Tixkit-Confirmation` must equal `execute:<actionId>:<approvalId>:<actionDigest>`. Execution reloads and locks the event, principal, delegation, sponsor authority, policy, approval, and execution fence in a serializable transaction. It re-resolves the original normalized changes, recomputes the exact preview digest, rejects a no-op or any material drift, applies one compare-and-swap update, and atomically commits agent-attributed product audit plus durable effect evidence. Retrieve immutable evidence through `GET /v1/agent/event-updates/{actionId}/executions/{executionId}`.
+
+Success returns only `{ resourceId, resourceVersion, status: "updated" }`, where the version is exactly the approved target version plus one. Exact retries converge on the same terminal execution and never apply the update twice. A version, preview, authority, policy, or approval change fails closed and requires a newly prepared action and fresh approval.
+
+## Recovery and reversal
+
+Recovery accepts only an effect whose execution fence, action identity, resource identity, result digest, live event version, and complete approved projection all match. It never trusts an execution shell or caller-supplied tool result. Infrastructure failures before the atomic product transaction remain resumable; committed effects reconcile without reinvocation.
+
+Automatic compensation is not available. A reversal is another consequential `event.update` against the new version and requires its own exact preview and fresh approval.
+
+Pin the registry through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-01` and the full action overlay through `@tixkit/agent-protocol/schema` or `./schemas/2026-08-01`. Durable webhook envelopes remain at `2026-01-01`; synthetic test/replay API-version fields and SDK request headers advance to `2026-08-01`.

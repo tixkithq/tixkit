@@ -1,14 +1,14 @@
 import { agentSha256, installAgentProtocolSchemaKeywords } from '@tixkit/agent-protocol';
 import currentAgentSchema from '@tixkit/agent-protocol/schema' with { type: 'json' };
 import retainedAgentSchema from '@tixkit/agent-protocol/schemas/2026-07-22' with { type: 'json' };
-import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-31' with { type: 'json' };
+import currentActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-08-01' with { type: 'json' };
 import retainedActionContracts from '@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-27' with { type: 'json' };
 import { runAgentPlatformContract } from '@tixkit/contract-tests';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 
 if (
-  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-07-31' ||
+  currentAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-08-01' ||
   retainedAgentSchema.$id !== 'https://tixkit.com/schemas/agent-protocol/2026-07-22' ||
   currentAgentSchema.allOf[0]?.$ref !== retainedAgentSchema.$id ||
   currentAgentSchema.allOf[2]?.then?.properties?.autonomy?.const !== 'prepare'
@@ -19,32 +19,41 @@ const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 installAgentProtocolSchemaKeywords(ajv);
 ajv.addSchema(retainedAgentSchema);
-const validateCurrentAction = ajv.compile(currentAgentSchema);
 ajv.addSchema(retainedActionContracts);
 ajv.addSchema(currentActionContracts);
+const validateCurrentAction = ajv.compile(currentAgentSchema);
 const validateEventPreparePayload = ajv.getSchema(
   `${currentActionContracts.$id}#/$defs/eventPrepareResolvedPayload`,
 );
-if (!validateEventPreparePayload)
-  throw new Error('packed agent action contracts did not expose event.prepare payload validation');
+const validateEventUpdatePayload = ajv.getSchema(
+  `${currentActionContracts.$id}#/$defs/eventUpdateResolvedPayload`,
+);
+if (!validateEventPreparePayload || !validateEventUpdatePayload)
+  throw new Error('packed agent action contracts did not expose typed event change validation');
 
 const mutation = process.argv[2] || 'none';
 const actionId = `act_${'a'.repeat(48)}`;
 const approvalId = `apr_${'b'.repeat(48)}`;
 const executionId = `exec_${'c'.repeat(48)}`;
+const eventUpdateActionId = `act_${'f'.repeat(48)}`;
+const eventUpdateApprovalId = `apr_${'d'.repeat(48)}`;
+const eventUpdateExecutionId = `exec_${'e'.repeat(48)}`;
+const agentPrincipalId = `agt_${'1'.repeat(48)}`;
+const delegationGrantId = `dlg_${'2'.repeat(48)}`;
 const base = {
   protocolVersion: '2026-07-22',
-  agentPrincipalId: 'agent_primary',
+  agentPrincipalId: agentPrincipalId,
   sponsorPrincipalId: 'sponsor_primary',
-  delegationGrantId: 'delegation_primary',
+  delegationGrantId: delegationGrantId,
   expectedPolicyVersion: 3,
 };
-const target = {
+const initialTarget = {
   tenantId: 'tenant_primary',
   resourceType: 'event',
   resourceId: 'event_primary',
   resourceVersion: 7,
 };
+const target = { ...initialTarget, resourceVersion: 8 };
 const projection = {
   title: 'Packed conformance event',
   description: 'Organizer-authored content.',
@@ -63,7 +72,7 @@ const eventAction = {
   ...base,
   kind: 'event.read',
   autonomy: 'read',
-  target: { ...target, apiOperation: 'events.get' },
+  target: { ...initialTarget, apiOperation: 'events.get' },
   payload: { eventSnapshotSha256 },
   idempotencyKey: 'agent.conformance.packed.event.read',
   preparedAt: '2026-07-14T11:58:00.000Z',
@@ -83,7 +92,7 @@ const eventPrepareAction = {
   ...base,
   kind: 'event.prepare',
   autonomy: 'prepare',
-  target: { ...target, apiOperation: 'events.prepare' },
+  target: { ...initialTarget, apiOperation: 'events.prepare' },
   payload: {
     changePreviewSha256: agentSha256(eventPreparePreview),
     changes: eventPreparePreview.after,
@@ -108,6 +117,42 @@ if (
   })
 )
   throw new Error('packed action contracts accepted unowned resolved event media');
+const eventUpdateAfter = {
+  description: 'Organizer-approved updated description.',
+  title: 'Contract-updated event',
+};
+const eventUpdatePreviewMaterial = {
+  resourceId: initialTarget.resourceId,
+  resourceVersion: initialTarget.resourceVersion,
+  changedFields: ['description', 'title'],
+  before: { description: projection.description, title: projection.title },
+  after: eventUpdateAfter,
+};
+const eventUpdatePreview = {
+  ...eventUpdatePreviewMaterial,
+  changePreviewSha256: agentSha256(eventUpdatePreviewMaterial),
+  observedAt: '2026-07-14T11:59:00.000Z',
+  untrustedContentPaths: ['before.description', 'after.description', 'before.title', 'after.title'],
+};
+const eventUpdateAction = {
+  id: eventUpdateActionId,
+  ...base,
+  kind: 'event.update',
+  autonomy: 'execute_with_approval',
+  target: { ...initialTarget, apiOperation: 'events.update' },
+  payload: {
+    changePreviewSha256: eventUpdatePreview.changePreviewSha256,
+    changes: eventUpdateAfter,
+  },
+  idempotencyKey: 'agent.conformance.packed.event.update',
+  preparedAt: '2026-07-14T11:59:00.000Z',
+};
+const eventUpdateActionDigest = agentSha256(eventUpdateAction);
+if (
+  !validateCurrentAction(eventUpdateAction) ||
+  !validateEventUpdatePayload(eventUpdateAction.payload)
+)
+  throw new Error('packed agent schemas rejected a valid approval-bound event.update action');
 const readinessAction = {
   id: `act_${'r'.repeat(48)}`,
   ...base,
@@ -132,6 +177,8 @@ const actionDigest = agentSha256(publishAction);
 let planSha256 = '';
 let eventCalls = 0;
 let eventPrepareCalls = 0;
+let eventUpdateCalls = 0;
+let eventUpdateExecutionCalls = 0;
 const response = (status, body) => ({
   status,
   headers: { 'cache-control': 'no-store', 'content-type': 'application/json' },
@@ -147,7 +194,7 @@ const execute = async (request) => {
     });
   if (request.path === '/v1/agent/session')
     return response(200, {
-      principal: { id: 'agent_primary', sponsorPrincipalId: 'sponsor_primary' },
+      principal: { id: agentPrincipalId, sponsorPrincipalId: 'sponsor_primary' },
       authentication: { grantType: 'client_credentials' },
       delegationRequired: true,
     });
@@ -210,10 +257,46 @@ const execute = async (request) => {
         prepareMutation === 'result_digest' ? '0'.repeat(64) : agentSha256(preparedResult),
     });
   }
+  if (request.path === '/v1/agent/event-updates') {
+    eventUpdateCalls += 1;
+    const returnedPreview = {
+      ...eventUpdatePreview,
+      ...(mutation === 'update_preview'
+        ? { after: { ...eventUpdatePreview.after, title: 'Substituted update' } }
+        : {}),
+      ...(mutation === 'update_replay' && eventUpdateCalls === 2
+        ? { observedAt: '2026-07-14T11:59:01.000Z' }
+        : {}),
+    };
+    return response(201, {
+      action: eventUpdateAction,
+      actionDigest: mutation === 'update_action_digest' ? '0'.repeat(64) : eventUpdateActionDigest,
+      expiresAt:
+        mutation === 'update_preparation_time'
+          ? '2026-07-14T12:30:00.000Z'
+          : '2026-07-14T12:04:00.000Z',
+      authorization: {
+        eligibleForApproval: true,
+        reasons: ['approval_required'],
+        snapshotSha256: mutation === 'update_authorization_digest' ? 'invalid' : 'a'.repeat(64),
+        checkedAt:
+          mutation === 'update_authorization_time'
+            ? '2026-07-14T11:58:59.000Z'
+            : mutation === 'update_authorization_after_approval'
+              ? '2026-07-14T12:03:00.000Z'
+              : '2026-07-14T11:59:00.000Z',
+        ...(mutation === 'update_authorization_shape' ? { unsafe: true } : {}),
+      },
+      preview: returnedPreview,
+      previewSha256:
+        mutation === 'update_preview_digest' ? '0'.repeat(64) : agentSha256(returnedPreview),
+      ...(mutation === 'update_extra' ? { unsafe: true } : {}),
+    });
+  }
   if (request.path === '/v1/agent/readiness') {
     const result = {
       resourceId: 'event_primary',
-      resourceVersion: 7,
+      resourceVersion: target.resourceVersion,
       status: 'ready',
       readinessSnapshotSha256: 'f'.repeat(64),
       generatedAt: '2026-07-14T11:59:00.000Z',
@@ -261,6 +344,19 @@ const execute = async (request) => {
       state: { status, stateVersion: status === 'awaiting_approval' ? 2 : 3 },
     });
   }
+  if (request.path === `/v1/agent/event-updates/${eventUpdateActionId}/approvals`)
+    return response(201, {
+      id: eventUpdateApprovalId,
+      tenantId: initialTarget.tenantId,
+      actionDigest: eventUpdateActionDigest,
+      approverPrincipalId: base.sponsorPrincipalId,
+      approverPermissionSnapshot:
+        mutation === 'update_approval' ? ['events:publish'] : ['events:write'],
+      policyVersion: 3,
+      approvedAt: '2026-07-14T11:59:15.000Z',
+      expiresAt: '2026-07-14T12:03:00.000Z',
+      ...(mutation === 'update_approval_extra' ? { planSha256: '9'.repeat(64) } : {}),
+    });
   if (request.path.endsWith('/approvals'))
     return response(201, {
       id: approvalId,
@@ -273,6 +369,41 @@ const execute = async (request) => {
       approvedAt: '2026-07-14T12:01:00.000Z',
       expiresAt: '2026-07-14T12:04:00.000Z',
     });
+  if (request.path === `/v1/agent/event-updates/${eventUpdateActionId}/executions`) {
+    eventUpdateExecutionCalls += 1;
+    return response(200, {
+      id: eventUpdateExecutionId,
+      ...(mutation === 'update_execution_envelope' ? {} : { tenantId: initialTarget.tenantId }),
+      state: 'succeeded',
+      actionId: eventUpdateActionId,
+      actionDigest: eventUpdateActionDigest,
+      approvalId: eventUpdateApprovalId,
+      agentPrincipalId: base.agentPrincipalId,
+      sponsorPrincipalId: base.sponsorPrincipalId,
+      delegationGrantId: base.delegationGrantId,
+      idempotencyKey: '7'.repeat(64),
+      requestFingerprint: '8'.repeat(64),
+      resourceVersion: initialTarget.resourceVersion,
+      policyVersion: base.expectedPolicyVersion,
+      fenceToken: 1,
+      result: {
+        resourceId: initialTarget.resourceId,
+        resourceVersion: 8,
+        status: mutation === 'update_result' ? 'published' : 'updated',
+      },
+      createdAt:
+        mutation === 'update_execution_time'
+          ? '2026-07-14T11:59:14.000Z'
+          : mutation === 'update_execution_at_expiry'
+            ? '2026-07-14T12:03:00.000Z'
+            : '2026-07-14T11:59:16.000Z',
+      updatedAt:
+        mutation === 'update_execution_replay' && eventUpdateExecutionCalls === 2
+          ? '2026-07-14T11:59:18.000Z'
+          : '2026-07-14T11:59:17.000Z',
+      ...(mutation === 'update_execution_extra' ? { planSha256: '9'.repeat(64) } : {}),
+    });
+  }
   if (request.path.endsWith('/executions'))
     return response(200, {
       id: executionId,
@@ -282,7 +413,7 @@ const execute = async (request) => {
       actionDigest,
       approvalId,
       ...base,
-      result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+      result: { resourceId: 'event_primary', resourceVersion: 9, status: 'published' },
     });
   if (request.path.endsWith(`/${executionId}`)) {
     const binding = {
@@ -306,7 +437,7 @@ const execute = async (request) => {
 };
 
 const result = await runAgentPlatformContract({
-  apiVersion: '2026-07-31',
+  apiVersion: '2026-08-01',
   sponsorAccessToken: 'sponsor_token',
   agentClientId: `tk_agent_${'e'.repeat(48)}`,
   agentClientSecret: 'secret_value',
@@ -316,4 +447,12 @@ const result = await runAgentPlatformContract({
   idempotencyPrefix: 'agent.conformance.packed',
   execute,
 });
-process.stdout.write(JSON.stringify({ result, eventCalls, eventPrepareCalls }));
+process.stdout.write(
+  JSON.stringify({
+    result,
+    eventCalls,
+    eventPrepareCalls,
+    eventUpdateCalls,
+    eventUpdateExecutionCalls,
+  }),
+);

@@ -30,6 +30,10 @@ export type ApplyResolvedEventPatchResult =
   | { applied: true; event: EventRow }
   | { applied: false; currentVersion: number };
 
+export interface EventUpdateServiceCheckpoints {
+  beforeUpdateIfVersion?: () => Promise<void>;
+}
+
 class StaleEventPatchError extends Error {
   constructor(readonly currentVersion: number) {
     super('stale event patch');
@@ -43,6 +47,23 @@ function parseJson(value: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function normalizePersistedEventMediaPatch(patch: unknown): unknown {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch;
+  const normalized = { ...(patch as Record<string, unknown>) };
+  if (
+    typeof normalized.coverImageUrl === 'string' &&
+    normalized.coverImageUrl.startsWith('/v1/public/event-media/')
+  )
+    normalized.coverImageUrl = `http://localhost${normalized.coverImageUrl}`;
+  if (normalized.seo && typeof normalized.seo === 'object' && !Array.isArray(normalized.seo)) {
+    const seo = { ...(normalized.seo as Record<string, unknown>) };
+    if (typeof seo.imageUrl === 'string' && seo.imageUrl.startsWith('/v1/public/event-media/'))
+      seo.imageUrl = `http://localhost${seo.imageUrl}`;
+    normalized.seo = seo;
+  }
+  return normalized;
 }
 
 function eventPatchProjection(row: EventRow): Record<string, unknown> {
@@ -74,6 +95,13 @@ function projectedFields(
   fields: readonly string[],
 ): Record<string, unknown> {
   return Object.fromEntries(fields.map((field) => [field, projection[field]]));
+}
+
+export function projectEventUpdateFields(
+  row: EventRow,
+  fields: readonly string[],
+): Readonly<Record<string, unknown>> {
+  return projectedFields(eventPatchProjection(row), fields);
 }
 
 function applyProjectionUpdate(
@@ -153,14 +181,17 @@ async function renewEventMediaLease(
 }
 
 export class EventUpdateService {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly checkpoints: EventUpdateServiceCheckpoints = {},
+  ) {}
 
   async resolvePatch(input: {
     tenantId: string;
     eventId: string;
     patch: unknown;
   }): Promise<ResolvedEventPatch> {
-    const body = updateEventSchema.parse(input.patch);
+    const body = updateEventSchema.parse(normalizePersistedEventMediaPatch(input.patch));
     if (body.status !== undefined) {
       throw new ValidationError(
         'Use the dedicated publish, pause, or archive endpoint to change event status',
@@ -270,46 +301,59 @@ export class EventUpdateService {
 
   async applyResolvedPatch(resolved: ResolvedEventPatch): Promise<ApplyResolvedEventPatchResult> {
     try {
-      return await this.db.transaction().execute(async (transaction) => {
-        const repo = new EventRepository(transaction as Database);
-        const current = await repo.findById(resolved.eventId);
-        if (!current || current.tenant_id !== resolved.tenantId)
-          throw new NotFoundError('Event', resolved.eventId);
-        if (Number(current.version) !== resolved.expectedVersion)
-          throw new StaleEventPatchError(Number(current.version));
+      return await this.db
+        .transaction()
+        .execute((transaction) => this.applyResolvedPatchInTransaction(transaction, resolved));
+    } catch (error) {
+      if (error instanceof StaleEventPatchError)
+        return { applied: false, currentVersion: error.currentVersion };
+      throw error;
+    }
+  }
 
-        if (typeof resolved.updateData.slug === 'string') {
-          const slugAvailable = await repo.isSlugAvailable(
-            current.brand_id,
-            resolved.updateData.slug,
-            resolved.eventId,
-          );
-          if (!slugAvailable) throw new ValidationError('Event slug is already in use');
-        }
-        if (typeof resolved.updateData.venue_id === 'string') {
-          const venue = await transaction
-            .selectFrom('venues')
-            .select('id')
-            .where('id', '=', resolved.updateData.venue_id)
-            .where('tenant_id', '=', current.tenant_id)
-            .where('organization_id', '=', current.organization_id)
-            .executeTakeFirst();
-          if (!venue) throw new NotFoundError('Venue', resolved.updateData.venue_id);
-        }
-        for (const binding of resolved.mediaBindings)
-          await renewEventMediaLease(transaction, current, binding);
+  async applyResolvedPatchInTransaction(
+    transaction: Transaction<DB>,
+    resolved: ResolvedEventPatch,
+  ): Promise<ApplyResolvedEventPatchResult> {
+    try {
+      const repo = new EventRepository(transaction as Database);
+      const current = await repo.findById(resolved.eventId);
+      if (!current || current.tenant_id !== resolved.tenantId)
+        throw new NotFoundError('Event', resolved.eventId);
+      if (Number(current.version) !== resolved.expectedVersion)
+        throw new StaleEventPatchError(Number(current.version));
 
-        const updated = await repo.updateIfVersion(
+      if (typeof resolved.updateData.slug === 'string') {
+        const slugAvailable = await repo.isSlugAvailable(
+          current.brand_id,
+          resolved.updateData.slug,
           resolved.eventId,
-          resolved.expectedVersion,
-          resolved.updateData,
         );
-        if (!updated) {
-          const latest = await repo.findById(resolved.eventId);
-          throw new StaleEventPatchError(Number(latest?.version ?? resolved.expectedVersion));
-        }
-        return { applied: true as const, event: updated };
-      });
+        if (!slugAvailable) throw new ValidationError('Event slug is already in use');
+      }
+      if (typeof resolved.updateData.venue_id === 'string') {
+        const venue = await transaction
+          .selectFrom('venues')
+          .select('id')
+          .where('id', '=', resolved.updateData.venue_id)
+          .where('tenant_id', '=', current.tenant_id)
+          .where('organization_id', '=', current.organization_id)
+          .executeTakeFirst();
+        if (!venue) throw new NotFoundError('Venue', resolved.updateData.venue_id);
+      }
+      await this.checkpoints.beforeUpdateIfVersion?.();
+      const updated = await repo.updateIfVersion(
+        resolved.eventId,
+        resolved.expectedVersion,
+        resolved.updateData,
+      );
+      if (!updated) {
+        const latest = await repo.findById(resolved.eventId);
+        throw new StaleEventPatchError(Number(latest?.version ?? resolved.expectedVersion));
+      }
+      for (const binding of resolved.mediaBindings)
+        await renewEventMediaLease(transaction, current, binding);
+      return { applied: true as const, event: updated };
     } catch (error) {
       if (error instanceof StaleEventPatchError)
         return { applied: false, currentVersion: error.currentVersion };

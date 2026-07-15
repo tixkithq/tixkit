@@ -31,6 +31,7 @@ const readEventSchema = readReadinessSchema;
 const prepareEventChangesSchema = readReadinessSchema
   .extend({ changes: eventPrepareChangesSchema })
   .strict();
+const prepareEventUpdateSchema = prepareEventChangesSchema;
 const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{48}$/u) }).strict();
 const approvalParamsSchema = actionParamsSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
@@ -56,7 +57,7 @@ export interface AgentActionRouteService {
     tenantId: string;
     agentPrincipalId: string;
     idempotencyKey: string;
-    kind: 'event.publish' | 'event.read' | 'readiness.read' | 'event.prepare';
+    kind: 'event.publish' | 'event.read' | 'readiness.read' | 'event.prepare' | 'event.update';
     delegationGrantId: string;
     resourceId: string;
     changes?: Readonly<Record<string, unknown>>;
@@ -78,6 +79,7 @@ export interface AgentActionRouteService {
     actionDigest: string;
     planSha256?: string;
     idempotencyKey: string;
+    expectedActionKind?: 'event.publish' | 'event.update';
   }): Promise<import('@tixkit/agent-protocol').AgentApproval>;
   revokeApproval(input: {
     tenantId: string;
@@ -86,6 +88,7 @@ export interface AgentActionRouteService {
     approvalId: string;
     actionDigest: string;
     idempotencyKey: string;
+    expectedActionKind?: 'event.publish' | 'event.update';
   }): Promise<import('@tixkit/agent-protocol').AgentApproval>;
   execute(input: {
     tenantId: string;
@@ -93,6 +96,7 @@ export interface AgentActionRouteService {
     actionId: string;
     approvalId: string;
     actionDigest: string;
+    expectedActionKind?: 'event.publish' | 'event.update';
   }): Promise<import('@tixkit/agent-protocol').AgentExecution>;
   getExecutionForAgent(input: {
     tenantId: string;
@@ -161,6 +165,8 @@ function translateAgentActionError(key: string, error: unknown): never {
     throw new NotFoundError('AgentActionScope', 'requested');
   if (message === 'AGENT_ACTION_POLICY_UNAVAILABLE')
     throw new ConflictError('Agent action policy is not configured');
+  if (message === 'AGENT_ACTION_NO_MATERIAL_CHANGE')
+    throw new ConflictError('Agent event update does not contain a material change');
   if (message === 'AGENT_ACTION_APPROVAL_IDEMPOTENCY_CONFLICT')
     throw new IdempotencyConflictError(key);
   if (message === 'AGENT_ACTION_APPROVAL_SCOPE_DENIED')
@@ -273,6 +279,26 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
     },
   );
 
+  app.post('/agent/event-updates', { config: { agentAccess: true } }, async (request, reply) => {
+    const actor = request.principal!;
+    requireAgent(actor);
+    const key = idempotencyKey(request.headers);
+    const body = parseBody(prepareEventUpdateSchema, request.body);
+    try {
+      const prepared = await service.prepare({
+        tenantId: actor.tenantId,
+        agentPrincipalId: actor.id,
+        idempotencyKey: key,
+        kind: 'event.update',
+        ...body,
+      });
+      reply.header('Cache-Control', 'no-store');
+      return reply.status(201).send(prepared);
+    } catch (error) {
+      translateAgentActionError(key, error);
+    }
+  });
+
   app.get('/agent/actions/:actionId', { config: { agentAccess: true } }, async (request, reply) => {
     const actor = request.principal!;
     if (actor.type === 'agent') requireAgent(actor);
@@ -381,6 +407,161 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
     },
   );
 
+  app.get(
+    '/agent/event-updates/:actionId',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      if (actor.type === 'agent') requireAgent(actor);
+      else requireHumanSponsor(actor);
+      const { actionId } = parseBody(actionParamsSchema, request.params);
+      const action =
+        actor.type === 'agent'
+          ? await service.getForAgent({
+              tenantId: actor.tenantId,
+              agentPrincipalId: actor.id,
+              actionId,
+            })
+          : actor.type === 'user'
+            ? await service.getForSponsor({
+                tenantId: actor.tenantId,
+                sponsorPrincipalId: actor.id,
+                actionId,
+              })
+            : undefined;
+      if (!action || action.action.kind !== 'event.update')
+        throw new NotFoundError('AgentEventUpdate', actionId);
+      reply.header('Cache-Control', 'no-store');
+      return action;
+    },
+  );
+
+  app.post('/agent/event-updates/:actionId/approvals', async (request, reply) => {
+    const actor = request.principal!;
+    requireHumanApprover(actor);
+    const key = idempotencyKey(request.headers);
+    const { actionId } = parseBody(actionParamsSchema, request.params);
+    const { actionDigest } = parseBody(actionDigestSchema, request.body);
+    const expectedConfirmation = `approve:${actionId}:${actionDigest}`;
+    if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
+      throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);
+    try {
+      const approval = await service.approve({
+        tenantId: actor.tenantId,
+        approverPrincipalId: actor.id,
+        actionId,
+        actionDigest,
+        idempotencyKey: key,
+        expectedActionKind: 'event.update',
+      });
+      reply.header('Cache-Control', 'no-store');
+      return reply.status(201).send(approval);
+    } catch (error) {
+      translateAgentActionError(key, error);
+    }
+  });
+
+  app.post(
+    '/agent/event-updates/:actionId/approvals/:approvalId/revoke',
+    async (request, reply) => {
+      const actor = request.principal!;
+      requireHumanSponsor(actor);
+      const key = idempotencyKey(request.headers);
+      const { actionId, approvalId } = parseBody(approvalParamsSchema, request.params);
+      const { actionDigest } = parseBody(actionDigestSchema, request.body);
+      const expectedConfirmation = `revoke:${actionId}:${approvalId}:${actionDigest}`;
+      if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
+        throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);
+      try {
+        const approval = await service.revokeApproval({
+          tenantId: actor.tenantId,
+          sponsorPrincipalId: actor.id,
+          actionId,
+          approvalId,
+          actionDigest,
+          idempotencyKey: key,
+          expectedActionKind: 'event.update',
+        });
+        reply.header('Cache-Control', 'no-store');
+        return reply.send(approval);
+      } catch (error) {
+        translateAgentActionError(key, error);
+      }
+    },
+  );
+
+  app.post(
+    '/agent/event-updates/:actionId/executions',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      requireAgent(actor);
+      const { actionId } = parseBody(actionParamsSchema, request.params);
+      const { approvalId, actionDigest } = parseBody(executionSchema, request.body);
+      const expectedConfirmation = `execute:${actionId}:${approvalId}:${actionDigest}`;
+      if (request.headers['idempotency-key'] !== expectedConfirmation)
+        throw new ValidationError(`Idempotency-Key must equal ${expectedConfirmation}`);
+      if (request.headers['x-tixkit-confirmation'] !== expectedConfirmation)
+        throw new ValidationError(`x-tixkit-confirmation must equal ${expectedConfirmation}`);
+      try {
+        const execution = await service.execute({
+          tenantId: actor.tenantId,
+          agentPrincipalId: actor.id,
+          actionId,
+          approvalId,
+          actionDigest,
+          expectedActionKind: 'event.update',
+        });
+        reply.header('Cache-Control', 'no-store');
+        return reply.send(execution);
+      } catch (error) {
+        translateAgentActionError(actionId, error);
+      }
+    },
+  );
+
+  app.get(
+    '/agent/event-updates/:actionId/executions/:executionId',
+    { config: { agentAccess: true } },
+    async (request, reply) => {
+      const actor = request.principal!;
+      if (actor.type === 'agent') requireAgent(actor);
+      else requireHumanSponsor(actor);
+      const { actionId, executionId } = parseBody(executionParamsSchema, request.params);
+      const prepared =
+        actor.type === 'agent'
+          ? await service.getForAgent({
+              tenantId: actor.tenantId,
+              agentPrincipalId: actor.id,
+              actionId,
+            })
+          : await service.getForSponsor({
+              tenantId: actor.tenantId,
+              sponsorPrincipalId: actor.id,
+              actionId,
+            });
+      if (!prepared || prepared.action.kind !== 'event.update')
+        throw new NotFoundError('AgentEventUpdateExecution', executionId);
+      const evidence =
+        actor.type === 'agent'
+          ? await service.getExecutionForAgent({
+              tenantId: actor.tenantId,
+              agentPrincipalId: actor.id,
+              actionId,
+              executionId,
+            })
+          : await service.getExecutionForSponsor({
+              tenantId: actor.tenantId,
+              sponsorPrincipalId: actor.id,
+              actionId,
+              executionId,
+            });
+      if (!evidence) throw new NotFoundError('AgentEventUpdateExecution', executionId);
+      reply.header('Cache-Control', 'no-store');
+      return evidence;
+    },
+  );
+
   app.post('/agent/actions/:actionId/approvals', async (request, reply) => {
     const actor = request.principal!;
     requireHumanApprover(actor);
@@ -398,6 +579,7 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
         actionDigest,
         ...(planSha256 ? { planSha256 } : {}),
         idempotencyKey: key,
+        expectedActionKind: 'event.publish',
       });
       reply.header('Cache-Control', 'no-store');
       return reply.status(201).send(approval);
@@ -423,6 +605,7 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
         approvalId,
         actionDigest,
         idempotencyKey: key,
+        expectedActionKind: 'event.publish',
       });
       reply.header('Cache-Control', 'no-store');
       return reply.send(approval);
@@ -451,6 +634,7 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
           actionId,
           approvalId,
           actionDigest,
+          expectedActionKind: 'event.publish',
         });
         reply.header('Cache-Control', 'no-store');
         return reply.send(execution);

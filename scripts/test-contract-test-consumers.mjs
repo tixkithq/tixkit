@@ -190,7 +190,7 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
-      apiVersion: '2026-07-31',
+      apiVersion: '2026-08-01',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
@@ -234,6 +234,24 @@ try {
     'prepare_untrusted_paths',
     'prepare_result_digest',
     'prepare_replay',
+    'update_action_digest',
+    'update_preview',
+    'update_preview_digest',
+    'update_extra',
+    'update_replay',
+    'update_authorization_shape',
+    'update_authorization_digest',
+    'update_authorization_time',
+    'update_authorization_after_approval',
+    'update_preparation_time',
+    'update_approval',
+    'update_approval_extra',
+    'update_execution_envelope',
+    'update_result',
+    'update_execution_extra',
+    'update_execution_time',
+    'update_execution_at_expiry',
+    'update_execution_replay',
   ]) {
     const packedOutput = JSON.parse(
       execFileSync('bun', ['run', 'packed-agent-platform-consumer.mjs', mutation], {
@@ -248,9 +266,23 @@ try {
       packedOutput.eventPrepareCalls !== 2
     )
       throw new Error(`Packed agent-platform ${mutation} did not prove exact event-prepare replay`);
+    if (
+      (mutation === 'none' || mutation.startsWith('update_')) &&
+      packedOutput.eventUpdateCalls !== 2
+    )
+      throw new Error(`Packed agent-platform ${mutation} did not prove exact event-update replay`);
+    if (
+      (mutation === 'none' || mutation.startsWith('update_execution')) &&
+      packedOutput.eventUpdateExecutionCalls !== 2
+    )
+      throw new Error(
+        `Packed agent-platform ${mutation} did not prove exact event-update execution replay`,
+      );
     if (mutation === 'none') {
       if (packedOutput.result.ok !== true)
-        throw new Error('Packed agent-platform happy path failed');
+        throw new Error(
+          `Packed agent-platform happy path failed: ${JSON.stringify(packedOutput.result)}`,
+        );
     } else if (
       packedOutput.result.ok !== false ||
       !packedOutput.result.findings.some((finding) =>
@@ -258,6 +290,9 @@ try {
           'AGENT_PLATFORM_EVENT_READ_SCHEMA',
           'AGENT_PLATFORM_EVENT_READ_REPLAY',
           'AGENT_PLATFORM_EVENT_PREPARE_SCHEMA',
+          'AGENT_PLATFORM_EVENT_UPDATE_SCHEMA',
+          'AGENT_PLATFORM_EVENT_UPDATE_APPROVAL_SCHEMA',
+          'AGENT_PLATFORM_EVENT_UPDATE_EXECUTION_SCHEMA',
         ].includes(finding.code),
       )
     )
@@ -285,7 +320,7 @@ if (captured.headers.authorization !== 'Bearer tk_sandbox') throw new Error('Pac
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
-    'Built and executed 4 packed contract profiles, including agent event-read/event-prepare replay and mutations, fail-closed credential handling, and the packed SDK wire contract.',
+    'Built and executed 4 packed contract profiles, including agent event-read/event-prepare replay, approval-bound event-update execution replay, fail-closed credential handling, and the packed SDK wire contract.',
   );
 } finally {
   await rm(temp, { recursive: true, force: true });

@@ -11,20 +11,24 @@ import {
   agentActionDigest,
   agentSha256,
   buildAgentPlanDefinition,
+  validateAgentActionResultForAction,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
+  validateAgentEventUpdatePreview,
   validateAgentReadinessReadResult,
   type AgentAction,
+  type AgentActionResult,
   type AgentApproval,
   type AgentExecution,
   type AgentEventReadResult,
   type AgentEventPrepareResult,
+  type AgentEventUpdatePreview,
   type AgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-31' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-08-01' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -155,14 +159,23 @@ export function testEmbedHostContract(input: {
   } else {
     const mutations: MessageEvent[] = [
       { ...canonical.event, origin: 'https://invalid.example' } as MessageEvent,
-      { ...canonical.event, source: {} as MessageEvent['source'] } as MessageEvent,
       {
         ...canonical.event,
-        data: { ...(canonical.event.data as object), widgetId: '__invalid_widget__' },
+        source: {} as MessageEvent['source'],
       } as MessageEvent,
       {
         ...canonical.event,
-        data: { ...(canonical.event.data as object), nonce: '__invalid_nonce__' },
+        data: {
+          ...(canonical.event.data as object),
+          widgetId: '__invalid_widget__',
+        },
+      } as MessageEvent,
+      {
+        ...canonical.event,
+        data: {
+          ...(canonical.event.data as object),
+          nonce: '__invalid_nonce__',
+        },
       } as MessageEvent,
       {
         ...canonical.event,
@@ -349,16 +362,27 @@ export function testSdkConsumerContract(input: {
 }): ContractResult {
   const findings: ContractFinding[] = [];
   if (input.apiVersion !== input.expectedApiVersion)
-    findings.push({ code: 'SDK_API_VERSION', message: 'SDK and API versions do not match.' });
+    findings.push({
+      code: 'SDK_API_VERSION',
+      message: 'SDK and API versions do not match.',
+    });
   const unique = new Set(input.operationIds);
   if (unique.size !== input.operationIds.length)
-    findings.push({ code: 'SDK_OPERATION_DUPLICATE', message: 'Operation IDs must be unique.' });
+    findings.push({
+      code: 'SDK_OPERATION_DUPLICATE',
+      message: 'Operation IDs must be unique.',
+    });
   for (const id of input.requiredOperationIds) {
     if (!unique.has(id))
-      findings.push({ code: 'SDK_OPERATION_MISSING', message: `Missing operation ${id}.` });
+      findings.push({
+        code: 'SDK_OPERATION_MISSING',
+        message: `Missing operation ${id}.`,
+      });
   }
   for (const [index, sample] of input.errorSamples.entries()) {
-    const error = sample as { error?: { code?: unknown; message?: unknown; requestId?: unknown } };
+    const error = sample as {
+      error?: { code?: unknown; message?: unknown; requestId?: unknown };
+    };
     if (typeof error?.error?.code !== 'string' || typeof error.error.message !== 'string')
       findings.push({
         code: 'SDK_ERROR_SCHEMA',
@@ -400,7 +424,10 @@ export async function runSdkApiConsumerContract(input: {
     response = await input.execute(request);
   } catch {
     return result([
-      { code: 'SDK_REQUEST_FAILED', message: 'SDK/API request could not be completed.' },
+      {
+        code: 'SDK_REQUEST_FAILED',
+        message: 'SDK/API request could not be completed.',
+      },
     ]);
   }
   const headers = Object.fromEntries(
@@ -412,7 +439,10 @@ export async function runSdkApiConsumerContract(input: {
       message: `Expected 202, received ${response.status}.`,
     });
   if (headers['content-type'] && !headers['content-type']?.includes('application/json'))
-    findings.push({ code: 'SDK_RESPONSE_CONTENT_TYPE', message: 'Response is not JSON.' });
+    findings.push({
+      code: 'SDK_RESPONSE_CONTENT_TYPE',
+      message: 'Response is not JSON.',
+    });
   const body = response.body as {
     queued?: unknown;
     test?: unknown;
@@ -506,7 +536,10 @@ export async function runAgentPlatformContract(
     {
       method: 'POST',
       path: '/v1/oauth/token',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
       body: {
         grant_type: 'client_credentials',
         client_id: input.agentClientId,
@@ -517,7 +550,10 @@ export async function runAgentPlatformContract(
   );
   const accessToken = objectBody(oauth?.body)?.access_token;
   if (typeof accessToken !== 'string') {
-    findings.push({ code: 'AGENT_PLATFORM_OAUTH_SCHEMA', message: 'OAuth response is invalid.' });
+    findings.push({
+      code: 'AGENT_PLATFORM_OAUTH_SCHEMA',
+      message: 'OAuth response is invalid.',
+    });
     return result(findings);
   }
   const sessionResponse = await request(
@@ -665,6 +701,251 @@ export async function runAgentPlatformContract(
     });
     return result(findings);
   }
+  const eventUpdateRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: '/v1/agent/event-updates',
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.event.update`,
+    },
+    body: {
+      delegationGrantId: input.delegationGrantId,
+      resourceId: input.resourceId,
+      changes: {
+        title: 'Contract-updated event',
+        description: 'Organizer-approved updated description.',
+      },
+    },
+  };
+  const eventUpdateResponse = await request('event-update', eventUpdateRequest, 201);
+  const eventUpdateReplay = await request('event-update-replay', eventUpdateRequest, 201);
+  const preparedEventUpdate = objectBody(eventUpdateResponse?.body);
+  const eventUpdateAction = objectBody(preparedEventUpdate?.action) as unknown as
+    | AgentAction
+    | undefined;
+  const eventUpdatePreview = objectBody(preparedEventUpdate?.preview);
+  const eventUpdateAuthorization = objectBody(preparedEventUpdate?.authorization);
+  const eventUpdatePreparedKeys = preparedEventUpdate
+    ? Object.keys(preparedEventUpdate).sort().join(',')
+    : '';
+  const eventUpdateAuthorizationKeys = eventUpdateAuthorization
+    ? Object.keys(eventUpdateAuthorization).sort().join(',')
+    : '';
+  const eventUpdatePreparedAt = Date.parse(String(eventUpdateAction?.preparedAt));
+  const eventUpdateActionExpiresAt = Date.parse(String(preparedEventUpdate?.expiresAt));
+  const eventUpdateAuthorizationCheckedAt = Date.parse(String(eventUpdateAuthorization?.checkedAt));
+  let eventUpdateActionDigest: string | undefined;
+  try {
+    if (!eventUpdateAction || !eventUpdatePreview) throw new Error('invalid event update response');
+    validateAgentEventUpdatePreview(
+      eventUpdateAction,
+      eventUpdatePreview as unknown as AgentEventUpdatePreview,
+    );
+    eventUpdateActionDigest = agentActionDigest(eventUpdateAction);
+  } catch {
+    eventUpdateActionDigest = undefined;
+  }
+  if (
+    !eventUpdateAction ||
+    eventUpdatePreparedKeys !==
+      ['action', 'actionDigest', 'authorization', 'expiresAt', 'preview', 'previewSha256']
+        .sort()
+        .join(',') ||
+    eventUpdateAuthorizationKeys !==
+      ['checkedAt', 'eligibleForApproval', 'reasons', 'snapshotSha256'].sort().join(',') ||
+    eventUpdateAction.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    eventUpdateAction.kind !== 'event.update' ||
+    eventUpdateAction.autonomy !== 'execute_with_approval' ||
+    !/^act_[a-f0-9]{48}$/u.test(eventUpdateAction.id) ||
+    !/^agt_[a-f0-9]{48}$/u.test(eventUpdateAction.agentPrincipalId) ||
+    !/^dlg_[a-f0-9]{48}$/u.test(eventUpdateAction.delegationGrantId) ||
+    eventUpdateAction.agentPrincipalId !== principal.id ||
+    eventUpdateAction.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    eventUpdateAction.delegationGrantId !== input.delegationGrantId ||
+    eventUpdateAction.target.resourceType !== 'event' ||
+    eventUpdateAction.target.resourceId !== input.resourceId ||
+    eventUpdateAction.target.apiOperation !== 'events.update' ||
+    eventUpdateActionDigest !== preparedEventUpdate?.actionDigest ||
+    eventUpdateAuthorization?.eligibleForApproval !== true ||
+    !Array.isArray(eventUpdateAuthorization.reasons) ||
+    eventUpdateAuthorization.reasons.join(',') !== 'approval_required' ||
+    !/^[a-f0-9]{64}$/u.test(String(eventUpdateAuthorization.snapshotSha256)) ||
+    preparedEventUpdate?.previewSha256 !== agentSha256(eventUpdatePreview) ||
+    objectBody(eventUpdateAction.payload)?.changePreviewSha256 !==
+      eventUpdatePreview?.changePreviewSha256 ||
+    agentSha256(eventUpdateResponse?.body) !== agentSha256(eventUpdateReplay?.body) ||
+    !Array.isArray(eventUpdatePreview?.changedFields) ||
+    eventUpdatePreview.changedFields.join(',') !== 'description,title' ||
+    !Number.isFinite(eventUpdatePreparedAt) ||
+    !Number.isFinite(eventUpdateActionExpiresAt) ||
+    !Number.isFinite(eventUpdateAuthorizationCheckedAt) ||
+    eventUpdateAuthorizationCheckedAt < eventUpdatePreparedAt ||
+    eventUpdateAuthorizationCheckedAt > eventUpdateActionExpiresAt ||
+    eventUpdateActionExpiresAt <= eventUpdatePreparedAt ||
+    eventUpdateActionExpiresAt - eventUpdatePreparedAt > 15 * 60_000
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_EVENT_UPDATE_SCHEMA',
+      message:
+        'Approval-bound event update, immutable preview digest or exact preparation replay evidence is invalid.',
+    });
+    return result(findings);
+  }
+  const eventUpdateApprovalResponse = await request(
+    'event-update-approve',
+    {
+      method: 'POST',
+      path: `/v1/agent/event-updates/${encodeURIComponent(eventUpdateAction.id)}/approvals`,
+      headers: {
+        ...headers(input.sponsorAccessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.event.update.approve`,
+        'X-Tixkit-Confirmation': `approve:${eventUpdateAction.id}:${eventUpdateActionDigest}`,
+      },
+      body: { actionDigest: eventUpdateActionDigest },
+    },
+    201,
+  );
+  const eventUpdateApproval = objectBody(eventUpdateApprovalResponse?.body) as unknown as
+    | AgentApproval
+    | undefined;
+  const eventUpdateApprovalKeys = eventUpdateApproval
+    ? Object.keys(eventUpdateApproval).sort().join(',')
+    : '';
+  const eventUpdateApprovedAt = Date.parse(String(eventUpdateApproval?.approvedAt));
+  const eventUpdateApprovalExpiresAt = Date.parse(String(eventUpdateApproval?.expiresAt));
+  if (
+    !eventUpdateApproval ||
+    eventUpdateApprovalKeys !==
+      [
+        'actionDigest',
+        'approvedAt',
+        'approverPermissionSnapshot',
+        'approverPrincipalId',
+        'expiresAt',
+        'id',
+        'policyVersion',
+        'tenantId',
+      ]
+        .sort()
+        .join(',') ||
+    !/^apr_[a-f0-9]{48}$/u.test(eventUpdateApproval.id) ||
+    eventUpdateApproval.tenantId !== eventUpdateAction.target.tenantId ||
+    eventUpdateApproval.actionDigest !== eventUpdateActionDigest ||
+    eventUpdateApproval.planSha256 !== undefined ||
+    eventUpdateApproval.approverPrincipalId !== eventUpdateAction.sponsorPrincipalId ||
+    eventUpdateApproval.approverPermissionSnapshot?.join(',') !== 'events:write' ||
+    eventUpdateApproval.policyVersion !== eventUpdateAction.expectedPolicyVersion ||
+    eventUpdateApproval.revokedAt !== undefined ||
+    eventUpdateApproval.consumedAt !== undefined ||
+    !Number.isFinite(eventUpdateApprovedAt) ||
+    !Number.isFinite(eventUpdateApprovalExpiresAt) ||
+    eventUpdateApprovedAt < eventUpdatePreparedAt ||
+    eventUpdateApprovedAt < eventUpdateAuthorizationCheckedAt ||
+    eventUpdateApprovalExpiresAt <= eventUpdateApprovedAt ||
+    eventUpdateApprovalExpiresAt - eventUpdateApprovedAt > 5 * 60_000 ||
+    eventUpdateApprovalExpiresAt > eventUpdateActionExpiresAt
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_EVENT_UPDATE_APPROVAL_SCHEMA',
+      message: 'Event update approval is not bound to the exact immutable preview and sponsor.',
+    });
+    return result(findings);
+  }
+  const eventUpdateExecutionRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: `/v1/agent/event-updates/${encodeURIComponent(eventUpdateAction.id)}/executions`,
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `execute:${eventUpdateAction.id}:${eventUpdateApproval.id}:${eventUpdateActionDigest}`,
+      'X-Tixkit-Confirmation': `execute:${eventUpdateAction.id}:${eventUpdateApproval.id}:${eventUpdateActionDigest}`,
+    },
+    body: {
+      approvalId: eventUpdateApproval.id,
+      actionDigest: eventUpdateActionDigest,
+    },
+  };
+  const eventUpdateExecutionResponse = await request(
+    'event-update-execute',
+    eventUpdateExecutionRequest,
+    200,
+  );
+  const eventUpdateExecutionReplay = await request(
+    'event-update-execute-replay',
+    eventUpdateExecutionRequest,
+    200,
+  );
+  const eventUpdateExecution = eventUpdateExecutionResponse?.body as AgentExecution | undefined;
+  try {
+    if (!eventUpdateExecution?.result) throw new Error('missing event update result');
+    validateAgentActionResultForAction(
+      eventUpdateAction,
+      eventUpdateExecution.result as AgentActionResult,
+    );
+  } catch {
+    findings.push({
+      code: 'AGENT_PLATFORM_EVENT_UPDATE_EXECUTION_SCHEMA',
+      message: 'Event update execution result is not bound to the approved resource version.',
+    });
+    return result(findings);
+  }
+  const eventUpdateExecutionKeys = eventUpdateExecution
+    ? Object.keys(eventUpdateExecution).sort().join(',')
+    : '';
+  if (
+    eventUpdateExecutionKeys !==
+      [
+        'actionDigest',
+        'actionId',
+        'agentPrincipalId',
+        'approvalId',
+        'createdAt',
+        'delegationGrantId',
+        'fenceToken',
+        'id',
+        'idempotencyKey',
+        'policyVersion',
+        'requestFingerprint',
+        'resourceVersion',
+        'result',
+        'sponsorPrincipalId',
+        'state',
+        'tenantId',
+        'updatedAt',
+      ]
+        .sort()
+        .join(',') ||
+    !/^exec_[a-f0-9]{48}$/u.test(eventUpdateExecution.id) ||
+    eventUpdateExecution.tenantId !== eventUpdateAction.target.tenantId ||
+    eventUpdateExecution.state !== 'succeeded' ||
+    eventUpdateExecution.actionId !== eventUpdateAction.id ||
+    eventUpdateExecution.actionDigest !== eventUpdateActionDigest ||
+    eventUpdateExecution.approvalId !== eventUpdateApproval.id ||
+    eventUpdateExecution.agentPrincipalId !== eventUpdateAction.agentPrincipalId ||
+    eventUpdateExecution.sponsorPrincipalId !== eventUpdateAction.sponsorPrincipalId ||
+    eventUpdateExecution.delegationGrantId !== eventUpdateAction.delegationGrantId ||
+    !/^agt_[a-f0-9]{48}$/u.test(eventUpdateExecution.agentPrincipalId) ||
+    !/^dlg_[a-f0-9]{48}$/u.test(eventUpdateExecution.delegationGrantId) ||
+    eventUpdateExecution.planSha256 !== undefined ||
+    !/^[a-f0-9]{64}$/u.test(eventUpdateExecution.idempotencyKey) ||
+    !/^[a-f0-9]{64}$/u.test(eventUpdateExecution.requestFingerprint) ||
+    eventUpdateExecution.resourceVersion !== eventUpdateAction.target.resourceVersion ||
+    eventUpdateExecution.policyVersion !== eventUpdateAction.expectedPolicyVersion ||
+    !Number.isSafeInteger(eventUpdateExecution.fenceToken) ||
+    eventUpdateExecution.fenceToken < 1 ||
+    !Number.isFinite(Date.parse(eventUpdateExecution.createdAt)) ||
+    !Number.isFinite(Date.parse(eventUpdateExecution.updatedAt)) ||
+    Date.parse(eventUpdateExecution.createdAt) < eventUpdateApprovedAt ||
+    Date.parse(eventUpdateExecution.createdAt) >= eventUpdateApprovalExpiresAt ||
+    Date.parse(eventUpdateExecution.updatedAt) < Date.parse(eventUpdateExecution.createdAt) ||
+    agentSha256(eventUpdateExecutionResponse?.body) !==
+      agentSha256(eventUpdateExecutionReplay?.body)
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_EVENT_UPDATE_EXECUTION_SCHEMA',
+      message: 'Event update execution identity or exact replay evidence is invalid.',
+    });
+    return result(findings);
+  }
   const readinessRequest: AgentPlatformContractRequest = {
     method: 'POST',
     path: '/v1/agent/readiness',
@@ -733,7 +1014,10 @@ export async function runAgentPlatformContract(
     {
       method: 'POST',
       path: '/v1/agent/actions',
-      headers: { ...headers(accessToken), 'Idempotency-Key': `${input.idempotencyPrefix}.prepare` },
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.prepare`,
+      },
       body: {
         kind: 'event.publish',
         delegationGrantId: input.delegationGrantId,
@@ -776,6 +1060,7 @@ export async function runAgentPlatformContract(
     action.autonomy !== 'execute_with_approval' ||
     action.target.resourceType !== 'event' ||
     action.target.resourceId !== input.resourceId ||
+    action.target.resourceVersion !== eventUpdateAction.target.resourceVersion + 1 ||
     action.target.apiOperation !== 'events.publish' ||
     objectBody(action.payload)?.readinessSnapshotSha256 !== dryRun.readinessSnapshotSha256
   ) {
@@ -835,7 +1120,10 @@ export async function runAgentPlatformContract(
           ],
           readinessImpact: {
             beforeSnapshotSha256: String(dryRun.readinessSnapshotSha256),
-            projectedSnapshotSha256: agentSha256({ actionDigest, status: 'published' }),
+            projectedSnapshotSha256: agentSha256({
+              actionDigest,
+              status: 'published',
+            }),
             introducedReasonCodes: [],
             resolvedReasonCodes: ['event_unpublished'],
           },

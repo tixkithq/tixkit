@@ -3343,6 +3343,91 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('agentActions prepares and retrieves an approval-bound event update', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const prepared = await client.agentActions.prepareEventUpdate({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      changes: { title: 'Approved update' },
+      idempotencyKey: 'agent-event-update-0001',
+    });
+    const assertEventUpdateResponseType = (value: typeof prepared) => {
+      const kind: 'event.update' = value.action.kind;
+      const autonomy: 'execute_with_approval' = value.action.autonomy;
+      void kind;
+      void autonomy;
+      void value.preview.changePreviewSha256;
+      void value.previewSha256;
+      // @ts-expect-error update preparation is not a completed direct result.
+      void value.result;
+    };
+    void assertEventUpdateResponseType;
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/event-updates',
+      headers: { 'Idempotency-Key': 'agent-event-update-0001' },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      changes: { title: 'Approved update' },
+    });
+    const actionId = `act_${'a'.repeat(48)}`;
+    const inspected = await client.agentActions.getEventUpdate(actionId);
+    const assertInspectedEventUpdateType = (value: typeof inspected) => {
+      void value.preview.after.title;
+    };
+    void assertInspectedEventUpdateType;
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/event-updates/${actionId}`,
+    });
+    const actionDigest = 'b'.repeat(64);
+    const approvalId = `apr_${'c'.repeat(48)}`;
+    const executionId = `exec_${'d'.repeat(48)}`;
+    await client.agentActions.approveEventUpdate({
+      actionId,
+      actionDigest,
+      idempotencyKey: 'agent-event-update-approval-0001',
+    });
+    expect(getCall(fm, 2)).toMatchObject({
+      method: 'POST',
+      url: `https://api.test/v1/agent/event-updates/${actionId}/approvals`,
+      headers: {
+        'Idempotency-Key': 'agent-event-update-approval-0001',
+        'X-Tixkit-Confirmation': `approve:${actionId}:${actionDigest}`,
+      },
+    });
+    await client.agentActions.revokeEventUpdateApproval({
+      actionId,
+      approvalId,
+      actionDigest,
+      idempotencyKey: 'agent-event-update-revocation-0001',
+    });
+    expect(getCall(fm, 3).url).toBe(
+      `https://api.test/v1/agent/event-updates/${actionId}/approvals/${approvalId}/revoke`,
+    );
+    await client.agentActions.executeEventUpdate({ actionId, approvalId, actionDigest });
+    expect(getCall(fm, 4)).toMatchObject({
+      method: 'POST',
+      url: `https://api.test/v1/agent/event-updates/${actionId}/executions`,
+      headers: {
+        'Idempotency-Key': `execute:${actionId}:${approvalId}:${actionDigest}`,
+        'X-Tixkit-Confirmation': `execute:${actionId}:${approvalId}:${actionDigest}`,
+      },
+    });
+    await client.agentActions.getEventUpdateExecution(actionId, executionId);
+    expect(getCall(fm, 5)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/event-updates/${actionId}/executions/${executionId}`,
+    });
+  });
+
   it('agentActions binds planned approval intent to the plan digest', async () => {
     const fm = mockFetch(201, {});
     const client = new TixkitClient({
@@ -3429,7 +3514,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-07-31',
+        'X-Tixkit-Version': '2026-08-01',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

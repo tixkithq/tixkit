@@ -5,6 +5,7 @@ import {
   AgentExecutionConflictError,
   agentActionDigest,
   agentExecutionIdempotencyKey,
+  validateAgentActionResultForAction,
   type AgentAction,
   type AgentApproval,
   type AgentAuditRecord,
@@ -45,6 +46,32 @@ const approval: AgentApproval = {
   approvedAt: now.toISOString(),
   expiresAt: '2026-07-12T12:05:00.000Z',
 };
+
+it('binds event.update execution results to exactly one approved version increment', () => {
+  const updateAction: AgentAction = {
+    ...action,
+    kind: 'event.update',
+    target: { ...action.target, apiOperation: 'events.update' },
+    payload: {
+      changePreviewSha256: 'b'.repeat(64),
+      changes: { title: 'Updated' },
+    },
+  };
+  expect(() =>
+    validateAgentActionResultForAction(updateAction, {
+      resourceId: 'evt_primary',
+      resourceVersion: 8,
+      status: 'updated',
+    }),
+  ).not.toThrow();
+  for (const result of [
+    { resourceId: 'evt_primary', resourceVersion: 7, status: 'updated' },
+    { resourceId: 'evt_primary', resourceVersion: 9, status: 'updated' },
+    { resourceId: 'evt_primary', resourceVersion: 8, status: 'published' },
+    { resourceId: 'evt_other', resourceVersion: 8, status: 'updated' },
+  ])
+    expect(() => validateAgentActionResultForAction(updateAction, result)).toThrow();
+});
 const authorization: AgentAuthorizationInput & { approval: AgentApproval } = {
   principal: {
     id: 'agent_primary',
@@ -183,7 +210,10 @@ describe('durable agent execution service', () => {
   it('rejects an idempotency replay bound to another action digest', async () => {
     const { service } = harness();
     await service.reserve(authorization);
-    const changed = { ...action, payload: { readinessSnapshotSha256: 'b'.repeat(64) } };
+    const changed = {
+      ...action,
+      payload: { readinessSnapshotSha256: 'b'.repeat(64) },
+    };
     await expect(
       service.reserve({
         ...authorization,
@@ -202,7 +232,10 @@ describe('durable agent execution service', () => {
       execution: reserved,
       workerId: 'worker_primary',
     });
-    expect(completed).toMatchObject({ state: 'succeeded', result: { status: 'published' } });
+    expect(completed).toMatchObject({
+      state: 'succeeded',
+      result: { status: 'published' },
+    });
     expect(invocations).toEqual([
       expect.objectContaining({
         operation: 'events.publish',
@@ -237,7 +270,11 @@ describe('durable agent execution service', () => {
       store,
       {
         async invoke() {
-          store.effect = { resourceId: 'evt_primary', resourceVersion: 8, status: 'published' };
+          store.effect = {
+            resourceId: 'evt_primary',
+            resourceVersion: 8,
+            status: 'published',
+          };
           return store.effect;
         },
       },
@@ -263,12 +300,23 @@ describe('durable agent execution service', () => {
     const reserved = await service.reserve(authorization);
     store.completeAllowed = false;
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_lost_response' }),
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_lost_response',
+      }),
     ).rejects.toBeInstanceOf(AgentExecutionConflictError);
     store.completeAllowed = true;
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_successor' }),
-    ).resolves.toMatchObject({ state: 'succeeded', result: { resourceVersion: 8 } });
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_successor',
+      }),
+    ).resolves.toMatchObject({
+      state: 'succeeded',
+      result: { resourceVersion: 8 },
+    });
     expect(authorizationLoads).toBe(1);
     expect(store.audits.at(-1)?.phase).toBe('succeeded');
   });
@@ -287,7 +335,11 @@ describe('durable agent execution service', () => {
       actionId: forgedAction.id,
     };
     await expect(
-      service.run({ action: forgedAction, execution: forged, workerId: 'worker_forged' }),
+      service.run({
+        action: forgedAction,
+        execution: forged,
+        workerId: 'worker_forged',
+      }),
     ).rejects.toBeInstanceOf(AgentExecutionConflictError);
     expect(store.execution?.actionId).toBe(action.id);
     expect(invocations).toHaveLength(0);
@@ -301,7 +353,11 @@ describe('durable agent execution service', () => {
       state: 'succeeded' as const,
       result: { resourceId: 'forged', resourceVersion: 999, status: 'forged' },
     };
-    const completed = await service.run({ action, execution: forged, workerId: 'worker_terminal' });
+    const completed = await service.run({
+      action,
+      execution: forged,
+      workerId: 'worker_terminal',
+    });
     expect(invocations).toHaveLength(1);
     expect(completed.result).toEqual({
       resourceId: 'evt_primary',
@@ -322,8 +378,15 @@ describe('durable agent execution service', () => {
     const { service, store, invocations } = harness(new MemoryStore(), current);
     const reserved = await service.reserve(authorization);
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_changed_auth' }),
-    ).resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_AUTHORIZATION_CHANGED' });
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_changed_auth',
+      }),
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failureCode: 'AGENT_AUTHORIZATION_CHANGED',
+    });
     expect(invocations).toHaveLength(0);
     expect(store.audits.at(-1)).toMatchObject({ phase: 'failed' });
     expect(store.audits.at(-1)?.reasonCodes.length).toBeGreaterThan(0);
@@ -331,7 +394,10 @@ describe('durable agent execution service', () => {
 
   it('scopes execution idempotency to the agent principal', () => {
     expect(agentExecutionIdempotencyKey(action)).not.toBe(
-      agentExecutionIdempotencyKey({ ...action, agentPrincipalId: 'agent_other' }),
+      agentExecutionIdempotencyKey({
+        ...action,
+        agentPrincipalId: 'agent_other',
+      }),
     );
     expect(agentExecutionIdempotencyKey(action)).toBe(agentExecutionIdempotencyKey({ ...action }));
   });
@@ -354,14 +420,23 @@ describe('durable agent execution service', () => {
         },
         {
           async load() {
-            throw Object.assign(new Error('authoritative state is invalid'), { code });
+            throw Object.assign(new Error('authoritative state is invalid'), {
+              code,
+            });
           },
         },
       );
       const reserved = await service.reserve(authorization);
       await expect(
-        service.run({ action, execution: reserved, workerId: 'worker_permanent_failure' }),
-      ).resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_AUTHORIZATION_CHANGED' });
+        service.run({
+          action,
+          execution: reserved,
+          workerId: 'worker_permanent_failure',
+        }),
+      ).resolves.toMatchObject({
+        state: 'failed',
+        failureCode: 'AGENT_AUTHORIZATION_CHANGED',
+      });
       expect(store.audits.at(-1)).toMatchObject({
         phase: 'failed',
         reasonCodes: [code.toLowerCase()],
@@ -391,7 +466,11 @@ describe('durable agent execution service', () => {
     );
     const reserved = await service.reserve(authorization);
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_retryable_failure' }),
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_retryable_failure',
+      }),
     ).rejects.toThrow('connection reset');
     expect(store.execution).toMatchObject({ state: 'running' });
     expect(store.audits.at(-1)?.phase).toBe('started');
@@ -430,8 +509,15 @@ describe('durable agent execution service', () => {
     );
     const reserved = await service.reserve(authorization);
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_unsafe_result' }),
-    ).resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_ACTION_FAILED' });
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_unsafe_result',
+      }),
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failureCode: 'AGENT_ACTION_FAILED',
+    });
     expect(JSON.stringify(store.execution)).not.toContain('sk_live_secret');
     const oversizedStore = new MemoryStore();
     const oversizedService = new DurableAgentExecutionService(
@@ -505,8 +591,15 @@ describe('durable agent execution service', () => {
     );
     const reserved = await service.reserve(authorization);
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_substituted_result' }),
-    ).resolves.toMatchObject({ state: 'failed', failureCode: 'AGENT_ACTION_FAILED' });
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_substituted_result',
+      }),
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failureCode: 'AGENT_ACTION_FAILED',
+    });
     expect(store.execution?.result).toBeUndefined();
   });
 
@@ -515,7 +608,11 @@ describe('durable agent execution service', () => {
     const reserved = await service.reserve(authorization);
     store.execution = { ...reserved, state: 'failed', failureCode: 'TIMEOUT' };
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_failed_replay' }),
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_failed_replay',
+      }),
     ).resolves.toMatchObject({ state: 'failed', failureCode: 'TIMEOUT' });
     expect(invocations).toHaveLength(0);
     expect(store.audits.map(({ phase }) => phase)).toEqual(['prepared', 'authorized']);
@@ -525,9 +622,17 @@ describe('durable agent execution service', () => {
     const { service, store, invocations } = harness();
     const reserved = await service.reserve(authorization);
     store.execution = { ...reserved, state: 'failed', failureCode: 'TIMEOUT' };
-    store.effect = { resourceId: 'evt_primary', resourceVersion: 8, status: 'published' };
+    store.effect = {
+      resourceId: 'evt_primary',
+      resourceVersion: 8,
+      status: 'published',
+    };
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_failed_effect_recovery' }),
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_failed_effect_recovery',
+      }),
     ).resolves.toMatchObject({ state: 'succeeded', result: store.effect });
     expect(invocations).toHaveLength(0);
     expect(store.audits.map(({ phase }) => phase)).toEqual([
@@ -571,7 +676,11 @@ describe('durable agent execution service', () => {
     );
     const reserved = await service.reserve(authorization);
     await expect(
-      service.run({ action, execution: reserved, workerId: 'worker_invalid_result' }),
+      service.run({
+        action,
+        execution: reserved,
+        workerId: 'worker_invalid_result',
+      }),
     ).resolves.toMatchObject({ state: 'failed' });
     expect(store.execution?.result).toBeUndefined();
   });
@@ -582,7 +691,9 @@ describe('durable agent execution service', () => {
       store,
       {
         async invoke() {
-          throw Object.assign(new Error('provider secret detail'), { code: 'TIMEOUT' });
+          throw Object.assign(new Error('provider secret detail'), {
+            code: 'TIMEOUT',
+          });
         },
       },
       { now: () => now },

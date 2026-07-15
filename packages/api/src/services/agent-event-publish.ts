@@ -18,10 +18,13 @@ import { ReadinessService, resolvePaymentMode } from './readiness.js';
 import type { EventLaunchReadiness } from '@tixkit/domain';
 import type { Permission } from '@tixkit/domain';
 import { publishEvent } from './event-publication.js';
+import { EventUpdateService, projectEventUpdateFields } from './event-update.js';
 
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
 
 export type EventPublishAgentAdapterCheckpoints = {
+  beforeExecutionRun?: () => Promise<void> | void;
+  beforeInvocationTransaction?: () => Promise<void> | void;
   beforeProductAudit?: () => Promise<void> | void;
   beforeEffectRecord?: () => Promise<void> | void;
 };
@@ -67,6 +70,30 @@ function readinessDigestFromPayload(payload: Readonly<Record<string, unknown>>):
   return payload.readinessSnapshotSha256;
 }
 
+function changePreviewFromPayload(payload: Readonly<Record<string, unknown>>): {
+  changePreviewSha256: string;
+  changes: Readonly<Record<string, unknown>>;
+} {
+  const keys = Object.keys(payload).sort();
+  if (
+    keys.length !== 2 ||
+    keys[0] !== 'changePreviewSha256' ||
+    keys[1] !== 'changes' ||
+    typeof payload.changePreviewSha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(payload.changePreviewSha256) ||
+    !payload.changes ||
+    typeof payload.changes !== 'object' ||
+    Array.isArray(payload.changes)
+  )
+    throw Object.assign(new Error('invalid event update payload'), {
+      code: 'AGENT_OPERATION_DENIED',
+    });
+  return {
+    changePreviewSha256: payload.changePreviewSha256,
+    changes: payload.changes as Readonly<Record<string, unknown>>,
+  };
+}
+
 async function databaseNow(db: Executor): Promise<string> {
   const result = await db
     .selectFrom('tenants')
@@ -88,7 +115,7 @@ export class EventPublishAgentAdapter
     action: AgentAction;
     execution: AgentExecution;
   }): Promise<AgentCurrentAuthorization> {
-    this.assertEventPublish(
+    this.assertEventAction(
       input.action.kind,
       input.action.target.apiOperation,
       input.action.target.resourceType,
@@ -102,13 +129,18 @@ export class EventPublishAgentAdapter
           input.action.target.resourceId,
           input.execution,
           false,
+          input.action.kind as 'event.publish' | 'event.update',
         ),
       );
   }
 
   async invoke(input: Parameters<AgentActionInvoker['invoke']>[0]) {
-    this.assertEventPublish(input.actionKind, input.operation, input.resourceType);
-    const approvedReadinessDigest = readinessDigestFromPayload(input.payload);
+    this.assertEventAction(input.actionKind, input.operation, input.resourceType);
+    await this.checkpoints.beforeInvocationTransaction?.();
+    const approvedReadinessDigest =
+      input.actionKind === 'event.publish' ? readinessDigestFromPayload(input.payload) : undefined;
+    const approvedUpdate =
+      input.actionKind === 'event.update' ? changePreviewFromPayload(input.payload) : undefined;
     return this.db
       .transaction()
       .setIsolationLevel('serializable')
@@ -211,7 +243,9 @@ export class EventPublishAgentAdapter
             priorEffect.operation !== input.operation ||
             priorEffect.idempotency_key !== input.idempotencyKey ||
             Number(priorEffect.expected_policy_version) !== input.expectedPolicyVersion ||
-            Number(priorEffect.expected_resource_version) !== input.expectedResourceVersion
+            Number(priorEffect.expected_resource_version) !== input.expectedResourceVersion ||
+            Number(priorEffect.effect_fence_token) < 1 ||
+            Number(priorEffect.effect_fence_token) > input.expectedFenceToken
           )
             throw Object.assign(new Error('agent effect binding changed'), {
               code: 'AGENT_AUTHORIZATION_CHANGED',
@@ -224,18 +258,27 @@ export class EventPublishAgentAdapter
           validateAgentActionResult(result);
           const effectedEvent = await tx
             .selectFrom('events')
-            .select(['status', 'version'])
+            .selectAll()
             .where('tenant_id', '=', input.tenantId)
             .where('id', '=', input.resourceId)
             .forUpdate()
             .executeTakeFirst();
           if (
             agentSha256(result) !== priorEffect.result_sha256 ||
-            result.status !== 'published' ||
-            (result.resourceVersion !== input.expectedResourceVersion &&
-              result.resourceVersion !== input.expectedResourceVersion + 1) ||
+            result.status !== (input.actionKind === 'event.publish' ? 'published' : 'updated') ||
+            (input.actionKind === 'event.publish'
+              ? result.resourceVersion !== input.expectedResourceVersion &&
+                result.resourceVersion !== input.expectedResourceVersion + 1
+              : result.resourceVersion !== input.expectedResourceVersion + 1) ||
             !effectedEvent ||
-            effectedEvent.status !== 'published' ||
+            (input.actionKind === 'event.publish' && effectedEvent.status !== 'published') ||
+            (input.actionKind === 'event.update' &&
+              agentSha256(
+                projectEventUpdateFields(
+                  effectedEvent,
+                  Object.keys(approvedUpdate!.changes).sort(),
+                ),
+              ) !== agentSha256(approvedUpdate!.changes)) ||
             Number(effectedEvent.version) !== result.resourceVersion
           )
             throw Object.assign(new Error('agent effect result digest changed'), {
@@ -262,7 +305,14 @@ export class EventPublishAgentAdapter
           createdAt: iso(executionRow.created_at),
           updatedAt: iso(executionRow.updated_at),
         };
-        const current = await this.loadState(tx, input.tenantId, input.resourceId, execution, true);
+        const current = await this.loadState(
+          tx,
+          input.tenantId,
+          input.resourceId,
+          execution,
+          true,
+          input.actionKind as 'event.publish' | 'event.update',
+        );
         const now = new Date(current.observedAt).getTime();
         if (agentAuthorizationStateDigest(current) !== input.authorizationStateDigest)
           throw Object.assign(new Error('agent authorization digest changed before invocation'), {
@@ -281,8 +331,9 @@ export class EventPublishAgentAdapter
           new Date(current.delegation.issuedAt).getTime() > now && 'delegation_not_started',
           new Date(current.delegation.expiresAt).getTime() <= now && 'delegation_expired',
           !current.delegation.capabilities.includes('events.execute') && 'delegation_capability',
-          !current.delegation.permissionSnapshot.includes('events:publish') &&
-            'delegation_permission',
+          !current.delegation.permissionSnapshot.includes(
+            input.actionKind === 'event.publish' ? 'events:publish' : 'events:write',
+          ) && 'delegation_permission',
           !current.delegation.resourceScopes.includes(`event:${input.resourceId}`) &&
             'delegation_scope',
           current.approval.actionDigest !== input.actionDigest && 'approval_digest',
@@ -290,8 +341,10 @@ export class EventPublishAgentAdapter
           new Date(current.approval.approvedAt).getTime() > now && 'approval_not_started',
           new Date(current.approval.expiresAt).getTime() <= now && 'approval_expired',
           current.approvalExecutionId !== input.executionId && 'approval_binding',
-          !current.sponsorPermissions.includes('events:publish') && 'sponsor_permission',
-          !current.tenantAllowedActions.includes('event.publish') && 'tenant_policy',
+          !current.sponsorPermissions.includes(
+            input.actionKind === 'event.publish' ? 'events:publish' : 'events:write',
+          ) && 'sponsor_permission',
+          !current.tenantAllowedActions.includes(input.actionKind) && 'tenant_policy',
           !current.riskPolicyAllowed && 'risk_policy',
           current.currentPolicyVersion !== input.expectedPolicyVersion && 'policy_version',
           current.currentResourceVersion !== input.expectedResourceVersion && 'resource_version',
@@ -313,6 +366,70 @@ export class EventPublishAgentAdapter
           throw Object.assign(new Error('event is missing'), {
             code: 'AGENT_AUTHORIZATION_CHANGED',
           });
+        if (input.actionKind === 'event.update') {
+          const updateService = new EventUpdateService(tx as Database);
+          const resolved = await updateService.resolvePatch({
+            tenantId: input.tenantId,
+            eventId: input.resourceId,
+            patch: {
+              ...approvedUpdate!.changes,
+              expectedVersion: input.expectedResourceVersion,
+            },
+          });
+          const preview = {
+            resourceId: event.id,
+            resourceVersion: input.expectedResourceVersion,
+            changedFields: resolved.requestedFields,
+            before: resolved.before,
+            after: resolved.after,
+          };
+          if (
+            agentSha256(preview) !== approvedUpdate!.changePreviewSha256 ||
+            agentSha256(resolved.after) !== agentSha256(approvedUpdate!.changes) ||
+            agentSha256(resolved.before) === agentSha256(resolved.after)
+          )
+            throw Object.assign(new Error('event update preview changed after approval'), {
+              code: 'AGENT_AUTHORIZATION_CHANGED',
+            });
+          const update = await updateService.applyResolvedPatchInTransaction(tx, resolved);
+          if (!update.applied)
+            throw Object.assign(new Error('event version changed'), {
+              code: 'RESOURCE_VERSION_CHANGED',
+            });
+          await this.checkpoints.beforeProductAudit?.();
+          await new AuditLogRepository(tx as Database).create({
+            tenantId: input.tenantId,
+            organizationId: event.organization_id,
+            brandId: event.brand_id,
+            actorType: 'agent',
+            actorId: input.agentPrincipalId,
+            action: 'event.updated',
+            resourceType: 'Event',
+            resourceId: update.event.id,
+            requestId: input.executionId,
+            diffSummary: {
+              protocolVersion: AGENT_PROTOCOL_VERSION,
+              actionDigest: input.actionDigest,
+              executionId: input.executionId,
+              sponsorPrincipalId: input.sponsorPrincipalId,
+              delegationGrantId: input.delegationGrantId,
+              approvalId: input.approvalId,
+              expectedPolicyVersion: input.expectedPolicyVersion,
+              expectedResourceVersion: input.expectedResourceVersion,
+              resultingResourceVersion: Number(update.event.version),
+              changePreviewSha256: approvedUpdate!.changePreviewSha256,
+              changedFields: resolved.requestedFields,
+            },
+          });
+          const result = {
+            resourceId: update.event.id,
+            resourceVersion: Number(update.event.version),
+            status: 'updated',
+          };
+          await this.checkpoints.beforeEffectRecord?.();
+          await this.recordEffect(tx, input, result, new Date(invocationTime));
+          return result;
+        }
         const publication = await publishEvent(
           tx,
           new ReadinessService(tx as Database, resolvePaymentMode()),
@@ -359,9 +476,13 @@ export class EventPublishAgentAdapter
             code: 'AGENT_AUTHORIZATION_CHANGED',
           });
         if (publication.kind === 'archived')
-          throw Object.assign(new Error('event is archived'), { code: 'EVENT_ARCHIVED' });
+          throw Object.assign(new Error('event is archived'), {
+            code: 'EVENT_ARCHIVED',
+          });
         if (publication.kind === 'blocked')
-          throw Object.assign(new Error('event readiness blocked'), { code: 'EVENT_NOT_READY' });
+          throw Object.assign(new Error('event readiness blocked'), {
+            code: 'EVENT_NOT_READY',
+          });
         if (publication.kind === 'stale')
           throw Object.assign(new Error('event version changed'), {
             code: 'RESOURCE_VERSION_CHANGED',
@@ -411,6 +532,7 @@ export class EventPublishAgentAdapter
     eventId: string,
     execution: AgentExecution,
     lock: boolean,
+    actionKind: 'event.publish' | 'event.update',
   ): Promise<AgentCurrentAuthorization> {
     const principalQuery = db
       .selectFrom('agent_principals')
@@ -457,7 +579,7 @@ export class EventPublishAgentAdapter
       .selectFrom('agent_action_policies')
       .selectAll()
       .where('tenant_id', '=', tenantId)
-      .where('action_kind', '=', 'event.publish');
+      .where('action_kind', '=', actionKind);
     const policy = await (lock ? policyQuery.forUpdate() : policyQuery).executeTakeFirst();
     if (!policy) authorizationChanged('policy_missing');
     const eventQuery = db
@@ -516,8 +638,10 @@ export class EventPublishAgentAdapter
       } as AgentApproval,
       approvalExecutionId: approval.consumed_execution_id ?? '',
       sponsorPermissions:
-        permission && sponsor?.status === 'active' && membership ? ['events:publish'] : [],
-      tenantAllowedActions: policy.allowed ? ['event.publish'] : [],
+        permission && sponsor?.status === 'active' && membership
+          ? [actionKind === 'event.publish' ? 'events:publish' : 'events:write']
+          : [],
+      tenantAllowedActions: policy.allowed ? [actionKind] : [],
       currentResourceVersion: Number(event.version),
       currentPolicyVersion: Number(policy.policy_version),
       riskPolicyAllowed: Boolean(policy.risk_allowed),
@@ -525,8 +649,12 @@ export class EventPublishAgentAdapter
     };
   }
 
-  private assertEventPublish(kind: string, operation: string, resourceType: string): void {
-    if (kind !== 'event.publish' || operation !== 'events.publish' || resourceType !== 'event')
+  private assertEventAction(kind: string, operation: string, resourceType: string): void {
+    if (
+      resourceType !== 'event' ||
+      (kind !== 'event.publish' && kind !== 'event.update') ||
+      operation !== (kind === 'event.publish' ? 'events.publish' : 'events.update')
+    )
       throw Object.assign(new Error('unsupported agent action adapter target'), {
         code: 'AGENT_OPERATION_DENIED',
       });

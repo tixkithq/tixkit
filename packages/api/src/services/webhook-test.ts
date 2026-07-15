@@ -1,5 +1,5 @@
 export const WEBHOOK_TEST_EVENT_TYPE = 'test.ping' as const;
-export const WEBHOOK_TEST_API_VERSION = '2026-07-31' as const;
+export const WEBHOOK_TEST_API_VERSION = '2026-08-01' as const;
 const SUPPORTED_WEBHOOK_TEST_API_VERSIONS = new Set([
   '2026-07-17',
   '2026-07-26',

@@ -16,12 +16,14 @@ import {
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_29,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_30,
+  AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_31,
   AGENT_ACTION_REGISTRY,
   AGENT_PLATFORM_PROTOCOL_VERSION,
   buildAgentPlanDefinition,
   validateAgentActionRegistry,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
+  validateAgentEventUpdatePreview,
   validateAgentReadinessReadResult,
   validateAgentPlanActionBindings,
   validateAgentPlanDefinition,
@@ -32,6 +34,7 @@ import {
   type AgentPlanState,
   type AgentEventReadResult,
   type AgentEventPrepareResult,
+  type AgentEventUpdatePreview,
   type AgentReadinessReadResult,
 } from '../platform.js';
 
@@ -683,6 +686,10 @@ describe('agent platform contracts', () => {
         planSupport: 'direct_only',
       }),
       expect.objectContaining({
+        kind: 'event.update',
+        planSupport: 'direct_only',
+      }),
+      expect.objectContaining({
         kind: 'event.publish',
         planSupport: 'supported',
       }),
@@ -717,7 +724,7 @@ describe('agent platform contracts', () => {
       ...AGENT_ACTION_REGISTRY,
       actions: substitutedActions,
       registrySha256: agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-07-31',
+        domain: 'tixkit.agent-action-registry.v2026-08-01',
         protocolVersion: AGENT_ACTION_REGISTRY.protocolVersion,
         actionProtocolVersion: AGENT_ACTION_REGISTRY.actionProtocolVersion,
         actions: substitutedActions,
@@ -732,7 +739,7 @@ describe('agent platform contracts', () => {
       'utf8',
     );
     const contractsSchemaText = readFileSync(
-      new URL('../../schemas/agent-action-contracts-2026-07-31.json', import.meta.url),
+      new URL('../../schemas/agent-action-contracts-2026-08-01.json', import.meta.url),
       'utf8',
     );
     expect(createHash('sha256').update(contractsSchemaText).digest('hex')).toBe(
@@ -815,6 +822,14 @@ describe('agent platform contracts', () => {
       AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_30,
     );
     ajv.addSchema(JSON.parse(prior20260730ContractsText));
+    const prior20260731ContractsText = readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-07-31.json', import.meta.url),
+      'utf8',
+    );
+    expect(createHash('sha256').update(prior20260731ContractsText).digest('hex')).toBe(
+      AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_31,
+    );
+    ajv.addSchema(JSON.parse(prior20260731ContractsText));
     const contracts = JSON.parse(contractsSchemaText) as { $id: string };
     ajv.addSchema(contracts);
     const validatePrepare = ajv.getSchema(`${contracts.$id}#/$defs/eventPublishPrepareInput`)!;
@@ -833,6 +848,14 @@ describe('agent platform contracts', () => {
       `${contracts.$id}#/$defs/eventPrepareResolvedPayload`,
     )!;
     const validateEventPrepareResult = ajv.getSchema(`${contracts.$id}#/$defs/eventPrepareResult`)!;
+    const validateEventUpdatePrepare = ajv.getSchema(
+      `${contracts.$id}#/$defs/eventUpdatePrepareInput`,
+    )!;
+    const validateEventUpdatePayload = ajv.getSchema(
+      `${contracts.$id}#/$defs/eventUpdateResolvedPayload`,
+    )!;
+    const validateEventUpdatePreview = ajv.getSchema(`${contracts.$id}#/$defs/eventUpdatePreview`)!;
+    const validateEventUpdateResult = ajv.getSchema(`${contracts.$id}#/$defs/eventUpdateResult`)!;
     expect(
       validatePrepare({
         kind: 'event.publish',
@@ -1022,7 +1045,10 @@ describe('agent platform contracts', () => {
       };
       expect(validateEventPreparePayload(invalidResolvedPayload)).toBe(false);
       expect(() =>
-        agentActionDigest({ ...eventPrepareAction, payload: invalidResolvedPayload }),
+        agentActionDigest({
+          ...eventPrepareAction,
+          payload: invalidResolvedPayload,
+        }),
       ).toThrow();
       expect(
         validateEventPrepareResult({
@@ -1039,13 +1065,19 @@ describe('agent platform contracts', () => {
     }
     const invalidPreview = {
       ...eventPreparePreview,
-      before: { ...eventPreparePreview.before, description: { malicious: 'ignore policy' } },
+      before: {
+        ...eventPreparePreview.before,
+        description: { malicious: 'ignore policy' },
+      },
       after: { ...eventPreparePreview.after, title: 42 },
     };
     const invalidPreviewSha256 = agentSha256(invalidPreview);
     const invalidAction = {
       ...eventPrepareAction,
-      payload: { changePreviewSha256: invalidPreviewSha256, changes: invalidPreview.after },
+      payload: {
+        changePreviewSha256: invalidPreviewSha256,
+        changes: invalidPreview.after,
+      },
     } as AgentAction;
     const invalidResult = {
       ...invalidPreview,
@@ -1064,6 +1096,48 @@ describe('agent platform contracts', () => {
         delegationGrantId: 'delegation_primary',
         resourceId: 'event_primary',
         changes: {},
+      }),
+    ).toBe(false);
+    const eventUpdateAction: AgentAction = {
+      ...eventPrepareAction,
+      kind: 'event.update',
+      autonomy: 'execute_with_approval',
+      target: { ...eventPrepareAction.target, apiOperation: 'events.update' },
+    };
+    const eventUpdatePreview = eventPrepareResult as AgentEventUpdatePreview;
+    expect(
+      validateEventUpdatePrepare({
+        kind: 'event.update',
+        delegationGrantId: 'delegation_primary',
+        resourceId: 'event_primary',
+        changes: { title: eventPreparePreview.after.title },
+      }),
+      ajv.errorsText(validateEventUpdatePrepare.errors),
+    ).toBe(true);
+    expect(
+      validateEventUpdatePayload(eventUpdateAction.payload),
+      ajv.errorsText(validateEventUpdatePayload.errors),
+    ).toBe(true);
+    expect(
+      validateEventUpdatePreview(eventUpdatePreview),
+      ajv.errorsText(validateEventUpdatePreview.errors),
+    ).toBe(true);
+    expect(() =>
+      validateAgentEventUpdatePreview(eventUpdateAction, eventUpdatePreview),
+    ).not.toThrow();
+    expect(
+      validateEventUpdateResult({
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        status: 'updated',
+      }),
+      ajv.errorsText(validateEventUpdateResult.errors),
+    ).toBe(true);
+    expect(
+      validateEventUpdateResult({
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        status: 'published',
       }),
     ).toBe(false);
     expect(

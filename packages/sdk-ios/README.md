@@ -10,7 +10,7 @@ iOS 15+ and macOS 12+ applications.
 
 ## Status
 
-Supported Swift package pinned to API version `2026-07-31`.
+Supported Swift package pinned to API version `2026-08-01`.
 
 ## Installation
 
@@ -42,7 +42,7 @@ Never place scanner credentials in UserDefaults, URLs, logs, analytics, or scree
 
 ## Compatibility
 
-Swift package products/platforms and API version `2026-07-31` define compatibility.
+Swift package products/platforms and API version `2026-08-01` define compatibility.
 
 ## Related guides
 

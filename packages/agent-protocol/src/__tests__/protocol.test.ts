@@ -125,7 +125,10 @@ describe('agent protocol', () => {
       target: preparedTarget,
       payload: {
         changePreviewSha256: 'a'.repeat(64),
-        changes: { title: 'Prepared event', description: 'Prepared description' },
+        changes: {
+          title: 'Prepared event',
+          description: 'Prepared description',
+        },
       },
     });
     const reordered = action({
@@ -133,7 +136,10 @@ describe('agent protocol', () => {
       autonomy: 'prepare',
       target: preparedTarget,
       payload: {
-        changes: { description: 'Prepared description', title: 'Prepared event' },
+        changes: {
+          description: 'Prepared description',
+          title: 'Prepared event',
+        },
         changePreviewSha256: 'a'.repeat(64),
       },
     });
@@ -247,6 +253,39 @@ describe('agent protocol', () => {
     expect(() => agentActionDigest(action({ autonomy: 'prepare' }))).toThrow(
       AgentProtocolValidationError,
     );
+  });
+
+  it('requires event.update to carry only a digest-bound mutation-ready event patch', () => {
+    const update = (payload: Readonly<Record<string, unknown>>): AgentAction =>
+      action({
+        kind: 'event.update',
+        target: { ...action().target, apiOperation: 'events.update' },
+        payload,
+      });
+    expect(() =>
+      agentActionDigest(
+        update({
+          changePreviewSha256: 'a'.repeat(64),
+          changes: { title: 'Updated event' },
+        }),
+      ),
+    ).not.toThrow();
+    for (const payload of [
+      {},
+      { changePreviewSha256: 'a'.repeat(64) },
+      { changePreviewSha256: 'a'.repeat(64), changes: {} },
+      { changePreviewSha256: 'a'.repeat(64), changes: { status: 'published' } },
+      {
+        changePreviewSha256: 'a'.repeat(64),
+        changes: { coverImageUrl: 'https://attacker.test/image.png' },
+      },
+      {
+        changePreviewSha256: 'a'.repeat(64),
+        changes: { title: 'Updated' },
+        extra: true,
+      },
+    ])
+      expect(() => agentActionDigest(update(payload))).toThrow(AgentProtocolValidationError);
   });
 
   it('rejects autonomy escalation and approval consumption for direct-only actions', async () => {

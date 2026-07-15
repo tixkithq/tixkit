@@ -15,6 +15,7 @@ import type {
   PreparedAgentAction,
   PreparedAgentEventPrepareAction,
   PreparedAgentEventReadAction,
+  PreparedAgentEventUpdateAction,
   PreparedAgentReadinessAction,
 } from '../services/agent-actions.js';
 
@@ -165,6 +166,37 @@ const eventPreparePrepared: PreparedAgentEventPrepareAction = {
   },
   resultSha256: '0'.repeat(64),
 };
+const eventUpdatePrepared: PreparedAgentEventUpdateAction = {
+  action: {
+    ...action,
+    id: `act_${'5'.repeat(48)}`,
+    kind: 'event.update',
+    target: { ...action.target, apiOperation: 'events.update' },
+    payload: {
+      changePreviewSha256: '4'.repeat(64),
+      changes: { title: 'Approved title' },
+    },
+  },
+  actionDigest: '3'.repeat(64),
+  expiresAt: '2026-07-14T12:15:00.000Z',
+  authorization: {
+    eligibleForApproval: true,
+    reasons: ['approval_required'],
+    snapshotSha256: '2'.repeat(64),
+    checkedAt: '2026-07-14T12:00:00.000Z',
+  },
+  preview: {
+    resourceId: 'event_primary',
+    resourceVersion: 7,
+    changePreviewSha256: '4'.repeat(64),
+    observedAt: '2026-07-14T12:00:00.000Z',
+    changedFields: ['title'],
+    before: { title: 'Original title' },
+    after: { title: 'Approved title' },
+    untrustedContentPaths: ['before.title', 'after.title'],
+  },
+  previewSha256: '1'.repeat(64),
+};
 const executionEvidence: AgentExecutionEvidence = {
   execution: {
     id: `exec_${'f'.repeat(48)}`,
@@ -181,7 +213,11 @@ const executionEvidence: AgentExecutionEvidence = {
     resourceVersion: 7,
     policyVersion: 3,
     fenceToken: 1,
-    result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+    result: {
+      resourceId: 'event_primary',
+      resourceVersion: 8,
+      status: 'published',
+    },
     createdAt: '2026-07-14T12:02:00.000Z',
     updatedAt: '2026-07-14T12:02:01.000Z',
   },
@@ -261,7 +297,11 @@ async function setup(
       resourceVersion: 8,
       policyVersion: 3,
       fenceToken: 1,
-      result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+      result: {
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        status: 'published',
+      },
       createdAt: '2026-07-14T12:02:00.000Z',
       updatedAt: '2026-07-14T12:02:01.000Z',
     })),
@@ -367,7 +407,10 @@ describe('agent action routes', () => {
       payload: {
         delegationGrantId: 'dlg_primary',
         resourceId: 'event_primary',
-        changes: { title: 'Prepared title', description: 'Prepared description' },
+        changes: {
+          title: 'Prepared title',
+          description: 'Prepared description',
+        },
       },
     });
     expect(response.statusCode).toBe(201);
@@ -396,11 +439,57 @@ describe('agent action routes', () => {
         method: 'POST',
         url: '/agent/event-preparations',
         headers: { 'idempotency-key': 'agent-event-prepare-invalid-0001' },
-        payload: { delegationGrantId: 'dlg_primary', resourceId: 'event_primary', changes },
+        payload: {
+          delegationGrantId: 'dlg_primary',
+          resourceId: 'event_primary',
+          changes,
+        },
       });
       expect(invalid.statusCode).toBe(400);
     }
     expect(prepare).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('accepts strict event.update preparation and returns it only from consequential surfaces', async () => {
+    const prepare = vi.fn(async () => eventUpdatePrepared);
+    const getForAgent = vi.fn(async () => eventUpdatePrepared);
+    const { app } = await setup({ service: { prepare, getForAgent } });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/event-updates',
+      headers: { 'idempotency-key': 'agent-event-update-route-0001' },
+      payload: {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        changes: { title: 'Approved title' },
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(prepare).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      idempotencyKey: 'agent-event-update-route-0001',
+      kind: 'event.update',
+      delegationGrantId: 'dlg_primary',
+      resourceId: 'event_primary',
+      changes: { title: 'Approved title' },
+    });
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(eventUpdatePrepared)));
+
+    const dedicated = await app.inject({
+      method: 'GET',
+      url: `/agent/event-updates/${eventUpdatePrepared.action.id}`,
+    });
+    expect(dedicated.statusCode).toBe(200);
+    expect(dedicated.headers['cache-control']).toBe('no-store');
+    expect(dedicated.json()).toEqual(JSON.parse(JSON.stringify(eventUpdatePrepared)));
+    const generic = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/${eventUpdatePrepared.action.id}`,
+    });
+    expect(generic.statusCode).toBe(404);
     await app.close();
   });
 
@@ -418,6 +507,113 @@ describe('agent action routes', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(service.prepare).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('binds dedicated event.update approval and revocation to the update action kind', async () => {
+    const actionId = eventUpdatePrepared.action.id;
+    const actionDigest = eventUpdatePrepared.actionDigest;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const approvalRecord = {
+      id: approvalId,
+      tenantId: 'tenant_primary',
+      actionDigest,
+      approverPrincipalId: 'user_primary',
+      approverPermissionSnapshot: ['events:write'] as const,
+      policyVersion: 3,
+      approvedAt: '2026-07-14T12:01:00.000Z',
+      expiresAt: '2026-07-14T12:06:00.000Z',
+    };
+    const approve = vi.fn(async () => approvalRecord);
+    const revokeApproval = vi.fn(async () => ({
+      ...approvalRecord,
+      revokedAt: '2026-07-14T12:02:00.000Z',
+    }));
+    const { app } = await setup({
+      actor: principal('user'),
+      service: { approve, revokeApproval },
+    });
+    const approval = await app.inject({
+      method: 'POST',
+      url: `/agent/event-updates/${actionId}/approvals`,
+      headers: {
+        'idempotency-key': 'event-update-approval-route-0001',
+        'x-tixkit-confirmation': `approve:${actionId}:${actionDigest}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(approval.statusCode).toBe(201);
+    expect(approve).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      approverPrincipalId: 'user_primary',
+      actionId,
+      actionDigest,
+      idempotencyKey: 'event-update-approval-route-0001',
+      expectedActionKind: 'event.update',
+    });
+    const revocation = await app.inject({
+      method: 'POST',
+      url: `/agent/event-updates/${actionId}/approvals/${approvalId}/revoke`,
+      headers: {
+        'idempotency-key': 'event-update-revocation-route-0001',
+        'x-tixkit-confirmation': `revoke:${actionId}:${approvalId}:${actionDigest}`,
+      },
+      payload: { actionDigest },
+    });
+    expect(revocation.statusCode).toBe(200);
+    expect(revokeApproval).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      sponsorPrincipalId: 'user_primary',
+      actionId,
+      approvalId,
+      actionDigest,
+      idempotencyKey: 'event-update-revocation-route-0001',
+      expectedActionKind: 'event.update',
+    });
+    await app.close();
+  });
+
+  it('uses dedicated event.update execution and evidence surfaces', async () => {
+    const actionId = eventUpdatePrepared.action.id;
+    const actionDigest = eventUpdatePrepared.actionDigest;
+    const approvalId = `apr_${'e'.repeat(48)}`;
+    const executionId = `exec_${'f'.repeat(48)}`;
+    const execute = vi.fn(async () => ({ ...executionEvidence.execution, id: executionId }));
+    const getForAgent = vi.fn(async () => eventUpdatePrepared);
+    const getExecutionForAgent = vi.fn(async () => executionEvidence);
+    const { app } = await setup({
+      service: { execute, getForAgent, getExecutionForAgent },
+    });
+    const confirmation = `execute:${actionId}:${approvalId}:${actionDigest}`;
+    const execution = await app.inject({
+      method: 'POST',
+      url: `/agent/event-updates/${actionId}/executions`,
+      headers: {
+        'idempotency-key': confirmation,
+        'x-tixkit-confirmation': confirmation,
+      },
+      payload: { approvalId, actionDigest },
+    });
+    expect(execution.statusCode).toBe(200);
+    expect(execute).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      actionId,
+      approvalId,
+      actionDigest,
+      expectedActionKind: 'event.update',
+    });
+    const evidence = await app.inject({
+      method: 'GET',
+      url: `/agent/event-updates/${actionId}/executions/${executionId}`,
+    });
+    expect(evidence.statusCode).toBe(200);
+    expect(getExecutionForAgent).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      actionId,
+      executionId,
+    });
     await app.close();
   });
 
@@ -483,7 +679,10 @@ describe('agent action routes', () => {
   it('returns successful immutable reads with no-store caching', async () => {
     const { app } = await setup();
     const actionId = `act_${'d'.repeat(48)}`;
-    const response = await app.inject({ method: 'GET', url: `/agent/actions/${actionId}` });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/${actionId}`,
+    });
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.json()).toEqual(JSON.parse(JSON.stringify(prepared)));
@@ -492,9 +691,15 @@ describe('agent action routes', () => {
 
   it('lets the human sponsor load the exact action through live sponsor authorization', async () => {
     const getForSponsor = vi.fn(async () => prepared);
-    const { app } = await setup({ actor: principal('user'), service: { getForSponsor } });
+    const { app } = await setup({
+      actor: principal('user'),
+      service: { getForSponsor },
+    });
     const actionId = `act_${'d'.repeat(48)}`;
-    const response = await app.inject({ method: 'GET', url: `/agent/actions/${actionId}` });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/${actionId}`,
+    });
     expect(response.statusCode).toBe(200);
     expect(getForSponsor).toHaveBeenCalledWith({
       tenantId: 'tenant_primary',
@@ -515,7 +720,10 @@ describe('agent action routes', () => {
       approvedAt: '2026-07-14T12:01:00.000Z',
       expiresAt: '2026-07-14T12:06:00.000Z',
     }));
-    const { app } = await setup({ actor: principal('user'), service: { approve } });
+    const { app } = await setup({
+      actor: principal('user'),
+      service: { approve },
+    });
     const actionId = `act_${'d'.repeat(48)}`;
     const actionDigest = 'b'.repeat(64);
     const response = await app.inject({
@@ -535,6 +743,7 @@ describe('agent action routes', () => {
       actionId,
       actionDigest,
       idempotencyKey: 'agent-action-approval-0001',
+      expectedActionKind: 'event.publish',
     });
     await app.close();
   });
@@ -551,7 +760,10 @@ describe('agent action routes', () => {
       approvedAt: '2026-07-14T12:01:00.000Z',
       expiresAt: '2026-07-14T12:06:00.000Z',
     }));
-    const { app } = await setup({ actor: principal('user'), service: { approve } });
+    const { app } = await setup({
+      actor: principal('user'),
+      service: { approve },
+    });
     const actionId = `act_${'d'.repeat(48)}`;
     const actionDigest = 'b'.repeat(64);
     const planSha256 = 'c'.repeat(64);
@@ -572,6 +784,7 @@ describe('agent action routes', () => {
       actionDigest,
       planSha256,
       idempotencyKey: 'agent-plan-approval-0001',
+      expectedActionKind: 'event.publish',
     });
     await app.close();
   });
@@ -593,7 +806,10 @@ describe('agent action routes', () => {
     expect(agentResponse.statusCode).toBe(403);
     await agentSetup.app.close();
 
-    const humanSetup = await setup({ actor: principal('user'), service: { approve } });
+    const humanSetup = await setup({
+      actor: principal('user'),
+      service: { approve },
+    });
     const humanResponse = await humanSetup.app.inject({
       method: 'POST',
       url: `/agent/actions/${actionId}/approvals`,
@@ -643,6 +859,7 @@ describe('agent action routes', () => {
       approvalId,
       actionDigest,
       idempotencyKey: 'agent-action-revocation-0001',
+      expectedActionKind: 'event.publish',
     });
     await app.close();
   });
@@ -665,7 +882,10 @@ describe('agent action routes', () => {
     expect(denied.statusCode).toBe(403);
     await agentSetup.app.close();
 
-    const humanSetup = await setup({ actor: principal('user'), service: { revokeApproval } });
+    const humanSetup = await setup({
+      actor: principal('user'),
+      service: { revokeApproval },
+    });
     const invalid = await humanSetup.app.inject({
       method: 'POST',
       url: `/agent/actions/${actionId}/approvals/${approvalId}/revoke`,
@@ -696,7 +916,11 @@ describe('agent action routes', () => {
       resourceVersion: 8,
       policyVersion: 3,
       fenceToken: 1,
-      result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+      result: {
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        status: 'published',
+      },
       createdAt: '2026-07-14T12:02:00.000Z',
       updatedAt: '2026-07-14T12:02:01.000Z',
     }));
@@ -721,6 +945,7 @@ describe('agent action routes', () => {
       actionId,
       approvalId,
       actionDigest,
+      expectedActionKind: 'event.publish',
     });
     await app.close();
   });
@@ -729,7 +954,9 @@ describe('agent action routes', () => {
     const actionId = `act_${'d'.repeat(48)}`;
     const executionId = `exec_${'f'.repeat(48)}`;
     const agentLookup = vi.fn(async () => executionEvidence);
-    const agent = await setup({ service: { getExecutionForAgent: agentLookup } });
+    const agent = await setup({
+      service: { getExecutionForAgent: agentLookup },
+    });
     const agentResponse = await agent.app.inject({
       method: 'GET',
       url: `/agent/actions/${actionId}/executions/${executionId}`,
@@ -781,7 +1008,10 @@ describe('agent action routes', () => {
     const actionId = `act_${'d'.repeat(48)}`;
     const approvalId = `apr_${'e'.repeat(48)}`;
     const actionDigest = 'b'.repeat(64);
-    const human = await setup({ actor: principal('user'), service: { execute } });
+    const human = await setup({
+      actor: principal('user'),
+      service: { execute },
+    });
     const denied = await human.app.inject({
       method: 'POST',
       url: `/agent/actions/${actionId}/executions`,
@@ -910,7 +1140,10 @@ describe('agent action routes', () => {
     const getForAgent = vi.fn(async () => undefined);
     const { app } = await setup({ service: { getForAgent } });
     const otherActionId = `act_${'d'.repeat(48)}`;
-    const response = await app.inject({ method: 'GET', url: `/agent/actions/${otherActionId}` });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent/actions/${otherActionId}`,
+    });
     expect(response.statusCode).toBe(404);
     expect(getForAgent).toHaveBeenCalledWith({
       tenantId: 'tenant_primary',

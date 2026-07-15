@@ -43,7 +43,9 @@ export interface AgentExecutionEvidence {
 }
 
 /** Audit evidence returned with an execution is always bound to its consumed approval. */
-export type AgentExecutionAuditRecord = AgentAuditRecord & { approvalId: string };
+export type AgentExecutionAuditRecord = AgentAuditRecord & {
+  approvalId: string;
+};
 
 export interface AgentExecutionStore {
   /**
@@ -189,6 +191,11 @@ export function validateAgentActionResultForAction(
         result.resourceVersion !== action.target.resourceVersion + 1))
   )
     throw new AgentProtocolValidationError('event publish result is invalid');
+  if (
+    action.kind === 'event.update' &&
+    (result.status !== 'updated' || result.resourceVersion !== action.target.resourceVersion + 1)
+  )
+    throw new AgentProtocolValidationError('event update result is invalid');
 }
 
 export function agentExecutionIdempotencyKey(
@@ -308,7 +315,10 @@ export class DurableAgentExecutionService {
     if (['succeeded', 'failed', 'compensated'].includes(claimed.state)) return claimed;
     if (!claimed.leaseOwner || claimed.state !== 'running')
       throw new AgentExecutionConflictError('execution is not claimable');
-    const recovered = await this.store.recoverEffect({ execution: claimed, action: input.action });
+    const recovered = await this.store.recoverEffect({
+      execution: claimed,
+      action: input.action,
+    });
     if (recovered) {
       validateAgentActionResultForAction(input.action, recovered);
       const completed: AgentExecution = {
@@ -322,7 +332,10 @@ export class DurableAgentExecutionService {
       if (
         !(await this.store.complete({
           execution: completed,
-          expectedRevision: { fenceToken: claimed.fenceToken, leaseOwner: claimed.leaseOwner },
+          expectedRevision: {
+            fenceToken: claimed.fenceToken,
+            leaseOwner: claimed.leaseOwner,
+          },
           audit: this.audit(completed, 'succeeded', completed.updatedAt),
         }))
       )
@@ -397,7 +410,10 @@ export class DurableAgentExecutionService {
       if (
         !(await this.store.complete({
           execution: completed,
-          expectedRevision: { fenceToken: claimed.fenceToken, leaseOwner: claimed.leaseOwner },
+          expectedRevision: {
+            fenceToken: claimed.fenceToken,
+            leaseOwner: claimed.leaseOwner,
+          },
           audit: this.audit(completed, 'succeeded', completed.updatedAt),
         }))
       )
@@ -416,7 +432,10 @@ export class DurableAgentExecutionService {
       if (
         !(await this.store.complete({
           execution: failed,
-          expectedRevision: { fenceToken: claimed.fenceToken, leaseOwner: claimed.leaseOwner },
+          expectedRevision: {
+            fenceToken: claimed.fenceToken,
+            leaseOwner: claimed.leaseOwner,
+          },
           audit: this.audit(failed, 'failed', failed.updatedAt),
         }))
       )
@@ -441,8 +460,14 @@ export class DurableAgentExecutionService {
       !execution.leaseOwner ||
       !(await this.store.complete({
         execution: failed,
-        expectedRevision: { fenceToken: execution.fenceToken, leaseOwner: execution.leaseOwner },
-        audit: { ...this.audit(failed, 'failed', failed.updatedAt), reasonCodes: reasons },
+        expectedRevision: {
+          fenceToken: execution.fenceToken,
+          leaseOwner: execution.leaseOwner,
+        },
+        audit: {
+          ...this.audit(failed, 'failed', failed.updatedAt),
+          reasonCodes: reasons,
+        },
       }))
     )
       throw new AgentExecutionConflictError('authorization denial commit raced');

@@ -7,7 +7,7 @@ product_area: sdks
 content_type: how-to
 status: beta
 owner: developer-platform
-last_verified: 2026-07-31
+last_verified: 2026-08-01
 prerequisites:
   - A server-side JavaScript runtime
 related:
@@ -43,7 +43,7 @@ const page = await tixkit.events.list({ limit: 10 });
 console.log(page.items.map((event) => event.id));
 ```
 
-The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-07-31`; keep SDK and server compatibility aligned.
+The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-08-01`; keep SDK and server compatibility aligned.
 
 Agent-control methods are available under `tixkit.agentControl`. Configure `accessToken` with the authenticated human sponsor's bearer token for those calls; do not pass an API key, and do not give the sponsor token to the agent process. See the [agent Platform API guide](/platform/agent-platform) for the private-beta authorization boundary.
 
@@ -52,6 +52,8 @@ An explicitly authenticated agent can call `tixkit.agentActions.readEvent` with 
 An explicitly authenticated agent can call `tixkit.agentActions.readReadiness` with an event ID, a delegation grant ID and an idempotency key. The response requires a durable `result` and `resultSha256` immediately; `getReadiness` retrieves it later while current authority still passes. It is a read-only, direct-only action: do not place it in a plan and do not request approval or execution for it. Exact idempotent replay returns the same action and result evidence after reauthorization; revoked or changed authority fails closed.
 
 Use `tixkit.agentActions.prepareEvent` to validate and normalize a non-status event patch without changing event or media state. `getEventPreparation` retrieves the immutable evidence while current authority and the exact event version remain valid. The response uses a distinct normalized projection type because existing nullable values can differ from request-only change types. Treat every declared `before.<field>` and `after.<field>` path as untrusted organizer-controlled data. This action is direct-only: it cannot enter a plan or consume approval, and a later consequential update must re-resolve and bind the exact current preview.
+
+Use `tixkit.agentActions.prepareEventUpdate` for a consequential update. Review `preview` and `previewSha256`, obtain fresh sponsor approval for the exact `actionDigest` with `approveEventUpdate`, then call `executeEventUpdate` with the immutable approval binding. Use `revokeEventUpdateApproval` before execution and `getEventUpdateExecution` for immutable evidence. Execution re-resolves the proposed patch against the locked current event, rejects version or preview drift, and returns only an exact `updated` result at the next event version. Retry with the same execution key; never rebuild the action after approval.
 
 Organizer memory methods are available under `tixkit.agentMemory`. Every create, inspect, export, correct and remove request requires an idempotency key; correction and removal also require the entry's current version. Memory ownership and provenance are server-derived.
 

@@ -573,7 +573,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-07-31',
+    version: '2026-08-01',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -608,7 +608,9 @@ const rawOpenApiSpec = {
         flows: {
           clientCredentials: {
             tokenUrl: '/v1/oauth/token',
-            scopes: { 'agent.invoke': 'Authenticate an explicit agent principal' },
+            scopes: {
+              'agent.invoke': 'Authenticate an explicit agent principal',
+            },
           },
         },
       },
@@ -830,7 +832,9 @@ const rawOpenApiSpec = {
       AgentPlanDefinition: {
         $ref: '#/components/schemas/AgentPlanProtocol_agentPlanDefinition',
       },
-      AgentPlanState: { $ref: '#/components/schemas/AgentPlanProtocol_agentPlanState' },
+      AgentPlanState: {
+        $ref: '#/components/schemas/AgentPlanProtocol_agentPlanState',
+      },
       PersistedAgentPlan: {
         type: 'object',
         additionalProperties: false,
@@ -1048,12 +1052,17 @@ const rawOpenApiSpec = {
         properties: {
           job: { type: 'object', additionalProperties: true },
           report: { type: 'object', additionalProperties: true },
-          conflicts: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          conflicts: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
           correctivePlans: {
             type: 'array',
             items: { type: 'object', additionalProperties: true },
           },
-          portableDryRunReceipt: { $ref: '#/components/schemas/PortableDryRunReceipt' },
+          portableDryRunReceipt: {
+            $ref: '#/components/schemas/PortableDryRunReceipt',
+          },
         },
       },
       PortableDryRunReceipt: {
@@ -1267,7 +1276,10 @@ const rawOpenApiSpec = {
         additionalProperties: false,
         required: ['required', 'completed', 'complete'],
         properties: {
-          required: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          required: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
           completed: {
             type: 'array',
             items: { $ref: '#/components/schemas/PortableImportRebinding' },
@@ -1315,8 +1327,13 @@ const rawOpenApiSpec = {
           status: { type: 'string', enum: ['ready', 'failed'] },
           report: { $ref: '#/components/schemas/MigrationReport' },
           domainWrites: { const: 0 },
-          portableDryRunReceipt: { $ref: '#/components/schemas/PortableDryRunReceipt' },
-          portableDryRunReceiptSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          portableDryRunReceipt: {
+            $ref: '#/components/schemas/PortableDryRunReceipt',
+          },
+          portableDryRunReceiptSha256: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+          },
         },
       },
       MigrationRollbackAssessment: {
@@ -5295,7 +5312,9 @@ const rawOpenApiSpec = {
               { $ref: '#/components/schemas/AgentPrincipal' },
               {
                 type: 'object',
-                properties: { updatedAt: { type: 'string', format: 'date-time' } },
+                properties: {
+                  updatedAt: { type: 'string', format: 'date-time' },
+                },
                 required: ['updatedAt'],
               },
             ],
@@ -5306,7 +5325,11 @@ const rawOpenApiSpec = {
             properties: {
               grantType: { type: 'string', const: 'client_credentials' },
               scope: { type: 'string', const: 'agent.invoke' },
-              productPermissions: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              productPermissions: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
             },
             required: ['grantType', 'scope', 'productPermissions'],
           },
@@ -5345,7 +5368,10 @@ const rawOpenApiSpec = {
             type: 'object',
             additionalProperties: false,
             properties: {
-              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              readinessSnapshotSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
             },
             required: ['readinessSnapshotSha256'],
           },
@@ -5397,7 +5423,10 @@ const rawOpenApiSpec = {
             type: 'object',
             additionalProperties: false,
             properties: {
-              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              readinessSnapshotSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
             },
             required: ['readinessSnapshotSha256'],
           },
@@ -5427,7 +5456,10 @@ const rawOpenApiSpec = {
           resourceId: { type: 'string' },
           resourceVersion: { type: 'integer', minimum: 1 },
           status: { type: 'string', enum: ['ready', 'blocked'] },
-          readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          readinessSnapshotSha256: {
+            type: 'string',
+            pattern: '^[a-f0-9]{64}$',
+          },
           generatedAt: { type: 'string', format: 'date-time' },
           published: { type: 'boolean' },
           blockerReasonCodes: {
@@ -5483,7 +5515,10 @@ const rawOpenApiSpec = {
             type: 'object',
             additionalProperties: false,
             properties: {
-              eventSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              eventSnapshotSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
             },
             required: ['eventSnapshotSha256'],
           },
@@ -5520,10 +5555,19 @@ const rawOpenApiSpec = {
             type: 'object',
             additionalProperties: false,
             properties: {
-              title: { type: 'string', minLength: 1, maxLength: 512, pattern: '^[^\\u0000]+$' },
+              title: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 512,
+                pattern: '^[^\\u0000]+$',
+              },
               description: {
                 oneOf: [
-                  { type: 'string', maxLength: 50000, pattern: '^[^\\u0000]*$' },
+                  {
+                    type: 'string',
+                    maxLength: 50000,
+                    pattern: '^[^\\u0000]*$',
+                  },
                   { type: 'null' },
                 ],
               },
@@ -5542,7 +5586,10 @@ const rawOpenApiSpec = {
               endsAt: {
                 oneOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }],
               },
-              visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
+              visibility: {
+                type: 'string',
+                enum: ['public', 'unlisted', 'private'],
+              },
               capacity: {
                 oneOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }],
               },
@@ -5594,7 +5641,12 @@ const rawOpenApiSpec = {
         additionalProperties: false,
         minProperties: 1,
         properties: {
-          title: { type: 'string', minLength: 1, maxLength: 512, pattern: '^[^\\u0000]+$' },
+          title: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+            pattern: '^[^\\u0000]+$',
+          },
           slug: {
             type: 'string',
             minLength: 1,
@@ -5602,9 +5654,18 @@ const rawOpenApiSpec = {
             pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
             example: 'prepared-event',
           },
-          description: { type: 'string', maxLength: 50_000, pattern: '^[^\\u0000]*$' },
+          description: {
+            type: 'string',
+            maxLength: 50_000,
+            pattern: '^[^\\u0000]*$',
+          },
           currency: { type: 'string', pattern: '^[A-Z]{3}$' },
-          timezone: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[^\\u0000]+$' },
+          timezone: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100,
+            pattern: '^[^\\u0000]+$',
+          },
           startsAt: { type: 'string', format: 'date-time' },
           endsAt: { type: ['string', 'null'], format: 'date-time' },
           venue: {
@@ -5616,14 +5677,30 @@ const rawOpenApiSpec = {
             'x-tixkit-noNulStrings': true,
           },
           venueId: { type: ['string', 'null'] },
-          visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
+          visibility: {
+            type: 'string',
+            enum: ['public', 'unlisted', 'private'],
+          },
           seo: {
             type: 'object',
             additionalProperties: false,
             properties: {
-              title: { type: 'string', maxLength: 200, pattern: '^[^\\u0000]*$' },
-              description: { type: 'string', maxLength: 500, pattern: '^[^\\u0000]*$' },
-              imageUrl: { type: 'string', format: 'uri', pattern: '^https?://', maxLength: 2048 },
+              title: {
+                type: 'string',
+                maxLength: 200,
+                pattern: '^[^\\u0000]*$',
+              },
+              description: {
+                type: 'string',
+                maxLength: 500,
+                pattern: '^[^\\u0000]*$',
+              },
+              imageUrl: {
+                type: 'string',
+                format: 'uri',
+                pattern: '^https?://',
+                maxLength: 2048,
+              },
             },
           },
           capacity: { type: ['integer', 'null'], minimum: 1 },
@@ -5658,7 +5735,12 @@ const rawOpenApiSpec = {
         additionalProperties: false,
         minProperties: 1,
         properties: {
-          title: { type: 'string', minLength: 1, maxLength: 512, pattern: '^[^\\u0000]+$' },
+          title: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 512,
+            pattern: '^[^\\u0000]+$',
+          },
           slug: {
             type: 'string',
             minLength: 1,
@@ -5672,7 +5754,12 @@ const rawOpenApiSpec = {
             pattern: '^[^\\u0000]*$',
           },
           currency: { type: 'string', pattern: '^[A-Z]{3}$' },
-          timezone: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[^\\u0000]+$' },
+          timezone: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 100,
+            pattern: '^[^\\u0000]+$',
+          },
           startsAt: { type: 'string', format: 'date-time' },
           endsAt: { type: ['string', 'null'], format: 'date-time' },
           venue: {
@@ -5684,13 +5771,24 @@ const rawOpenApiSpec = {
             'x-tixkit-noNulStrings': true,
           },
           venueId: { type: ['string', 'null'] },
-          visibility: { type: 'string', enum: ['public', 'unlisted', 'private'] },
+          visibility: {
+            type: 'string',
+            enum: ['public', 'unlisted', 'private'],
+          },
           seo: {
             type: 'object',
             additionalProperties: false,
             properties: {
-              title: { type: 'string', maxLength: 200, pattern: '^[^\\u0000]*$' },
-              description: { type: 'string', maxLength: 500, pattern: '^[^\\u0000]*$' },
+              title: {
+                type: 'string',
+                maxLength: 200,
+                pattern: '^[^\\u0000]*$',
+              },
+              description: {
+                type: 'string',
+                maxLength: 500,
+                pattern: '^[^\\u0000]*$',
+              },
               imageUrl: {
                 type: 'string',
                 format: 'uri-reference',
@@ -5734,7 +5832,11 @@ const rawOpenApiSpec = {
           {
             type: 'object',
             properties: {
-              description: { type: 'string', maxLength: 50_000, pattern: '^[^\\u0000]*$' },
+              description: {
+                type: 'string',
+                maxLength: 50_000,
+                pattern: '^[^\\u0000]*$',
+              },
               coverImageUrl: {
                 type: ['string', 'null'],
                 format: 'uri-reference',
@@ -5746,8 +5848,16 @@ const rawOpenApiSpec = {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  title: { type: 'string', maxLength: 200, pattern: '^[^\\u0000]*$' },
-                  description: { type: 'string', maxLength: 500, pattern: '^[^\\u0000]*$' },
+                  title: {
+                    type: 'string',
+                    maxLength: 200,
+                    pattern: '^[^\\u0000]*$',
+                  },
+                  description: {
+                    type: 'string',
+                    maxLength: 500,
+                    pattern: '^[^\\u0000]*$',
+                  },
                   imageUrl: {
                     type: 'string',
                     format: 'uri-reference',
@@ -5790,8 +5900,13 @@ const rawOpenApiSpec = {
             type: 'object',
             additionalProperties: false,
             properties: {
-              changePreviewSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-              changes: { $ref: '#/components/schemas/AgentEventPrepareResolvedChanges' },
+              changePreviewSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
+              changes: {
+                $ref: '#/components/schemas/AgentEventPrepareResolvedChanges',
+              },
             },
             required: ['changePreviewSha256', 'changes'],
           },
@@ -5854,7 +5969,9 @@ const rawOpenApiSpec = {
             },
           },
           before: { $ref: '#/components/schemas/AgentEventPrepareProjection' },
-          after: { $ref: '#/components/schemas/AgentEventPrepareResolvedChanges' },
+          after: {
+            $ref: '#/components/schemas/AgentEventPrepareResolvedChanges',
+          },
           untrustedContentPaths: {
             type: 'array',
             minItems: 2,
@@ -5878,6 +5995,67 @@ const rawOpenApiSpec = {
           'untrustedContentPaths',
         ],
       },
+      AgentEventUpdateAction: {
+        type: 'object',
+        description:
+          'Server-derived immutable event update bound to one normalized preview and fresh human approval.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          protocolVersion: { type: 'string', const: '2026-07-22' },
+          agentPrincipalId: { type: 'string' },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: { type: 'string' },
+          kind: { type: 'string', const: 'event.update' },
+          autonomy: { type: 'string', const: 'execute_with_approval' },
+          target: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              tenantId: { type: 'string' },
+              resourceType: { type: 'string', const: 'event' },
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 1 },
+              apiOperation: { type: 'string', const: 'events.update' },
+            },
+            required: ['tenantId', 'resourceType', 'resourceId', 'resourceVersion', 'apiOperation'],
+          },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              changePreviewSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
+              changes: {
+                $ref: '#/components/schemas/AgentEventPrepareResolvedChanges',
+              },
+            },
+            required: ['changePreviewSha256', 'changes'],
+          },
+          idempotencyKey: { type: 'string', minLength: 16, maxLength: 127 },
+          expectedPolicyVersion: { type: 'integer', minimum: 1 },
+          preparedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'protocolVersion',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'kind',
+          'autonomy',
+          'target',
+          'payload',
+          'idempotencyKey',
+          'expectedPolicyVersion',
+          'preparedAt',
+        ],
+      },
+      AgentEventUpdatePreview: {
+        $ref: '#/components/schemas/AgentEventPrepareResult',
+      },
       PreparedAgentAction: {
         type: 'object',
         description:
@@ -5892,7 +6070,11 @@ const rawOpenApiSpec = {
             additionalProperties: false,
             properties: {
               eligibleForApproval: { type: 'boolean' },
-              reasons: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+              reasons: {
+                type: 'array',
+                items: { type: 'string' },
+                uniqueItems: true,
+              },
               snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
               checkedAt: { type: 'string', format: 'date-time' },
             },
@@ -5903,7 +6085,10 @@ const rawOpenApiSpec = {
             additionalProperties: false,
             properties: {
               launchable: { type: 'boolean' },
-              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              readinessSnapshotSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
               blockingReasonCodes: {
                 type: 'array',
                 items: { type: 'string' },
@@ -5930,7 +6115,11 @@ const rawOpenApiSpec = {
             properties: {
               allowed: { type: 'boolean', const: true },
               eligibleForApproval: { type: 'boolean', const: false },
-              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              reasons: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
               snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
               checkedAt: { type: 'string', format: 'date-time' },
             },
@@ -5941,11 +6130,17 @@ const rawOpenApiSpec = {
             additionalProperties: false,
             properties: {
               launchable: { type: 'boolean' },
-              readinessSnapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              readinessSnapshotSha256: {
+                type: 'string',
+                pattern: '^[a-f0-9]{64}$',
+              },
               blockingReasonCodes: {
                 type: 'array',
                 uniqueItems: true,
-                items: { type: 'string', pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$' },
+                items: {
+                  type: 'string',
+                  pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$',
+                },
               },
             },
             required: ['launchable', 'readinessSnapshotSha256', 'blockingReasonCodes'],
@@ -5978,7 +6173,11 @@ const rawOpenApiSpec = {
             properties: {
               allowed: { type: 'boolean', const: true },
               eligibleForApproval: { type: 'boolean', const: false },
-              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              reasons: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
               snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
               checkedAt: { type: 'string', format: 'date-time' },
             },
@@ -6011,7 +6210,11 @@ const rawOpenApiSpec = {
             properties: {
               allowed: { type: 'boolean', const: true },
               eligibleForApproval: { type: 'boolean', const: false },
-              reasons: { type: 'array', maxItems: 0, items: { type: 'string' } },
+              reasons: {
+                type: 'array',
+                maxItems: 0,
+                items: { type: 'string' },
+              },
               snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
               checkedAt: { type: 'string', format: 'date-time' },
             },
@@ -6029,6 +6232,42 @@ const rawOpenApiSpec = {
           'resultSha256',
         ],
       },
+      PreparedAgentEventUpdateAction: {
+        type: 'object',
+        description:
+          'Immutable high-risk event update with digest-bound approval preview. It has no mutation authority until freshly approved and executed.',
+        additionalProperties: false,
+        properties: {
+          action: { $ref: '#/components/schemas/AgentEventUpdateAction' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          authorization: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              eligibleForApproval: { type: 'boolean' },
+              reasons: {
+                type: 'array',
+                uniqueItems: true,
+                items: { type: 'string' },
+              },
+              snapshotSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              checkedAt: { type: 'string', format: 'date-time' },
+            },
+            required: ['eligibleForApproval', 'reasons', 'snapshotSha256', 'checkedAt'],
+          },
+          preview: { $ref: '#/components/schemas/AgentEventUpdatePreview' },
+          previewSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: [
+          'action',
+          'actionDigest',
+          'expiresAt',
+          'authorization',
+          'preview',
+          'previewSha256',
+        ],
+      },
       AgentApproval: {
         type: 'object',
         description:
@@ -6044,7 +6283,41 @@ const rawOpenApiSpec = {
             type: 'array',
             minItems: 1,
             uniqueItems: true,
-            items: { type: 'string', const: 'events:publish' },
+            items: { type: 'string', enum: ['events:publish'] },
+          },
+          policyVersion: { type: 'integer', minimum: 1 },
+          approvedAt: { type: 'string', format: 'date-time' },
+          expiresAt: { type: 'string', format: 'date-time' },
+          revokedAt: { type: 'string', format: 'date-time' },
+          consumedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'actionDigest',
+          'approverPrincipalId',
+          'approverPermissionSnapshot',
+          'policyVersion',
+          'approvedAt',
+          'expiresAt',
+        ],
+      },
+      AgentEventUpdateApproval: {
+        type: 'object',
+        description:
+          'Fresh human approval bound to one immutable direct event-update digest and current events.write permission evidence.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          approverPrincipalId: { type: 'string' },
+          approverPermissionSnapshot: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 1,
+            uniqueItems: true,
+            items: { type: 'string', const: 'events:write' },
           },
           policyVersion: { type: 'integer', minimum: 1 },
           approvedAt: { type: 'string', format: 'date-time' },
@@ -6066,7 +6339,7 @@ const rawOpenApiSpec = {
       AgentExecution: {
         type: 'object',
         description:
-          'Durable, tenant-scoped execution evidence for one approved immutable action. Reserved evidence has no lease or terminal payload; running evidence has a valid lease; succeeded evidence has one exact published result; failed evidence has one bounded failure code; compensated evidence has no result and uses AGENT_ACTION_COMPENSATED. Terminal exact replays do not repeat the product effect.',
+          'Durable, tenant-scoped execution evidence for one approved immutable event-publish action. Reserved evidence has no lease or terminal payload; running evidence has a valid lease; succeeded evidence has one exact published result; failed evidence has one bounded failure code; compensated evidence has no result and uses AGENT_ACTION_COMPENSATED. Terminal exact replays do not repeat the product effect.',
         additionalProperties: false,
         properties: {
           id: {
@@ -6127,7 +6400,7 @@ const rawOpenApiSpec = {
             properties: {
               resourceId: { type: 'string' },
               resourceVersion: { type: 'integer', minimum: 0 },
-              status: { type: 'string', const: 'published' },
+              status: { type: 'string', enum: ['published'] },
             },
             required: ['resourceId', 'resourceVersion', 'status'],
           },
@@ -6137,6 +6410,64 @@ const rawOpenApiSpec = {
             description:
               'Required for failed evidence. Compensated evidence uses AGENT_ACTION_COMPENSATED exactly.',
           },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: [
+          'id',
+          'tenantId',
+          'actionId',
+          'actionDigest',
+          'agentPrincipalId',
+          'sponsorPrincipalId',
+          'delegationGrantId',
+          'approvalId',
+          'idempotencyKey',
+          'requestFingerprint',
+          'state',
+          'resourceVersion',
+          'policyVersion',
+          'fenceToken',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
+      AgentEventUpdateExecution: {
+        type: 'object',
+        description:
+          'Durable, tenant-scoped execution evidence for one approved direct event-update action. A succeeded result is exactly one version increment with status updated.',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^exec_[a-f0-9]{48}$' },
+          tenantId: { type: 'string' },
+          actionId: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          agentPrincipalId: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+          sponsorPrincipalId: { type: 'string' },
+          delegationGrantId: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
+          approvalId: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
+          idempotencyKey: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          requestFingerprint: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          state: {
+            type: 'string',
+            enum: ['reserved', 'running', 'succeeded', 'failed'],
+          },
+          resourceVersion: { type: 'integer', minimum: 0 },
+          policyVersion: { type: 'integer', minimum: 1 },
+          fenceToken: { type: 'integer', minimum: 0 },
+          leaseOwner: { type: 'string' },
+          leaseExpiresAt: { type: 'string', format: 'date-time' },
+          result: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              resourceId: { type: 'string' },
+              resourceVersion: { type: 'integer', minimum: 1 },
+              status: { type: 'string', const: 'updated' },
+            },
+            required: ['resourceId', 'resourceVersion', 'status'],
+          },
+          failureCode: { type: 'string', pattern: '^[A-Z0-9_]{3,64}$' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
@@ -6256,6 +6587,22 @@ const rawOpenApiSpec = {
         },
         required: ['execution', 'audit'],
       },
+      AgentEventUpdateExecutionEvidence: {
+        type: 'object',
+        description:
+          'Durable event-update execution plus bounded immutable audit history, visible only to the exact agent principal or human sponsor.',
+        additionalProperties: false,
+        properties: {
+          execution: { $ref: '#/components/schemas/AgentEventUpdateExecution' },
+          audit: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 100,
+            items: { $ref: '#/components/schemas/AgentExecutionAuditRecord' },
+          },
+        },
+        required: ['execution', 'audit'],
+      },
       AgentDelegation: {
         type: 'object',
         description:
@@ -6280,9 +6627,16 @@ const rawOpenApiSpec = {
             minItems: 1,
             maxItems: 100,
             uniqueItems: true,
-            items: { type: 'string', pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+            items: {
+              type: 'string',
+              pattern: '^event:[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+            },
           },
-          permissionSnapshot: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+          permissionSnapshot: {
+            type: 'array',
+            items: { type: 'string' },
+            uniqueItems: true,
+          },
           issuedAt: { type: 'string', format: 'date-time' },
           expiresAt: { type: 'string', format: 'date-time' },
           revokedAt: { type: 'string', format: 'date-time' },
@@ -6319,7 +6673,10 @@ const rawOpenApiSpec = {
             additionalProperties: false,
             properties: {
               scopeType: { type: 'string', const: 'event' },
-              scopeId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+              scopeId: {
+                type: 'string',
+                pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+              },
               purpose: {
                 type: 'string',
                 enum: ['organizer_preferences', 'project_context'],
@@ -6337,7 +6694,10 @@ const rawOpenApiSpec = {
           tenantId: { type: 'string' },
           sponsorPrincipalId: { type: 'string' },
           scopeType: { type: 'string', enum: ['workspace', 'event'] },
-          scopeId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$' },
+          scopeId: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+          },
           purpose: {
             type: 'string',
             enum: ['organizer_preferences', 'project_context'],
@@ -6351,8 +6711,14 @@ const rawOpenApiSpec = {
         properties: {
           kind: { type: 'string', const: 'organizer_preferences' },
           summary: { type: 'string', minLength: 1, maxLength: 2_000 },
-          tone: { type: 'string', enum: ['concise', 'warm', 'formal', 'direct'] },
-          verbosity: { type: 'string', enum: ['brief', 'standard', 'detailed'] },
+          tone: {
+            type: 'string',
+            enum: ['concise', 'warm', 'formal', 'direct'],
+          },
+          verbosity: {
+            type: 'string',
+            enum: ['brief', 'standard', 'detailed'],
+          },
           locale: { type: 'string' },
           timezone: { type: 'string' },
           currency: { type: 'string' },
@@ -6372,7 +6738,10 @@ const rawOpenApiSpec = {
               type: 'object',
               additionalProperties: false,
               properties: {
-                kind: { type: 'string', enum: ['objective', 'constraint', 'decision'] },
+                kind: {
+                  type: 'string',
+                  enum: ['objective', 'constraint', 'decision'],
+                },
                 text: { type: 'string', minLength: 1, maxLength: 2_000 },
               },
               required: ['kind', 'text'],
@@ -6392,7 +6761,10 @@ const rawOpenApiSpec = {
         type: 'object',
         additionalProperties: false,
         properties: {
-          type: { type: 'string', enum: ['organizer', 'agent_observation', 'import'] },
+          type: {
+            type: 'string',
+            enum: ['organizer', 'agent_observation', 'import'],
+          },
           actorPrincipalId: { type: 'string' },
           agentPrincipalId: { type: 'string' },
           sourceReference: { type: 'string' },
@@ -6421,7 +6793,9 @@ const rawOpenApiSpec = {
                 pattern: '^[a-z][a-z0-9_.-]{1,63}$',
                 example: 'copy_preferences',
               },
-              content: { $ref: '#/components/schemas/AgentMemoryOrganizerPreferences' },
+              content: {
+                $ref: '#/components/schemas/AgentMemoryOrganizerPreferences',
+              },
               retentionExpiresAt: {
                 type: 'string',
                 format: 'date-time',
@@ -6449,7 +6823,9 @@ const rawOpenApiSpec = {
                 pattern: '^[a-z][a-z0-9_.-]{1,63}$',
                 example: 'event_context',
               },
-              content: { $ref: '#/components/schemas/AgentMemoryProjectContext' },
+              content: {
+                $ref: '#/components/schemas/AgentMemoryProjectContext',
+              },
               retentionExpiresAt: {
                 type: 'string',
                 format: 'date-time',
@@ -6464,7 +6840,9 @@ const rawOpenApiSpec = {
         type: 'object',
         additionalProperties: false,
         properties: {
-          namespace: { $ref: '#/components/schemas/AgentMemoryNamespaceRequest' },
+          namespace: {
+            $ref: '#/components/schemas/AgentMemoryNamespaceRequest',
+          },
         },
         required: ['namespace'],
       },
@@ -6487,7 +6865,9 @@ const rawOpenApiSpec = {
         type: 'object',
         additionalProperties: false,
         properties: {
-          namespace: { $ref: '#/components/schemas/AgentMemoryNamespaceRequest' },
+          namespace: {
+            $ref: '#/components/schemas/AgentMemoryNamespaceRequest',
+          },
           expectedVersion: { type: 'integer', minimum: 1 },
         },
         required: ['namespace', 'expectedVersion'],
@@ -6527,7 +6907,10 @@ const rawOpenApiSpec = {
           schemaVersion: { type: 'integer', const: 1 },
           exportedAt: { type: 'string', format: 'date-time' },
           namespace: { $ref: '#/components/schemas/AgentMemoryNamespace' },
-          entries: { type: 'array', items: { $ref: '#/components/schemas/AgentMemoryEntry' } },
+          entries: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/AgentMemoryEntry' },
+          },
           sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
         },
         required: ['schemaVersion', 'exportedAt', 'namespace', 'entries', 'sha256'],
@@ -9150,27 +9533,49 @@ const rawOpenApiSpec = {
       get: {
         summary: 'List scoped event media assets and optimized renditions',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
-        parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Event media assets',
             content: {
               'application/json': {
-                schema: { type: 'array', items: { $ref: '#/components/schemas/EventMediaAsset' } },
+                schema: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/EventMediaAsset' },
+                },
               },
             },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event not found',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -9180,7 +9585,12 @@ const rawOpenApiSpec = {
         summary: 'Attach an owned original and generate optimized event media renditions',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'role',
             in: 'path',
@@ -9191,31 +9601,51 @@ const rawOpenApiSpec = {
         requestBody: {
           required: true,
           content: {
-            'application/json': { schema: { $ref: '#/components/schemas/AttachEventMedia' } },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/AttachEventMedia' },
+            },
           },
         },
         responses: {
           '200': {
             description: 'Attached event media asset',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/EventMediaAsset' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EventMediaAsset' },
+              },
             },
           },
           '400': {
             description: 'Invalid image, role, alt text, or focal point',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event or upload artifact not found in scope',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -9223,7 +9653,12 @@ const rawOpenApiSpec = {
         summary: 'Remove one scoped event media role and schedule rendition cleanup',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         parameters: [
-          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'eventId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'role',
             in: 'path',
@@ -9235,15 +9670,27 @@ const rawOpenApiSpec = {
           '204': { description: 'Event media role removed' },
           '401': {
             description: 'Unauthorized',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '403': {
             description: 'Forbidden',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
           '404': {
             description: 'Event or media role not found in scope',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -9252,7 +9699,12 @@ const rawOpenApiSpec = {
       get: {
         summary: 'Stream an immutable rendition for a public event',
         parameters: [
-          { name: 'renditionId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'renditionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         responses: {
           '200': {
@@ -9261,11 +9713,17 @@ const rawOpenApiSpec = {
               'Cache-Control': { schema: { type: 'string' } },
               ETag: { schema: { type: 'string' } },
             },
-            content: { 'image/webp': { schema: { type: 'string', format: 'binary' } } },
+            content: {
+              'image/webp': { schema: { type: 'string', format: 'binary' } },
+            },
           },
           '404': {
             description: 'Rendition not found or event is not public',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiError' } } },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
+            },
           },
         },
       },
@@ -11143,7 +11601,10 @@ const rawOpenApiSpec = {
                     description:
                       'Caller-chosen stable registration reference. The response contains its tenant-namespaced platform identifier.',
                   },
-                  kind: { type: 'string', enum: ['third_party', 'self_hosted'] },
+                  kind: {
+                    type: 'string',
+                    enum: ['third_party', 'self_hosted'],
+                  },
                   capabilities: {
                     type: 'array',
                     minItems: 1,
@@ -11168,12 +11629,16 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Agent principal registered',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentPrincipal' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentPrincipal' },
+              },
             },
           },
           '400': { description: 'Invalid registration or idempotency key' },
           '401': { description: 'Authentication required' },
-          '403': { description: 'Human sponsor lacks live authority or kind is unavailable' },
+          '403': {
+            description: 'Human sponsor lacks live authority or kind is unavailable',
+          },
           '409': { description: 'Idempotency conflict' },
         },
       },
@@ -11189,11 +11654,15 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Sponsored agent principal',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentPrincipal' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentPrincipal' },
+              },
             },
           },
           '401': { description: 'Authentication required' },
-          '403': { description: 'Human sponsor lacks tenant-wide agent administration authority' },
+          '403': {
+            description: 'Human sponsor lacks tenant-wide agent administration authority',
+          },
           '404': { description: 'Agent principal not found for this sponsor' },
         },
       },
@@ -11255,7 +11724,11 @@ const rawOpenApiSpec = {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  organizationId: { type: 'string', minLength: 3, maxLength: 64 },
+                  organizationId: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 64,
+                  },
                   name: { type: 'string', minLength: 1, maxLength: 120 },
                 },
                 required: ['organizationId', 'name'],
@@ -11266,22 +11739,32 @@ const rawOpenApiSpec = {
         responses: {
           '201': {
             description: 'Credential created; clientSecret is present exactly once',
-            headers: { 'Cache-Control': { schema: { type: 'string', const: 'no-store' } } },
+            headers: {
+              'Cache-Control': {
+                schema: { type: 'string', const: 'no-store' },
+              },
+            },
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentOAuthClientCreated' },
+                schema: {
+                  $ref: '#/components/schemas/AgentOAuthClientCreated',
+                },
               },
             },
           },
           '200': {
             description: 'Identical idempotent replay; clientSecret is omitted',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentOAuthClient' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentOAuthClient' },
+              },
             },
           },
           '400': { description: 'Invalid body or idempotency key' },
           '401': { description: 'Authentication required' },
-          '403': { description: 'Sponsor or organization authorization changed' },
+          '403': {
+            description: 'Sponsor or organization authorization changed',
+          },
           '404': { description: 'Sponsored active agent principal not found' },
           '409': { description: 'Idempotency or stable-reference conflict' },
         },
@@ -11329,7 +11812,9 @@ const rawOpenApiSpec = {
           '400': { description: 'Invalid path or idempotency key' },
           '401': { description: 'Authentication required' },
           '403': { description: 'Sponsor authorization changed' },
-          '404': { description: 'Credential not found for this sponsored agent' },
+          '404': {
+            description: 'Credential not found for this sponsored agent',
+          },
           '409': { description: 'Idempotency conflict' },
         },
       },
@@ -11349,7 +11834,9 @@ const rawOpenApiSpec = {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  definition: { $ref: '#/components/schemas/AgentPlanDefinition' },
+                  definition: {
+                    $ref: '#/components/schemas/AgentPlanDefinition',
+                  },
                   actionBindings: {
                     type: 'array',
                     minItems: 1,
@@ -11358,8 +11845,12 @@ const rawOpenApiSpec = {
                       type: 'object',
                       additionalProperties: false,
                       properties: {
-                        stepId: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
-                        actionId: { $ref: '#/components/schemas/AgentPlanProtocol_id' },
+                        stepId: {
+                          $ref: '#/components/schemas/AgentPlanProtocol_id',
+                        },
+                        actionId: {
+                          $ref: '#/components/schemas/AgentPlanProtocol_id',
+                        },
                       },
                       required: ['stepId', 'actionId'],
                     },
@@ -11375,14 +11866,22 @@ const rawOpenApiSpec = {
             description:
               'Immutable definition, server-owned initial state and exact action bindings',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PersistedAgentPlan' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PersistedAgentPlan' },
+              },
             },
           },
-          '400': { description: 'Invalid canonical plan, action bindings or idempotency key' },
+          '400': {
+            description: 'Invalid canonical plan, action bindings or idempotency key',
+          },
           '401': { description: 'Valid Agent OAuth authentication required' },
           '403': { description: 'Authenticated principal is not an agent' },
-          '404': { description: 'Agent or bound authority is outside the authenticated scope' },
-          '409': { description: 'Idempotency conflict or plan lifetime is no longer valid' },
+          '404': {
+            description: 'Agent or bound authority is outside the authenticated scope',
+          },
+          '409': {
+            description: 'Idempotency conflict or plan lifetime is no longer valid',
+          },
         },
       },
     },
@@ -11404,11 +11903,17 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Immutable plan and current state',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PersistedAgentPlan' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PersistedAgentPlan' },
+              },
             },
           },
-          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
           '404': { description: 'Plan not found for this agent or sponsor' },
         },
       },
@@ -11453,9 +11958,13 @@ const rawOpenApiSpec = {
                     type: 'array',
                     minItems: 1,
                     maxItems: 100,
-                    items: { $ref: '#/components/schemas/AgentPlanProtocol_stepState' },
+                    items: {
+                      $ref: '#/components/schemas/AgentPlanProtocol_stepState',
+                    },
                   },
-                  reasonCode: { $ref: '#/components/schemas/AgentPlanProtocol_reasonCode' },
+                  reasonCode: {
+                    $ref: '#/components/schemas/AgentPlanProtocol_reasonCode',
+                  },
                 },
                 required: ['expectedStateVersion', 'status', 'stepStates', 'reasonCode'],
               },
@@ -11466,13 +11975,23 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Current immutable plan and newly committed state',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PersistedAgentPlan' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PersistedAgentPlan' },
+              },
             },
           },
-          '400': { description: 'Invalid state, reason code or idempotency key' },
-          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
-          '404': { description: 'Plan or current actor authority is outside the caller scope' },
+          '400': {
+            description: 'Invalid state, reason code or idempotency key',
+          },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Plan or current actor authority is outside the caller scope',
+          },
           '409': {
             description:
               'State version, idempotency, lifetime, approval or execution evidence conflict',
@@ -11515,7 +12034,9 @@ const rawOpenApiSpec = {
             description:
               'Immutable event-publish action with authorization/readiness evidence. Exact replays return identical evidence.',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PreparedAgentAction' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentAction' },
+              },
             },
           },
           '400': { description: 'Invalid typed request or idempotency key' },
@@ -11524,7 +12045,9 @@ const rawOpenApiSpec = {
           '404': {
             description: 'Agent, delegation or resource is outside the authenticated scope',
           },
-          '409': { description: 'Idempotency conflict or action policy is unavailable' },
+          '409': {
+            description: 'Idempotency conflict or action policy is unavailable',
+          },
         },
       },
     },
@@ -11563,7 +12086,9 @@ const rawOpenApiSpec = {
               'Immutable direct readiness action with required result and result digest. Exact still-authorized replays return identical evidence.',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentReadinessReadAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentReadinessReadAction',
+                },
               },
             },
           },
@@ -11574,7 +12099,9 @@ const rawOpenApiSpec = {
             description:
               'Current agent, delegation, sponsor, policy or resource authority is unavailable',
           },
-          '409': { description: 'Idempotency conflict or readiness policy is unavailable' },
+          '409': {
+            description: 'Idempotency conflict or readiness policy is unavailable',
+          },
         },
       },
     },
@@ -11597,13 +12124,21 @@ const rawOpenApiSpec = {
             description: 'Immutable direct readiness action and required result evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentReadinessReadAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentReadinessReadAction',
+                },
               },
             },
           },
-          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
-          '404': { description: 'Action or current authority is outside the caller scope' },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Action or current authority is outside the caller scope',
+          },
         },
       },
     },
@@ -11642,7 +12177,9 @@ const rawOpenApiSpec = {
               'Immutable direct event-read action with required result and result digest. Exact still-authorized replays return identical evidence.',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentEventReadAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentEventReadAction',
+                },
               },
             },
           },
@@ -11653,7 +12190,9 @@ const rawOpenApiSpec = {
             description:
               'Current agent, delegation, sponsor, policy or resource authority is unavailable',
           },
-          '409': { description: 'Idempotency conflict or event-read policy is unavailable' },
+          '409': {
+            description: 'Idempotency conflict or event-read policy is unavailable',
+          },
         },
       },
     },
@@ -11676,13 +12215,21 @@ const rawOpenApiSpec = {
             description: 'Immutable direct event-read action and required result evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentEventReadAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentEventReadAction',
+                },
               },
             },
           },
-          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
-          '404': { description: 'Action or current authority is outside the caller scope' },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Action or current authority is outside the caller scope',
+          },
         },
       },
     },
@@ -11709,7 +12256,9 @@ const rawOpenApiSpec = {
                     type: 'string',
                     pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
                   },
-                  changes: { $ref: '#/components/schemas/AgentEventPrepareChanges' },
+                  changes: {
+                    $ref: '#/components/schemas/AgentEventPrepareChanges',
+                  },
                 },
                 required: ['delegationGrantId', 'resourceId', 'changes'],
               },
@@ -11722,7 +12271,9 @@ const rawOpenApiSpec = {
               'Immutable direct event-preparation action with exact normalized preview and result digest. Exact still-authorized replays return identical evidence.',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentEventPrepareAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentEventPrepareAction',
+                },
               },
             },
           },
@@ -11733,7 +12284,9 @@ const rawOpenApiSpec = {
             description:
               'Current agent, delegation, sponsor, venue, media or event authority is unavailable',
           },
-          '409': { description: 'Idempotency conflict or event-prepare policy is unavailable' },
+          '409': {
+            description: 'Idempotency conflict or event-prepare policy is unavailable',
+          },
         },
       },
     },
@@ -11756,13 +12309,302 @@ const rawOpenApiSpec = {
             description: 'Immutable direct event-preparation action and required result evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PreparedAgentEventPrepareAction' },
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentEventPrepareAction',
+                },
               },
             },
           },
-          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Action or current authority is outside the caller scope',
+          },
+        },
+      },
+    },
+    '/agent/event-updates': {
+      post: {
+        summary: 'Prepare a consequential event update for fresh human approval',
+        description:
+          'Experimental/private beta. Requires Agent OAuth. Resolves the typed non-status event PATCH surface against current event, venue, slug and owned-media state, stores an immutable version-bound preview, and returns approval eligibility. It does not mutate the event. Execution re-resolves and compares the exact preview under a serializable lock before applying one CAS update.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [{ $ref: '#/components/parameters/AgentActionIdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  delegationGrantId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  resourceId: {
+                    type: 'string',
+                    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$',
+                  },
+                  changes: {
+                    $ref: '#/components/schemas/AgentEventPrepareChanges',
+                  },
+                },
+                required: ['delegationGrantId', 'resourceId', 'changes'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description:
+              'Immutable event update and exact normalized approval preview. Exact idempotent replays return identical evidence.',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentEventUpdateAction',
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid typed changes or idempotency key' },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': {
+            description:
+              'Current agent, delegation, sponsor, venue, media or event authority is unavailable',
+          },
+          '409': {
+            description: 'No material change, idempotency conflict, or update policy unavailable',
+          },
+        },
+      },
+    },
+    '/agent/event-updates/{actionId}': {
+      get: {
+        summary: 'Get a consequential event-update approval preview',
+        description:
+          'Requires the exact agent or human sponsor with live event write authority. Returns the immutable normalized preview originally bound to the action digest.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Immutable event update and exact approval preview',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PreparedAgentEventUpdateAction',
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Action or current authority is outside the caller scope',
+          },
+        },
+      },
+    },
+    '/agent/event-updates/{actionId}/approvals': {
+      post: {
+        summary: 'Approve one immutable event update',
+        description:
+          'Experimental/private beta. Human sponsor only. Re-resolves and binds the exact normalized event-update preview under live events.write authority. Event updates are direct-only and cannot carry a plan digest.',
+        'x-required-permissions': ['events.write'],
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
+          { $ref: '#/components/parameters/AgentApprovalConfirmation' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                },
+                required: ['actionDigest'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Fresh short-lived events.write approval',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentEventUpdateApproval' },
+              },
+            },
+          },
+          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '401': { description: 'Human authentication required' },
+          '403': { description: 'Caller is not a human sponsor with events.write' },
+          '404': { description: 'Event update is outside the current sponsor scope' },
+          '409': { description: 'Digest, resource, preview, policy or authorization changed' },
+        },
+      },
+    },
+    '/agent/event-updates/{actionId}/approvals/{approvalId}/revoke': {
+      post: {
+        summary: 'Revoke one event-update approval',
+        description:
+          'The exact human sponsor may revoke an unconsumed event-update approval. Exact replay returns the original revoked approval.',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          {
+            name: 'approvalId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
+          },
+          { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
+          { $ref: '#/components/parameters/AgentApprovalRevocationConfirmation' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                },
+                required: ['actionDigest'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Revoked event-update approval',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentEventUpdateApproval' },
+              },
+            },
+          },
+          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '401': { description: 'Human authentication required' },
+          '403': { description: 'Caller is not a human principal' },
+          '404': { description: 'Event update or approval is outside the sponsor scope' },
+          '409': { description: 'Approval already revoked or consumed, or binding changed' },
+        },
+      },
+    },
+    '/agent/event-updates/{actionId}/executions': {
+      post: {
+        summary: 'Execute one approved immutable event update',
+        description:
+          'Exact Agent OAuth principal only. Atomically consumes the fresh approval, re-resolves the exact preview under serializable locks, applies one versioned event update and records audit plus effect evidence. Exact terminal replay never repeats the mutation.',
+        security: [{ AgentOAuth: ['agent.invoke'] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          { $ref: '#/components/parameters/AgentExecutionIdempotencyKey' },
+          { $ref: '#/components/parameters/AgentExecutionConfirmation' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  approvalId: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
+                  actionDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                },
+                required: ['approvalId', 'actionDigest'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Durable event-update execution evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentEventUpdateExecution' },
+              },
+            },
+          },
+          '400': { description: 'Invalid path, approval, digest or confirmation' },
+          '401': { description: 'Valid Agent OAuth authentication required' },
+          '403': { description: 'Authenticated principal is not an agent' },
+          '404': { description: 'Event update or approval is outside the agent scope' },
+          '409': { description: 'Approval, preview, authority, version, policy or lease changed' },
+        },
+      },
+    },
+    '/agent/event-updates/{actionId}/executions/{executionId}': {
+      get: {
+        summary: 'Inspect durable event-update execution and audit evidence',
+        description:
+          'Returns bounded immutable lifecycle evidence only to the exact agent principal or its human sponsor.',
+        security: [{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'actionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^act_[a-f0-9]{48}$' },
+          },
+          {
+            name: 'executionId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^exec_[a-f0-9]{48}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Event-update execution and ordered immutable audit evidence',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentEventUpdateExecutionEvidence' },
+              },
+            },
+          },
+          '401': { description: 'Valid Agent OAuth or human authentication required' },
           '403': { description: 'Caller is not an explicit agent or human principal' },
-          '404': { description: 'Action or current authority is outside the caller scope' },
+          '404': { description: 'Event update execution is outside the caller scope' },
         },
       },
     },
@@ -11784,10 +12626,14 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Immutable action and original dry-run evidence',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/PreparedAgentAction' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PreparedAgentAction' },
+              },
             },
           },
-          '401': { description: 'Valid Agent OAuth or human bearer authentication required' },
+          '401': {
+            description: 'Valid Agent OAuth or human bearer authentication required',
+          },
           '403': {
             description: 'Human sponsor lacks current events.read or events.write authority',
           },
@@ -11833,12 +12679,18 @@ const rawOpenApiSpec = {
             description:
               'Fresh short-lived approval. Exact idempotent replays return the original approval.',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentApproval' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentApproval' },
+              },
             },
           },
-          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '400': {
+            description: 'Invalid path, digest, idempotency key or confirmation',
+          },
           '401': { description: 'Human authentication required' },
-          '403': { description: 'Caller is not a human sponsor with events.write' },
+          '403': {
+            description: 'Caller is not a human sponsor with events.write',
+          },
           '404': { description: 'Action is outside the current sponsor scope' },
           '409': {
             description:
@@ -11867,7 +12719,9 @@ const rawOpenApiSpec = {
             schema: { type: 'string', pattern: '^apr_[a-f0-9]{48}$' },
           },
           { $ref: '#/components/parameters/AgentApprovalIdempotencyKey' },
-          { $ref: '#/components/parameters/AgentApprovalRevocationConfirmation' },
+          {
+            $ref: '#/components/parameters/AgentApprovalRevocationConfirmation',
+          },
         ],
         requestBody: {
           required: true,
@@ -11888,13 +12742,19 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Revoked approval with immutable revocation timestamp',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentApproval' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentApproval' },
+              },
             },
           },
-          '400': { description: 'Invalid path, digest, idempotency key or confirmation' },
+          '400': {
+            description: 'Invalid path, digest, idempotency key or confirmation',
+          },
           '401': { description: 'Human authentication required' },
           '403': { description: 'Caller is not a human principal' },
-          '404': { description: 'Action or approval is outside the sponsor scope' },
+          '404': {
+            description: 'Action or approval is outside the sponsor scope',
+          },
           '409': {
             description:
               'Digest mismatch, approval already revoked or consumed, or idempotency conflict',
@@ -11947,13 +12807,19 @@ const rawOpenApiSpec = {
             description:
               'Durable execution evidence. A succeeded action has one idempotent product effect; failed evidence contains only a bounded failure code.',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentExecution' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentExecution' },
+              },
             },
           },
-          '400': { description: 'Invalid path, approval, digest or confirmation' },
+          '400': {
+            description: 'Invalid path, approval, digest or confirmation',
+          },
           '401': { description: 'Valid Agent OAuth authentication required' },
           '403': { description: 'Authenticated principal is not an agent' },
-          '404': { description: 'Action or approval is outside the authenticated agent scope' },
+          '404': {
+            description: 'Action or approval is outside the authenticated agent scope',
+          },
           '409': {
             description:
               'Approval, action, authorization, resource, policy or readiness changed; or an execution is currently leased by another worker',
@@ -12043,9 +12909,15 @@ const rawOpenApiSpec = {
             },
           },
           '400': { description: 'Invalid action or execution identifier' },
-          '401': { description: 'Human or Agent OAuth authentication required' },
-          '403': { description: 'Caller is not an explicit agent or human principal' },
-          '404': { description: 'Execution is outside the exact caller and action scope' },
+          '401': {
+            description: 'Human or Agent OAuth authentication required',
+          },
+          '403': {
+            description: 'Caller is not an explicit agent or human principal',
+          },
+          '404': {
+            description: 'Execution is outside the exact caller and action scope',
+          },
         },
       },
     },
@@ -12059,7 +12931,9 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Live agent session',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentSession' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentSession' },
+              },
             },
           },
           '401': { description: 'Agent token is invalid, expired, or revoked' },
@@ -12089,7 +12963,10 @@ const rawOpenApiSpec = {
                     description:
                       'Caller-chosen stable grant reference. The response contains its tenant-namespaced platform identifier.',
                   },
-                  agentPrincipalId: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
+                  agentPrincipalId: {
+                    type: 'string',
+                    pattern: '^agt_[a-f0-9]{48}$',
+                  },
                   capabilities: {
                     type: 'array',
                     minItems: 1,
@@ -12125,14 +13002,20 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Agent delegation granted',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentDelegation' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentDelegation' },
+              },
             },
           },
           '400': { description: 'Invalid delegation or idempotency key' },
           '401': { description: 'Authentication required' },
           '403': { description: 'Human sponsor lacks current authority' },
-          '404': { description: 'Sponsored principal or event scope not found' },
-          '409': { description: 'Principal unavailable or idempotency conflict' },
+          '404': {
+            description: 'Sponsored principal or event scope not found',
+          },
+          '409': {
+            description: 'Principal unavailable or idempotency conflict',
+          },
         },
       },
     },
@@ -12188,13 +13071,19 @@ const rawOpenApiSpec = {
           '201': {
             description: 'Agent memory entry created',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentMemoryEntry' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentMemoryEntry' },
+              },
             },
           },
-          '400': { description: 'Invalid namespace, retention, content, or idempotency key' },
+          '400': {
+            description: 'Invalid namespace, retention, content, or idempotency key',
+          },
           '401': { description: 'Authentication required' },
           '403': { description: 'Human sponsor lacks current authority' },
-          '404': { description: 'Event scope not found or outside the sponsor scope' },
+          '404': {
+            description: 'Event scope not found or outside the sponsor scope',
+          },
           '409': { description: 'Idempotency or resource-binding conflict' },
         },
       },
@@ -12210,7 +13099,9 @@ const rawOpenApiSpec = {
           required: true,
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/AgentMemoryNamespaceRequestBody' },
+              schema: {
+                $ref: '#/components/schemas/AgentMemoryNamespaceRequestBody',
+              },
             },
           },
         },
@@ -12236,7 +13127,9 @@ const rawOpenApiSpec = {
           '400': { description: 'Invalid namespace or idempotency key' },
           '401': { description: 'Authentication required' },
           '403': { description: 'Human sponsor lacks current authority' },
-          '404': { description: 'Event scope not found or outside the sponsor scope' },
+          '404': {
+            description: 'Event scope not found or outside the sponsor scope',
+          },
           '409': { description: 'Idempotency or resource-binding conflict' },
         },
       },
@@ -12252,7 +13145,9 @@ const rawOpenApiSpec = {
           required: true,
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/AgentMemoryNamespaceRequestBody' },
+              schema: {
+                $ref: '#/components/schemas/AgentMemoryNamespaceRequestBody',
+              },
             },
           },
         },
@@ -12261,14 +13156,18 @@ const rawOpenApiSpec = {
             description: 'Checksummed agent memory export',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AgentMemoryExportBundle' },
+                schema: {
+                  $ref: '#/components/schemas/AgentMemoryExportBundle',
+                },
               },
             },
           },
           '400': { description: 'Invalid namespace or idempotency key' },
           '401': { description: 'Authentication required' },
           '403': { description: 'Human sponsor lacks current authority' },
-          '404': { description: 'Event scope not found or outside the sponsor scope' },
+          '404': {
+            description: 'Event scope not found or outside the sponsor scope',
+          },
           '409': { description: 'Idempotency or resource-binding conflict' },
         },
       },
@@ -12284,7 +13183,9 @@ const rawOpenApiSpec = {
           required: true,
           content: {
             'application/json': {
-              schema: { $ref: '#/components/schemas/AgentMemoryCorrectRequest' },
+              schema: {
+                $ref: '#/components/schemas/AgentMemoryCorrectRequest',
+              },
             },
           },
         },
@@ -12292,14 +13193,20 @@ const rawOpenApiSpec = {
           '200': {
             description: 'Corrected agent memory entry',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/AgentMemoryEntry' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentMemoryEntry' },
+              },
             },
           },
-          '400': { description: 'Invalid correction, retention, content, or idempotency key' },
+          '400': {
+            description: 'Invalid correction, retention, content, or idempotency key',
+          },
           '401': { description: 'Authentication required' },
           '403': { description: 'Human sponsor authorization changed' },
           '404': { description: 'Agent memory entry not found' },
-          '409': { description: 'Version, idempotency, or resource-binding conflict' },
+          '409': {
+            description: 'Version, idempotency, or resource-binding conflict',
+          },
         },
       },
     },
@@ -12335,11 +13242,15 @@ const rawOpenApiSpec = {
               },
             },
           },
-          '400': { description: 'Invalid namespace, version, or idempotency key' },
+          '400': {
+            description: 'Invalid namespace, version, or idempotency key',
+          },
           '401': { description: 'Authentication required' },
           '403': { description: 'Human sponsor authorization changed' },
           '404': { description: 'Agent memory entry or scope not found' },
-          '409': { description: 'Version, idempotency, or resource-binding conflict' },
+          '409': {
+            description: 'Version, idempotency, or resource-binding conflict',
+          },
         },
       },
     },
@@ -15727,7 +16638,11 @@ const rawOpenApiSpec = {
         responses: {
           '200': {
             description: 'OAuth token response',
-            headers: { 'Cache-Control': { schema: { type: 'string', const: 'no-store' } } },
+            headers: {
+              'Cache-Control': {
+                schema: { type: 'string', const: 'no-store' },
+              },
+            },
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/OAuthTokenResponse' },
@@ -15917,7 +16832,11 @@ const rawOpenApiSpec = {
                 additionalProperties: false,
                 required: ['organizationId', 'expiresAt'],
                 properties: {
-                  organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                  organizationId: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 32,
+                  },
                   expiresAt: { type: 'string', format: 'date-time' },
                 },
               },
@@ -15946,7 +16865,11 @@ const rawOpenApiSpec = {
                     'scope',
                   ],
                   properties: {
-                    authorizationId: { type: 'string', minLength: 3, maxLength: 64 },
+                    authorizationId: {
+                      type: 'string',
+                      minLength: 3,
+                      maxLength: 64,
+                    },
                     tenantId: { type: 'string' },
                     organizationId: { type: 'string' },
                     grantedByPrincipalId: { type: 'string' },
@@ -15970,25 +16893,33 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Invalid authorization lifetime or request',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '403': {
             description: 'Accepted organization owner or admin user required',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '503': {
             description: 'Authorization persistence is unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -16019,7 +16950,11 @@ const rawOpenApiSpec = {
                 additionalProperties: false,
                 required: ['organizationId'],
                 properties: {
-                  organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                  organizationId: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 32,
+                  },
                 },
               },
               example: { organizationId: 'organization_example' },
@@ -16034,37 +16969,49 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Invalid revocation request',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '403': {
             description: 'Accepted organization owner or admin user required',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Historical export authorization not found',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Authorization is already consumed or has a conflicting terminal state',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '503': {
             description: 'Authorization persistence is unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -16095,15 +17042,26 @@ const rawOpenApiSpec = {
                 additionalProperties: false,
                 required: ['organizationId', 'parentExportJobId'],
                 properties: {
-                  organizationId: { type: 'string', minLength: 3, maxLength: 32 },
-                  parentExportJobId: { type: 'string', minLength: 3, maxLength: 64 },
+                  organizationId: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 32,
+                  },
+                  parentExportJobId: {
+                    type: 'string',
+                    minLength: 3,
+                    maxLength: 64,
+                  },
                   cutoverFreeze: {
                     type: 'object',
                     additionalProperties: false,
                     required: ['frozenAt', 'receiptSha256'],
                     properties: {
                       frozenAt: { type: 'string', format: 'date-time' },
-                      receiptSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                      receiptSha256: {
+                        type: 'string',
+                        pattern: '^[a-f0-9]{64}$',
+                      },
                     },
                   },
                 },
@@ -16135,31 +17093,41 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Invalid delta or cutover request',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '401': {
             description: 'Unauthorized',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '403': {
             description: 'Insufficient permission or invalid principal scope',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Idempotency conflict, export in progress, or invalid durable parent',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '503': {
             description: 'Export signing or immutable storage is unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -16192,8 +17160,15 @@ const rawOpenApiSpec = {
                     additionalProperties: false,
                     required: ['organizationId'],
                     properties: {
-                      organizationId: { type: 'string', minLength: 3, maxLength: 32 },
-                      mode: { const: 'configuration', default: 'configuration' },
+                      organizationId: {
+                        type: 'string',
+                        minLength: 3,
+                        maxLength: 32,
+                      },
+                      mode: {
+                        const: 'configuration',
+                        default: 'configuration',
+                      },
                     },
                   },
                   {
@@ -16201,9 +17176,17 @@ const rawOpenApiSpec = {
                     additionalProperties: false,
                     required: ['organizationId', 'mode', 'authorizationId'],
                     properties: {
-                      organizationId: { type: 'string', minLength: 3, maxLength: 32 },
+                      organizationId: {
+                        type: 'string',
+                        minLength: 3,
+                        maxLength: 32,
+                      },
                       mode: { const: 'historical' },
-                      authorizationId: { type: 'string', minLength: 3, maxLength: 64 },
+                      authorizationId: {
+                        type: 'string',
+                        minLength: 3,
+                        maxLength: 64,
+                      },
                     },
                   },
                 ],
@@ -16902,7 +17885,9 @@ const rawOpenApiSpec = {
           '503': {
             description: 'Portable dry-run attestation is unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -16992,26 +17977,39 @@ const rawOpenApiSpec = {
         summary: 'List required and completed portable destination rebindings',
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.read'],
-        parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }],
+        parameters: [
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
         responses: {
           '200': {
             description: 'Portable destination rebinding status',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PortableImportRebindingStatus' },
+                schema: {
+                  $ref: '#/components/schemas/PortableImportRebindingStatus',
+                },
               },
             },
           },
           '400': {
             description: 'Job is not a portable import',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Migration job or preflight not found',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -17024,8 +18022,18 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.write'],
         parameters: [
-          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'portableId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'portableId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
         ],
         requestBody: {
           required: true,
@@ -17036,7 +18044,11 @@ const rawOpenApiSpec = {
                 additionalProperties: false,
                 required: ['destinationReference'],
                 properties: {
-                  destinationReference: { type: 'string', minLength: 1, maxLength: 200 },
+                  destinationReference: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 200,
+                  },
                 },
               },
             },
@@ -17047,26 +18059,34 @@ const rawOpenApiSpec = {
             description: 'Destination rebinding evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PortableImportRebinding' },
+                schema: {
+                  $ref: '#/components/schemas/PortableImportRebinding',
+                },
               },
             },
           },
           '400': {
             description: 'Invalid, secret-bearing, or unrequested destination reference',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Migration job not found',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Portable dry-run is not ready for rebinding',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -17110,19 +18130,25 @@ const rawOpenApiSpec = {
           '400': {
             description: 'Malformed confirmation, idempotency key, or request body',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Job state or idempotency conflict',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '503': {
             description: 'Receipt integrity or attestation trust unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -17135,8 +18161,18 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
         parameters: [
-          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'approvalId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'approvalId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'x-tixkit-confirmation',
             in: 'header',
@@ -17151,7 +18187,9 @@ const rawOpenApiSpec = {
               schema: {
                 type: 'object',
                 additionalProperties: false,
-                properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } },
+                properties: {
+                  reason: { type: 'string', minLength: 1, maxLength: 500 },
+                },
               },
             },
           },
@@ -17161,32 +18199,42 @@ const rawOpenApiSpec = {
             description: 'Approval revocation evidence',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PortableImportApprovalRevocation' },
+                schema: {
+                  $ref: '#/components/schemas/PortableImportApprovalRevocation',
+                },
               },
             },
           },
           '400': {
             description: 'Malformed confirmation or revocation body',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Approval not found in the scoped job',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Approval is already revoked with conflicting evidence',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '503': {
             description: 'Approval evidence persistence is unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -17199,7 +18247,12 @@ const rawOpenApiSpec = {
         security: [{ BearerAuth: [] }, { ApiKey: [] }],
         'x-required-permissions': ['migrations.commit'],
         parameters: [
-          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'jobId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
           {
             name: 'x-tixkit-confirmation',
             in: 'header',
@@ -17211,7 +18264,11 @@ const rawOpenApiSpec = {
           required: false,
           content: {
             'application/json': {
-              schema: { type: 'object', additionalProperties: false, maxProperties: 0 },
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                maxProperties: 0,
+              },
             },
           },
         },
@@ -17220,26 +18277,34 @@ const rawOpenApiSpec = {
             description: 'Portable import activated',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PortableImportActivated' },
+                schema: {
+                  $ref: '#/components/schemas/PortableImportActivated',
+                },
               },
             },
           },
           '400': {
             description: 'Malformed confirmation or request body',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '404': {
             description: 'Migration job not found',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
           '409': {
             description: 'Commit, authorization, input, or reconciliation gate is incomplete',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },
@@ -17281,7 +18346,9 @@ const rawOpenApiSpec = {
                 additionalProperties: false,
                 required: ['cutoverProof'],
                 properties: {
-                  cutoverProof: { $ref: '#/components/schemas/PortableCutoverProof' },
+                  cutoverProof: {
+                    $ref: '#/components/schemas/PortableCutoverProof',
+                  },
                 },
               },
             },
@@ -17307,7 +18374,9 @@ const rawOpenApiSpec = {
           '503': {
             description: 'Portable approval integrity or trust validation is unavailable',
             content: {
-              'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiError' },
+              },
             },
           },
         },

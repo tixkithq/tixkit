@@ -540,7 +540,8 @@ function validateAction(action: AgentAction): void {
     throw new AgentProtocolValidationError('action payload exceeds 256 KiB');
   if (action.kind === 'campaign.send') validateCampaignSendPayload(action.payload);
   if (action.kind === 'event.publish') validateEventPublishPayload(action.payload);
-  if (action.kind === 'event.prepare') validateEventPreparePayload(action.payload);
+  if (action.kind === 'event.prepare' || action.kind === 'event.update')
+    validateEventChangePayload(action.payload);
   const expectedAutonomy = descriptor.consequential
     ? 'execute_with_approval'
     : READ_ONLY_ACTIONS.has(action.kind)
@@ -757,7 +758,7 @@ export function validateAgentEventPrepareResolvedChanges(
     );
 }
 
-function validateEventPreparePayload(payload: Readonly<Record<string, unknown>>): void {
+function validateEventChangePayload(payload: Readonly<Record<string, unknown>>): void {
   if (
     JSON.stringify(Object.keys(payload).sort()) !==
       JSON.stringify(['changePreviewSha256', 'changes']) ||
@@ -767,7 +768,7 @@ function validateEventPreparePayload(payload: Readonly<Record<string, unknown>>)
     typeof payload.changes !== 'object' ||
     Array.isArray(payload.changes)
   )
-    throw new AgentProtocolValidationError('event prepare payload is invalid');
+    throw new AgentProtocolValidationError('event change payload is invalid');
   validateAgentEventPrepareResolvedChanges(payload.changes);
 }
 

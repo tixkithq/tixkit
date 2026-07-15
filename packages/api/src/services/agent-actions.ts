@@ -14,10 +14,12 @@ import {
   type AgentExecutionEvidence,
   type AgentEventReadResult,
   type AgentEventPrepareResult,
+  type AgentEventUpdatePreview,
   type AgentPrincipal,
   type AgentReadinessReadResult,
   validateAgentEventReadResult,
   validateAgentEventPrepareResult,
+  validateAgentEventUpdatePreview,
   validateAgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 import { AgentExecutionRepository, sql, type Database } from '@tixkit/db';
@@ -69,6 +71,15 @@ type EventPrepareAgentAction = AgentAction & {
   target: AgentAction['target'] & {
     resourceType: 'event';
     apiOperation: 'events.prepare';
+  };
+};
+
+type EventUpdateAgentAction = AgentAction & {
+  kind: 'event.update';
+  autonomy: 'execute_with_approval';
+  target: AgentAction['target'] & {
+    resourceType: 'event';
+    apiOperation: 'events.update';
   };
 };
 
@@ -134,11 +145,24 @@ export interface PreparedAgentEventPrepareAction extends PreparedAgentActionBase
   resultSha256: string;
 }
 
+export interface PreparedAgentEventUpdateAction extends PreparedAgentActionBase {
+  action: EventUpdateAgentAction;
+  authorization: {
+    eligibleForApproval: boolean;
+    reasons: readonly string[];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  preview: AgentEventUpdatePreview;
+  previewSha256: string;
+}
+
 export type PreparedAgentAction =
   | PreparedAgentEventPublishAction
   | PreparedAgentReadinessAction
   | PreparedAgentEventReadAction
-  | PreparedAgentEventPrepareAction;
+  | PreparedAgentEventPrepareAction
+  | PreparedAgentEventUpdateAction;
 
 function parseStrings(value: string, field: string): string[] {
   const parsed: unknown = JSON.parse(value);
@@ -231,9 +255,10 @@ function stableId(
 }
 
 function requestFingerprint(input: {
-  kind: 'event.publish' | 'event.read' | 'readiness.read' | 'event.prepare';
+  kind: 'event.publish' | 'event.read' | 'readiness.read' | 'event.prepare' | 'event.update';
   delegationGrantId: string;
   resourceId: string;
+  changes?: Readonly<Record<string, unknown>>;
 }): string {
   return agentSha256(input);
 }
@@ -257,6 +282,10 @@ type PrepareReadinessActionInput = PrepareAgentActionInput & {
 };
 type PrepareEventPrepareActionInput = PrepareAgentActionInput & {
   kind: 'event.prepare';
+  changes: Readonly<Record<string, unknown>>;
+};
+type PrepareEventUpdateActionInput = PrepareAgentActionInput & {
+  kind: 'event.update';
   changes: Readonly<Record<string, unknown>>;
 };
 
@@ -353,12 +382,14 @@ export class AgentActionService {
   async prepare(input: PrepareEventReadActionInput): Promise<PreparedAgentEventReadAction>;
   async prepare(input: PrepareReadinessActionInput): Promise<PreparedAgentReadinessAction>;
   async prepare(input: PrepareEventPrepareActionInput): Promise<PreparedAgentEventPrepareAction>;
+  async prepare(input: PrepareEventUpdateActionInput): Promise<PreparedAgentEventUpdateAction>;
   async prepare(
     input:
       | PrepareEventPublishActionInput
       | PrepareEventReadActionInput
       | PrepareReadinessActionInput
-      | PrepareEventPrepareActionInput,
+      | PrepareEventPrepareActionInput
+      | PrepareEventUpdateActionInput,
   ): Promise<PreparedAgentAction> {
     const fingerprint = requestFingerprint(input);
     return executeAgentActionTransaction(this.db, async (tx) => {
@@ -382,6 +413,7 @@ export class AgentActionService {
         const prepared = this.fromRow(replay);
         if (
           prepared.action.kind !== 'event.publish' &&
+          prepared.action.kind !== 'event.update' &&
           !(await this.isCurrentlyReadable(tx, prepared, await databaseNow(tx)))
         )
           throw new Error('AGENT_ACTION_RESOURCE_DENIED');
@@ -398,7 +430,7 @@ export class AgentActionService {
       if (!principalRow) throw new Error('AGENT_ACTION_PRINCIPAL_DENIED');
       const principal = toPrincipal(principalRow);
       const requiredCapability =
-        input.kind === 'event.publish'
+        input.kind === 'event.publish' || input.kind === 'event.update'
           ? 'events.execute'
           : input.kind === 'event.read'
             ? 'events.read'
@@ -479,7 +511,9 @@ export class AgentActionService {
         .where(
           'permission',
           '=',
-          input.kind === 'event.publish' || input.kind === 'event.prepare'
+          input.kind === 'event.publish' ||
+            input.kind === 'event.prepare' ||
+            input.kind === 'event.update'
             ? 'events.write'
             : 'events.read',
         )
@@ -497,10 +531,16 @@ export class AgentActionService {
         .forUpdate()
         .executeTakeFirst();
       if (!policy) throw new Error('AGENT_ACTION_POLICY_UNAVAILABLE');
-      if (input.kind !== 'event.publish' && (!policy.allowed || !policy.risk_allowed))
+      if (
+        input.kind !== 'event.publish' &&
+        input.kind !== 'event.update' &&
+        (!policy.allowed || !policy.risk_allowed)
+      )
         throw new Error('AGENT_ACTION_RESOURCE_DENIED');
       const readiness =
-        input.kind === 'event.read' || input.kind === 'event.prepare'
+        input.kind === 'event.read' ||
+        input.kind === 'event.prepare' ||
+        input.kind === 'event.update'
           ? undefined
           : await new ReadinessService(
               tx as Database,
@@ -520,7 +560,7 @@ export class AgentActionService {
       const eventProjection = input.kind === 'event.read' ? eventReadProjection(event) : undefined;
       const eventSnapshotSha256 = eventProjection ? agentSha256(eventProjection) : undefined;
       const resolvedEventPatch =
-        input.kind === 'event.prepare'
+        input.kind === 'event.prepare' || input.kind === 'event.update'
           ? await new EventUpdateService(tx as Database).resolvePatch({
               tenantId: input.tenantId,
               eventId: event.id,
@@ -540,6 +580,12 @@ export class AgentActionService {
           }
         : undefined;
       const changePreviewSha256 = changePreview ? agentSha256(changePreview) : undefined;
+      if (
+        input.kind === 'event.update' &&
+        changePreview &&
+        agentSha256(changePreview.before) === agentSha256(changePreview.after)
+      )
+        throw new Error('AGENT_ACTION_NO_MATERIAL_CHANGE');
       const action: AgentAction = {
         id: stableId('act', input.tenantId, input.agentPrincipalId, input.idempotencyKey),
         protocolVersion: AGENT_PROTOCOL_VERSION,
@@ -548,7 +594,7 @@ export class AgentActionService {
         delegationGrantId: input.delegationGrantId,
         kind: input.kind,
         autonomy:
-          input.kind === 'event.publish'
+          input.kind === 'event.publish' || input.kind === 'event.update'
             ? 'execute_with_approval'
             : input.kind === 'event.prepare'
               ? 'prepare'
@@ -561,16 +607,18 @@ export class AgentActionService {
           apiOperation:
             input.kind === 'event.publish'
               ? 'events.publish'
-              : input.kind === 'event.read'
-                ? 'events.get'
-                : input.kind === 'event.prepare'
-                  ? 'events.prepare'
-                  : 'events.readiness.get',
+              : input.kind === 'event.update'
+                ? 'events.update'
+                : input.kind === 'event.read'
+                  ? 'events.get'
+                  : input.kind === 'event.prepare'
+                    ? 'events.prepare'
+                    : 'events.readiness.get',
         },
         payload:
           input.kind === 'event.read'
             ? { eventSnapshotSha256 }
-            : input.kind === 'event.prepare'
+            : input.kind === 'event.prepare' || input.kind === 'event.update'
               ? { changePreviewSha256, changes: resolvedEventPatch!.after }
               : { readinessSnapshotSha256 },
         idempotencyKey: input.idempotencyKey,
@@ -581,7 +629,7 @@ export class AgentActionService {
       const sponsorPermissions = [
         input.kind === 'event.publish'
           ? 'events:publish'
-          : input.kind === 'event.prepare'
+          : input.kind === 'event.prepare' || input.kind === 'event.update'
             ? 'events:write'
             : 'events:read',
       ];
@@ -605,11 +653,11 @@ export class AgentActionService {
               ]),
             ]
           : [...decision.reasons];
-      if (input.kind !== 'event.publish' && !decision.allowed)
+      if (input.kind !== 'event.publish' && input.kind !== 'event.update' && !decision.allowed)
         throw new Error('AGENT_ACTION_RESOURCE_DENIED');
       const eligibleForApproval =
-        input.kind === 'event.publish' &&
-        readiness?.launchable === true &&
+        (input.kind === 'event.publish' || input.kind === 'event.update') &&
+        (input.kind !== 'event.publish' || readiness?.launchable === true) &&
         decision.reasons.length === 1 &&
         decision.reasons[0] === 'approval_required';
       const authorizationSnapshotSha256 = agentSha256({
@@ -629,15 +677,30 @@ export class AgentActionService {
       const expiresAt = new Date(
         Math.min(now.getTime() + ACTION_TTL_MILLISECONDS, new Date(delegation.expiresAt).getTime()),
       );
-      const dryRun = readiness
-        ? {
-            launchable: readiness.launchable,
-            readinessSnapshotSha256: readinessSnapshotSha256!,
-            blockingReasonCodes: [
-              ...new Set(readiness.requiredBlockers.flatMap((step) => step.reasonCodes)),
-            ],
-          }
-        : undefined;
+      const dryRun: PreparedAgentReadinessBase['dryRun'] | AgentEventUpdatePreview | undefined =
+        readiness
+          ? {
+              launchable: readiness.launchable,
+              readinessSnapshotSha256: readinessSnapshotSha256!,
+              blockingReasonCodes: [
+                ...new Set(readiness.requiredBlockers.flatMap((step) => step.reasonCodes)),
+              ],
+            }
+          : input.kind === 'event.update' && changePreview && changePreviewSha256
+            ? {
+                resourceId: changePreview.resourceId,
+                resourceVersion: changePreview.resourceVersion,
+                changePreviewSha256,
+                changedFields: changePreview.changedFields,
+                before: changePreview.before,
+                after: changePreview.after,
+                observedAt: now.toISOString(),
+                untrustedContentPaths: changePreview.changedFields.flatMap((field) => [
+                  `before.${field}`,
+                  `after.${field}`,
+                ]),
+              }
+            : undefined;
       const result:
         | AgentReadinessReadResult
         | AgentEventReadResult
@@ -685,6 +748,8 @@ export class AgentActionService {
           validateAgentEventPrepareResult(action, result as AgentEventPrepareResult);
         else validateAgentReadinessReadResult(action, result as AgentReadinessReadResult);
       }
+      if (action.kind === 'event.update' && dryRun)
+        validateAgentEventUpdatePreview(action, dryRun as AgentEventUpdatePreview);
       const resultSha256 = result ? agentSha256(result) : undefined;
       await tx
         .insertInto('agent_actions')
@@ -729,14 +794,17 @@ export class AgentActionService {
           sponsor_principal_id: action.sponsorPrincipalId,
           actor_type: 'agent',
           actor_principal_id: action.agentPrincipalId,
-          phase: input.kind === 'event.publish' ? 'prepared' : 'succeeded',
+          phase:
+            input.kind === 'event.publish' || input.kind === 'event.update'
+              ? 'prepared'
+              : 'succeeded',
           approval_id: null,
           execution_id: null,
           idempotency_key: input.idempotencyKey,
           request_fingerprint: fingerprint,
           authorization_sha256: authorizationSnapshotSha256,
           outcome:
-            input.kind !== 'event.publish'
+            input.kind !== 'event.publish' && input.kind !== 'event.update'
               ? 'succeeded'
               : eligibleForApproval
                 ? 'approval_required'
@@ -776,10 +844,23 @@ export class AgentActionService {
           result: result as AgentEventPrepareResult,
           resultSha256,
         };
+      if (action.kind === 'event.update' && dryRun)
+        return {
+          ...common,
+          preview: dryRun as AgentEventUpdatePreview,
+          previewSha256: agentSha256(dryRun as AgentEventUpdatePreview),
+          action: action as EventUpdateAgentAction,
+          authorization: {
+            eligibleForApproval,
+            reasons: authorizationReasons,
+            snapshotSha256: authorizationSnapshotSha256,
+            checkedAt: now.toISOString(),
+          },
+        };
       if (result && resultSha256 && action.kind === 'readiness.read' && dryRun)
         return {
           ...common,
-          dryRun,
+          dryRun: dryRun as PreparedAgentReadinessBase['dryRun'],
           action: action as ReadinessReadAgentAction,
           authorization: {
             allowed: true as const,
@@ -794,7 +875,7 @@ export class AgentActionService {
       if (!dryRun) throw new Error('AGENT_ACTION_PREVIEW_UNAVAILABLE');
       return {
         ...common,
-        dryRun,
+        dryRun: dryRun as PreparedAgentReadinessBase['dryRun'],
         action: action as EventPublishAgentAction,
         authorization: {
           eligibleForApproval,
@@ -832,6 +913,7 @@ export class AgentActionService {
       const prepared = this.fromRow(row);
       if (
         prepared.action.kind !== 'event.publish' &&
+        prepared.action.kind !== 'event.update' &&
         !(await this.isCurrentlyReadable(tx, prepared, await databaseNow(tx)))
       )
         return undefined;
@@ -882,7 +964,7 @@ export class AgentActionService {
       await this.assertDirectAuthorizationEvidence(tx, row);
       const action = this.fromRow(row);
       const authorized =
-        action.action.kind !== 'event.publish'
+        action.action.kind !== 'event.publish' && action.action.kind !== 'event.update'
           ? await this.isCurrentlyReadable(tx, action, await databaseNow(tx))
           : await this.hasLiveSponsorAuthority(
               tx,
@@ -902,6 +984,7 @@ export class AgentActionService {
     actionDigest: string;
     planSha256?: string;
     idempotencyKey: string;
+    expectedActionKind?: 'event.publish' | 'event.update';
   }): Promise<AgentApproval> {
     const fingerprint = agentSha256({
       actionId: input.actionId,
@@ -925,7 +1008,10 @@ export class AgentActionService {
         .executeTakeFirst();
       if (!row) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
       const prepared = this.fromRow(row);
-      if (prepared.action.kind !== 'event.publish') throw new Error('AGENT_ACTION_NOT_APPROVABLE');
+      if (prepared.action.kind !== 'event.publish' && prepared.action.kind !== 'event.update')
+        throw new Error('AGENT_ACTION_NOT_APPROVABLE');
+      if (input.expectedActionKind && prepared.action.kind !== input.expectedActionKind)
+        throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
       if (prepared.actionDigest !== input.actionDigest)
         throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
       const now = await databaseNow(tx);
@@ -1063,7 +1149,8 @@ export class AgentActionService {
           replayed.approverPrincipalId !== input.approverPrincipalId ||
           replayed.policyVersion !== prepared.action.expectedPolicyVersion ||
           replayed.approverPermissionSnapshot.length !== 1 ||
-          replayed.approverPermissionSnapshot[0] !== 'events:publish'
+          replayed.approverPermissionSnapshot[0] !==
+            (prepared.action.kind === 'event.publish' ? 'events:publish' : 'events:write')
         )
           throw new Error('persisted agent approval binding is invalid');
         return replayed;
@@ -1106,7 +1193,9 @@ export class AgentActionService {
         actionDigest: input.actionDigest,
         ...(input.planSha256 ? { planSha256: input.planSha256 } : {}),
         approverPrincipalId: input.approverPrincipalId,
-        approverPermissionSnapshot: ['events:publish'],
+        approverPermissionSnapshot: [
+          prepared.action.kind === 'event.publish' ? 'events:publish' : 'events:write',
+        ],
         policyVersion: prepared.action.expectedPolicyVersion,
         approvedAt: now.toISOString(),
         expiresAt: expiresAt.toISOString(),
@@ -1161,6 +1250,7 @@ export class AgentActionService {
     approvalId: string;
     actionDigest: string;
     idempotencyKey: string;
+    expectedActionKind?: 'event.publish' | 'event.update';
   }): Promise<AgentApproval> {
     const fingerprint = agentSha256({
       actionId: input.actionId,
@@ -1185,6 +1275,8 @@ export class AgentActionService {
         .executeTakeFirst();
       if (!action) throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
       const prepared = this.fromRow(action);
+      if (input.expectedActionKind && prepared.action.kind !== input.expectedActionKind)
+        throw new Error('AGENT_ACTION_APPROVAL_SCOPE_DENIED');
       if (prepared.actionDigest !== input.actionDigest)
         throw new Error('AGENT_ACTION_APPROVAL_DIGEST_MISMATCH');
       const replay = await tx
@@ -1280,6 +1372,7 @@ export class AgentActionService {
     actionId: string;
     approvalId: string;
     actionDigest: string;
+    expectedActionKind?: 'event.publish' | 'event.update';
   }): Promise<AgentExecution> {
     const prepared = await this.getForAgent({
       tenantId: input.tenantId,
@@ -1287,7 +1380,9 @@ export class AgentActionService {
       actionId: input.actionId,
     });
     if (!prepared) throw new Error('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
-    if (prepared.action.kind !== 'event.publish')
+    if (prepared.action.kind !== 'event.publish' && prepared.action.kind !== 'event.update')
+      throw new Error('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+    if (input.expectedActionKind && prepared.action.kind !== input.expectedActionKind)
       throw new Error('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
     if (prepared.actionDigest !== input.actionDigest)
       throw new Error('AGENT_ACTION_EXECUTION_DIGEST_MISMATCH');
@@ -1358,6 +1453,7 @@ export class AgentActionService {
       )
         throw new AgentExecutionConflictError('persisted agent execution binding is invalid');
       if (['succeeded', 'failed', 'compensated'].includes(existing.state)) return existing;
+      await this.eventPublishCheckpoints.beforeExecutionRun?.();
       const completed = await executionService.run({
         action: prepared.action,
         execution: existing,
@@ -1406,6 +1502,7 @@ export class AgentActionService {
         throw new AgentExecutionConflictError('agent execution reservation conflicted');
       throw error;
     }
+    await this.eventPublishCheckpoints.beforeExecutionRun?.();
     const completed = await executionService.run({
       action: prepared.action,
       execution: reserved,
@@ -1529,7 +1626,7 @@ export class AgentActionService {
     const { action } = prepared;
     if (
       !prepared.authorization.eligibleForApproval ||
-      action.kind !== 'event.publish' ||
+      (action.kind !== 'event.publish' && action.kind !== 'event.update') ||
       action.sponsorPrincipalId !== approverPrincipalId ||
       new Date(prepared.expiresAt).getTime() <= now.getTime()
     )
@@ -1595,31 +1692,56 @@ export class AgentActionService {
       .executeTakeFirst();
     if (sponsor?.status !== 'active' || !membership || !permission)
       throw new Error('AGENT_ACTION_NOT_APPROVABLE');
-    const readiness = await new ReadinessService(
-      tx as Database,
-      resolvePaymentMode(),
-    ).getEventLaunchReadiness({
-      tenantId: action.target.tenantId,
-      organizationId: event.organization_id,
-      brandId: event.brand_id,
-      eventId: event.id,
-      permissions: new Set(['events.write']),
-    });
-    const readinessSnapshotSha256 = eventPublishReadinessSnapshotSha256(readiness);
+    const readiness =
+      action.kind === 'event.publish'
+        ? await new ReadinessService(tx as Database, resolvePaymentMode()).getEventLaunchReadiness({
+            tenantId: action.target.tenantId,
+            organizationId: event.organization_id,
+            brandId: event.brand_id,
+            eventId: event.id,
+            permissions: new Set(['events.write']),
+          })
+        : undefined;
+    const readinessSnapshotSha256 = readiness
+      ? eventPublishReadinessSnapshotSha256(readiness)
+      : undefined;
+    const resolvedUpdate =
+      action.kind === 'event.update'
+        ? await new EventUpdateService(tx as Database).resolvePatch({
+            tenantId: action.target.tenantId,
+            eventId: event.id,
+            patch: {
+              ...(action.payload.changes as Readonly<Record<string, unknown>>),
+              expectedVersion: action.target.resourceVersion,
+            },
+          })
+        : undefined;
+    const updatePreviewSha256 = resolvedUpdate
+      ? agentSha256({
+          resourceId: event.id,
+          resourceVersion: safeInteger(event.version, 'event version'),
+          changedFields: resolvedUpdate.requestedFields,
+          before: resolvedUpdate.before,
+          after: resolvedUpdate.after,
+        })
+      : undefined;
     const decision = authorizeAgentAction({
       principal,
       delegation,
       action,
       actionDigest: prepared.actionDigest,
-      sponsorPermissions: ['events:publish'],
-      tenantAllowedActions: policy.allowed && policy.risk_allowed ? ['event.publish'] : [],
+      sponsorPermissions: [action.kind === 'event.publish' ? 'events:publish' : 'events:write'],
+      tenantAllowedActions: policy.allowed && policy.risk_allowed ? [action.kind] : [],
       currentResourceVersion: safeInteger(event.version, 'event version'),
       currentPolicyVersion: safeInteger(policy.policy_version, 'agent policy version'),
       now: now.toISOString(),
     });
     if (
-      !readiness.launchable ||
-      readinessSnapshotSha256 !== action.payload.readinessSnapshotSha256 ||
+      (action.kind === 'event.publish' &&
+        (!readiness?.launchable ||
+          readinessSnapshotSha256 !== action.payload.readinessSnapshotSha256)) ||
+      (action.kind === 'event.update' &&
+        updatePreviewSha256 !== action.payload.changePreviewSha256) ||
       decision.reasons.length !== 1 ||
       decision.reasons[0] !== 'approval_required'
     )
@@ -1641,7 +1763,7 @@ export class AgentActionService {
         version: safeInteger(policy.policy_version, 'agent policy version'),
       },
       resourceVersion: safeInteger(event.version, 'event version'),
-      readinessSnapshotSha256,
+      materialSnapshotSha256: readinessSnapshotSha256 ?? updatePreviewSha256,
       checkedAt: now.toISOString(),
     });
   }
@@ -1710,6 +1832,14 @@ export class AgentActionService {
         persistedPreview.changePreviewSha256 !== action.payload.changePreviewSha256
       )
         throw new Error('persisted agent event prepare preview is invalid');
+    } else if (action.kind === 'event.update') {
+      if (
+        !persistedPreview ||
+        typeof persistedPreview !== 'object' ||
+        Array.isArray(persistedPreview)
+      )
+        throw new Error('persisted agent event update preview is invalid');
+      validateAgentEventUpdatePreview(action, persistedPreview as AgentEventUpdatePreview);
     } else {
       const readinessSnapshotSha256 = action.payload.readinessSnapshotSha256;
       if (typeof readinessSnapshotSha256 !== 'string')
@@ -1761,7 +1891,7 @@ export class AgentActionService {
       if (reasons.length !== 0 || Boolean(row.eligible_for_approval))
         throw new Error('persisted direct agent authorization is invalid');
     } else if (row.result_json || row.result_sha256) {
-      throw new Error('persisted event publication action contains an unexpected direct result');
+      throw new Error('persisted consequential agent action contains an unexpected direct result');
     }
     const common = {
       actionDigest: row.action_digest,
@@ -1809,6 +1939,19 @@ export class AgentActionService {
         },
         result: result as AgentReadinessReadResult,
         resultSha256,
+      };
+    if (action.kind === 'event.update')
+      return {
+        ...common,
+        preview: persistedPreview as AgentEventUpdatePreview,
+        previewSha256: agentSha256(persistedPreview),
+        action: action as EventUpdateAgentAction,
+        authorization: {
+          eligibleForApproval: Boolean(row.eligible_for_approval),
+          reasons,
+          snapshotSha256: row.authorization_snapshot_sha256,
+          checkedAt: iso(row.prepared_at),
+        },
       };
     return {
       ...common,

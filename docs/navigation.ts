@@ -170,6 +170,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-07-31 direct event preparation',
         routeId: 'apiMigration20260730To20260731',
       },
+      {
+        label: 'Adopt 2026-08-01 approved event updates',
+        routeId: 'apiMigration20260731To20260801',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },

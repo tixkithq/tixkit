@@ -20,8 +20,12 @@ const retainedSchemaText = readFileSync(
 );
 const retainedSchema = JSON.parse(retainedSchemaText) as Record<string, unknown>;
 const currentSchema = JSON.parse(
-  readFileSync(new URL('../../schemas/agent-protocol-2026-07-31.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../schemas/agent-protocol-2026-08-01.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
+const retainedOverlayText = readFileSync(
+  new URL('../../schemas/agent-protocol-2026-07-31.json', import.meta.url),
+  'utf8',
+);
 const legacySchema = JSON.parse(
   readFileSync(new URL('../../schemas/agent-protocol-2026-07-11.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
@@ -29,6 +33,22 @@ const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 installAgentProtocolSchemaKeywords(ajv);
 ajv.addSchema(retainedSchema);
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-07-27.json', import.meta.url),
+      'utf8',
+    ),
+  ),
+);
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-08-01.json', import.meta.url),
+      'utf8',
+    ),
+  ),
+);
 const validate = ajv.compile(currentSchema);
 const validateRetained = ajv.getSchema('https://tixkit.com/schemas/agent-protocol/2026-07-22')!;
 const validateLegacy = ajv.compile(legacySchema);
@@ -69,7 +89,7 @@ function action(kind: AgentActionKind): AgentAction {
         ? campaign
         : kind === 'event.publish'
           ? { readinessSnapshotSha256: 'a'.repeat(64) }
-          : kind === 'event.prepare'
+          : kind === 'event.prepare' || kind === 'event.update'
             ? {
                 changePreviewSha256: 'a'.repeat(64),
                 changes: { title: 'Prepared event' },
@@ -83,6 +103,9 @@ function action(kind: AgentActionKind): AgentAction {
 
 describe('published agent schema parity', () => {
   it('retains the immutable prior protocol contract beside the current schema', () => {
+    expect(createHash('sha256').update(retainedOverlayText).digest('hex')).toBe(
+      '3f93361935842f28116f6b21f0d665bb44bfe436e4696221e7e789e4139430b6',
+    );
     const legacy = {
       ...action('event.publish'),
       protocolVersion: '2026-07-11',

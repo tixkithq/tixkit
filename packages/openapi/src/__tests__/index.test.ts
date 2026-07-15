@@ -96,7 +96,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-31');
+    expect(openApiSpec.info.version).toBe('2026-08-01');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -373,6 +373,55 @@ describe('openApiSpec', () => {
     );
     expect(prepared.required).toEqual(expect.arrayContaining(['result', 'resultSha256']));
     expect(prepared.properties).not.toHaveProperty('dryRun');
+  });
+
+  it('adds approval-bound event.update preparation, inspection and execution evidence', () => {
+    const prepare = openApiSpec.paths['/agent/event-updates'].post;
+    const inspect = openApiSpec.paths['/agent/event-updates/{actionId}'].get;
+    const action = openApiSpec.components.schemas.AgentEventUpdateAction;
+    const prepared = openApiSpec.components.schemas.PreparedAgentEventUpdateAction;
+    expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(prepare.requestBody.content['application/json'].schema.properties.changes).toEqual({
+      $ref: '#/components/schemas/AgentEventPrepareChanges',
+    });
+    expect(action.properties).toMatchObject({
+      kind: { type: 'string', const: 'event.update' },
+      autonomy: { type: 'string', const: 'execute_with_approval' },
+    });
+    expect(action.properties.target.properties.apiOperation).toEqual({
+      type: 'string',
+      const: 'events.update',
+    });
+    expect(action.properties.payload.properties.changes).toEqual({
+      $ref: '#/components/schemas/AgentEventPrepareResolvedChanges',
+    });
+    expect(prepared.required).toEqual(
+      expect.arrayContaining(['action', 'authorization', 'preview', 'previewSha256']),
+    );
+    expect(
+      openApiSpec.components.schemas.AgentApproval.properties.approverPermissionSnapshot.items,
+    ).toEqual({ type: 'string', enum: ['events:publish'] });
+    expect(
+      openApiSpec.components.schemas.AgentExecution.properties.result.properties.status,
+    ).toEqual({ type: 'string', enum: ['published'] });
+    expect(
+      openApiSpec.components.schemas.AgentEventUpdateApproval.properties.approverPermissionSnapshot
+        .items,
+    ).toEqual({ type: 'string', const: 'events:write' });
+    expect(
+      openApiSpec.components.schemas.AgentEventUpdateExecution.properties.result.properties.status,
+    ).toEqual({ type: 'string', const: 'updated' });
+    expect(openApiSpec.paths).toHaveProperty('/agent/event-updates/{actionId}/approvals');
+    expect(openApiSpec.paths).toHaveProperty('/agent/event-updates/{actionId}/executions');
+    expect(openApiSpec.paths).toHaveProperty(
+      '/agent/event-updates/{actionId}/executions/{executionId}',
+    );
+    expect(
+      openApiSpec.paths['/agent/actions/{actionId}'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toEqual({ $ref: '#/components/schemas/PreparedAgentAction' });
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

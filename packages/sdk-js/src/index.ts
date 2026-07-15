@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-31';
+export const TIXKIT_API_VERSION = '2026-08-01';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1737,6 +1737,24 @@ export type AgentEventPrepareResult = {
   untrustedContentPaths: string[];
 };
 
+export type AgentEventUpdateAction = AgentActionBase & {
+  kind: 'event.update';
+  autonomy: 'execute_with_approval';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'events.update';
+  };
+  payload: {
+    changePreviewSha256: string;
+    changes: AgentEventPrepareResolvedChanges;
+  };
+};
+
+export type AgentEventUpdatePreview = AgentEventPrepareResult;
+
 export type AgentReadinessReadResult = {
   resourceId: string;
   resourceVersion: number;
@@ -1815,6 +1833,20 @@ export type PreparedAgentEventPrepareAction = {
   resultSha256: string;
 };
 
+export type PreparedAgentEventUpdateAction = {
+  action: AgentEventUpdateAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    eligibleForApproval: boolean;
+    reasons: string[];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  preview: AgentEventUpdatePreview;
+  previewSha256: string;
+};
+
 export type AgentApproval = {
   id: string;
   tenantId: string;
@@ -1872,6 +1904,25 @@ export type AgentExecutionAuditRecord = {
 
 export type AgentExecutionEvidence = {
   execution: AgentExecution;
+  audit: AgentExecutionAuditRecord[];
+};
+
+export type AgentEventUpdateApproval = Omit<
+  AgentApproval,
+  'planSha256' | 'approverPermissionSnapshot'
+> & {
+  planSha256?: never;
+  approverPermissionSnapshot: Array<'events:write'>;
+};
+
+export type AgentEventUpdateExecution = Omit<AgentExecution, 'planSha256' | 'state' | 'result'> & {
+  planSha256?: never;
+  state: 'reserved' | 'running' | 'succeeded' | 'failed';
+  result?: { resourceId: string; resourceVersion: number; status: 'updated' };
+};
+
+export type AgentEventUpdateExecutionEvidence = {
+  execution: AgentEventUpdateExecution;
   audit: AgentExecutionAuditRecord[];
 };
 
@@ -4624,6 +4675,19 @@ class AgentActionResource {
     });
   }
 
+  async prepareEventUpdate(input: {
+    delegationGrantId: string;
+    resourceId: string;
+    changes: AgentEventPrepareChanges;
+    idempotencyKey: string;
+  }): Promise<PreparedAgentEventUpdateAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/event-updates', {
+      body,
+      idempotencyKey,
+    });
+  }
+
   async get(actionId: string): Promise<PreparedAgentAction> {
     return this.client.request('GET', `/agent/actions/${actionId}`);
   }
@@ -4638,6 +4702,63 @@ class AgentActionResource {
 
   async getEventPreparation(actionId: string): Promise<PreparedAgentEventPrepareAction> {
     return this.client.request('GET', `/agent/event-preparations/${actionId}`);
+  }
+
+  async getEventUpdate(actionId: string): Promise<PreparedAgentEventUpdateAction> {
+    return this.client.request('GET', `/agent/event-updates/${actionId}`);
+  }
+
+  async approveEventUpdate(input: {
+    actionId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<AgentEventUpdateApproval> {
+    return this.client.request('POST', `/agent/event-updates/${input.actionId}/approvals`, {
+      body: { actionDigest: input.actionDigest },
+      idempotencyKey: input.idempotencyKey,
+      headers: {
+        'X-Tixkit-Confirmation': `approve:${input.actionId}:${input.actionDigest}`,
+      },
+    });
+  }
+
+  async revokeEventUpdateApproval(input: {
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+    idempotencyKey: string;
+  }): Promise<AgentEventUpdateApproval> {
+    return this.client.request(
+      'POST',
+      `/agent/event-updates/${input.actionId}/approvals/${input.approvalId}/revoke`,
+      {
+        body: { actionDigest: input.actionDigest },
+        idempotencyKey: input.idempotencyKey,
+        headers: {
+          'X-Tixkit-Confirmation': `revoke:${input.actionId}:${input.approvalId}:${input.actionDigest}`,
+        },
+      },
+    );
+  }
+
+  async executeEventUpdate(input: {
+    actionId: string;
+    approvalId: string;
+    actionDigest: string;
+  }): Promise<AgentEventUpdateExecution> {
+    const executionKey = `execute:${input.actionId}:${input.approvalId}:${input.actionDigest}`;
+    return this.client.request('POST', `/agent/event-updates/${input.actionId}/executions`, {
+      body: { approvalId: input.approvalId, actionDigest: input.actionDigest },
+      idempotencyKey: executionKey,
+      headers: { 'X-Tixkit-Confirmation': executionKey },
+    });
+  }
+
+  async getEventUpdateExecution(
+    actionId: string,
+    executionId: string,
+  ): Promise<AgentEventUpdateExecutionEvidence> {
+    return this.client.request('GET', `/agent/event-updates/${actionId}/executions/${executionId}`);
   }
 
   async approve(input: {

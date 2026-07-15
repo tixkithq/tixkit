@@ -396,6 +396,14 @@ describe.sequential.each(driverCases)(
             policy_version: 1,
             updated_at: now,
           },
+          {
+            tenant_id: tenant.id,
+            action_kind: 'event.update',
+            allowed: true,
+            risk_allowed: true,
+            policy_version: 1,
+            updated_at: now,
+          },
         ])
         .execute();
       await db
@@ -465,6 +473,145 @@ describe.sequential.each(driverCases)(
         authorizationStateDigest: digest,
         expectedLeaseOwner: execution.leaseOwner!,
         expectedFenceToken: execution.fenceToken,
+      };
+    }
+
+    async function seedEventUpdateExecution(
+      suffix: string,
+      state: 'running' | 'reserved' = 'running',
+    ): Promise<{
+      updateAction: AgentAction;
+      updateExecution: AgentExecution;
+      updateAdapter: EventPublishAgentAdapter;
+      invoke: (digest: string) => Parameters<EventPublishAgentAdapter['invoke']>[0];
+    }> {
+      const event = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const resolved = await new EventUpdateService(db).resolvePatch({
+        tenantId: event.tenant_id,
+        eventId: event.id,
+        patch: {
+          expectedVersion: Number(event.version),
+          title: `Approved recovered update ${suffix}`,
+        },
+      });
+      const preview = {
+        resourceId: event.id,
+        resourceVersion: Number(event.version),
+        changedFields: resolved.requestedFields,
+        before: resolved.before,
+        after: resolved.after,
+      };
+      const now = new Date();
+      const updateAction: AgentAction = {
+        ...action,
+        id: `action_update_${suffix}`,
+        kind: 'event.update',
+        target: {
+          ...action.target,
+          resourceVersion: Number(event.version),
+          apiOperation: 'events.update',
+        },
+        payload: {
+          changePreviewSha256: agentSha256(preview),
+          changes: resolved.after,
+        },
+        idempotencyKey: `agent-update-${suffix}`,
+        expectedPolicyVersion: 1,
+        preparedAt: now.toISOString(),
+      };
+      const digest = agentActionDigest(updateAction);
+      const approvalId = `approval_update_${suffix}`;
+      const executionId = `execution_update_${suffix}`;
+      await db
+        .insertInto('agent_approvals')
+        .values({
+          id: approvalId,
+          tenant_id: event.tenant_id,
+          action_digest: digest,
+          plan_sha256: null,
+          approver_principal_id: updateAction.sponsorPrincipalId,
+          approver_permission_snapshot: JSON.stringify(['events:write']),
+          policy_version: 1,
+          approved_at: new Date(now.getTime() - 5_000),
+          expires_at: new Date(now.getTime() + 900_000),
+          revoked_at: null,
+          consumed_at: new Date(now.getTime() - 4_000),
+          consumed_execution_id: executionId,
+        })
+        .execute();
+      await db
+        .insertInto('agent_executions')
+        .values({
+          id: executionId,
+          tenant_id: event.tenant_id,
+          action_id: updateAction.id,
+          action_digest: digest,
+          agent_principal_id: updateAction.agentPrincipalId,
+          sponsor_principal_id: updateAction.sponsorPrincipalId,
+          delegation_grant_id: updateAction.delegationGrantId,
+          approval_id: approvalId,
+          idempotency_key: updateAction.idempotencyKey,
+          request_fingerprint: 'e'.repeat(64),
+          state,
+          resource_version: Number(event.version),
+          policy_version: 1,
+          fence_token: state === 'running' ? 1 : 0,
+          lease_owner: state === 'running' ? `worker_update_${suffix}` : null,
+          lease_expires_at: state === 'running' ? new Date(now.getTime() + 300_000) : null,
+          result: null,
+          failure_code: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const updateExecution: AgentExecution = {
+        id: executionId,
+        tenantId: event.tenant_id,
+        actionId: updateAction.id,
+        actionDigest: digest,
+        agentPrincipalId: updateAction.agentPrincipalId,
+        sponsorPrincipalId: updateAction.sponsorPrincipalId,
+        delegationGrantId: updateAction.delegationGrantId,
+        approvalId,
+        idempotencyKey: updateAction.idempotencyKey,
+        requestFingerprint: 'e'.repeat(64),
+        state,
+        resourceVersion: Number(event.version),
+        policyVersion: 1,
+        fenceToken: state === 'running' ? 1 : 0,
+        ...(state === 'running' ? { leaseOwner: `worker_update_${suffix}` } : {}),
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      const updateAdapter = new EventPublishAgentAdapter(db);
+      return {
+        updateAction,
+        updateExecution,
+        updateAdapter,
+        invoke: (authorizationStateDigest) => ({
+          tenantId: updateExecution.tenantId,
+          operation: 'events.update',
+          resourceType: 'event',
+          resourceId: updateAction.target.resourceId,
+          expectedResourceVersion: updateExecution.resourceVersion,
+          payload: updateAction.payload,
+          idempotencyKey: updateExecution.idempotencyKey,
+          agentPrincipalId: updateExecution.agentPrincipalId,
+          sponsorPrincipalId: updateExecution.sponsorPrincipalId,
+          delegationGrantId: updateExecution.delegationGrantId,
+          approvalId: updateExecution.approvalId,
+          executionId: updateExecution.id,
+          actionKind: 'event.update',
+          actionDigest: updateExecution.actionDigest,
+          expectedPolicyVersion: updateExecution.policyVersion,
+          authorizationStateDigest,
+          expectedLeaseOwner: updateExecution.leaseOwner!,
+          expectedFenceToken: updateExecution.fenceToken,
+        }),
       };
     }
 
@@ -567,6 +714,544 @@ describe.sequential.each(driverCases)(
       expect(await db.selectFrom('agent_action_effects').select('execution_id').execute()).toEqual(
         before.effects,
       );
+    });
+
+    it('prepares, freshly approves, executes and exactly replays one event.update', async () => {
+      const service = new AgentActionService(db);
+      const before = await db
+        .selectFrom('events')
+        .select(['title', 'version'])
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `event-update-prepare-${driver}-0001`,
+        kind: 'event.update',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+        changes: { title: `Approved event update ${driver}` },
+      });
+      expect(prepared.action).toMatchObject({
+        kind: 'event.update',
+        autonomy: 'execute_with_approval',
+        target: {
+          resourceVersion: Number(before.version),
+          apiOperation: 'events.update',
+        },
+      });
+      expect(prepared.authorization).toMatchObject({
+        eligibleForApproval: true,
+        reasons: ['approval_required'],
+      });
+      expect(prepared.preview).toMatchObject({
+        resourceId: action.target.resourceId,
+        resourceVersion: Number(before.version),
+        changedFields: ['title'],
+        before: { title: before.title },
+        after: { title: `Approved event update ${driver}` },
+      });
+      expect(prepared.previewSha256).toBe(agentSha256(prepared.preview));
+      expect(
+        await db
+          .selectFrom('events')
+          .select('title')
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ title: before.title });
+
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `event-update-approve-${driver}-0001`,
+      });
+      expect(approval.approverPermissionSnapshot).toEqual(['events:write']);
+
+      const executed = await service.execute({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        actionId: prepared.action.id,
+        approvalId: approval.id,
+        actionDigest: prepared.actionDigest,
+      });
+      expect(executed).toMatchObject({
+        state: 'succeeded',
+        resourceVersion: Number(before.version),
+        result: {
+          resourceId: action.target.resourceId,
+          resourceVersion: Number(before.version) + 1,
+          status: 'updated',
+        },
+      });
+      expect(
+        await service.execute({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: prepared.action.id,
+          approvalId: approval.id,
+          actionDigest: prepared.actionDigest,
+        }),
+      ).toEqual(executed);
+      expect(
+        await db
+          .selectFrom('events')
+          .select(['title', 'version'])
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        title: `Approved event update ${driver}`,
+        version: Number(before.version) + 1,
+      });
+      expect(
+        await db
+          .selectFrom('audit_logs')
+          .select(['actor_type', 'actor_id', 'action', 'request_id'])
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('resource_id', '=', action.target.resourceId)
+          .where('action', '=', 'event.updated')
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        actor_type: 'agent',
+        actor_id: action.agentPrincipalId,
+        action: 'event.updated',
+        request_id: executed.id,
+      });
+      expect(
+        await db
+          .selectFrom('agent_action_effects')
+          .select(['operation', 'result_sha256'])
+          .where('execution_id', '=', executed.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        operation: 'events.update',
+        result_sha256: agentSha256(executed.result!),
+      });
+    });
+
+    it.each(['product_audit', 'effect_record'] as const)(
+      'rolls back event.update when %s persistence fails',
+      async (failure) => {
+        const forcedFailure = Object.assign(new Error(`forced event update ${failure} failure`), {
+          code: 'FORCED_PERSISTENCE_FAILURE',
+        });
+        const service = new AgentActionService(db, {
+          beforeProductAudit:
+            failure === 'product_audit' ? () => Promise.reject(forcedFailure) : undefined,
+          beforeEffectRecord:
+            failure === 'effect_record' ? () => Promise.reject(forcedFailure) : undefined,
+        });
+        const before = await db
+          .selectFrom('events')
+          .select(['title', 'version'])
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow();
+        const prepared = await service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `event-update-${failure}-${driver}-0001`,
+          kind: 'event.update',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+          changes: { title: `Must roll back ${failure}` },
+        });
+        const approval = await service.approve({
+          tenantId: action.target.tenantId,
+          approverPrincipalId: action.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `event-update-${failure}-approval-${driver}-0001`,
+        });
+        await service
+          .execute({
+            tenantId: action.target.tenantId,
+            agentPrincipalId: action.agentPrincipalId,
+            actionId: prepared.action.id,
+            approvalId: approval.id,
+            actionDigest: prepared.actionDigest,
+          })
+          .catch(() => undefined);
+        const execution = await db
+          .selectFrom('agent_executions')
+          .select('id')
+          .where('action_id', '=', prepared.action.id)
+          .executeTakeFirstOrThrow();
+        expect(
+          await db
+            .selectFrom('events')
+            .select(['title', 'version'])
+            .where('id', '=', action.target.resourceId)
+            .executeTakeFirstOrThrow(),
+        ).toEqual(before);
+        expect(
+          await db
+            .selectFrom('audit_logs')
+            .select('id')
+            .where('request_id', '=', execution.id)
+            .execute(),
+        ).toHaveLength(0);
+        expect(
+          await db
+            .selectFrom('agent_action_effects')
+            .select('execution_id')
+            .where('execution_id', '=', execution.id)
+            .execute(),
+        ).toHaveLength(0);
+      },
+    );
+
+    it('rejects event.update no-ops before creating approval evidence', async () => {
+      const service = new AgentActionService(db);
+      const current = await db
+        .selectFrom('events')
+        .select('title')
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      await expect(
+        service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `event-update-noop-${driver}-0001`,
+          kind: 'event.update',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+          changes: { title: current.title },
+        }),
+      ).rejects.toThrow('AGENT_ACTION_NO_MATERIAL_CHANGE');
+      expect(
+        await db
+          .selectFrom('agent_actions')
+          .select('id')
+          .where('action_kind', '=', 'event.update')
+          .execute(),
+      ).toEqual([]);
+    });
+
+    it('invalidates event.update approval when the version changes after preparation', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `event-update-stale-${driver}-0001`,
+        kind: 'event.update',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+        changes: { title: 'Prepared before concurrent edit' },
+      });
+      await db
+        .updateTable('events')
+        .set({
+          title: 'Concurrent edit',
+          version: prepared.action.target.resourceVersion + 1,
+        })
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      await expect(
+        service.approve({
+          tenantId: action.target.tenantId,
+          approverPrincipalId: action.sponsorPrincipalId,
+          actionId: prepared.action.id,
+          actionDigest: prepared.actionDigest,
+          idempotencyKey: `event-update-stale-approval-${driver}-0001`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_NOT_APPROVABLE');
+    });
+
+    it('makes persisted event.update approval preview content immutable', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `event-update-preview-tamper-${driver}-0001`,
+        kind: 'event.update',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+        changes: { title: 'Actually approved title' },
+      });
+      await expect(
+        db
+          .updateTable('agent_actions')
+          .set({
+            dry_run_json: JSON.stringify({
+              ...prepared.preview,
+              after: { title: 'Substituted approval display' },
+            }),
+          })
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('id', '=', prepared.action.id)
+          .executeTakeFirstOrThrow(),
+      ).rejects.toThrow(/immutable/u);
+    });
+
+    it('denies event.update execution after sponsor write authority is revoked', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `event-update-revoked-${driver}-0001`,
+        kind: 'event.update',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+        changes: { title: 'Must never be applied' },
+      });
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `event-update-revoked-approval-${driver}-0001`,
+      });
+      await db
+        .deleteFrom('permission_grants')
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('principal_type', '=', 'user')
+        .where('principal_id', '=', action.sponsorPrincipalId)
+        .where('permission', '=', 'events.write')
+        .execute();
+      await expect(
+        service.execute({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: prepared.action.id,
+          approvalId: approval.id,
+          actionDigest: prepared.actionDigest,
+        }),
+      ).rejects.toThrow();
+      expect(
+        await db
+          .selectFrom('events')
+          .select('title')
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).not.toEqual({ title: 'Must never be applied' });
+    });
+
+    it.each([
+      'approval',
+      'policy',
+      'resource',
+      'lease_expiry',
+      'successor_fence',
+      'principal',
+      'delegation',
+      'permission',
+      'media_scan',
+      'venue',
+      'slug',
+    ] as const)('fails event.update closed when %s changes after claim', async (changed) => {
+      let invocationReached!: () => void;
+      let releaseInvocation!: () => void;
+      const atInvocation = new Promise<void>((resolve) => {
+        invocationReached = resolve;
+      });
+      const continueInvocation = new Promise<void>((resolve) => {
+        releaseInvocation = resolve;
+      });
+      const service = new AgentActionService(db, {
+        beforeInvocationTransaction: async () => {
+          invocationReached();
+          await continueInvocation;
+        },
+      });
+      const before = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const now = new Date();
+      const mediaExpiry = new Date(now.getTime() + 60_000);
+      if (changed === 'media_scan')
+        await db
+          .insertInto('upload_artifacts')
+          .values({
+            id: 'upl_event_update_post_claim',
+            tenant_id: before.tenant_id,
+            organization_id: before.organization_id,
+            brand_id: before.brand_id,
+            event_id: before.id,
+            created_by_user_id: null,
+            purpose: 'event_cover',
+            status: 'uploaded',
+            scan_status: 'clean',
+            scan_result: 'clean',
+            bucket: 'media',
+            object_key: 'event-update/post-claim.jpg',
+            file_name: 'post-claim.jpg',
+            content_type: 'image/jpeg',
+            size_bytes: 100,
+            checksum_sha256: 'a'.repeat(64),
+            client_token_hash: null,
+            metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+            consumed_by_checkout_session_id: null,
+            consumed_at: null,
+            completion_owner_token: null,
+            completion_started_at: null,
+            expires_at: mediaExpiry,
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      if (changed === 'venue')
+        await db
+          .insertInto('venues')
+          .values({
+            id: 'ven_event_update_post_claim',
+            tenant_id: before.tenant_id,
+            organization_id: before.organization_id,
+            name: 'Post-claim venue',
+            address: '{}',
+            timezone: 'UTC',
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      const changes: Record<string, unknown> =
+        changed === 'media_scan'
+          ? {
+              coverImageUrl:
+                'https://tixkit.example/v1/public/event-media/event_cover/upl_event_update_post_claim',
+            }
+          : changed === 'venue'
+            ? { venueId: 'ven_event_update_post_claim' }
+            : changed === 'slug'
+              ? { slug: `event-update-post-claim-${driver}` }
+              : { title: `Forbidden post-claim update ${changed}` };
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `event-update-post-claim-${changed}-${driver}-0001`,
+        kind: 'event.update',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+        changes,
+      });
+      const approval = await service.approve({
+        tenantId: action.target.tenantId,
+        approverPrincipalId: action.sponsorPrincipalId,
+        actionId: prepared.action.id,
+        actionDigest: prepared.actionDigest,
+        idempotencyKey: `event-update-post-claim-approval-${changed}-${driver}-0001`,
+      });
+      const executionAttempt = service.execute({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        actionId: prepared.action.id,
+        approvalId: approval.id,
+        actionDigest: prepared.actionDigest,
+      });
+      await atInvocation;
+      const execution = await db
+        .selectFrom('agent_executions')
+        .select('id')
+        .where('action_id', '=', prepared.action.id)
+        .executeTakeFirstOrThrow();
+      if (changed === 'approval')
+        await db
+          .updateTable('agent_approvals')
+          .set({ revoked_at: new Date() })
+          .where('id', '=', approval.id)
+          .execute();
+      if (changed === 'policy')
+        await db
+          .updateTable('agent_action_policies')
+          .set({ policy_version: prepared.action.expectedPolicyVersion + 1 })
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('action_kind', '=', 'event.update')
+          .execute();
+      if (changed === 'resource')
+        await db
+          .updateTable('events')
+          .set({ title: 'External post-claim winner', version: Number(before.version) + 1 })
+          .where('id', '=', action.target.resourceId)
+          .execute();
+      if (changed === 'lease_expiry')
+        await db
+          .updateTable('agent_executions')
+          .set({ lease_expires_at: new Date(Date.now() - 60_000) })
+          .where('id', '=', execution.id)
+          .execute();
+      if (changed === 'successor_fence')
+        await db
+          .updateTable('agent_executions')
+          .set({ fence_token: 2, lease_owner: 'worker_successor' })
+          .where('id', '=', execution.id)
+          .execute();
+      if (changed === 'principal')
+        await db
+          .updateTable('agent_principals')
+          .set({ state: 'revoked' })
+          .where('id', '=', action.agentPrincipalId)
+          .execute();
+      if (changed === 'delegation')
+        await db
+          .updateTable('agent_delegations')
+          .set({ revoked_at: new Date() })
+          .where('id', '=', action.delegationGrantId)
+          .execute();
+      if (changed === 'permission')
+        await db
+          .deleteFrom('permission_grants')
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('principal_id', '=', action.sponsorPrincipalId)
+          .where('permission', '=', 'events.write')
+          .execute();
+      if (changed === 'media_scan')
+        await db
+          .updateTable('upload_artifacts')
+          .set({ scan_status: 'rejected', updated_at: new Date() })
+          .where('id', '=', 'upl_event_update_post_claim')
+          .execute();
+      if (changed === 'venue')
+        await db.deleteFrom('venues').where('id', '=', 'ven_event_update_post_claim').execute();
+      if (changed === 'slug')
+        await new EventRepository(db).create({
+          tenantId: before.tenant_id,
+          organizationId: before.organization_id,
+          brandId: before.brand_id,
+          slug: `event-update-post-claim-${driver}`,
+          title: 'Post-claim slug winner',
+          currency: 'USD',
+          timezone: 'UTC',
+          startsAt: new Date(Date.now() + 172_800_000),
+        });
+      releaseInvocation();
+      await executionAttempt.catch(() => undefined);
+      const after = await db
+        .selectFrom('events')
+        .select(['title', 'version'])
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      expect(after).toEqual(
+        changed === 'resource'
+          ? { title: 'External post-claim winner', version: Number(before.version) + 1 }
+          : { title: before.title, version: before.version },
+      );
+      expect(
+        await db
+          .selectFrom('audit_logs')
+          .select('id')
+          .where('request_id', '=', execution.id)
+          .execute(),
+      ).toHaveLength(0);
+      expect(
+        await db
+          .selectFrom('agent_action_effects')
+          .select('execution_id')
+          .where('execution_id', '=', execution.id)
+          .execute(),
+      ).toHaveLength(0);
+      if (changed === 'media_scan') {
+        const media = await db
+          .selectFrom('upload_artifacts')
+          .select('expires_at')
+          .where('id', '=', 'upl_event_update_post_claim')
+          .executeTakeFirstOrThrow();
+        expect(Math.abs(new Date(media.expires_at).getTime() - mediaExpiry.getTime())).toBeLessThan(
+          1_000,
+        );
+      }
     });
 
     it('executes readiness.read directly with immutable result and audit evidence', async () => {
@@ -1173,7 +1858,10 @@ describe.sequential.each(driverCases)(
           })
           .executeTakeFirstOrThrow();
         await expect(
-          service.prepare({ ...request, idempotencyKey: cloneAction.idempotencyKey }),
+          service.prepare({
+            ...request,
+            idempotencyKey: cloneAction.idempotencyKey,
+          }),
           `${surface} replay`,
         ).rejects.toThrow();
         await expect(
@@ -1244,7 +1932,11 @@ describe.sequential.each(driverCases)(
       });
       expect(prepared.result.changedFields).toEqual(['venue', 'venueId']);
       expect(prepared.result.after).toEqual({
-        venue: { name: 'Derived prepared venue', city: 'Chicago', country: 'US' },
+        venue: {
+          name: 'Derived prepared venue',
+          city: 'Chicago',
+          country: 'US',
+        },
         venueId: 'ven_prepare_derived',
       });
       expect(prepared.action.payload.changes).toEqual(prepared.result.after);
@@ -1259,7 +1951,10 @@ describe.sequential.each(driverCases)(
       const resolved = await updateService.resolvePatch({
         tenantId: event.tenant_id,
         eventId: event.id,
-        patch: { expectedVersion: Number(event.version), venueId: 'ven_prepare_derived' },
+        patch: {
+          expectedVersion: Number(event.version),
+          venueId: 'ven_prepare_derived',
+        },
       });
       expect(resolved.requestedFields).toEqual(prepared.result.changedFields);
       expect(resolved.before).toEqual(prepared.result.before);
@@ -1275,7 +1970,11 @@ describe.sequential.each(driverCases)(
           .executeTakeFirstOrThrow(),
       ).toEqual({
         venue_id: 'ven_prepare_derived',
-        venue: { name: 'Derived prepared venue', city: 'Chicago', country: 'US' },
+        venue: {
+          name: 'Derived prepared venue',
+          city: 'Chicago',
+          country: 'US',
+        },
       });
     });
 
@@ -1307,7 +2006,9 @@ describe.sequential.each(driverCases)(
           size_bytes: 100,
           checksum_sha256: 'c'.repeat(64),
           client_token_hash: null,
-          metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+          metadata: JSON.stringify({
+            image: { width: 1200, height: 630, format: 'jpeg' },
+          }),
           consumed_by_checkout_session_id: null,
           consumed_at: null,
           completion_owner_token: null,
@@ -1357,7 +2058,9 @@ describe.sequential.each(driverCases)(
             'https://tixkit.local/v1/public/event-media/event_cover/upl_event_update_atomic',
         },
       });
-      await new EventRepository(db).update(event.id, { title: 'Concurrent winner' });
+      await new EventRepository(db).update(event.id, {
+        title: 'Concurrent winner',
+      });
       const leaseBeforeStaleApply = await db
         .selectFrom('upload_artifacts')
         .select(['expires_at', 'updated_at'])
@@ -1377,6 +2080,56 @@ describe.sequential.each(driverCases)(
       expect(
         await db.selectFrom('events').select('title').where('id', '=', event.id).executeTakeFirst(),
       ).toEqual({ title: 'Concurrent winner' });
+
+      const raceEvent = await db
+        .selectFrom('events')
+        .select(['version'])
+        .where('id', '=', event.id)
+        .executeTakeFirstOrThrow();
+      let releaseCompareAndSwap!: () => void;
+      let reachedCompareAndSwap!: () => void;
+      const atCompareAndSwap = new Promise<void>((resolve) => {
+        reachedCompareAndSwap = resolve;
+      });
+      const continueCompareAndSwap = new Promise<void>((resolve) => {
+        releaseCompareAndSwap = resolve;
+      });
+      const racingService = new EventUpdateService(db, {
+        beforeUpdateIfVersion: async () => {
+          reachedCompareAndSwap();
+          await continueCompareAndSwap;
+        },
+      });
+      const racingResolved = await racingService.resolvePatch({
+        tenantId: event.tenant_id,
+        eventId: event.id,
+        patch: {
+          expectedVersion: Number(raceEvent.version),
+          title: 'Losing compare-and-swap update',
+          coverImageUrl:
+            'https://tixkit.local/v1/public/event-media/event_cover/upl_event_update_atomic',
+        },
+      });
+      const leaseBeforeRace = await db
+        .selectFrom('upload_artifacts')
+        .select(['expires_at', 'updated_at'])
+        .where('id', '=', 'upl_event_update_atomic')
+        .executeTakeFirstOrThrow();
+      const losingApply = racingService.applyResolvedPatch(racingResolved);
+      await atCompareAndSwap;
+      await new EventRepository(db).update(event.id, { title: 'Racing compare-and-swap winner' });
+      releaseCompareAndSwap();
+      await expect(losingApply).resolves.toMatchObject({ applied: false });
+      expect(
+        await db
+          .selectFrom('upload_artifacts')
+          .select(['expires_at', 'updated_at'])
+          .where('id', '=', 'upl_event_update_atomic')
+          .executeTakeFirstOrThrow(),
+      ).toEqual(leaseBeforeRace);
+      expect(
+        await db.selectFrom('events').select('title').where('id', '=', event.id).executeTakeFirst(),
+      ).toEqual({ title: 'Racing compare-and-swap winner' });
     });
 
     it('rolls back an earlier media lease renewal when a later binding fails', async () => {
@@ -1411,7 +2164,9 @@ describe.sequential.each(driverCases)(
             size_bytes: 100,
             checksum_sha256: checksum!.repeat(64),
             client_token_hash: null,
-            metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+            metadata: JSON.stringify({
+              image: { width: 1200, height: 630, format: 'jpeg' },
+            }),
             consumed_by_checkout_session_id: null,
             consumed_at: null,
             completion_owner_token: null,
@@ -1444,7 +2199,10 @@ describe.sequential.each(driverCases)(
         .executeTakeFirstOrThrow();
       await db
         .updateTable('upload_artifacts')
-        .set({ scan_status: 'rejected', updated_at: new Date(now.getTime() + 1_000) })
+        .set({
+          scan_status: 'rejected',
+          updated_at: new Date(now.getTime() + 1_000),
+        })
         .where('id', '=', 'upl_prepare_rollback_cover')
         .execute();
       await expect(service.applyResolvedPatch(resolved)).rejects.toThrow(
@@ -1521,7 +2279,9 @@ describe.sequential.each(driverCases)(
           size_bytes: 100,
           checksum_sha256: 'd'.repeat(64),
           client_token_hash: null,
-          metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+          metadata: JSON.stringify({
+            image: { width: 1200, height: 630, format: 'jpeg' },
+          }),
           consumed_by_checkout_session_id: null,
           consumed_at: null,
           completion_owner_token: null,
@@ -1545,7 +2305,11 @@ describe.sequential.each(driverCases)(
         { currency: 'usd' },
         { seo: { title: 'Prepared SEO', extra: 'not allowed' } },
         { externalUrl: 'javascript:alert(1)' },
-        { venue: { level1: { level2: { level3: { level4: { level5: true } } } } } },
+        {
+          venue: {
+            level1: { level2: { level3: { level4: { level5: true } } } },
+          },
+        },
         { title: 'Unsafe\u0000title' },
         { coverImageAlt: 'Unsafe\u0000alt text' },
         { lastSetupSection: 'Unsafe\u0000section' },
@@ -1639,7 +2403,9 @@ describe.sequential.each(driverCases)(
         if (surface === 'principal_capability')
           await db
             .updateTable('agent_principals')
-            .set({ capabilities: JSON.stringify(['events.execute', 'events.read']) })
+            .set({
+              capabilities: JSON.stringify(['events.execute', 'events.read']),
+            })
             .where('tenant_id', '=', action.target.tenantId)
             .where('id', '=', action.agentPrincipalId)
             .executeTakeFirstOrThrow();
@@ -1660,7 +2426,9 @@ describe.sequential.each(driverCases)(
         if (surface === 'delegation_capability')
           await db
             .updateTable('agent_delegations')
-            .set({ capabilities: JSON.stringify(['events.execute', 'events.read']) })
+            .set({
+              capabilities: JSON.stringify(['events.execute', 'events.read']),
+            })
             .where('tenant_id', '=', action.target.tenantId)
             .where('id', '=', action.delegationGrantId)
             .executeTakeFirstOrThrow();
@@ -1807,7 +2575,10 @@ describe.sequential.each(driverCases)(
                 .set({
                   result_json: JSON.stringify({
                     ...prepared.result,
-                    after: { ...prepared.result.after, title: 'Substituted persisted title' },
+                    after: {
+                      ...prepared.result.after,
+                      title: 'Substituted persisted title',
+                    },
                   }),
                 })
                 .where('tenant_id', '=', action.target.tenantId)
@@ -3855,6 +4626,96 @@ describe.sequential.each(driverCases)(
       ).toMatchObject({ state: 'succeeded' });
     });
 
+    it('lets a successor reconcile one committed event.update effect without reinvocation', async () => {
+      const seeded = await seedEventUpdateExecution('successor', 'reserved');
+      const repository = new AgentExecutionRepository(db);
+      let rejectFirstCompletion = true;
+      let invocations = 0;
+      const store: AgentExecutionStore = {
+        reserveAndConsume: (input) => repository.reserveAndConsume(input),
+        claim: (input) => repository.claim(input),
+        recoverEffect: (input) => repository.recoverEffect(input),
+        complete: async (input) => {
+          if (rejectFirstCompletion) {
+            rejectFirstCompletion = false;
+            return false;
+          }
+          return repository.complete(input);
+        },
+      };
+      let auditSequence = 0;
+      const executionService = new DurableAgentExecutionService(
+        store,
+        {
+          async invoke(input) {
+            invocations += 1;
+            return seeded.updateAdapter.invoke(input);
+          },
+        },
+        { now: () => new Date() },
+        {
+          executionId: () => 'unused_update_execution',
+          auditId: () => `audit_update_recovery_${++auditSequence}`,
+        },
+        seeded.updateAdapter,
+      );
+      await expect(
+        executionService.run({
+          action: seeded.updateAction,
+          execution: seeded.updateExecution,
+          workerId: 'worker_update_first',
+        }),
+      ).rejects.toBeInstanceOf(AgentExecutionConflictError);
+      await db
+        .updateTable('agent_executions')
+        .set({ lease_expires_at: new Date(Date.now() - 60_000) })
+        .where('id', '=', seeded.updateExecution.id)
+        .execute();
+      await db
+        .updateTable('agent_approvals')
+        .set({ revoked_at: new Date() })
+        .where('id', '=', seeded.updateExecution.approvalId)
+        .execute();
+      await db
+        .updateTable('agent_principals')
+        .set({ state: 'revoked' })
+        .where('id', '=', seeded.updateExecution.agentPrincipalId)
+        .execute();
+      await db
+        .updateTable('agent_delegations')
+        .set({ revoked_at: new Date() })
+        .where('id', '=', seeded.updateExecution.delegationGrantId)
+        .execute();
+      await expect(
+        executionService.run({
+          action: seeded.updateAction,
+          execution: seeded.updateExecution,
+          workerId: 'worker_update_successor',
+        }),
+      ).resolves.toMatchObject({
+        state: 'succeeded',
+        result: { status: 'updated' },
+      });
+      expect(invocations).toBe(1);
+      expect(
+        await db
+          .selectFrom('events')
+          .select(['title', 'version'])
+          .where('id', '=', seeded.updateAction.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        title: 'Approved recovered update successor',
+        version: seeded.updateAction.target.resourceVersion + 1,
+      });
+      expect(
+        await db
+          .selectFrom('agent_action_effects')
+          .select('execution_id')
+          .where('execution_id', '=', seeded.updateExecution.id)
+          .execute(),
+      ).toHaveLength(1);
+    });
+
     it.each([
       { resourceVersion: 999, status: 'published' },
       { resourceVersion: 2, status: 'failed' },
@@ -3883,6 +4744,52 @@ describe.sequential.each(driverCases)(
         adapter.invoke(invocation(agentAuthorizationStateDigest(state))),
       ).rejects.toMatchObject({ code: 'AGENT_AUTHORIZATION_CHANGED' });
     });
+
+    it.each(['result', 'live_projection'] as const)(
+      'rejects a forged event.update %s effect',
+      async (forgery) => {
+        const seeded = await seedEventUpdateExecution(`forged_${forgery}`);
+        const forged = {
+          resourceId: seeded.updateAction.target.resourceId,
+          resourceVersion: seeded.updateAction.target.resourceVersion + 1,
+          status: forgery === 'result' ? 'published' : 'updated',
+        };
+        const state = await seeded.updateAdapter.load({
+          action: seeded.updateAction,
+          execution: seeded.updateExecution,
+        });
+        await db
+          .insertInto('agent_action_effects')
+          .values({
+            execution_id: seeded.updateExecution.id,
+            tenant_id: seeded.updateExecution.tenantId,
+            action_digest: seeded.updateExecution.actionDigest,
+            resource_type: 'event',
+            resource_id: seeded.updateAction.target.resourceId,
+            operation: 'events.update',
+            idempotency_key: seeded.updateExecution.idempotencyKey,
+            expected_policy_version: seeded.updateExecution.policyVersion,
+            expected_resource_version: seeded.updateExecution.resourceVersion,
+            effect_fence_token: seeded.updateExecution.fenceToken,
+            result: JSON.stringify(forged),
+            result_sha256: agentSha256(forged),
+            created_at: new Date(),
+          })
+          .execute();
+        if (forgery === 'live_projection')
+          await db
+            .updateTable('events')
+            .set({
+              title: 'Unapproved recovered projection',
+              version: seeded.updateAction.target.resourceVersion + 1,
+            })
+            .where('id', '=', seeded.updateAction.target.resourceId)
+            .execute();
+        await expect(
+          seeded.updateAdapter.invoke(seeded.invoke(agentAuthorizationStateDigest(state))),
+        ).rejects.toMatchObject({ code: 'AGENT_AUTHORIZATION_CHANGED' });
+      },
+    );
 
     it.each(['approval', 'policy', 'resource', 'lease_expiry', 'successor_fence'] as const)(
       'rejects a %s change committed between load and invoke',

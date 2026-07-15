@@ -28,14 +28,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./schema": "./schemas/agent-protocol-2026-07-31.json",
+    "./schema": "./schemas/agent-protocol-2026-08-01.json",
     "./schemas/2026-07-11": "./schemas/agent-protocol-2026-07-11.json",
     "./schemas/2026-07-22": "./schemas/agent-protocol-2026-07-22.json",
     "./schemas/2026-07-31": "./schemas/agent-protocol-2026-07-31.json",
+    "./schemas/2026-08-01": "./schemas/agent-protocol-2026-08-01.json",
     "./schemas/agent-action-contracts/2026-07-27": "./schemas/agent-action-contracts-2026-07-27.json",
     "./schemas/agent-action-contracts/2026-07-29": "./schemas/agent-action-contracts-2026-07-29.json",
     "./schemas/agent-action-contracts/2026-07-30": "./schemas/agent-action-contracts-2026-07-30.json",
     "./schemas/agent-action-contracts/2026-07-31": "./schemas/agent-action-contracts-2026-07-31.json",
+    "./schemas/agent-action-contracts/2026-08-01": "./schemas/agent-action-contracts-2026-08-01.json",
     "./schemas/agent-plan/2026-07-27": "./schemas/agent-plan-2026-07-27.json",
     "./package.json": "./package.json"
   },
