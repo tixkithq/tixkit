@@ -58,6 +58,21 @@ const event = {
   brandId: 'brd_1',
 };
 
+const launchReadiness = {
+  tenantId: 'tnt_1',
+  organizationId: 'org_1',
+  brandId: 'brd_1',
+  eventId: 'evt_1',
+  eventVersion: 1,
+  generatedAt: '2026-07-01T00:00:00.000Z',
+  paymentMode: 'capture' as const,
+  launchable: true,
+  published: true,
+  requiredBlockers: [],
+  recommendedWarnings: [],
+  steps: [],
+};
+
 function setClipboard(clipboard: Clipboard | undefined) {
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
@@ -81,7 +96,20 @@ function mockLoadedEventDetail() {
       return { data: [], loading: false, error: null, refetch: vi.fn() };
     }
     if (key === 'listOrders') {
-      return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+      return {
+        data: { items: [] },
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      };
+    }
+    if (key === 'eventLaunchReadiness') {
+      return {
+        data: launchReadiness,
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      };
     }
     return { data: undefined, loading: false, error: null, refetch: vi.fn() };
   });
@@ -148,7 +176,7 @@ describe('EventDetailView', () => {
     mockLoadedEventDetail();
 
     const view = render(<EventDetailView eventId="evt_1" />);
-    fireEvent.click(await view.findByRole('button', { name: 'Copy link' }));
+    fireEvent.click(await view.findByRole('button', { name: 'Copy public link' }));
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('http://localhost:3000/e/evt_1');
@@ -162,11 +190,14 @@ describe('EventDetailView', () => {
     mockLoadedEventDetail();
 
     const view = render(<EventDetailView eventId="evt_1" />);
-    fireEvent.click(await view.findByRole('button', { name: 'Copy link' }));
+    fireEvent.click(await view.findByRole('button', { name: 'Copy public link' }));
 
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(
       'Copy unavailable. Select and copy the public event URL manually.',
+    );
+    expect(view.getByRole('textbox', { name: 'Public event URL' })).toHaveValue(
+      'http://localhost:3000/e/evt_1',
     );
   });
 
@@ -176,7 +207,7 @@ describe('EventDetailView', () => {
     mockLoadedEventDetail();
 
     const view = render(<EventDetailView eventId="evt_1" />);
-    fireEvent.click(await view.findByRole('button', { name: 'Copy link' }));
+    fireEvent.click(await view.findByRole('button', { name: 'Copy public link' }));
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('http://localhost:3000/e/evt_1');
@@ -185,6 +216,243 @@ describe('EventDetailView', () => {
     expect(toast.error).toHaveBeenCalledWith(
       'Unable to copy public event link. Select and copy it manually.',
     );
+    expect(view.getByRole('textbox', { name: 'Public event URL' })).toHaveValue(
+      'http://localhost:3000/e/evt_1',
+    );
+  });
+
+  it('ranks only active ticket inventory as a live risk', async () => {
+    mockLoadedEventDetail();
+    useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+      if (key === 'getEvent') {
+        return { data: event, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listTicketTypes') {
+        return {
+          data: [
+            {
+              id: 'ticket_draft',
+              eventId: 'evt_1',
+              name: 'Draft ticket',
+              status: 'draft',
+              priceCents: 1000,
+              currency: 'USD',
+              quantityTotal: 5,
+              quantitySold: 5,
+              maxPerOrder: 2,
+              requiresAccessCode: false,
+            },
+            {
+              id: 'ticket_active',
+              eventId: 'evt_1',
+              name: 'Active ticket',
+              status: 'active',
+              priceCents: 1000,
+              currency: 'USD',
+              quantityTotal: 10,
+              quantitySold: 8,
+              maxPerOrder: 2,
+              requiresAccessCode: false,
+            },
+          ],
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'listOrders') {
+        return {
+          data: { items: [] },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'eventLaunchReadiness') {
+        return {
+          data: launchReadiness,
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      return { data: undefined, loading: false, error: null, refetch: vi.fn() };
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText('Review inventory risk')).toBeInTheDocument();
+    expect(view.getByText(/1 ticket type may need more inventory/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['listTicketTypes', 'checking', 'Checking inventory, messaging, and launch health'],
+    ['listMessages', 'failed', 'Health checks are incomplete'],
+    ['eventLaunchReadiness', 'failed', 'Health checks are incomplete'],
+  ])('does not recommend from incomplete %s signals (%s)', async (failedKey, _state, notice) => {
+    mockLoadedEventDetail();
+    const refetchTickets = vi.fn();
+    const refetchMessages = vi.fn();
+    const refetchReadiness = vi.fn();
+    useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+      if (key === 'getEvent') {
+        return { data: event, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listTicketTypes') {
+        return {
+          data: [],
+          loading: failedKey === key,
+          error: null,
+          refetch: refetchTickets,
+        };
+      }
+      if (key === 'listOrders') {
+        return {
+          data: { items: [] },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'eventLaunchReadiness') {
+        return {
+          data: failedKey === key ? undefined : launchReadiness,
+          loading: false,
+          error: failedKey === key ? new Error('readiness unavailable') : null,
+          refetch: refetchReadiness,
+        };
+      }
+      if (key === 'listMessages') {
+        return {
+          data: [],
+          loading: false,
+          error: failedKey === key ? new Error('messages unavailable') : null,
+          refetch: refetchMessages,
+        };
+      }
+      return {
+        data: undefined,
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      };
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText(new RegExp(notice))).toBeInTheDocument();
+    expect(view.queryByText('Recommended next')).not.toBeInTheDocument();
+    if (failedKey === 'listMessages') {
+      fireEvent.click(view.getAllByRole('button', { name: 'Retry health checks' })[0]);
+      expect(refetchTickets).toHaveBeenCalledOnce();
+      expect(refetchMessages).toHaveBeenCalledOnce();
+      expect(refetchReadiness).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('reports consent suppressions as safe policy outcomes instead of messaging incidents', async () => {
+    mockLoadedEventDetail();
+    useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+      if (key === 'getEvent') {
+        return { data: event, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listTicketTypes') {
+        return { data: [], loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listOrders') {
+        return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listMessages') {
+        return {
+          data: [
+            {
+              id: 'campaign_1',
+              eventId: 'evt_1',
+              name: 'Door reminder',
+              channel: 'email',
+              status: 'sent',
+              audience: 'all_attendees',
+              audienceLabel: 'All attendees',
+              queuedCount: 1,
+              sentCount: 0,
+              deliveredCount: 0,
+              failedCount: 0,
+              suppressedCount: 1,
+              createdAt: '2026-07-01T00:00:00.000Z',
+            },
+          ],
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'eventLaunchReadiness') {
+        return { data: launchReadiness, loading: false, error: null, refetch: vi.fn() };
+      }
+      return { data: undefined, loading: false, error: null, refetch: vi.fn() };
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(
+      await view.findByText(/No failed deliveries\. 1 recipient was safely suppressed/),
+    ).toBeInTheDocument();
+    expect(view.queryByText('Review message outcomes')).not.toBeInTheDocument();
+  });
+
+  it('prioritizes only failed deliveries when outcomes also include policy suppressions', async () => {
+    mockLoadedEventDetail();
+    useAdminDataMock.mockImplementation((queryKey: unknown[]) => {
+      const key = Array.isArray(queryKey) ? queryKey[0] : queryKey;
+      if (key === 'getEvent') {
+        return { data: event, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listTicketTypes') {
+        return { data: [], loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listOrders') {
+        return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+      }
+      if (key === 'listMessages') {
+        return {
+          data: [
+            {
+              id: 'campaign_1',
+              eventId: 'evt_1',
+              name: 'Door reminder',
+              channel: 'email',
+              status: 'sent',
+              audience: 'all_attendees',
+              audienceLabel: 'All attendees',
+              queuedCount: 5,
+              sentCount: 0,
+              deliveredCount: 0,
+              failedCount: 2,
+              suppressedCount: 3,
+              createdAt: '2026-07-01T00:00:00.000Z',
+            },
+          ],
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
+      }
+      if (key === 'eventLaunchReadiness') {
+        return { data: launchReadiness, loading: false, error: null, refetch: vi.fn() };
+      }
+      return { data: undefined, loading: false, error: null, refetch: vi.fn() };
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByText('Review message outcomes')).toBeInTheDocument();
+    expect(view.getByText('2 failed delivery outcomes need review.')).toBeInTheDocument();
+    expect(
+      view.getByText(/2 failed delivery outcomes\. 3 recipients were safely suppressed/),
+    ).toBeInTheDocument();
   });
 
   it('hides the Messages quick link without messages.write', async () => {
@@ -247,7 +515,12 @@ describe('EventDetailView', () => {
         return { data: [], loading: false, error: null, refetch: vi.fn() };
       }
       if (key === 'listOrders') {
-        return { data: { items: [] }, loading: false, error: null, refetch: vi.fn() };
+        return {
+          data: { items: [] },
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        };
       }
       return { data: undefined, loading: false, error: null, refetch: vi.fn() };
     });

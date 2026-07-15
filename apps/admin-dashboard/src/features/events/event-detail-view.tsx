@@ -14,7 +14,6 @@ import {
   MapPin,
   Globe,
   Pencil,
-  Copy,
   ExternalLink,
   Calendar,
   FileText,
@@ -35,6 +34,7 @@ import { usePermissions } from '@/context/permission-provider';
 import { EventLaunchPanel } from './event-launch-panel';
 import { PublishPreflightDialog } from './publish-preflight-dialog';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { PublishedEventNextActions } from './published-event-next-actions';
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const {
@@ -138,13 +138,36 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   const paymentStep = launchReadiness?.steps.find((step) => step.id === 'payment_readiness');
   const checkInStep = launchReadiness?.steps.find((step) => step.id === 'check_in_configuration');
   const lowInventory = tickets.filter((ticket) => {
+    if (ticket.status !== 'active') return false;
     if (!ticket.quantityTotal) return false;
     return ticket.quantityTotal - ticket.quantitySold <= Math.max(ticket.maxPerOrder ?? 1, 5);
   });
   const messagingFailures = (messages ?? []).reduce(
-    (total, message) => total + message.failedCount + message.suppressedCount,
+    (total, message) => total + message.failedCount,
     0,
   );
+  const messagingSuppressions = (messages ?? []).reduce(
+    (total, message) => total + message.suppressedCount,
+    0,
+  );
+  const publishedSignalState =
+    ticketsLoading || messagesLoading || readinessLoading
+      ? 'checking'
+      : ticketsError || messagesError || readinessError || !launchReadiness
+        ? 'incomplete'
+        : 'ready';
+  const messagingHealthCopy = (() => {
+    if (messagesLoading || messagesError) return 'Messaging health unavailable.';
+    const suppressionCopy = messagingSuppressions
+      ? `${messagingSuppressions} recipient${messagingSuppressions === 1 ? ' was' : 's were'} safely suppressed by consent or delivery policy.`
+      : '';
+    if (messagingFailures) {
+      return `${messagingFailures} failed delivery outcome${messagingFailures === 1 ? '' : 's'}.${suppressionCopy ? ` ${suppressionCopy}` : ''}`;
+    }
+    return suppressionCopy
+      ? `No failed deliveries. ${suppressionCopy}`
+      : 'No failed deliveries or policy suppressions detected.';
+  })();
 
   const copyShareUrl = async () => {
     const writeText = navigator.clipboard?.writeText;
@@ -262,23 +285,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
               Archive
             </Button>
           ) : null}
-          {event.status === 'published' ? (
-            <>
-              <Button variant="outline" asChild>
-                <a href={shareUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink className="size-4" />
-                  Open public page
-                </a>
-              </Button>
-              <Button variant="outline" onClick={copyShareUrl}>
-                <Copy className="size-4" />
-                Copy link
-              </Button>
-              <Button variant="outline" asChild>
-                <Link href={routes.eventPreview(eventId)}>Run another test checkout</Link>
-              </Button>
-            </>
-          ) : (
+          {event.status === 'published' ? null : (
             <Button variant="outline" asChild>
               <Link href={routes.eventPreview(eventId)}>
                 <ExternalLink className="size-4" />
@@ -303,6 +310,27 @@ export function EventDetailView({ eventId }: { eventId: string }) {
       ) : null}
       {launchReadiness && event.status !== 'published' ? (
         <EventLaunchPanel eventId={eventId} readiness={launchReadiness} />
+      ) : null}
+      {event.status === 'published' ? (
+        <PublishedEventNextActions
+          eventId={eventId}
+          publicUrl={shareUrl}
+          lowInventoryCount={lowInventory.length}
+          checkInNeedsAttention={Boolean(
+            checkInStep &&
+            checkInStep.status !== 'complete' &&
+            checkInStep.status !== 'not_applicable',
+          )}
+          messagingFailureCount={messagingFailures}
+          signalState={publishedSignalState}
+          can={can}
+          onCopyPublicUrl={copyShareUrl}
+          onRetrySignals={() => {
+            void refetchTickets();
+            void refetchMessages();
+            void refetchReadiness();
+          }}
+        />
       ) : null}
       {launchReadiness && event.status === 'published' ? (
         <>
@@ -361,13 +389,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 </li>
                 <li className="rounded-md border p-3">
                   <span className="font-medium">Messaging</span>
-                  <p className="text-muted-foreground">
-                    {messagesLoading || messagesError
-                      ? 'Messaging health unavailable.'
-                      : messagingFailures
-                        ? `${messagingFailures} failed or suppressed delivery outcome${messagingFailures === 1 ? '' : 's'}.`
-                        : 'No messaging failure or suppression detected.'}
-                  </p>
+                  <p className="text-muted-foreground">{messagingHealthCopy}</p>
                 </li>
                 <li className="rounded-md border p-3">
                   <span className="font-medium">Schedule and check-in</span>
