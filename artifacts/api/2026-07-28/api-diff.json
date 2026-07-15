@@ -1,0 +1,24 @@
+{
+  "from": "2026-07-27",
+  "to": "2026-07-28",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "POST /agent/actions/{actionId}/approvals.requestBody.content.application/json.schema.properties.planSha256",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.AgentExecution.properties.planSha256",
+      "message": "An optional property was added."
+    }
+  ]
+}
