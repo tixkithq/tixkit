@@ -1,0 +1,48 @@
+{
+  "from": "2026-08-04",
+  "to": "2026-08-05",
+  "initialRelease": false,
+  "breaking": true,
+  "summary": {
+    "breaking": 2,
+    "compatible": 4
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /events/{eventId}/media/renditions/{renditionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "enum-expanded",
+      "path": "components.schemas.PublicEventMediaRendition.properties.variant",
+      "message": "Enum value card was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.Event.properties.thumbnail",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "breaking",
+      "category": "enum-expanded",
+      "path": "components.schemas.EventMediaRendition.properties.variant",
+      "message": "Enum value card was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.EventMediaRendition.properties.organizerUrl",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.EventThumbnail",
+      "message": "A named schema was added."
+    }
+  ]
+}
