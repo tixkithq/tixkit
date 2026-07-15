@@ -88,4 +88,10 @@ export {
   type RollbackEligibility,
 } from './import.js';
 export { AgentExecutionRepository } from './agent.js';
+export {
+  AgentPlanRepository,
+  type AgentPlanActionBinding,
+  type AgentPlanTransitionActor,
+  type PersistedAgentPlan,
+} from './agent-plan.js';
 export { AgentMemoryRepository, type AgentMemoryAuditInput } from './agent-memory.js';

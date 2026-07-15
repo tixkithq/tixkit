@@ -84,6 +84,7 @@ import { PortableImportLineageCheckpointsMigration } from './migrations/0080_por
 import { AgentOAuthCredentialsMigration } from './migrations/0081_agent_oauth_credentials.js';
 import { AgentActionsMigration } from './migrations/0082_agent_actions.js';
 import { AgentApprovalActionUniqueMigration } from './migrations/0083_agent_approval_action_unique.js';
+import { AgentPlansMigration } from './migrations/0084_agent_plans.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -201,6 +202,10 @@ const ALL_SCHEMA_TABLES = [
   'import_jobs',
   'migration_credentials',
   'agent_control_events',
+  'agent_plan_state_events',
+  'agent_plan_states',
+  'agent_plan_actions',
+  'agent_plans',
   'agent_action_events',
   'agent_action_effects',
   'agent_actions',
@@ -339,6 +344,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0081_agent_oauth_credentials': AgentOAuthCredentialsMigration,
       '0082_agent_actions': AgentActionsMigration,
       '0083_agent_approval_action_unique': AgentApprovalActionUniqueMigration,
+      '0084_agent_plans': AgentPlansMigration,
     };
   }
 }
@@ -542,9 +548,12 @@ export async function dropAllTables(db: Database): Promise<void> {
     .catch(() => undefined);
   for (const functionName of [
     'reject_agent_action_effect_mutation',
+    'reject_agent_action_event_mutation',
+    'reject_agent_action_mutation',
     'reject_agent_audit_mutation',
     'reject_agent_control_mutation',
     'reject_agent_memory_event_mutation',
+    'reject_agent_plan_immutable_mutation',
     'reject_portable_export_event_mutation',
     'reject_portable_export_authorization_event_mutation',
     'enforce_portable_export_authorization_transition',
@@ -601,6 +610,9 @@ export async function truncateAllData(db: Database): Promise<void> {
       'portable_export_authorization_events',
       'portable_export_authorizations',
       'import_job_events',
+      'agent_plans',
+      'agent_plan_actions',
+      'agent_plan_state_events',
     ]) {
       await sql
         .raw(
@@ -653,6 +665,9 @@ export async function truncateAllData(db: Database): Promise<void> {
         'portable_export_authorization_events',
         'portable_export_authorizations',
         'import_job_events',
+        'agent_plans',
+        'agent_plan_actions',
+        'agent_plan_state_events',
       ]) {
         await sql
           .raw(

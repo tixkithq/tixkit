@@ -3,6 +3,60 @@ import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface AgentPlanTable {
+  id: string;
+  tenant_id: string;
+  agent_principal_id: string;
+  sponsor_principal_id: string;
+  delegation_grant_id: string;
+  protocol_version: string;
+  plan_sha256: string;
+  plan_json: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+}
+
+export interface AgentPlanActionTable {
+  tenant_id: string;
+  plan_id: string;
+  step_id: string;
+  action_id: string;
+  action_digest: string;
+  ordinal: number;
+}
+
+export interface AgentPlanStateTable {
+  tenant_id: string;
+  plan_id: string;
+  state_version: number | string | bigint;
+  status: string;
+  state_json: string;
+  state_sha256: string;
+  updated_at: Timestamp;
+}
+
+export interface AgentPlanStateEventTable {
+  id: string;
+  tenant_id: string;
+  plan_id: string;
+  previous_state_version: number | string | bigint | null;
+  next_state_version: number | string | bigint;
+  previous_state_sha256: string | null;
+  next_state_sha256: string;
+  previous_state_json: string | null;
+  next_state_json: string;
+  actor_type: string;
+  actor_principal_id: string;
+  actor_authorization_json: string;
+  actor_authorization_sha256: string;
+  reason_code: string;
+  idempotency_key: string;
+  request_fingerprint: string;
+  occurred_at: Timestamp;
+}
+
 export interface AgentApprovalTable {
   id: string;
   tenant_id: string;
@@ -2128,6 +2182,10 @@ export interface PortableImportCutoverProofTable {
 }
 
 export interface DB {
+  agent_plans: AgentPlanTable;
+  agent_plan_actions: AgentPlanActionTable;
+  agent_plan_states: AgentPlanStateTable;
+  agent_plan_state_events: AgentPlanStateEventTable;
   agent_principals: AgentPrincipalTable;
   agent_delegations: AgentDelegationTable;
   agent_control_events: AgentControlEventTable;
