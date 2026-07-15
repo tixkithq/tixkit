@@ -147,6 +147,9 @@ function createEventMutationDb(
       limit() {
         return query;
       },
+      forUpdate() {
+        return query;
+      },
       executeTakeFirst() {
         const found = (rows[table] ?? []).find((row) =>
           conditions.every(([column, value]) => row[column] === value),

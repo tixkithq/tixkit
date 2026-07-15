@@ -10,6 +10,7 @@ import {
   type AgentExecutionStore,
 } from '@tixkit/agent-protocol';
 import { createHash } from 'node:crypto';
+import type { Permission } from '@tixkit/domain';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   BrandRepository,
@@ -28,6 +29,7 @@ import {
 } from '../../services/agent-event-publish.js';
 import { AgentActionService } from '../../services/agent-actions.js';
 import { ReadinessService, resolvePaymentMode } from '../../services/readiness.js';
+import { publishEvent } from '../../services/event-publication.js';
 
 type DriverCase = { driver: 'postgres' | 'mysql'; url: string };
 const requestedDriver = process.env.DB_INTEGRATION_DRIVER;
@@ -1125,6 +1127,35 @@ describe.sequential.each(driverCases)(
           })),
         ),
       );
+      const productAudit = await db
+        .selectFrom('audit_logs')
+        .select(['actor_type', 'actor_id', 'action', 'resource_id', 'request_id', 'diff_summary'])
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('action', '=', 'event.published')
+        .where('request_id', '=', executed.id)
+        .executeTakeFirstOrThrow();
+      expect(productAudit).toMatchObject({
+        actor_type: 'agent',
+        actor_id: action.agentPrincipalId,
+        action: 'event.published',
+        resource_id: action.target.resourceId,
+        request_id: executed.id,
+      });
+      const productAuditDiff =
+        typeof productAudit.diff_summary === 'string'
+          ? (JSON.parse(productAudit.diff_summary) as Record<string, unknown>)
+          : productAudit.diff_summary;
+      expect(productAuditDiff).toMatchObject({
+        protocolVersion: AGENT_PROTOCOL_VERSION,
+        actionDigest: prepared.actionDigest,
+        executionId: executed.id,
+        sponsorPrincipalId: action.sponsorPrincipalId,
+        delegationGrantId: action.delegationGrantId,
+        approvalId: approval.id,
+        expectedPolicyVersion: action.expectedPolicyVersion,
+        expectedResourceVersion: action.target.resourceVersion,
+        resultingResourceVersion: action.target.resourceVersion + 1,
+      });
     });
 
     it('serializes execution against approval revocation with one safe winner', async () => {
@@ -1415,6 +1446,143 @@ describe.sequential.each(driverCases)(
       await expect(
         db.deleteFrom('agent_action_effects').where('execution_id', '=', execution.id).execute(),
       ).rejects.toThrow(/immutable/u);
+    });
+
+    it.each(['product_audit', 'post_audit_effect'] as const)(
+      'rolls back publication when %s persistence fails',
+      async (failure) => {
+        const forcedFailure = Object.assign(new Error(`forced ${failure} failure`), {
+          code: 'FORCED_PERSISTENCE_FAILURE',
+        });
+        const failingAdapter = new EventPublishAgentAdapter(db, {
+          beforeProductAudit:
+            failure === 'product_audit' ? () => Promise.reject(forcedFailure) : undefined,
+          beforeEffectRecord:
+            failure === 'post_audit_effect' ? () => Promise.reject(forcedFailure) : undefined,
+        });
+        const state = await failingAdapter.load({ action, execution });
+        await expect(
+          failingAdapter.invoke(invocation(agentAuthorizationStateDigest(state))),
+        ).rejects.toBe(forcedFailure);
+        await expect(
+          db
+            .selectFrom('events')
+            .select(['status', 'version'])
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.target.resourceId)
+            .executeTakeFirstOrThrow(),
+        ).resolves.toMatchObject({
+          status: 'draft',
+          version: action.target.resourceVersion,
+        });
+        expect(
+          await db
+            .selectFrom('audit_logs')
+            .select('id')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('request_id', '=', execution.id)
+            .execute(),
+        ).toHaveLength(0);
+        expect(
+          await db
+            .selectFrom('agent_action_effects')
+            .select('execution_id')
+            .where('execution_id', '=', execution.id)
+            .execute(),
+        ).toHaveLength(0);
+        await expect(
+          db
+            .selectFrom('agent_executions')
+            .select('state')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', execution.id)
+            .executeTakeFirstOrThrow(),
+        ).resolves.toEqual({ state: 'running' });
+      },
+    );
+
+    it('does not resurrect an event archived after a stale human read', async () => {
+      const stale = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      await db
+        .updateTable('events')
+        .set({ status: 'archived', version: Number(stale.version) + 1, updated_at: new Date() })
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('id', '=', action.target.resourceId)
+        .where('version', '=', Number(stale.version))
+        .executeTakeFirstOrThrow();
+
+      const result = await db
+        .transaction()
+        .setIsolationLevel('serializable')
+        .execute((tx) =>
+          publishEvent(tx, new ReadinessService(tx as Database, resolvePaymentMode()), {
+            tenantId: action.target.tenantId,
+            eventId: action.target.resourceId,
+            permissions: new Set<Permission>(['events.write']),
+          }),
+        );
+      expect(result.kind).toBe('archived');
+      await expect(
+        db
+          .selectFrom('events')
+          .select(['status', 'version'])
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toMatchObject({ status: 'archived', version: Number(stale.version) + 1 });
+    });
+
+    it('serializes concurrent publication into one mutation', async () => {
+      const publishOnce = () =>
+        db
+          .transaction()
+          .setIsolationLevel('serializable')
+          .execute((tx) =>
+            publishEvent(tx, new ReadinessService(tx as Database, resolvePaymentMode()), {
+              tenantId: action.target.tenantId,
+              eventId: action.target.resourceId,
+              permissions: new Set<Permission>(['events.write']),
+            }),
+          );
+      const attempts = await Promise.allSettled([publishOnce(), publishOnce()]);
+      const completed = attempts.filter(
+        (attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<typeof publishOnce>>> =>
+          attempt.status === 'fulfilled',
+      );
+      expect(completed.some(({ value }) => value.kind === 'published')).toBe(true);
+      expect(
+        attempts
+          .filter((attempt): attempt is PromiseRejectedResult => attempt.status === 'rejected')
+          .every((attempt) => {
+            const error = attempt.reason as {
+              code?: string;
+              errno?: number;
+              cause?: { code?: string; errno?: number };
+            };
+            return (
+              (error.code ?? error.cause?.code) === '40001' ||
+              (error.code ?? error.cause?.code) === 'ER_LOCK_DEADLOCK' ||
+              (error.errno ?? error.cause?.errno) === 1213
+            );
+          }),
+      ).toBe(true);
+      await expect(publishOnce()).resolves.toMatchObject({ kind: 'already_published' });
+      await expect(
+        db
+          .selectFrom('events')
+          .select(['status', 'version'])
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('id', '=', action.target.resourceId)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toMatchObject({
+        status: 'published',
+        version: action.target.resourceVersion + 1,
+      });
     });
 
     it.each(['missing_policy', 'invalid_principal_state'] as const)(

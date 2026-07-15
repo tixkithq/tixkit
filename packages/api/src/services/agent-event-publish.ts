@@ -12,12 +12,19 @@ import {
   type AgentPrincipal,
   validateAgentActionResult,
 } from '@tixkit/agent-protocol';
-import { EventRepository, sql, type Database } from '@tixkit/db';
+import { AuditLogRepository, sql, type Database } from '@tixkit/db';
 import type { Transaction } from 'kysely';
 import { ReadinessService, resolvePaymentMode } from './readiness.js';
 import type { EventLaunchReadiness } from '@tixkit/domain';
+import type { Permission } from '@tixkit/domain';
+import { publishEvent } from './event-publication.js';
 
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
+
+export type EventPublishAgentAdapterCheckpoints = {
+  beforeProductAudit?: () => Promise<void> | void;
+  beforeEffectRecord?: () => Promise<void> | void;
+};
 
 function parseStrings(value: string): string[] {
   try {
@@ -72,7 +79,10 @@ async function databaseNow(db: Executor): Promise<string> {
 export class EventPublishAgentAdapter
   implements AgentAuthorizationStateProvider, AgentActionInvoker
 {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly checkpoints: EventPublishAgentAdapterCheckpoints = {},
+  ) {}
 
   async load(input: {
     action: AgentAction;
@@ -239,47 +249,72 @@ export class EventPublishAgentAdapter
           .where('tenant_id', '=', input.tenantId)
           .where('id', '=', input.resourceId)
           .forUpdate()
-          .executeTakeFirstOrThrow();
-        if (event.status === 'published') {
-          const result = {
-            resourceId: event.id,
-            resourceVersion: Number(event.version),
-            status: 'published',
-          };
-          await this.recordEffect(tx, input, result, new Date(invocationTime));
-          return result;
-        }
-        if (event.status === 'archived')
-          throw Object.assign(new Error('event is archived'), { code: 'EVENT_ARCHIVED' });
-        const readiness = await new ReadinessService(
-          tx as Database,
-          resolvePaymentMode(),
-        ).getEventLaunchReadiness({
-          tenantId: input.tenantId,
-          organizationId: event.organization_id,
-          brandId: event.brand_id,
-          eventId: event.id,
-          permissions: new Set(['events.write']),
-        });
-        if (!readiness.launchable)
-          throw Object.assign(new Error('event readiness blocked'), { code: 'EVENT_NOT_READY' });
-        if (eventPublishReadinessSnapshotSha256(readiness) !== approvedReadinessDigest)
-          throw Object.assign(new Error('event readiness changed after approval'), {
+          .executeTakeFirst();
+        if (!event)
+          throw Object.assign(new Error('event is missing'), {
             code: 'AGENT_AUTHORIZATION_CHANGED',
           });
-        const published = await new EventRepository(tx as Database).publishIfVersion(
-          event.id,
-          input.expectedResourceVersion,
+        const publication = await publishEvent(
+          tx,
+          new ReadinessService(tx as Database, resolvePaymentMode()),
+          {
+            tenantId: input.tenantId,
+            eventId: input.resourceId,
+            permissions: new Set<Permission>(['events.write']),
+            expectedResourceVersion: input.expectedResourceVersion,
+            beforePublish: ({ readiness }) => {
+              if (eventPublishReadinessSnapshotSha256(readiness) !== approvedReadinessDigest)
+                throw Object.assign(new Error('event readiness changed after approval'), {
+                  code: 'AGENT_AUTHORIZATION_CHANGED',
+                });
+            },
+            onPublished: async ({ event, published }) => {
+              await this.checkpoints.beforeProductAudit?.();
+              await new AuditLogRepository(tx as Database).create({
+                tenantId: input.tenantId,
+                organizationId: event.organization_id,
+                brandId: event.brand_id,
+                actorType: 'agent',
+                actorId: input.agentPrincipalId,
+                action: 'event.published',
+                resourceType: 'Event',
+                resourceId: published.id,
+                requestId: input.executionId,
+                diffSummary: {
+                  protocolVersion: AGENT_PROTOCOL_VERSION,
+                  actionDigest: input.actionDigest,
+                  executionId: input.executionId,
+                  sponsorPrincipalId: input.sponsorPrincipalId,
+                  delegationGrantId: input.delegationGrantId,
+                  approvalId: input.approvalId,
+                  expectedPolicyVersion: input.expectedPolicyVersion,
+                  expectedResourceVersion: input.expectedResourceVersion,
+                  resultingResourceVersion: Number(published.version),
+                },
+              });
+            },
+          },
         );
-        if (!published)
+        if (publication.kind === 'not_found')
+          throw Object.assign(new Error('event is missing'), {
+            code: 'AGENT_AUTHORIZATION_CHANGED',
+          });
+        if (publication.kind === 'archived')
+          throw Object.assign(new Error('event is archived'), { code: 'EVENT_ARCHIVED' });
+        if (publication.kind === 'blocked')
+          throw Object.assign(new Error('event readiness blocked'), { code: 'EVENT_NOT_READY' });
+        if (publication.kind === 'stale')
           throw Object.assign(new Error('event version changed'), {
             code: 'RESOURCE_VERSION_CHANGED',
           });
+        const published =
+          publication.kind === 'published' ? publication.published : publication.event;
         const result = {
           resourceId: published.id,
           resourceVersion: Number(published.version),
           status: 'published',
         };
+        await this.checkpoints.beforeEffectRecord?.();
         await this.recordEffect(tx, input, result, new Date(invocationTime));
         return result;
       });

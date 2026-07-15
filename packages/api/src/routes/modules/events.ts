@@ -38,6 +38,7 @@ import {
 } from '../../http/schemas.js';
 import { ReadinessService, resolvePaymentMode } from '../../services/readiness.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
+import { publishEvent } from '../../services/event-publication.js';
 
 const marketingIntegrationStatusSchema = z.enum(['active', 'disabled']).default('active');
 const onboardingTelemetrySchema = z
@@ -1861,42 +1862,31 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
         },
       });
     }
-    const readinessInput = {
-      tenantId: principal.tenantId,
-      organizationId: existing.organization_id,
-      brandId: existing.brand_id,
-      eventId,
-      permissions: new Set(principal.scopes),
-    };
-    const publishCheckedEvent = async (
-      service: ReadinessService,
-      repository: EventRepository,
-      auditRepository: AuditLogRepository,
-    ) => {
-      const readiness = await service.getEventLaunchReadiness(readinessInput);
-      if (!readiness.launchable) return { kind: 'blocked' as const, readiness };
-      const published = await repository.publishIfVersion(eventId, readiness.eventVersion);
-      if (!published) return { kind: 'stale' as const, readiness };
-      await writeAuditLog(auditRepository, request, principal, {
-        action: 'event.published',
-        organizationId: existing.organization_id,
-        brandId: existing.brand_id,
-        resourceType: 'Event',
-        resourceId: eventId,
-      });
-      return { kind: 'published' as const, readiness, published };
-    };
     let publishResult;
     try {
       publishResult = await db
         .transaction()
         .setIsolationLevel('serializable')
-        .execute(async (trx) =>
-          publishCheckedEvent(
-            createReadinessService(trx as typeof db),
-            new EventRepository(trx as typeof db),
-            new AuditLogRepository(trx as typeof db),
-          ),
+        .execute((trx) =>
+          publishEvent(trx, createReadinessService(trx as typeof db), {
+            tenantId: principal.tenantId,
+            eventId,
+            permissions: new Set(principal.scopes),
+            authorizeEvent: (event) => {
+              ClerkAuthService.requireResourceTenant(principal, event, 'Event', event.id);
+              ClerkAuthService.requireOrganizationScope(principal, event.organization_id);
+              ClerkAuthService.requireBrandScope(principal, event.brand_id);
+              ClerkAuthService.requireEventScope(principal, event.id);
+            },
+            onPublished: ({ event }) =>
+              writeAuditLog(new AuditLogRepository(trx as typeof db), request, principal, {
+                action: 'event.published',
+                organizationId: event.organization_id,
+                brandId: event.brand_id,
+                resourceType: 'Event',
+                resourceId: event.id,
+              }),
+          }),
         );
     } catch (error) {
       const databaseError = error as {
@@ -1916,6 +1906,17 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
             expectedVersion: Number(existing.version),
             currentVersion: Number(current?.version ?? existing.version),
           },
+          requestId: request.id,
+        },
+      });
+    }
+    if (publishResult.kind === 'not_found') throw new NotFoundError('Event', eventId);
+    if (publishResult.kind === 'already_published') return serializeEvent(publishResult.event);
+    if (publishResult.kind === 'archived') {
+      return reply.status(409).send({
+        error: {
+          code: 'event_archived',
+          message: 'Archived events cannot be published',
           requestId: request.id,
         },
       });
