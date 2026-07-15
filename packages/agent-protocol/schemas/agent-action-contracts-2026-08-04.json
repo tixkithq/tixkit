@@ -1,0 +1,1816 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/agent-action-contracts/2026-08-04",
+  "title": "Tixkit Agent Action Contracts 2026-08-04",
+  "$defs": {
+    "id": {
+      "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/id"
+    },
+    "sha256": {
+      "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/sha256"
+    },
+    "reservedAction": false,
+    "eventPublishPrepareInput": {
+      "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/eventPublishPrepareInput"
+    },
+    "eventPublishResolvedPayload": {
+      "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/eventPublishResolvedPayload"
+    },
+    "eventPublishResult": {
+      "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/eventPublishResult"
+    },
+    "eventReadPrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "event.read"
+        },
+        "delegationGrantId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId"]
+    },
+    "eventReadResolvedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eventSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["eventSnapshotSha256"]
+    },
+    "eventReadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "eventSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^[^\\u0000]+$"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50000,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "status": {
+              "enum": ["draft", "published", "paused", "ended", "archived"]
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "timezone": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000]+$"
+            },
+            "startsAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "endsAt": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "visibility": {
+              "enum": ["public", "unlisted", "private"]
+            },
+            "capacity": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "minimumAge": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "title",
+            "description",
+            "status",
+            "currency",
+            "timezone",
+            "startsAt",
+            "endsAt",
+            "visibility",
+            "capacity",
+            "minimumAge"
+          ]
+        },
+        "untrustedContentPaths": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "event.title"
+            },
+            {
+              "const": "event.description"
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "resourceId",
+        "resourceVersion",
+        "eventSnapshotSha256",
+        "observedAt",
+        "event",
+        "untrustedContentPaths"
+      ]
+    },
+    "readinessReadPrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "readiness.read"
+        },
+        "delegationGrantId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId"]
+    },
+    "readinessReadResolvedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readinessSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["readinessSnapshotSha256"]
+    },
+    "readinessReadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": ["ready", "blocked"]
+        },
+        "readinessSnapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "published": {
+          "type": "boolean"
+        },
+        "blockerReasonCodes": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]{1,63}$"
+          }
+        },
+        "warningReasonCodes": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]{1,63}$"
+          }
+        }
+      },
+      "required": [
+        "resourceId",
+        "resourceVersion",
+        "status",
+        "readinessSnapshotSha256",
+        "generatedAt",
+        "published",
+        "blockerReasonCodes",
+        "warningReasonCodes"
+      ]
+    },
+    "schemaReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaId": {
+          "const": "https://tixkit.com/schemas/agent-action-contracts/2026-08-04"
+        },
+        "schemaSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "jsonPointer": {
+          "type": "string",
+          "pattern": "^#\\/\\$defs\\/[A-Za-z][A-Za-z0-9]+$"
+        }
+      },
+      "required": ["schemaId", "schemaSha256", "jsonPointer"]
+    },
+    "registryAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "event.read",
+            "readiness.read",
+            "report.read",
+            "event.prepare",
+            "content.prepare",
+            "campaign.prepare",
+            "event.update",
+            "event.publish",
+            "inventory.change",
+            "campaign.send",
+            "refund.issue",
+            "permission.change",
+            "personal_data.export",
+            "credential.change",
+            "domain.change",
+            "provider.change",
+            "migration.execute",
+            "resource.delete"
+          ]
+        },
+        "availability": {
+          "enum": ["implemented", "reserved"]
+        },
+        "planSupport": {
+          "enum": ["supported", "direct_only", "unavailable"]
+        },
+        "prepareInputSchema": {
+          "$ref": "#/$defs/schemaReference"
+        },
+        "resolvedPayloadSchema": {
+          "$ref": "#/$defs/schemaReference"
+        },
+        "resultSchema": {
+          "$ref": "#/$defs/schemaReference"
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{2,63}$"
+          }
+        },
+        "requiredSponsorPermissions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{1,31}:[a-z][a-z0-9_-]{1,63}$"
+          }
+        },
+        "resourceScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resourceTypes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "scopeTemplate": {
+              "const": "{resourceType}:{resourceId}"
+            }
+          },
+          "required": ["resourceTypes", "scopeTemplate"]
+        },
+        "preconditions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resourceVersion": {
+              "const": "exact"
+            },
+            "policyVersion": {
+              "const": "exact"
+            },
+            "requiredMaterialDigests": {
+              "type": "array",
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]{1,63}$"
+              }
+            }
+          },
+          "required": ["resourceVersion", "policyVersion", "requiredMaterialDigests"]
+        },
+        "riskClass": {
+          "enum": ["read_only", "low", "high", "critical"]
+        },
+        "reversibility": {
+          "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/reversibility"
+        },
+        "approvalPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": ["none", "fresh_action"]
+            },
+            "ttlSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "confirmationRequired": {
+              "type": "boolean"
+            }
+          },
+          "required": ["mode", "confirmationRequired"]
+        },
+        "idempotency": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "prepare": {
+              "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/idempotencyPhase"
+            },
+            "approve": {
+              "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/idempotencyPhase"
+            },
+            "execute": {
+              "$ref": "https://tixkit.com/schemas/agent-action-contracts/2026-07-27#/$defs/idempotencyPhase"
+            }
+          },
+          "required": ["prepare", "approve", "execute"]
+        },
+        "executionBoundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": ["api", "durable_workflow"]
+            },
+            "operation": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.-]{2,127}$"
+            }
+          },
+          "required": ["kind", "operation"]
+        }
+      },
+      "required": [
+        "kind",
+        "availability",
+        "planSupport",
+        "prepareInputSchema",
+        "resolvedPayloadSchema",
+        "resultSchema",
+        "requiredCapabilities",
+        "requiredSponsorPermissions",
+        "resourceScope",
+        "preconditions",
+        "riskClass",
+        "reversibility",
+        "approvalPolicy",
+        "idempotency",
+        "executionBoundary"
+      ]
+    },
+    "agentActionRegistry": {
+      "$comment": "Semantic conformance additionally requires validateAgentActionRegistry against the canonical pinned registry digest.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "const": "2026-08-04"
+        },
+        "actionProtocolVersion": {
+          "const": "2026-07-22"
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 18,
+          "maxItems": 18,
+          "items": {
+            "$ref": "#/$defs/registryAction"
+          }
+        },
+        "registrySha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["protocolVersion", "actionProtocolVersion", "actions", "registrySha256"]
+    },
+    "eventVenueValue": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^[^\\u0000]*$"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/eventVenueValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/eventVenueValue"
+          }
+        }
+      ]
+    },
+    "eventPrepareChanges": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 50000,
+          "pattern": "^[^\\u0000]*$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "venue": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/eventVenueValue"
+              },
+              "maxProperties": 64,
+              "x-tixkit-maxCanonicalBytes": 16384,
+              "x-tixkit-maxDepth": 4
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "venueId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "enum": ["public", "unlisted", "private"]
+        },
+        "seo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 500,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "imageUrl": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https?://",
+              "maxLength": 2048
+            }
+          }
+        },
+        "capacity": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimumAge": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverImageUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https?://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "externalUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https?://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverImageAlt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500,
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seoUseCoverImage": {
+          "type": "boolean"
+        },
+        "lastSetupSection": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "eventPrepareProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 50000,
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "venue": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/eventVenueValue"
+              },
+              "maxProperties": 64,
+              "x-tixkit-maxCanonicalBytes": 16384,
+              "x-tixkit-maxDepth": 4
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "venueId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "enum": ["public", "unlisted", "private"]
+        },
+        "seo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 500,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "imageUrl": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uri",
+                  "pattern": "^https?://",
+                  "maxLength": 2048
+                },
+                {
+                  "type": "string",
+                  "pattern": "^/v1/public/event-media/[A-Za-z0-9_/-]+$",
+                  "maxLength": 2048
+                }
+              ]
+            }
+          }
+        },
+        "capacity": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minimumAge": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverImageUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https?://",
+              "maxLength": 2048
+            },
+            {
+              "type": "string",
+              "pattern": "^/v1/public/event-media/[A-Za-z0-9_/-]+$",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "externalUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https?://",
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverImageAlt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500,
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seoUseCoverImage": {
+          "type": "boolean"
+        },
+        "lastSetupSection": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[^\\u0000]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "eventPrepareResolvedChanges": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/eventPrepareProjection"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string",
+              "maxLength": 50000,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "coverImageUrl": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^/v1/public/event-media/[A-Za-z0-9_/-]+$",
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "seo": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 500,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "imageUrl": {
+                  "type": "string",
+                  "pattern": "^/v1/public/event-media/[A-Za-z0-9_/-]+$",
+                  "maxLength": 2048
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "eventPreparePrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "event.prepare"
+        },
+        "delegationGrantId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "changes": {
+          "$ref": "#/$defs/eventPrepareChanges"
+        }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId", "changes"]
+    },
+    "eventPrepareResolvedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "changePreviewSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "changes": {
+          "$ref": "#/$defs/eventPrepareResolvedChanges"
+        }
+      },
+      "required": ["changePreviewSha256", "changes"]
+    },
+    "eventPrepareResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "changePreviewSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "changedFields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 18,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "capacity",
+              "coverImageAlt",
+              "coverImageUrl",
+              "currency",
+              "description",
+              "endsAt",
+              "externalUrl",
+              "lastSetupSection",
+              "minimumAge",
+              "seo",
+              "seoUseCoverImage",
+              "slug",
+              "startsAt",
+              "timezone",
+              "title",
+              "venue",
+              "venueId",
+              "visibility"
+            ]
+          }
+        },
+        "before": {
+          "$ref": "#/$defs/eventPrepareProjection"
+        },
+        "after": {
+          "$ref": "#/$defs/eventPrepareResolvedChanges"
+        },
+        "untrustedContentPaths": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 36,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(?:before|after)\\.[A-Za-z][A-Za-z0-9]+$"
+          }
+        }
+      },
+      "required": [
+        "resourceId",
+        "resourceVersion",
+        "changePreviewSha256",
+        "observedAt",
+        "changedFields",
+        "before",
+        "after",
+        "untrustedContentPaths"
+      ]
+    },
+    "campaignPrepareTemplateVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "channel": { "enum": ["email", "sms"] },
+        "templateKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "versionId": { "$ref": "#/$defs/id" },
+        "contentSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["channel", "templateKey", "versionId", "contentSha256"]
+    },
+    "campaignPreparePrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "campaign.prepare" },
+        "delegationGrantId": { "$ref": "#/$defs/id" },
+        "resourceId": { "$ref": "#/$defs/id" },
+        "audience": { "enum": ["all", "checked_in", "not_checked_in", "specific"] },
+        "attendeeIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "channel": { "enum": ["email", "sms", "both"] },
+        "emailTemplateKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "smsTemplateKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId", "audience", "channel"],
+      "allOf": [
+        {
+          "if": { "properties": { "audience": { "const": "specific" } } },
+          "then": {
+            "required": ["attendeeIds"],
+            "properties": { "attendeeIds": { "type": "array", "minItems": 1 } }
+          },
+          "else": { "properties": { "attendeeIds": false } }
+        },
+        {
+          "if": { "properties": { "channel": { "enum": ["email", "both"] } } },
+          "then": {
+            "properties": { "emailTemplateKey": { "type": "string" } },
+            "required": ["emailTemplateKey"]
+          },
+          "else": { "properties": { "emailTemplateKey": false } }
+        },
+        {
+          "if": { "properties": { "channel": { "enum": ["sms", "both"] } } },
+          "then": {
+            "properties": { "smsTemplateKey": { "type": "string" } },
+            "required": ["smsTemplateKey"]
+          },
+          "else": { "properties": { "smsTemplateKey": false } }
+        }
+      ]
+    },
+    "campaignPrepareResolvedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-tixkit-campaignPrepareCoherent": true,
+      "properties": {
+        "audience": { "enum": ["all", "checked_in", "not_checked_in", "specific"] },
+        "channel": { "enum": ["email", "sms", "both"] },
+        "requestedAttendeeIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "x-tixkit-sortedUniqueStrings": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "templateVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/campaignPrepareTemplateVersion" }
+        },
+        "contentVersionSha256": { "$ref": "#/$defs/sha256" },
+        "audienceSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "exclusionSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "complianceResultSha256": { "$ref": "#/$defs/sha256" },
+        "audienceCount": { "type": "integer", "minimum": 1, "maximum": 2000000 },
+        "eligibleRecipientCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "eligibleDeliveryCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "suppressedDeliveryCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "consentExclusionCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "missingContactCount": { "type": "integer", "minimum": 0, "maximum": 2000000 }
+      },
+      "required": [
+        "audience",
+        "channel",
+        "requestedAttendeeIds",
+        "templateVersions",
+        "contentVersionSha256",
+        "audienceSnapshotSha256",
+        "exclusionSnapshotSha256",
+        "complianceResultSha256",
+        "audienceCount",
+        "eligibleRecipientCount",
+        "eligibleDeliveryCount",
+        "suppressedDeliveryCount",
+        "consentExclusionCount",
+        "missingContactCount"
+      ]
+    },
+    "campaignPrepareResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-tixkit-campaignPrepareCoherent": true,
+      "properties": {
+        "resourceId": { "$ref": "#/$defs/id" },
+        "resourceVersion": { "type": "integer", "minimum": 1 },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "untrustedContentPaths": { "type": "array", "maxItems": 0 },
+        "audience": { "enum": ["all", "checked_in", "not_checked_in", "specific"] },
+        "channel": { "enum": ["email", "sms", "both"] },
+        "requestedAttendeeIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "x-tixkit-sortedUniqueStrings": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "templateVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/campaignPrepareTemplateVersion" }
+        },
+        "contentVersionSha256": { "$ref": "#/$defs/sha256" },
+        "audienceSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "exclusionSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "complianceResultSha256": { "$ref": "#/$defs/sha256" },
+        "audienceCount": { "type": "integer", "minimum": 1, "maximum": 2000000 },
+        "eligibleRecipientCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "eligibleDeliveryCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "suppressedDeliveryCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "consentExclusionCount": { "type": "integer", "minimum": 0, "maximum": 2000000 },
+        "missingContactCount": { "type": "integer", "minimum": 0, "maximum": 2000000 }
+      },
+      "required": [
+        "resourceId",
+        "resourceVersion",
+        "observedAt",
+        "untrustedContentPaths",
+        "audience",
+        "channel",
+        "requestedAttendeeIds",
+        "templateVersions",
+        "contentVersionSha256",
+        "audienceSnapshotSha256",
+        "exclusionSnapshotSha256",
+        "complianceResultSha256",
+        "audienceCount",
+        "eligibleRecipientCount",
+        "eligibleDeliveryCount",
+        "suppressedDeliveryCount",
+        "consentExclusionCount",
+        "missingContactCount"
+      ]
+    },
+    "contentPrepareInputContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-tixkit-maxCanonicalBytes": 262144,
+      "x-tixkit-maxDepth": 24,
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "editor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "provider": { "const": "@puckeditor/core" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "root": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "props": {
+                      "type": "object",
+                      "maxProperties": 32,
+                      "propertyNames": {
+                        "enum": [
+                          "title",
+                          "description",
+                          "marketingSummary",
+                          "category",
+                          "tags",
+                          "coverImageUrl",
+                          "socialImageUrl",
+                          "backgroundColor",
+                          "foregroundColor",
+                          "accentColor",
+                          "accentForegroundColor",
+                          "fontFamily",
+                          "headingFontFamily",
+                          "radius"
+                        ]
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 100000
+                      }
+                    }
+                  },
+                  "required": ["props"]
+                },
+                "content": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "EventHeader",
+                          "EventDescription",
+                          "Divider",
+                          "Tickets",
+                          "ResaleTickets",
+                          "CheckoutCta",
+                          "BrandFooter"
+                        ]
+                      },
+                      "props": {
+                        "type": "object",
+                        "maxProperties": 64,
+                        "propertyNames": {
+                          "enum": [
+                            "id",
+                            "brandLabel",
+                            "title",
+                            "description",
+                            "startsAtLabel",
+                            "timezone",
+                            "venueName",
+                            "showDate",
+                            "showTimezone",
+                            "showVenue",
+                            "showBrandBadge",
+                            "imageUrl",
+                            "imageAlt",
+                            "imageFit",
+                            "imagePosition",
+                            "imagePlacement",
+                            "overlayContentPosition",
+                            "overlayContentHorizontalPosition",
+                            "overlayMinHeight",
+                            "overlayPadding",
+                            "contentPadding",
+                            "contentGap",
+                            "imageOpacity",
+                            "backgroundOverlayColor",
+                            "backgroundOverlayOpacity",
+                            "logos",
+                            "logoPosition",
+                            "logoSize",
+                            "logoMaxHeight",
+                            "logoMaxWidth",
+                            "eyebrow",
+                            "body",
+                            "alignment",
+                            "titleAlignment",
+                            "bodyAlignment",
+                            "imageAlignment",
+                            "spacing",
+                            "backgroundColor",
+                            "imageLayout",
+                            "imagePositionX",
+                            "imagePositionY",
+                            "imageRadius",
+                            "imageOverlay",
+                            "eyebrowFontSize",
+                            "titleFontSize",
+                            "bodyFontSize",
+                            "eyebrowColor",
+                            "titleColor",
+                            "bodyColor",
+                            "contentBackgroundColor",
+                            "contentRadius",
+                            "emptyTitle",
+                            "emptyDescription",
+                            "badgeLabel",
+                            "label",
+                            "supportingText"
+                          ]
+                        },
+                        "properties": {
+                          "id": { "type": "string", "minLength": 1, "maxLength": 100000 },
+                          "showDate": { "type": "boolean" },
+                          "showTimezone": { "type": "boolean" },
+                          "showVenue": { "type": "boolean" },
+                          "showBrandBadge": { "type": "boolean" },
+                          "logos": { "type": "array", "maxItems": 0 },
+                          "imageOverlay": { "type": "array", "maxItems": 0 },
+                          "imagePlacement": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "x": { "type": "string", "maxLength": 100000 },
+                              "y": { "type": "string", "maxLength": 100000 },
+                              "scale": { "type": "string", "maxLength": 100000 }
+                            }
+                          }
+                        },
+                        "additionalProperties": {
+                          "type": "string",
+                          "maxLength": 100000
+                        },
+                        "required": ["id"]
+                      }
+                    },
+                    "required": ["type", "props"],
+                    "allOf": [
+                      {
+                        "if": { "properties": { "type": { "const": "EventHeader" } } },
+                        "then": {
+                          "properties": {
+                            "props": {
+                              "type": "object",
+                              "propertyNames": {
+                                "enum": [
+                                  "id",
+                                  "brandLabel",
+                                  "title",
+                                  "description",
+                                  "startsAtLabel",
+                                  "timezone",
+                                  "venueName",
+                                  "showDate",
+                                  "showTimezone",
+                                  "showVenue",
+                                  "showBrandBadge",
+                                  "imageUrl",
+                                  "imageAlt",
+                                  "imageFit",
+                                  "imagePosition",
+                                  "imagePlacement",
+                                  "overlayContentPosition",
+                                  "overlayContentHorizontalPosition",
+                                  "overlayMinHeight",
+                                  "overlayPadding",
+                                  "contentPadding",
+                                  "contentGap",
+                                  "imageOpacity",
+                                  "backgroundOverlayColor",
+                                  "backgroundOverlayOpacity",
+                                  "logos",
+                                  "logoPosition",
+                                  "logoSize",
+                                  "logoMaxHeight",
+                                  "logoMaxWidth"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "if": {
+                          "properties": { "type": { "const": "EventDescription" } }
+                        },
+                        "then": {
+                          "properties": {
+                            "props": {
+                              "type": "object",
+                              "propertyNames": {
+                                "enum": [
+                                  "id",
+                                  "eyebrow",
+                                  "title",
+                                  "body",
+                                  "imageUrl",
+                                  "imageAlt",
+                                  "alignment",
+                                  "titleAlignment",
+                                  "bodyAlignment",
+                                  "imageAlignment",
+                                  "spacing",
+                                  "backgroundColor",
+                                  "imageLayout",
+                                  "imageFit",
+                                  "imagePosition",
+                                  "imagePositionX",
+                                  "imagePositionY",
+                                  "imagePlacement",
+                                  "imageRadius",
+                                  "overlayContentPosition",
+                                  "overlayContentHorizontalPosition",
+                                  "overlayMinHeight",
+                                  "overlayPadding",
+                                  "imageOpacity",
+                                  "backgroundOverlayColor",
+                                  "backgroundOverlayOpacity",
+                                  "imageOverlay",
+                                  "logos",
+                                  "logoPosition",
+                                  "logoSize",
+                                  "logoMaxHeight",
+                                  "logoMaxWidth",
+                                  "eyebrowFontSize",
+                                  "titleFontSize",
+                                  "bodyFontSize",
+                                  "eyebrowColor",
+                                  "titleColor",
+                                  "bodyColor",
+                                  "contentBackgroundColor",
+                                  "contentPadding",
+                                  "contentRadius",
+                                  "contentGap"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "if": { "properties": { "type": { "const": "Divider" } } },
+                        "then": {
+                          "properties": {
+                            "props": {
+                              "type": "object",
+                              "propertyNames": { "enum": ["id", "spacing"] }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "if": { "properties": { "type": { "const": "Tickets" } } },
+                        "then": {
+                          "properties": {
+                            "props": {
+                              "type": "object",
+                              "propertyNames": {
+                                "enum": ["id", "title", "emptyTitle", "emptyDescription"]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "if": {
+                          "properties": { "type": { "const": "ResaleTickets" } }
+                        },
+                        "then": {
+                          "properties": {
+                            "props": {
+                              "type": "object",
+                              "propertyNames": { "enum": ["id", "title", "badgeLabel"] }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "if": { "properties": { "type": { "const": "CheckoutCta" } } },
+                        "then": {
+                          "properties": {
+                            "props": {
+                              "type": "object",
+                              "propertyNames": { "enum": ["id", "label", "supportingText"] }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "if": { "properties": { "type": { "const": "BrandFooter" } } },
+                        "then": {
+                          "properties": {
+                            "props": {
+                              "type": "object",
+                              "propertyNames": { "enum": ["id"] }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": ["root", "content"]
+            }
+          },
+          "required": ["provider", "data"]
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "locale": { "type": "string", "minLength": 2, "maxLength": 16 },
+            "publicPath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "discovery": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "summary": { "type": "string", "maxLength": 100000 },
+                "category": { "type": "string", "maxLength": 100000 },
+                "tags": {
+                  "type": "array",
+                  "maxItems": 50,
+                  "items": { "type": "string", "maxLength": 128 }
+                },
+                "coverImageUrl": { "type": "string", "maxLength": 100000 },
+                "socialImageUrl": { "type": "string", "maxLength": 100000 },
+                "seoTitle": { "type": "string", "maxLength": 100000 },
+                "seoDescription": { "type": "string", "maxLength": 100000 }
+              },
+              "required": ["summary", "tags"]
+            }
+          },
+          "required": ["locale", "publicPath", "discovery"]
+        }
+      },
+      "required": ["schemaVersion", "editor", "settings"]
+    },
+    "contentPrepareValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "valid": { "type": "boolean" },
+        "severity": { "enum": ["error", "warning"] },
+        "issueCodes": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "x-tixkit-sortedUniqueStrings": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]{1,63}$"
+          }
+        }
+      },
+      "required": ["valid", "severity", "issueCodes"],
+      "allOf": [
+        {
+          "if": { "properties": { "valid": { "const": true } }, "required": ["valid"] },
+          "then": { "properties": { "severity": { "const": "warning" } } }
+        },
+        {
+          "if": { "properties": { "valid": { "const": false } }, "required": ["valid"] },
+          "then": { "properties": { "severity": { "const": "error" } } }
+        }
+      ]
+    },
+    "contentPreparePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "const": "@puckeditor/core" },
+        "discovery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "summary": { "type": "string", "minLength": 1, "maxLength": 50000 },
+            "category": { "type": "string", "maxLength": 128 },
+            "tags": {
+              "type": "array",
+              "maxItems": 50,
+              "items": { "type": "string", "maxLength": 128 }
+            },
+            "imageUrl": { "type": "string", "maxLength": 2048 },
+            "startsAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+            },
+            "venueName": { "type": "string", "maxLength": 512 },
+            "publicPath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          "required": ["title", "summary", "tags"]
+        }
+      },
+      "required": ["provider", "discovery"]
+    },
+    "contentPreparePrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "content.prepare" },
+        "delegationGrantId": { "$ref": "#/$defs/id" },
+        "resourceId": { "$ref": "#/$defs/id" },
+        "content": { "$ref": "#/$defs/contentPrepareInputContent" }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId", "content"]
+    },
+    "contentPrepareResolvedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "channel": { "const": "event_page" },
+        "content": { "$ref": "#/$defs/contentPrepareInputContent" },
+        "preview": { "$ref": "#/$defs/contentPreparePreview" },
+        "validation": { "$ref": "#/$defs/contentPrepareValidation" },
+        "contentPreviewSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["channel", "content", "preview", "validation", "contentPreviewSha256"]
+    },
+    "contentPrepareResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": { "$ref": "#/$defs/id" },
+        "resourceVersion": { "type": "integer", "minimum": 1 },
+        "channel": { "const": "event_page" },
+        "content": { "$ref": "#/$defs/contentPrepareInputContent" },
+        "preview": { "$ref": "#/$defs/contentPreparePreview" },
+        "validation": { "$ref": "#/$defs/contentPrepareValidation" },
+        "contentPreviewSha256": { "$ref": "#/$defs/sha256" },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "untrustedContentPaths": {
+          "type": "array",
+          "prefixItems": [{ "const": "content" }, { "const": "preview.discovery" }],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "resourceId",
+        "resourceVersion",
+        "channel",
+        "content",
+        "preview",
+        "validation",
+        "contentPreviewSha256",
+        "observedAt",
+        "untrustedContentPaths"
+      ]
+    },
+    "reportReadPrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "report.read" },
+        "delegationGrantId": { "$ref": "#/$defs/id" },
+        "resourceId": { "$ref": "#/$defs/id" },
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId"]
+    },
+    "reportReadResolvedPayload": {
+      "type": "object",
+      "x-tixkit-reportReadPayloadCoherent": true,
+      "additionalProperties": false,
+      "properties": {
+        "reportType": { "const": "event_sales" },
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" },
+        "reportSnapshotSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["reportType", "from", "to", "reportSnapshotSha256"]
+    },
+    "reportReadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": { "$ref": "#/$defs/id" },
+        "resourceVersion": { "type": "integer", "minimum": 1 },
+        "reportType": { "const": "event_sales" },
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" },
+        "reportSnapshotSha256": { "$ref": "#/$defs/sha256" },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "report": {
+          "type": "object",
+          "x-tixkit-reportAggregateCoherent": true,
+          "additionalProperties": false,
+          "properties": {
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+            "grossSalesCents": { "type": "integer", "minimum": 0 },
+            "grossSalesByChannelCents": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "online": { "type": "integer", "minimum": 0 },
+                "boxOffice": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["online", "boxOffice"]
+            },
+            "netRevenueCents": { "type": "integer" },
+            "refundsCents": { "type": "integer", "minimum": 0 },
+            "feesCents": { "type": "integer", "minimum": 0 },
+            "taxCents": { "type": "integer", "minimum": 0 },
+            "ticketsSold": { "type": "integer", "minimum": 0 },
+            "checkIns": { "type": "integer", "minimum": 0 },
+            "ordersCount": { "type": "integer", "minimum": 0 },
+            "paidOrdersCount": { "type": "integer", "minimum": 0 }
+          },
+          "required": [
+            "currency",
+            "grossSalesCents",
+            "grossSalesByChannelCents",
+            "netRevenueCents",
+            "refundsCents",
+            "feesCents",
+            "taxCents",
+            "ticketsSold",
+            "checkIns",
+            "ordersCount",
+            "paidOrdersCount"
+          ]
+        },
+        "untrustedContentPaths": { "type": "array", "maxItems": 0, "items": false }
+      },
+      "required": [
+        "resourceId",
+        "resourceVersion",
+        "reportType",
+        "from",
+        "to",
+        "reportSnapshotSha256",
+        "observedAt",
+        "report",
+        "untrustedContentPaths"
+      ]
+    },
+    "eventUpdatePrepareInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "event.update"
+        },
+        "delegationGrantId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "changes": {
+          "$ref": "#/$defs/eventPrepareChanges"
+        }
+      },
+      "required": ["kind", "delegationGrantId", "resourceId", "changes"]
+    },
+    "eventUpdateResolvedPayload": {
+      "$ref": "#/$defs/eventPrepareResolvedPayload"
+    },
+    "eventUpdatePreview": {
+      "$ref": "#/$defs/eventPrepareResult"
+    },
+    "eventUpdateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "resourceVersion": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "status": {
+          "const": "updated"
+        }
+      },
+      "required": ["resourceId", "resourceVersion", "status"]
+    }
+  }
+}

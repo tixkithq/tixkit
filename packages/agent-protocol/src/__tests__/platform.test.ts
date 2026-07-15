@@ -18,6 +18,7 @@ import {
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_30,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_31,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_01,
+  AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_03,
   AGENT_ACTION_REGISTRY,
   AGENT_PLATFORM_PROTOCOL_VERSION,
   buildAgentPlanDefinition,
@@ -25,6 +26,7 @@ import {
   validateAgentCampaignPrepareResult,
   validateAgentContentPrepareResult,
   validateAgentEventReadResult,
+  validateAgentReportReadResult,
   validateAgentEventPrepareResult,
   validateAgentEventUpdatePreview,
   validateAgentReadinessReadResult,
@@ -36,6 +38,7 @@ import {
   type AgentPlanDefinition,
   type AgentPlanState,
   type AgentEventReadResult,
+  type AgentReportReadResult,
   type AgentContentPrepareResult,
   type AgentCampaignPrepareResult,
   type AgentEventPrepareResult,
@@ -796,6 +799,105 @@ describe('agent platform contracts', () => {
     ).toThrow();
   });
 
+  it('binds a direct event sales report to its exact range and aggregate digest', () => {
+    const report = {
+      currency: 'USD',
+      grossSalesCents: 12_500,
+      grossSalesByChannelCents: { online: 10_000, boxOffice: 2_500 },
+      netRevenueCents: 11_000,
+      refundsCents: 1_500,
+      feesCents: 500,
+      taxCents: 750,
+      ticketsSold: 5,
+      checkIns: 3,
+      ordersCount: 4,
+      paidOrdersCount: 3,
+    };
+    const reportSnapshotSha256 = agentSha256(report);
+    const reportAction: AgentAction = {
+      ...action(),
+      kind: 'report.read',
+      autonomy: 'read',
+      target: { ...action().target, apiOperation: 'reports.get' },
+      payload: {
+        reportType: 'event_sales',
+        from: createdAt,
+        to: expiresAt,
+        reportSnapshotSha256,
+      },
+    };
+    const result: AgentReportReadResult = {
+      resourceId: reportAction.target.resourceId,
+      resourceVersion: reportAction.target.resourceVersion,
+      reportType: 'event_sales',
+      from: createdAt,
+      to: expiresAt,
+      reportSnapshotSha256,
+      observedAt: createdAt,
+      report,
+      untrustedContentPaths: [],
+    };
+    expect(() => validateAgentReportReadResult(reportAction, result)).not.toThrow();
+    expect(() =>
+      validateAgentReportReadResult(reportAction, {
+        ...result,
+        report: { ...report, grossSalesCents: 12_501 },
+      }),
+    ).toThrow('digest binding');
+    expect(() =>
+      validateAgentReportReadResult(
+        {
+          ...reportAction,
+          payload: { ...reportAction.payload, from: expiresAt, to: createdAt },
+        },
+        { ...result, from: expiresAt, to: createdAt },
+      ),
+    ).toThrow('range binding');
+    const contradictoryChannels = {
+      ...report,
+      grossSalesByChannelCents: { online: 12_500, boxOffice: 2_500 },
+    };
+    const contradictoryChannelsSha256 = agentSha256(contradictoryChannels);
+    expect(() =>
+      validateAgentReportReadResult(
+        {
+          ...reportAction,
+          payload: {
+            ...reportAction.payload,
+            reportSnapshotSha256: contradictoryChannelsSha256,
+          },
+        },
+        {
+          ...result,
+          reportSnapshotSha256: contradictoryChannelsSha256,
+          report: contradictoryChannels,
+        },
+      ),
+    ).toThrow('channel totals');
+    const contradictoryCounts = { ...report, paidOrdersCount: 5 };
+    const contradictoryCountsSha256 = agentSha256(contradictoryCounts);
+    expect(() =>
+      validateAgentReportReadResult(
+        {
+          ...reportAction,
+          payload: {
+            ...reportAction.payload,
+            reportSnapshotSha256: contradictoryCountsSha256,
+          },
+        },
+        {
+          ...result,
+          reportSnapshotSha256: contradictoryCountsSha256,
+          report: contradictoryCounts,
+        },
+      ),
+    ).toThrow('order counts');
+    expect(
+      AGENT_ACTION_REGISTRY.actions.find((item) => item.kind === 'report.read')?.resourceScope
+        .resourceTypes,
+    ).toEqual(['event']);
+  });
+
   it('publishes one digest-bound registry and never advertises reserved actions as callable', () => {
     expect(() => validateAgentActionRegistry(AGENT_ACTION_REGISTRY)).not.toThrow();
     expect(
@@ -807,6 +909,10 @@ describe('agent platform contracts', () => {
       }),
       expect.objectContaining({
         kind: 'readiness.read',
+        planSupport: 'direct_only',
+      }),
+      expect.objectContaining({
+        kind: 'report.read',
         planSupport: 'direct_only',
       }),
       expect.objectContaining({
@@ -843,6 +949,13 @@ describe('agent platform contracts', () => {
       },
       reversibility: { mode: 'none' },
     });
+    expect(AGENT_ACTION_REGISTRY.actions.find((item) => item.kind === 'report.read')).toMatchObject(
+      {
+        preconditions: { requiredMaterialDigests: ['reportSnapshotSha256'] },
+        reversibility: { mode: 'none' },
+        approvalPolicy: { mode: 'none', confirmationRequired: false },
+      },
+    );
     for (const definition of AGENT_ACTION_REGISTRY.actions.filter(
       (item) => item.availability === 'reserved',
     )) {
@@ -873,7 +986,7 @@ describe('agent platform contracts', () => {
       ...AGENT_ACTION_REGISTRY,
       actions: substitutedActions,
       registrySha256: agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-08-03',
+        domain: 'tixkit.agent-action-registry.v2026-08-04',
         protocolVersion: AGENT_ACTION_REGISTRY.protocolVersion,
         actionProtocolVersion: AGENT_ACTION_REGISTRY.actionProtocolVersion,
         actions: substitutedActions,
@@ -888,7 +1001,7 @@ describe('agent platform contracts', () => {
       'utf8',
     );
     const contractsSchemaText = readFileSync(
-      new URL('../../schemas/agent-action-contracts-2026-08-03.json', import.meta.url),
+      new URL('../../schemas/agent-action-contracts-2026-08-04.json', import.meta.url),
       'utf8',
     );
     expect(createHash('sha256').update(contractsSchemaText).digest('hex')).toBe(
@@ -987,6 +1100,14 @@ describe('agent platform contracts', () => {
       AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_01,
     );
     ajv.addSchema(JSON.parse(prior20260801ContractsText));
+    const prior20260803ContractsText = readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-08-03.json', import.meta.url),
+      'utf8',
+    );
+    expect(createHash('sha256').update(prior20260803ContractsText).digest('hex')).toBe(
+      AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_03,
+    );
+    ajv.addSchema(JSON.parse(prior20260803ContractsText));
     const contracts = JSON.parse(contractsSchemaText) as { $id: string };
     ajv.addSchema(contracts);
     const validatePrepare = ajv.getSchema(`${contracts.$id}#/$defs/eventPublishPrepareInput`)!;

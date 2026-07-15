@@ -21,7 +21,7 @@ const retainedSchemaText = readFileSync(
 );
 const retainedSchema = JSON.parse(retainedSchemaText) as Record<string, unknown>;
 const currentSchema = JSON.parse(
-  readFileSync(new URL('../../schemas/agent-protocol-2026-08-03.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../schemas/agent-protocol-2026-08-04.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
 const retainedOverlayText = readFileSync(
   new URL('../../schemas/agent-protocol-2026-07-31.json', import.meta.url),
@@ -38,6 +38,14 @@ ajv.addSchema(
   JSON.parse(
     readFileSync(
       new URL('../../schemas/agent-action-contracts-2026-07-27.json', import.meta.url),
+      'utf8',
+    ),
+  ),
+);
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-08-04.json', import.meta.url),
       'utf8',
     ),
   ),
@@ -98,74 +106,81 @@ function action(kind: AgentActionKind): AgentAction {
         ? campaign
         : kind === 'event.publish'
           ? { readinessSnapshotSha256: 'a'.repeat(64) }
-          : kind === 'event.prepare' || kind === 'event.update'
+          : kind === 'report.read'
             ? {
-                changePreviewSha256: 'a'.repeat(64),
-                changes: { title: 'Prepared event' },
+                reportType: 'event_sales',
+                from: '2026-08-01T00:00:00.000Z',
+                to: '2026-08-02T00:00:00.000Z',
+                reportSnapshotSha256: 'e'.repeat(64),
               }
-            : kind === 'content.prepare'
-              ? (() => {
-                  const projection = {
-                    channel: 'event_page' as const,
-                    content: {
-                      schemaVersion: 2,
-                      editor: {
-                        provider: '@puckeditor/core',
-                        data: { root: { props: {} }, content: [] },
-                      },
-                      settings: {
-                        locale: 'en',
-                        publicPath: '/e/summer-event',
-                        discovery: { summary: 'Summer event', tags: [] },
-                      },
-                    },
-                    preview: {
-                      provider: '@puckeditor/core' as const,
-                      discovery: {
-                        title: 'Summer event',
-                        summary: 'Summer event',
-                        tags: [],
-                      },
-                    },
-                    validation: {
-                      valid: true,
-                      severity: 'warning' as const,
-                      issueCodes: [],
-                    },
-                  };
-                  return {
-                    ...projection,
-                    contentPreviewSha256: agentSha256(projection),
-                  };
-                })()
-              : kind === 'campaign.prepare'
+            : kind === 'event.prepare' || kind === 'event.update'
+              ? {
+                  changePreviewSha256: 'a'.repeat(64),
+                  changes: { title: 'Prepared event' },
+                }
+              : kind === 'content.prepare'
                 ? (() => {
-                    const templateVersions = [
-                      {
-                        channel: 'email' as const,
-                        templateKey: 'event-reminder',
-                        versionId: 'version_primary',
-                        contentSha256: '1'.repeat(64),
+                    const projection = {
+                      channel: 'event_page' as const,
+                      content: {
+                        schemaVersion: 2,
+                        editor: {
+                          provider: '@puckeditor/core',
+                          data: { root: { props: {} }, content: [] },
+                        },
+                        settings: {
+                          locale: 'en',
+                          publicPath: '/e/summer-event',
+                          discovery: { summary: 'Summer event', tags: [] },
+                        },
                       },
-                    ];
+                      preview: {
+                        provider: '@puckeditor/core' as const,
+                        discovery: {
+                          title: 'Summer event',
+                          summary: 'Summer event',
+                          tags: [],
+                        },
+                      },
+                      validation: {
+                        valid: true,
+                        severity: 'warning' as const,
+                        issueCodes: [],
+                      },
+                    };
                     return {
-                      audience: 'all' as const,
-                      channel: 'email' as const,
-                      requestedAttendeeIds: [],
-                      templateVersions,
-                      contentVersionSha256: agentSha256(templateVersions),
-                      audienceSnapshotSha256: '2'.repeat(64),
-                      exclusionSnapshotSha256: '3'.repeat(64),
-                      complianceResultSha256: '4'.repeat(64),
-                      audienceCount: 1,
-                      eligibleRecipientCount: 1,
-                      eligibleDeliveryCount: 1,
-                      suppressedDeliveryCount: 0,
-                      consentExclusionCount: 0,
-                      missingContactCount: 0,
+                      ...projection,
+                      contentPreviewSha256: agentSha256(projection),
                     };
                   })()
-                : {},
+                : kind === 'campaign.prepare'
+                  ? (() => {
+                      const templateVersions = [
+                        {
+                          channel: 'email' as const,
+                          templateKey: 'event-reminder',
+                          versionId: 'version_primary',
+                          contentSha256: '1'.repeat(64),
+                        },
+                      ];
+                      return {
+                        audience: 'all' as const,
+                        channel: 'email' as const,
+                        requestedAttendeeIds: [],
+                        templateVersions,
+                        contentVersionSha256: agentSha256(templateVersions),
+                        audienceSnapshotSha256: '2'.repeat(64),
+                        exclusionSnapshotSha256: '3'.repeat(64),
+                        complianceResultSha256: '4'.repeat(64),
+                        audienceCount: 1,
+                        eligibleRecipientCount: 1,
+                        eligibleDeliveryCount: 1,
+                        suppressedDeliveryCount: 0,
+                        consentExclusionCount: 0,
+                        missingContactCount: 0,
+                      };
+                    })()
+                  : {},
     idempotencyKey: `agent-action-${kind}-2026-07-12`,
     expectedPolicyVersion: 1,
     preparedAt: '2026-07-12T12:00:00.000Z',
@@ -251,6 +266,29 @@ describe('published agent schema parity', () => {
         target: { ...action(kind).target, apiOperation: 'orders.purchase' },
       };
       expect(validate(item), kind).toBe(false);
+      expect(() => agentActionDigest(item)).toThrow(AgentProtocolValidationError);
+    }
+  });
+
+  it('rejects malformed report payloads and unsupported report targets in both schema and runtime', () => {
+    const valid = action('report.read');
+    const corpus: AgentAction[] = [
+      { ...valid, payload: {} },
+      { ...valid, payload: { ...valid.payload, extra: true } },
+      { ...valid, payload: { ...valid.payload, from: 'not-a-timestamp' } },
+      {
+        ...valid,
+        payload: {
+          ...valid.payload,
+          from: '2026-08-03T00:00:00.000Z',
+          to: '2026-08-02T00:00:00.000Z',
+        },
+      },
+      { ...valid, payload: { ...valid.payload, reportSnapshotSha256: 'invalid' } },
+      { ...valid, target: { ...valid.target, resourceType: 'tenant' } },
+    ];
+    for (const item of corpus) {
+      expect(validate(item), ajv.errorsText(validate.errors)).toBe(false);
       expect(() => agentActionDigest(item)).toThrow(AgentProtocolValidationError);
     }
   });

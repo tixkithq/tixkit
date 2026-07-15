@@ -27,7 +27,7 @@ import {
 export const AGENT_PLATFORM_PROTOCOL_VERSION = '2026-07-27' as const;
 export const AGENT_PLATFORM_PLAN_DIGEST_DOMAIN =
   'tixkit.agent-plan-definition.v2026-07-27' as const;
-export const AGENT_ACTION_CONTRACT_VERSION = '2026-08-03' as const;
+export const AGENT_ACTION_CONTRACT_VERSION = '2026-08-04' as const;
 
 export type AgentRiskClass = 'read_only' | 'low' | 'high' | 'critical';
 export type AgentReversibilityMode = 'none' | 'reversible' | 'compensatable';
@@ -233,6 +233,30 @@ export interface AgentEventReadResult extends Readonly<Record<string, unknown>> 
     minimumAge: number | null;
   };
   untrustedContentPaths: readonly ['event.title', 'event.description'];
+}
+
+export interface AgentReportReadResult extends Readonly<Record<string, unknown>> {
+  resourceId: string;
+  resourceVersion: number;
+  reportType: 'event_sales';
+  from: string;
+  to: string;
+  reportSnapshotSha256: string;
+  observedAt: string;
+  report: {
+    currency: string;
+    grossSalesCents: number;
+    grossSalesByChannelCents: { online: number; boxOffice: number };
+    netRevenueCents: number;
+    refundsCents: number;
+    feesCents: number;
+    taxCents: number;
+    ticketsSold: number;
+    checkIns: number;
+    ordersCount: number;
+    paidOrdersCount: number;
+  };
+  untrustedContentPaths: readonly [];
 }
 
 export interface AgentEventPrepareResult extends Readonly<Record<string, unknown>> {
@@ -1137,6 +1161,97 @@ export function validateAgentEventReadResult(
   );
 }
 
+export function validateAgentReportReadResult(
+  action: AgentAction,
+  result: AgentReportReadResult,
+): void {
+  assert(action.kind === 'report.read', 'agent report result action kind is invalid');
+  assertExactKeys(action.payload, ['reportType', 'from', 'to', 'reportSnapshotSha256']);
+  assertExactKeys(result, [
+    'resourceId',
+    'resourceVersion',
+    'reportType',
+    'from',
+    'to',
+    'reportSnapshotSha256',
+    'observedAt',
+    'report',
+    'untrustedContentPaths',
+  ]);
+  assertExactKeys(result.report, [
+    'currency',
+    'grossSalesCents',
+    'grossSalesByChannelCents',
+    'netRevenueCents',
+    'refundsCents',
+    'feesCents',
+    'taxCents',
+    'ticketsSold',
+    'checkIns',
+    'ordersCount',
+    'paidOrdersCount',
+  ]);
+  assertExactKeys(result.report.grossSalesByChannelCents, ['online', 'boxOffice']);
+  assert(
+    action.autonomy === 'read' &&
+      action.target.resourceType === 'event' &&
+      action.target.apiOperation === 'reports.get' &&
+      result.resourceId === action.target.resourceId &&
+      result.resourceVersion === action.target.resourceVersion &&
+      action.payload.reportType === 'event_sales' &&
+      result.reportType === action.payload.reportType,
+    'agent report result target binding is invalid',
+  );
+  assert(
+    typeof action.payload.from === 'string' && typeof action.payload.to === 'string',
+    'agent report range binding is invalid',
+  );
+  const from = validDate(action.payload.from);
+  const to = validDate(action.payload.to);
+  assert(
+    result.from === action.payload.from && result.to === action.payload.to && from <= to,
+    'agent report range binding is invalid',
+  );
+  assert(
+    typeof action.payload.reportSnapshotSha256 === 'string' &&
+      SHA256.test(action.payload.reportSnapshotSha256) &&
+      result.reportSnapshotSha256 === action.payload.reportSnapshotSha256 &&
+      result.reportSnapshotSha256 === agentSha256(result.report),
+    'agent report digest binding is invalid',
+  );
+  validDate(result.observedAt);
+  assert(CURRENCY.test(result.report.currency), 'agent report currency is invalid');
+  for (const [key, value] of Object.entries(result.report)) {
+    if (key === 'currency' || key === 'grossSalesByChannelCents' || key === 'netRevenueCents')
+      continue;
+    assert(
+      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
+      `agent report ${key} is invalid`,
+    );
+  }
+  assert(
+    Number.isSafeInteger(result.report.netRevenueCents),
+    'agent report net revenue is invalid',
+  );
+  for (const value of Object.values(result.report.grossSalesByChannelCents))
+    assert(Number.isSafeInteger(value) && value >= 0, 'agent report channel amount is invalid');
+  assert(
+    result.report.netRevenueCents === result.report.grossSalesCents - result.report.refundsCents,
+    'agent report net revenue is inconsistent',
+  );
+  assert(
+    result.report.grossSalesCents ===
+      result.report.grossSalesByChannelCents.online +
+        result.report.grossSalesByChannelCents.boxOffice,
+    'agent report channel totals are inconsistent',
+  );
+  assert(
+    result.report.paidOrdersCount <= result.report.ordersCount,
+    'agent report order counts are inconsistent',
+  );
+  assert(result.untrustedContentPaths.length === 0, 'agent report untrusted content is invalid');
+}
+
 const EVENT_PREPARE_FIELDS = new Set([
   'capacity',
   'coverImageAlt',
@@ -1355,7 +1470,7 @@ function validateAgentEventChangePreview(
   );
 }
 
-const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-08-03';
+const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-08-04';
 // Updated only alongside the immutable schema and verified by schema-parity tests.
 export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27 =
   'fd74b30a8ba72341fcf4fa6984dca901ba7dec95cf305dc98f5cc38c184b092f' as const;
@@ -1369,8 +1484,10 @@ export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_01 =
   '335e70ca4930b26cfe47b866eedeaacea9c802b5f844e2e26c2e9f40201b8984' as const;
 export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_02 =
   'a12327ff58bee27b566408ddc4c054e49463a851c1d5a36974575bc592578626' as const;
-export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_08_03 =
   '90a370a02930c77d2726a78a03ebd77e679184396165727b0f72cf9af0308aea' as const;
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+  '037b8a13ea7a9384e1929d91850200c655501a786b42812c767d04bb9625eeb1' as const;
 
 const riskByKind: Readonly<Record<AgentActionKind, AgentRiskClass>> = {
   'event.read': 'read_only',
@@ -1435,7 +1552,7 @@ const reversibilityByKind: Readonly<Record<AgentActionKind, AgentPlanReversibili
 const materialDigestsByKind: Readonly<Record<AgentActionKind, readonly string[]>> = {
   'event.read': [],
   'readiness.read': [],
-  'report.read': [],
+  'report.read': ['reportSnapshotSha256'],
   'event.prepare': ['changePreviewSha256'],
   'content.prepare': ['contentPreviewSha256'],
   'campaign.prepare': [
@@ -1478,6 +1595,7 @@ const actions = (Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]).map
       kind === 'event.publish' ||
       kind === 'event.read' ||
       kind === 'readiness.read' ||
+      kind === 'report.read' ||
       kind === 'event.prepare' ||
       kind === 'content.prepare' ||
       kind === 'campaign.prepare' ||
@@ -1489,15 +1607,17 @@ const actions = (Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]).map
           ? 'eventRead'
           : kind === 'readiness.read'
             ? 'readinessRead'
-            : kind === 'event.prepare'
-              ? 'eventPrepare'
-              : kind === 'content.prepare'
-                ? 'contentPrepare'
-                : kind === 'campaign.prepare'
-                  ? 'campaignPrepare'
-                  : kind === 'event.update'
-                    ? 'eventUpdate'
-                    : undefined;
+            : kind === 'report.read'
+              ? 'reportRead'
+              : kind === 'event.prepare'
+                ? 'eventPrepare'
+                : kind === 'content.prepare'
+                  ? 'contentPrepare'
+                  : kind === 'campaign.prepare'
+                    ? 'campaignPrepare'
+                    : kind === 'event.update'
+                      ? 'eventUpdate'
+                      : undefined;
     return {
       kind,
       availability: implemented ? 'implemented' : 'reserved',
@@ -1560,7 +1680,7 @@ export const AGENT_ACTION_REGISTRY: AgentActionRegistry = {
   actionProtocolVersion: AGENT_PROTOCOL_VERSION,
   actions,
   registrySha256: agentSha256({
-    domain: 'tixkit.agent-action-registry.v2026-08-03',
+    domain: 'tixkit.agent-action-registry.v2026-08-04',
     protocolVersion: AGENT_ACTION_CONTRACT_VERSION,
     actionProtocolVersion: AGENT_PROTOCOL_VERSION,
     actions,
@@ -1625,6 +1745,7 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
         definition.kind === 'event.publish' ||
           definition.kind === 'event.read' ||
           definition.kind === 'readiness.read' ||
+          definition.kind === 'report.read' ||
           definition.kind === 'event.prepare' ||
           definition.kind === 'content.prepare' ||
           definition.kind === 'campaign.prepare' ||
@@ -1660,7 +1781,7 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
   assert(
     registry.registrySha256 ===
       agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-08-03',
+        domain: 'tixkit.agent-action-registry.v2026-08-04',
         ...material,
       }),
     'agent registry digest is invalid',

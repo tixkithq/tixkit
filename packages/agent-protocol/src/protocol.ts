@@ -108,6 +108,13 @@ export interface EventPublishPayload extends Readonly<Record<string, unknown>> {
   readinessSnapshotSha256: string;
 }
 
+export interface ReportReadPayload extends Readonly<Record<string, unknown>> {
+  reportType: 'event_sales';
+  from: string;
+  to: string;
+  reportSnapshotSha256: string;
+}
+
 export interface ContentPrepareValidation extends Readonly<Record<string, unknown>> {
   valid: boolean;
   severity: 'error' | 'warning';
@@ -361,7 +368,7 @@ export const AGENT_ACTION_DESCRIPTORS: Readonly<Record<AgentActionKind, AgentAct
   'report.read': {
     capability: 'reports.read',
     sponsorPermission: 'reports:read',
-    resourceTypes: ['event', 'tenant'],
+    resourceTypes: ['event'],
     apiOperation: 'reports.get',
     consequential: false,
   },
@@ -592,6 +599,27 @@ export function installAgentProtocolSchemaKeywords(host: AgentSchemaKeywordHost)
       }
     },
   });
+  host.addKeyword({
+    keyword: 'x-tixkit-reportAggregateCoherent',
+    schemaType: 'boolean',
+    type: 'object',
+    validate: (enabled, data) => !enabled || isCoherentReportAggregate(data),
+  });
+  host.addKeyword({
+    keyword: 'x-tixkit-reportReadPayloadCoherent',
+    schemaType: 'boolean',
+    type: 'object',
+    validate: (enabled, data) => {
+      if (!enabled) return true;
+      try {
+        if (!isPlainObject(data)) return false;
+        validateReportReadPayload(data);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
 
 function validateAction(action: AgentAction): void {
@@ -625,6 +653,7 @@ function validateAction(action: AgentAction): void {
     throw new AgentProtocolValidationError('action payload exceeds 256 KiB');
   if (action.kind === 'campaign.send') validateCampaignSendPayload(action.payload);
   if (action.kind === 'campaign.prepare') validateAgentCampaignPreparePayload(action.payload);
+  if (action.kind === 'report.read') validateReportReadPayload(action.payload);
   if (action.kind === 'event.publish') validateEventPublishPayload(action.payload);
   if (action.kind === 'content.prepare') validateContentPreparePayload(action.payload);
   if (action.kind === 'event.prepare' || action.kind === 'event.update')
@@ -671,6 +700,38 @@ function isEventTimestamp(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
+
+function validateReportReadPayload(payload: Readonly<Record<string, unknown>>): void {
+  const expected = ['from', 'reportSnapshotSha256', 'reportType', 'to'];
+  if (
+    JSON.stringify(Object.keys(payload).sort()) !== JSON.stringify(expected) ||
+    payload.reportType !== 'event_sales' ||
+    !isEventTimestamp(payload.from) ||
+    !isEventTimestamp(payload.to) ||
+    Date.parse(payload.from) > Date.parse(payload.to) ||
+    typeof payload.reportSnapshotSha256 !== 'string' ||
+    !SHA256.test(payload.reportSnapshotSha256)
+  )
+    throw new AgentProtocolValidationError('report read payload is invalid');
+}
+
+function isCoherentReportAggregate(value: unknown): boolean {
+  if (!isPlainObject(value) || !isPlainObject(value.grossSalesByChannelCents)) return false;
+  const grossSalesCents = value.grossSalesCents;
+  const online = value.grossSalesByChannelCents.online;
+  const boxOffice = value.grossSalesByChannelCents.boxOffice;
+  const ordersCount = value.ordersCount;
+  const paidOrdersCount = value.paidOrdersCount;
+  return (
+    Number.isSafeInteger(grossSalesCents) &&
+    Number.isSafeInteger(online) &&
+    Number.isSafeInteger(boxOffice) &&
+    Number(grossSalesCents) === Number(online) + Number(boxOffice) &&
+    Number.isSafeInteger(ordersCount) &&
+    Number.isSafeInteger(paidOrdersCount) &&
+    Number(paidOrdersCount) <= Number(ordersCount)
+  );
 }
 
 function isHttpUrl(value: unknown): value is string {
