@@ -32,7 +32,39 @@ function acceptedDecision(
     classification,
     lifecycle,
     availability: Object.freeze(availability),
+    extensionContract: Object.freeze({ status: 'versioned' }),
     publicBoundary: Object.freeze({ path, symbols: Object.freeze(symbols) }),
+    obligations: Object.freeze({
+      credentialCustody,
+      plaintextCredentialsPortable: false,
+      portability,
+      destinationRebinding: 'required',
+      consent: 'required',
+      suppression: 'required',
+      webhooks: 'required',
+      retries: 'required',
+      idempotency: 'required',
+      audit: 'required',
+    }),
+  });
+}
+
+function pendingContractDecision(
+  classification,
+  lifecycle,
+  availability,
+  missingContractReason,
+  credentialCustody,
+  portability,
+) {
+  return Object.freeze({
+    classification,
+    lifecycle,
+    availability: Object.freeze(availability),
+    extensionContract: Object.freeze({
+      status: 'not-yet-versioned',
+      missingContractReason,
+    }),
     obligations: Object.freeze({
       credentialCustody,
       plaintextCredentialsPortable: false,
@@ -55,14 +87,15 @@ const availableEverywhere = {
 };
 const plannedEverywhere = { cloud: 'planned', platformApi: 'planned', selfHosted: 'planned' };
 const plannedManaged = { cloud: 'planned', platformApi: 'planned', selfHosted: 'unavailable' };
+const missingRichChannelContract =
+  'A public rich-channel extension contract has not been published.';
 
 export const EXPECTED_CAPABILITY_DECISIONS = Object.freeze({
-  'apple-messages-for-business': acceptedDecision(
+  'apple-messages-for-business': pendingContractDecision(
     'managed-provider-service',
     'planned',
     plannedManaged,
-    'packages/domain/src/messaging/index.ts',
-    ['SmsTransport'],
+    missingRichChannelContract,
     'managed-cloud',
     'contract-metadata',
   ),
@@ -120,12 +153,11 @@ export const EXPECTED_CAPABILITY_DECISIONS = Object.freeze({
     'caller-or-operator',
     'configuration-only',
   ),
-  'rcs-messaging': acceptedDecision(
+  'rcs-messaging': pendingContractDecision(
     'managed-provider-service',
     'planned',
     plannedManaged,
-    'packages/domain/src/messaging/index.ts',
-    ['SmsTransport'],
+    missingRichChannelContract,
     'managed-cloud',
     'contract-metadata',
   ),
@@ -174,12 +206,11 @@ export const EXPECTED_CAPABILITY_DECISIONS = Object.freeze({
     'caller-or-operator',
     'configuration-only',
   ),
-  'whatsapp-messaging': acceptedDecision(
+  'whatsapp-messaging': pendingContractDecision(
     'managed-provider-service',
     'planned',
     plannedManaged,
-    'packages/domain/src/messaging/index.ts',
-    ['SmsTransport'],
+    missingRichChannelContract,
     'managed-cloud',
     'contract-metadata',
   ),
@@ -236,6 +267,14 @@ function formatObligations(obligations) {
   ].join('; ');
 }
 
+function formatExtensionContract(capability) {
+  if (capability.extensionContract.status === 'not-yet-versioned') {
+    return `Not yet versioned: ${capability.extensionContract.missingContractReason ?? 'Missing contract reason.'}`;
+  }
+  if (!capability.publicBoundary) return 'Versioned: missing public boundary';
+  return `Versioned: \`${capability.publicBoundary.path}#${capability.publicBoundary.symbols.join(',')}\``;
+}
+
 function normalizeDocumentation(documentation) {
   return documentation
     .split('\n')
@@ -253,11 +292,53 @@ function normalizeDocumentation(documentation) {
     .join('\n');
 }
 
+function conditionalSchemaViolations(registry) {
+  const violations = [];
+  for (const [index, capability] of registry.capabilities.entries()) {
+    const path = `$.capabilities[${index}]`;
+    const status = capability.extensionContract.status;
+    if (status === 'versioned') {
+      if (!capability.publicBoundary)
+        violations.push(
+          `${path}.publicBoundary is required by schema when extensionContract.status is versioned`,
+        );
+      if (capability.extensionContract.missingContractReason !== undefined)
+        violations.push(
+          `${path}.extensionContract.missingContractReason is forbidden by schema when extensionContract.status is versioned`,
+        );
+      continue;
+    }
+    if (status !== 'not-yet-versioned') continue;
+    if (capability.publicBoundary !== undefined)
+      violations.push(
+        `${path}.publicBoundary is forbidden by schema when extensionContract.status is not-yet-versioned`,
+      );
+    if (!capability.extensionContract.missingContractReason?.trim())
+      violations.push(
+        `${path}.extensionContract.missingContractReason is required by schema when extensionContract.status is not-yet-versioned`,
+      );
+    if (capability.lifecycle !== 'planned')
+      violations.push(
+        `${path}.lifecycle must equal "planned" by schema when extensionContract.status is not-yet-versioned`,
+      );
+    for (const adoptionPath of ['cloud', 'platformApi'])
+      if (capability.availability[adoptionPath] === 'available')
+        violations.push(
+          `${path}.availability.${adoptionPath} must not equal "available" by schema when extensionContract.status is not-yet-versioned`,
+        );
+    if (capability.availability.selfHosted !== 'unavailable')
+      violations.push(
+        `${path}.availability.selfHosted must equal "unavailable" by schema when extensionContract.status is not-yet-versioned`,
+      );
+  }
+  return violations;
+}
+
 export function renderCapabilityRegistryDocumentation(registry) {
   const rows = registry.capabilities
     .map(
       (capability) =>
-        `| \`${capability.id}\` | ${capability.name} | ${capability.classification} | ${capability.lifecycle} | ${formatAvailability(capability.availability)} | \`${capability.publicBoundary.path}#${capability.publicBoundary.symbols.join(',')}\` | ${formatObligations(capability.obligations)} | ${capability.notes} |`,
+        `| \`${capability.id}\` | ${capability.name} | ${capability.classification} | ${capability.lifecycle} | ${formatAvailability(capability.availability)} | ${formatExtensionContract(capability)} | ${formatObligations(capability.obligations)} | ${capability.notes} |`,
     )
     .join('\n');
 
@@ -283,7 +364,7 @@ related:
 
 This page is generated from the public capability registry. “Available” describes an implemented public contract or adapter, not a promise that Tixkit Cloud is generally available. Managed services are shown only as private beta or planned. Cloud, Platform API, and Self-Hosted availability are independent decisions.
 
-| ID | Capability | Classification | Lifecycle | Availability | Public boundary | Delivery and portability obligations | Notes |
+| ID | Capability | Classification | Lifecycle | Availability | Extension contract | Delivery and portability obligations | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 ${rows}
 
@@ -293,6 +374,7 @@ ${rows}
 - Credentials, signing keys, and provider tokens are never included in portable bundles. Configuration and contract metadata require destination rebinding where shown.
 - Consent, suppression, webhook verification, bounded retries, idempotency, and audit requirements are mandatory wherever marked required; a managed service does not weaken them.
 - Apple Messages for Business, RCS, and WhatsApp are planned managed services. They are unavailable to Self-Hosted deployments until Tixkit publishes a versioned rich-channel extension contract.
+- The schema permits a pending managed contract to enter private beta on Cloud or Platform API without implying a public extension contract. Every current rich-channel decision remains pinned to planned until this registry records an accepted promotion.
 - Managed routing intelligence may remain private, but execution must use the public provider-routing boundary and remain auditable.
 `;
 }
@@ -303,6 +385,8 @@ export function capabilityRegistryViolations(registry, root, publicDistribution)
     readFileSync(resolve(root, 'distribution/capability-registry.schema.json'), 'utf8'),
   );
   violations.push(...jsonSchemaViolations(registry, schema));
+  if (violations.length > 0) return violations;
+  violations.push(...conditionalSchemaViolations(registry));
   if (violations.length > 0) return violations;
 
   const ids = registry.capabilities.map(({ id }) => id);
@@ -327,23 +411,53 @@ export function capabilityRegistryViolations(registry, root, publicDistribution)
   const roots = publicRoots(publicDistribution);
   for (const capability of registry.capabilities) {
     const managed = managedClassifications.has(capability.classification);
+    const contractStatus = capability.extensionContract.status;
     const boundary = capability.publicBoundary;
-    if (!isInsideRoot(root, boundary.path)) {
-      violations.push(`${capability.id}: public boundary escapes the repository`);
-      continue;
-    }
-    if (!isPublicPath(boundary.path, roots))
-      violations.push(`${capability.id}: public boundary is not in the public distribution`);
-    const metadata = statSync(resolve(root, boundary.path), { throwIfNoEntry: false });
-    if (!metadata?.isFile()) {
-      violations.push(`${capability.id}: public boundary file does not exist: ${boundary.path}`);
-    } else {
-      const source = readFileSync(resolve(root, boundary.path), 'utf8');
-      for (const symbol of boundary.symbols)
-        if (!exportedSymbolPattern(symbol).test(source))
+    if (contractStatus === 'versioned') {
+      if (!boundary) {
+        violations.push(
+          `${capability.id}: versioned extension contract requires a public boundary`,
+        );
+      } else if (!isInsideRoot(root, boundary.path)) {
+        violations.push(`${capability.id}: public boundary escapes the repository`);
+      } else {
+        if (!isPublicPath(boundary.path, roots))
+          violations.push(`${capability.id}: public boundary is not in the public distribution`);
+        const metadata = statSync(resolve(root, boundary.path), { throwIfNoEntry: false });
+        if (!metadata?.isFile()) {
           violations.push(
-            `${capability.id}: public boundary symbol is not exported: ${boundary.path}#${symbol}`,
+            `${capability.id}: public boundary file does not exist: ${boundary.path}`,
           );
+        } else {
+          const source = readFileSync(resolve(root, boundary.path), 'utf8');
+          for (const symbol of boundary.symbols)
+            if (!exportedSymbolPattern(symbol).test(source))
+              violations.push(
+                `${capability.id}: public boundary symbol is not exported: ${boundary.path}#${symbol}`,
+              );
+        }
+      }
+    } else {
+      if (boundary)
+        violations.push(
+          `${capability.id}: not-yet-versioned extension contract must not declare a public boundary`,
+        );
+      if (!capability.extensionContract.missingContractReason?.trim())
+        violations.push(
+          `${capability.id}: not-yet-versioned extension contract requires a missing-contract reason`,
+        );
+      if (capability.lifecycle !== 'planned')
+        violations.push(
+          `${capability.id}: not-yet-versioned extension contract must remain planned`,
+        );
+      if (Object.values(capability.availability).includes('available'))
+        violations.push(
+          `${capability.id}: not-yet-versioned extension contract must not claim availability`,
+        );
+      if (capability.availability.selfHosted !== 'unavailable')
+        violations.push(
+          `${capability.id}: not-yet-versioned extension contract must remain unavailable to Self-Hosted`,
+        );
     }
 
     if (managed) {

@@ -5,7 +5,7 @@
   "required": ["$schema", "schemaVersion", "documentation", "capabilities"],
   "properties": {
     "$schema": { "const": "./capability-registry.schema.json" },
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "documentation": { "const": "docs/public/reference/capabilities-and-integrations.mdx" },
     "capabilities": {
       "type": "array",
@@ -39,6 +39,15 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$" }
         }
+      },
+      "additionalProperties": false
+    },
+    "extensionContract": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["versioned", "not-yet-versioned"] },
+        "missingContractReason": { "type": "string", "minLength": 1, "pattern": "\\S" }
       },
       "additionalProperties": false
     },
@@ -80,7 +89,7 @@
         "classification",
         "lifecycle",
         "availability",
-        "publicBoundary",
+        "extensionContract",
         "obligations",
         "notes"
       ],
@@ -97,10 +106,78 @@
         },
         "lifecycle": { "enum": ["stable", "private-beta", "planned"] },
         "availability": { "$ref": "#/$defs/availability" },
+        "extensionContract": { "$ref": "#/$defs/extensionContract" },
         "publicBoundary": { "$ref": "#/$defs/boundary" },
         "obligations": { "$ref": "#/$defs/obligations" },
         "notes": { "type": "string", "minLength": 1 }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "extensionContract": {
+                "type": "object",
+                "properties": { "status": { "const": "versioned" } },
+                "required": ["status"]
+              }
+            },
+            "required": ["extensionContract"]
+          },
+          "then": {
+            "required": ["publicBoundary"],
+            "properties": {
+              "publicBoundary": { "$ref": "#/$defs/boundary" },
+              "extensionContract": {
+                "type": "object",
+                "not": {
+                  "type": "object",
+                  "properties": {
+                    "missingContractReason": { "type": "string" }
+                  },
+                  "required": ["missingContractReason"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "extensionContract": {
+                "type": "object",
+                "properties": { "status": { "const": "not-yet-versioned" } },
+                "required": ["status"]
+              }
+            },
+            "required": ["extensionContract"]
+          },
+          "then": {
+            "properties": {
+              "extensionContract": {
+                "type": "object",
+                "properties": {
+                  "missingContractReason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                },
+                "required": ["missingContractReason"]
+              },
+              "publicBoundary": false,
+              "lifecycle": { "const": "planned" },
+              "availability": {
+                "type": "object",
+                "properties": {
+                  "cloud": { "not": { "const": "available" } },
+                  "platformApi": { "not": { "const": "available" } },
+                  "selfHosted": { "const": "unavailable" }
+                }
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     }
   },

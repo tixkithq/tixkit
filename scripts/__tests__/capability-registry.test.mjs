@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import Ajv2020 from 'ajv/dist/2020.js';
 import {
   capabilityRegistryViolations,
   EXPECTED_CAPABILITY_DECISIONS,
@@ -15,9 +16,62 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const registry = JSON.parse(
   readFileSync(resolve(root, 'distribution/capability-registry.json'), 'utf8'),
 );
+const registrySchema = JSON.parse(
+  readFileSync(resolve(root, 'distribution/capability-registry.schema.json'), 'utf8'),
+);
 const publicDistribution = JSON.parse(
   readFileSync(resolve(root, 'distribution/public-distribution.json'), 'utf8'),
 );
+
+test('strict draft 2020-12 schema enforces extension-contract conditions', () => {
+  const validate = new Ajv2020({ strict: true }).compile(registrySchema);
+  assert.equal(validate(registry), true, JSON.stringify(validate.errors));
+  assert.equal(registry.schemaVersion, 2);
+
+  const mutations = [
+    (candidate) => {
+      candidate.capabilities[0].publicBoundary = {
+        path: 'packages/domain/src/messaging/index.ts',
+        symbols: ['SmsTransport'],
+      };
+    },
+    (candidate) => {
+      delete candidate.capabilities.find(({ id }) => id === 'generic-messaging-contracts')
+        .publicBoundary;
+    },
+    (candidate) => {
+      candidate.capabilities.find(
+        ({ id }) => id === 'generic-messaging-contracts',
+      ).extensionContract.missingContractReason = 'Must be rejected for a versioned contract.';
+    },
+    (candidate) => {
+      candidate.capabilities[0].availability.cloud = 'available';
+    },
+    (candidate) => {
+      candidate.capabilities[0].extensionContract.missingContractReason = '   ';
+    },
+    (candidate) => {
+      candidate.schemaVersion = 1;
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const candidate = structuredClone(registry);
+    mutate(candidate);
+    assert.equal(validate(candidate), false, 'conditional schema unexpectedly accepted mutation');
+    assert.ok(validate.errors?.length);
+  }
+
+  const futureManagedBeta = structuredClone(registry);
+  futureManagedBeta.capabilities[0].availability.cloud = 'private-beta';
+  futureManagedBeta.capabilities[0].availability.platformApi = 'private-beta';
+  assert.equal(validate(futureManagedBeta), true, JSON.stringify(validate.errors));
+  assert.ok(
+    capabilityRegistryViolations(futureManagedBeta, root, publicDistribution).some((violation) =>
+      violation.includes('accepted availability decision drifted'),
+    ),
+  );
+});
 
 test('validates every required capability decision and its generated documentation', () => {
   assert.deepEqual(
@@ -101,18 +155,98 @@ test('requires existing public files and named exported symbols', () => {
   );
 });
 
+test('versioned extension contracts require an exported public boundary', () => {
+  const missingBoundary = structuredClone(registry);
+  const generic = missingBoundary.capabilities.find(
+    ({ id }) => id === 'generic-messaging-contracts',
+  );
+  delete generic.publicBoundary;
+  assert.throws(
+    () => validateCapabilityRegistry(missingBoundary, root, publicDistribution),
+    /publicBoundary is required by schema when extensionContract\.status is versioned/u,
+  );
+
+  const forbiddenReason = structuredClone(registry);
+  const resend = forbiddenReason.capabilities.find(({ id }) => id === 'resend-email-adapter');
+  resend.extensionContract.missingContractReason =
+    'This reason must not decorate a versioned contract.';
+  assert.throws(
+    () => validateCapabilityRegistry(forbiddenReason, root, publicDistribution),
+    /missingContractReason is forbidden by schema when extensionContract\.status is versioned/u,
+  );
+});
+
+test('not-yet-versioned contracts require a reason and forbid boundary substitution', () => {
+  const missingReason = structuredClone(registry);
+  const apple = missingReason.capabilities.find(({ id }) => id === 'apple-messages-for-business');
+  delete apple.extensionContract.missingContractReason;
+  assert.throws(
+    () => validateCapabilityRegistry(missingReason, root, publicDistribution),
+    /missingContractReason is required by schema when extensionContract\.status is not-yet-versioned/u,
+  );
+
+  const substitutedBoundary = structuredClone(registry);
+  const rcs = substitutedBoundary.capabilities.find(({ id }) => id === 'rcs-messaging');
+  rcs.publicBoundary = {
+    path: 'packages/domain/src/messaging/index.ts',
+    symbols: ['SmsTransport'],
+  };
+  assert.throws(
+    () => validateCapabilityRegistry(substitutedBoundary, root, publicDistribution),
+    /publicBoundary is forbidden by schema when extensionContract\.status is not-yet-versioned/u,
+  );
+
+  const blankReason = structuredClone(registry);
+  blankReason.capabilities.find(
+    ({ id }) => id === 'apple-messages-for-business',
+  ).extensionContract.missingContractReason = '   ';
+  assert.throws(
+    () => validateCapabilityRegistry(blankReason, root, publicDistribution),
+    /missingContractReason must match/u,
+  );
+});
+
+test('not-yet-versioned contracts cannot claim premature lifecycle or availability', () => {
+  const premature = structuredClone(registry);
+  const whatsapp = premature.capabilities.find(({ id }) => id === 'whatsapp-messaging');
+  whatsapp.lifecycle = 'stable';
+  whatsapp.availability.cloud = 'available';
+  whatsapp.availability.platformApi = 'available';
+  whatsapp.availability.selfHosted = 'planned';
+  assert.throws(
+    () => validateCapabilityRegistry(premature, root, publicDistribution),
+    (error) => {
+      assert.match(error.message, /lifecycle must equal "planned" by schema/u);
+      assert.match(error.message, /availability\.cloud must not equal "available" by schema/u);
+      assert.match(
+        error.message,
+        /availability\.platformApi must not equal "available" by schema/u,
+      );
+      assert.match(error.message, /availability\.selfHosted must equal "unavailable" by schema/u);
+      return true;
+    },
+  );
+});
+
 test('managed capabilities cannot expose private paths or claim GA availability', () => {
   const falseGa = structuredClone(registry);
-  falseGa.capabilities[0].lifecycle = 'stable';
-  falseGa.capabilities[0].availability.cloud = 'available';
+  const falseGaManagedEmail = falseGa.capabilities.find(
+    ({ id }) => id === 'managed-email-operations',
+  );
+  falseGaManagedEmail.lifecycle = 'stable';
+  falseGaManagedEmail.availability.cloud = 'available';
   const falseGaViolations = capabilityRegistryViolations(falseGa, root, publicDistribution);
   assert.ok(
     falseGaViolations.some((violation) => violation.includes('must not claim stable or GA')),
   );
+
   assert.ok(falseGaViolations.some((violation) => violation.includes('must not claim GA')));
 
   const privateBoundary = structuredClone(registry);
-  privateBoundary.capabilities[0].publicBoundary.path = 'packages/managed/src/apple-messages.ts';
+  const managedEmail = privateBoundary.capabilities.find(
+    ({ id }) => id === 'managed-email-operations',
+  );
+  managedEmail.publicBoundary.path = 'packages/managed/src/email-operations.ts';
   assert.ok(
     capabilityRegistryViolations(privateBoundary, root, publicDistribution).some((violation) =>
       violation.includes('references a private source/import path'),
@@ -166,10 +300,9 @@ test('rich channels stay unavailable to Self-Hosted without a versioned public c
   const prematureExtension = structuredClone(registry);
   const whatsapp = prematureExtension.capabilities.find(({ id }) => id === 'whatsapp-messaging');
   whatsapp.availability.selfHosted = 'planned';
-  assert.ok(
-    capabilityRegistryViolations(prematureExtension, root, publicDistribution).some((violation) =>
-      violation.includes('rich channel must remain unavailable to Self-Hosted'),
-    ),
+  assert.throws(
+    () => validateCapabilityRegistry(prematureExtension, root, publicDistribution),
+    /availability\.selfHosted must equal "unavailable" by schema/u,
   );
 });
 
@@ -179,6 +312,21 @@ test('closed schema rejects undeclared managed implementation fields', () => {
   assert.throws(
     () => validateCapabilityRegistry(sourceLeak, root, publicDistribution),
     /privateImport is not allowed/u,
+  );
+
+  const invalidExtensionStatus = structuredClone(registry);
+  invalidExtensionStatus.capabilities[0].extensionContract.status = 'implicitly-versioned';
+  assert.throws(
+    () => validateCapabilityRegistry(invalidExtensionStatus, root, publicDistribution),
+    /extensionContract\.status must be one of versioned, not-yet-versioned/u,
+  );
+
+  const undeclaredExtensionField = structuredClone(registry);
+  undeclaredExtensionField.capabilities[0].extensionContract.privateSchema =
+    '@tixkit-cloud/rich-channel';
+  assert.throws(
+    () => validateCapabilityRegistry(undeclaredExtensionField, root, publicDistribution),
+    /extensionContract\.privateSchema is not allowed/u,
   );
 });
 
