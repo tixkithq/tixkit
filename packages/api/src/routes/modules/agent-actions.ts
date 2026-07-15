@@ -27,6 +27,7 @@ const readReadinessSchema = z
     resourceId: idSchema,
   })
   .strict();
+const readEventSchema = readReadinessSchema;
 const actionParamsSchema = z.object({ actionId: z.string().regex(/^act_[a-f0-9]{48}$/u) }).strict();
 const approvalParamsSchema = actionParamsSchema
   .extend({ approvalId: z.string().regex(/^apr_[a-f0-9]{48}$/u) })
@@ -52,7 +53,7 @@ export interface AgentActionRouteService {
     tenantId: string;
     agentPrincipalId: string;
     idempotencyKey: string;
-    kind: 'event.publish' | 'readiness.read';
+    kind: 'event.publish' | 'event.read' | 'readiness.read';
     delegationGrantId: string;
     resourceId: string;
   }): Promise<PreparedAgentAction>;
@@ -224,6 +225,26 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
     }
   });
 
+  app.post('/agent/events', { config: { agentAccess: true } }, async (request, reply) => {
+    const actor = request.principal!;
+    requireAgent(actor);
+    const key = idempotencyKey(request.headers);
+    const body = parseBody(readEventSchema, request.body);
+    try {
+      const prepared = await service.prepare({
+        tenantId: actor.tenantId,
+        agentPrincipalId: actor.id,
+        idempotencyKey: key,
+        kind: 'event.read',
+        ...body,
+      });
+      reply.header('Cache-Control', 'no-store');
+      return reply.status(201).send(prepared);
+    } catch (error) {
+      translateAgentActionError(key, error);
+    }
+  });
+
   app.get('/agent/actions/:actionId', { config: { agentAccess: true } }, async (request, reply) => {
     const actor = request.principal!;
     if (actor.type === 'agent') requireAgent(actor);
@@ -277,6 +298,31 @@ export const agentActionRoutes: FastifyPluginAsync<AgentActionRouteOptions> = as
       return action;
     },
   );
+
+  app.get('/agent/events/:actionId', { config: { agentAccess: true } }, async (request, reply) => {
+    const actor = request.principal!;
+    if (actor.type === 'agent') requireAgent(actor);
+    else requireHumanSponsor(actor);
+    const { actionId } = parseBody(actionParamsSchema, request.params);
+    const action =
+      actor.type === 'agent'
+        ? await service.getForAgent({
+            tenantId: actor.tenantId,
+            agentPrincipalId: actor.id,
+            actionId,
+          })
+        : actor.type === 'user'
+          ? await service.getForSponsor({
+              tenantId: actor.tenantId,
+              sponsorPrincipalId: actor.id,
+              actionId,
+            })
+          : undefined;
+    if (!action || action.action.kind !== 'event.read')
+      throw new NotFoundError('AgentEventRead', actionId);
+    reply.header('Cache-Control', 'no-store');
+    return action;
+  });
 
   app.post('/agent/actions/:actionId/approvals', async (request, reply) => {
     const actor = request.principal!;

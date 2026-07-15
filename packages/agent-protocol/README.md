@@ -10,7 +10,7 @@ The shared Tixkit API and Self-Hosted runtime, third-party Platform API agents, 
 
 ## Status
 
-Experimental organizer-first action protocol at version `2026-07-22`, with immutable plans at platform protocol version `2026-07-27` and additive action-registry contracts at version `2026-07-29`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
+Experimental organizer-first action protocol at version `2026-07-22`, with immutable plans at platform protocol version `2026-07-27` and additive action-registry contracts at version `2026-07-30`. The package is a public-release candidate, but publication and MIT licensing remain subject to the repository's pending legal and protected-release gates.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Use `buildAgentPlanDefinition` for new plans. It hashes immutable assumptions, e
 
 ## Public exports
 
-The root exports protocol versions and the digest-bound action registry; principal, delegation, action, immutable plan definition, mutable plan state, approval, authorization and audit contracts; canonical hashing and validation helpers; `DurableAgentExecutionService`; execution-store and invoker interfaces; and scoped memory normalization and validation contracts. `./schema` remains the immutable `2026-07-22` Agent Action schema. Immutable schemas use explicit `./schemas/agent-plan/2026-07-27`, `./schemas/agent-action-contracts/2026-07-27` and `./schemas/agent-action-contracts/2026-07-29` exports. The registry marks `event.publish` as plan-supported and `readiness.read` as direct-only; reserved actions remain unavailable.
+The root exports protocol versions and the digest-bound action registry; principal, delegation, action, immutable plan definition, mutable plan state, approval, authorization and audit contracts; canonical hashing and validation helpers; `DurableAgentExecutionService`; execution-store and invoker interfaces; and scoped memory normalization and validation contracts. `./schema` remains the immutable `2026-07-22` Agent Action schema. Immutable schemas use explicit `./schemas/agent-plan/2026-07-27`, `./schemas/agent-action-contracts/2026-07-27`, `./schemas/agent-action-contracts/2026-07-29` and `./schemas/agent-action-contracts/2026-07-30` exports. The registry marks `event.publish` as plan-supported and both `event.read` and `readiness.read` as direct-only; reserved actions remain unavailable.
 
 ## Runtime
 
@@ -42,9 +42,11 @@ Authorization is the intersection of agent capability, sponsor permission, deleg
 
 ## Compatibility
 
-Managed Cloud releases must pin action protocol version `2026-07-22`, platform plan protocol version `2026-07-27`, action-registry contract version `2026-07-29`, and the registry/schema digests through their Cloud/core compatibility manifest. Changes to canonical bytes, action or plan digests, authorization inputs, approval semantics, registry policy, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. The immutable `2026-07-11` and `2026-07-22` action schemas remain exported byte-for-byte; `./schema` intentionally continues to resolve to `2026-07-22`.
+Managed Cloud releases must pin action protocol version `2026-07-22`, platform plan protocol version `2026-07-27`, action-registry contract version `2026-07-30`, and the registry/schema digests through their Cloud/core compatibility manifest. Changes to canonical bytes, action or plan digests, authorization inputs, approval semantics, registry policy, audit envelopes, schema keywords, or memory scope are protocol changes and require compatibility evidence. The immutable `2026-07-11` and `2026-07-22` action schemas remain exported byte-for-byte; `./schema` intentionally continues to resolve to `2026-07-22`.
 
 HTTP API release `2026-07-29` retains byte-for-byte readability for serialized `2026-07-27` plan definitions, states and digests. It adds the direct-only `readiness.read` adapter and immutable action-registry schema without changing action protocol bytes or allowing direct reads into a plan. Readiness results are canonical, digest-bound and durable, but do not create approval or execution records.
+
+HTTP API release `2026-07-30` retains the `2026-07-29` action and readiness response schemas byte-for-byte and adds the direct-only `event.read` adapter. Its strict version-bound projection identifies organizer-authored title and description as untrusted tool output, binds the projection to the action digest, and never creates approval, execution or plan authority.
 
 ## Related guides
 

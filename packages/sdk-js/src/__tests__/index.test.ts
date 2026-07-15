@@ -3243,6 +3243,47 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('agentActions reads a direct version-bound event projection', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const prepared = await client.agentActions.readEvent({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      idempotencyKey: 'agent-event-read-0001',
+    });
+    const assertEventResponseType = (value: typeof prepared) => {
+      void value.result.event.title;
+      const paths: ['event.title', 'event.description'] = value.result.untrustedContentPaths;
+      void paths;
+      // @ts-expect-error direct reads never expose approval dry-run evidence.
+      void value.dryRun;
+    };
+    void assertEventResponseType;
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/events',
+      headers: { 'Idempotency-Key': 'agent-event-read-0001' },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+    });
+    const actionId = `act_${'a'.repeat(48)}`;
+    const inspected = await client.agentActions.getEvent(actionId);
+    const assertInspectedEventType = (value: typeof inspected) => {
+      void value.result.eventSnapshotSha256;
+    };
+    void assertInspectedEventType;
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/events/${actionId}`,
+    });
+  });
+
   it('agentActions binds planned approval intent to the plan digest', async () => {
     const fm = mockFetch(201, {});
     const client = new TixkitClient({
@@ -3329,7 +3370,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-07-29',
+        'X-Tixkit-Version': '2026-07-30',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({

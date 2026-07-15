@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -188,7 +188,7 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
-      apiVersion: '2026-07-29',
+      apiVersion: '2026-07-30',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
@@ -218,6 +218,32 @@ try {
     throw new Error('Packed agent-platform profile did not reject remote plaintext HTTP');
   if (/secret_must_not_leak/u.test(`${remoteHttpAgent.stdout}${remoteHttpAgent.stderr}`))
     throw new Error('Packed agent-platform remote HTTP rejection leaked a credential');
+  await copyFile(
+    join(root, 'scripts/fixtures/packed-agent-platform-consumer.mjs'),
+    join(temp, 'packed-agent-platform-consumer.mjs'),
+  );
+  for (const mutation of ['none', 'projection', 'untrusted_paths', 'result_digest', 'replay']) {
+    const packedOutput = JSON.parse(
+      execFileSync('bun', ['run', 'packed-agent-platform-consumer.mjs', mutation], {
+        cwd: temp,
+        encoding: 'utf8',
+      }),
+    );
+    if (packedOutput.eventCalls !== 2)
+      throw new Error(`Packed agent-platform ${mutation} did not prove exact event-read replay`);
+    if (mutation === 'none') {
+      if (packedOutput.result.ok !== true)
+        throw new Error('Packed agent-platform happy path failed');
+    } else if (
+      packedOutput.result.ok !== false ||
+      !packedOutput.result.findings.some((finding) =>
+        ['AGENT_PLATFORM_EVENT_READ_SCHEMA', 'AGENT_PLATFORM_EVENT_READ_REPLAY'].includes(
+          finding.code,
+        ),
+      )
+    )
+      throw new Error(`Packed agent-platform ${mutation} did not fail closed`);
+  }
   await writeFile(
     join(temp, 'sdk-wire.mjs'),
     `import { TixkitClient } from '@tixkit/js';
@@ -240,7 +266,7 @@ if (captured.headers.authorization !== 'Bearer tk_sandbox') throw new Error('Pac
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
-    'Built and executed 4 packed contract profiles, including agent fail-closed credential handling, and the packed SDK wire contract.',
+    'Built and executed 4 packed contract profiles, including agent event-read replay/mutations and fail-closed credential handling, and the packed SDK wire contract.',
   );
 } finally {
   await rm(temp, { recursive: true, force: true });

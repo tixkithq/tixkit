@@ -41,21 +41,21 @@ Profiles run locally or in CI and return structured findings; assertion helpers 
 
 The CLI accepts a profile name and sanitized JSON fixture, for example `tixkit-contract-tests webhook-consumer fixture.json`.
 
-The live `agent-platform` profile validates a direct `readiness.read` result and the shared `event.publish` execution boundary: client-credential authentication, explicit agent identity, canonical result and exact-replay evidence, typed action preparation, canonical plan persistence, sponsor approval bound to the immutable plan digest, idempotent execution, terminal plan evidence, and plan-bound audit inspection.
+The live `agent-platform` profile validates direct `event.read` and `readiness.read` results and the shared `event.publish` execution boundary: client-credential authentication, explicit agent identity, version/digest and untrusted-content binding, canonical result and exact-replay evidence, typed action preparation, canonical plan persistence, sponsor approval bound to the immutable plan digest, idempotent execution, terminal plan evidence, and plan-bound audit inspection.
 
 It publishes the selected event. Run it only in an isolated private-beta or Self-Hosted test tenant with an unpublished, disposable event that is ready to publish. Never target a production event. Put only environment-variable names in the fixture:
 
 ```json
 {
   "baseUrl": "https://sandbox.example.test",
-  "apiVersion": "2026-07-29",
+  "apiVersion": "2026-07-30",
   "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
   "agentClientId": "tk_agent_example",
   "agentClientSecretEnv": "TIXKIT_CONFORMANCE_AGENT_SECRET",
   "delegationGrantId": "delegation_example",
   "resourceId": "event_disposable",
-  "planId": "plan_conformance_20260729",
-  "idempotencyPrefix": "agent.conformance.20260729"
+  "planId": "plan_conformance_20260730",
+  "idempotencyPrefix": "agent.conformance.20260730"
 }
 ```
 
@@ -65,7 +65,7 @@ TIXKIT_CONFORMANCE_AGENT_SECRET='...' \
 tixkit-contract-tests agent-platform agent-platform.fixture.json
 ```
 
-The sponsor must own the agent principal and hold current `events.read` and `events.write` permission for the selected event. The agent credential must have an active delegation containing `readiness.read`, `events.prepare` and `events.execute` for that exact event. Use a new plan ID and idempotency prefix for each event fixture.
+The sponsor must own the agent principal and hold current `events.read` and `events.write` permission for the selected event. The agent credential must have an active delegation containing `events.read`, `readiness.read`, `events.prepare` and `events.execute` for that exact event. Use a new plan ID and idempotency prefix for each event fixture.
 
 ## Security
 

@@ -7,7 +7,7 @@ product_area: api
 content_type: reference
 status: beta
 owner: developer-platform
-last_verified: 2026-07-29
+last_verified: 2026-07-30
 prerequisites: []
 related:
   - /reference/api
@@ -29,12 +29,13 @@ related:
   - /reference/migrations/2026-07-26-to-2026-07-27
   - /reference/migrations/2026-07-27-to-2026-07-28
   - /reference/migrations/2026-07-28-to-2026-07-29
+  - /reference/migrations/2026-07-29-to-2026-07-30
 ---
 
-The current HTTP/OpenAPI/SDK contract release is `2026-07-29`. HTTP routes use the `/v1` URL prefix. Durable domain webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change their payload schema. The synthetic `test.ping` envelope and the `X-Tixkit-API-Version` delivery-attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train.
+The current HTTP/OpenAPI/SDK contract release is `2026-07-30`. HTTP routes use the `/v1` URL prefix. Durable domain webhook envelopes remain independently versioned as `2026-01-01`; an HTTP contract release does not silently change their payload schema. The synthetic `test.ping` envelope and the `X-Tixkit-API-Version` delivery-attempt header instead identify the current HTTP/SDK contract used by test and replay tooling, so they advance with this release train.
 
 The generated endpoint and schema reference defaults to the current contract. Its version selector exposes immutable retained contract artifacts and checksums under `/contracts/<API version>/`. Migration guidance is published separately for [2026-01-01 to 2026-07-12](/reference/migrations/2026-01-01-to-2026-07-12), [2026-07-13 to 2026-07-14](/reference/migrations/2026-07-13-to-2026-07-14), [2026-07-14 to 2026-07-15](/reference/migrations/2026-07-14-to-2026-07-15), [2026-07-15 to 2026-07-16](/reference/migrations/2026-07-15-to-2026-07-16), [2026-07-16 to 2026-07-17](/reference/migrations/2026-07-16-to-2026-07-17), [2026-07-17 to 2026-07-18](/reference/migrations/2026-07-17-to-2026-07-18), [2026-07-18 to 2026-07-19](/reference/migrations/2026-07-18-to-2026-07-19), [2026-07-19 to 2026-07-20](/reference/migrations/2026-07-19-to-2026-07-20), [2026-07-20 to 2026-07-21](/reference/migrations/2026-07-20-to-2026-07-21), [2026-07-21 to 2026-07-22](/reference/migrations/2026-07-21-to-2026-07-22), [2026-07-22 to 2026-07-23](/reference/migrations/2026-07-22-to-2026-07-23), [2026-07-23 to 2026-07-24](/reference/migrations/2026-07-23-to-2026-07-24), [2026-07-24 to 2026-07-25](/reference/migrations/2026-07-24-to-2026-07-25), and [2026-07-25 to 2026-07-26](/reference/migrations/2026-07-25-to-2026-07-26). Breaking changes require an explicit lifecycle/version decision, updated OpenAPI, SDKs, examples, documentation, and release notes. A future incompatible URL surface uses a new major prefix while the prior version remains available through its documented deprecation period.
 
 SDK parity validation checks the declared API version across supported packages and guides.
 
-Plan-bound approval and execution enforcement is documented in [2026-07-27 to 2026-07-28](/reference/migrations/2026-07-27-to-2026-07-28). Direct readiness evidence and the additive action-registry contract are documented in [2026-07-28 to 2026-07-29](/reference/migrations/2026-07-28-to-2026-07-29).
+Plan-bound approval and execution enforcement is documented in [2026-07-27 to 2026-07-28](/reference/migrations/2026-07-27-to-2026-07-28). Direct readiness evidence is documented in [2026-07-28 to 2026-07-29](/reference/migrations/2026-07-28-to-2026-07-29). The version-bound event projection and untrusted-content contract are documented in [2026-07-29 to 2026-07-30](/reference/migrations/2026-07-29-to-2026-07-30).

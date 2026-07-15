@@ -96,7 +96,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-29');
+    expect(openApiSpec.info.version).toBe('2026-07-30');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -279,6 +279,28 @@ describe('openApiSpec', () => {
     expect(
       openApiSpec.components.schemas.AgentReadinessReadResult.properties.blockerReasonCodes.items,
     ).toMatchObject({ pattern: '^[a-z0-9][a-z0-9_.-]{1,63}$' });
+  });
+
+  it('adds a direct event projection with exact authority and untrusted-content boundaries', () => {
+    const read = openApiSpec.paths['/agent/events'].post;
+    const inspect = openApiSpec.paths['/agent/events/{actionId}'].get;
+    const action = openApiSpec.components.schemas.AgentEventReadAction;
+    const result = openApiSpec.components.schemas.AgentEventReadResult;
+    const prepared = openApiSpec.components.schemas.PreparedAgentEventReadAction;
+    expect(read.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(action.properties.kind).toEqual({ type: 'string', const: 'event.read' });
+    expect(action.properties.target.properties.apiOperation).toEqual({
+      type: 'string',
+      const: 'events.get',
+    });
+    expect(prepared.required).toEqual(expect.arrayContaining(['result', 'resultSha256']));
+    expect(prepared.properties).not.toHaveProperty('dryRun');
+    expect(result.properties.event.additionalProperties).toBe(false);
+    expect(result.properties.untrustedContentPaths.prefixItems).toEqual([
+      { type: 'string', const: 'event.title' },
+      { type: 'string', const: 'event.description' },
+    ]);
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

@@ -18,7 +18,7 @@ import {
 export const AGENT_PLATFORM_PROTOCOL_VERSION = '2026-07-27' as const;
 export const AGENT_PLATFORM_PLAN_DIGEST_DOMAIN =
   'tixkit.agent-plan-definition.v2026-07-27' as const;
-export const AGENT_ACTION_CONTRACT_VERSION = '2026-07-29' as const;
+export const AGENT_ACTION_CONTRACT_VERSION = '2026-07-30' as const;
 
 export type AgentRiskClass = 'read_only' | 'low' | 'high' | 'critical';
 export type AgentReversibilityMode = 'none' | 'reversible' | 'compensatable';
@@ -204,6 +204,26 @@ export interface AgentReadinessReadResult extends Readonly<Record<string, unknow
   published: boolean;
   blockerReasonCodes: readonly string[];
   warningReasonCodes: readonly string[];
+}
+
+export interface AgentEventReadResult extends Readonly<Record<string, unknown>> {
+  resourceId: string;
+  resourceVersion: number;
+  eventSnapshotSha256: string;
+  observedAt: string;
+  event: {
+    title: string;
+    description: string | null;
+    status: 'draft' | 'published' | 'paused' | 'ended' | 'archived';
+    currency: string;
+    timezone: string;
+    startsAt: string;
+    endsAt: string | null;
+    visibility: 'public' | 'unlisted' | 'private';
+    capacity: number | null;
+    minimumAge: number | null;
+  };
+  untrustedContentPaths: readonly ['event.title', 'event.description'];
 }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$/u;
@@ -964,12 +984,109 @@ export function validateAgentReadinessReadResult(
   );
 }
 
-const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-07-29';
+export function validateAgentEventReadResult(
+  action: AgentAction,
+  result: AgentEventReadResult,
+): void {
+  assert(action.kind === 'event.read', 'agent event result action kind is invalid');
+  assertExactKeys(action.payload, ['eventSnapshotSha256']);
+  assertExactKeys(result, [
+    'resourceId',
+    'resourceVersion',
+    'eventSnapshotSha256',
+    'observedAt',
+    'event',
+    'untrustedContentPaths',
+  ]);
+  assertExactKeys(result.event, [
+    'title',
+    'description',
+    'status',
+    'currency',
+    'timezone',
+    'startsAt',
+    'endsAt',
+    'visibility',
+    'capacity',
+    'minimumAge',
+  ]);
+  assert(
+    action.autonomy === 'read' &&
+      action.target.resourceType === 'event' &&
+      action.target.apiOperation === 'events.get' &&
+      result.resourceId === action.target.resourceId &&
+      result.resourceVersion === action.target.resourceVersion,
+    'agent event result target binding is invalid',
+  );
+  assert(
+    typeof action.payload.eventSnapshotSha256 === 'string' &&
+      SHA256.test(action.payload.eventSnapshotSha256) &&
+      result.eventSnapshotSha256 === action.payload.eventSnapshotSha256 &&
+      result.eventSnapshotSha256 === agentSha256(result.event),
+    'agent event result digest binding is invalid',
+  );
+  validDate(result.observedAt);
+  assert(
+    typeof result.event.title === 'string' &&
+      result.event.title.length >= 1 &&
+      result.event.title.length <= 512 &&
+      !result.event.title.includes('\0'),
+    'agent event title is invalid',
+  );
+  assert(
+    result.event.description === null ||
+      (typeof result.event.description === 'string' &&
+        result.event.description.length <= 50_000 &&
+        !result.event.description.includes('\0')),
+    'agent event description is invalid',
+  );
+  assert(
+    ['draft', 'published', 'paused', 'ended', 'archived'].includes(result.event.status),
+    'agent event status is invalid',
+  );
+  assert(CURRENCY.test(result.event.currency), 'agent event currency is invalid');
+  assert(
+    typeof result.event.timezone === 'string' &&
+      result.event.timezone.length >= 1 &&
+      result.event.timezone.length <= 128 &&
+      !result.event.timezone.includes('\0'),
+    'agent event timezone is invalid',
+  );
+  const startsAt = validDate(result.event.startsAt);
+  const endsAt = result.event.endsAt === null ? undefined : validDate(result.event.endsAt);
+  assert(endsAt === undefined || endsAt >= startsAt, 'agent event time range is invalid');
+  assert(
+    ['public', 'unlisted', 'private'].includes(result.event.visibility),
+    'agent event visibility is invalid',
+  );
+  assert(
+    result.event.capacity === null ||
+      (Number.isSafeInteger(result.event.capacity) && result.event.capacity >= 0),
+    'agent event capacity is invalid',
+  );
+  assert(
+    result.event.minimumAge === null ||
+      (Number.isSafeInteger(result.event.minimumAge) &&
+        result.event.minimumAge >= 0 &&
+        result.event.minimumAge <= 255),
+    'agent event minimum age is invalid',
+  );
+  assert(
+    result.untrustedContentPaths.length === 2 &&
+      result.untrustedContentPaths[0] === 'event.title' &&
+      result.untrustedContentPaths[1] === 'event.description',
+    'agent event untrusted content declaration is invalid',
+  );
+}
+
+const CONTRACT_SCHEMA_ID = 'https://tixkit.com/schemas/agent-action-contracts/2026-07-30';
 // Updated only alongside the immutable schema and verified by schema-parity tests.
 export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27 =
   'fd74b30a8ba72341fcf4fa6984dca901ba7dec95cf305dc98f5cc38c184b092f' as const;
-export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_29 =
   '13c927eacc6b21b14a5637f95b479aa6ae0707db75bc1a508e489bb0ff813f83' as const;
+export const AGENT_ACTION_CONTRACT_SCHEMA_SHA256 =
+  '2fb854eba68e6c9b1b6f9c1fce5e9d585b49a09d62b1642119497a4c46548843' as const;
 
 const riskByKind: Readonly<Record<AgentActionKind, AgentRiskClass>> = {
   'event.read': 'read_only',
@@ -1050,13 +1167,16 @@ function schemaReference(jsonPointer: string): AgentSchemaReference {
 const actions = (Object.keys(AGENT_ACTION_DESCRIPTORS) as AgentActionKind[]).map(
   (kind): AgentActionRegistryDefinition => {
     const descriptor = AGENT_ACTION_DESCRIPTORS[kind];
-    const implemented = kind === 'event.publish' || kind === 'readiness.read';
+    const implemented =
+      kind === 'event.publish' || kind === 'event.read' || kind === 'readiness.read';
     const schemaPrefix =
       kind === 'event.publish'
         ? 'eventPublish'
-        : kind === 'readiness.read'
-          ? 'readinessRead'
-          : undefined;
+        : kind === 'event.read'
+          ? 'eventRead'
+          : kind === 'readiness.read'
+            ? 'readinessRead'
+            : undefined;
     return {
       kind,
       availability: implemented ? 'implemented' : 'reserved',
@@ -1119,7 +1239,7 @@ export const AGENT_ACTION_REGISTRY: AgentActionRegistry = {
   actionProtocolVersion: AGENT_PROTOCOL_VERSION,
   actions,
   registrySha256: agentSha256({
-    domain: 'tixkit.agent-action-registry.v2026-07-29',
+    domain: 'tixkit.agent-action-registry.v2026-07-30',
     protocolVersion: AGENT_ACTION_CONTRACT_VERSION,
     actionProtocolVersion: AGENT_PROTOCOL_VERSION,
     actions,
@@ -1181,7 +1301,9 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
     }
     if (definition.availability === 'implemented')
       assert(
-        definition.kind === 'event.publish' || definition.kind === 'readiness.read',
+        definition.kind === 'event.publish' ||
+          definition.kind === 'event.read' ||
+          definition.kind === 'readiness.read',
         'unimplemented agent action is advertised',
       );
     else
@@ -1212,7 +1334,7 @@ export function validateAgentActionRegistry(registry: AgentActionRegistry): void
   const { registrySha256: _digest, ...material } = registry;
   assert(
     registry.registrySha256 ===
-      agentSha256({ domain: 'tixkit.agent-action-registry.v2026-07-29', ...material }),
+      agentSha256({ domain: 'tixkit.agent-action-registry.v2026-07-30', ...material }),
     'agent registry digest is invalid',
   );
   assert(

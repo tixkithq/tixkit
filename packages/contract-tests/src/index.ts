@@ -11,16 +11,18 @@ import {
   agentActionDigest,
   agentSha256,
   buildAgentPlanDefinition,
+  validateAgentEventReadResult,
   validateAgentReadinessReadResult,
   type AgentAction,
   type AgentApproval,
   type AgentExecution,
+  type AgentEventReadResult,
   type AgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-29' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-30' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -532,6 +534,61 @@ export async function runAgentPlatformContract(
     findings.push({
       code: 'AGENT_PLATFORM_SESSION_SCHEMA',
       message: 'Explicit agent session response is invalid.',
+    });
+    return result(findings);
+  }
+  const eventReadRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: '/v1/agent/events',
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.event.read`,
+    },
+    body: {
+      delegationGrantId: input.delegationGrantId,
+      resourceId: input.resourceId,
+    },
+  };
+  const eventReadResponse = await request('event-read', eventReadRequest, 201);
+  const eventReadReplay = await request('event-read-replay', eventReadRequest, 201);
+  const eventPrepared = objectBody(eventReadResponse?.body);
+  const eventAction = objectBody(eventPrepared?.action) as unknown as AgentAction | undefined;
+  const eventResult = objectBody(eventPrepared?.result);
+  const eventAuthorization = objectBody(eventPrepared?.authorization);
+  let eventActionDigest: string | undefined;
+  let eventResultDigest: string | undefined;
+  try {
+    if (!eventAction || !eventResult) throw new Error('invalid event read response');
+    validateAgentEventReadResult(eventAction, eventResult as unknown as AgentEventReadResult);
+    eventActionDigest = agentActionDigest(eventAction);
+    eventResultDigest = agentSha256(eventResult);
+  } catch {
+    eventActionDigest = undefined;
+  }
+  if (
+    !eventAction ||
+    eventAction.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    eventAction.kind !== 'event.read' ||
+    eventAction.autonomy !== 'read' ||
+    eventAction.agentPrincipalId !== principal.id ||
+    eventAction.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    eventAction.delegationGrantId !== input.delegationGrantId ||
+    eventAction.target.resourceType !== 'event' ||
+    eventAction.target.resourceId !== input.resourceId ||
+    eventAction.target.apiOperation !== 'events.get' ||
+    eventActionDigest !== eventPrepared?.actionDigest ||
+    eventResultDigest !== eventPrepared?.resultSha256 ||
+    eventAuthorization?.allowed !== true ||
+    eventPrepared?.dryRun !== undefined ||
+    objectBody(eventAction.payload)?.eventSnapshotSha256 !== eventResult?.eventSnapshotSha256 ||
+    agentSha256(eventReadResponse?.body) !== agentSha256(eventReadReplay?.body) ||
+    !Array.isArray(eventResult?.untrustedContentPaths) ||
+    eventResult.untrustedContentPaths.join(',') !== 'event.title,event.description'
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_EVENT_READ_SCHEMA',
+      message:
+        'Direct event projection, untrusted-content boundary, result digest or exact replay evidence is invalid.',
     });
     return result(findings);
   }

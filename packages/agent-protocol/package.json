@@ -33,6 +33,7 @@
     "./schemas/2026-07-22": "./schemas/agent-protocol-2026-07-22.json",
     "./schemas/agent-action-contracts/2026-07-27": "./schemas/agent-action-contracts-2026-07-27.json",
     "./schemas/agent-action-contracts/2026-07-29": "./schemas/agent-action-contracts-2026-07-29.json",
+    "./schemas/agent-action-contracts/2026-07-30": "./schemas/agent-action-contracts-2026-07-30.json",
     "./schemas/agent-plan/2026-07-27": "./schemas/agent-plan-2026-07-27.json",
     "./package.json": "./package.json"
   },

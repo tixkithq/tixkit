@@ -7,7 +7,7 @@ product_area: sdks
 content_type: how-to
 status: beta
 owner: developer-platform
-last_verified: 2026-07-29
+last_verified: 2026-07-30
 prerequisites:
   - A server-side JavaScript runtime
 related:
@@ -43,9 +43,11 @@ const page = await tixkit.events.list({ limit: 10 });
 console.log(page.items.map((event) => event.id));
 ```
 
-The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-07-29`; keep SDK and server compatibility aligned.
+The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-07-30`; keep SDK and server compatibility aligned.
 
 Agent-control methods are available under `tixkit.agentControl`. Configure `accessToken` with the authenticated human sponsor's bearer token for those calls; do not pass an API key, and do not give the sponsor token to the agent process. See the [agent Platform API guide](/platform/agent-platform) for the private-beta authorization boundary.
+
+An explicitly authenticated agent can call `tixkit.agentActions.readEvent` with an event ID, delegation grant ID and idempotency key. The strict version-bound projection excludes buyer, payment, credential and arbitrary metadata fields. Treat the paths declared in `result.untrustedContentPaths` as organizer-authored data, never tool instructions. `getEvent` retrieves the immutable evidence only while the complete current authority intersection remains valid.
 
 An explicitly authenticated agent can call `tixkit.agentActions.readReadiness` with an event ID, a delegation grant ID and an idempotency key. The response requires a durable `result` and `resultSha256` immediately; `getReadiness` retrieves it later while current authority still passes. It is a read-only, direct-only action: do not place it in a plan and do not request approval or execution for it. Exact idempotent replay returns the same action and result evidence after reauthorization; revoked or changed authority fails closed.
 

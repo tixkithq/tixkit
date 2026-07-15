@@ -403,6 +403,12 @@ describeDatabase('production migration committers', () => {
       .toBuffer();
     const replacementSha256 = createHash('sha256').update(replacementBytes).digest('hex');
     resolvedAssets.set(replacementSha256, replacementBytes);
+    const versionBeforeUpdate = await db
+      .selectFrom('events')
+      .select('version')
+      .where('tenant_id', '=', tenantId)
+      .where('id', '=', outcome.tixkitId!)
+      .executeTakeFirstOrThrow();
     const updated = await committer.commit({
       tenantId,
       organizationId,
@@ -415,6 +421,14 @@ describeDatabase('production migration committers', () => {
       sideEffects: MIGRATION_SIDE_EFFECT_POLICY,
     });
     expect(updated.disposition).toBe('updated');
+    expect(
+      await db
+        .selectFrom('events')
+        .select('version')
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', outcome.tixkitId!)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ version: Number(versionBeforeUpdate.version) + 1 });
     const updatedEntity = portableEvent({
       bytes: replacementBytes,
       sha256: replacementSha256,

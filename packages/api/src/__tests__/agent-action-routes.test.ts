@@ -13,6 +13,7 @@ import {
 } from '../routes/modules/agent-actions.js';
 import type {
   PreparedAgentAction,
+  PreparedAgentEventReadAction,
   PreparedAgentReadinessAction,
 } from '../services/agent-actions.js';
 
@@ -85,6 +86,45 @@ const readinessPrepared: PreparedAgentReadinessAction = {
     warningReasonCodes: [],
   },
   resultSha256: 'f'.repeat(64),
+};
+const eventReadPrepared: PreparedAgentEventReadAction = {
+  action: {
+    ...action,
+    id: `act_${'7'.repeat(48)}`,
+    kind: 'event.read',
+    autonomy: 'read',
+    target: { ...action.target, apiOperation: 'events.get' },
+    payload: { eventSnapshotSha256: '8'.repeat(64) },
+  },
+  actionDigest: '9'.repeat(64),
+  expiresAt: '2026-07-14T12:15:00.000Z',
+  authorization: {
+    allowed: true,
+    eligibleForApproval: false,
+    reasons: [],
+    snapshotSha256: 'c'.repeat(64),
+    checkedAt: '2026-07-14T12:00:00.000Z',
+  },
+  result: {
+    resourceId: 'event_primary',
+    resourceVersion: 7,
+    eventSnapshotSha256: '8'.repeat(64),
+    observedAt: '2026-07-14T12:00:00.000Z',
+    event: {
+      title: 'Summer Showcase',
+      description: 'Organizer-authored event details.',
+      status: 'draft',
+      currency: 'USD',
+      timezone: 'America/Chicago',
+      startsAt: '2026-07-14T12:00:00.000Z',
+      endsAt: '2026-07-14T12:30:00.000Z',
+      visibility: 'unlisted',
+      capacity: 500,
+      minimumAge: null,
+    },
+    untrustedContentPaths: ['event.title', 'event.description'],
+  },
+  resultSha256: '6'.repeat(64),
 };
 const executionEvidence: AgentExecutionEvidence = {
   execution: {
@@ -252,6 +292,32 @@ describe('agent action routes', () => {
     await app.close();
   });
 
+  it('accepts event.read only through the dedicated direct-read route', async () => {
+    const prepare = vi.fn(async () => eventReadPrepared);
+    const { app } = await setup({ service: { prepare } });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/events',
+      headers: { 'idempotency-key': 'agent-event-read-route-0001' },
+      payload: {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(prepare).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      idempotencyKey: 'agent-event-read-route-0001',
+      kind: 'event.read',
+      delegationGrantId: 'dlg_primary',
+      resourceId: 'event_primary',
+    });
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(eventReadPrepared)));
+    await app.close();
+  });
+
   it('keeps event publish preparation closed to readiness requests', async () => {
     const { app, service } = await setup();
     const response = await app.inject({
@@ -285,6 +351,26 @@ describe('agent action routes', () => {
       url: `/agent/actions/${actionId}`,
     });
     expect(publishResponse.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('returns event.read evidence only from its dedicated retrieval route', async () => {
+    const getForAgent = vi.fn(async () => eventReadPrepared);
+    const { app } = await setup({ service: { getForAgent } });
+    const actionId = eventReadPrepared.action.id;
+    const eventResponse = await app.inject({
+      method: 'GET',
+      url: `/agent/events/${actionId}`,
+    });
+    expect(eventResponse.statusCode).toBe(200);
+    expect(eventResponse.headers['cache-control']).toBe('no-store');
+    expect(eventResponse.json()).toEqual(JSON.parse(JSON.stringify(eventReadPrepared)));
+    expect(
+      (await app.inject({ method: 'GET', url: `/agent/actions/${actionId}` })).statusCode,
+    ).toBe(404);
+    expect(
+      (await app.inject({ method: 'GET', url: `/agent/readiness/${actionId}` })).statusCode,
+    ).toBe(404);
     await app.close();
   });
 

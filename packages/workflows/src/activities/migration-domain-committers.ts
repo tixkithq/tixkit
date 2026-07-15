@@ -13,7 +13,7 @@ import {
   portableManifestSha256,
   type PortableBundleManifest,
 } from '@tixkit/portability';
-import { ImportRepository, type Database } from '@tixkit/db';
+import { ImportRepository, sql, type Database } from '@tixkit/db';
 import {
   canonicalMigrationContentFingerprint,
   MIGRATION_ENTITY_DEPENDENCY_ORDER,
@@ -1167,6 +1167,7 @@ async function writeCanonicalEntity(
             ? null
             : jsonAttribute(entity, 'codeFormat', null),
         public_revision: null,
+        ...(input.existing ? { version: sql<number>`version + 1` } : {}),
         updated_at: now,
         ...(!input.existing ? { created_at: now } : {}),
       });

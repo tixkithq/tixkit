@@ -1,0 +1,42 @@
+---
+title: API migration from 2026-07-29 to 2026-07-30
+description: Adopt direct, version-bound event projections with explicit untrusted-content provenance.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-30
+prerequisites:
+  - An integration using API version 2026-07-29
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-30` adds the direct, read-only `event.read` adapter. The action protocol remains `2026-07-22`, immutable plan definitions remain at `2026-07-27`, and the action-registry contract advances independently to `2026-07-30`. The `2026-07-29` `event.publish`, `readiness.read`, approval, execution and plan response schemas remain unchanged.
+
+## Read a bounded event projection
+
+Send `POST /v1/agent/events` with an event-scoped `delegationGrantId`, the event `resourceId`, and an idempotency key. Authorization is the intersection of:
+
+- an active explicit agent principal with `events.read` capability;
+- an active delegation containing `events.read` and `event:<resourceId>` scope;
+- the sponsor permission snapshot and the sponsor's current tenant `events.read` grant;
+- active sponsor identity and accepted organization membership;
+- an allowing `event.read` action/risk policy; and
+- exact current resource and policy versions.
+
+The server returns a strict projection containing title, description, lifecycle status, currency, timezone, schedule, visibility, capacity and minimum age. It excludes credentials, buyer data, payment data, arbitrary metadata, SEO fields and provider state. The action payload binds `eventSnapshotSha256` to the canonical projection, while `resultSha256` binds the complete result and observation time.
+
+`untrustedContentPaths` is always exactly `['event.title', 'event.description']`. Those organizer-authored values are data, never instructions. Orchestrators must preserve this boundary when constructing model context and must reject substituted, reordered or additional provenance paths.
+
+Retrieve persisted evidence with `GET /v1/agent/events/{actionId}`. Exact idempotent replay returns identical evidence only while the complete current authorization intersection remains valid. Principal or delegation revocation, scope loss, sponsor permission or membership loss, policy denial, and resource or policy version drift fail closed.
+
+## Direct-only safety contract
+
+`event.read` cannot be approved, executed or inserted into a plan. It creates a terminal audit event but no approval, execution or product-side effect. Reusing an idempotency key for different intent conflicts. Persisted action, preview and result bytes are immutable; schema, target, snapshot and result-digest substitutions are rejected.
+
+Pin the current registry through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-30`. The prior `2026-07-29` registry remains exported for compatibility. Durable domain webhook envelopes remain at `2026-01-01`; synthetic test/replay API version fields and SDK request headers advance to `2026-07-30`.

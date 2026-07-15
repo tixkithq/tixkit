@@ -668,7 +668,7 @@ describe('TixkitScannerClient', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       const headers = init?.headers as Record<string, string>;
-      expect(headers['X-Tixkit-Version']).toBe('2026-07-29');
+      expect(headers['X-Tixkit-Version']).toBe('2026-07-30');
 
       if (url.includes('/events/evt_1/resale-listings')) {
         expect(init?.method).toBe('GET');

@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-29';
+export const TIXKIT_API_VERSION = '2026-07-30';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1603,9 +1603,6 @@ type AgentActionBase = {
   agentPrincipalId: string;
   sponsorPrincipalId: string;
   delegationGrantId: string;
-  payload: {
-    readinessSnapshotSha256: string;
-  };
   idempotencyKey: string;
   expectedPolicyVersion: number;
   preparedAt: string;
@@ -1621,6 +1618,9 @@ export type AgentAction = AgentActionBase & {
     resourceVersion: number;
     apiOperation: 'events.publish';
   };
+  payload: {
+    readinessSnapshotSha256: string;
+  };
 };
 
 export type AgentReadinessReadAction = AgentActionBase & {
@@ -1633,6 +1633,44 @@ export type AgentReadinessReadAction = AgentActionBase & {
     resourceVersion: number;
     apiOperation: 'events.readiness.get';
   };
+  payload: {
+    readinessSnapshotSha256: string;
+  };
+};
+
+export type AgentEventReadAction = AgentActionBase & {
+  kind: 'event.read';
+  autonomy: 'read';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'events.get';
+  };
+  payload: {
+    eventSnapshotSha256: string;
+  };
+};
+
+export type AgentEventReadResult = {
+  resourceId: string;
+  resourceVersion: number;
+  eventSnapshotSha256: string;
+  observedAt: string;
+  event: {
+    title: string;
+    description: string | null;
+    status: 'draft' | 'published' | 'paused' | 'ended' | 'archived';
+    currency: string;
+    timezone: string;
+    startsAt: string;
+    endsAt: string | null;
+    visibility: 'public' | 'unlisted' | 'private';
+    capacity: number | null;
+    minimumAge: number | null;
+  };
+  untrustedContentPaths: ['event.title', 'event.description'];
 };
 
 export type AgentReadinessReadResult = {
@@ -1680,6 +1718,21 @@ export type PreparedAgentReadinessReadAction = {
     blockingReasonCodes: string[];
   };
   result: AgentReadinessReadResult;
+  resultSha256: string;
+};
+
+export type PreparedAgentEventReadAction = {
+  action: AgentEventReadAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  result: AgentEventReadResult;
   resultSha256: string;
 };
 
@@ -4467,12 +4520,28 @@ class AgentActionResource {
     });
   }
 
+  async readEvent(input: {
+    delegationGrantId: string;
+    resourceId: string;
+    idempotencyKey: string;
+  }): Promise<PreparedAgentEventReadAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/events', {
+      body,
+      idempotencyKey,
+    });
+  }
+
   async get(actionId: string): Promise<PreparedAgentAction> {
     return this.client.request('GET', `/agent/actions/${actionId}`);
   }
 
   async getReadiness(actionId: string): Promise<PreparedAgentReadinessReadAction> {
     return this.client.request('GET', `/agent/readiness/${actionId}`);
+  }
+
+  async getEvent(actionId: string): Promise<PreparedAgentEventReadAction> {
+    return this.client.request('GET', `/agent/events/${actionId}`);
   }
 
   async approve(input: {

@@ -1,4 +1,4 @@
-import { createDb, type Database } from '@tixkit/db';
+import { createDb, sql, type Database } from '@tixkit/db';
 
 export function makeId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 26)}`.slice(0, 32);
@@ -344,7 +344,7 @@ async function ensureCheckInList(ctx: SeedContext, now: Date): Promise<void> {
 async function publishEventIfNeeded(ctx: SeedContext, now: Date): Promise<void> {
   await ctx.db
     .updateTable('events')
-    .set({ status: 'published', updated_at: now })
+    .set({ status: 'published', version: sql<number>`version + 1`, updated_at: now })
     .where('id', '=', ctx.eventId)
     .where('status', '!=', 'published')
     .execute();

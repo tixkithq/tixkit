@@ -11,7 +11,7 @@ describe('synthetic webhook fixture', () => {
     expect(payload).toEqual({
       type: WEBHOOK_TEST_EVENT_TYPE,
       test: true,
-      apiVersion: '2026-07-29',
+      apiVersion: '2026-07-30',
       createdAt: '2026-07-10T12:00:00.000Z',
       data: { endpointId: 'wh_1' },
     });
@@ -31,7 +31,7 @@ describe('synthetic webhook fixture', () => {
     const retained = { ...current, apiVersion: '2026-07-17' };
 
     expect(isWebhookTestPayload(retained, 'wh_1')).toBe(true);
-    expect(current.apiVersion).toBe('2026-07-29');
+    expect(current.apiVersion).toBe('2026-07-30');
     expect(isWebhookTestPayload({ ...retained, apiVersion: '2026-07-16' }, 'wh_1')).toBe(false);
   });
 });
