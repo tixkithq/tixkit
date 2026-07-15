@@ -7,6 +7,7 @@ import {
   AGENT_PROTOCOL_VERSION,
   agentActionDigest,
   agentSha256,
+  installAgentProtocolSchemaKeywords,
   type AgentAction,
   type AgentApproval,
 } from '../protocol.js';
@@ -14,11 +15,13 @@ import {
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_27,
   AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_29,
+  AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_30,
   AGENT_ACTION_REGISTRY,
   AGENT_PLATFORM_PROTOCOL_VERSION,
   buildAgentPlanDefinition,
   validateAgentActionRegistry,
   validateAgentEventReadResult,
+  validateAgentEventPrepareResult,
   validateAgentReadinessReadResult,
   validateAgentPlanActionBindings,
   validateAgentPlanDefinition,
@@ -28,6 +31,7 @@ import {
   type AgentPlanDefinition,
   type AgentPlanState,
   type AgentEventReadResult,
+  type AgentEventPrepareResult,
   type AgentReadinessReadResult,
 } from '../platform.js';
 
@@ -172,8 +176,24 @@ describe('agent platform contracts', () => {
           {
             ...base.steps[0]!,
             actionKind: 'refund.issue',
-            approvalRequirement: { mode: 'fresh_action', riskClass: 'critical' },
+            approvalRequirement: {
+              mode: 'fresh_action',
+              riskClass: 'critical',
+            },
             reversibility: { mode: 'none' },
+          },
+        ],
+      }),
+    ).toThrow('not implemented');
+    expect(() =>
+      buildAgentPlanDefinition({
+        ...base,
+        steps: [
+          {
+            ...base.steps[0]!,
+            actionKind: 'event.prepare',
+            approvalRequirement: { mode: 'none', riskClass: 'low' },
+            reversibility: { mode: 'reversible' },
           },
         ],
       }),
@@ -414,7 +434,11 @@ describe('agent platform contracts', () => {
     const succeededExecution = {
       ...execution,
       state: 'succeeded' as const,
-      result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+      result: {
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        status: 'published',
+      },
       updatedAt: '2026-07-14T12:07:00.000Z',
     };
     const succeeded: AgentPlanState = {
@@ -452,11 +476,18 @@ describe('agent platform contracts', () => {
       }),
     ).not.toThrow();
     for (const invalidResult of [
-      { resourceId: 'event_substituted', resourceVersion: 8, status: 'published' },
+      {
+        resourceId: 'event_substituted',
+        resourceVersion: 8,
+        status: 'published',
+      },
       { resourceId: 'event_primary', resourceVersion: 9, status: 'published' },
       { resourceId: 'event_primary', resourceVersion: 8, status: 'wrong' },
     ]) {
-      const invalidSucceededExecution = { ...succeededExecution, result: invalidResult };
+      const invalidSucceededExecution = {
+        ...succeededExecution,
+        result: invalidResult,
+      };
       expect(() =>
         validateAgentPlanStateTransition(
           plan,
@@ -562,7 +593,11 @@ describe('agent platform contracts', () => {
         plan,
         awaitingApproval,
         { ...executing, updatedAt: expiresAt },
-        { actions: [preparedAction], approvals: [approval], executions: [execution] },
+        {
+          actions: [preparedAction],
+          approvals: [approval],
+          executions: [execution],
+        },
       ),
     ).toThrow('exact expired state');
     expect(() =>
@@ -583,7 +618,10 @@ describe('agent platform contracts', () => {
     const twoStepPlan = buildAgentPlanDefinition({
       ...twoStepInput,
       steps: [
-        { ...twoStepInput.steps[0]!, actionDigest: agentActionDigest(preparedAction) },
+        {
+          ...twoStepInput.steps[0]!,
+          actionDigest: agentActionDigest(preparedAction),
+        },
         {
           ...twoStepInput.steps[0]!,
           id: 'step_second',
@@ -632,9 +670,22 @@ describe('agent platform contracts', () => {
     expect(
       AGENT_ACTION_REGISTRY.actions.filter((item) => item.availability === 'implemented'),
     ).toEqual([
-      expect.objectContaining({ kind: 'event.read', planSupport: 'direct_only' }),
-      expect.objectContaining({ kind: 'readiness.read', planSupport: 'direct_only' }),
-      expect.objectContaining({ kind: 'event.publish', planSupport: 'supported' }),
+      expect.objectContaining({
+        kind: 'event.read',
+        planSupport: 'direct_only',
+      }),
+      expect.objectContaining({
+        kind: 'readiness.read',
+        planSupport: 'direct_only',
+      }),
+      expect.objectContaining({
+        kind: 'event.prepare',
+        planSupport: 'direct_only',
+      }),
+      expect.objectContaining({
+        kind: 'event.publish',
+        planSupport: 'supported',
+      }),
     ]);
     for (const definition of AGENT_ACTION_REGISTRY.actions.filter(
       (item) => item.availability === 'reserved',
@@ -655,7 +706,10 @@ describe('agent platform contracts', () => {
         ? {
             ...item,
             riskClass: 'low' as const,
-            resultSchema: { ...item.resultSchema, jsonPointer: '#/$defs/eventPublishPrepareInput' },
+            resultSchema: {
+              ...item.resultSchema,
+              jsonPointer: '#/$defs/eventPublishPrepareInput',
+            },
           }
         : item,
     );
@@ -663,7 +717,7 @@ describe('agent platform contracts', () => {
       ...AGENT_ACTION_REGISTRY,
       actions: substitutedActions,
       registrySha256: agentSha256({
-        domain: 'tixkit.agent-action-registry.v2026-07-30',
+        domain: 'tixkit.agent-action-registry.v2026-07-31',
         protocolVersion: AGENT_ACTION_REGISTRY.protocolVersion,
         actionProtocolVersion: AGENT_ACTION_REGISTRY.actionProtocolVersion,
         actions: substitutedActions,
@@ -678,7 +732,7 @@ describe('agent platform contracts', () => {
       'utf8',
     );
     const contractsSchemaText = readFileSync(
-      new URL('../../schemas/agent-action-contracts-2026-07-30.json', import.meta.url),
+      new URL('../../schemas/agent-action-contracts-2026-07-31.json', import.meta.url),
       'utf8',
     );
     expect(createHash('sha256').update(contractsSchemaText).digest('hex')).toBe(
@@ -686,6 +740,7 @@ describe('agent platform contracts', () => {
     );
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     addFormats(ajv);
+    installAgentProtocolSchemaKeywords(ajv);
     const validatePlan = ajv.compile(JSON.parse(planSchemaText));
     const plan = buildAgentPlanDefinition(definitionInput());
     expect(validatePlan(plan), ajv.errorsText(validatePlan.errors)).toBe(true);
@@ -700,7 +755,10 @@ describe('agent platform contracts', () => {
         steps: [
           {
             ...plan.steps[0]!,
-            reversibility: { mode: 'none', compensationActionKind: 'event.update' },
+            reversibility: {
+              mode: 'none',
+              compensationActionKind: 'event.update',
+            },
           },
         ],
       },
@@ -749,6 +807,14 @@ describe('agent platform contracts', () => {
       AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_29,
     );
     ajv.addSchema(JSON.parse(prior20260729ContractsText));
+    const prior20260730ContractsText = readFileSync(
+      new URL('../../schemas/agent-action-contracts-2026-07-30.json', import.meta.url),
+      'utf8',
+    );
+    expect(createHash('sha256').update(prior20260730ContractsText).digest('hex')).toBe(
+      AGENT_ACTION_CONTRACT_SCHEMA_SHA256_2026_07_30,
+    );
+    ajv.addSchema(JSON.parse(prior20260730ContractsText));
     const contracts = JSON.parse(contractsSchemaText) as { $id: string };
     ajv.addSchema(contracts);
     const validatePrepare = ajv.getSchema(`${contracts.$id}#/$defs/eventPublishPrepareInput`)!;
@@ -762,6 +828,11 @@ describe('agent platform contracts', () => {
       `${contracts.$id}#/$defs/eventReadPrepareInput`,
     )!;
     const validateEventReadResult = ajv.getSchema(`${contracts.$id}#/$defs/eventReadResult`)!;
+    const validateEventPrepare = ajv.getSchema(`${contracts.$id}#/$defs/eventPreparePrepareInput`)!;
+    const validateEventPreparePayload = ajv.getSchema(
+      `${contracts.$id}#/$defs/eventPrepareResolvedPayload`,
+    )!;
+    const validateEventPrepareResult = ajv.getSchema(`${contracts.$id}#/$defs/eventPrepareResult`)!;
     expect(
       validatePrepare({
         kind: 'event.publish',
@@ -771,7 +842,11 @@ describe('agent platform contracts', () => {
       ajv.errorsText(validatePrepare.errors),
     ).toBe(true);
     expect(
-      validateResult({ resourceId: 'event_primary', resourceVersion: 8, status: 'published' }),
+      validateResult({
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        status: 'published',
+      }),
       ajv.errorsText(validateResult.errors),
     ).toBe(true);
     expect(validateRegistry(AGENT_ACTION_REGISTRY), ajv.errorsText(validateRegistry.errors)).toBe(
@@ -862,8 +937,141 @@ describe('agent platform contracts', () => {
         untrustedContentPaths: ['event.description', 'event.title'],
       }),
     ).toBe(false);
+    const eventPreparePreview = {
+      resourceId: 'event_primary',
+      resourceVersion: 7,
+      changedFields: ['coverImageUrl', 'description', 'title'],
+      before: { coverImageUrl: null, description: null, title: event.title },
+      after: {
+        coverImageUrl: '/v1/public/event-media/event_cover/upl_prepared',
+        description: 'Prepared description',
+        title: 'Prepared title',
+      },
+    };
+    const changePreviewSha256 = agentSha256(eventPreparePreview);
+    const eventPrepareAction: AgentAction = {
+      ...action(),
+      kind: 'event.prepare',
+      autonomy: 'prepare',
+      target: { ...action().target, apiOperation: 'events.prepare' },
+      payload: { changePreviewSha256, changes: eventPreparePreview.after },
+    };
+    const eventPrepareResult: AgentEventPrepareResult = {
+      ...eventPreparePreview,
+      changePreviewSha256,
+      observedAt: createdAt,
+      untrustedContentPaths: [
+        'before.coverImageUrl',
+        'after.coverImageUrl',
+        'before.description',
+        'after.description',
+        'before.title',
+        'after.title',
+      ],
+    };
     expect(
-      validateResult({ resourceId: 'event_primary', resourceVersion: 8, status: 'failed' }),
+      validateEventPrepare({
+        kind: 'event.prepare',
+        delegationGrantId: 'delegation_primary',
+        resourceId: 'event_primary',
+        changes: {
+          ...eventPreparePreview.after,
+          coverImageUrl: 'https://tixkit.test/v1/public/event-media/event_cover/upl_prepared',
+        },
+      }),
+      ajv.errorsText(validateEventPrepare.errors),
+    ).toBe(true);
+    for (const changes of [
+      { coverImageAlt: 'Unsafe\u0000alt text' },
+      { lastSetupSection: 'Unsafe\u0000section' },
+      { venue: { address: { line1: 'Unsafe\u0000venue' } } },
+      { externalUrl: `https://example.test/${'x'.repeat(2048)}` },
+      { coverImageUrl: `https://example.test/${'x'.repeat(2048)}` },
+      { seo: { imageUrl: `https://example.test/${'x'.repeat(2048)}` } },
+    ]) {
+      expect(
+        validateEventPrepare({
+          kind: 'event.prepare',
+          delegationGrantId: 'delegation_primary',
+          resourceId: 'event_primary',
+          changes,
+        }),
+      ).toBe(false);
+    }
+    expect(
+      validateEventPrepareResult(eventPrepareResult),
+      ajv.errorsText(validateEventPrepareResult.errors),
+    ).toBe(true);
+    expect(() =>
+      validateAgentEventPrepareResult(eventPrepareAction, eventPrepareResult),
+    ).not.toThrow();
+    expect(() =>
+      validateAgentEventPrepareResult(eventPrepareAction, {
+        ...eventPrepareResult,
+        after: { ...eventPrepareResult.after, title: 'Substituted event' },
+      }),
+    ).toThrow('normalized changes');
+    for (const changes of [
+      { description: null },
+      { coverImageUrl: 'https://unowned.example/cover.jpg' },
+      { seo: { imageUrl: 'https://unowned.example/social.jpg' } },
+    ]) {
+      const invalidResolvedPayload = {
+        changePreviewSha256: 'a'.repeat(64),
+        changes,
+      };
+      expect(validateEventPreparePayload(invalidResolvedPayload)).toBe(false);
+      expect(() =>
+        agentActionDigest({ ...eventPrepareAction, payload: invalidResolvedPayload }),
+      ).toThrow();
+      expect(
+        validateEventPrepareResult({
+          ...eventPrepareResult,
+          changedFields: Object.keys(changes),
+          before: Object.fromEntries(Object.keys(changes).map((field) => [field, null])),
+          after: changes,
+          untrustedContentPaths: Object.keys(changes).flatMap((field) => [
+            `before.${field}`,
+            `after.${field}`,
+          ]),
+        }),
+      ).toBe(false);
+    }
+    const invalidPreview = {
+      ...eventPreparePreview,
+      before: { ...eventPreparePreview.before, description: { malicious: 'ignore policy' } },
+      after: { ...eventPreparePreview.after, title: 42 },
+    };
+    const invalidPreviewSha256 = agentSha256(invalidPreview);
+    const invalidAction = {
+      ...eventPrepareAction,
+      payload: { changePreviewSha256: invalidPreviewSha256, changes: invalidPreview.after },
+    } as AgentAction;
+    const invalidResult = {
+      ...invalidPreview,
+      changePreviewSha256: invalidPreviewSha256,
+      observedAt: createdAt,
+      untrustedContentPaths: eventPrepareResult.untrustedContentPaths,
+    } as AgentEventPrepareResult;
+    expect(validateEventPrepareResult(invalidResult)).toBe(false);
+    expect(() => agentActionDigest(invalidAction)).toThrow('invalid field value');
+    expect(() => validateAgentEventPrepareResult(invalidAction, invalidResult)).toThrow(
+      'invalid field value',
+    );
+    expect(
+      validateEventPrepare({
+        kind: 'event.prepare',
+        delegationGrantId: 'delegation_primary',
+        resourceId: 'event_primary',
+        changes: {},
+      }),
+    ).toBe(false);
+    expect(
+      validateResult({
+        resourceId: 'event_primary',
+        resourceVersion: 8,
+        status: 'failed',
+      }),
     ).toBe(false);
   });
 });

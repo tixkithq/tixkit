@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Tixkit API",
-    "version": "2026-07-30",
+    "version": "2026-07-31",
     "description": "Headless white-label event commerce platform API",
     "license": {
       "name": "MIT"
@@ -10853,6 +10853,539 @@
           "untrustedContentPaths"
         ]
       },
+      "AgentEventPrepareChanges": {
+        "type": "object",
+        "description": "Complete non-status event PATCH surface accepted for a mutation-free agent preview.",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[^\\u0000]+$"
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "example": "prepared-event"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 50000,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[^\\u0000]+$"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "venue": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "maxProperties": 64,
+            "x-tixkit-maxCanonicalBytes": 16384,
+            "x-tixkit-maxDepth": 4,
+            "x-tixkit-noNulStrings": true
+          },
+          "venueId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "unlisted",
+              "private"
+            ]
+          },
+          "seo": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "imageUrl": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https?://",
+                "maxLength": 2048
+              }
+            }
+          },
+          "capacity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "minimumAge": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 120
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "pattern": "^https?://",
+            "maxLength": 2048
+          },
+          "externalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "pattern": "^https?://",
+            "maxLength": 2048
+          },
+          "coverImageAlt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "seoUseCoverImage": {
+            "type": "boolean"
+          },
+          "lastSetupSection": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100,
+            "pattern": "^[^\\u0000]*$"
+          }
+        }
+      },
+      "AgentEventPrepareProjection": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[^\\u0000]+$"
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "example": "prepared-event"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 50000,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[^\\u0000]+$"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "venue": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "maxProperties": 64,
+            "x-tixkit-maxCanonicalBytes": 16384,
+            "x-tixkit-maxDepth": 4,
+            "x-tixkit-noNulStrings": true
+          },
+          "venueId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "unlisted",
+              "private"
+            ]
+          },
+          "seo": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "imageUrl": {
+                "type": "string",
+                "format": "uri-reference",
+                "pattern": "^(?:https?://|/v1/public/event-media/)",
+                "maxLength": 2048
+              }
+            }
+          },
+          "capacity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "minimumAge": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 120
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri-reference",
+            "pattern": "^(?:https?://|/v1/public/event-media/)",
+            "maxLength": 2048
+          },
+          "externalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "pattern": "^https?://",
+            "maxLength": 2048
+          },
+          "coverImageAlt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "pattern": "^[^\\u0000]*$"
+          },
+          "seoUseCoverImage": {
+            "type": "boolean"
+          },
+          "lastSetupSection": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100,
+            "pattern": "^[^\\u0000]*$"
+          }
+        }
+      },
+      "AgentEventPrepareResolvedChanges": {
+        "description": "Normalized mutation-ready event changes. Historical nullable descriptions and external media references are excluded.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AgentEventPrepareProjection"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "maxLength": 50000,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "coverImageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri-reference",
+                "pattern": "^/v1/public/event-media/[A-Za-z0-9_/-]+$",
+                "maxLength": 2048,
+                "example": "/v1/public/event-media/event_cover/upl_example"
+              },
+              "seo": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  "imageUrl": {
+                    "type": "string",
+                    "format": "uri-reference",
+                    "pattern": "^/v1/public/event-media/[A-Za-z0-9_/-]+$",
+                    "maxLength": 2048,
+                    "example": "/v1/public/event-media/social/upl_example"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "AgentEventPrepareAction": {
+        "type": "object",
+        "description": "Server-derived immutable direct event preparation. It is not approval-, execution- or plan-eligible.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^act_[a-f0-9]{48}$"
+          },
+          "protocolVersion": {
+            "type": "string",
+            "const": "2026-07-22"
+          },
+          "agentPrincipalId": {
+            "type": "string"
+          },
+          "sponsorPrincipalId": {
+            "type": "string"
+          },
+          "delegationGrantId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "event.prepare"
+          },
+          "autonomy": {
+            "type": "string",
+            "const": "prepare"
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "tenantId": {
+                "type": "string"
+              },
+              "resourceType": {
+                "type": "string",
+                "const": "event"
+              },
+              "resourceId": {
+                "type": "string"
+              },
+              "resourceVersion": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "apiOperation": {
+                "type": "string",
+                "const": "events.prepare"
+              }
+            },
+            "required": [
+              "tenantId",
+              "resourceType",
+              "resourceId",
+              "resourceVersion",
+              "apiOperation"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "changePreviewSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "changes": {
+                "$ref": "#/components/schemas/AgentEventPrepareResolvedChanges"
+              }
+            },
+            "required": [
+              "changePreviewSha256",
+              "changes"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 127
+          },
+          "expectedPolicyVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "preparedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "protocolVersion",
+          "agentPrincipalId",
+          "sponsorPrincipalId",
+          "delegationGrantId",
+          "kind",
+          "autonomy",
+          "target",
+          "payload",
+          "idempotencyKey",
+          "expectedPolicyVersion",
+          "preparedAt"
+        ]
+      },
+      "AgentEventPrepareResult": {
+        "type": "object",
+        "description": "Digest-bound normalized before/after preview. Every projected field is explicitly identified as untrusted tool output.",
+        "additionalProperties": false,
+        "properties": {
+          "resourceId": {
+            "type": "string"
+          },
+          "resourceVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "changePreviewSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "changedFields": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 18,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "capacity",
+                "coverImageAlt",
+                "coverImageUrl",
+                "currency",
+                "description",
+                "endsAt",
+                "externalUrl",
+                "lastSetupSection",
+                "minimumAge",
+                "seo",
+                "seoUseCoverImage",
+                "slug",
+                "startsAt",
+                "timezone",
+                "title",
+                "venue",
+                "venueId",
+                "visibility"
+              ]
+            }
+          },
+          "before": {
+            "$ref": "#/components/schemas/AgentEventPrepareProjection"
+          },
+          "after": {
+            "$ref": "#/components/schemas/AgentEventPrepareResolvedChanges"
+          },
+          "untrustedContentPaths": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 36,
+            "uniqueItems": true,
+            "example": [
+              "before.title",
+              "after.title"
+            ],
+            "items": {
+              "type": "string",
+              "pattern": "^(?:before|after)\\.[A-Za-z][A-Za-z0-9]+$"
+            }
+          }
+        },
+        "required": [
+          "resourceId",
+          "resourceVersion",
+          "changePreviewSha256",
+          "observedAt",
+          "changedFields",
+          "before",
+          "after",
+          "untrustedContentPaths"
+        ]
+      },
       "PreparedAgentAction": {
         "type": "object",
         "description": "Immutable typed action plus server-authoritative dry-run evidence. eligibleForApproval does not grant execution authority; fresh human approval remains mandatory.",
@@ -11083,6 +11616,75 @@
           },
           "result": {
             "$ref": "#/components/schemas/AgentEventReadResult"
+          },
+          "resultSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "action",
+          "actionDigest",
+          "expiresAt",
+          "authorization",
+          "result",
+          "resultSha256"
+        ]
+      },
+      "PreparedAgentEventPrepareAction": {
+        "type": "object",
+        "description": "Immutable direct event-preparation action with required digest-bound result evidence and no mutation authority.",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/AgentEventPrepareAction"
+          },
+          "actionDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authorization": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "allowed": {
+                "type": "boolean",
+                "const": true
+              },
+              "eligibleForApproval": {
+                "type": "boolean",
+                "const": false
+              },
+              "reasons": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snapshotSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "checkedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "allowed",
+              "eligibleForApproval",
+              "reasons",
+              "snapshotSha256",
+              "checkedAt"
+            ]
+          },
+          "result": {
+            "$ref": "#/components/schemas/AgentEventPrepareResult"
           },
           "resultSha256": {
             "type": "string",
@@ -24488,6 +25090,300 @@
           }
         },
         "operationId": "getAgentEventsByActionId",
+        "tags": [
+          "Agent platform"
+        ]
+      }
+    },
+    "/agent/event-preparations": {
+      "post": {
+        "summary": "Prepare a normalized event update without mutating the event",
+        "description": "Experimental/private beta. Requires Agent OAuth. Resolves the complete non-status event PATCH surface against current event, venue, slug and owned-media state, then returns a version-bound digest of the exact normalized before/after preview. It never renews media, changes the event, creates approval authority or executes the update.",
+        "security": [
+          {
+            "AgentOAuth": [
+              "agent.invoke"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentActionIdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "delegationGrantId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$"
+                  },
+                  "resourceId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$"
+                  },
+                  "changes": {
+                    "$ref": "#/components/schemas/AgentEventPrepareChanges"
+                  }
+                },
+                "required": [
+                  "delegationGrantId",
+                  "resourceId",
+                  "changes"
+                ]
+              },
+              "example": {
+                "delegationGrantId": "resource_example",
+                "resourceId": "resource_example",
+                "changes": {
+                  "title": "title example",
+                  "slug": "prepared-event",
+                  "description": "description example",
+                  "currency": "USD"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Immutable direct event-preparation action with exact normalized preview and result digest. Exact still-authorized replays return identical evidence.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreparedAgentEventPrepareAction"
+                },
+                "example": {
+                  "action": {
+                    "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "protocolVersion": "2026-07-22",
+                    "agentPrincipalId": "agentprincipal_example",
+                    "sponsorPrincipalId": "sponsorprincipal_example",
+                    "delegationGrantId": "delegationgrant_example",
+                    "kind": "event.prepare",
+                    "autonomy": "prepare",
+                    "target": {
+                      "tenantId": "tenant_example",
+                      "resourceType": "event",
+                      "resourceId": "resource_example",
+                      "resourceVersion": 1,
+                      "apiOperation": "events.prepare"
+                    },
+                    "payload": {
+                      "changePreviewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "changes": {
+                        "title": "title example",
+                        "slug": "prepared-event",
+                        "description": "description example",
+                        "currency": "USD",
+                        "coverImageUrl": "/v1/public/event-media/event_cover/upl_example",
+                        "seo": {
+                          "title": "title example",
+                          "description": "description example",
+                          "imageUrl": "/v1/public/event-media/social/upl_example"
+                        }
+                      }
+                    },
+                    "idempotencyKey": "idempotencyKey example",
+                    "expectedPolicyVersion": 1,
+                    "preparedAt": "2026-07-10T12:00:00.000Z"
+                  },
+                  "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "expiresAt": "2026-07-10T12:00:00.000Z",
+                  "authorization": {
+                    "allowed": true,
+                    "eligibleForApproval": false,
+                    "reasons": [],
+                    "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "checkedAt": "2026-07-10T12:00:00.000Z"
+                  },
+                  "result": {
+                    "resourceId": "resource_example",
+                    "resourceVersion": 1,
+                    "changePreviewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "observedAt": "2026-07-10T12:00:00.000Z",
+                    "changedFields": [
+                      "capacity"
+                    ],
+                    "before": {
+                      "title": "title example",
+                      "slug": "prepared-event",
+                      "description": "description example",
+                      "currency": "USD"
+                    },
+                    "after": {
+                      "title": "title example",
+                      "slug": "prepared-event",
+                      "description": "description example",
+                      "currency": "USD",
+                      "coverImageUrl": "/v1/public/event-media/event_cover/upl_example",
+                      "seo": {
+                        "title": "title example",
+                        "description": "description example",
+                        "imageUrl": "/v1/public/event-media/social/upl_example"
+                      }
+                    },
+                    "untrustedContentPaths": [
+                      "before.title",
+                      "after.title"
+                    ]
+                  },
+                  "resultSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed changes or idempotency key"
+          },
+          "401": {
+            "description": "Valid Agent OAuth authentication required"
+          },
+          "403": {
+            "description": "Authenticated principal is not an agent"
+          },
+          "404": {
+            "description": "Current agent, delegation, sponsor, venue, media or event authority is unavailable"
+          },
+          "409": {
+            "description": "Idempotency conflict or event-prepare policy is unavailable"
+          }
+        },
+        "operationId": "postAgentEventPreparations",
+        "tags": [
+          "Agent platform"
+        ]
+      }
+    },
+    "/agent/event-preparations/{actionId}": {
+      "get": {
+        "summary": "Get a direct event-preparation result",
+        "description": "Requires the exact agent or sponsor and reauthorizes the complete current permission intersection and event version before returning persisted preview evidence.",
+        "security": [
+          {
+            "AgentOAuth": [
+              "agent.invoke"
+            ]
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^act_[a-f0-9]{48}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable direct event-preparation action and required result evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreparedAgentEventPrepareAction"
+                },
+                "example": {
+                  "action": {
+                    "id": "act_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "protocolVersion": "2026-07-22",
+                    "agentPrincipalId": "agentprincipal_example",
+                    "sponsorPrincipalId": "sponsorprincipal_example",
+                    "delegationGrantId": "delegationgrant_example",
+                    "kind": "event.prepare",
+                    "autonomy": "prepare",
+                    "target": {
+                      "tenantId": "tenant_example",
+                      "resourceType": "event",
+                      "resourceId": "resource_example",
+                      "resourceVersion": 1,
+                      "apiOperation": "events.prepare"
+                    },
+                    "payload": {
+                      "changePreviewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "changes": {
+                        "title": "title example",
+                        "slug": "prepared-event",
+                        "description": "description example",
+                        "currency": "USD",
+                        "coverImageUrl": "/v1/public/event-media/event_cover/upl_example",
+                        "seo": {
+                          "title": "title example",
+                          "description": "description example",
+                          "imageUrl": "/v1/public/event-media/social/upl_example"
+                        }
+                      }
+                    },
+                    "idempotencyKey": "idempotencyKey example",
+                    "expectedPolicyVersion": 1,
+                    "preparedAt": "2026-07-10T12:00:00.000Z"
+                  },
+                  "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "expiresAt": "2026-07-10T12:00:00.000Z",
+                  "authorization": {
+                    "allowed": true,
+                    "eligibleForApproval": false,
+                    "reasons": [],
+                    "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "checkedAt": "2026-07-10T12:00:00.000Z"
+                  },
+                  "result": {
+                    "resourceId": "resource_example",
+                    "resourceVersion": 1,
+                    "changePreviewSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "observedAt": "2026-07-10T12:00:00.000Z",
+                    "changedFields": [
+                      "capacity"
+                    ],
+                    "before": {
+                      "title": "title example",
+                      "slug": "prepared-event",
+                      "description": "description example",
+                      "currency": "USD"
+                    },
+                    "after": {
+                      "title": "title example",
+                      "slug": "prepared-event",
+                      "description": "description example",
+                      "currency": "USD",
+                      "coverImageUrl": "/v1/public/event-media/event_cover/upl_example",
+                      "seo": {
+                        "title": "title example",
+                        "description": "description example",
+                        "imageUrl": "/v1/public/event-media/social/upl_example"
+                      }
+                    },
+                    "untrustedContentPaths": [
+                      "before.title",
+                      "after.title"
+                    ]
+                  },
+                  "resultSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Valid Agent OAuth or human bearer authentication required"
+          },
+          "403": {
+            "description": "Caller is not an explicit agent or human principal"
+          },
+          "404": {
+            "description": "Action or current authority is outside the caller scope"
+          }
+        },
+        "operationId": "getAgentEventPreparationsByActionId",
         "tags": [
           "Agent platform"
         ]

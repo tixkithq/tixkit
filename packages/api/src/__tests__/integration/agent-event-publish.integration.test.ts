@@ -8,6 +8,7 @@ import {
   DurableAgentExecutionService,
   buildAgentPlanDefinition,
   validateAgentEventReadResult,
+  validateAgentEventPrepareResult,
   type AgentAction,
   type AgentExecution,
   type AgentExecutionStore,
@@ -33,6 +34,7 @@ import {
   eventPublishReadinessSnapshotSha256,
 } from '../../services/agent-event-publish.js';
 import { AgentActionService } from '../../services/agent-actions.js';
+import { EventUpdateService } from '../../services/event-update.js';
 import { ReadinessService, resolvePaymentMode } from '../../services/readiness.js';
 import { publishEvent } from '../../services/event-publication.js';
 
@@ -66,7 +68,9 @@ describe.sequential.each(driverCases)(
 
     beforeEach(async () => {
       await truncateAllData(db);
-      const tenant = await new TenantRepository(db).create({ name: `Agent adapter ${driver}` });
+      const tenant = await new TenantRepository(db).create({
+        name: `Agent adapter ${driver}`,
+      });
       const organization = await new OrganizationRepository(db).create({
         tenantId: tenant.id,
         name: 'Agent adapter org',
@@ -273,7 +277,12 @@ describe.sequential.each(driverCases)(
           tenant_id: tenant.id,
           kind: 'third_party',
           sponsor_principal_id: 'user_sponsor',
-          capabilities: JSON.stringify(['events.execute', 'events.read', 'readiness.read']),
+          capabilities: JSON.stringify([
+            'events.execute',
+            'events.read',
+            'events.prepare',
+            'readiness.read',
+          ]),
           maximum_autonomy: 'execute_with_approval',
           protocol_version: AGENT_PROTOCOL_VERSION,
           state: 'active',
@@ -288,9 +297,14 @@ describe.sequential.each(driverCases)(
           tenant_id: tenant.id,
           agent_principal_id: 'agent_publish',
           sponsor_principal_id: 'user_sponsor',
-          capabilities: JSON.stringify(['events.execute', 'events.read', 'readiness.read']),
+          capabilities: JSON.stringify([
+            'events.execute',
+            'events.read',
+            'events.prepare',
+            'readiness.read',
+          ]),
           resource_scopes: JSON.stringify([`event:${event.id}`]),
-          permission_snapshot: JSON.stringify(['events:publish', 'events:read']),
+          permission_snapshot: JSON.stringify(['events:publish', 'events:read', 'events:write']),
           issued_at: new Date(now.getTime() - 60_000),
           expires_at: new Date(now.getTime() + 3_600_000),
           revoked_at: null,
@@ -369,6 +383,14 @@ describe.sequential.each(driverCases)(
           {
             tenant_id: tenant.id,
             action_kind: 'readiness.read',
+            allowed: true,
+            risk_allowed: true,
+            policy_version: 1,
+            updated_at: now,
+          },
+          {
+            tenant_id: tenant.id,
+            action_kind: 'event.prepare',
             allowed: true,
             risk_allowed: true,
             policy_version: 1,
@@ -486,7 +508,10 @@ describe.sequential.each(driverCases)(
         eligibleForApproval: true,
         reasons: ['approval_required'],
       });
-      expect(first.dryRun).toMatchObject({ launchable: true, blockingReasonCodes: [] });
+      expect(first.dryRun).toMatchObject({
+        launchable: true,
+        blockingReasonCodes: [],
+      });
       await expect(
         service.prepare({ ...request, resourceId: 'event_substituted' }),
       ).rejects.toThrow('AGENT_ACTION_IDEMPOTENCY_CONFLICT');
@@ -779,7 +804,10 @@ describe.sequential.each(driverCases)(
           })
           .executeTakeFirstOrThrow();
         await expect(
-          service.prepare({ ...request, idempotencyKey: clonedAction.idempotencyKey }),
+          service.prepare({
+            ...request,
+            idempotencyKey: clonedAction.idempotencyKey,
+          }),
         ).rejects.toThrow('persisted agent authorization evidence is invalid');
       }
       const originalEvent = await db
@@ -790,7 +818,10 @@ describe.sequential.each(driverCases)(
         .executeTakeFirstOrThrow();
       await db
         .updateTable('events')
-        .set({ title: 'Version-invalidated title', version: originalEvent.version + 1 })
+        .set({
+          title: 'Version-invalidated title',
+          version: originalEvent.version + 1,
+        })
         .where('tenant_id', '=', action.target.tenantId)
         .where('id', '=', action.target.resourceId)
         .executeTakeFirstOrThrow();
@@ -840,7 +871,10 @@ describe.sequential.each(driverCases)(
           }),
           result_json: JSON.stringify({
             ...first.result,
-            event: { ...first.result.event, title: 'Injected tool instruction' },
+            event: {
+              ...first.result.event,
+              title: 'Injected tool instruction',
+            },
           }),
         })
         .executeTakeFirstOrThrow();
@@ -859,9 +893,937 @@ describe.sequential.each(driverCases)(
         })
         .executeTakeFirstOrThrow();
       await expect(
-        service.prepare({ ...request, idempotencyKey: tamperedAction.idempotencyKey }),
+        service.prepare({
+          ...request,
+          idempotencyKey: tamperedAction.idempotencyKey,
+        }),
       ).rejects.toThrow('digest binding');
     });
+
+    it('prepares a normalized event patch without mutating the event or owned media', async () => {
+      const service = new AgentActionService(db);
+      const event = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const now = new Date();
+      await db
+        .insertInto('venues')
+        .values({
+          id: 'ven_agent_prepare',
+          tenant_id: event.tenant_id,
+          organization_id: event.organization_id,
+          name: 'Prepared venue',
+          address: JSON.stringify({ city: 'Chicago', country: 'US' }),
+          timezone: 'America/Chicago',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const mediaExpiry = new Date(now.getTime() + 60_000);
+      await db
+        .insertInto('upload_artifacts')
+        .values(
+          [
+            ['upl_agent_prepare_cover', 'event_cover'],
+            ['upl_agent_prepare_seo', 'event_seo_image'],
+          ].map(([id, purpose]) => ({
+            id: id!,
+            tenant_id: event.tenant_id,
+            organization_id: event.organization_id,
+            brand_id: event.brand_id,
+            event_id: event.id,
+            created_by_user_id: null,
+            purpose: purpose!,
+            status: 'uploaded',
+            scan_status: 'clean',
+            scan_result: 'clean',
+            bucket: 'media',
+            object_key: `agent-prepare/${id}.jpg`,
+            file_name: `${id}.jpg`,
+            content_type: 'image/jpeg',
+            size_bytes: 100,
+            checksum_sha256: id === 'upl_agent_prepare_cover' ? 'a'.repeat(64) : 'b'.repeat(64),
+            client_token_hash: null,
+            metadata: JSON.stringify({
+              image: { width: 1200, height: 630, format: 'jpeg' },
+            }),
+            consumed_by_checkout_session_id: null,
+            consumed_at: null,
+            completion_owner_token: null,
+            completion_started_at: null,
+            expires_at: mediaExpiry,
+            created_at: now,
+            updated_at: now,
+          })),
+        )
+        .execute();
+      const request = {
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-event-prepare-${driver}-0001`,
+        kind: 'event.prepare' as const,
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+        changes: {
+          title: 'Prepared title',
+          slug: `prepared-${driver}`,
+          description: 'Prepared organizer-authored description',
+          currency: 'CAD',
+          timezone: 'America/Chicago',
+          startsAt: '2027-08-01T18:00:00.000Z',
+          endsAt: '2027-08-01T22:00:00.000Z',
+          venueId: 'ven_agent_prepare',
+          venue: { name: 'Explicit prepared venue', city: 'Chicago' },
+          visibility: 'unlisted' as const,
+          seo: {
+            title: 'Prepared SEO title',
+            description: 'Prepared SEO description',
+            imageUrl:
+              'https://tixkit.local/v1/public/event-media/event_seo_image/upl_agent_prepare_seo',
+          },
+          capacity: 250,
+          minimumAge: 18,
+          coverImageUrl:
+            'https://tixkit.local/v1/public/event-media/event_cover/upl_agent_prepare_cover',
+          externalUrl: 'https://example.test/prepared',
+          coverImageAlt: 'Prepared cover art',
+          seoUseCoverImage: false,
+          lastSetupSection: 'media',
+        },
+      };
+      const beforeEvent = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', event.id)
+        .executeTakeFirstOrThrow();
+      const beforeMedia = await db
+        .selectFrom('upload_artifacts')
+        .select(['id', 'expires_at', 'updated_at'])
+        .where('event_id', '=', event.id)
+        .orderBy('id')
+        .execute();
+      const concurrent = await Promise.all(
+        Array.from({ length: 4 }, () => service.prepare(request)),
+      );
+      const first = concurrent[0]!;
+      expect(concurrent).toEqual([first, first, first, first]);
+      await expect(
+        service.prepare({
+          ...request,
+          changes: { ...request.changes, title: 'Conflicting prepared title' },
+        }),
+      ).rejects.toThrow('AGENT_ACTION_IDEMPOTENCY_CONFLICT');
+      expect(first.action).toMatchObject({
+        kind: 'event.prepare',
+        autonomy: 'prepare',
+        target: {
+          resourceType: 'event',
+          resourceId: event.id,
+          resourceVersion: Number(event.version),
+          apiOperation: 'events.prepare',
+        },
+      });
+      expect(first.result.changedFields).toEqual(Object.keys(request.changes).sort());
+      expect(first.action.payload.changes).toEqual(first.result.after);
+      expect(first.result.after).toMatchObject({
+        title: request.changes.title,
+        currency: 'CAD',
+        venueId: 'ven_agent_prepare',
+        venue: request.changes.venue,
+        coverImageUrl: '/v1/public/event-media/event_cover/upl_agent_prepare_cover',
+      });
+      expect(first.result.untrustedContentPaths).toEqual(
+        first.result.changedFields.flatMap((field) => [`before.${field}`, `after.${field}`]),
+      );
+      expect(first.result.changePreviewSha256).toBe(
+        agentSha256({
+          resourceId: event.id,
+          resourceVersion: Number(event.version),
+          changedFields: first.result.changedFields,
+          before: first.result.before,
+          after: first.result.after,
+        }),
+      );
+      expect(first.action.payload.changePreviewSha256).toBe(first.result.changePreviewSha256);
+      expect(first.resultSha256).toBe(agentSha256(first.result));
+      expect(() => validateAgentEventPrepareResult(first.action, first.result)).not.toThrow();
+      expect(
+        await db
+          .selectFrom('events')
+          .selectAll()
+          .where('id', '=', event.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual(beforeEvent);
+      expect(
+        await db
+          .selectFrom('upload_artifacts')
+          .select(['id', 'expires_at', 'updated_at'])
+          .where('event_id', '=', event.id)
+          .orderBy('id')
+          .execute(),
+      ).toEqual(beforeMedia);
+      expect(
+        await db
+          .selectFrom('agent_action_events')
+          .select(['phase', 'outcome'])
+          .where('action_id', '=', first.action.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ phase: 'succeeded', outcome: 'succeeded' });
+      await expect(
+        service.approve({
+          tenantId: action.target.tenantId,
+          approverPrincipalId: action.sponsorPrincipalId,
+          actionId: first.action.id,
+          actionDigest: first.actionDigest,
+          idempotencyKey: `agent-event-prepare-approve-${driver}-0001`,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_NOT_APPROVABLE');
+      await expect(
+        service.execute({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: first.action.id,
+          approvalId: 'approval_publish',
+          actionDigest: first.actionDigest,
+        }),
+      ).rejects.toThrow('AGENT_ACTION_EXECUTION_SCOPE_DENIED');
+      expect(
+        await service.getForSponsor({
+          tenantId: action.target.tenantId,
+          sponsorPrincipalId: action.sponsorPrincipalId,
+          actionId: first.action.id,
+        }),
+      ).toEqual(first);
+      const persistedAction = await db
+        .selectFrom('agent_actions')
+        .selectAll()
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('id', '=', first.action.id)
+        .executeTakeFirstOrThrow();
+      const persistedAudit = await db
+        .selectFrom('agent_action_events')
+        .selectAll()
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('action_id', '=', first.action.id)
+        .executeTakeFirstOrThrow();
+      for (const [index, surface] of [
+        'result_digest',
+        'preview_binding',
+        'authorization_snapshot',
+        'succeeded_audit',
+      ].entries()) {
+        const cloneAction = {
+          ...first.action,
+          id: `act_${String(index + 6).repeat(48)}`,
+          idempotencyKey: `agent-event-prepare-corrupt-${surface}-${driver}`,
+        };
+        const substitutedResult = {
+          ...first.result,
+          after: {
+            ...first.result.after,
+            title:
+              surface === 'result_digest'
+                ? 'Result digest substitution'
+                : surface === 'preview_binding'
+                  ? 'Preview substitution'
+                  : first.result.after.title,
+          },
+        };
+        const fingerprint = agentSha256({
+          ...request,
+          idempotencyKey: cloneAction.idempotencyKey,
+        });
+        await db
+          .insertInto('agent_actions')
+          .values({
+            ...persistedAction,
+            id: cloneAction.id,
+            action_digest: agentActionDigest(cloneAction),
+            action_json: JSON.stringify(cloneAction),
+            idempotency_key: cloneAction.idempotencyKey,
+            request_fingerprint: fingerprint,
+            authorization_snapshot_sha256:
+              surface === 'authorization_snapshot'
+                ? 'invalid'
+                : persistedAction.authorization_snapshot_sha256,
+            result_json:
+              surface === 'result_digest' || surface === 'preview_binding'
+                ? JSON.stringify(substitutedResult)
+                : persistedAction.result_json,
+            result_sha256:
+              surface === 'preview_binding'
+                ? agentSha256(substitutedResult)
+                : persistedAction.result_sha256,
+          })
+          .executeTakeFirstOrThrow();
+        await db
+          .insertInto('agent_action_events')
+          .values({
+            ...persistedAudit,
+            id: `aevt_${String(index + 6).repeat(47)}`,
+            action_id: cloneAction.id,
+            action_digest: agentActionDigest(cloneAction),
+            idempotency_key: cloneAction.idempotencyKey,
+            request_fingerprint: fingerprint,
+            authorization_sha256:
+              surface === 'succeeded_audit' ? 'f'.repeat(64) : persistedAudit.authorization_sha256,
+          })
+          .executeTakeFirstOrThrow();
+        await expect(
+          service.prepare({ ...request, idempotencyKey: cloneAction.idempotencyKey }),
+          `${surface} replay`,
+        ).rejects.toThrow();
+        await expect(
+          service.getForAgent({
+            tenantId: action.target.tenantId,
+            agentPrincipalId: action.agentPrincipalId,
+            actionId: cloneAction.id,
+          }),
+          `${surface} agent retrieval`,
+        ).rejects.toThrow();
+        await expect(
+          service.getForSponsor({
+            tenantId: action.target.tenantId,
+            sponsorPrincipalId: action.sponsorPrincipalId,
+            actionId: cloneAction.id,
+          }),
+          `${surface} sponsor retrieval`,
+        ).rejects.toThrow();
+      }
+      await new EventRepository(db).update(event.id, {
+        title: 'Changed after preparation',
+      });
+      await expect(service.prepare(request)).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+      expect(
+        await service.getForAgent({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: first.action.id,
+        }),
+      ).toBeUndefined();
+      expect(
+        await service.getForSponsor({
+          tenantId: action.target.tenantId,
+          sponsorPrincipalId: action.sponsorPrincipalId,
+          actionId: first.action.id,
+        }),
+      ).toBeUndefined();
+    });
+
+    it('binds a venueId-only preparation to both derived organizer-visible fields', async () => {
+      const event = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const now = new Date();
+      await db
+        .insertInto('venues')
+        .values({
+          id: 'ven_prepare_derived',
+          tenant_id: event.tenant_id,
+          organization_id: event.organization_id,
+          name: 'Derived prepared venue',
+          address: JSON.stringify({ city: 'Chicago', country: 'US' }),
+          timezone: 'America/Chicago',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const prepared = await new AgentActionService(db).prepare({
+        tenantId: event.tenant_id,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-event-prepare-derived-venue-${driver}`,
+        kind: 'event.prepare',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: event.id,
+        changes: { venueId: 'ven_prepare_derived' },
+      });
+      expect(prepared.result.changedFields).toEqual(['venue', 'venueId']);
+      expect(prepared.result.after).toEqual({
+        venue: { name: 'Derived prepared venue', city: 'Chicago', country: 'US' },
+        venueId: 'ven_prepare_derived',
+      });
+      expect(prepared.action.payload.changes).toEqual(prepared.result.after);
+      expect(prepared.result.untrustedContentPaths).toEqual([
+        'before.venue',
+        'after.venue',
+        'before.venueId',
+        'after.venueId',
+      ]);
+
+      const updateService = new EventUpdateService(db);
+      const resolved = await updateService.resolvePatch({
+        tenantId: event.tenant_id,
+        eventId: event.id,
+        patch: { expectedVersion: Number(event.version), venueId: 'ven_prepare_derived' },
+      });
+      expect(resolved.requestedFields).toEqual(prepared.result.changedFields);
+      expect(resolved.before).toEqual(prepared.result.before);
+      expect(resolved.after).toEqual(prepared.result.after);
+      await expect(updateService.applyResolvedPatch(resolved)).resolves.toMatchObject({
+        applied: true,
+      });
+      expect(
+        await db
+          .selectFrom('events')
+          .select(['venue_id', 'venue'])
+          .where('id', '=', event.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        venue_id: 'ven_prepare_derived',
+        venue: { name: 'Derived prepared venue', city: 'Chicago', country: 'US' },
+      });
+    });
+
+    it('applies one resolved PATCH atomically and rolls media renewal back on stale version', async () => {
+      const event = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const now = new Date();
+      const expiry = new Date(now.getTime() + 60_000);
+      await db
+        .insertInto('upload_artifacts')
+        .values({
+          id: 'upl_event_update_atomic',
+          tenant_id: event.tenant_id,
+          organization_id: event.organization_id,
+          brand_id: event.brand_id,
+          event_id: event.id,
+          created_by_user_id: null,
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          scan_result: 'clean',
+          bucket: 'media',
+          object_key: 'event-update/atomic.jpg',
+          file_name: 'atomic.jpg',
+          content_type: 'image/jpeg',
+          size_bytes: 100,
+          checksum_sha256: 'c'.repeat(64),
+          client_token_hash: null,
+          metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+          consumed_by_checkout_session_id: null,
+          consumed_at: null,
+          completion_owner_token: null,
+          completion_started_at: null,
+          expires_at: expiry,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const service = new EventUpdateService(db);
+      const resolved = await service.resolvePatch({
+        tenantId: event.tenant_id,
+        eventId: event.id,
+        patch: {
+          expectedVersion: Number(event.version),
+          title: 'Atomically applied title',
+          coverImageUrl:
+            'https://tixkit.local/v1/public/event-media/event_cover/upl_event_update_atomic',
+        },
+      });
+      const applied = await service.applyResolvedPatch(resolved);
+      expect(applied.applied).toBe(true);
+      const updated = await db
+        .selectFrom('events')
+        .select(['title', 'cover_image_url', 'version'])
+        .where('id', '=', event.id)
+        .executeTakeFirstOrThrow();
+      expect(updated).toEqual({
+        title: 'Atomically applied title',
+        cover_image_url: '/v1/public/event-media/event_cover/upl_event_update_atomic',
+        version: Number(event.version) + 1,
+      });
+      const renewed = await db
+        .selectFrom('upload_artifacts')
+        .select('expires_at')
+        .where('id', '=', 'upl_event_update_atomic')
+        .executeTakeFirstOrThrow();
+      expect(new Date(renewed.expires_at).getTime()).toBeGreaterThan(expiry.getTime());
+
+      const staleResolved = await service.resolvePatch({
+        tenantId: event.tenant_id,
+        eventId: event.id,
+        patch: {
+          expectedVersion: updated.version,
+          title: 'Must not apply',
+          coverImageUrl:
+            'https://tixkit.local/v1/public/event-media/event_cover/upl_event_update_atomic',
+        },
+      });
+      await new EventRepository(db).update(event.id, { title: 'Concurrent winner' });
+      const leaseBeforeStaleApply = await db
+        .selectFrom('upload_artifacts')
+        .select(['expires_at', 'updated_at'])
+        .where('id', '=', 'upl_event_update_atomic')
+        .executeTakeFirstOrThrow();
+      expect(await service.applyResolvedPatch(staleResolved)).toEqual({
+        applied: false,
+        currentVersion: updated.version + 1,
+      });
+      expect(
+        await db
+          .selectFrom('upload_artifacts')
+          .select(['expires_at', 'updated_at'])
+          .where('id', '=', 'upl_event_update_atomic')
+          .executeTakeFirstOrThrow(),
+      ).toEqual(leaseBeforeStaleApply);
+      expect(
+        await db.selectFrom('events').select('title').where('id', '=', event.id).executeTakeFirst(),
+      ).toEqual({ title: 'Concurrent winner' });
+    });
+
+    it('rolls back an earlier media lease renewal when a later binding fails', async () => {
+      const event = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const now = new Date();
+      const expiry = new Date(now.getTime() + 60_000);
+      await db
+        .insertInto('upload_artifacts')
+        .values(
+          [
+            ['upl_prepare_rollback_seo', 'event_seo_image', 'd'],
+            ['upl_prepare_rollback_cover', 'event_cover', 'e'],
+          ].map(([id, purpose, checksum]) => ({
+            id: id!,
+            tenant_id: event.tenant_id,
+            organization_id: event.organization_id,
+            brand_id: event.brand_id,
+            event_id: event.id,
+            created_by_user_id: null,
+            purpose: purpose!,
+            status: 'uploaded',
+            scan_status: 'clean',
+            scan_result: 'clean',
+            bucket: 'media',
+            object_key: `event-update/${id}.jpg`,
+            file_name: `${id}.jpg`,
+            content_type: 'image/jpeg',
+            size_bytes: 100,
+            checksum_sha256: checksum!.repeat(64),
+            client_token_hash: null,
+            metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+            consumed_by_checkout_session_id: null,
+            consumed_at: null,
+            completion_owner_token: null,
+            completion_started_at: null,
+            expires_at: expiry,
+            created_at: now,
+            updated_at: now,
+          })),
+        )
+        .execute();
+      const service = new EventUpdateService(db);
+      const resolved = await service.resolvePatch({
+        tenantId: event.tenant_id,
+        eventId: event.id,
+        patch: {
+          expectedVersion: Number(event.version),
+          title: 'Must roll back',
+          seo: {
+            imageUrl:
+              'https://tixkit.local/v1/public/event-media/event_seo_image/upl_prepare_rollback_seo',
+          },
+          coverImageUrl:
+            'https://tixkit.local/v1/public/event-media/event_cover/upl_prepare_rollback_cover',
+        },
+      });
+      const firstLeaseBefore = await db
+        .selectFrom('upload_artifacts')
+        .select(['expires_at', 'updated_at'])
+        .where('id', '=', 'upl_prepare_rollback_seo')
+        .executeTakeFirstOrThrow();
+      await db
+        .updateTable('upload_artifacts')
+        .set({ scan_status: 'rejected', updated_at: new Date(now.getTime() + 1_000) })
+        .where('id', '=', 'upl_prepare_rollback_cover')
+        .execute();
+      await expect(service.applyResolvedPatch(resolved)).rejects.toThrow(
+        'UploadArtifact not found: upl_prepare_rollback_cover',
+      );
+      expect(
+        await db
+          .selectFrom('upload_artifacts')
+          .select(['expires_at', 'updated_at'])
+          .where('id', '=', 'upl_prepare_rollback_seo')
+          .executeTakeFirstOrThrow(),
+      ).toEqual(firstLeaseBefore);
+      expect(
+        await db
+          .selectFrom('events')
+          .select(['title', 'version'])
+          .where('id', '=', event.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ title: event.title, version: event.version });
+    });
+
+    it('fails event preparation closed on slug, venue, media and schema boundary violations', async () => {
+      const event = await db
+        .selectFrom('events')
+        .selectAll()
+        .where('id', '=', action.target.resourceId)
+        .executeTakeFirstOrThrow();
+      const conflicting = await new EventRepository(db).create({
+        tenantId: event.tenant_id,
+        organizationId: event.organization_id,
+        brandId: event.brand_id,
+        slug: `agent-conflict-${driver}`,
+        title: 'Conflicting event',
+        currency: 'USD',
+        timezone: 'UTC',
+        startsAt: new Date(Date.now() + 172_800_000),
+      });
+      const otherOrganization = await new OrganizationRepository(db).create({
+        tenantId: event.tenant_id,
+        name: 'Foreign venue organization',
+        slug: `agent-foreign-venue-${driver}`,
+      });
+      const now = new Date();
+      await db
+        .insertInto('venues')
+        .values({
+          id: 'ven_agent_foreign',
+          tenant_id: event.tenant_id,
+          organization_id: otherOrganization.id,
+          name: 'Foreign venue',
+          address: '{}',
+          timezone: 'UTC',
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await db
+        .insertInto('upload_artifacts')
+        .values({
+          id: 'upl_agent_foreign_cover',
+          tenant_id: event.tenant_id,
+          organization_id: event.organization_id,
+          brand_id: event.brand_id,
+          event_id: conflicting.id,
+          created_by_user_id: null,
+          purpose: 'event_cover',
+          status: 'uploaded',
+          scan_status: 'clean',
+          scan_result: 'clean',
+          bucket: 'media',
+          object_key: 'agent-foreign/cover.jpg',
+          file_name: 'cover.jpg',
+          content_type: 'image/jpeg',
+          size_bytes: 100,
+          checksum_sha256: 'd'.repeat(64),
+          client_token_hash: null,
+          metadata: JSON.stringify({ image: { width: 1200, height: 630, format: 'jpeg' } }),
+          consumed_by_checkout_session_id: null,
+          consumed_at: null,
+          completion_owner_token: null,
+          completion_started_at: null,
+          expires_at: new Date(now.getTime() + 60_000),
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      const service = new AgentActionService(db);
+      const invalidChanges = [
+        { slug: conflicting.slug },
+        { venueId: 'ven_agent_foreign' },
+        {
+          coverImageUrl:
+            'https://tixkit.local/v1/public/event-media/event_cover/upl_agent_foreign_cover',
+        },
+        { startsAt: 'not-a-date' },
+        { coverImageUrl: 'https://unowned.example/cover.jpg' },
+        { slug: 'a'.repeat(201) },
+        { currency: 'usd' },
+        { seo: { title: 'Prepared SEO', extra: 'not allowed' } },
+        { externalUrl: 'javascript:alert(1)' },
+        { venue: { level1: { level2: { level3: { level4: { level5: true } } } } } },
+        { title: 'Unsafe\u0000title' },
+        { coverImageAlt: 'Unsafe\u0000alt text' },
+        { lastSetupSection: 'Unsafe\u0000section' },
+        { venue: { name: 'Unsafe\u0000venue' } },
+        { status: 'published' },
+        { title: 'Unexpected field', unexpected: true },
+      ];
+      const beforeActions = await db.selectFrom('agent_actions').select('id').execute();
+      for (const [index, changes] of invalidChanges.entries()) {
+        await expect(
+          service.prepare({
+            tenantId: action.target.tenantId,
+            agentPrincipalId: action.agentPrincipalId,
+            idempotencyKey: `agent-event-prepare-invalid-${index}-${driver}-0001`,
+            kind: 'event.prepare',
+            delegationGrantId: action.delegationGrantId,
+            resourceId: action.target.resourceId,
+            changes,
+          }),
+        ).rejects.toThrow();
+      }
+      expect(await db.selectFrom('agent_actions').select('id').execute()).toEqual(beforeActions);
+    });
+
+    it('denies event.prepare before evaluation when sponsor write permission is missing', async () => {
+      const service = new AgentActionService(db);
+      const idempotencyKey = `agent-event-prepare-initial-denied-${driver}-0001`;
+      await db
+        .deleteFrom('permission_grants')
+        .where('tenant_id', '=', action.target.tenantId)
+        .where('id', '=', 'pg_event_publish')
+        .executeTakeFirstOrThrow();
+      await expect(
+        service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey,
+          kind: 'event.prepare',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+          changes: { title: 'Denied preparation' },
+        }),
+      ).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+      expect(
+        await db
+          .selectFrom('agent_actions')
+          .select('id')
+          .where('tenant_id', '=', action.target.tenantId)
+          .where('idempotency_key', '=', idempotencyKey)
+          .execute(),
+      ).toEqual([]);
+    });
+
+    it.each([
+      'principal_state',
+      'principal_capability',
+      'principal_protocol',
+      'delegation_revocation',
+      'delegation_capability',
+      'delegation_sponsor',
+      'delegation_scope',
+      'delegation_expiry',
+      'sponsor_state',
+      'sponsor_permission',
+      'membership',
+      'policy_action',
+      'policy_risk',
+      'policy_version',
+      'resource_version',
+    ] as const)(
+      'denies event.prepare replay and both retrieval surfaces after current %s changes',
+      async (surface) => {
+        const service = new AgentActionService(db);
+        const request = {
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-event-prepare-revoked-${surface}-${driver}-0001`,
+          kind: 'event.prepare' as const,
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+          changes: { title: `Prepared ${surface}` },
+        };
+        const prepared = await service.prepare(request);
+        if (surface === 'principal_state')
+          await db
+            .updateTable('agent_principals')
+            .set({ state: 'revoked' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.agentPrincipalId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'principal_capability')
+          await db
+            .updateTable('agent_principals')
+            .set({ capabilities: JSON.stringify(['events.execute', 'events.read']) })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.agentPrincipalId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'principal_protocol')
+          await db
+            .updateTable('agent_principals')
+            .set({ protocol_version: '2026-07-21' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.agentPrincipalId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'delegation_revocation')
+          await db
+            .updateTable('agent_delegations')
+            .set({ revoked_at: new Date() })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'delegation_capability')
+          await db
+            .updateTable('agent_delegations')
+            .set({ capabilities: JSON.stringify(['events.execute', 'events.read']) })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'delegation_sponsor')
+          await db
+            .updateTable('agent_delegations')
+            .set({ sponsor_principal_id: 'user_sponsor_mismatch' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'delegation_scope')
+          await db
+            .updateTable('agent_delegations')
+            .set({ resource_scopes: '[]' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'delegation_expiry')
+          await db
+            .updateTable('agent_delegations')
+            .set({ expires_at: new Date(Date.now() - 1_000) })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.delegationGrantId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'sponsor_state')
+          await db
+            .updateTable('user_profiles')
+            .set({ status: 'suspended' })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.sponsorPrincipalId)
+            .executeTakeFirstOrThrow();
+        if (surface === 'sponsor_permission')
+          await db
+            .deleteFrom('permission_grants')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', 'pg_event_publish')
+            .executeTakeFirstOrThrow();
+        if (surface === 'membership')
+          await db
+            .deleteFrom('organization_members')
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', 'member_agent_publish')
+            .executeTakeFirstOrThrow();
+        if (surface === 'policy_action' || surface === 'policy_risk')
+          await db
+            .updateTable('agent_action_policies')
+            .set(surface === 'policy_action' ? { allowed: false } : { risk_allowed: false })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('action_kind', '=', 'event.prepare')
+            .executeTakeFirstOrThrow();
+        if (surface === 'policy_version')
+          await db
+            .updateTable('agent_action_policies')
+            .set({ policy_version: 2 })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('action_kind', '=', 'event.prepare')
+            .executeTakeFirstOrThrow();
+        if (surface === 'resource_version')
+          await db
+            .updateTable('events')
+            .set({ version: action.target.resourceVersion + 1 })
+            .where('tenant_id', '=', action.target.tenantId)
+            .where('id', '=', action.target.resourceId)
+            .executeTakeFirstOrThrow();
+
+        await expect(service.prepare(request)).rejects.toThrow('AGENT_ACTION_RESOURCE_DENIED');
+        await expect(
+          service.getForAgent({
+            tenantId: action.target.tenantId,
+            agentPrincipalId: action.agentPrincipalId,
+            actionId: prepared.action.id,
+          }),
+        ).resolves.toBeUndefined();
+        await expect(
+          service.getForSponsor({
+            tenantId: action.target.tenantId,
+            sponsorPrincipalId: action.sponsorPrincipalId,
+            actionId: prepared.action.id,
+          }),
+        ).resolves.toBeUndefined();
+      },
+    );
+
+    it('hides event.prepare across wrong tenant, agent, sponsor and resource scope', async () => {
+      const service = new AgentActionService(db);
+      const prepared = await service.prepare({
+        tenantId: action.target.tenantId,
+        agentPrincipalId: action.agentPrincipalId,
+        idempotencyKey: `agent-event-prepare-scope-${driver}-0001`,
+        kind: 'event.prepare',
+        delegationGrantId: action.delegationGrantId,
+        resourceId: action.target.resourceId,
+        changes: { title: 'Scoped preparation' },
+      });
+      for (const lookup of [
+        service.getForAgent({
+          tenantId: 'tenant_other',
+          agentPrincipalId: action.agentPrincipalId,
+          actionId: prepared.action.id,
+        }),
+        service.getForAgent({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: 'agent_other',
+          actionId: prepared.action.id,
+        }),
+        service.getForSponsor({
+          tenantId: action.target.tenantId,
+          sponsorPrincipalId: 'sponsor_other',
+          actionId: prepared.action.id,
+        }),
+      ])
+        await expect(lookup).resolves.toBeUndefined();
+      await expect(
+        service.prepare({
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-event-prepare-resource-${driver}-0001`,
+          kind: 'event.prepare',
+          delegationGrantId: action.delegationGrantId,
+          resourceId: 'evt_outside_scope',
+          changes: { title: 'Outside scope' },
+        }),
+      ).rejects.toThrow('AGENT_ACTION_DELEGATION_DENIED');
+    });
+
+    it.each(['result', 'audit'] as const)(
+      'fails closed on persisted event.prepare %s evidence tampering',
+      async (surface) => {
+        const service = new AgentActionService(db);
+        const request = {
+          tenantId: action.target.tenantId,
+          agentPrincipalId: action.agentPrincipalId,
+          idempotencyKey: `agent-event-prepare-tamper-${surface}-${driver}-0001`,
+          kind: 'event.prepare' as const,
+          delegationGrantId: action.delegationGrantId,
+          resourceId: action.target.resourceId,
+          changes: { title: 'Tamper-resistant preparation' },
+        };
+        const prepared = await service.prepare(request);
+        const tamper =
+          surface === 'result'
+            ? db
+                .updateTable('agent_actions')
+                .set({
+                  result_json: JSON.stringify({
+                    ...prepared.result,
+                    after: { ...prepared.result.after, title: 'Substituted persisted title' },
+                  }),
+                })
+                .where('tenant_id', '=', action.target.tenantId)
+                .where('id', '=', prepared.action.id)
+                .executeTakeFirstOrThrow()
+            : db
+                .updateTable('agent_action_events')
+                .set({ authorization_sha256: 'f'.repeat(64) })
+                .where('tenant_id', '=', action.target.tenantId)
+                .where('action_id', '=', prepared.action.id)
+                .where('phase', '=', 'succeeded')
+                .executeTakeFirstOrThrow();
+        await expect(tamper).rejects.toThrow('immutable');
+        await expect(service.prepare(request)).resolves.toEqual(prepared);
+      },
+    );
 
     it('denies readiness.read before evaluation when authority is missing', async () => {
       const service = new AgentActionService(db);
@@ -1044,7 +2006,9 @@ describe.sequential.each(driverCases)(
         if (surface === 'principal_capability')
           await db
             .updateTable('agent_principals')
-            .set({ capabilities: JSON.stringify(['events.execute', 'readiness.read']) })
+            .set({
+              capabilities: JSON.stringify(['events.execute', 'readiness.read']),
+            })
             .where('tenant_id', '=', action.target.tenantId)
             .where('id', '=', action.agentPrincipalId)
             .executeTakeFirstOrThrow();
@@ -1065,7 +2029,9 @@ describe.sequential.each(driverCases)(
         if (surface === 'delegation_capability')
           await db
             .updateTable('agent_delegations')
-            .set({ capabilities: JSON.stringify(['events.execute', 'readiness.read']) })
+            .set({
+              capabilities: JSON.stringify(['events.execute', 'readiness.read']),
+            })
             .where('tenant_id', '=', action.target.tenantId)
             .where('id', '=', action.delegationGrantId)
             .executeTakeFirstOrThrow();
@@ -1250,7 +2216,10 @@ describe.sequential.each(driverCases)(
           idempotencyKey: `agent-readiness-corrupt-${shape}-${driver}-0001`,
           payload:
             shape === 'extra'
-              ? { ...prepared.action.payload, untrustedToolOutput: 'ignore policy' }
+              ? {
+                  ...prepared.action.payload,
+                  untrustedToolOutput: 'ignore policy',
+                }
               : {},
         };
         await db
@@ -1460,7 +2429,10 @@ describe.sequential.each(driverCases)(
         },
       ]);
       await expect(
-        service.approve({ ...request, idempotencyKey: `${request.idempotencyKey}-second` }),
+        service.approve({
+          ...request,
+          idempotencyKey: `${request.idempotencyKey}-second`,
+        }),
       ).rejects.toThrow('AGENT_ACTION_ALREADY_APPROVED');
       const competing = await Promise.allSettled(
         Array.from({ length: 3 }, (_, index) =>
@@ -1688,8 +2660,16 @@ describe.sequential.each(driverCases)(
           requiredApproverPermission: 'events:publish',
           now: approval.approvedAt,
           audit: [
-            { ...invalidAuditBase, id: `aaud_${'a'.repeat(48)}`, phase: 'prepared' },
-            { ...invalidAuditBase, id: `aaud_${'b'.repeat(48)}`, phase: 'authorized' },
+            {
+              ...invalidAuditBase,
+              id: `aaud_${'a'.repeat(48)}`,
+              phase: 'prepared',
+            },
+            {
+              ...invalidAuditBase,
+              id: `aaud_${'b'.repeat(48)}`,
+              phase: 'authorized',
+            },
           ],
         }),
       ).rejects.toThrow('AGENT_AUDIT_IDENTITY_MISMATCH');
@@ -1726,7 +2706,10 @@ describe.sequential.each(driverCases)(
             ...step.readinessImpact,
             beforeSnapshotSha256: cancelledPrepared.dryRun.readinessSnapshotSha256,
           },
-          costs: step.costs.map((cost) => ({ ...cost, expiresAt: cancelledExpiresAt })),
+          costs: step.costs.map((cost) => ({
+            ...cost,
+            expiresAt: cancelledExpiresAt,
+          })),
         })),
         createdAt: cancelledPrepared.action.preparedAt,
         expiresAt: cancelledExpiresAt,
@@ -1800,7 +2783,11 @@ describe.sequential.each(driverCases)(
         expectedStateVersion: 2,
         status: 'cancelled',
         stepStates: [{ stepId: 'step_publish', status: 'cancelled' }],
-        actor: { type: 'user', tenantId: plan.tenantId, principalId: plan.sponsorPrincipalId },
+        actor: {
+          type: 'user',
+          tenantId: plan.tenantId,
+          principalId: plan.sponsorPrincipalId,
+        },
         reasonCode: 'sponsor_cancelled',
         idempotencyKey: `agent-plan-cancel-race-${driver}-0001`,
       });
@@ -1814,7 +2801,10 @@ describe.sequential.each(driverCases)(
       expect(await cancellationResult).toMatchObject({
         message: 'AGENT_PLAN_CANCELLATION_REQUIRES_NO_EXECUTION',
       });
-      expect(executed).toMatchObject({ state: 'succeeded', planSha256: plan.planSha256 });
+      expect(executed).toMatchObject({
+        state: 'succeeded',
+        planSha256: plan.planSha256,
+      });
       expect(
         await db
           .selectFrom('agent_executions')
@@ -1855,7 +2845,9 @@ describe.sequential.each(driverCases)(
           reasonCode: 'execution_succeeded',
           idempotencyKey: `agent-plan-succeeded-${driver}-0001`,
         }),
-      ).resolves.toMatchObject({ state: { status: 'succeeded', stateVersion: 3 } });
+      ).resolves.toMatchObject({
+        state: { status: 'succeeded', stateVersion: 3 },
+      });
     });
 
     it('hides an action from a different sponsor without approval persistence', async () => {
@@ -1933,7 +2925,10 @@ describe.sequential.each(driverCases)(
         Array.from({ length: 4 }, () => service.revokeApproval(request)),
       );
       expect(concurrent).toEqual([concurrent[0], concurrent[0], concurrent[0], concurrent[0]]);
-      expect(concurrent[0]).toMatchObject({ id: approval.id, revokedAt: expect.any(String) });
+      expect(concurrent[0]).toMatchObject({
+        id: approval.id,
+        revokedAt: expect.any(String),
+      });
       await expect(service.revokeApproval(request)).resolves.toEqual(concurrent[0]);
       await expect(
         service.revokeApproval({
@@ -2638,7 +3633,11 @@ describe.sequential.each(driverCases)(
         .executeTakeFirstOrThrow();
       await db
         .updateTable('events')
-        .set({ status: 'archived', version: Number(stale.version) + 1, updated_at: new Date() })
+        .set({
+          status: 'archived',
+          version: Number(stale.version) + 1,
+          updated_at: new Date(),
+        })
         .where('tenant_id', '=', action.target.tenantId)
         .where('id', '=', action.target.resourceId)
         .where('version', '=', Number(stale.version))
@@ -2662,7 +3661,10 @@ describe.sequential.each(driverCases)(
           .where('tenant_id', '=', action.target.tenantId)
           .where('id', '=', action.target.resourceId)
           .executeTakeFirstOrThrow(),
-      ).resolves.toMatchObject({ status: 'archived', version: Number(stale.version) + 1 });
+      ).resolves.toMatchObject({
+        status: 'archived',
+        version: Number(stale.version) + 1,
+      });
     });
 
     it('serializes concurrent publication into one mutation', async () => {
@@ -2699,7 +3701,9 @@ describe.sequential.each(driverCases)(
             );
           }),
       ).toBe(true);
-      await expect(publishOnce()).resolves.toMatchObject({ kind: 'already_published' });
+      await expect(publishOnce()).resolves.toMatchObject({
+        kind: 'already_published',
+      });
       await expect(
         db
           .selectFrom('events')
@@ -2746,7 +3750,12 @@ describe.sequential.each(driverCases)(
     it('lets a successor reconcile one committed effect after lease loss and revocation', async () => {
       await db
         .updateTable('agent_executions')
-        .set({ state: 'reserved', fence_token: 0, lease_owner: null, lease_expires_at: null })
+        .set({
+          state: 'reserved',
+          fence_token: 0,
+          lease_owner: null,
+          lease_expires_at: null,
+        })
         .where('id', '=', execution.id)
         .execute();
       const reserved = {
@@ -2810,8 +3819,15 @@ describe.sequential.each(driverCases)(
         .where('id', '=', execution.delegationGrantId)
         .execute();
       await expect(
-        service.run({ action, execution: reserved, workerId: 'worker_successor' }),
-      ).resolves.toMatchObject({ state: 'succeeded', result: { status: 'published' } });
+        service.run({
+          action,
+          execution: reserved,
+          workerId: 'worker_successor',
+        }),
+      ).resolves.toMatchObject({
+        state: 'succeeded',
+        result: { status: 'published' },
+      });
       expect(invocations).toBe(1);
       expect(
         await db
@@ -2819,7 +3835,10 @@ describe.sequential.each(driverCases)(
           .select(['status', 'version'])
           .where('id', '=', action.target.resourceId)
           .executeTakeFirstOrThrow(),
-      ).toMatchObject({ status: 'published', version: action.target.resourceVersion + 1 });
+      ).toMatchObject({
+        status: 'published',
+        version: action.target.resourceVersion + 1,
+      });
       expect(
         await db
           .selectFrom('agent_action_effects')

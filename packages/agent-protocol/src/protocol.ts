@@ -433,6 +433,7 @@ const CONSEQUENTIAL = new Set(
     .filter(([, descriptor]) => descriptor.consequential)
     .map(([kind]) => kind as AgentActionKind),
 );
+const READ_ONLY_ACTIONS = new Set<AgentActionKind>(['event.read', 'readiness.read', 'report.read']);
 const AUTONOMY_RANK: Record<AgentAutonomy, number> = {
   read: 0,
   recommend: 1,
@@ -539,8 +540,235 @@ function validateAction(action: AgentAction): void {
     throw new AgentProtocolValidationError('action payload exceeds 256 KiB');
   if (action.kind === 'campaign.send') validateCampaignSendPayload(action.payload);
   if (action.kind === 'event.publish') validateEventPublishPayload(action.payload);
-  if (CONSEQUENTIAL.has(action.kind) && action.autonomy !== 'execute_with_approval')
-    throw new AgentProtocolValidationError('consequential action must execute with approval');
+  if (action.kind === 'event.prepare') validateEventPreparePayload(action.payload);
+  const expectedAutonomy = descriptor.consequential
+    ? 'execute_with_approval'
+    : READ_ONLY_ACTIONS.has(action.kind)
+      ? 'read'
+      : 'prepare';
+  if (action.autonomy !== expectedAutonomy)
+    throw new AgentProtocolValidationError('action autonomy does not match its declared kind');
+}
+
+const EVENT_PREPARE_FIELDS = new Set([
+  'capacity',
+  'coverImageAlt',
+  'coverImageUrl',
+  'currency',
+  'description',
+  'endsAt',
+  'externalUrl',
+  'lastSetupSection',
+  'minimumAge',
+  'seo',
+  'seoUseCoverImage',
+  'slug',
+  'startsAt',
+  'timezone',
+  'title',
+  'venue',
+  'venueId',
+  'visibility',
+]);
+const EVENT_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const isSafeEventText = (value: string): boolean => !value.includes('\0');
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function isEventTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 2048 || !isSafeEventText(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isMediaReference(value: unknown): value is string {
+  return (
+    isHttpUrl(value) ||
+    (typeof value === 'string' &&
+      value.length <= 2048 &&
+      isSafeEventText(value) &&
+      /^\/v1\/public\/event-media\/[A-Za-z0-9_/-]+$/u.test(value))
+  );
+}
+
+function hasUnsafeNestedString(value: unknown): boolean {
+  if (typeof value === 'string') return !isSafeEventText(value);
+  if (Array.isArray(value)) return value.some(hasUnsafeNestedString);
+  if (!isPlainObject(value)) return false;
+  return Object.values(value).some(hasUnsafeNestedString);
+}
+
+function validEventSeo(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.some((key) => !['description', 'imageUrl', 'title'].includes(key))) return false;
+  return (
+    (value.title === undefined ||
+      (typeof value.title === 'string' &&
+        value.title.length <= 200 &&
+        isSafeEventText(value.title))) &&
+    (value.description === undefined ||
+      (typeof value.description === 'string' &&
+        value.description.length <= 500 &&
+        isSafeEventText(value.description))) &&
+    (value.imageUrl === undefined || isMediaReference(value.imageUrl))
+  );
+}
+
+function validEventVenue(value: unknown): boolean {
+  if (value === null) return true;
+  if (!isPlainObject(value) || Object.keys(value).length > 64 || hasUnsafeNestedString(value))
+    return false;
+  try {
+    return Buffer.byteLength(canonicalAgentJson(value)) <= 16 * 1024 && canonicalDepth(value) <= 4;
+  } catch {
+    return false;
+  }
+}
+
+function validEventPrepareField(field: string, value: unknown): boolean {
+  switch (field) {
+    case 'title':
+      return (
+        typeof value === 'string' &&
+        value.length >= 1 &&
+        value.length <= 512 &&
+        isSafeEventText(value)
+      );
+    case 'slug':
+      return typeof value === 'string' && value.length <= 200 && EVENT_SLUG.test(value);
+    case 'description':
+      return (
+        value === null ||
+        (typeof value === 'string' && value.length <= 50_000 && isSafeEventText(value))
+      );
+    case 'currency':
+      return typeof value === 'string' && CURRENCY.test(value);
+    case 'timezone':
+      return (
+        typeof value === 'string' &&
+        value.length >= 1 &&
+        value.length <= 100 &&
+        isSafeEventText(value)
+      );
+    case 'startsAt':
+      return isEventTimestamp(value);
+    case 'endsAt':
+      return value === null || isEventTimestamp(value);
+    case 'venue':
+      return validEventVenue(value);
+    case 'venueId':
+      return value === null || (typeof value === 'string' && ID.test(value));
+    case 'visibility':
+      return value === 'public' || value === 'unlisted' || value === 'private';
+    case 'seo':
+      return validEventSeo(value);
+    case 'capacity':
+      return value === null || (Number.isSafeInteger(value) && Number(value) >= 1);
+    case 'minimumAge':
+      return (
+        value === null ||
+        (Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 120)
+      );
+    case 'coverImageUrl':
+      return value === null || isMediaReference(value);
+    case 'externalUrl':
+      return value === null || isHttpUrl(value);
+    case 'coverImageAlt':
+      return (
+        value === null ||
+        (typeof value === 'string' && value.length <= 500 && isSafeEventText(value))
+      );
+    case 'seoUseCoverImage':
+      return typeof value === 'boolean';
+    case 'lastSetupSection':
+      return (
+        value === null ||
+        (typeof value === 'string' && value.length <= 100 && isSafeEventText(value))
+      );
+    default:
+      return false;
+  }
+}
+
+export function validateAgentEventPrepareProjection(
+  value: unknown,
+): asserts value is Readonly<Record<string, unknown>> {
+  if (!isPlainObject(value))
+    throw new AgentProtocolValidationError('event prepare projection must be a plain object');
+  const keys = Object.keys(value);
+  if (
+    keys.length < 1 ||
+    keys.length > EVENT_PREPARE_FIELDS.size ||
+    keys.some(
+      (field) => !EVENT_PREPARE_FIELDS.has(field) || !validEventPrepareField(field, value[field]),
+    )
+  )
+    throw new AgentProtocolValidationError(
+      'event prepare projection contains an invalid field value',
+    );
+}
+
+function isOwnedEventMediaReference(value: unknown): boolean {
+  return (
+    typeof value === 'string' &&
+    value.length <= 2048 &&
+    isSafeEventText(value) &&
+    /^\/v1\/public\/event-media\/[A-Za-z0-9_/-]+$/u.test(value)
+  );
+}
+
+export function validateAgentEventPrepareResolvedChanges(
+  value: unknown,
+): asserts value is Readonly<Record<string, unknown>> {
+  validateAgentEventPrepareProjection(value);
+  if ('description' in value && value.description === null)
+    throw new AgentProtocolValidationError('event prepare resolved description must not be null');
+  if (
+    'coverImageUrl' in value &&
+    value.coverImageUrl !== null &&
+    !isOwnedEventMediaReference(value.coverImageUrl)
+  )
+    throw new AgentProtocolValidationError(
+      'event prepare resolved cover image must be owned event media',
+    );
+  if (
+    'seo' in value &&
+    isPlainObject(value.seo) &&
+    value.seo.imageUrl !== undefined &&
+    !isOwnedEventMediaReference(value.seo.imageUrl)
+  )
+    throw new AgentProtocolValidationError(
+      'event prepare resolved SEO image must be owned event media',
+    );
+}
+
+function validateEventPreparePayload(payload: Readonly<Record<string, unknown>>): void {
+  if (
+    JSON.stringify(Object.keys(payload).sort()) !==
+      JSON.stringify(['changePreviewSha256', 'changes']) ||
+    typeof payload.changePreviewSha256 !== 'string' ||
+    !SHA256.test(payload.changePreviewSha256) ||
+    !payload.changes ||
+    typeof payload.changes !== 'object' ||
+    Array.isArray(payload.changes)
+  )
+    throw new AgentProtocolValidationError('event prepare payload is invalid');
+  validateAgentEventPrepareResolvedChanges(payload.changes);
 }
 
 function validateEventPublishPayload(payload: Readonly<Record<string, unknown>>): void {
@@ -603,7 +831,11 @@ export function buildAgentPlan(input: Omit<AgentPlan, 'planSha256'>): AgentPlan 
     new Date(input.expiresAt).getTime() <= new Date(input.createdAt).getTime()
   )
     throw new AgentProtocolValidationError('agent plan is invalid');
-  return { ...input, actionDigests: [...input.actionDigests], planSha256: agentSha256(input) };
+  return {
+    ...input,
+    actionDigests: [...input.actionDigests],
+    planSha256: agentSha256(input),
+  };
 }
 
 function includes<T>(items: readonly T[], value: T): boolean {
@@ -737,7 +969,9 @@ export async function consumeApprovedAgentAction(
     executionId: input.executionId,
   });
   if (!consumed)
-    return { decision: { ...decision, allowed: false, reasons: ['approval_consumed'] } };
+    return {
+      decision: { ...decision, allowed: false, reasons: ['approval_consumed'] },
+    };
   const descriptor = AGENT_ACTION_DESCRIPTORS[input.action.kind];
   const authoritativeReasons: AgentAuthorizationDenial[] = [];
   if (
@@ -756,7 +990,11 @@ export async function consumeApprovedAgentAction(
     authoritativeReasons.push('approval_expired');
   if (authoritativeReasons.length > 0)
     return {
-      decision: { ...decision, allowed: false, reasons: [...new Set(authoritativeReasons)] },
+      decision: {
+        ...decision,
+        allowed: false,
+        reasons: [...new Set(authoritativeReasons)],
+      },
     };
   return { decision, approval: consumed };
 }

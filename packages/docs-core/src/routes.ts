@@ -68,6 +68,7 @@ export const docRoutes = {
   apiMigration20260727To20260728: '/reference/migrations/2026-07-27-to-2026-07-28',
   apiMigration20260728To20260729: '/reference/migrations/2026-07-28-to-2026-07-29',
   apiMigration20260729To20260730: '/reference/migrations/2026-07-29-to-2026-07-30',
+  apiMigration20260730To20260731: '/reference/migrations/2026-07-30-to-2026-07-31',
   accessibility: '/reference/accessibility',
   performance: '/reference/performance',
   privacyAndRetention: '/reference/privacy-and-retention',

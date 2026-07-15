@@ -35,6 +35,8 @@ try {
         '@tixkit/agent-protocol': `file:${agentProtocolTar}`,
         '@tixkit/contract-tests': `file:${contractsTar}`,
         '@tixkit/js': `file:${sdkTar}`,
+        ajv: '^8.20.0',
+        'ajv-formats': '^3.0.1',
       },
       overrides: {
         '@tixkit/embed-core': `file:${embedTar}`,
@@ -188,7 +190,7 @@ try {
     join(temp, 'agent-platform-remote-http.json'),
     JSON.stringify({
       baseUrl: 'http://api.example.test',
-      apiVersion: '2026-07-30',
+      apiVersion: '2026-07-31',
       sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
       agentClientId: 'agent_client',
       agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
@@ -222,7 +224,17 @@ try {
     join(root, 'scripts/fixtures/packed-agent-platform-consumer.mjs'),
     join(temp, 'packed-agent-platform-consumer.mjs'),
   );
-  for (const mutation of ['none', 'projection', 'untrusted_paths', 'result_digest', 'replay']) {
+  for (const mutation of [
+    'none',
+    'projection',
+    'untrusted_paths',
+    'result_digest',
+    'replay',
+    'prepare_preview',
+    'prepare_untrusted_paths',
+    'prepare_result_digest',
+    'prepare_replay',
+  ]) {
     const packedOutput = JSON.parse(
       execFileSync('bun', ['run', 'packed-agent-platform-consumer.mjs', mutation], {
         cwd: temp,
@@ -231,15 +243,22 @@ try {
     );
     if (packedOutput.eventCalls !== 2)
       throw new Error(`Packed agent-platform ${mutation} did not prove exact event-read replay`);
+    if (
+      (mutation === 'none' || mutation.startsWith('prepare_')) &&
+      packedOutput.eventPrepareCalls !== 2
+    )
+      throw new Error(`Packed agent-platform ${mutation} did not prove exact event-prepare replay`);
     if (mutation === 'none') {
       if (packedOutput.result.ok !== true)
         throw new Error('Packed agent-platform happy path failed');
     } else if (
       packedOutput.result.ok !== false ||
       !packedOutput.result.findings.some((finding) =>
-        ['AGENT_PLATFORM_EVENT_READ_SCHEMA', 'AGENT_PLATFORM_EVENT_READ_REPLAY'].includes(
-          finding.code,
-        ),
+        [
+          'AGENT_PLATFORM_EVENT_READ_SCHEMA',
+          'AGENT_PLATFORM_EVENT_READ_REPLAY',
+          'AGENT_PLATFORM_EVENT_PREPARE_SCHEMA',
+        ].includes(finding.code),
       )
     )
       throw new Error(`Packed agent-platform ${mutation} did not fail closed`);
@@ -266,7 +285,7 @@ if (captured.headers.authorization !== 'Bearer tk_sandbox') throw new Error('Pac
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
   console.log(
-    'Built and executed 4 packed contract profiles, including agent event-read replay/mutations and fail-closed credential handling, and the packed SDK wire contract.',
+    'Built and executed 4 packed contract profiles, including agent event-read/event-prepare replay and mutations, fail-closed credential handling, and the packed SDK wire contract.',
   );
 } finally {
   await rm(temp, { recursive: true, force: true });

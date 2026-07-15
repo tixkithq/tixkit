@@ -7,7 +7,7 @@ product_area: platform
 content_type: how-to
 status: experimental
 owner: developer-platform
-last_verified: 2026-07-30
+last_verified: 2026-07-31
 prerequisites:
   - An experimental private-beta environment
   - A human administrator with tenant-wide developers.write
@@ -25,6 +25,7 @@ related:
   - /reference/migrations/2026-07-27-to-2026-07-28
   - /reference/migrations/2026-07-28-to-2026-07-29
   - /reference/migrations/2026-07-29-to-2026-07-30
+  - /reference/migrations/2026-07-30-to-2026-07-31
 keywords:
   - agents
   - delegation
@@ -40,7 +41,7 @@ Tixkit agents use explicit principals. An agent does not impersonate its organiz
 
 ## Current beta surface
 
-API version `2026-07-30`, action protocol `2026-07-22`, plan protocol `2026-07-27` and action-registry contract `2026-07-30` support these sponsor-controlled operations:
+API version `2026-07-31`, action protocol `2026-07-22`, plan protocol `2026-07-27` and action-registry contract `2026-07-31` support these sponsor-controlled operations:
 
 - register an agent principal;
 - read a principal sponsored by the current user;
@@ -50,6 +51,7 @@ API version `2026-07-30`, action protocol `2026-07-22`, plan protocol `2026-07-2
 - create and revoke sponsor-bound OAuth clients for active agents;
 - exchange client credentials and inspect an explicit, permission-empty agent session;
 - read a bounded, version-bound event projection with explicit untrusted-content provenance;
+- prepare a normalized, version-bound event update preview without mutating event or media state;
 - read event readiness through a direct, immutable, digest-bound action result;
 - prepare and retrieve an immutable `event.publish` action with a server-authoritative dry run;
 - persist, inspect and version an immutable multi-step plan over prepared actions;
@@ -99,6 +101,14 @@ The terminal result is a strict subset of the versioned event: title, descriptio
 
 Exact replay and `GET /v1/agent/events/{actionId}` recheck the complete current authorization intersection. Revocation, permission or membership loss, scope or policy denial, and resource or policy version drift fail closed. `event.read` cannot enter a plan and cannot create approval, execution or product effects.
 
+## Prepare an event update without approval
+
+An explicitly authenticated agent calls `tixkit.agentActions.prepareEvent` or `POST /v1/agent/event-preparations` with an event identifier, matching delegation, idempotency key and non-empty `changes`. The accepted change object is the complete generic event PATCH surface except `status` and `expectedVersion`; lifecycle status remains confined to its dedicated operations. The server requires `events.prepare` in the principal and delegation, exact event scope, current sponsor `events.write` authority and membership, plus an allowing `event.prepare` action/risk policy.
+
+Resolution uses the same slug, venue, media ownership and normalization rules as organizer PATCH. It validates owned, clean media without renewing its lease and performs no event, venue, upload, approval, execution or plan write. The action payload binds the canonical normalized `changes` and `changePreviewSha256`; the result binds the exact resource version, sorted material fields, before/after projections, observation time and result digest. Every `before.<field>` and `after.<field>` path is declared untrusted because existing and proposed organizer-controlled content is data, never an instruction. Derived organizer-visible effects, such as the venue snapshot resolved from `venueId`, are included in the field set and digest even when the request supplies only the identifier.
+
+Exact replay and `GET /v1/agent/event-preparations/{actionId}` reauthorize the full intersection and return identical persisted evidence. Event or policy version drift, revocation, permission or membership loss, scope denial, slug conflict, foreign venue, foreign or unsafe media, malformed input and persisted-evidence substitution fail closed. `event.prepare` is direct-only until a separate consequential `event.update` action consumes the exact preview digest under fresh approval.
+
 ## Read event readiness without approval
 
 An explicitly authenticated agent calls `tixkit.agentActions.readReadiness` or `POST /v1/agent/readiness` with an event identifier, a matching delegation grant and an idempotency key. The server requires `readiness.read` in the principal capability and delegation, exact `event:<id>` scope, live sponsor `events.read` authority, an `events:read` permission snapshot, and an allowed current tenant action and risk policy.
@@ -125,7 +135,7 @@ The exact agent or human sponsor inspects durable execution and its ordered immu
 
 ## Persist and inspect an approval-aware plan
 
-After preparing every plan-supported typed action, the authenticated agent submits the canonical `2026-07-27` plan definition and exact step-to-action bindings through `tixkit.agentPlans.create` or `POST /v1/agent/plans`. The database reloads those actions and rechecks the agent, sponsor, delegation, capabilities, resource scopes, action digests and lifetime. Creation has no product effect and grants no approval. The `2026-07-30` registry marks `event.read` and `readiness.read` as direct-only, so they are evidence for orchestration rather than plan steps.
+After preparing every plan-supported typed action, the authenticated agent submits the canonical `2026-07-27` plan definition and exact step-to-action bindings through `tixkit.agentPlans.create` or `POST /v1/agent/plans`. The database reloads those actions and rechecks the agent, sponsor, delegation, capabilities, resource scopes, action digests and lifetime. Creation has no product effect and grants no approval. The `2026-07-31` registry marks `event.read`, `readiness.read` and `event.prepare` as direct-only, so they are evidence for orchestration rather than plan steps.
 
 The exact agent or sponsor reads the immutable definition, bindings and current state through `tixkit.agentPlans.get` or `GET /v1/agent/plans/{planId}`. Advance state with `tixkit.agentPlans.transition` or `POST /v1/agent/plans/{planId}/transitions`. Supply an expected state version, complete next step states, a bounded reason code and an idempotency key. Tixkit owns timestamps and reloads approvals and executions under lock; clients cannot assert their own evidence.
 
@@ -141,7 +151,7 @@ Managed messaging may become an agent tool only with consent and suppression eva
 
 ## Prove an orchestrator against the shared contract
 
-The public `@tixkit/contract-tests` source package includes a live `agent-platform` profile for third-party and Self-Hosted orchestrators. It verifies direct event and readiness evidence followed by the `event.publish` golden path: client-credential authentication, explicit agent identity, version/digest and untrusted-content binding, typed action preparation, canonical plan persistence, plan-bound sponsor approval, idempotent execution, terminal plan state and plan-bound audit evidence against one API environment. It does not claim hosted availability or cover the separate memory and revocation contracts.
+The public `@tixkit/contract-tests` source package includes a live `agent-platform` profile for third-party and Self-Hosted orchestrators. It verifies direct event reads, event preparation and readiness evidence followed by the `event.publish` golden path: client-credential authentication, explicit agent identity, version/digest and untrusted-content binding, typed action preparation, canonical plan persistence, plan-bound sponsor approval, idempotent execution, terminal plan state and plan-bound audit evidence against one API environment. It does not claim hosted availability or cover the separate memory and revocation contracts.
 
 This profile performs the consequential `event.publish` action after the read. Use only an isolated private-beta or Self-Hosted test tenant and an unpublished disposable event that is ready to publish. Never run it against a production event. The sponsor must own the agent and retain `events.read` and `events.write`; the agent delegation must grant `events.read`, `readiness.read`, `events.prepare` and `events.execute` for that exact event.
 
@@ -154,7 +164,7 @@ npm install --save-dev @tixkit/contract-tests
 ```json
 {
   "baseUrl": "https://sandbox.example.test",
-  "apiVersion": "2026-07-30",
+  "apiVersion": "2026-07-31",
   "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
   "agentClientId": "tk_agent_example",
   "agentClientSecretEnv": "TIXKIT_CONFORMANCE_AGENT_SECRET",

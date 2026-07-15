@@ -2,7 +2,7 @@
 // Works in Node.js and browsers with separate entry points.
 // Never exposes secret API keys in browser bundles.
 
-export const TIXKIT_API_VERSION = '2026-07-30';
+export const TIXKIT_API_VERSION = '2026-07-31';
 export const MAX_OFFLINE_SYNC_SCANS = 100_000;
 export const MAX_BULK_OFFLINE_SYNC_CHUNK_SCANS = 50_000;
 export const MAX_OFFLINE_MANIFEST_TICKETS = 50_000;
@@ -1673,6 +1673,70 @@ export type AgentEventReadResult = {
   untrustedContentPaths: ['event.title', 'event.description'];
 };
 
+export type AgentEventPrepareChanges = {
+  title?: string;
+  slug?: string;
+  description?: string;
+  currency?: string;
+  timezone?: string;
+  startsAt?: string;
+  endsAt?: string | null;
+  venue?: Record<string, unknown> | null;
+  venueId?: string | null;
+  visibility?: 'public' | 'unlisted' | 'private';
+  seo?: { title?: string; description?: string; imageUrl?: string };
+  capacity?: number | null;
+  minimumAge?: number | null;
+  coverImageUrl?: string | null;
+  externalUrl?: string | null;
+  coverImageAlt?: string | null;
+  seoUseCoverImage?: boolean;
+  lastSetupSection?: string | null;
+};
+
+export type AgentEventPrepareProjection = Omit<AgentEventPrepareChanges, 'description'> & {
+  description?: string | null;
+};
+
+export type AgentOwnedEventMediaReference = `/v1/public/event-media/${string}`;
+
+export type AgentEventPrepareResolvedChanges = Omit<
+  AgentEventPrepareChanges,
+  'coverImageUrl' | 'seo'
+> & {
+  coverImageUrl?: AgentOwnedEventMediaReference | null;
+  seo?: Omit<NonNullable<AgentEventPrepareChanges['seo']>, 'imageUrl'> & {
+    imageUrl?: AgentOwnedEventMediaReference;
+  };
+};
+
+export type AgentEventPrepareAction = AgentActionBase & {
+  kind: 'event.prepare';
+  autonomy: 'prepare';
+  target: {
+    tenantId: string;
+    resourceType: 'event';
+    resourceId: string;
+    resourceVersion: number;
+    apiOperation: 'events.prepare';
+  };
+  payload: {
+    changePreviewSha256: string;
+    changes: AgentEventPrepareResolvedChanges;
+  };
+};
+
+export type AgentEventPrepareResult = {
+  resourceId: string;
+  resourceVersion: number;
+  changePreviewSha256: string;
+  observedAt: string;
+  changedFields: Array<keyof AgentEventPrepareProjection>;
+  before: AgentEventPrepareProjection;
+  after: AgentEventPrepareResolvedChanges;
+  untrustedContentPaths: string[];
+};
+
 export type AgentReadinessReadResult = {
   resourceId: string;
   resourceVersion: number;
@@ -1733,6 +1797,21 @@ export type PreparedAgentEventReadAction = {
     checkedAt: string;
   };
   result: AgentEventReadResult;
+  resultSha256: string;
+};
+
+export type PreparedAgentEventPrepareAction = {
+  action: AgentEventPrepareAction;
+  actionDigest: string;
+  expiresAt: string;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  result: AgentEventPrepareResult;
   resultSha256: string;
 };
 
@@ -4532,6 +4611,19 @@ class AgentActionResource {
     });
   }
 
+  async prepareEvent(input: {
+    delegationGrantId: string;
+    resourceId: string;
+    changes: AgentEventPrepareChanges;
+    idempotencyKey: string;
+  }): Promise<PreparedAgentEventPrepareAction> {
+    const { idempotencyKey, ...body } = input;
+    return this.client.request('POST', '/agent/event-preparations', {
+      body,
+      idempotencyKey,
+    });
+  }
+
   async get(actionId: string): Promise<PreparedAgentAction> {
     return this.client.request('GET', `/agent/actions/${actionId}`);
   }
@@ -4542,6 +4634,10 @@ class AgentActionResource {
 
   async getEvent(actionId: string): Promise<PreparedAgentEventReadAction> {
     return this.client.request('GET', `/agent/events/${actionId}`);
+  }
+
+  async getEventPreparation(actionId: string): Promise<PreparedAgentEventPrepareAction> {
+    return this.client.request('GET', `/agent/event-preparations/${actionId}`);
   }
 
   async approve(input: {

@@ -13,9 +13,11 @@ import {
   type AgentExecution,
   type AgentExecutionEvidence,
   type AgentEventReadResult,
+  type AgentEventPrepareResult,
   type AgentPrincipal,
   type AgentReadinessReadResult,
   validateAgentEventReadResult,
+  validateAgentEventPrepareResult,
   validateAgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 import { AgentExecutionRepository, sql, type Database } from '@tixkit/db';
@@ -27,6 +29,7 @@ import {
   type EventPublishAgentAdapterCheckpoints,
 } from './agent-event-publish.js';
 import { ReadinessService, resolvePaymentMode } from './readiness.js';
+import { EventUpdateService } from './event-update.js';
 
 type Executor = Database | Transaction<import('@tixkit/db').DB>;
 const ACTION_TTL_MILLISECONDS = 15 * 60 * 1000;
@@ -36,19 +39,37 @@ const SHA256 = /^[a-f0-9]{64}$/u;
 type EventPublishAgentAction = AgentAction & {
   kind: 'event.publish';
   autonomy: 'execute_with_approval';
-  target: AgentAction['target'] & { resourceType: 'event'; apiOperation: 'events.publish' };
+  target: AgentAction['target'] & {
+    resourceType: 'event';
+    apiOperation: 'events.publish';
+  };
 };
 
 type ReadinessReadAgentAction = AgentAction & {
   kind: 'readiness.read';
   autonomy: 'read';
-  target: AgentAction['target'] & { resourceType: 'event'; apiOperation: 'events.readiness.get' };
+  target: AgentAction['target'] & {
+    resourceType: 'event';
+    apiOperation: 'events.readiness.get';
+  };
 };
 
 type EventReadAgentAction = AgentAction & {
   kind: 'event.read';
   autonomy: 'read';
-  target: AgentAction['target'] & { resourceType: 'event'; apiOperation: 'events.get' };
+  target: AgentAction['target'] & {
+    resourceType: 'event';
+    apiOperation: 'events.get';
+  };
+};
+
+type EventPrepareAgentAction = AgentAction & {
+  kind: 'event.prepare';
+  autonomy: 'prepare';
+  target: AgentAction['target'] & {
+    resourceType: 'event';
+    apiOperation: 'events.prepare';
+  };
 };
 
 interface PreparedAgentActionBase {
@@ -100,10 +121,24 @@ export interface PreparedAgentEventReadAction extends PreparedAgentActionBase {
   resultSha256: string;
 }
 
+export interface PreparedAgentEventPrepareAction extends PreparedAgentActionBase {
+  action: EventPrepareAgentAction;
+  authorization: {
+    allowed: true;
+    eligibleForApproval: false;
+    reasons: readonly [];
+    snapshotSha256: string;
+    checkedAt: string;
+  };
+  result: AgentEventPrepareResult;
+  resultSha256: string;
+}
+
 export type PreparedAgentAction =
   | PreparedAgentEventPublishAction
   | PreparedAgentReadinessAction
-  | PreparedAgentEventReadAction;
+  | PreparedAgentEventReadAction
+  | PreparedAgentEventPrepareAction;
 
 function parseStrings(value: string, field: string): string[] {
   const parsed: unknown = JSON.parse(value);
@@ -196,7 +231,7 @@ function stableId(
 }
 
 function requestFingerprint(input: {
-  kind: 'event.publish' | 'event.read' | 'readiness.read';
+  kind: 'event.publish' | 'event.read' | 'readiness.read' | 'event.prepare';
   delegationGrantId: string;
   resourceId: string;
 }): string {
@@ -211,9 +246,19 @@ interface PrepareAgentActionInput {
   resourceId: string;
 }
 
-type PrepareEventPublishActionInput = PrepareAgentActionInput & { kind: 'event.publish' };
-type PrepareEventReadActionInput = PrepareAgentActionInput & { kind: 'event.read' };
-type PrepareReadinessActionInput = PrepareAgentActionInput & { kind: 'readiness.read' };
+type PrepareEventPublishActionInput = PrepareAgentActionInput & {
+  kind: 'event.publish';
+};
+type PrepareEventReadActionInput = PrepareAgentActionInput & {
+  kind: 'event.read';
+};
+type PrepareReadinessActionInput = PrepareAgentActionInput & {
+  kind: 'readiness.read';
+};
+type PrepareEventPrepareActionInput = PrepareAgentActionInput & {
+  kind: 'event.prepare';
+  changes: Readonly<Record<string, unknown>>;
+};
 
 function eventReadProjection(event: {
   title: string;
@@ -307,11 +352,13 @@ export class AgentActionService {
   async prepare(input: PrepareEventPublishActionInput): Promise<PreparedAgentEventPublishAction>;
   async prepare(input: PrepareEventReadActionInput): Promise<PreparedAgentEventReadAction>;
   async prepare(input: PrepareReadinessActionInput): Promise<PreparedAgentReadinessAction>;
+  async prepare(input: PrepareEventPrepareActionInput): Promise<PreparedAgentEventPrepareAction>;
   async prepare(
     input:
       | PrepareEventPublishActionInput
       | PrepareEventReadActionInput
-      | PrepareReadinessActionInput,
+      | PrepareReadinessActionInput
+      | PrepareEventPrepareActionInput,
   ): Promise<PreparedAgentAction> {
     const fingerprint = requestFingerprint(input);
     return executeAgentActionTransaction(this.db, async (tx) => {
@@ -355,7 +402,9 @@ export class AgentActionService {
           ? 'events.execute'
           : input.kind === 'event.read'
             ? 'events.read'
-            : 'readiness.read';
+            : input.kind === 'event.prepare'
+              ? 'events.prepare'
+              : 'readiness.read';
       if (
         principal.state !== 'active' ||
         principal.protocolVersion !== AGENT_PROTOCOL_VERSION ||
@@ -427,7 +476,13 @@ export class AgentActionService {
         .where('tenant_id', '=', input.tenantId)
         .where('principal_type', '=', 'user')
         .where('principal_id', '=', principal.sponsorPrincipalId)
-        .where('permission', '=', input.kind === 'event.publish' ? 'events.write' : 'events.read')
+        .where(
+          'permission',
+          '=',
+          input.kind === 'event.publish' || input.kind === 'event.prepare'
+            ? 'events.write'
+            : 'events.read',
+        )
         .where('scope_type', '=', 'tenant')
         .where('scope_id', 'is', null)
         .forUpdate()
@@ -445,7 +500,7 @@ export class AgentActionService {
       if (input.kind !== 'event.publish' && (!policy.allowed || !policy.risk_allowed))
         throw new Error('AGENT_ACTION_RESOURCE_DENIED');
       const readiness =
-        input.kind === 'event.read'
+        input.kind === 'event.read' || input.kind === 'event.prepare'
           ? undefined
           : await new ReadinessService(
               tx as Database,
@@ -464,6 +519,27 @@ export class AgentActionService {
         : undefined;
       const eventProjection = input.kind === 'event.read' ? eventReadProjection(event) : undefined;
       const eventSnapshotSha256 = eventProjection ? agentSha256(eventProjection) : undefined;
+      const resolvedEventPatch =
+        input.kind === 'event.prepare'
+          ? await new EventUpdateService(tx as Database).resolvePatch({
+              tenantId: input.tenantId,
+              eventId: event.id,
+              patch: {
+                ...input.changes,
+                expectedVersion: safeInteger(event.version, 'event version'),
+              },
+            })
+          : undefined;
+      const changePreview = resolvedEventPatch
+        ? {
+            resourceId: event.id,
+            resourceVersion: safeInteger(event.version, 'event version'),
+            changedFields: resolvedEventPatch.requestedFields,
+            before: resolvedEventPatch.before,
+            after: resolvedEventPatch.after,
+          }
+        : undefined;
+      const changePreviewSha256 = changePreview ? agentSha256(changePreview) : undefined;
       const action: AgentAction = {
         id: stableId('act', input.tenantId, input.agentPrincipalId, input.idempotencyKey),
         protocolVersion: AGENT_PROTOCOL_VERSION,
@@ -471,7 +547,12 @@ export class AgentActionService {
         sponsorPrincipalId: principal.sponsorPrincipalId,
         delegationGrantId: input.delegationGrantId,
         kind: input.kind,
-        autonomy: input.kind === 'event.publish' ? 'execute_with_approval' : 'read',
+        autonomy:
+          input.kind === 'event.publish'
+            ? 'execute_with_approval'
+            : input.kind === 'event.prepare'
+              ? 'prepare'
+              : 'read',
         target: {
           tenantId: input.tenantId,
           resourceType: 'event',
@@ -482,17 +563,27 @@ export class AgentActionService {
               ? 'events.publish'
               : input.kind === 'event.read'
                 ? 'events.get'
-                : 'events.readiness.get',
+                : input.kind === 'event.prepare'
+                  ? 'events.prepare'
+                  : 'events.readiness.get',
         },
         payload:
-          input.kind === 'event.read' ? { eventSnapshotSha256 } : { readinessSnapshotSha256 },
+          input.kind === 'event.read'
+            ? { eventSnapshotSha256 }
+            : input.kind === 'event.prepare'
+              ? { changePreviewSha256, changes: resolvedEventPatch!.after }
+              : { readinessSnapshotSha256 },
         idempotencyKey: input.idempotencyKey,
         expectedPolicyVersion: safeInteger(policy.policy_version, 'agent policy version'),
         preparedAt: now.toISOString(),
       };
       const actionDigest = agentActionDigest(action);
       const sponsorPermissions = [
-        input.kind === 'event.publish' ? 'events:publish' : 'events:read',
+        input.kind === 'event.publish'
+          ? 'events:publish'
+          : input.kind === 'event.prepare'
+            ? 'events:write'
+            : 'events:read',
       ];
       const decision = authorizeAgentAction({
         principal,
@@ -531,7 +622,8 @@ export class AgentActionService {
           version: action.expectedPolicyVersion,
         },
         resource: action.target,
-        materialSnapshotSha256: eventSnapshotSha256 ?? readinessSnapshotSha256,
+        materialSnapshotSha256:
+          changePreviewSha256 ?? eventSnapshotSha256 ?? readinessSnapshotSha256,
         checkedAt: now.toISOString(),
       });
       const expiresAt = new Date(
@@ -546,7 +638,11 @@ export class AgentActionService {
             ],
           }
         : undefined;
-      const result: AgentReadinessReadResult | AgentEventReadResult | undefined =
+      const result:
+        | AgentReadinessReadResult
+        | AgentEventReadResult
+        | AgentEventPrepareResult
+        | undefined =
         input.kind === 'readiness.read' && readiness && readinessSnapshotSha256
           ? {
               resourceId: event.id,
@@ -571,10 +667,22 @@ export class AgentActionService {
                 event: eventProjection,
                 untrustedContentPaths: ['event.title', 'event.description'],
               }
-            : undefined;
+            : input.kind === 'event.prepare' && changePreview && changePreviewSha256
+              ? {
+                  ...changePreview,
+                  changePreviewSha256,
+                  observedAt: now.toISOString(),
+                  untrustedContentPaths: changePreview.changedFields.flatMap((field) => [
+                    `before.${field}`,
+                    `after.${field}`,
+                  ]),
+                }
+              : undefined;
       if (result) {
         if (action.kind === 'event.read')
           validateAgentEventReadResult(action, result as AgentEventReadResult);
+        else if (action.kind === 'event.prepare')
+          validateAgentEventPrepareResult(action, result as AgentEventPrepareResult);
         else validateAgentReadinessReadResult(action, result as AgentReadinessReadResult);
       }
       const resultSha256 = result ? agentSha256(result) : undefined;
@@ -597,7 +705,12 @@ export class AgentActionService {
           request_fingerprint: fingerprint,
           authorization_snapshot_sha256: authorizationSnapshotSha256,
           authorization_reasons: JSON.stringify(authorizationReasons),
-          dry_run_json: canonicalAgentJson(dryRun ?? { eventSnapshotSha256: eventSnapshotSha256! }),
+          dry_run_json: canonicalAgentJson(
+            dryRun ??
+              (action.kind === 'event.prepare'
+                ? { changePreviewSha256: changePreviewSha256! }
+                : { eventSnapshotSha256: eventSnapshotSha256! }),
+          ),
           result_json: result ? canonicalAgentJson(result) : null,
           result_sha256: resultSha256 ?? null,
           eligible_for_approval: eligibleForApproval,
@@ -647,6 +760,20 @@ export class AgentActionService {
             checkedAt: now.toISOString(),
           },
           result: result as AgentEventReadResult,
+          resultSha256,
+        };
+      if (result && resultSha256 && action.kind === 'event.prepare')
+        return {
+          ...common,
+          action: action as EventPrepareAgentAction,
+          authorization: {
+            allowed: true as const,
+            eligibleForApproval: false as const,
+            reasons: [] as const,
+            snapshotSha256: authorizationSnapshotSha256,
+            checkedAt: now.toISOString(),
+          },
+          result: result as AgentEventPrepareResult,
           resultSha256,
         };
       if (result && resultSha256 && action.kind === 'readiness.read' && dryRun)
@@ -1240,7 +1367,10 @@ export class AgentActionService {
     }
     let current: Awaited<ReturnType<EventPublishAgentAdapter['load']>>;
     try {
-      current = await adapter.load({ action: prepared.action, execution: probe });
+      current = await adapter.load({
+        action: prepared.action,
+        execution: probe,
+      });
     } catch (error) {
       const code =
         error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
@@ -1332,7 +1462,12 @@ export class AgentActionService {
     now: Date,
   ): Promise<boolean> {
     const { action } = prepared;
-    if (action.kind !== 'readiness.read' && action.kind !== 'event.read') return false;
+    if (
+      action.kind !== 'readiness.read' &&
+      action.kind !== 'event.read' &&
+      action.kind !== 'event.prepare'
+    )
+      return false;
     const principalRow = await tx
       .selectFrom('agent_principals')
       .selectAll()
@@ -1367,14 +1502,16 @@ export class AgentActionService {
       action.target.tenantId,
       action.sponsorPrincipalId,
       action.target.resourceId,
-      'events.read',
+      action.kind === 'event.prepare' ? 'events.write' : 'events.read',
     );
     const decision = authorizeAgentAction({
       principal: toPrincipal(principalRow),
       delegation: toDelegation(delegationRow),
       action,
       actionDigest: prepared.actionDigest,
-      sponsorPermissions: sponsorAuthorized ? ['events:read'] : [],
+      sponsorPermissions: sponsorAuthorized
+        ? [action.kind === 'event.prepare' ? 'events:write' : 'events:read']
+        : [],
       tenantAllowedActions: policy.allowed && policy.risk_allowed ? [action.kind] : [],
       currentResourceVersion: safeInteger(event.version, 'event version'),
       currentPolicyVersion: safeInteger(policy.policy_version, 'agent policy version'),
@@ -1491,7 +1628,11 @@ export class AgentActionService {
       actionDigest: prepared.actionDigest,
       principal,
       delegation,
-      sponsor: { id: sponsor.id, status: sponsor.status, updatedAt: iso(sponsor.updated_at) },
+      sponsor: {
+        id: sponsor.id,
+        status: sponsor.status,
+        updatedAt: iso(sponsor.updated_at),
+      },
       membership: { id: membership.id, updatedAt: iso(membership.updated_at) },
       permission: { id: permission.id, updatedAt: iso(permission.updated_at) },
       policy: {
@@ -1559,6 +1700,16 @@ export class AgentActionService {
         persistedPreview.eventSnapshotSha256 !== action.payload.eventSnapshotSha256
       )
         throw new Error('persisted agent event preview is invalid');
+    } else if (action.kind === 'event.prepare') {
+      if (
+        !persistedPreview ||
+        typeof persistedPreview !== 'object' ||
+        Array.isArray(persistedPreview) ||
+        Object.keys(persistedPreview).length !== 1 ||
+        !('changePreviewSha256' in persistedPreview) ||
+        persistedPreview.changePreviewSha256 !== action.payload.changePreviewSha256
+      )
+        throw new Error('persisted agent event prepare preview is invalid');
     } else {
       const readinessSnapshotSha256 = action.payload.readinessSnapshotSha256;
       if (typeof readinessSnapshotSha256 !== 'string')
@@ -1578,9 +1729,17 @@ export class AgentActionService {
         throw new Error('persisted agent action dry run is invalid');
       dryRun = persistedPreview as PreparedAgentReadinessBase['dryRun'];
     }
-    let result: AgentReadinessReadResult | AgentEventReadResult | undefined;
+    let result:
+      | AgentReadinessReadResult
+      | AgentEventReadResult
+      | AgentEventPrepareResult
+      | undefined;
     let resultSha256: string | undefined;
-    if (action.kind === 'readiness.read' || action.kind === 'event.read') {
+    if (
+      action.kind === 'readiness.read' ||
+      action.kind === 'event.read' ||
+      action.kind === 'event.prepare'
+    ) {
       if (!row.result_json || !row.result_sha256)
         throw new Error('persisted direct agent result is unavailable');
       const parsedResult: unknown = JSON.parse(row.result_json);
@@ -1589,6 +1748,9 @@ export class AgentActionService {
       if (action.kind === 'event.read') {
         result = parsedResult as AgentEventReadResult;
         validateAgentEventReadResult(action, result);
+      } else if (action.kind === 'event.prepare') {
+        result = parsedResult as AgentEventPrepareResult;
+        validateAgentEventPrepareResult(action, result);
       } else {
         result = parsedResult as AgentReadinessReadResult;
         validateAgentReadinessReadResult(action, result);
@@ -1617,6 +1779,20 @@ export class AgentActionService {
           checkedAt: iso(row.prepared_at),
         },
         result: result as AgentEventReadResult,
+        resultSha256,
+      };
+    if (action.kind === 'event.prepare' && result && resultSha256)
+      return {
+        ...common,
+        action: action as EventPrepareAgentAction,
+        authorization: {
+          allowed: true,
+          eligibleForApproval: false,
+          reasons: [],
+          snapshotSha256: row.authorization_snapshot_sha256,
+          checkedAt: iso(row.prepared_at),
+        },
+        result: result as AgentEventPrepareResult,
         resultSha256,
       };
     if (action.kind === 'readiness.read' && result && resultSha256 && dryRun)
@@ -1651,7 +1827,12 @@ export class AgentActionService {
     tx: Transaction<import('@tixkit/db').DB>,
     row: Selectable<import('@tixkit/db').DB['agent_actions']>,
   ): Promise<void> {
-    if (row.action_kind !== 'readiness.read' && row.action_kind !== 'event.read') return;
+    if (
+      row.action_kind !== 'readiness.read' &&
+      row.action_kind !== 'event.read' &&
+      row.action_kind !== 'event.prepare'
+    )
+      return;
     if (!SHA256.test(row.authorization_snapshot_sha256))
       throw new Error('persisted agent authorization evidence is invalid');
     const evidence = await tx

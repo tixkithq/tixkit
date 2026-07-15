@@ -776,9 +776,7 @@ describe.sequential.each(driverCases)('agent plan persistence: $driver', ({ driv
       idempotencyKey: 'agent-plan-transition-succeeded-2026',
     });
     expect(succeeded.state).toMatchObject({ stateVersion: 6, status: 'succeeded' });
-    await expect(AgentExecutionPlanBindingMigration.down!(db)).rejects.toThrow(
-      'rollback refused',
-    );
+    await expect(AgentExecutionPlanBindingMigration.down!(db)).rejects.toThrow('rollback refused');
   });
 
   it('reauthorizes tenant-scoped actors for every transition', async () => {

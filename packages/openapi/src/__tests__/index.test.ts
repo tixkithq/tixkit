@@ -96,7 +96,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-07-30');
+    expect(openApiSpec.info.version).toBe('2026-07-31');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -301,6 +301,78 @@ describe('openApiSpec', () => {
       { type: 'string', const: 'event.title' },
       { type: 'string', const: 'event.description' },
     ]);
+  });
+
+  it('adds direct event preparation with the complete non-status patch surface', () => {
+    const prepare = openApiSpec.paths['/agent/event-preparations'].post;
+    const inspect = openApiSpec.paths['/agent/event-preparations/{actionId}'].get;
+    const changes = openApiSpec.components.schemas.AgentEventPrepareChanges;
+    const resolved = openApiSpec.components.schemas.AgentEventPrepareResolvedChanges;
+    const action = openApiSpec.components.schemas.AgentEventPrepareAction;
+    const result = openApiSpec.components.schemas.AgentEventPrepareResult;
+    const prepared = openApiSpec.components.schemas.PreparedAgentEventPrepareAction;
+    expect(prepare.security).toEqual([{ AgentOAuth: ['agent.invoke'] }]);
+    expect(inspect.security).toEqual([{ AgentOAuth: ['agent.invoke'] }, { BearerAuth: [] }]);
+    expect(prepare.requestBody.content['application/json'].schema.properties.changes).toEqual({
+      $ref: '#/components/schemas/AgentEventPrepareChanges',
+    });
+    expect(Object.keys(changes.properties).sort()).toEqual([
+      'capacity',
+      'coverImageAlt',
+      'coverImageUrl',
+      'currency',
+      'description',
+      'endsAt',
+      'externalUrl',
+      'lastSetupSection',
+      'minimumAge',
+      'seo',
+      'seoUseCoverImage',
+      'slug',
+      'startsAt',
+      'timezone',
+      'title',
+      'venue',
+      'venueId',
+      'visibility',
+    ]);
+    expect(changes.properties).not.toHaveProperty('status');
+    expect(changes.properties).not.toHaveProperty('expectedVersion');
+    expect(changes.properties.venue).toMatchObject({
+      'x-tixkit-noNulStrings': true,
+      'x-tixkit-maxCanonicalBytes': 16 * 1024,
+      'x-tixkit-maxDepth': 4,
+    });
+    expect(changes.properties.externalUrl.maxLength).toBe(2048);
+    expect(changes.properties.coverImageUrl.maxLength).toBe(2048);
+    expect(changes.properties.seo.properties.imageUrl.maxLength).toBe(2048);
+    expect(action.properties).toMatchObject({
+      kind: { type: 'string', const: 'event.prepare' },
+      autonomy: { type: 'string', const: 'prepare' },
+    });
+    expect(action.properties.target.properties.apiOperation).toEqual({
+      type: 'string',
+      const: 'events.prepare',
+    });
+    expect(action.properties.payload.required).toEqual(['changePreviewSha256', 'changes']);
+    expect(action.properties.payload.properties.changes).toEqual({
+      $ref: '#/components/schemas/AgentEventPrepareResolvedChanges',
+    });
+    expect(resolved.allOf[1].properties.description.type).toBe('string');
+    expect(resolved.allOf[1].properties.coverImageUrl.pattern).toBe(
+      '^/v1/public/event-media/[A-Za-z0-9_/-]+$',
+    );
+    expect(result.properties.before).toEqual({
+      $ref: '#/components/schemas/AgentEventPrepareProjection',
+    });
+    expect(result.properties.after).toEqual({
+      $ref: '#/components/schemas/AgentEventPrepareResolvedChanges',
+    });
+    expect(result.required).toEqual(
+      expect.arrayContaining(['changePreviewSha256', 'changedFields', 'before', 'after']),
+    );
+    expect(prepared.required).toEqual(expect.arrayContaining(['result', 'resultSha256']));
+    expect(prepared.properties).not.toHaveProperty('dryRun');
   });
 
   it('keeps historical portability authorization discriminated across runtime and generated types', () => {

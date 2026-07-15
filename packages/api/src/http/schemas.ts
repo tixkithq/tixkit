@@ -8,7 +8,7 @@ import {
 
 // Reusable primitives
 const ulidSchema = z.string().min(1);
-const currencySchema = z.string().length(3);
+const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 const iso8601Schema = z.string().datetime();
 const dateOfBirthSchema = z
   .string()
@@ -28,10 +28,12 @@ export const MAX_MESSAGE_OPT_OUT_TOKEN_LENGTH = 256;
 const eventSlugSchema = z
   .string()
   .min(1)
+  .max(200)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be URL-safe lowercase text');
 const hostnameLabelSchema = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const urlSchema = z
   .string()
+  .max(2048)
   .url()
   .refine(
     (val) => {
@@ -66,6 +68,13 @@ function jsonDepth(value: unknown): number {
   }
   const entries = Object.values(value as Record<string, unknown>);
   return entries.length === 0 ? 1 : 1 + Math.max(...entries.map((item) => jsonDepth(item)));
+}
+
+function containsNulString(value: unknown): boolean {
+  if (typeof value === 'string') return value.includes('\0');
+  if (Array.isArray(value)) return value.some(containsNulString);
+  if (value === null || typeof value !== 'object') return false;
+  return Object.values(value as Record<string, unknown>).some(containsNulString);
 }
 
 const messageTemplateKeySchema = z
@@ -356,26 +365,52 @@ export const refundSchema = z
 // Event schemas
 const createEventSeoSchema = z
   .object({
-    title: z.string().max(200).optional(),
-    description: z.string().max(500).optional(),
+    title: z
+      .string()
+      .max(200)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .optional(),
+    description: z
+      .string()
+      .max(500)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .optional(),
   })
   .strict();
 const updateEventSeoSchema = createEventSeoSchema
   .extend({ imageUrl: urlSchema.optional() })
   .strict();
+const eventVenueSchema = z
+  .record(z.string(), z.unknown())
+  .refine((venue) => Object.keys(venue).length <= 64, 'Venue has too many fields')
+  .refine((venue) => jsonByteLength(venue) <= 16 * 1024, 'Venue exceeds 16 KiB')
+  .refine((venue) => jsonDepth(venue) <= 4, 'Venue exceeds maximum nesting depth')
+  .refine((venue) => !containsNulString(venue), 'Venue text must not contain NUL bytes');
 
 export const createEventSchema = z
   .object({
     organizationId: ulidSchema,
     brandId: ulidSchema,
     slug: eventSlugSchema,
-    title: z.string().min(1),
-    description: z.string().optional(),
+    title: z
+      .string()
+      .min(1)
+      .max(512)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes'),
+    description: z
+      .string()
+      .max(50_000)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .optional(),
     currency: currencySchema,
-    timezone: z.string().min(1),
+    timezone: z
+      .string()
+      .min(1)
+      .max(100)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes'),
     startsAt: iso8601Schema,
     endsAt: iso8601Schema.optional(),
-    venue: z.record(z.string(), z.unknown()).optional(),
+    venue: eventVenueSchema.optional(),
     venueId: ulidSchema.nullable().optional(),
     visibility: z.enum(['public', 'unlisted', 'private']).optional(),
     seo: createEventSeoSchema.optional(),
@@ -388,14 +423,28 @@ export const createEventSchema = z
 
 export const updateEventSchema = z
   .object({
-    title: z.string().min(1).optional(),
+    title: z
+      .string()
+      .min(1)
+      .max(512)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .optional(),
     slug: eventSlugSchema.optional(),
-    description: z.string().optional(),
+    description: z
+      .string()
+      .max(50_000)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .optional(),
     currency: currencySchema.optional(),
-    timezone: z.string().min(1).optional(),
+    timezone: z
+      .string()
+      .min(1)
+      .max(100)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .optional(),
     startsAt: iso8601Schema.optional(),
     endsAt: iso8601Schema.nullable().optional(),
-    venue: z.record(z.string(), z.unknown()).nullable().optional(),
+    venue: eventVenueSchema.nullable().optional(),
     venueId: ulidSchema.nullable().optional(),
     visibility: z.enum(['public', 'unlisted', 'private']).optional(),
     seo: updateEventSeoSchema.optional(),
@@ -403,13 +452,29 @@ export const updateEventSchema = z
     minimumAge: z.number().int().min(0).max(120).nullable().optional(),
     coverImageUrl: urlSchema.nullable().optional(),
     externalUrl: urlSchema.nullable().optional(),
-    coverImageAlt: z.string().max(500).nullable().optional(),
+    coverImageAlt: z
+      .string()
+      .max(500)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .nullable()
+      .optional(),
     seoUseCoverImage: z.boolean().optional(),
-    lastSetupSection: z.string().max(100).nullable().optional(),
+    lastSetupSection: z
+      .string()
+      .max(100)
+      .refine((value) => !value.includes('\0'), 'Text must not contain NUL bytes')
+      .nullable()
+      .optional(),
     expectedVersion: z.number().int().positive(),
     status: z.enum(['draft', 'published', 'paused', 'archived']).optional(),
   })
   .strict();
+
+export const eventPrepareChangesSchema = updateEventSchema
+  .omit({ expectedVersion: true, status: true })
+  .refine((changes) => Object.keys(changes).length > 0, {
+    message: 'At least one event change is required',
+  });
 
 const eventFeePolicyRuleSchema = z.discriminatedUnion('type', [
   z

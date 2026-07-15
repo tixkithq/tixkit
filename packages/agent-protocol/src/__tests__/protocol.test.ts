@@ -95,7 +95,10 @@ describe('agent protocol', () => {
   it('rejects invalid principals and delegations that exceed principal authority', () => {
     expect(() => validateAgentPrincipal(principal)).not.toThrow();
     expect(() =>
-      validateAgentPrincipal({ ...principal, capabilities: ['events.read', 'events.read'] }),
+      validateAgentPrincipal({
+        ...principal,
+        capabilities: ['events.read', 'events.read'],
+      }),
     ).toThrow(AgentProtocolValidationError);
     expect(() => validateAgentDelegation(delegation, principal)).not.toThrow();
     expect(() =>
@@ -112,18 +115,27 @@ describe('agent protocol', () => {
     expect(canonicalAgentJson({ z: 1, nested: { b: 2, a: 1 }, a: 3 })).toBe(
       '{"a":3,"nested":{"a":1,"b":2},"z":1}',
     );
-    const preparedTarget = { ...action().target, apiOperation: 'events.prepare' };
+    const preparedTarget = {
+      ...action().target,
+      apiOperation: 'events.prepare',
+    };
     const first = action({
       kind: 'event.prepare',
       autonomy: 'prepare',
       target: preparedTarget,
-      payload: { b: 2, a: 1 },
+      payload: {
+        changePreviewSha256: 'a'.repeat(64),
+        changes: { title: 'Prepared event', description: 'Prepared description' },
+      },
     });
     const reordered = action({
       kind: 'event.prepare',
       autonomy: 'prepare',
       target: preparedTarget,
-      payload: { a: 1, b: 2 },
+      payload: {
+        changes: { description: 'Prepared description', title: 'Prepared event' },
+        changePreviewSha256: 'a'.repeat(64),
+      },
     });
     expect(agentActionDigest(first)).toBe(agentActionDigest(reordered));
     expect(
@@ -149,15 +161,23 @@ describe('agent protocol', () => {
       'approval_invalid',
     );
     expect(
-      authorizeAgentAction({ ...base, approval: { ...base.approval!, consumedAt: now } }).reasons,
+      authorizeAgentAction({
+        ...base,
+        approval: { ...base.approval!, consumedAt: now },
+      }).reasons,
     ).toContain('approval_consumed');
     expect(
-      authorizeAgentAction({ ...base, approval: { ...base.approval!, revokedAt: now } }).reasons,
+      authorizeAgentAction({
+        ...base,
+        approval: { ...base.approval!, revokedAt: now },
+      }).reasons,
     ).toContain('approval_revoked');
     expect(authorizeAgentAction({ ...base, now: '2026-07-12T12:05:00.000Z' }).reasons).toContain(
       'approval_expired',
     );
-    const changed = action({ payload: { readinessSnapshotSha256: 'b'.repeat(64) } });
+    const changed = action({
+      payload: { readinessSnapshotSha256: 'b'.repeat(64) },
+    });
     expect(authorizeAgentAction({ ...base, action: changed }).reasons).toContain(
       'approval_invalid',
     );
@@ -167,7 +187,11 @@ describe('agent protocol', () => {
     const base = authorization();
     const decision = authorizeAgentAction({
       ...base,
-      principal: { ...principal, sponsorPrincipalId: 'user_other', capabilities: [] },
+      principal: {
+        ...principal,
+        sponsorPrincipalId: 'user_other',
+        capabilities: [],
+      },
       delegation: {
         ...delegation,
         tenantId: 'tenant_other',
@@ -195,8 +219,10 @@ describe('agent protocol', () => {
   it('denies action attribution to another agent and invalidates approval on policy change', () => {
     const base = authorization();
     expect(
-      authorizeAgentAction({ ...base, action: { ...base.action, agentPrincipalId: 'agent_other' } })
-        .reasons,
+      authorizeAgentAction({
+        ...base,
+        action: { ...base.action, agentPrincipalId: 'agent_other' },
+      }).reasons,
     ).toContain('agent_identity_mismatch');
     expect(authorizeAgentAction({ ...base, currentPolicyVersion: 4 }).reasons).toContain(
       'policy_version_changed',
@@ -223,10 +249,41 @@ describe('agent protocol', () => {
     );
   });
 
+  it('rejects autonomy escalation and approval consumption for direct-only actions', async () => {
+    const escalated = action({
+      kind: 'event.prepare',
+      autonomy: 'execute_with_approval',
+      target: { ...action().target, apiOperation: 'events.prepare' },
+      payload: {
+        changePreviewSha256: 'a'.repeat(64),
+        changes: { title: 'Prepared event' },
+      },
+    });
+    expect(() => agentActionDigest(escalated)).toThrow(AgentProtocolValidationError);
+    let consumeCalls = 0;
+    await expect(
+      consumeApprovedAgentAction({
+        ...authorization(),
+        action: escalated,
+        actionDigest: 'a'.repeat(64),
+        executionId: 'execution_direct_only',
+        approvalStore: {
+          async consume() {
+            consumeCalls += 1;
+            return null;
+          },
+        },
+      }),
+    ).rejects.toThrow(AgentProtocolValidationError);
+    expect(consumeCalls).toBe(0);
+  });
+
   it('rejects direct database/provider operations and non-JSON or ambiguous numeric payloads', () => {
     expect(() =>
       agentActionDigest(
-        action({ target: { ...action().target, apiOperation: 'database.update' } }),
+        action({
+          target: { ...action().target, apiOperation: 'database.update' },
+        }),
       ),
     ).toThrow(AgentProtocolValidationError);
     expect(() => agentActionDigest(action({ payload: { amount: 1.5 } }))).toThrow(
@@ -240,7 +297,9 @@ describe('agent protocol', () => {
   it('binds action kind to protocol-owned capability, permission, resource and API operation', () => {
     expect(() =>
       agentActionDigest(
-        action({ target: { ...action().target, apiOperation: 'orders.purchase' } }),
+        action({
+          target: { ...action().target, apiOperation: 'orders.purchase' },
+        }),
       ),
     ).toThrow(AgentProtocolValidationError);
     expect(() =>
@@ -265,7 +324,10 @@ describe('agent protocol', () => {
       target: { ...action().target, apiOperation: 'campaigns.send' },
     });
     expect(
-      agentActionDigest({ ...campaignAction, payload: { ...campaign, estimatedCostMinor: 2501 } }),
+      agentActionDigest({
+        ...campaignAction,
+        payload: { ...campaign, estimatedCostMinor: 2501 },
+      }),
     ).not.toBe(agentActionDigest(campaignAction));
     expect(
       agentActionDigest({
@@ -277,7 +339,10 @@ describe('agent protocol', () => {
       AgentProtocolValidationError,
     );
     expect(() =>
-      agentActionDigest({ ...campaignAction, payload: { ...campaign, recipientIds: ['buyer_1'] } }),
+      agentActionDigest({
+        ...campaignAction,
+        payload: { ...campaign, recipientIds: ['buyer_1'] },
+      }),
     ).toThrow(AgentProtocolValidationError);
   });
 
@@ -292,8 +357,16 @@ describe('agent protocol', () => {
       },
     };
     const results = await Promise.all([
-      consumeApprovedAgentAction({ ...base, approvalStore, executionId: 'execution_primary' }),
-      consumeApprovedAgentAction({ ...base, approvalStore, executionId: 'execution_secondary' }),
+      consumeApprovedAgentAction({
+        ...base,
+        approvalStore,
+        executionId: 'execution_primary',
+      }),
+      consumeApprovedAgentAction({
+        ...base,
+        approvalStore,
+        executionId: 'execution_secondary',
+      }),
     ]);
     expect(results.filter(({ decision }) => decision.allowed)).toHaveLength(1);
     expect(results.find(({ decision }) => !decision.allowed)?.decision.reasons).toContain(
@@ -316,13 +389,19 @@ describe('agent protocol', () => {
         },
       },
     });
-    expect(result.decision).toMatchObject({ allowed: false, reasons: ['approval_invalid'] });
+    expect(result.decision).toMatchObject({
+      allowed: false,
+      reasons: ['approval_invalid'],
+    });
   });
 
   it('creates an immutable plan digest over ordered action digests', () => {
     const first = agentActionDigest(action());
     const second = agentActionDigest(
-      action({ id: 'action_secondary', idempotencyKey: 'agent-action-2026-07-12-0002' }),
+      action({
+        id: 'action_secondary',
+        idempotencyKey: 'agent-action-2026-07-12-0002',
+      }),
     );
     const plan = buildAgentPlan({
       id: 'plan_primary',

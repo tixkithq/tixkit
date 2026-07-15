@@ -13,6 +13,7 @@ import {
 } from '../routes/modules/agent-actions.js';
 import type {
   PreparedAgentAction,
+  PreparedAgentEventPrepareAction,
   PreparedAgentEventReadAction,
   PreparedAgentReadinessAction,
 } from '../services/agent-actions.js';
@@ -125,6 +126,44 @@ const eventReadPrepared: PreparedAgentEventReadAction = {
     untrustedContentPaths: ['event.title', 'event.description'],
   },
   resultSha256: '6'.repeat(64),
+};
+const eventPreparePrepared: PreparedAgentEventPrepareAction = {
+  action: {
+    ...action,
+    id: `act_${'4'.repeat(48)}`,
+    kind: 'event.prepare',
+    autonomy: 'prepare',
+    target: { ...action.target, apiOperation: 'events.prepare' },
+    payload: {
+      changePreviewSha256: '3'.repeat(64),
+      changes: { description: 'Prepared description', title: 'Prepared title' },
+    },
+  },
+  actionDigest: '2'.repeat(64),
+  expiresAt: '2026-07-14T12:15:00.000Z',
+  authorization: {
+    allowed: true,
+    eligibleForApproval: false,
+    reasons: [],
+    snapshotSha256: '1'.repeat(64),
+    checkedAt: '2026-07-14T12:00:00.000Z',
+  },
+  result: {
+    resourceId: 'event_primary',
+    resourceVersion: 7,
+    changePreviewSha256: '3'.repeat(64),
+    observedAt: '2026-07-14T12:00:00.000Z',
+    changedFields: ['description', 'title'],
+    before: { description: null, title: 'Original title' },
+    after: { description: 'Prepared description', title: 'Prepared title' },
+    untrustedContentPaths: [
+      'before.description',
+      'after.description',
+      'before.title',
+      'after.title',
+    ],
+  },
+  resultSha256: '0'.repeat(64),
 };
 const executionEvidence: AgentExecutionEvidence = {
   execution: {
@@ -318,6 +357,53 @@ describe('agent action routes', () => {
     await app.close();
   });
 
+  it('accepts strict event.prepare changes only through its direct preparation route', async () => {
+    const prepare = vi.fn(async () => eventPreparePrepared);
+    const { app } = await setup({ service: { prepare } });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/event-preparations',
+      headers: { 'idempotency-key': 'agent-event-prepare-route-0001' },
+      payload: {
+        delegationGrantId: 'dlg_primary',
+        resourceId: 'event_primary',
+        changes: { title: 'Prepared title', description: 'Prepared description' },
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(prepare).toHaveBeenCalledWith({
+      tenantId: 'tenant_primary',
+      agentPrincipalId: 'agent_primary',
+      idempotencyKey: 'agent-event-prepare-route-0001',
+      kind: 'event.prepare',
+      delegationGrantId: 'dlg_primary',
+      resourceId: 'event_primary',
+      changes: { title: 'Prepared title', description: 'Prepared description' },
+    });
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(eventPreparePrepared)));
+
+    for (const changes of [
+      {},
+      { status: 'published' },
+      { title: 'Changed', extra: true },
+      { venue: { address: { line1: 'Unsafe\u0000venue' } } },
+      { externalUrl: `https://example.test/${'x'.repeat(2048)}` },
+      { coverImageUrl: `https://example.test/${'x'.repeat(2048)}` },
+      { seo: { imageUrl: `https://example.test/${'x'.repeat(2048)}` } },
+    ]) {
+      const invalid = await app.inject({
+        method: 'POST',
+        url: '/agent/event-preparations',
+        headers: { 'idempotency-key': 'agent-event-prepare-invalid-0001' },
+        payload: { delegationGrantId: 'dlg_primary', resourceId: 'event_primary', changes },
+      });
+      expect(invalid.statusCode).toBe(400);
+    }
+    expect(prepare).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
   it('keeps event publish preparation closed to readiness requests', async () => {
     const { app, service } = await setup();
     const response = await app.inject({
@@ -371,6 +457,26 @@ describe('agent action routes', () => {
     expect(
       (await app.inject({ method: 'GET', url: `/agent/readiness/${actionId}` })).statusCode,
     ).toBe(404);
+    await app.close();
+  });
+
+  it('returns event.prepare evidence only from its dedicated retrieval route', async () => {
+    const getForAgent = vi.fn(async () => eventPreparePrepared);
+    const { app } = await setup({ service: { getForAgent } });
+    const actionId = eventPreparePrepared.action.id;
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent/event-preparations/${actionId}`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual(JSON.parse(JSON.stringify(eventPreparePrepared)));
+    expect(
+      (await app.inject({ method: 'GET', url: `/agent/actions/${actionId}` })).statusCode,
+    ).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/agent/events/${actionId}` })).statusCode).toBe(
+      404,
+    );
     await app.close();
   });
 

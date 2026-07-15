@@ -12,17 +12,19 @@ import {
   agentSha256,
   buildAgentPlanDefinition,
   validateAgentEventReadResult,
+  validateAgentEventPrepareResult,
   validateAgentReadinessReadResult,
   type AgentAction,
   type AgentApproval,
   type AgentExecution,
   type AgentEventReadResult,
+  type AgentEventPrepareResult,
   type AgentReadinessReadResult,
 } from '@tixkit/agent-protocol';
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
-export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-30' as const;
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-31' as const;
 
 export type AgentPlatformContractRequest = {
   method: 'GET' | 'POST';
@@ -589,6 +591,77 @@ export async function runAgentPlatformContract(
       code: 'AGENT_PLATFORM_EVENT_READ_SCHEMA',
       message:
         'Direct event projection, untrusted-content boundary, result digest or exact replay evidence is invalid.',
+    });
+    return result(findings);
+  }
+  const eventPrepareRequest: AgentPlatformContractRequest = {
+    method: 'POST',
+    path: '/v1/agent/event-preparations',
+    headers: {
+      ...headers(accessToken),
+      'Idempotency-Key': `${input.idempotencyPrefix}.event.prepare`,
+    },
+    body: {
+      delegationGrantId: input.delegationGrantId,
+      resourceId: input.resourceId,
+      changes: {
+        title: 'Contract-prepared event',
+        description: 'Organizer-authored prepared description.',
+      },
+    },
+  };
+  const eventPrepareResponse = await request('event-prepare', eventPrepareRequest, 201);
+  const eventPrepareReplay = await request('event-prepare-replay', eventPrepareRequest, 201);
+  const preparedEventChange = objectBody(eventPrepareResponse?.body);
+  const eventPrepareAction = objectBody(preparedEventChange?.action) as unknown as
+    | AgentAction
+    | undefined;
+  const eventPrepareResult = objectBody(preparedEventChange?.result);
+  const eventPrepareAuthorization = objectBody(preparedEventChange?.authorization);
+  let eventPrepareActionDigest: string | undefined;
+  let eventPrepareResultDigest: string | undefined;
+  let eventPrepareValidationFailure: string | undefined;
+  try {
+    if (!eventPrepareAction || !eventPrepareResult)
+      throw new Error('invalid event prepare response');
+    validateAgentEventPrepareResult(
+      eventPrepareAction,
+      eventPrepareResult as unknown as AgentEventPrepareResult,
+    );
+    eventPrepareActionDigest = agentActionDigest(eventPrepareAction);
+    eventPrepareResultDigest = agentSha256(eventPrepareResult);
+  } catch (error) {
+    eventPrepareActionDigest = undefined;
+    eventPrepareValidationFailure =
+      error instanceof Error ? error.message : 'unknown validation error';
+  }
+  if (
+    !eventPrepareAction ||
+    eventPrepareAction.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    eventPrepareAction.kind !== 'event.prepare' ||
+    eventPrepareAction.autonomy !== 'prepare' ||
+    eventPrepareAction.agentPrincipalId !== principal.id ||
+    eventPrepareAction.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    eventPrepareAction.delegationGrantId !== input.delegationGrantId ||
+    eventPrepareAction.target.resourceType !== 'event' ||
+    eventPrepareAction.target.resourceId !== input.resourceId ||
+    eventPrepareAction.target.apiOperation !== 'events.prepare' ||
+    eventPrepareActionDigest !== preparedEventChange?.actionDigest ||
+    eventPrepareResultDigest !== preparedEventChange?.resultSha256 ||
+    eventPrepareAuthorization?.allowed !== true ||
+    preparedEventChange?.dryRun !== undefined ||
+    objectBody(eventPrepareAction.payload)?.changePreviewSha256 !==
+      eventPrepareResult?.changePreviewSha256 ||
+    agentSha256(eventPrepareResponse?.body) !== agentSha256(eventPrepareReplay?.body) ||
+    !Array.isArray(eventPrepareResult?.changedFields) ||
+    eventPrepareResult.changedFields.join(',') !== 'description,title' ||
+    !Array.isArray(eventPrepareResult.untrustedContentPaths) ||
+    eventPrepareResult.untrustedContentPaths.join(',') !==
+      'before.description,after.description,before.title,after.title'
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_EVENT_PREPARE_SCHEMA',
+      message: `Direct event preparation, normalized preview digest, untrusted-content boundary or exact replay evidence is invalid.${eventPrepareValidationFailure ? ` ${eventPrepareValidationFailure}` : ''}`,
     });
     return result(findings);
   }

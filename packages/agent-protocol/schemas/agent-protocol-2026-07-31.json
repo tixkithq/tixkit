@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/agent-protocol/2026-07-31",
+  "title": "Tixkit Agent Action Structural Contract 2026-07-31",
+  "description": "Current full Agent Action validation overlay. The action wire protocol remains 2026-07-22; this contract adds fail-closed exact autonomy semantics without changing retained 2026-07-22 bytes.",
+  "allOf": [
+    {
+      "$ref": "https://tixkit.com/schemas/agent-protocol/2026-07-22"
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": ["event.read", "readiness.read", "report.read"]
+          }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "autonomy": {
+            "const": "read"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": ["event.prepare", "content.prepare", "campaign.prepare"]
+          }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "autonomy": {
+            "const": "prepare"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "event.update",
+              "event.publish",
+              "inventory.change",
+              "campaign.send",
+              "refund.issue",
+              "permission.change",
+              "personal_data.export",
+              "credential.change",
+              "domain.change",
+              "provider.change",
+              "migration.execute",
+              "resource.delete"
+            ]
+          }
+        },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "autonomy": {
+            "const": "execute_with_approval"
+          }
+        }
+      }
+    }
+  ]
+}

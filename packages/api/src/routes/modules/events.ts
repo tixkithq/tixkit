@@ -39,6 +39,7 @@ import {
 import { ReadinessService, resolvePaymentMode } from '../../services/readiness.js';
 import { hashRequest, withIdempotency } from '../../services/idempotency.js';
 import { publishEvent } from '../../services/event-publication.js';
+import { EventUpdateService } from '../../services/event-update.js';
 
 const marketingIntegrationStatusSchema = z.enum(['active', 'disabled']).default('active');
 const onboardingTelemetrySchema = z
@@ -400,49 +401,6 @@ function duplicatedIntegrationConfig(provider: string, value: unknown): Record<s
   if (provider === 'generic_tag' && typeof config.pixelUrl === 'string')
     return { pixelUrl: config.pixelUrl };
   return {};
-}
-
-async function requireOwnedEventMediaUrl(
-  db: import('@tixkit/db').Database,
-  event: {
-    id: string;
-    tenant_id: string;
-    organization_id: string;
-    brand_id: string;
-  },
-  value: string,
-  purpose: 'event_cover' | 'event_seo_image',
-): Promise<string> {
-  let pathname: string;
-  try {
-    pathname = new URL(value, 'http://tixkit.local').pathname;
-  } catch {
-    throw new ValidationError('Event media URL is invalid');
-  }
-  const match = new RegExp(`^/v1/public/event-media/${purpose}/(upl_[A-Za-z0-9_-]+)$`).exec(
-    pathname,
-  );
-  if (!match) throw new ValidationError('Event media must use the owned upload pipeline');
-  // Renew the artifact atomically before attaching it. Cleanup claims require
-  // an expired `uploaded` row, so either this lease wins or attachment fails
-  // without ever persisting a URL for an object being deleted.
-  const lease = await db
-    .updateTable('upload_artifacts')
-    .set({
-      expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      updated_at: new Date(),
-    })
-    .where('id', '=', match[1]!)
-    .where('tenant_id', '=', event.tenant_id)
-    .where('organization_id', '=', event.organization_id)
-    .where('brand_id', '=', event.brand_id)
-    .where('event_id', '=', event.id)
-    .where('purpose', '=', purpose)
-    .where('status', '=', 'uploaded')
-    .where('scan_status', '=', 'clean')
-    .executeTakeFirst();
-  if (Number(lease.numUpdatedRows) !== 1) throw new NotFoundError('UploadArtifact', match[1]!);
-  return pathname;
 }
 
 function serializeFeePolicy(eventId: string, event: EventFeePolicyRow, rows: FeeRuleRow[]) {
@@ -1065,103 +1023,35 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     ClerkAuthService.requireBrandScope(principal, existing.brand_id);
     ClerkAuthService.requireEventScope(principal, eventId);
 
-    if (body.status !== undefined) {
-      throw new ValidationError(
-        'Use the dedicated publish, pause, or archive endpoint to change event status',
-      );
-    }
-
-    const updateData: Record<string, unknown> = {};
-    if (body.title !== undefined) updateData.title = body.title;
-    if (body.slug !== undefined) {
-      if (!(await repo.isSlugAvailable(existing.brand_id, body.slug, eventId))) {
-        throw new ValidationError('Event slug is already in use');
-      }
-      updateData.slug = body.slug;
-    }
-    if (body.description !== undefined) updateData.description = body.description;
-    if (body.currency !== undefined) {
-      updateData.currency = body.currency;
-      updateData.checkout_configuration_updated_at = new Date();
-    }
-    if (body.timezone !== undefined) updateData.timezone = body.timezone;
-    if (body.startsAt !== undefined) updateData.starts_at = new Date(body.startsAt);
-    if (body.endsAt !== undefined) updateData.ends_at = body.endsAt ? new Date(body.endsAt) : null;
-    if (body.venueId !== undefined) {
-      if (body.venueId === null) {
-        updateData.venue_id = null;
-      } else {
-        const savedVenue = await db
-          .selectFrom('venues')
-          .selectAll()
-          .where('id', '=', body.venueId)
-          .where('tenant_id', '=', principal.tenantId)
-          .where('organization_id', '=', existing.organization_id)
-          .executeTakeFirst();
-        if (!savedVenue) throw new NotFoundError('Venue', body.venueId);
-        updateData.venue_id = savedVenue.id;
-        updateData.venue = JSON.stringify({
-          name: savedVenue.name,
-          ...JSON.parse(savedVenue.address ?? '{}'),
-        });
-      }
-    }
-    if (body.venue !== undefined) updateData.venue = body.venue ? JSON.stringify(body.venue) : null;
-    if (body.visibility !== undefined) updateData.visibility = body.visibility;
-    if (body.seo !== undefined) {
-      if (typeof body.seo.imageUrl === 'string' && body.seo.imageUrl) {
-        body.seo.imageUrl = await requireOwnedEventMediaUrl(
-          db,
-          existing,
-          body.seo.imageUrl,
-          'event_seo_image',
-        );
-      }
-      updateData.seo = JSON.stringify(body.seo);
-    }
-    if (body.capacity !== undefined) updateData.capacity = body.capacity;
-    if (body.minimumAge !== undefined) updateData.minimum_age = body.minimumAge;
-    if (body.coverImageUrl !== undefined) {
-      if (body.coverImageUrl) {
-        updateData.cover_image_url = await requireOwnedEventMediaUrl(
-          db,
-          existing,
-          body.coverImageUrl,
-          'event_cover',
-        );
-      } else {
-        updateData.cover_image_url = body.coverImageUrl;
-      }
-    }
-    if (body.externalUrl !== undefined) updateData.external_url = body.externalUrl;
-    if (body.coverImageAlt !== undefined) updateData.cover_image_alt = body.coverImageAlt;
-    if (body.seoUseCoverImage !== undefined) updateData.seo_use_cover_image = body.seoUseCoverImage;
-    if (body.lastSetupSection !== undefined) updateData.last_setup_section = body.lastSetupSection;
-
-    let updated;
+    let result;
     try {
-      updated = await repo.updateIfVersion(eventId, body.expectedVersion, updateData);
+      const service = new EventUpdateService(db);
+      const resolved = await service.resolvePatch({
+        tenantId: principal.tenantId,
+        eventId,
+        patch: body,
+      });
+      result = await service.applyResolvedPatch(resolved);
     } catch (error) {
       if (body.venueId && isVenueForeignKeyError(error)) {
         throw new NotFoundError('Venue', body.venueId);
       }
       throw error;
     }
-    if (!updated) {
-      const current = await repo.findById(eventId);
+    if (!result.applied) {
       return reply.status(409).send({
         error: {
           code: 'stale_event_version',
           message: 'The event was changed in another session',
           details: {
             expectedVersion: body.expectedVersion,
-            currentVersion: Number(current?.version ?? body.expectedVersion),
+            currentVersion: result.currentVersion,
           },
           requestId: request.id,
         },
       });
     }
-    return serializeEvent(updated);
+    return serializeEvent(result.event);
   });
 
   app.get('/events/:eventId/fee-policy', async (request) => {

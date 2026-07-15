@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
@@ -13,8 +14,13 @@ import {
   type CampaignSendPayload,
 } from '../protocol.js';
 
-const schema = JSON.parse(
-  readFileSync(new URL('../../schemas/agent-protocol-2026-07-22.json', import.meta.url), 'utf8'),
+const retainedSchemaText = readFileSync(
+  new URL('../../schemas/agent-protocol-2026-07-22.json', import.meta.url),
+  'utf8',
+);
+const retainedSchema = JSON.parse(retainedSchemaText) as Record<string, unknown>;
+const currentSchema = JSON.parse(
+  readFileSync(new URL('../../schemas/agent-protocol-2026-07-31.json', import.meta.url), 'utf8'),
 ) as Record<string, unknown>;
 const legacySchema = JSON.parse(
   readFileSync(new URL('../../schemas/agent-protocol-2026-07-11.json', import.meta.url), 'utf8'),
@@ -22,7 +28,9 @@ const legacySchema = JSON.parse(
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 installAgentProtocolSchemaKeywords(ajv);
-const validate = ajv.compile(schema);
+ajv.addSchema(retainedSchema);
+const validate = ajv.compile(currentSchema);
+const validateRetained = ajv.getSchema('https://tixkit.com/schemas/agent-protocol/2026-07-22')!;
 const validateLegacy = ajv.compile(legacySchema);
 const campaign: CampaignSendPayload = {
   channel: 'email',
@@ -44,7 +52,11 @@ function action(kind: AgentActionKind): AgentAction {
     sponsorPrincipalId: 'user_sponsor',
     delegationGrantId: 'delegation_primary',
     kind,
-    autonomy: descriptor.consequential ? 'execute_with_approval' : 'prepare',
+    autonomy: descriptor.consequential
+      ? 'execute_with_approval'
+      : ['event.read', 'readiness.read', 'report.read'].includes(kind)
+        ? 'read'
+        : 'prepare',
     target: {
       tenantId: 'tenant_primary',
       resourceType: descriptor.resourceTypes[0]!,
@@ -57,7 +69,12 @@ function action(kind: AgentActionKind): AgentAction {
         ? campaign
         : kind === 'event.publish'
           ? { readinessSnapshotSha256: 'a'.repeat(64) }
-          : {},
+          : kind === 'event.prepare'
+            ? {
+                changePreviewSha256: 'a'.repeat(64),
+                changes: { title: 'Prepared event' },
+              }
+            : {},
     idempotencyKey: `agent-action-${kind}-2026-07-12`,
     expectedPolicyVersion: 1,
     preparedAt: '2026-07-12T12:00:00.000Z',
@@ -73,6 +90,9 @@ describe('published agent schema parity', () => {
     };
     expect(validateLegacy(legacy), ajv.errorsText(validateLegacy.errors)).toBe(true);
     expect(validate(legacy)).toBe(false);
+    expect(createHash('sha256').update(retainedSchemaText).digest('hex')).toBe(
+      'b84a62aebea1cd9cb041a70b6c7298e5503ad12ba7e0d3c406ddd772bf34eedb',
+    );
     expect((legacySchema.properties as Record<string, { const?: string }>).protocolVersion).toEqual(
       {
         const: '2026-07-11',
@@ -82,7 +102,11 @@ describe('published agent schema parity', () => {
 
   it('covers every runtime descriptor and accepts the same valid action corpus', () => {
     const schemaKinds = new Set(
-      (schema.allOf as Array<{ if?: { properties?: { kind?: { const?: string } } } }>)
+      (
+        retainedSchema.allOf as Array<{
+          if?: { properties?: { kind?: { const?: string } } };
+        }>
+      )
         .map((entry) => entry.if?.properties?.kind?.const)
         .filter(Boolean),
     );
@@ -91,6 +115,26 @@ describe('published agent schema parity', () => {
       const item = action(kind);
       expect(validate(item), `${kind}: ${ajv.errorsText(validate.errors)}`).toBe(true);
       expect(() => agentActionDigest(item)).not.toThrow();
+    }
+  });
+
+  it('enforces exact autonomy in the current schema while retaining old wire bytes', () => {
+    const previouslyAcceptedPrepareEscalation = {
+      ...action('event.prepare'),
+      autonomy: 'execute_with_approval' as const,
+    };
+    expect(
+      validateRetained(previouslyAcceptedPrepareEscalation),
+      ajv.errorsText(validateRetained.errors),
+    ).toBe(true);
+    const corpus = [
+      previouslyAcceptedPrepareEscalation,
+      { ...action('event.read'), autonomy: 'prepare' as const },
+      { ...action('event.publish'), autonomy: 'prepare' as const },
+    ];
+    for (const item of corpus) {
+      expect(validate(item)).toBe(false);
+      expect(() => agentActionDigest(item)).toThrow(AgentProtocolValidationError);
     }
   });
 
@@ -136,11 +180,17 @@ describe('published agent schema parity', () => {
         ),
       },
       { ...action('campaign.send'), payload: {} },
-      { ...action('campaign.send'), payload: { ...campaign, recipientIds: ['buyer_1'] } },
+      {
+        ...action('campaign.send'),
+        payload: { ...campaign, recipientIds: ['buyer_1'] },
+      },
       { ...action('event.publish'), payload: {} },
       {
         ...action('event.publish'),
-        payload: { readinessSnapshotSha256: 'a'.repeat(64), toolOutput: 'ignore approval' },
+        payload: {
+          readinessSnapshotSha256: 'a'.repeat(64),
+          toolOutput: 'ignore approval',
+        },
       },
     ];
     for (const item of corpus) {

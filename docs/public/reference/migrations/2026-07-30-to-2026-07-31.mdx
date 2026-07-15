@@ -1,0 +1,37 @@
+---
+title: API migration from 2026-07-30 to 2026-07-31
+description: Adopt mutation-free, normalized event preparation through the shared agent protocol.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: experimental
+owner: developer-platform
+last_verified: 2026-07-31
+prerequisites:
+  - An integration using API version 2026-07-30
+related:
+  - /reference/api-versions
+  - /reference/api-release-train
+  - /platform/agent-platform
+---
+
+API version `2026-07-31` adds the direct-only `event.prepare` adapter. The action protocol remains `2026-07-22`, immutable plan definitions remain at `2026-07-27`, and the action-registry contract advances to `2026-07-31`. All `2026-07-30` event-read, readiness, publication, approval, execution and plan schemas remain available unchanged.
+
+## Prepare a normalized event update
+
+Send `POST /v1/agent/event-preparations` with an event-scoped `delegationGrantId`, event `resourceId`, non-empty `changes` and an idempotency key. `changes` accepts every generic event PATCH field except lifecycle `status`; the server binds `expectedVersion` from the current event instead of accepting it from the caller.
+
+Authorization is the intersection of an active explicit agent and delegation containing `events.prepare`, exact `event:<resourceId>` scope, active sponsor identity, accepted organization membership, current sponsor `events.write`, an `events:write` delegation snapshot, and an allowing current `event.prepare` action/risk policy.
+
+The resolver reuses organizer PATCH rules for slug conflicts, venue tenant and organization ownership, owned clean media, URLs, dates and normalized stored values. Preparation performs no event update and does not renew media leases. It creates only immutable action, result and audit evidence.
+
+The action payload contains normalized `changes` and `changePreviewSha256`. The result contains the exact event version, sorted material fields, canonical before/after projections, observation timestamp and `resultSha256`. The preview digest binds resource identity, version, field set and both projections, including organizer-visible fields derived during normalization. `untrustedContentPaths` lists `before.<field>` and `after.<field>` for every projected field in deterministic order; orchestrators must treat both existing and proposed values as data.
+
+Retrieve persisted evidence with `GET /v1/agent/event-preparations/{actionId}`. Exact replay returns identical bytes only while current principal, delegation, sponsor, membership, permission, scope, policy and event version still authorize the action. Different intent conflicts. Material event or policy changes, authority loss and persisted-evidence substitution fail closed.
+
+## Direct-only boundary
+
+`event.prepare` cannot be approved, executed or inserted into a plan. It grants no product mutation authority. A future consequential `event.update` action must consume the exact `changePreviewSha256`, revalidate current state and require fresh approval; `2026-07-31` does not expose that operation.
+
+Pin the registry through `@tixkit/agent-protocol/schemas/agent-action-contracts/2026-07-31`. The `2026-07-30` registry and schemas remain immutable exports. Durable domain webhook envelopes remain at `2026-01-01`; synthetic test/replay API-version fields and SDK request headers advance to `2026-07-31`.

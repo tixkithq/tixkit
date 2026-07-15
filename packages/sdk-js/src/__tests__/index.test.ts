@@ -35,7 +35,19 @@ import {
   type WebhookEvent,
   type CreateMigrationJobInput,
   type AgentPlanDefinition,
+  type AgentEventPrepareResolvedChanges,
 } from '../index.js';
+
+const validResolvedEventMedia: AgentEventPrepareResolvedChanges = {
+  coverImageUrl: '/v1/public/event-media/event_cover/upl_example',
+  seo: { imageUrl: '/v1/public/event-media/social/upl_example' },
+};
+void validResolvedEventMedia;
+const invalidResolvedEventMedia: AgentEventPrepareResolvedChanges = {
+  // @ts-expect-error Resolved event media must be an owned Tixkit media reference.
+  coverImageUrl: 'https://unowned.example/cover.jpg',
+};
+void invalidResolvedEventMedia;
 
 function mockFetch(status: number, body: unknown) {
   const init: ResponseInit = {
@@ -3284,6 +3296,53 @@ describe('TixkitClient new resource methods', () => {
     });
   });
 
+  it('agentActions prepares and retrieves a direct normalized event patch preview', async () => {
+    const fm = mockFetch(201, {});
+    const client = new TixkitClient({
+      accessToken: 'tk_aat_token',
+      apiBaseUrl: 'https://api.test',
+      maxRetries: 0,
+    });
+    const prepared = await client.agentActions.prepareEvent({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      changes: { title: 'Prepared title', description: 'Prepared description' },
+      idempotencyKey: 'agent-event-prepare-0001',
+    });
+    const assertEventPrepareResponseType = (value: typeof prepared) => {
+      void value.result.changePreviewSha256;
+      void value.result.after.title;
+      const nullableExistingDescription: string | null | undefined =
+        value.result.before.description;
+      void nullableExistingDescription;
+      const resolvedDescription: string | undefined = value.result.after.description;
+      void resolvedDescription;
+      // @ts-expect-error direct preparations never expose approval dry-run evidence.
+      void value.dryRun;
+    };
+    void assertEventPrepareResponseType;
+    expect(getCall(fm)).toMatchObject({
+      method: 'POST',
+      url: 'https://api.test/v1/agent/event-preparations',
+      headers: { 'Idempotency-Key': 'agent-event-prepare-0001' },
+    });
+    expect(JSON.parse(getCall(fm).body)).toEqual({
+      delegationGrantId: 'dlg_1',
+      resourceId: 'evt_1',
+      changes: { title: 'Prepared title', description: 'Prepared description' },
+    });
+    const actionId = `act_${'a'.repeat(48)}`;
+    const inspected = await client.agentActions.getEventPreparation(actionId);
+    const assertInspectedEventPrepareType = (value: typeof inspected) => {
+      void value.result.changedFields;
+    };
+    void assertInspectedEventPrepareType;
+    expect(getCall(fm, 1)).toMatchObject({
+      method: 'GET',
+      url: `https://api.test/v1/agent/event-preparations/${actionId}`,
+    });
+  });
+
   it('agentActions binds planned approval intent to the plan digest', async () => {
     const fm = mockFetch(201, {});
     const client = new TixkitClient({
@@ -3370,7 +3429,7 @@ describe('TixkitClient new resource methods', () => {
       url: 'https://api.test/v1/agent/plans',
       headers: {
         'Idempotency-Key': 'agent-plan-sdk-create-0001',
-        'X-Tixkit-Version': '2026-07-30',
+        'X-Tixkit-Version': '2026-07-31',
       },
     });
     expect(JSON.parse(getCall(fm).body)).toEqual({
