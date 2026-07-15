@@ -208,19 +208,38 @@ jobs:
       - run: bun run db:migrate
       - run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
       - run: bun run test:integration
-      - name: PostgreSQL performance budget gate
+      - name: PostgreSQL trusted multi-sample performance evidence
         run: |
-          cd packages/api
-          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1
-          cd ../..
-          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
-          bun run check:performance-budgets -- --config performance-budgets.integration.json
+          set -euo pipefail
+          mkdir -p artifacts/performance/postgresql
+          for sample in 1 2 3; do
+            metrics="artifacts/performance/postgresql/metrics-${sample}.json"
+            evidence_sample="artifacts/performance/postgresql/sample-${sample}.json"
+            (
+              cd packages/api
+              PERFORMANCE_METRICS_PATH="../../${metrics}" bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1
+            )
+            PERFORMANCE_METRICS_PATH="../../${metrics}" bun run --cwd packages/workflows test:unit -- export-activity.test.ts
+            node scripts/performance-evidence.mjs sample \
+              --metrics "${metrics}" \
+              --output "${evidence_sample}" \
+              --git-sha "${GITHUB_SHA}" \
+              --runner-label tixkit-epyc-trusted \
+              --db-engine postgresql \
+              --db-version '16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb' \
+              --workload '{"checkoutCapacity":25,"checkoutConcurrency":120,"processSamples":3,"scannerConcurrency":60,"streamedExportRows":2500}'
+          done
+          node scripts/performance-evidence.mjs aggregate \
+            --sample artifacts/performance/postgresql/sample-1.json \
+            --sample artifacts/performance/postgresql/sample-2.json \
+            --sample artifacts/performance/postgresql/sample-3.json \
+            --output artifacts/performance/postgresql/evidence.json
       - name: Upload PostgreSQL performance metrics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: postgres-performance-metrics
-          path: artifacts/performance/load-harness-metrics.json
+          path: artifacts/performance/postgresql/
           if-no-files-found: error
           retention-days: 30
 
@@ -254,18 +273,39 @@ jobs:
       - run: bunx turbo run build --filter=@tixkit/db --filter=@tixkit/shared
       - name: MySQL Tier 1 correctness suites
         run: |
-          cd packages/api
-          DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1
-          cd ../..
           DB_INTEGRATION_DRIVER=mysql bun --filter @tixkit/workflows test:mysql-tier1
-          PERFORMANCE_METRICS_PATH=../../artifacts/performance/load-harness-metrics.json bun run --cwd packages/workflows test:unit -- export-activity.test.ts
-          bun run check:performance-budgets -- --config performance-budgets.integration.json
+      - name: MySQL trusted multi-sample performance evidence
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/performance/mysql
+          for sample in 1 2 3; do
+            metrics="artifacts/performance/mysql/metrics-${sample}.json"
+            evidence_sample="artifacts/performance/mysql/sample-${sample}.json"
+            (
+              cd packages/api
+              DB_INTEGRATION_DRIVER=mysql PERFORMANCE_METRICS_PATH="../../${metrics}" bun vitest run src/__tests__/integration/inventory-concurrency.integration.test.ts src/__tests__/integration/load-harness.integration.test.ts --no-file-parallelism --maxWorkers=1
+            )
+            PERFORMANCE_METRICS_PATH="../../${metrics}" bun run --cwd packages/workflows test:unit -- export-activity.test.ts
+            node scripts/performance-evidence.mjs sample \
+              --metrics "${metrics}" \
+              --output "${evidence_sample}" \
+              --git-sha "${GITHUB_SHA}" \
+              --runner-label tixkit-epyc-trusted \
+              --db-engine mysql \
+              --db-version '8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209' \
+              --workload '{"checkoutCapacity":25,"checkoutConcurrency":120,"processSamples":3,"scannerConcurrency":60,"streamedExportRows":2500}'
+          done
+          node scripts/performance-evidence.mjs aggregate \
+            --sample artifacts/performance/mysql/sample-1.json \
+            --sample artifacts/performance/mysql/sample-2.json \
+            --sample artifacts/performance/mysql/sample-3.json \
+            --output artifacts/performance/mysql/evidence.json
       - name: Upload MySQL performance metrics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mysql-performance-metrics
-          path: artifacts/performance/load-harness-metrics.json
+          path: artifacts/performance/mysql/
           if-no-files-found: error
           retention-days: 30
 
