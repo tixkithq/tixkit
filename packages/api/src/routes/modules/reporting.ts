@@ -430,6 +430,8 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
       allOrdersQuery = allOrdersQuery.where('organization_id', '=', eventScope.organizationId);
     if (eventScope.brandId)
       allOrdersQuery = allOrdersQuery.where('brand_id', '=', eventScope.brandId);
+    if (from) allOrdersQuery = allOrdersQuery.where('created_at', '>=', from);
+    if (to) allOrdersQuery = allOrdersQuery.where('created_at', '<=', to);
     const totalOrdersCountRow = await allOrdersQuery.executeTakeFirst();
     const totalOrdersCount = Number(totalOrdersCountRow?.count ?? 0);
     const paidOrders = Number(totalsRow?.paid_orders_count ?? 0);

@@ -1843,7 +1843,14 @@ describe('reporting routes', () => {
 
   it('GET /events/:eventId/reports/sales includes the full date-only to day', async () => {
     dbState.order.created_at = new Date('2026-06-01T18:30:00.000Z');
-    dbState.orders = [dbState.order];
+    dbState.orders = [
+      dbState.order,
+      {
+        ...dbState.order,
+        id: 'ord_outside_range',
+        created_at: new Date('2026-06-02T00:00:00.000Z'),
+      },
+    ];
     const app = await setupApp(reportingRoutes, makePrincipal());
     const res = await app.inject({
       method: 'GET',
@@ -1853,6 +1860,8 @@ describe('reporting routes', () => {
     expect(res.json()).toMatchObject({
       grossSalesCents: 10700,
       netRevenueCents: 10700,
+      ordersCount: 1,
+      paidOrdersCount: 1,
     });
     expect(dbState.queryWheres).toContainEqual(
       expect.objectContaining({
