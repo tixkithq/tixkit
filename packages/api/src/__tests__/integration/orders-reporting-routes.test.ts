@@ -1670,8 +1670,10 @@ describe('reporting routes', () => {
       expect.objectContaining({
         table: 'refunds',
         wheres: expect.arrayContaining([
+          { column: 'refunds.tenant_id', op: '=', value: 'tnt_1' },
           { column: 'refunds.status', op: '=', value: 'succeeded' },
           { column: 'orders.tenant_id', op: '=', value: 'tnt_1' },
+          { column: 'orders.is_test', op: '=', value: false },
         ]),
       }),
     );
@@ -1692,9 +1694,13 @@ describe('reporting routes', () => {
       expect.objectContaining({
         table: 'tickets',
         wheres: expect.arrayContaining([
-          { column: 'tenant_id', op: '=', value: 'tnt_1' },
-          { column: 'event_id', op: '=', value: 'evt_1' },
-          { column: 'status', op: '=', value: 'checked_in' },
+          { column: 'tickets.tenant_id', op: '=', value: 'tnt_1' },
+          { column: 'tickets.event_id', op: '=', value: 'evt_1' },
+          { column: 'tickets.status', op: '=', value: 'checked_in' },
+          { column: 'orders.tenant_id', op: '=', value: 'tnt_1' },
+          { column: 'orders.event_id', op: '=', value: 'evt_1' },
+          { column: 'orders.is_test', op: '=', value: false },
+          { column: 'orders.status', op: 'in', value: ['paid', 'partially_refunded', 'refunded'] },
         ]),
       }),
     );
@@ -1948,11 +1954,17 @@ describe('reporting routes', () => {
       method: 'GET',
       url: '/events/evt_1/reports/sales?to=2026-02-31',
     });
+    const invertedRange = await app.inject({
+      method: 'GET',
+      url: '/events/evt_1/reports/sales?from=2026-06-02&to=2026-06-01',
+    });
 
     expect(invalidFrom.statusCode).toBe(400);
     expect(invalidFrom.json().message).toBe('from must be a valid date');
     expect(invalidTo.statusCode).toBe(400);
     expect(invalidTo.json().message).toBe('to must be a valid date');
+    expect(invertedRange.statusCode).toBe(400);
+    expect(invertedRange.json().message).toBe('from must not be after to');
     await app.close();
   });
 

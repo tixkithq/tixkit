@@ -4,8 +4,10 @@ import {
   BrandRepository,
   createDb,
   EventRepository,
+  InventoryPoolRepository,
   OrganizationRepository,
   TenantRepository,
+  TicketTypeRepository,
   type Database,
 } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
@@ -53,6 +55,20 @@ describeWithIntegrationDatabase('test-order reporting exclusion', () => {
       startsAt: new Date('2027-01-01T18:00:00.000Z'),
     });
     eventId = event.id;
+    const pool = await new InventoryPoolRepository(db).create({
+      eventId: event.id,
+      name: 'Reporting inventory',
+      totalCapacity: 10,
+    });
+    const ticketType = await new TicketTypeRepository(db).create({
+      eventId: event.id,
+      inventoryPoolId: pool.id,
+      name: 'Reporting ticket',
+      kind: 'paid',
+      status: 'on_sale',
+      currency: 'USD',
+      priceCents: 10_000,
+    });
     const now = new Date();
     for (const [index, isTest] of [false, true].entries()) {
       const sessionId = `cs_reporting_${suffix}_${index}`;
@@ -118,6 +134,74 @@ describeWithIntegrationDatabase('test-order reporting exclusion', () => {
           updated_at: now,
         })
         .execute();
+      const attendeeId = `att_reporting_${suffix}_${index}`;
+      await db
+        .insertInto('attendees')
+        .values({
+          id: attendeeId,
+          tenant_id: tenant.id,
+          order_id: orderId,
+          event_id: event.id,
+          event_occurrence_id: null,
+          ticket_type_id: ticketType.id,
+          ticket_id: null,
+          first_name: 'Reporting',
+          last_name: isTest ? 'Test' : 'Real',
+          email: `buyer-${index}@example.test`,
+          phone: null,
+          status: 'checked_in',
+          custom_answers: null,
+          checked_in_at: now,
+          check_in_device_id: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await db
+        .insertInto('tickets')
+        .values({
+          id: `tkt_reporting_${suffix}_${index}`,
+          tenant_id: tenant.id,
+          order_id: orderId,
+          attendee_id: attendeeId,
+          event_id: event.id,
+          event_occurrence_id: null,
+          ticket_type_id: ticketType.id,
+          status: 'checked_in',
+          code: `REPORT-${suffix}-${index}`,
+          qr_payload: `report-payload-${suffix}-${index}`,
+          qr_hash: `report-hash-${suffix}-${index}`,
+          transferred_to_email: null,
+          transferred_at: null,
+          checked_in_at: now,
+          checked_in_by_device_id: null,
+          wallet_pass_id: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      if (isTest) {
+        await db
+          .insertInto('refunds')
+          .values({
+            id: `ref_reporting_${suffix}`,
+            tenant_id: tenant.id,
+            order_id: orderId,
+            payment_intent_id: null,
+            provider: 'test',
+            provider_refund_id: `provider-refund-${suffix}`,
+            request_idempotency_key: null,
+            request_nonce: null,
+            amount_cents: 50_000,
+            currency: 'USD',
+            status: 'succeeded',
+            reason: 'test-order-refund',
+            metadata: '{}',
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+      }
     }
 
     const principal: Principal = {
@@ -154,6 +238,10 @@ describeWithIntegrationDatabase('test-order reporting exclusion', () => {
     expect(response.json()).toMatchObject({
       eventId,
       grossSalesCents: 10_000,
+      netRevenueCents: 10_000,
+      refundsCents: 0,
+      ticketsSold: 1,
+      checkIns: 1,
       ordersCount: 1,
       paidOrdersCount: 1,
     });

@@ -7,12 +7,10 @@ import { ClerkAuthService } from '../../auth/clerk.js';
 import { EventRepository, type Database } from '@tixkit/db';
 import {
   ConflictError,
-  groupRevenueByChannel,
   NotFoundError,
   ValidationError,
   type Permission,
   type Principal,
-  type SalesChannel,
 } from '@tixkit/domain';
 import { ulid } from 'ulid';
 import { createExportSchema, parseBody } from '../../http/schemas.js';
@@ -20,6 +18,7 @@ import { withIdempotency, hashRequest } from '../../services/idempotency.js';
 import { config } from '../../config/index.js';
 import { writeSseEvent } from '../../services/sse.js';
 import { redactErrorFields } from '@tixkit/shared';
+import { resolveEventSalesReport } from '../../services/event-sales-report.js';
 
 const exportEventChannel = (exportId: string) => `tixkit:export-job:${exportId}:events`;
 const DEFAULT_REPORTING_CACHE_TTL_MS = 30_000;
@@ -250,6 +249,7 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const from =
       typeof query.from === 'string' ? parseDateFilterBoundary(query.from, 'start') : undefined;
     const to = typeof query.to === 'string' ? parseDateFilterBoundary(query.to, 'end') : undefined;
+    if (from && to && from > to) throw new ValidationError('from must not be after to');
 
     const event = await loadEvent(eventId);
     requireReportEventAccess(principal, event, eventId);
@@ -267,205 +267,16 @@ export const reportingRoutes: FastifyPluginAsync = async (app) => {
     const cached = readReportingCache(reportCache, cacheKey, now);
     if (cached) return cached;
 
-    let totalsQuery = db
-      .selectFrom('orders')
-      .select(({ fn }) => [
-        fn.countAll<number>().as('paid_orders_count'),
-        fn.sum<number>('total_cents').as('gross_sales_cents'),
-        fn.sum<number>('fee_cents').as('fees_cents'),
-        fn.sum<number>('tax_cents').as('tax_cents'),
-      ])
-      .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId)
-      .where('is_test', '=', false)
-      .where('status', 'in', ['paid', 'partially_refunded', 'refunded']);
-    if (eventScope.organizationId)
-      totalsQuery = totalsQuery.where('organization_id', '=', eventScope.organizationId);
-    if (eventScope.brandId) totalsQuery = totalsQuery.where('brand_id', '=', eventScope.brandId);
-    if (from) totalsQuery = totalsQuery.where('created_at', '>=', from);
-    if (to) totalsQuery = totalsQuery.where('created_at', '<=', to);
-    const totalsRow = await totalsQuery.executeTakeFirst();
-
-    let channelQuery = db
-      .selectFrom('orders')
-      .select(({ fn }) => ['sales_channel', fn.sum<number>('total_cents').as('gross_sales_cents')])
-      .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId)
-      .where('is_test', '=', false)
-      .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
-      .groupBy('sales_channel');
-    if (eventScope.organizationId)
-      channelQuery = channelQuery.where('organization_id', '=', eventScope.organizationId);
-    if (eventScope.brandId) channelQuery = channelQuery.where('brand_id', '=', eventScope.brandId);
-    if (from) channelQuery = channelQuery.where('created_at', '>=', from);
-    if (to) channelQuery = channelQuery.where('created_at', '<=', to);
-    const channelRows = await channelQuery.execute();
-
-    let firstOrderQuery = db
-      .selectFrom('orders')
-      .select(['currency', 'created_at'])
-      .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId)
-      .where('is_test', '=', false)
-      .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
-      .orderBy('created_at', 'asc')
-      .limit(1);
-    if (eventScope.organizationId)
-      firstOrderQuery = firstOrderQuery.where('organization_id', '=', eventScope.organizationId);
-    if (eventScope.brandId)
-      firstOrderQuery = firstOrderQuery.where('brand_id', '=', eventScope.brandId);
-    if (from) firstOrderQuery = firstOrderQuery.where('created_at', '>=', from);
-    if (to) firstOrderQuery = firstOrderQuery.where('created_at', '<=', to);
-
-    let lastOrderQuery = db
-      .selectFrom('orders')
-      .select(['created_at'])
-      .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId)
-      .where('is_test', '=', false)
-      .where('status', 'in', ['paid', 'partially_refunded', 'refunded'])
-      .orderBy('created_at', 'desc')
-      .limit(1);
-    if (eventScope.organizationId)
-      lastOrderQuery = lastOrderQuery.where('organization_id', '=', eventScope.organizationId);
-    if (eventScope.brandId)
-      lastOrderQuery = lastOrderQuery.where('brand_id', '=', eventScope.brandId);
-    if (from) lastOrderQuery = lastOrderQuery.where('created_at', '>=', from);
-    if (to) lastOrderQuery = lastOrderQuery.where('created_at', '<=', to);
-
-    const [firstOrder, lastOrder] = await Promise.all([
-      firstOrderQuery.executeTakeFirst(),
-      lastOrderQuery.executeTakeFirst(),
-    ]);
-
-    let refundQuery = db
-      .selectFrom('refunds')
-      .innerJoin('orders', 'refunds.order_id', 'orders.id')
-      .select(['refunds.amount_cents'])
-      .where('orders.event_id', '=', eventId)
-      .where('orders.tenant_id', '=', principal.tenantId)
-      .where('refunds.status', '=', 'succeeded');
-    if (eventScope.organizationId)
-      refundQuery = refundQuery.where('orders.organization_id', '=', eventScope.organizationId);
-    if (eventScope.brandId)
-      refundQuery = refundQuery.where('orders.brand_id', '=', eventScope.brandId);
-    if (from) refundQuery = refundQuery.where('refunds.created_at', '>=', from);
-    if (to) refundQuery = refundQuery.where('refunds.created_at', '<=', to);
-    const refundRows = await refundQuery.execute();
-
-    const grossSales = Number(totalsRow?.gross_sales_cents ?? 0);
-    const grossSalesByChannel = groupRevenueByChannel(
-      channelRows.map((order) => {
-        const salesChannel: SalesChannel =
-          order.sales_channel === 'box_office' ? 'box_office' : 'online';
-        return {
-          salesChannel,
-          amountCents: Number(order.gross_sales_cents ?? 0),
-        };
-      }),
-    );
-    const refunds = refundRows.reduce((sum, refund) => sum + Number(refund.amount_cents), 0);
-    const netRevenue = grossSales - refunds;
-    const feesCollected = Number(totalsRow?.fees_cents ?? 0);
-    const taxCollected = Number(totalsRow?.tax_cents ?? 0);
-
-    // Prefer ticket rows so refunded/voided tickets are excluded. Fall back to
-    // line items for older fixture data that does not materialize tickets.
-    let activeTicketsQuery = db
-      .selectFrom('tickets')
-      .innerJoin('orders', 'tickets.order_id', 'orders.id')
-      .select((eb) => eb.fn.countAll<number>().as('count'))
-      .where('tickets.tenant_id', '=', principal.tenantId)
-      .where('tickets.event_id', '=', eventId)
-      .where('tickets.status', 'in', ['valid', 'checked_in'])
-      .where('orders.tenant_id', '=', principal.tenantId)
-      .where('orders.event_id', '=', eventId)
-      .where('orders.is_test', '=', false)
-      .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
-    if (eventScope.organizationId)
-      activeTicketsQuery = activeTicketsQuery.where(
-        'orders.organization_id',
-        '=',
-        eventScope.organizationId,
-      );
-    if (eventScope.brandId)
-      activeTicketsQuery = activeTicketsQuery.where('orders.brand_id', '=', eventScope.brandId);
-    if (from) activeTicketsQuery = activeTicketsQuery.where('orders.created_at', '>=', from);
-    if (to) activeTicketsQuery = activeTicketsQuery.where('orders.created_at', '<=', to);
-    const activeTicketsRow = await activeTicketsQuery.executeTakeFirst();
-    const activeTicketsSold = Number(activeTicketsRow?.count ?? 0);
-    let lineItemsQuantityRow: { quantity: number | string | null } | undefined;
-    if (activeTicketsSold === 0 && Number(totalsRow?.paid_orders_count ?? 0) > 0) {
-      let lineItemsQuery = db
-        .selectFrom('order_line_items')
-        .innerJoin('orders', 'order_line_items.order_id', 'orders.id')
-        .select(({ fn }) => fn.sum<number>('order_line_items.quantity').as('quantity'))
-        .where('order_line_items.ticket_type_id', 'is not', null)
-        .where('orders.tenant_id', '=', principal.tenantId)
-        .where('orders.event_id', '=', eventId)
-        .where('orders.is_test', '=', false)
-        .where('orders.status', 'in', ['paid', 'partially_refunded', 'refunded']);
-      if (eventScope.organizationId)
-        lineItemsQuery = lineItemsQuery.where(
-          'orders.organization_id',
-          '=',
-          eventScope.organizationId,
-        );
-      if (eventScope.brandId)
-        lineItemsQuery = lineItemsQuery.where('orders.brand_id', '=', eventScope.brandId);
-      if (from) lineItemsQuery = lineItemsQuery.where('orders.created_at', '>=', from);
-      if (to) lineItemsQuery = lineItemsQuery.where('orders.created_at', '<=', to);
-      lineItemsQuantityRow = await lineItemsQuery.executeTakeFirst();
-    }
-    const ticketsSold =
-      activeTicketsSold > 0 ? activeTicketsSold : Number(lineItemsQuantityRow?.quantity ?? 0);
-
-    let allOrdersQuery = db
-      .selectFrom('orders')
-      .select((eb) => eb.fn.countAll<number>().as('count'))
-      .where('event_id', '=', eventId)
-      .where('tenant_id', '=', principal.tenantId)
-      .where('is_test', '=', false);
-    if (eventScope.organizationId)
-      allOrdersQuery = allOrdersQuery.where('organization_id', '=', eventScope.organizationId);
-    if (eventScope.brandId)
-      allOrdersQuery = allOrdersQuery.where('brand_id', '=', eventScope.brandId);
-    if (from) allOrdersQuery = allOrdersQuery.where('created_at', '>=', from);
-    if (to) allOrdersQuery = allOrdersQuery.where('created_at', '<=', to);
-    const totalOrdersCountRow = await allOrdersQuery.executeTakeFirst();
-    const totalOrdersCount = Number(totalOrdersCountRow?.count ?? 0);
-    const paidOrders = Number(totalsRow?.paid_orders_count ?? 0);
-
-    const checkInsRow = await db
-      .selectFrom('tickets')
-      .select((eb) => eb.fn.countAll<number>().as('count'))
-      .where('tenant_id', '=', principal.tenantId)
-      .where('event_id', '=', eventId)
-      .where('status', '=', 'checked_in')
-      .executeTakeFirst();
-
-    const report = {
+    const report = await resolveEventSalesReport(db, {
+      tenantId: principal.tenantId,
       eventId,
-      currency: firstOrder?.currency ?? event.currency ?? 'USD',
-      grossSalesCents: grossSales,
-      grossSalesByChannelCents: {
-        online: grossSalesByChannel.online,
-        boxOffice: grossSalesByChannel.box_office,
-      },
-      netRevenueCents: netRevenue,
-      refundsCents: refunds,
-      feesCents: feesCollected,
-      taxCents: taxCollected,
-      ticketsSold,
-      checkIns: Number(checkInsRow?.count ?? 0),
-      ordersCount: totalOrdersCount,
-      paidOrdersCount: paidOrders,
-      range: {
-        from:
-          from?.toISOString() ?? firstOrder?.created_at?.toISOString() ?? new Date().toISOString(),
-        to: to?.toISOString() ?? lastOrder?.created_at?.toISOString() ?? new Date().toISOString(),
-      },
-    };
+      organizationId: eventScope.organizationId,
+      brandId: eventScope.brandId,
+      eventCurrency: typeof event.currency === 'string' ? event.currency : undefined,
+      from,
+      to,
+      observedAt: new Date(now),
+    });
     writeReportingCache(reportCache, cacheKey, report, reportCacheTtlMs, now);
     return report;
   });
