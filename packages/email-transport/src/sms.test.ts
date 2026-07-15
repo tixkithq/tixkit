@@ -24,6 +24,21 @@ class FailingSmsTransport implements SmsTransport {
   }
 }
 
+class ExtensionSmsTransport implements SmsTransport {
+  providerName = 'operator-extension';
+
+  async send(input: SendSmsInput): Promise<SendSmsResult> {
+    return {
+      deliveryId: input.deliveryId,
+      provider: this.providerName,
+      providerMessageId: 'extension-message-1',
+      status: 'accepted',
+      attemptedFallbackProviders: [],
+      sentAt: new Date().toISOString(),
+    };
+  }
+}
+
 describe('SMS transports', () => {
   it('captures SMS sends without network calls', async () => {
     const transport = new CaptureSmsTransport();
@@ -43,6 +58,17 @@ describe('SMS transports', () => {
 
     expect(result.provider).toBe('capture');
     expect(result.attemptedFallbackProviders).toEqual(['failing', 'capture']);
+  });
+
+  it('preserves third-party provider identity through fallback execution', async () => {
+    const transport = new FallbackSmsTransport(new FailingSmsTransport(), [
+      new ExtensionSmsTransport(),
+    ]);
+
+    const result = await transport.send(smsInput);
+
+    expect(result.provider).toBe('operator-extension');
+    expect(result.attemptedFallbackProviders).toEqual(['failing', 'operator-extension']);
   });
 
   it('builds a Telnyx send request using the Messages API shape', async () => {

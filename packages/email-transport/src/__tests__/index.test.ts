@@ -5,6 +5,7 @@ import {
   FallbackEmailTransport,
   OpenCoreEmailSdkTransport,
   ResendEmailTransport,
+  SmtpEmailTransport,
   buildEmailTransport,
   createDefaultEmailTransport,
   validateProviderFields,
@@ -130,13 +131,19 @@ describe('FallbackEmailTransport', () => {
   });
 });
 
-describe('OpenCoreEmailSdkTransport', () => {
-  it('should send and return normalized result', async () => {
+describe('planned email transports', () => {
+  it('fails closed while the planned adapter has no provider implementation', async () => {
     const transport = new OpenCoreEmailSdkTransport('cred_ref_1', 'event.com');
-    const result = await transport.send(baseInput());
-    expect(result.provider).toBe('opencore_email_sdk');
-    expect(result.status).toBe('accepted');
-    expect(result.providerMessageId).toMatch(/^ocs_/);
+    await expect(transport.send(baseInput())).rejects.toThrow(
+      'Unsupported email provider route: opencore_email_sdk',
+    );
+  });
+
+  it('does not report synthetic SMTP acceptance while the adapter is planned', async () => {
+    const transport = new SmtpEmailTransport('localhost', 587, 'user', 'password');
+    await expect(transport.send(baseInput())).rejects.toThrow(
+      'Unsupported email provider route: smtp',
+    );
   });
 });
 
@@ -270,10 +277,16 @@ describe('buildEmailTransport', () => {
     expect(transport).toBeInstanceOf(ResendEmailTransport);
   });
 
-  it('returns capture when provider is unknown and Resend is not configured', () => {
+  it('fails closed when an explicit provider route is unsupported', () => {
     vi.stubEnv('RESEND_API_KEY', '');
-    const transport = buildEmailTransport('unknown', 'unused');
-    expect(transport).toBeInstanceOf(CaptureEmailTransport);
+    expect(() => buildEmailTransport('unknown', 'unused')).toThrow(
+      'Unsupported email provider route: unknown',
+    );
+
+    vi.stubEnv('RESEND_API_KEY', 're_live_must_not_be_used');
+    expect(() => buildEmailTransport('postmark', 'POSTMARK_API_KEY')).toThrow(
+      'Unsupported email provider route: postmark',
+    );
   });
 });
 
@@ -289,7 +302,16 @@ describe('createDefaultEmailTransport', () => {
 
   it('falls back to capture without RESEND_API_KEY', () => {
     vi.stubEnv('RESEND_API_KEY', '');
+    vi.stubEnv('TIXKIT_RUNTIME_MODE', 'development');
     expect(createDefaultEmailTransport()).toBeInstanceOf(CaptureEmailTransport);
+  });
+
+  it('fails production sends when no real default provider is configured', async () => {
+    vi.stubEnv('RESEND_API_KEY', '');
+    vi.stubEnv('TIXKIT_RUNTIME_MODE', 'production');
+    await expect(createDefaultEmailTransport().send(baseInput())).rejects.toThrow(
+      'Unsupported email provider route: default-unconfigured',
+    );
   });
 
   it('forces capture in sandbox mode even when Resend credentials are present', () => {

@@ -2,6 +2,16 @@ import type { EmailTransport, SendEmailInput, SendEmailResult } from '@tixkit/do
 import type { SmsTransport, SendSmsInput, SendSmsResult } from '@tixkit/domain/messaging';
 import { ulid } from 'ulid';
 
+export class UnsupportedProviderRouteError extends Error {
+  constructor(
+    public readonly channel: 'email' | 'sms',
+    public readonly providerType: string,
+  ) {
+    super(`Unsupported ${channel} provider route: ${providerType}`);
+    this.name = 'UnsupportedProviderRouteError';
+  }
+}
+
 /**
  * In-memory capture transport for testing.
  * Records all sends without making network calls.
@@ -55,6 +65,15 @@ export class CaptureSmsTransport implements SmsTransport {
 
   findByTo(phone: string): SendSmsInput[] {
     return this.sent.filter((message) => message.to === phone);
+  }
+}
+
+class UnconfiguredEmailTransport implements EmailTransport {
+  providerName = 'unconfigured';
+
+  async send(input: SendEmailInput): Promise<SendEmailResult> {
+    void input;
+    throw new UnsupportedProviderRouteError('email', 'default-unconfigured');
   }
 }
 
@@ -386,16 +405,9 @@ export class OpenCoreEmailSdkTransport implements EmailTransport {
   }
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
-    // In production, this calls the Email SDK with mapped fields using this.config
+    void input;
     void this.config;
-    return {
-      deliveryId: input.deliveryId,
-      provider: 'opencore_email_sdk',
-      providerMessageId: `ocs_${ulid()}`,
-      status: 'accepted',
-      attemptedFallbackProviders: [],
-      sentAt: new Date().toISOString(),
-    };
+    throw new UnsupportedProviderRouteError('email', 'opencore_email_sdk');
   }
 }
 
@@ -410,16 +422,9 @@ export class SmtpEmailTransport implements EmailTransport {
   }
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
-    // In production, uses nodemailer with this.smtpConfig
+    void input;
     void this.smtpConfig;
-    return {
-      deliveryId: input.deliveryId,
-      provider: 'smtp',
-      providerMessageId: `smtp_${ulid()}`,
-      status: 'accepted',
-      attemptedFallbackProviders: [],
-      sentAt: new Date().toISOString(),
-    };
+    throw new UnsupportedProviderRouteError('email', 'smtp');
   }
 }
 
@@ -521,43 +526,41 @@ function attachmentContentBase64(content: string | Uint8Array, contentEncoding?:
 
 /**
  * Build an email transport for a configured provider route.
- * Unknown providers fall back to capture so local/dev stays safe unless Resend is configured.
+ * Explicit provider routes fail closed when no public adapter exists. Capture is
+ * available only when explicitly selected or when the runtime is sandboxed.
  */
 export function buildEmailTransport(
   providerType: string,
   credentialsRef: string,
   senderDomain?: string,
 ): EmailTransport & { providerName?: string } {
+  void senderDomain;
   if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
   switch (providerType) {
     case 'resend':
       return new ResendEmailTransport(credentialsRef);
     case 'opencore_email_sdk':
-      return new OpenCoreEmailSdkTransport(credentialsRef, senderDomain ?? 'localhost');
+      throw new UnsupportedProviderRouteError('email', providerType);
     case 'smtp':
-      return new SmtpEmailTransport(
-        process.env.SMTP_HOST ?? 'localhost',
-        Number(process.env.SMTP_PORT ?? '587'),
-        process.env.SMTP_USERNAME ?? '',
-        process.env.SMTP_PASSWORD ?? '',
-      );
+      throw new UnsupportedProviderRouteError('email', providerType);
     case 'capture':
       return new CaptureEmailTransport();
     default:
-      if (process.env.RESEND_API_KEY) {
-        return new ResendEmailTransport('RESEND_API_KEY');
-      }
-      return new CaptureEmailTransport();
+      throw new UnsupportedProviderRouteError('email', providerType);
   }
 }
 
 /**
- * Default API/worker transport: Resend when RESEND_API_KEY is set, otherwise capture.
+ * Default API/worker transport: Resend when configured, capture only for
+ * sandbox/development, and fail closed in production.
  */
 export function createDefaultEmailTransport(): EmailTransport & { providerName?: string } {
   if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
   if (process.env.RESEND_API_KEY) {
     return new ResendEmailTransport('RESEND_API_KEY');
+  }
+  if (process.env.TIXKIT_RUNTIME_MODE === 'production') {
+    return new UnconfiguredEmailTransport();
   }
   return new CaptureEmailTransport();
 }
@@ -614,6 +617,7 @@ export function validateProviderFields(
 
   // Different providers have different field support
   const providerCapabilities: Record<string, string[]> = {
+    capture: ['attachments', 'tags', 'metadata', 'headers'],
     opencore_email_sdk: ['attachments', 'tags', 'metadata', 'headers'],
     resend: ['attachments', 'tags', 'metadata', 'headers'],
     postmark: ['attachments', 'metadata'],

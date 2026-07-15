@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
 
@@ -239,6 +239,10 @@ function activeSmsRoute(overrides: Record<string, unknown> = {}) {
 }
 
 describe('notification activity deliverability gating', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     dbState.emailJob.template_version_id = 'ntv_1';
     dbState.emailJob.variables = JSON.stringify({ notificationType: 'bulk' });
@@ -549,6 +553,26 @@ describe('notification activity deliverability gating', () => {
     expect(dbState.renderArtifacts).toHaveLength(0);
   });
 
+  it('fails closed without a configured production default email provider', async () => {
+    vi.stubEnv('TIXKIT_RUNTIME_MODE', 'production');
+    vi.stubEnv('RESEND_API_KEY', '');
+
+    const result = await sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_default',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_PROVIDER_UNSUPPORTED',
+      retryable: false,
+    });
+    expect(dbState.emailDeliveries).toHaveLength(0);
+    expect(dbState.renderArtifacts).toHaveLength(0);
+  });
+
   it('fails closed when email routes have no verified sender for the route domain', async () => {
     dbState.emailRoutes = [activeEmailRoute()];
 
@@ -562,6 +586,32 @@ describe('notification activity deliverability gating', () => {
     expect(result).toMatchObject({
       ok: false,
       errorCode: 'EMAIL_SENDER_NOT_VERIFIED',
+      retryable: false,
+    });
+    expect(dbState.emailDeliveries).toHaveLength(0);
+    expect(dbState.renderArtifacts).toHaveLength(0);
+  });
+
+  it('fails closed without retrying an unsupported email provider route', async () => {
+    dbState.emailRoutes = [activeEmailRoute({ provider_type: 'postmark' })];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      verified: true,
+    };
+
+    const result = await sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'EMAIL_PROVIDER_UNSUPPORTED',
       retryable: false,
     });
     expect(dbState.emailDeliveries).toHaveLength(0);
@@ -618,9 +668,41 @@ describe('notification activity deliverability gating', () => {
     expect(dbState.renderArtifacts).toHaveLength(0);
   });
 
+  it('fails closed without retrying an unsupported SMS provider route', async () => {
+    dbState.smsRoutes = [activeSmsRoute({ provider_type: 'operator-extension' })];
+    dbState.smsSender = {
+      id: 'ssi_1',
+      tenant_id: 'tnt_1',
+      brand_id: 'brd_1',
+      sender: '+15550000002',
+      verified: true,
+    };
+
+    const result = await sendSmsActivity({
+      jobId: 'smj_1',
+      providerRouteId: 'spr_1',
+      notificationType: 'bulk',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: 'SMS_PROVIDER_UNSUPPORTED',
+      retryable: false,
+    });
+    expect(dbState.smsDeliveries).toHaveLength(0);
+    expect(dbState.renderArtifacts).toHaveLength(0);
+  });
+
   it('records send render artifacts for accepted content email deliveries', async () => {
     dbState.emailJob.template_version_id = 'cver_1';
-    dbState.emailRoutes = [activeEmailRoute()];
+    dbState.emailRoutes = [
+      activeEmailRoute({ provider_type: 'capture' }),
+      activeEmailRoute({
+        id: 'epr_staff_unsupported',
+        provider_type: 'postmark',
+        allowed_categories: JSON.stringify(['staff']),
+      }),
+    ];
     dbState.emailSender = {
       id: 'bsi_1',
       brand_id: 'brd_1',
@@ -673,7 +755,14 @@ describe('notification activity deliverability gating', () => {
         },
       }),
     };
-    dbState.smsRoutes = [activeSmsRoute({ provider_type: 'capture' })];
+    dbState.smsRoutes = [
+      activeSmsRoute({ provider_type: 'capture' }),
+      activeSmsRoute({
+        id: 'spr_staff_unsupported',
+        provider_type: 'operator-extension',
+        allowed_categories: JSON.stringify(['staff']),
+      }),
+    ];
     dbState.smsSender = {
       id: 'ssi_1',
       tenant_id: 'tnt_1',

@@ -88,7 +88,7 @@ export type SendSmsInput = {
 
 export type SendSmsResult = {
   deliveryId: Ulid;
-  provider: 'telnyx' | 'twilio' | 'vonage' | 'plivo' | 'capture' | 'none';
+  provider: string;
   providerMessageId?: string;
   status: SmsTransportStatus;
   attemptedFallbackProviders: string[];

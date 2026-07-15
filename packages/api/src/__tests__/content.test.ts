@@ -878,6 +878,64 @@ describe('content routes', () => {
     );
   });
 
+  it('fails closed for an active email route without a public provider adapter', async () => {
+    const { db, inserted } = createContentDb({
+      brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],
+      email_provider_routes: [
+        {
+          id: 'epr_postmark',
+          tenant_id: 'tnt_1',
+          brand_id: 'brd_1',
+          provider_type: 'postmark',
+          credentials_ref: 'POSTMARK_API_KEY',
+          sender_domain: 'example.test',
+          priority: 0,
+          is_fallback: false,
+          rate_limit_per_hour: null,
+          allowed_categories: JSON.stringify(['transactional']),
+          status: 'active',
+          smoke_send_verified: true,
+          created_at: new Date('2026-06-01T00:00:00.000Z'),
+          updated_at: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ],
+      content_documents: [documentRow()],
+      content_document_versions: [versionRow()],
+      content_test_sends: [],
+      content_render_artifacts: [],
+    });
+    const app = await setupContentApp(db, principal);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/content-documents/cdoc_1/test-sends',
+      payload: {
+        versionId: 'cver_1',
+        recipient: 'ada@example.test',
+        context: {
+          event: { title: 'All Access', checkoutUrl: 'https://checkout.example.test' },
+          brand: { name: 'Tixkit', supportUrl: 'https://help.example.test/preferences' },
+          recipient: { name: 'Ada' },
+          ticket: { type: 'General Admission' },
+          order: { total: '$35.00' },
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().message ?? response.json().error?.message).toContain(
+      'Unsupported email provider route: postmark',
+    );
+    expect(inserted).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          channel: 'email',
+          recipient: 'ada@example.test',
+        }),
+      ]),
+    );
+  });
+
   it('duplicates authorized content documents as draft-only copies with fresh versions', async () => {
     const { db, inserted, updated } = createContentDb({
       brands: [{ id: 'brd_1', tenant_id: 'tnt_1', organization_id: 'org_1' }],

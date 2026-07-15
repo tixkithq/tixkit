@@ -34,7 +34,7 @@ import {
   type SendEmailResult,
   type SmsTransport,
 } from '@tixkit/domain';
-import { buildEmailTransport } from '@tixkit/email-transport';
+import { buildEmailTransport, UnsupportedProviderRouteError } from '@tixkit/email-transport';
 import {
   PUCK_EVENT_PAGE_PROVIDER,
   collectEventPageMediaReferences,
@@ -567,12 +567,21 @@ async function sendEmailTestThroughProvider(input: {
     (await senderRepo.findVerifiedByBrand(input.document.brandId));
 
   // Always build from the brand route. Injected transports are only for capture
-  // routes used by unit tests; live providers (resend/smtp/...) go through the network.
-  const routeTransport = buildEmailTransport(
-    route.provider_type,
-    route.credentials_ref,
-    route.sender_domain,
-  );
+  // routes used by unit tests; implemented live providers go through their public adapter.
+  let routeTransport: EmailTransport;
+  try {
+    routeTransport = buildEmailTransport(
+      route.provider_type,
+      route.credentials_ref,
+      route.sender_domain,
+    );
+  } catch (error) {
+    if (!(error instanceof UnsupportedProviderRouteError)) throw error;
+    throw new ValidationError(error.message, {
+      code: 'email_provider_unsupported',
+      provider: error.providerType,
+    });
+  }
   const transport =
     route.provider_type === 'capture' && input.transport ? input.transport : routeTransport;
 

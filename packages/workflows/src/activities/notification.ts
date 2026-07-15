@@ -22,6 +22,7 @@ import {
   CaptureSmsTransport,
   FallbackSmsTransport,
   ProviderRouteSelector,
+  UnsupportedProviderRouteError,
   validateProviderFields,
 } from '@tixkit/email-transport';
 import {
@@ -399,7 +400,7 @@ function buildSmsTransport(providerType: string, credentialsRef: string): SmsTra
     case 'capture':
       return new CaptureSmsTransport();
     default:
-      return new TelnyxSmsTransport(credentialsRef);
+      throw new UnsupportedProviderRouteError('sms', providerType);
   }
 }
 
@@ -521,16 +522,22 @@ export async function sendEmailActivity(input: {
       );
     }
 
-    const firstSenderIdentity = deliverableRoutePairs[0].senderIdentity;
-    const fromEmail = firstSenderIdentity.email;
-    const fromName = firstSenderIdentity.name;
-    const replyTo = firstSenderIdentity.reply_to_email
-      ? { email: firstSenderIdentity.reply_to_email, name: fromName }
-      : undefined;
+    const eligibleRoutePairs = deliverableRoutePairs.filter(({ route }) =>
+      (JSON.parse(route.allowed_categories as string) as string[]).includes(notificationType),
+    );
+    if (eligibleRoutePairs.length === 0) {
+      return errResult(
+        'NO_PROVIDER_ROUTE',
+        'No active provider route for this notification type',
+        false,
+      );
+    }
 
-    const selectorRoutes = deliverableRoutePairs.map(({ route }) => ({
+    const selectorRoutes = eligibleRoutePairs.map(({ route, senderIdentity }) => ({
       id: route.id,
       transport: buildTransport(route.provider_type, route.credentials_ref, route.sender_domain),
+      providerType: route.provider_type,
+      senderIdentity,
       priority: route.priority,
       isFallback: route.is_fallback,
       allowedCategories: JSON.parse(route.allowed_categories as string) as string[],
@@ -548,6 +555,17 @@ export async function sendEmailActivity(input: {
         false,
       );
     }
+    const primarySelection = selectorRoutes.find(
+      (candidate) => candidate.transport === primaryTransport,
+    );
+    if (!primarySelection) {
+      return errResult('NO_PROVIDER_ROUTE', 'Selected provider route is unavailable', false);
+    }
+    const fromEmail = primarySelection.senderIdentity.email;
+    const fromName = primarySelection.senderIdentity.name;
+    const replyTo = primarySelection.senderIdentity.reply_to_email
+      ? { email: primarySelection.senderIdentity.reply_to_email, name: fromName }
+      : undefined;
 
     const transport =
       fallbackTransports.length > 0
@@ -577,10 +595,7 @@ export async function sendEmailActivity(input: {
       metadata: { notificationType },
     };
 
-    const validation = validateProviderFields(
-      sendInput,
-      deliverableRoutePairs[0].route.provider_type,
-    );
+    const validation = validateProviderFields(sendInput, primarySelection.providerType);
     if (!validation.valid) {
       return errResult(
         'PROVIDER_FIELD_VALIDATION_FAILED',
@@ -622,6 +637,9 @@ export async function sendEmailActivity(input: {
 
     return okResult({ deliveryId: result.deliveryId, provider: result.provider });
   } catch (err) {
+    if (err instanceof UnsupportedProviderRouteError) {
+      return errResult('EMAIL_PROVIDER_UNSUPPORTED', err.message, false);
+    }
     return errResult(
       'EMAIL_SEND_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
@@ -682,6 +700,8 @@ export async function sendSmsActivity(input: {
     const selectorRouteCandidates = await Promise.all(
       routes.map(async (route) => {
         if (route.tenant_id !== job.tenant_id || route.brand_id !== job.brand_id) return undefined;
+        const allowedCategories = JSON.parse(route.allowed_categories as string) as string[];
+        if (!allowedCategories.includes(input.notificationType)) return undefined;
         const sender = await senderRepo.findById(route.sender_identity_id);
         if (
           !sender ||
@@ -696,7 +716,7 @@ export async function sendSmsActivity(input: {
           transport: buildSmsTransport(route.provider_type, route.credentials_ref),
           priority: route.priority,
           isFallback: route.is_fallback,
-          allowedCategories: JSON.parse(route.allowed_categories as string) as string[],
+          allowedCategories,
           rateLimitPerHour: route.rate_limit_per_hour ?? undefined,
           sender: sender.sender,
           webhookUrl: route.webhook_url ?? undefined,
@@ -782,6 +802,9 @@ export async function sendSmsActivity(input: {
 
     return okResult({ deliveryId: result.deliveryId, provider: result.provider });
   } catch (err) {
+    if (err instanceof UnsupportedProviderRouteError) {
+      return errResult('SMS_PROVIDER_UNSUPPORTED', err.message, false);
+    }
     return errResult('SMS_SEND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
   }
 }
