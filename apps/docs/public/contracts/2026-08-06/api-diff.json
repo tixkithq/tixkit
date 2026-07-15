@@ -1,0 +1,11 @@
+{
+  "from": "2026-08-05",
+  "to": "2026-08-06",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 0
+  },
+  "changes": []
+}
