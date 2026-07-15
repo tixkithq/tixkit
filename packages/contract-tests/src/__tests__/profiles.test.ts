@@ -1,12 +1,14 @@
 import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { EMBED_LIFECYCLE_NAMES } from '@tixkit/embed-core';
+import { agentSha256 } from '@tixkit/agent-protocol';
 import {
   testEmbedHostContract,
   testSdkConsumerContract,
   testWebhookConsumerContract,
   runWebhookConsumerContract,
   runSdkApiConsumerContract,
+  runAgentPlatformContract,
 } from '../index.js';
 
 describe('third-party contract profiles', () => {
@@ -258,5 +260,262 @@ describe('third-party contract profiles', () => {
         'X-Tixkit-Version': '2026-01-01',
       },
     });
+  });
+
+  it('executes the sponsor-approved plan-bound agent platform golden path', async () => {
+    const actionId = `act_${'a'.repeat(48)}`;
+    const approvalId = `apr_${'b'.repeat(48)}`;
+    const executionId = `exec_${'c'.repeat(48)}`;
+    const action = {
+      id: actionId,
+      protocolVersion: '2026-07-22' as const,
+      agentPrincipalId: 'agent_primary',
+      sponsorPrincipalId: 'sponsor_primary',
+      delegationGrantId: 'delegation_primary',
+      kind: 'event.publish' as const,
+      autonomy: 'execute_with_approval' as const,
+      target: {
+        tenantId: 'tenant_primary',
+        resourceType: 'event',
+        resourceId: 'event_primary',
+        resourceVersion: 7,
+        apiOperation: 'events.publish',
+      },
+      payload: { readinessSnapshotSha256: 'f'.repeat(64) },
+      idempotencyKey: 'agent.conformance.0001.prepare',
+      expectedPolicyVersion: 3,
+      preparedAt: '2026-07-14T12:00:00.000Z',
+    };
+    const actionDigest = agentSha256(action);
+    let planSha256 = '';
+    let substituteApprovalDigest = false;
+    let substituteApprovalIdentity = false;
+    let substituteApprovalPermission = false;
+    let substituteApprovalTime = false;
+    let rejectAwaitingTransition = false;
+    let returnMalformedAction = false;
+    const requests: Array<{ path: string; body?: unknown; headers: Record<string, string> }> = [];
+    const contractInput = {
+      apiVersion: '2026-07-28',
+      sponsorAccessToken: 'sponsor_token',
+      agentClientId: `tk_agent_${'e'.repeat(48)}`,
+      agentClientSecret: 'secret_value',
+      delegationGrantId: 'delegation_primary',
+      resourceId: 'event_primary',
+      planId: 'plan_conformance_primary',
+      idempotencyPrefix: 'agent.conformance.0001',
+      execute: async (request) => {
+        requests.push(request);
+        const response = (status: number, body: unknown) => ({
+          status,
+          headers: { 'cache-control': 'no-store', 'content-type': 'application/json' },
+          body,
+        });
+        if (request.path === '/v1/oauth/token')
+          return response(200, {
+            access_token: 'agent_access_token',
+            token_type: 'Bearer',
+            expires_in: 600,
+            scope: 'agent.invoke',
+          });
+        if (request.path === '/v1/agent/session')
+          return response(200, {
+            principal: {
+              id: 'agent_primary',
+              sponsorPrincipalId: 'sponsor_primary',
+            },
+            authentication: { grantType: 'client_credentials' },
+            delegationRequired: true,
+          });
+        if (request.path === '/v1/agent/actions')
+          return response(
+            201,
+            (() => {
+              const returnedAction = returnMalformedAction
+                ? { ...action, payload: { ...action.payload, unexpected: true } }
+                : action;
+              return {
+                action: returnedAction,
+                actionDigest: returnMalformedAction ? agentSha256(returnedAction) : actionDigest,
+                expiresAt: '2026-07-14T12:10:00.000Z',
+                dryRun: {
+                  launchable: true,
+                  readinessSnapshotSha256: 'f'.repeat(64),
+                  blockingReasonCodes: [],
+                },
+              };
+            })(),
+          );
+        if (request.path === '/v1/agent/plans' && request.method === 'POST') {
+          const definition = (request.body as { definition: { planSha256: string } }).definition;
+          planSha256 = definition.planSha256;
+          return response(201, {
+            definition,
+            state: { status: 'prepared', stateVersion: 1 },
+            actionBindings: [{ stepId: 'publish_event', actionId }],
+          });
+        }
+        if (request.path.endsWith('/transitions')) {
+          const transition = request.body as { status: string };
+          return response(200, {
+            state: {
+              status:
+                rejectAwaitingTransition && transition.status === 'awaiting_approval'
+                  ? 'prepared'
+                  : transition.status,
+              stateVersion: transition.status === 'awaiting_approval' ? 2 : 3,
+            },
+          });
+        }
+        if (request.path.endsWith('/approvals'))
+          return response(201, {
+            id: approvalId,
+            tenantId: action.target.tenantId,
+            actionDigest,
+            planSha256: substituteApprovalDigest ? '0'.repeat(64) : planSha256,
+            approverPrincipalId: substituteApprovalIdentity
+              ? 'sponsor_substituted'
+              : action.sponsorPrincipalId,
+            approverPermissionSnapshot: [
+              substituteApprovalPermission ? 'events.write' : 'events:publish',
+            ],
+            policyVersion: action.expectedPolicyVersion,
+            approvedAt: '2026-07-14T12:01:00.000Z',
+            expiresAt: substituteApprovalTime
+              ? '2026-07-14T12:09:00.000Z'
+              : '2026-07-14T12:04:00.000Z',
+          });
+        if (request.path.endsWith('/executions'))
+          return response(200, {
+            id: executionId,
+            state: 'succeeded',
+            planSha256,
+            actionId,
+            actionDigest,
+            approvalId,
+            agentPrincipalId: action.agentPrincipalId,
+            sponsorPrincipalId: action.sponsorPrincipalId,
+            delegationGrantId: action.delegationGrantId,
+            result: { resourceId: 'event_primary', resourceVersion: 8, status: 'published' },
+          });
+        if (request.path.endsWith(`/${executionId}`))
+          return response(200, {
+            execution: {
+              id: executionId,
+              planSha256,
+              actionId,
+              actionDigest,
+              approvalId,
+              agentPrincipalId: action.agentPrincipalId,
+              sponsorPrincipalId: action.sponsorPrincipalId,
+              delegationGrantId: action.delegationGrantId,
+            },
+            audit: ['prepared', 'authorized', 'started', 'succeeded'].map((phase) => ({
+              phase,
+              planSha256,
+              actionId,
+              actionDigest,
+              approvalId,
+              agentPrincipalId: action.agentPrincipalId,
+              sponsorPrincipalId: action.sponsorPrincipalId,
+              delegationGrantId: action.delegationGrantId,
+            })),
+          });
+        return response(404, {});
+      },
+    } as const;
+    const output = await runAgentPlatformContract(contractInput);
+    expect(output).toEqual({ ok: true, findings: [] });
+    const approvalRequest = requests.find((request) => request.path.endsWith('/approvals'))!;
+    expect(approvalRequest.body).toEqual({ actionDigest, planSha256 });
+    expect(approvalRequest.headers['X-Tixkit-Confirmation']).toBe(
+      `approve:${actionId}:${actionDigest}:${planSha256}`,
+    );
+    const executionRequest = requests.find((request) => request.path.endsWith('/executions'))!;
+    expect(executionRequest.body).toEqual({ approvalId, actionDigest });
+    expect(executionRequest.body).not.toHaveProperty('planSha256');
+
+    substituteApprovalDigest = true;
+    const substituted = await runAgentPlatformContract(contractInput);
+    expect(substituted.ok).toBe(false);
+    expect(substituted.findings.map((finding) => finding.code)).toContain(
+      'AGENT_PLATFORM_APPROVAL_SCHEMA',
+    );
+
+    substituteApprovalDigest = false;
+    rejectAwaitingTransition = true;
+    const approvalRequestsBefore = requests.filter((request) =>
+      request.path.endsWith('/approvals'),
+    ).length;
+    const invalidTransition = await runAgentPlatformContract(contractInput);
+    expect(invalidTransition.findings.map((finding) => finding.code)).toContain(
+      'AGENT_PLATFORM_PLAN_STATE',
+    );
+    expect(requests.filter((request) => request.path.endsWith('/approvals'))).toHaveLength(
+      approvalRequestsBefore,
+    );
+
+    rejectAwaitingTransition = false;
+    substituteApprovalIdentity = true;
+    const executionRequestsBefore = requests.filter((request) =>
+      request.path.endsWith('/executions'),
+    ).length;
+    const substitutedIdentity = await runAgentPlatformContract(contractInput);
+    expect(substitutedIdentity.findings.map((finding) => finding.code)).toContain(
+      'AGENT_PLATFORM_APPROVAL_SCHEMA',
+    );
+    expect(requests.filter((request) => request.path.endsWith('/executions'))).toHaveLength(
+      executionRequestsBefore,
+    );
+
+    substituteApprovalIdentity = false;
+    substituteApprovalPermission = true;
+    const invalidPermission = await runAgentPlatformContract(contractInput);
+    expect(invalidPermission.findings.map((finding) => finding.code)).toContain(
+      'AGENT_PLATFORM_APPROVAL_SCHEMA',
+    );
+    expect(requests.filter((request) => request.path.endsWith('/executions'))).toHaveLength(
+      executionRequestsBefore,
+    );
+
+    substituteApprovalPermission = false;
+    substituteApprovalTime = true;
+    const invalidApprovalTime = await runAgentPlatformContract(contractInput);
+    expect(invalidApprovalTime.findings.map((finding) => finding.code)).toContain(
+      'AGENT_PLATFORM_APPROVAL_SCHEMA',
+    );
+    expect(requests.filter((request) => request.path.endsWith('/executions'))).toHaveLength(
+      executionRequestsBefore,
+    );
+
+    substituteApprovalTime = false;
+    returnMalformedAction = true;
+    const approvalRequestsBeforeMalformedAction = requests.filter((request) =>
+      request.path.endsWith('/approvals'),
+    ).length;
+    const malformedAction = await runAgentPlatformContract(contractInput);
+    expect(malformedAction.findings.map((finding) => finding.code)).toContain(
+      'AGENT_PLATFORM_PREPARE_SCHEMA',
+    );
+    expect(requests.filter((request) => request.path.endsWith('/approvals'))).toHaveLength(
+      approvalRequestsBeforeMalformedAction,
+    );
+  });
+
+  it('rejects malformed agent-platform input before sending credentials', async () => {
+    const executed = vi.fn();
+    const output = await runAgentPlatformContract({
+      apiVersion: 'latest',
+      sponsorAccessToken: 'sponsor_token',
+      agentClientId: 'agent_client',
+      agentClientSecret: 'agent_secret',
+      delegationGrantId: 'delegation_primary',
+      resourceId: 'event_primary',
+      planId: '../invalid',
+      idempotencyPrefix: 'short',
+      execute: executed,
+    });
+    expect(output.findings.map((finding) => finding.code)).toEqual(['AGENT_PLATFORM_INPUT']);
+    expect(executed).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "@tixkit/contract-tests",
   "version": "0.1.0",
-  "description": "Executable Tixkit embed-host, webhook-consumer, and SDK/API-consumer contract profiles",
+  "description": "Executable Tixkit embed, webhook, SDK/API, and agent-platform contract profiles",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
@@ -44,6 +44,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@tixkit/agent-protocol": "workspace:*",
     "@tixkit/embed-core": "workspace:1.0.0"
   },
   "devDependencies": {

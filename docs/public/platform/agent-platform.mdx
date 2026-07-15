@@ -115,4 +115,38 @@ Agent memory is separately retained, scoped, inspectable, correctable, exportabl
 
 Memory content accepts only the typed `organizer_preferences` and `project_context` shapes. Credentials, payment data, buyer data and personal contact data fail closed. Agent retrieval remains delegation-bound through the shared repository and is not a generic HTTP read capability.
 
-Managed messaging may become an agent tool only with consent and suppression evaluation plus exact content and audience approval. Natural-language orchestration and managed memory remain Cloud capabilities; self-hosters may bring an orchestrator through the shared protocol when conformance support is available.
+Managed messaging may become an agent tool only with consent and suppression evaluation plus exact content and audience approval. Natural-language orchestration and managed memory remain Cloud capabilities; self-hosters may bring an orchestrator through the shared protocol.
+
+## Prove an orchestrator against the shared contract
+
+The public `@tixkit/contract-tests` source package includes a live `agent-platform` profile for third-party and Self-Hosted orchestrators. It verifies the current `event.publish` golden path: client-credential authentication, explicit agent identity, typed action preparation, canonical plan persistence, plan-bound sponsor approval, idempotent execution, terminal plan state and plan-bound audit evidence against one API environment. It does not claim hosted availability or cover the separate memory and revocation contracts.
+
+This profile performs the consequential `event.publish` action. Use only an isolated private-beta or Self-Hosted test tenant and an unpublished disposable event that is ready to publish. Never run it against a production event. The sponsor must own the agent and retain `events.write`; the agent delegation must grant `events.prepare` and `events.execute` for that exact event.
+
+Install the runner and create a fixture containing identifiers and environment-variable names, never credential values:
+
+```sh
+npm install --save-dev @tixkit/contract-tests
+```
+
+```json
+{
+  "baseUrl": "https://sandbox.example.test",
+  "apiVersion": "2026-07-28",
+  "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
+  "agentClientId": "tk_agent_example",
+  "agentClientSecretEnv": "TIXKIT_CONFORMANCE_AGENT_SECRET",
+  "delegationGrantId": "delegation_example",
+  "resourceId": "event_disposable",
+  "planId": "plan_conformance_20260728",
+  "idempotencyPrefix": "agent.conformance.20260728"
+}
+```
+
+```sh
+TIXKIT_CONFORMANCE_SPONSOR_TOKEN='...' \
+TIXKIT_CONFORMANCE_AGENT_SECRET='...' \
+npx tixkit-contract-tests agent-platform agent-platform.fixture.json
+```
+
+The command exits nonzero and emits structured, credential-free findings if any identity, cache-control, protocol, digest, state or audit invariant fails. Use a new plan ID and idempotency prefix for each disposable event.

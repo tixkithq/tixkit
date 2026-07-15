@@ -5,6 +5,7 @@ import {
   testSdkConsumerContract,
   testWebhookConsumerContract,
   runSdkApiConsumerContract,
+  runAgentPlatformContract,
 } from './index.js';
 
 const [profile, fixturePath] = process.argv.slice(2);
@@ -61,6 +62,54 @@ if (profile === 'sdk-consumer' && fixture && typeof fixture === 'object' && 'bas
       const response = await fetch(`${live.baseUrl.replace(/\/$/u, '')}${request.path}`, {
         method: request.method,
         headers: request.headers,
+      });
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers),
+        body: await response.json().catch(() => null),
+      };
+    },
+  });
+}
+if (profile === 'agent-platform' && fixture && typeof fixture === 'object') {
+  const live = fixture as unknown as {
+    baseUrl: string;
+    apiVersion: string;
+    sponsorAccessTokenEnv: string;
+    agentClientId: string;
+    agentClientSecretEnv: string;
+    delegationGrantId: string;
+    resourceId: string;
+    planId: string;
+    idempotencyPrefix: string;
+  };
+  const sponsorAccessToken = process.env[live.sponsorAccessTokenEnv];
+  const agentClientSecret = process.env[live.agentClientSecretEnv];
+  if (!sponsorAccessToken || !agentClientSecret)
+    throw new Error('Agent platform credential environment variables are not set.');
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(live.baseUrl);
+  } catch {
+    throw new Error('Agent platform baseUrl must be an absolute URL.');
+  }
+  const loopbackHosts = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
+  if (
+    baseUrl.username ||
+    baseUrl.password ||
+    (baseUrl.protocol !== 'https:' &&
+      !(baseUrl.protocol === 'http:' && loopbackHosts.has(baseUrl.hostname)))
+  )
+    throw new Error('Agent platform baseUrl must use HTTPS, or HTTP on loopback only.');
+  output = await runAgentPlatformContract({
+    ...live,
+    sponsorAccessToken,
+    agentClientSecret,
+    execute: async (request) => {
+      const response = await fetch(new URL(request.path, baseUrl), {
+        method: request.method,
+        headers: request.headers,
+        ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
       });
       return {
         status: response.status,

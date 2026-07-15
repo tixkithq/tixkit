@@ -5,9 +5,45 @@ import {
   validateCheckoutMessageEvent,
   type EmbedMessageExpectation,
 } from '@tixkit/embed-core';
+import {
+  AGENT_PLATFORM_PROTOCOL_VERSION,
+  AGENT_PROTOCOL_VERSION,
+  agentActionDigest,
+  agentSha256,
+  buildAgentPlanDefinition,
+  type AgentAction,
+  type AgentApproval,
+  type AgentExecution,
+} from '@tixkit/agent-protocol';
 
 export type ContractFinding = { code: string; message: string; path?: string };
 export type ContractResult = { ok: boolean; findings: ContractFinding[] };
+export const AGENT_PLATFORM_CONTRACT_API_VERSION = '2026-07-28' as const;
+
+export type AgentPlatformContractRequest = {
+  method: 'GET' | 'POST';
+  path: string;
+  headers: Record<string, string>;
+  body?: unknown;
+};
+
+export type AgentPlatformContractResponse = {
+  status: number;
+  headers: Record<string, string | undefined>;
+  body: unknown;
+};
+
+export interface AgentPlatformContractInput {
+  apiVersion: string;
+  sponsorAccessToken: string;
+  agentClientId: string;
+  agentClientSecret: string;
+  delegationGrantId: string;
+  resourceId: string;
+  planId: string;
+  idempotencyPrefix: string;
+  execute(request: AgentPlatformContractRequest): Promise<AgentPlatformContractResponse>;
+}
 
 function result(findings: ContractFinding[]): ContractResult {
   return { ok: findings.length === 0, findings };
@@ -388,6 +424,459 @@ export async function runSdkApiConsumerContract(input: {
       message: 'Synthetic delivery response is invalid.',
     });
   }
+  return result(findings);
+}
+
+function objectBody(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+export async function runAgentPlatformContract(
+  input: AgentPlatformContractInput,
+): Promise<ContractResult> {
+  const findings: ContractFinding[] = [];
+  if (
+    input.apiVersion !== AGENT_PLATFORM_CONTRACT_API_VERSION ||
+    !input.sponsorAccessToken ||
+    !input.agentClientId ||
+    !input.agentClientSecret ||
+    !input.delegationGrantId ||
+    !input.resourceId ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,62}$/u.test(input.planId) ||
+    input.idempotencyPrefix.length < 16 ||
+    input.idempotencyPrefix.length > 180 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.idempotencyPrefix)
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_INPUT',
+      message: `Conformance input must target API ${AGENT_PLATFORM_CONTRACT_API_VERSION} with complete credentials and valid plan and idempotency identifiers.`,
+    });
+    return result(findings);
+  }
+  const request = async (
+    stage: string,
+    value: AgentPlatformContractRequest,
+    expectedStatus: number,
+  ): Promise<AgentPlatformContractResponse | undefined> => {
+    try {
+      const response = await input.execute(value);
+      if (response.status !== expectedStatus) {
+        findings.push({
+          code: 'AGENT_PLATFORM_STATUS',
+          message: `${stage} expected ${expectedStatus}, received ${response.status}.`,
+          path: stage,
+        });
+        return undefined;
+      }
+      const cacheControl = Object.entries(response.headers).find(
+        ([name]) => name.toLowerCase() === 'cache-control',
+      )?.[1];
+      if (!/(?:^|,)\s*no-store(?:\s*(?:,|$))/iu.test(cacheControl ?? ''))
+        findings.push({
+          code: 'AGENT_PLATFORM_CACHE_CONTROL',
+          message: `${stage} must return Cache-Control: no-store.`,
+          path: stage,
+        });
+      return response;
+    } catch {
+      findings.push({
+        code: 'AGENT_PLATFORM_REQUEST_FAILED',
+        message: `${stage} request could not be completed.`,
+        path: stage,
+      });
+      return undefined;
+    }
+  };
+  const headers = (token: string): Record<string, string> => ({
+    authorization: `Bearer ${token}`,
+    accept: 'application/json',
+    'content-type': 'application/json',
+    'X-Tixkit-Version': input.apiVersion,
+  });
+  const oauth = await request(
+    'oauth',
+    {
+      method: 'POST',
+      path: '/v1/oauth/token',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: {
+        grant_type: 'client_credentials',
+        client_id: input.agentClientId,
+        client_secret: input.agentClientSecret,
+      },
+    },
+    200,
+  );
+  const accessToken = objectBody(oauth?.body)?.access_token;
+  if (typeof accessToken !== 'string') {
+    findings.push({ code: 'AGENT_PLATFORM_OAUTH_SCHEMA', message: 'OAuth response is invalid.' });
+    return result(findings);
+  }
+  const sessionResponse = await request(
+    'session',
+    { method: 'GET', path: '/v1/agent/session', headers: headers(accessToken) },
+    200,
+  );
+  const session = objectBody(sessionResponse?.body);
+  const principal = objectBody(session?.principal);
+  if (
+    typeof principal?.id !== 'string' ||
+    typeof principal.sponsorPrincipalId !== 'string' ||
+    objectBody(session?.authentication)?.grantType !== 'client_credentials' ||
+    session?.delegationRequired !== true
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_SESSION_SCHEMA',
+      message: 'Explicit agent session response is invalid.',
+    });
+    return result(findings);
+  }
+  const prepare = await request(
+    'prepare',
+    {
+      method: 'POST',
+      path: '/v1/agent/actions',
+      headers: { ...headers(accessToken), 'Idempotency-Key': `${input.idempotencyPrefix}.prepare` },
+      body: {
+        kind: 'event.publish',
+        delegationGrantId: input.delegationGrantId,
+        resourceId: input.resourceId,
+      },
+    },
+    201,
+  );
+  const prepared = objectBody(prepare?.body);
+  const rawAction = objectBody(prepared?.action);
+  let action: AgentAction | undefined;
+  let canonicalActionDigest: string | undefined;
+  const actionDigest = prepared?.actionDigest;
+  const dryRun = objectBody(prepared?.dryRun);
+  const actionExpiresAt = prepared?.expiresAt;
+  try {
+    if (!rawAction) throw new Error('invalid action');
+    action = rawAction as unknown as AgentAction;
+    canonicalActionDigest = agentActionDigest(action);
+  } catch {
+    action = undefined;
+  }
+  if (
+    !action ||
+    action.protocolVersion !== AGENT_PROTOCOL_VERSION ||
+    typeof actionDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(actionDigest) ||
+    canonicalActionDigest !== actionDigest ||
+    typeof actionExpiresAt !== 'string' ||
+    !Number.isFinite(Date.parse(actionExpiresAt)) ||
+    !Number.isFinite(Date.parse(action.preparedAt)) ||
+    Date.parse(actionExpiresAt) <= Date.parse(action.preparedAt) ||
+    dryRun?.launchable !== true ||
+    typeof dryRun.readinessSnapshotSha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(dryRun.readinessSnapshotSha256) ||
+    action.agentPrincipalId !== principal.id ||
+    action.sponsorPrincipalId !== principal.sponsorPrincipalId ||
+    action.delegationGrantId !== input.delegationGrantId ||
+    action.kind !== 'event.publish' ||
+    action.autonomy !== 'execute_with_approval' ||
+    action.target.resourceType !== 'event' ||
+    action.target.resourceId !== input.resourceId ||
+    action.target.apiOperation !== 'events.publish' ||
+    objectBody(action.payload)?.readinessSnapshotSha256 !== dryRun.readinessSnapshotSha256
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_PREPARE_SCHEMA',
+      message: 'Prepared action or dry-run evidence is invalid.',
+    });
+    return result(findings);
+  }
+  const expiresAt = new Date(
+    Math.min(new Date(actionExpiresAt).getTime(), new Date(action.preparedAt).getTime() + 240_000),
+  ).toISOString();
+  let definition;
+  try {
+    definition = buildAgentPlanDefinition({
+      id: input.planId,
+      protocolVersion: AGENT_PLATFORM_PROTOCOL_VERSION,
+      tenantId: action.target.tenantId,
+      agentPrincipalId: action.agentPrincipalId,
+      sponsorPrincipalId: action.sponsorPrincipalId,
+      delegationGrantId: action.delegationGrantId,
+      purpose: 'Conformance: publish one reviewed event',
+      assumptions: [
+        {
+          id: 'conformance_reviewed',
+          statement: 'The conformance operator selected this event for a controlled publish test.',
+          provenanceType: 'user',
+          sourceReference: 'tixkit-contract-tests',
+          verification: 'confirmed',
+        },
+      ],
+      steps: [
+        {
+          id: 'publish_event',
+          actionKind: action.kind,
+          actionProtocolVersion: action.protocolVersion,
+          actionDigest,
+          dependsOnStepIds: [],
+          projectedChanges: [
+            {
+              resourceType: action.target.resourceType,
+              resourceId: action.target.resourceId,
+              operation: 'publish',
+              beforeVersion: action.target.resourceVersion,
+              projectedVersion: action.target.resourceVersion + 1,
+              previewSha256: agentSha256(dryRun),
+            },
+          ],
+          costs: [
+            {
+              amountMinor: 0,
+              currency: 'USD',
+              basis: 'Conformance event publication has no direct platform charge.',
+              quoteSha256: agentSha256({ amountMinor: 0, currency: 'USD' }),
+              expiresAt,
+            },
+          ],
+          readinessImpact: {
+            beforeSnapshotSha256: String(dryRun.readinessSnapshotSha256),
+            projectedSnapshotSha256: agentSha256({ actionDigest, status: 'published' }),
+            introducedReasonCodes: [],
+            resolvedReasonCodes: ['event_unpublished'],
+          },
+          approvalRequirement: { mode: 'fresh_action', riskClass: 'high' },
+          reversibility: { mode: 'none' },
+        },
+      ],
+      createdAt: action.preparedAt,
+      expiresAt,
+    });
+  } catch {
+    findings.push({
+      code: 'AGENT_PLATFORM_PLAN_BUILD',
+      message: 'Prepared action could not produce a canonical plan.',
+    });
+    return result(findings);
+  }
+  const planCreate = await request(
+    'plan-create',
+    {
+      method: 'POST',
+      path: '/v1/agent/plans',
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.plan.create`,
+      },
+      body: {
+        definition,
+        actionBindings: [{ stepId: 'publish_event', actionId: action.id }],
+      },
+    },
+    201,
+  );
+  const createdPlan = objectBody(planCreate?.body);
+  const createdState = objectBody(createdPlan?.state);
+  const createdBindings = createdPlan?.actionBindings;
+  if (
+    objectBody(createdPlan?.definition)?.planSha256 !== definition.planSha256 ||
+    createdState?.status !== 'prepared' ||
+    createdState.stateVersion !== 1 ||
+    !Array.isArray(createdBindings) ||
+    createdBindings.length !== 1 ||
+    objectBody(createdBindings[0])?.stepId !== 'publish_event' ||
+    objectBody(createdBindings[0])?.actionId !== action.id
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_PLAN_SCHEMA',
+      message: 'Persisted plan digest does not match the canonical definition.',
+    });
+    return result(findings);
+  }
+  const awaiting = await request(
+    'plan-awaiting',
+    {
+      method: 'POST',
+      path: `/v1/agent/plans/${encodeURIComponent(definition.id)}/transitions`,
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.plan.awaiting`,
+      },
+      body: {
+        expectedStateVersion: 1,
+        status: 'awaiting_approval',
+        stepStates: [{ stepId: 'publish_event', status: 'awaiting_approval' }],
+        reasonCode: 'conformance_approval_requested',
+      },
+    },
+    200,
+  );
+  const awaitingState = objectBody(objectBody(awaiting?.body)?.state);
+  if (awaitingState?.status !== 'awaiting_approval' || awaitingState.stateVersion !== 2) {
+    findings.push({
+      code: 'AGENT_PLATFORM_PLAN_STATE',
+      message: 'Plan did not enter awaiting_approval.',
+    });
+    return result(findings);
+  }
+  const approvalResponse = await request(
+    'approve',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(action.id)}/approvals`,
+      headers: {
+        ...headers(input.sponsorAccessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.approve`,
+        'X-Tixkit-Confirmation': `approve:${action.id}:${actionDigest}:${definition.planSha256}`,
+      },
+      body: { actionDigest, planSha256: definition.planSha256 },
+    },
+    201,
+  );
+  const approval = objectBody(approvalResponse?.body) as unknown as AgentApproval | undefined;
+  if (
+    !approval ||
+    typeof approval.id !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$/u.test(approval.id) ||
+    approval.tenantId !== action.target.tenantId ||
+    approval.actionDigest !== actionDigest ||
+    approval.planSha256 !== definition.planSha256 ||
+    approval.approverPrincipalId !== action.sponsorPrincipalId ||
+    !Array.isArray(approval.approverPermissionSnapshot) ||
+    approval.approverPermissionSnapshot.length !== 1 ||
+    approval.approverPermissionSnapshot[0] !== 'events:publish' ||
+    approval.policyVersion !== action.expectedPolicyVersion ||
+    !Number.isSafeInteger(approval.policyVersion) ||
+    !Number.isFinite(Date.parse(approval.approvedAt)) ||
+    !Number.isFinite(Date.parse(approval.expiresAt)) ||
+    Date.parse(approval.approvedAt) < Date.parse(action.preparedAt) ||
+    Date.parse(approval.expiresAt) <= Date.parse(approval.approvedAt) ||
+    Date.parse(approval.expiresAt) > Date.parse(approval.approvedAt) + 300_000 ||
+    Date.parse(approval.expiresAt) > Date.parse(actionExpiresAt) ||
+    Date.parse(approval.expiresAt) > Date.parse(definition.expiresAt) ||
+    approval.revokedAt !== undefined ||
+    approval.consumedAt !== undefined
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_APPROVAL_SCHEMA',
+      message: 'Approval is not bound to the authoritative plan digest.',
+    });
+    return result(findings);
+  }
+  const executionResponse = await request(
+    'execute',
+    {
+      method: 'POST',
+      path: `/v1/agent/actions/${encodeURIComponent(action.id)}/executions`,
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `execute:${action.id}:${approval.id}:${actionDigest}`,
+        'X-Tixkit-Confirmation': `execute:${action.id}:${approval.id}:${actionDigest}`,
+      },
+      body: { approvalId: approval.id, actionDigest },
+    },
+    200,
+  );
+  const execution = executionResponse?.body as AgentExecution | undefined;
+  if (
+    !execution ||
+    execution.state !== 'succeeded' ||
+    execution.planSha256 !== definition.planSha256 ||
+    execution.actionId !== action.id ||
+    execution.actionDigest !== actionDigest ||
+    execution.approvalId !== approval.id ||
+    execution.agentPrincipalId !== action.agentPrincipalId ||
+    execution.sponsorPrincipalId !== action.sponsorPrincipalId ||
+    execution.delegationGrantId !== action.delegationGrantId ||
+    !execution.result
+  ) {
+    findings.push({
+      code: 'AGENT_PLATFORM_EXECUTION_SCHEMA',
+      message: 'Terminal execution evidence is invalid or missing its plan digest.',
+    });
+    return result(findings);
+  }
+  let resultSha256: string;
+  try {
+    resultSha256 = agentSha256(execution.result);
+  } catch {
+    findings.push({
+      code: 'AGENT_PLATFORM_EXECUTION_SCHEMA',
+      message: 'Terminal execution result is not canonical digestible evidence.',
+    });
+    return result(findings);
+  }
+  const succeeded = await request(
+    'plan-succeeded',
+    {
+      method: 'POST',
+      path: `/v1/agent/plans/${encodeURIComponent(definition.id)}/transitions`,
+      headers: {
+        ...headers(accessToken),
+        'Idempotency-Key': `${input.idempotencyPrefix}.plan.succeeded`,
+      },
+      body: {
+        expectedStateVersion: 2,
+        status: 'succeeded',
+        stepStates: [
+          {
+            stepId: 'publish_event',
+            status: 'succeeded',
+            approvalId: approval.id,
+            executionId: execution.id,
+            resultSha256,
+          },
+        ],
+        reasonCode: 'conformance_execution_succeeded',
+      },
+    },
+    200,
+  );
+  const succeededState = objectBody(objectBody(succeeded?.body)?.state);
+  if (succeededState?.status !== 'succeeded' || succeededState.stateVersion !== 3)
+    findings.push({
+      code: 'AGENT_PLATFORM_PLAN_STATE',
+      message: 'Plan did not persist terminal succeeded evidence.',
+    });
+  const inspection = await request(
+    'inspect',
+    {
+      method: 'GET',
+      path: `/v1/agent/actions/${encodeURIComponent(action.id)}/executions/${encodeURIComponent(execution.id)}`,
+      headers: headers(accessToken),
+    },
+    200,
+  );
+  const evidence = objectBody(inspection?.body);
+  const inspectedExecution = objectBody(evidence?.execution);
+  const audit = evidence?.audit;
+  if (
+    inspectedExecution?.id !== execution.id ||
+    inspectedExecution.actionId !== action.id ||
+    inspectedExecution.actionDigest !== actionDigest ||
+    inspectedExecution.approvalId !== approval.id ||
+    inspectedExecution.agentPrincipalId !== action.agentPrincipalId ||
+    inspectedExecution.sponsorPrincipalId !== action.sponsorPrincipalId ||
+    inspectedExecution.delegationGrantId !== action.delegationGrantId ||
+    inspectedExecution.planSha256 !== definition.planSha256 ||
+    !Array.isArray(audit) ||
+    audit.length < 4 ||
+    audit.some((record) => {
+      const value = objectBody(record);
+      return (
+        value?.actionId !== action.id ||
+        value.actionDigest !== actionDigest ||
+        value.approvalId !== approval.id ||
+        value.agentPrincipalId !== action.agentPrincipalId ||
+        value.sponsorPrincipalId !== action.sponsorPrincipalId ||
+        value.delegationGrantId !== action.delegationGrantId ||
+        value.planSha256 !== definition.planSha256
+      );
+    })
+  )
+    findings.push({
+      code: 'AGENT_PLATFORM_AUDIT_SCHEMA',
+      message: 'Execution audit evidence is incomplete or not plan-bound.',
+    });
   return result(findings);
 }
 

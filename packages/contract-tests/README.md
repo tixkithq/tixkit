@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Executable embed-host, webhook-consumer, and SDK/API-consumer contract profiles for third-party integrations.
+Executable embed-host, webhook-consumer, SDK/API-consumer, and agent-platform contract profiles for third-party integrations.
 
 ## Consumers
 
@@ -31,7 +31,7 @@ await assertWebhookConsumerContract({
 
 ## Public exports
 
-The root entry point exports structured profile runners and assertion helpers for embed hosts, webhook consumers, and SDK/API consumers. The package also exposes the `tixkit-contract-tests` CLI.
+The root entry point exports structured profile runners and assertion helpers for embed hosts, webhook consumers, SDK/API consumers, and agent-platform integrations. The package also exposes the `tixkit-contract-tests` CLI.
 
 ## Runtime
 
@@ -41,9 +41,35 @@ Profiles run locally or in CI and return structured findings; assertion helpers 
 
 The CLI accepts a profile name and sanitized JSON fixture, for example `tixkit-contract-tests webhook-consumer fixture.json`.
 
+The live `agent-platform` profile can validate the shared `event.publish` execution boundary: client-credential authentication, explicit agent identity, typed action preparation, canonical plan persistence, sponsor approval bound to the immutable plan digest, idempotent execution, terminal plan evidence, and plan-bound audit inspection.
+
+It publishes the selected event. Run it only in an isolated private-beta or Self-Hosted test tenant with an unpublished, disposable event that is ready to publish. Never target a production event. Put only environment-variable names in the fixture:
+
+```json
+{
+  "baseUrl": "https://sandbox.example.test",
+  "apiVersion": "2026-07-28",
+  "sponsorAccessTokenEnv": "TIXKIT_CONFORMANCE_SPONSOR_TOKEN",
+  "agentClientId": "tk_agent_example",
+  "agentClientSecretEnv": "TIXKIT_CONFORMANCE_AGENT_SECRET",
+  "delegationGrantId": "delegation_example",
+  "resourceId": "event_disposable",
+  "planId": "plan_conformance_20260728",
+  "idempotencyPrefix": "agent.conformance.20260728"
+}
+```
+
+```sh
+TIXKIT_CONFORMANCE_SPONSOR_TOKEN='...' \
+TIXKIT_CONFORMANCE_AGENT_SECRET='...' \
+tixkit-contract-tests agent-platform agent-platform.fixture.json
+```
+
+The sponsor must own the agent principal and hold current `events.write` permission for the selected event. The agent credential must have an active delegation containing `events.prepare` and `events.execute` for that exact event. Use a new plan ID and idempotency prefix for each event fixture.
+
 ## Security
 
-Fixtures must not contain production credentials, raw card data, or buyer PII. Webhook profiles use test secrets and validate signatures, timestamps, duplicates, and ordering without fabricating payments.
+Fixtures must not contain credentials, raw card data, or buyer PII. The agent-platform CLI resolves short-lived test credentials from named environment variables and never includes them in findings. Webhook profiles use test secrets and validate signatures, timestamps, duplicates, and ordering without fabricating payments.
 
 ## Validation
 
@@ -57,3 +83,4 @@ Profiles target the current and previous supported Embed Contract versions and t
 
 - [Test webhooks](../../docs/public/developers/webhooks/testing.mdx)
 - [Embed the widget](../../docs/public/developers/widget/embedding.mdx)
+- [Connect an agent through the Platform API](../../docs/public/platform/agent-platform.mdx)

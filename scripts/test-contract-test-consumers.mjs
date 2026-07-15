@@ -2,7 +2,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 const root = resolve(import.meta.dirname, '..');
 const temp = await mkdtemp(join(tmpdir(), 'tixkit-contract-consumer-'));
@@ -19,6 +19,7 @@ const pack = (workspace) => {
 
 try {
   const embedTar = pack('packages/embed-core');
+  const agentProtocolTar = pack('packages/agent-protocol');
   const contractsTar = pack('packages/contract-tests');
   execFileSync('bun', ['run', 'build'], {
     cwd: resolve(root, 'packages/sdk-js'),
@@ -31,10 +32,14 @@ try {
       private: true,
       dependencies: {
         '@tixkit/embed-core': `file:${embedTar}`,
+        '@tixkit/agent-protocol': `file:${agentProtocolTar}`,
         '@tixkit/contract-tests': `file:${contractsTar}`,
         '@tixkit/js': `file:${sdkTar}`,
       },
-      overrides: { '@tixkit/embed-core': `file:${embedTar}` },
+      overrides: {
+        '@tixkit/embed-core': `file:${embedTar}`,
+        '@tixkit/agent-protocol': `file:${agentProtocolTar}`,
+      },
     }),
   );
   execFileSync('bun', ['install'], { cwd: temp, stdio: 'inherit' });
@@ -144,6 +149,76 @@ try {
     if (JSON.parse(output).ok !== true) throw new Error(`${profile} external profile failed`);
   }
   await writeFile(
+    join(temp, 'agent-platform-invalid.json'),
+    JSON.stringify({
+      baseUrl: 'http://127.0.0.1:9',
+      apiVersion: 'latest',
+      sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
+      agentClientId: 'agent_client',
+      agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
+      delegationGrantId: 'delegation_primary',
+      resourceId: 'event_primary',
+      planId: '../invalid',
+      idempotencyPrefix: 'short',
+    }),
+  );
+  const invalidAgent = spawnSync(
+    bin,
+    ['agent-platform', join(temp, 'agent-platform-invalid.json')],
+    {
+      cwd: temp,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        TIXKIT_TEST_SPONSOR_TOKEN: 'sponsor_secret_must_not_leak',
+        TIXKIT_TEST_AGENT_SECRET: 'agent_secret_must_not_leak',
+      },
+    },
+  );
+  const invalidAgentOutput = JSON.parse(invalidAgent.stdout);
+  if (
+    invalidAgent.status !== 1 ||
+    invalidAgentOutput.ok !== false ||
+    invalidAgentOutput.findings?.[0]?.code !== 'AGENT_PLATFORM_INPUT'
+  )
+    throw new Error('Packed agent-platform fail-closed profile did not reject invalid input');
+  if (/secret_must_not_leak/u.test(`${invalidAgent.stdout}${invalidAgent.stderr}`))
+    throw new Error('Packed agent-platform profile leaked a credential');
+  await writeFile(
+    join(temp, 'agent-platform-remote-http.json'),
+    JSON.stringify({
+      baseUrl: 'http://api.example.test',
+      apiVersion: '2026-07-28',
+      sponsorAccessTokenEnv: 'TIXKIT_TEST_SPONSOR_TOKEN',
+      agentClientId: 'agent_client',
+      agentClientSecretEnv: 'TIXKIT_TEST_AGENT_SECRET',
+      delegationGrantId: 'delegation_primary',
+      resourceId: 'event_primary',
+      planId: 'plan_remote_http_rejected',
+      idempotencyPrefix: 'agent.conformance.remote-http',
+    }),
+  );
+  const remoteHttpAgent = spawnSync(
+    bin,
+    ['agent-platform', join(temp, 'agent-platform-remote-http.json')],
+    {
+      cwd: temp,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        TIXKIT_TEST_SPONSOR_TOKEN: 'sponsor_secret_must_not_leak',
+        TIXKIT_TEST_AGENT_SECRET: 'agent_secret_must_not_leak',
+      },
+    },
+  );
+  if (
+    remoteHttpAgent.status === 0 ||
+    !remoteHttpAgent.stderr.includes('HTTPS, or HTTP on loopback only')
+  )
+    throw new Error('Packed agent-platform profile did not reject remote plaintext HTTP');
+  if (/secret_must_not_leak/u.test(`${remoteHttpAgent.stdout}${remoteHttpAgent.stderr}`))
+    throw new Error('Packed agent-platform remote HTTP rejection leaked a credential');
+  await writeFile(
     join(temp, 'sdk-wire.mjs'),
     `import { TixkitClient } from '@tixkit/js';
 let captured;
@@ -164,7 +239,9 @@ if (captured.headers.authorization !== 'Bearer tk_sandbox') throw new Error('Pac
     await readFile(join(temp, 'node_modules/@tixkit/contract-tests/package.json'), 'utf8'),
   );
   if (installed.version !== '0.1.0') throw new Error('Unexpected installed contract-tests version');
-  console.log('Built and executed 3 packed contract profiles and the packed SDK wire contract.');
+  console.log(
+    'Built and executed 4 packed contract profiles, including agent fail-closed credential handling, and the packed SDK wire contract.',
+  );
 } finally {
   await rm(temp, { recursive: true, force: true });
   await Promise.all(tarballs.map((path) => rm(path, { force: true })));
