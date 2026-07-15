@@ -5,6 +5,7 @@ import { NewEventView } from './new-event-view';
 
 const push = vi.hoisted(() => vi.fn());
 const createEvent = vi.hoisted(() => vi.fn());
+const duplicateEvent = vi.hoisted(() => vi.fn());
 const reportOnboardingEvent = vi.hoisted(() => vi.fn());
 const listSavedVenues = vi.hoisted(() => vi.fn());
 const bootstrapState = vi.hoisted(() => ({
@@ -24,12 +25,15 @@ vi.mock('@/context/permission-provider', () => ({
   usePermissions: () => ({ can: () => true, loading: false }),
 }));
 vi.mock('@/hooks/use-all-events', () => ({
-  useAllEvents: () => ({ events: [], loading: false }),
+  useAllEvents: () => ({
+    events: [{ id: 'evt_source', title: 'Source Gala' }],
+    loading: false,
+  }),
 }));
 vi.mock('@/lib/api', () => ({
   adminApi: {
     createEvent,
-    duplicateEvent: vi.fn(),
+    duplicateEvent,
     listPaymentAccounts: vi.fn(),
     listSavedVenues,
     reportOnboardingEvent,
@@ -40,6 +44,7 @@ describe('NewEventView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createEvent.mockResolvedValue({ ok: true, data: { id: 'evt_new' } });
+    duplicateEvent.mockResolvedValue({ ok: true, data: { id: 'evt_duplicate' } });
     reportOnboardingEvent.mockResolvedValue({ ok: true, data: undefined });
     listSavedVenues.mockResolvedValue({ ok: true, data: [] });
     bootstrapState.value = {
@@ -50,7 +55,7 @@ describe('NewEventView', () => {
     };
   });
 
-  it('creates a durable blank draft and redirects to its launch center', async () => {
+  it('creates a durable blank draft and redirects to its media-aware launch follow-up', async () => {
     render(<NewEventView />);
     fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Community Night' },
@@ -62,7 +67,7 @@ describe('NewEventView', () => {
       brandId: 'brd_1',
       title: 'Community Night',
     });
-    expect(push).toHaveBeenCalledWith('/events/evt_new');
+    expect(push).toHaveBeenCalledWith('/events/evt_new?created=1');
   });
 
   it('preserves form data and does not redirect when atomic preset creation fails', async () => {
@@ -96,6 +101,83 @@ describe('NewEventView', () => {
         outcome: 'completed',
       }),
     );
+  });
+
+  it('retries duplication with one idempotency key and opens the media follow-up', async () => {
+    duplicateEvent
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { message: 'Unable to duplicate the event. Retry to continue.' },
+      })
+      .mockResolvedValueOnce({ ok: true, data: { id: 'evt_duplicate' } });
+    render(<NewEventView />);
+    const duplicateStartingPoint = screen.getByRole('radio', {
+      name: /Duplicate existing event/,
+    });
+    fireEvent.click(duplicateStartingPoint);
+    expect(duplicateStartingPoint).toBeChecked();
+    expect(reportOnboardingEvent).toHaveBeenCalledWith({
+      stage: 'starting_point_selected',
+      outcome: 'duplicate',
+    });
+    const sourceEvent = await screen.findByLabelText(/Source event/);
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Copied Gala' },
+    });
+    fireEvent.change(sourceEvent, {
+      target: { value: 'evt_source' },
+    });
+    fireEvent.click(screen.getByLabelText('Poster, cover, and social media'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unable to duplicate the event. Retry to continue.',
+    );
+    expect(push).not.toHaveBeenCalled();
+    expect(duplicateEvent).toHaveBeenCalledTimes(1);
+    const firstInput = duplicateEvent.mock.calls[0]![1];
+    expect(duplicateEvent.mock.calls[0]).toEqual([
+      'evt_source',
+      expect.objectContaining({
+        idempotencyKey: expect.any(String),
+        title: 'Copied Gala',
+        copy: expect.objectContaining({ mediaAssets: false }),
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(duplicateEvent).toHaveBeenCalledTimes(2));
+    expect(duplicateEvent.mock.calls[1]![1].idempotencyKey).toBe(firstInput.idempotencyKey);
+    expect(reportOnboardingEvent).toHaveBeenCalledWith({
+      stage: 'recovery',
+      outcome: 'completed',
+    });
+    expect(push).toHaveBeenCalledWith('/events/evt_duplicate?created=1');
+  });
+
+  it('uses a new idempotency key when a failed request is edited', async () => {
+    createEvent
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { message: 'Unable to create the event. Retry to continue.' },
+      })
+      .mockResolvedValueOnce({ ok: true, data: { id: 'evt_edited' } });
+    render(<NewEventView />);
+    const title = screen.getByLabelText('Title');
+    fireEvent.change(title, { target: { value: 'Original title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unable to create the event. Retry to continue.',
+    );
+    const firstIdempotencyKey = createEvent.mock.calls[0]![0].idempotencyKey;
+
+    fireEvent.change(title, { target: { value: 'Edited title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(createEvent).toHaveBeenCalledTimes(2));
+
+    expect(createEvent.mock.calls[1]![0]).toMatchObject({ title: 'Edited title' });
+    expect(createEvent.mock.calls[1]![0].idempotencyKey).not.toBe(firstIdempotencyKey);
+    expect(push).toHaveBeenCalledWith('/events/evt_edited?created=1');
   });
 
   it('validates title before calling the API', async () => {

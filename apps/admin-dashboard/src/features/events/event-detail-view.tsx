@@ -84,12 +84,17 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   const [lifecycleAction, setLifecycleAction] = React.useState<'pause' | 'archive'>();
   const [lifecycleError, setLifecycleError] = React.useState<string>();
   const [setupWarning, setSetupWarning] = React.useState<string>();
+  const [showCreationFollowUp, setShowCreationFollowUp] = React.useState(false);
   React.useEffect(() => {
-    const warning = new URLSearchParams(window.location.search).get('setupWarning');
-    if (!warning) return;
-    setSetupWarning(warning);
+    const search = new URLSearchParams(window.location.search);
+    const warning = search.get('setupWarning');
+    const created = search.get('created') === '1';
+    if (!warning && !created) return;
+    if (warning) setSetupWarning(warning);
+    if (created) setShowCreationFollowUp(true);
     const url = new URL(window.location.href);
     url.searchParams.delete('setupWarning');
+    url.searchParams.delete('created');
     window.history.replaceState(window.history.state, '', url);
   }, []);
 
@@ -190,6 +195,20 @@ export function EventDetailView({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-6">
+      {showCreationFollowUp && can('events.write') ? (
+        <output className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 p-4 text-sm">
+          <span>
+            <span className="block font-semibold">Your event draft is ready.</span>
+            <span className="block text-foreground">
+              Add a poster or cover next so dashboard, event-page, and social previews use optimized
+              event media.
+            </span>
+          </span>
+          <Button asChild size="sm">
+            <Link href={`${routes.eventSettings(eventId)}#media`}>Add event media</Link>
+          </Button>
+        </output>
+      ) : null}
       {setupWarning ? (
         <div
           role="alert"

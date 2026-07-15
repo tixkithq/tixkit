@@ -91,9 +91,57 @@ afterEach(() => {
   document.body.innerHTML = '';
   vi.clearAllMocks();
   setClipboard(undefined);
+  window.history.replaceState({}, '', '/');
 });
 
 describe('EventDetailView', () => {
+  it('offers an optimized event-media follow-up after draft creation and consumes the URL flag', async () => {
+    window.history.replaceState({}, '', '/events/evt_1?created=1');
+    mockLoadedEventDetail();
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByRole('status')).toHaveTextContent('Your event draft is ready.');
+    expect(view.getByRole('link', { name: 'Add event media' })).toHaveAttribute(
+      'href',
+      '/events/evt_1/settings#media',
+    );
+    await waitFor(() => expect(window.location.search).toBe(''));
+  });
+
+  it('consumes the creation flag without offering a write action to read-only organizers', async () => {
+    window.history.replaceState({}, '', '/events/evt_1?created=1');
+    mockLoadedEventDetail();
+    usePermissionsMock.mockReturnValue({
+      can: vi.fn((permission: string) => permission !== 'events.write'),
+      loading: false,
+      error: null,
+    });
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    await waitFor(() => expect(window.location.search).toBe(''));
+    expect(view.queryByRole('link', { name: 'Add event media' })).not.toBeInTheDocument();
+  });
+
+  it('consumes both creation notices while preserving unrelated query parameters and the hash', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/events/evt_1?tab=launch&created=1&setupWarning=Add+ticket+inventory#readiness',
+    );
+    mockLoadedEventDetail();
+
+    const view = render(<EventDetailView eventId="evt_1" />);
+
+    expect(await view.findByRole('status')).toHaveTextContent('Your event draft is ready.');
+    expect(view.getByRole('alert')).toHaveTextContent('Add ticket inventory');
+    await waitFor(() => {
+      expect(window.location.search).toBe('?tab=launch');
+      expect(window.location.hash).toBe('#readiness');
+    });
+  });
+
   it('shows copy success only after writing the public event URL', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText } as unknown as Clipboard);

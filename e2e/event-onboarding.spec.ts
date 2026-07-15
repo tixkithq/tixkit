@@ -2,12 +2,23 @@ import { test, expect, requireReachable } from './fixtures/validation-test';
 import { expectNoAxeViolations } from './helpers/axe';
 import { adminBaseUrl } from './helpers/env';
 import {
+  devBrandId,
+  devOrganizationId,
+  ensureDevTenantGraph,
   seedPublishedEventPageContent,
   seedPublishedOrderConfirmationContent,
 } from './helpers/seed';
 
 test.describe('State-driven event onboarding', () => {
   test.beforeEach(async ({ page }) => {
+    await ensureDevTenantGraph();
+    await page.addInitScript(
+      ({ organizationId, brandId }) => {
+        window.localStorage.setItem('tixkit:selected-organization-id', organizationId);
+        window.localStorage.setItem('tixkit:selected-brand-id', brandId);
+      },
+      { organizationId: devOrganizationId, brandId: devBrandId },
+    );
     await requireReachable(page, adminBaseUrl, 'admin dashboard');
   });
 
@@ -15,7 +26,7 @@ test.describe('State-driven event onboarding', () => {
     { name: 'desktop', width: 1440, height: 1000 },
     { name: 'mobile', width: 390, height: 844 },
   ]) {
-    test(`creates a durable draft and opens the launch center on ${viewport.name}`, async ({
+    test(`creates a durable draft and opens the media-aware launch center on ${viewport.name}`, async ({
       page,
     }, testInfo) => {
       await page.setViewportSize({
@@ -40,6 +51,10 @@ test.describe('State-driven event onboarding', () => {
       await expect(page.getByText(title)).toBeVisible();
       await expect(page.getByText(/launch center|required setup complete/i).first()).toBeVisible();
       await expect(page.getByRole('link', { name: /ticket/i }).first()).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Add event media' })).toHaveAttribute(
+        'href',
+        /\/events\/[^/]+\/settings#media$/u,
+      );
       await expectNoAxeViolations(page, testInfo);
     });
   }

@@ -131,7 +131,9 @@ export function NewEventView() {
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>();
   const [errorField, setErrorField] = React.useState<string>();
-  const creationIdempotencyKey = React.useRef<string | undefined>(undefined);
+  const creationRequest = React.useRef<{ fingerprint: string; idempotencyKey: string } | undefined>(
+    undefined,
+  );
   const recoveryPending = React.useRef(false);
   const fieldRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
   const { events: sourceEvents } = useAllEvents({
@@ -225,7 +227,6 @@ export function NewEventView() {
       return;
     }
     setSubmitting(true);
-    creationIdempotencyKey.current ??= window.crypto.randomUUID();
     const recovering = recoveryPending.current;
     if (recovering) {
       void adminApi.reportOnboardingEvent({ stage: 'recovery', outcome: 'attempted' });
@@ -233,20 +234,34 @@ export function NewEventView() {
     try {
       if (startingPoint === 'duplicate') {
         if (!sourceEventId) throw new Error('Choose an existing event to duplicate.');
-        const duplicated = await adminApi.duplicateEvent(sourceEventId, {
-          idempotencyKey: creationIdempotencyKey.current,
+        const duplicateInput = {
           startsAt: startIso,
           title: title.trim(),
           copy: duplicateCopy,
+        };
+        const fingerprint = JSON.stringify({
+          operation: 'duplicate',
+          sourceEventId,
+          input: duplicateInput,
+        });
+        if (creationRequest.current?.fingerprint !== fingerprint) {
+          creationRequest.current = {
+            fingerprint,
+            idempotencyKey: window.crypto.randomUUID(),
+          };
+        }
+        const duplicated = await adminApi.duplicateEvent(sourceEventId, {
+          ...duplicateInput,
+          idempotencyKey: creationRequest.current.idempotencyKey,
         });
         if (!duplicated.ok) throw new Error(duplicated.error.message);
         if (recovering) {
           void adminApi.reportOnboardingEvent({ stage: 'recovery', outcome: 'completed' });
         }
-        router.push(routes.eventDetail(duplicated.data.id));
+        router.push(`${routes.eventDetail(duplicated.data.id)}?created=1`);
         return;
       }
-      const created = await adminApi.createEvent({
+      const createInput = {
         organizationId,
         brandId,
         title: title.trim(),
@@ -259,13 +274,23 @@ export function NewEventView() {
         venue: venueName.trim() || country ? { name: venueName.trim(), country } : null,
         venueId: venueId || null,
         startingPoint,
-        idempotencyKey: creationIdempotencyKey.current,
+      };
+      const fingerprint = JSON.stringify({ operation: 'create', input: createInput });
+      if (creationRequest.current?.fingerprint !== fingerprint) {
+        creationRequest.current = {
+          fingerprint,
+          idempotencyKey: window.crypto.randomUUID(),
+        };
+      }
+      const created = await adminApi.createEvent({
+        ...createInput,
+        idempotencyKey: creationRequest.current.idempotencyKey,
       });
       if (!created.ok) throw new Error(created.error.message);
       if (recovering) {
         void adminApi.reportOnboardingEvent({ stage: 'recovery', outcome: 'completed' });
       }
-      router.push(routes.eventDetail(created.data.id));
+      router.push(`${routes.eventDetail(created.data.id)}?created=1`);
     } catch (cause) {
       recoveryPending.current = true;
       const message = cause instanceof Error ? cause.message : 'Unable to create the event draft.';
@@ -311,7 +336,8 @@ export function NewEventView() {
                   name="startingPoint"
                   value={point.id}
                   checked={startingPoint === point.id}
-                  onChange={() => {
+                  onChange={(change) => {
+                    if (!change.currentTarget.checked) return;
                     setStartingPoint(point.id);
                     void adminApi.reportOnboardingEvent({
                       stage: 'starting_point_selected',

@@ -481,7 +481,7 @@ async function withE2eDb<T>(callback: (db: Database) => Promise<T>): Promise<T> 
   }
 }
 
-async function ensureDevTenantGraph(): Promise<void> {
+export async function ensureDevTenantGraph(): Promise<void> {
   const now = new Date();
   await withE2eDb(async (db) => {
     const tenantInsert = db.insertInto('tenants').values({
