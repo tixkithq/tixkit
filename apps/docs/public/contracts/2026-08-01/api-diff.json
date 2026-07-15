@@ -1,0 +1,84 @@
+{
+  "from": "2026-07-31",
+  "to": "2026-08-01",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 12
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/event-updates",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/event-updates/{actionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/event-updates/{actionId}/approvals",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/event-updates/{actionId}/approvals/{approvalId}/revoke",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "POST /agent/event-updates/{actionId}/executions",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "operation-added",
+      "path": "GET /agent/event-updates/{actionId}/executions/{executionId}",
+      "message": "Operation was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventUpdateAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventUpdatePreview",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.PreparedAgentEventUpdateAction",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventUpdateApproval",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventUpdateExecution",
+      "message": "A named schema was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.AgentEventUpdateExecutionEvidence",
+      "message": "A named schema was added."
+    }
+  ]
+}
