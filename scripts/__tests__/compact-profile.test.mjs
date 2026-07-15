@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createPrivateKey, createPublicKey } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -9,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,6 +22,15 @@ import {
   runRecoveryActions,
   validateCompactEnvironment,
 } from '../compact.mjs';
+import {
+  assertCompactProofSchema,
+  parseComposeServices,
+  validateCompleteServiceState,
+  validateDockerEnvelope,
+  validateHostEnvelope,
+  validateOperatingEnvironment,
+  writeCompactProofArtifact,
+} from '../prove-compact-profile.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const composePath = resolve(root, 'infra/compact/compose.yml');
@@ -96,6 +106,373 @@ test('Compact topology contains the complete single-database application stack',
   assert.match(compose['x-app-environment'].S3_PUBLIC_ENDPOINT, /S3_PUBLIC_ENDPOINT/u);
   assert.match(compose.services.postgres.image, /@sha256:[a-f0-9]{64}$/u);
   assert.match(compose.services.minio.image, /@sha256:[a-f0-9]{64}$/u);
+});
+
+test('Compact proof validates the minimum host envelope and exact 13-service state', () => {
+  assert.doesNotThrow(() =>
+    validateHostEnvelope({
+      cpuCores: 4,
+      memoryBytes: 8 * 1024 ** 3,
+      diskBytes: 30 * 1024 ** 3,
+      architecture: 'x64',
+    }),
+  );
+  for (const invalid of [
+    { cpuCores: 3, memoryBytes: 8 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 },
+    { cpuCores: 4, memoryBytes: 8 * 1024 ** 3 - 1, diskBytes: 30 * 1024 ** 3 },
+    { cpuCores: 4, memoryBytes: 8 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 - 1 },
+  ])
+    assert.throws(
+      () => validateHostEnvelope({ ...invalid, architecture: 'x64' }),
+      /Compact proof requires/u,
+    );
+  assert.throws(
+    () =>
+      validateHostEnvelope({
+        cpuCores: 4,
+        memoryBytes: 8 * 1024 ** 3,
+        diskBytes: 30 * 1024 ** 3,
+        architecture: 'ia32',
+      }),
+    /supported 64-bit architecture/u,
+  );
+  assert.deepEqual(
+    validateDockerEnvelope({
+      NCPU: 4,
+      MemTotal: 8 * 1024 ** 3,
+      Architecture: 'aarch64',
+      OperatingSystem: 'Docker Desktop',
+      ServerVersion: '1.2.3',
+      diskBytes: 30 * 1024 ** 3,
+      contextName: 'desktop-linux',
+      endpointKind: 'local-unix',
+      endpointSha256: 'a'.repeat(64),
+    }),
+    {
+      cpuCores: 4,
+      memoryBytes: 8 * 1024 ** 3,
+      architecture: 'arm64',
+      operatingSystem: 'Docker Desktop',
+      serverVersion: '1.2.3',
+      diskBytes: 30 * 1024 ** 3,
+      diskScope: 'docker-writable-layer',
+      contextName: 'desktop-linux',
+      endpointKind: 'local-unix',
+      endpointSha256: 'a'.repeat(64),
+    },
+  );
+  assert.throws(
+    () =>
+      validateDockerEnvelope({
+        NCPU: 2,
+        MemTotal: 8 * 1024 ** 3,
+        Architecture: 'x86_64',
+        diskBytes: 30 * 1024 ** 3,
+        contextName: 'default',
+        endpointKind: 'local-unix',
+        endpointSha256: 'a'.repeat(64),
+      }),
+    /Docker cpuCores/u,
+  );
+  assert.doesNotThrow(() =>
+    validateOperatingEnvironment({ platform: 'darwin' }, { operatingSystem: 'Docker Desktop 4.0' }),
+  );
+  assert.throws(
+    () =>
+      validateOperatingEnvironment({ platform: 'win32' }, { operatingSystem: 'Docker Desktop' }),
+    /requires Linux or macOS/u,
+  );
+
+  const rows = [
+    ...[
+      'admin',
+      'api',
+      'checkout',
+      'minio',
+      'postgres',
+      'redis',
+      'temporal',
+      'temporal-postgres',
+      'temporal-ui',
+      'worker',
+    ].map((Service) => ({
+      Service,
+      State: 'running',
+      Health: Service === 'temporal-ui' ? '' : 'healthy',
+      ExitCode: 0,
+    })),
+    ...['migrate', 'seed', 'storage-init'].map((Service) => ({
+      Service,
+      State: 'exited',
+      Health: '',
+      ExitCode: 0,
+    })),
+  ];
+  const services = parseComposeServices(rows.map((row) => JSON.stringify(row)).join('\n'));
+  assert.equal(validateCompleteServiceState(services).length, 13);
+  assert.throws(
+    () => validateCompleteServiceState(services.filter((service) => service.service !== 'seed')),
+    /exact 13-service profile/u,
+  );
+  assert.throws(
+    () =>
+      validateCompleteServiceState(
+        services.map((service) =>
+          service.service === 'worker' ? { ...service, health: 'unhealthy' } : service,
+        ),
+      ),
+    /worker is not in its expected running health state/u,
+  );
+});
+
+test('Compact proof artifacts are exclusive, non-symlink, and mode 0600', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-compact-proof-artifact-'));
+  const artifact = join(directory, 'proof.json');
+  const target = join(directory, 'target.json');
+  const link = join(directory, 'link.json');
+  try {
+    writeCompactProofArtifact(artifact, { result: 'passed' });
+    assert.equal(statSync(artifact).mode & 0o777, 0o600);
+    assert.deepEqual(JSON.parse(readFileSync(artifact, 'utf8')), { result: 'passed' });
+    assert.throws(() => writeCompactProofArtifact(artifact, { result: 'replaced' }), /EEXIST/u);
+    writeFileSync(target, 'preserve', { mode: 0o600 });
+    symlinkSync(target, link);
+    assert.throws(() => writeCompactProofArtifact(link, { result: 'followed' }), /EEXIST/u);
+    assert.equal(readFileSync(target, 'utf8'), 'preserve');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Compact proof schema is strict and covers every lifecycle assertion', () => {
+  const schema = JSON.parse(readFileSync(resolve(root, 'infra/compact/proof.schema.json'), 'utf8'));
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(
+    new Set(schema.required),
+    new Set([
+      'schemaVersion',
+      'schema',
+      'kind',
+      'result',
+      'startedFromFreshEnvironment',
+      'authoritativePublicRepository',
+      'source',
+      'remote',
+      'host',
+      'docker',
+      'minimum',
+      'phases',
+      'negativeRestoreProof',
+      'backup',
+      'upgradeBackup',
+      'workerDependencyFailureObserved',
+      'seedPersistenceChecks',
+      'commands',
+      'transcript',
+      'finishedAt',
+      'limitations',
+    ]),
+  );
+  assert.equal(schema.$defs.command.additionalProperties, false);
+  assert.equal(schema.$defs.backupManifest.additionalProperties, false);
+  assert.equal(schema.$defs.serviceState.minItems, 13);
+  assert.equal(schema.$defs.serviceState.maxItems, 13);
+  assert.deepEqual(
+    schema.properties.negativeRestoreProof.prefixItems.map((item) => item.$ref),
+    [
+      '#/$defs/negativeSourceCommit',
+      '#/$defs/negativeVersion',
+      '#/$defs/negativeIncomplete',
+      '#/$defs/negativeChecksum',
+      '#/$defs/negativeSql',
+      '#/$defs/negativeArchive',
+    ],
+  );
+  const negativeIds = [
+    'incompatible-source-commit',
+    'incompatible-version',
+    'incomplete-artifact-set',
+    'checksum-mismatch',
+    'checksummed-invalid-sql',
+    'checksummed-unsafe-archive',
+  ];
+  const digest = 'a'.repeat(64);
+  const commit = 'b'.repeat(40);
+  const date = '2026-07-14T12:00:00.000Z';
+  const serviceState = [
+    ...[
+      'admin',
+      'api',
+      'checkout',
+      'minio',
+      'postgres',
+      'redis',
+      'temporal',
+      'temporal-postgres',
+      'worker',
+    ].map((service) => ({ service, state: 'running', health: 'healthy', exitCode: 0 })),
+    { service: 'temporal-ui', state: 'running', health: '', exitCode: 0 },
+    ...['migrate', 'seed', 'storage-init'].map((service) => ({
+      service,
+      state: 'exited',
+      health: '',
+      exitCode: 0,
+    })),
+  ].sort((left, right) => left.service.localeCompare(right.service));
+  const manifest = {
+    schemaVersion: 2,
+    profile: 'compact',
+    scope: 'application-object-and-temporal-logical-snapshot',
+    createdAt: date,
+    tixkitVersion: '1.0.0',
+    sourceCommit: commit,
+    files: ['postgres.sql', 'temporal.sql', 'temporal-visibility.sql', 'minio.tar.gz'].map(
+      (name) => ({ name, sha256: digest, size: 1 }),
+    ),
+  };
+  const manifestSha256 = createHash('sha256')
+    .update(`${JSON.stringify(manifest, null, 2)}\n`)
+    .digest('hex');
+  const command = {
+    command: ['bun', 'run', 'compact:up'],
+    expectedOutcome: 'success',
+    assertion: 'fixture-command',
+    failurePattern: null,
+    failureMatched: null,
+    startedAt: date,
+    finishedAt: date,
+    durationMs: 0,
+    exitCode: 0,
+    signal: null,
+    stdoutSha256: digest,
+    stdoutBytes: 0,
+    stderrSha256: digest,
+    stderrBytes: 0,
+  };
+  const evidence = {
+    schemaVersion: 1,
+    schema: 'https://tixkit.com/schemas/compact-clean-host-proof-v1.json',
+    kind: 'tixkit-compact-clean-host-proof',
+    result: 'passed',
+    startedFromFreshEnvironment: true,
+    authoritativePublicRepository: 'github.com/tixkit/tixkit',
+    source: { commit, tree: commit },
+    remote: {
+      url: 'https://github.com/tixkit/tixkit.git',
+      ref: 'refs/heads/main',
+      refObject: commit,
+      object: commit,
+    },
+    host: {
+      cpuCores: 4,
+      memoryBytes: 8 * 1024 ** 3,
+      diskBytes: 30 * 1024 ** 3,
+      architecture: 'x64',
+      platform: 'linux',
+      platformRelease: 'fixture',
+    },
+    docker: {
+      cpuCores: 4,
+      memoryBytes: 8 * 1024 ** 3,
+      architecture: 'x86_64',
+      operatingSystem: 'Linux',
+      serverVersion: 'fixture',
+      diskBytes: 30 * 1024 ** 3,
+      diskScope: 'docker-writable-layer',
+      contextName: 'default',
+      endpointKind: 'local-unix',
+      endpointSha256: digest,
+    },
+    minimum: { cpuCores: 4, memoryBytes: 8 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 },
+    phases: Object.fromEntries(
+      ['initial', 'restarted', 'restored', 'recovered', 'upgraded'].map((phase) => [
+        phase,
+        serviceState,
+      ]),
+    ),
+    negativeRestoreProof: negativeIds.map((id, commandIndex) => ({
+      id,
+      commandIndex,
+      expectedExitCode: 1,
+      before: {
+        databaseSha256: digest,
+        objectInventorySha256: digest,
+        objectInventoryCount: 1,
+        objectInventoryBytes: 1,
+      },
+      after: {
+        databaseSha256: digest,
+        objectInventorySha256: digest,
+        objectInventoryCount: 1,
+        objectInventoryBytes: 1,
+      },
+      liveStatePreserved: true,
+    })),
+    backup: { manifest, manifestSha256 },
+    upgradeBackup: { manifest, manifestSha256 },
+    workerDependencyFailureObserved: true,
+    seedPersistenceChecks: 5,
+    commands: Array.from({ length: 25 }, (_, index) =>
+      index < negativeIds.length
+        ? {
+            ...command,
+            expectedOutcome: 'failure',
+            assertion: `negative-restore-${negativeIds[index]}`,
+            failurePattern: 'expected fixture failure',
+            failureMatched: true,
+            exitCode: 1,
+          }
+        : command,
+    ),
+    transcript: { path: 'command-transcript.log', bytes: 1, sha256: digest },
+    finishedAt: date,
+    limitations: [
+      'This proof covers one Compact host and does not establish high availability.',
+      'This proof does not establish legal approval, hosted publication, or production DR.',
+    ],
+  };
+  assert.doesNotThrow(() => assertCompactProofSchema(evidence));
+  assert.throws(
+    () => assertCompactProofSchema({ ...evidence, unexpected: true }),
+    /violates its schema/u,
+  );
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        phases: { ...evidence.phases, initial: serviceState.slice(1) },
+      }),
+    /violates its schema/u,
+  );
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        commands: evidence.commands.map((item, index) =>
+          index === 10 ? { ...item, exitCode: 1 } : item,
+        ),
+      }),
+    /outcome differs/u,
+  );
+  const duplicateManifest = {
+    ...manifest,
+    files: manifest.files.map((file, index) =>
+      index === 3 ? { ...file, name: 'postgres.sql' } : file,
+    ),
+  };
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        backup: {
+          manifest: duplicateManifest,
+          manifestSha256: createHash('sha256')
+            .update(`${JSON.stringify(duplicateManifest, null, 2)}\n`)
+            .digest('hex'),
+        },
+      }),
+    /exact artifact set/u,
+  );
 });
 
 test('Compact rejects weak, placeholder, and permissive existing environments', () => {
@@ -526,6 +903,7 @@ printf 'fixture\n'
     const selector = ['--env-file', sourceEnvironment, '--project-name', projectName];
 
     run('up', ...selector);
+    run('restart', ...selector);
     run('status', ...selector);
     run('logs', ...selector, 'api', 'worker');
     run('backup', ...selector, backupDirectory);
@@ -613,6 +991,10 @@ printf 'fixture\n'
       ),
     );
     assert.ok(invocations.some((line) => line.includes(`--network ${projectName}_default`)));
+    assert.ok(
+      sourceComposeInvocations.some((line) => line.endsWith(' down')) &&
+        sourceComposeInvocations.some((line) => line.endsWith(' up -d --no-build --wait')),
+    );
     assert.ok(
       invocations.some(
         (line) =>

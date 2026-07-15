@@ -72,11 +72,22 @@ Edit the destination `*_PORT` values before starting both projects. When changin
 
 ```bash
 bun run compact:status
+bun run compact:restart
 bun run compact:logs
 bun run compact:logs -- api worker
 ```
 
-Restarting the host or Docker preserves the four named data volumes. Running `bun run compact:up` again rechecks migrations, storage initialization, seed idempotency, and service health.
+`compact:restart` removes and recreates the profile containers without rebuilding images or deleting the four named data volumes. This reruns migrations, storage initialization and the idempotent seed before waiting for every long-running service to become healthy. Restarting the host or Docker also preserves the named volumes; use `compact:restart` afterward for the supported full-profile restart check.
+
+From a fresh authoritative public clone on a host that meets the minimum envelope, retain a machine-readable lifecycle proof with:
+
+```bash
+bun run compact:prove -- \
+  --ref refs/heads/main \
+  --out /private/tmp/tixkit-compact-proof-$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+The output directory must be new, outside the repository and beneath a real non-symlink parent. The proof command refuses a dirty, shallow, non-public or already initialized clone, and requires `HEAD` to equal the object currently advertised by the named authoritative public branch or version tag. It records the remote ref/object, exact commit/tree, host and Docker envelope, all 13 service states, seed persistence, restart, backup/restore, live database/object fingerprints for every negative restore case, Temporal dependency failure/recovery, upgrade, validation commands and a mode-`0600` transcript. Raw daemon metadata is omitted and the transcript fails closed if it contains generated credentials. A passing local artifact is still not hosted publication, high-availability, legal or Production-profile proof.
 
 ## Trust a portability source
 

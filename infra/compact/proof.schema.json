@@ -1,0 +1,497 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/compact-clean-host-proof-v1.json",
+  "title": "Tixkit Compact clean-host proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "schema",
+    "kind",
+    "result",
+    "startedFromFreshEnvironment",
+    "authoritativePublicRepository",
+    "source",
+    "remote",
+    "host",
+    "docker",
+    "minimum",
+    "phases",
+    "negativeRestoreProof",
+    "backup",
+    "upgradeBackup",
+    "workerDependencyFailureObserved",
+    "seedPersistenceChecks",
+    "commands",
+    "transcript",
+    "finishedAt",
+    "limitations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "schema": { "const": "https://tixkit.com/schemas/compact-clean-host-proof-v1.json" },
+    "kind": { "const": "tixkit-compact-clean-host-proof" },
+    "result": { "const": "passed" },
+    "startedFromFreshEnvironment": { "const": true },
+    "authoritativePublicRepository": { "const": "github.com/tixkit/tixkit" },
+    "source": { "$ref": "#/$defs/source" },
+    "remote": { "$ref": "#/$defs/remote" },
+    "host": { "$ref": "#/$defs/host" },
+    "docker": { "$ref": "#/$defs/docker" },
+    "minimum": { "$ref": "#/$defs/minimum" },
+    "phases": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initial", "restarted", "restored", "recovered", "upgraded"],
+      "properties": {
+        "initial": { "$ref": "#/$defs/serviceState" },
+        "restarted": { "$ref": "#/$defs/serviceState" },
+        "restored": { "$ref": "#/$defs/serviceState" },
+        "recovered": { "$ref": "#/$defs/serviceState" },
+        "upgraded": { "$ref": "#/$defs/serviceState" }
+      }
+    },
+    "negativeRestoreProof": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "prefixItems": [
+        { "$ref": "#/$defs/negativeSourceCommit" },
+        { "$ref": "#/$defs/negativeVersion" },
+        { "$ref": "#/$defs/negativeIncomplete" },
+        { "$ref": "#/$defs/negativeChecksum" },
+        { "$ref": "#/$defs/negativeSql" },
+        { "$ref": "#/$defs/negativeArchive" }
+      ],
+      "items": false
+    },
+    "backup": { "$ref": "#/$defs/backupEvidence" },
+    "upgradeBackup": { "$ref": "#/$defs/backupEvidence" },
+    "workerDependencyFailureObserved": { "const": true },
+    "seedPersistenceChecks": { "const": 5 },
+    "commands": {
+      "type": "array",
+      "minItems": 25,
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "transcript": { "$ref": "#/$defs/transcript" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "limitations": {
+      "const": [
+        "This proof covers one Compact host and does not establish high availability.",
+        "This proof does not establish legal approval, hosted publication, or production DR."
+      ]
+    }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "commit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "tree": { "$ref": "#/$defs/commit" }
+      }
+    },
+    "remote": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "ref", "refObject", "object"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "(?:github\\.com)(?::|/)tixkit/tixkit(?:\\.git)?$"
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^refs/(?:heads/main|tags/v[0-9][A-Za-z0-9._-]*)$"
+        },
+        "refObject": { "$ref": "#/$defs/commit" },
+        "object": { "$ref": "#/$defs/commit" }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuCores",
+        "memoryBytes",
+        "diskBytes",
+        "architecture",
+        "platform",
+        "platformRelease"
+      ],
+      "properties": {
+        "cpuCores": { "type": "integer", "minimum": 4 },
+        "memoryBytes": { "type": "integer", "minimum": 8589934592 },
+        "diskBytes": { "type": "integer", "minimum": 32212254720 },
+        "architecture": { "enum": ["arm64", "x64"] },
+        "platform": { "type": "string", "minLength": 1 },
+        "platformRelease": { "type": "string", "minLength": 1 }
+      }
+    },
+    "docker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuCores",
+        "memoryBytes",
+        "architecture",
+        "operatingSystem",
+        "serverVersion",
+        "diskBytes",
+        "diskScope",
+        "contextName",
+        "endpointKind",
+        "endpointSha256"
+      ],
+      "properties": {
+        "cpuCores": { "type": "integer", "minimum": 4 },
+        "memoryBytes": { "type": "integer", "minimum": 8589934592 },
+        "architecture": { "enum": ["arm64", "x64", "x86_64"] },
+        "operatingSystem": { "type": "string", "minLength": 1 },
+        "serverVersion": { "type": "string", "minLength": 1 },
+        "diskBytes": { "type": "integer", "minimum": 32212254720 },
+        "diskScope": { "const": "docker-writable-layer" },
+        "contextName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "endpointKind": { "const": "local-unix" },
+        "endpointSha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "minimum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpuCores", "memoryBytes", "diskBytes"],
+      "properties": {
+        "cpuCores": { "const": 4 },
+        "memoryBytes": { "const": 8589934592 },
+        "diskBytes": { "const": 32212254720 }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "state", "health", "exitCode"],
+      "properties": {
+        "service": {
+          "enum": [
+            "admin",
+            "api",
+            "checkout",
+            "migrate",
+            "minio",
+            "postgres",
+            "redis",
+            "seed",
+            "storage-init",
+            "temporal",
+            "temporal-postgres",
+            "temporal-ui",
+            "worker"
+          ]
+        },
+        "state": { "enum": ["running", "exited"] },
+        "health": { "enum": ["", "healthy"] },
+        "exitCode": { "const": 0 }
+      }
+    },
+    "serviceState": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/service" },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "admin" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "api" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "checkout" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "migrate" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "minio" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "postgres" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "redis" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "seed" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "storage-init" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "temporal" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "temporal-postgres" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "temporal-ui" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "worker" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "backupFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size"],
+      "properties": {
+        "name": {
+          "enum": ["postgres.sql", "temporal.sql", "temporal-visibility.sql", "minio.tar.gz"]
+        },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "backupManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "profile",
+        "scope",
+        "createdAt",
+        "tixkitVersion",
+        "sourceCommit",
+        "files"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "profile": { "const": "compact" },
+        "scope": { "const": "application-object-and-temporal-logical-snapshot" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "tixkitVersion": { "type": "string", "minLength": 1 },
+        "sourceCommit": { "$ref": "#/$defs/commit" },
+        "files": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/backupFile" }
+        }
+      }
+    },
+    "backupEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest", "manifestSha256"],
+      "properties": {
+        "manifest": { "$ref": "#/$defs/backupManifest" },
+        "manifestSha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "expectedOutcome",
+        "assertion",
+        "failurePattern",
+        "failureMatched",
+        "startedAt",
+        "finishedAt",
+        "durationMs",
+        "exitCode",
+        "signal",
+        "stdoutSha256",
+        "stdoutBytes",
+        "stderrSha256",
+        "stderrBytes"
+      ],
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 4096 }
+        },
+        "expectedOutcome": { "enum": ["success", "failure"] },
+        "assertion": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "failurePattern": { "type": ["string", "null"], "maxLength": 500 },
+        "failureMatched": { "type": ["boolean", "null"] },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "exitCode": { "type": "integer", "minimum": 0 },
+        "signal": { "type": ["string", "null"] },
+        "stdoutSha256": { "$ref": "#/$defs/digest" },
+        "stdoutBytes": { "type": "integer", "minimum": 0 },
+        "stderrSha256": { "$ref": "#/$defs/digest" },
+        "stderrBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "transcript": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256"],
+      "properties": {
+        "path": { "const": "command-transcript.log" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "liveFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "databaseSha256",
+        "objectInventorySha256",
+        "objectInventoryCount",
+        "objectInventoryBytes"
+      ],
+      "properties": {
+        "databaseSha256": { "$ref": "#/$defs/digest" },
+        "objectInventorySha256": { "$ref": "#/$defs/digest" },
+        "objectInventoryCount": { "type": "integer", "minimum": 1 },
+        "objectInventoryBytes": { "type": "integer", "minimum": 1, "maximum": 4194304 }
+      }
+    },
+    "negativeProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "commandIndex",
+        "expectedExitCode",
+        "before",
+        "after",
+        "liveStatePreserved"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "commandIndex": { "type": "integer", "minimum": 0 },
+        "expectedExitCode": { "type": "integer", "minimum": 1 },
+        "before": { "$ref": "#/$defs/liveFingerprint" },
+        "after": { "$ref": "#/$defs/liveFingerprint" },
+        "liveStatePreserved": { "const": true }
+      }
+    },
+    "negativeSourceCommit": {
+      "allOf": [
+        { "$ref": "#/$defs/negativeProof" },
+        { "type": "object", "properties": { "id": { "const": "incompatible-source-commit" } } }
+      ]
+    },
+    "negativeVersion": {
+      "allOf": [
+        { "$ref": "#/$defs/negativeProof" },
+        { "type": "object", "properties": { "id": { "const": "incompatible-version" } } }
+      ]
+    },
+    "negativeIncomplete": {
+      "allOf": [
+        { "$ref": "#/$defs/negativeProof" },
+        { "type": "object", "properties": { "id": { "const": "incomplete-artifact-set" } } }
+      ]
+    },
+    "negativeChecksum": {
+      "allOf": [
+        { "$ref": "#/$defs/negativeProof" },
+        { "type": "object", "properties": { "id": { "const": "checksum-mismatch" } } }
+      ]
+    },
+    "negativeSql": {
+      "allOf": [
+        { "$ref": "#/$defs/negativeProof" },
+        { "type": "object", "properties": { "id": { "const": "checksummed-invalid-sql" } } }
+      ]
+    },
+    "negativeArchive": {
+      "allOf": [
+        { "$ref": "#/$defs/negativeProof" },
+        { "type": "object", "properties": { "id": { "const": "checksummed-unsafe-archive" } } }
+      ]
+    }
+  }
+}

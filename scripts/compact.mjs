@@ -800,7 +800,7 @@ export function restoreCompact(source, options = {}) {
 }
 
 function usage() {
-  return 'Usage: bun run compact:<init|up|status|logs|backup|restore|upgrade|uninstall> [--env-file <path>] [--project-name <name>] [init: --image-mode <source|release> --version <version>] [options]';
+  return 'Usage: bun run compact:<init|up|restart|status|logs|backup|restore|upgrade|uninstall> [--env-file <path>] [--project-name <name>] [init: --image-mode <source|release> --version <version>] [options]';
 }
 
 export function parseCompactCliArguments(arguments_) {
@@ -878,6 +878,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
         console.log(
           `Compact is healthy: admin ${compactUrl('admin', runtime)}, checkout ${compactUrl('checkout', runtime)}`,
         );
+        break;
+      case 'restart':
+        requireEnvironment(runtime);
+        compose(['down'], runtime);
+        compose(['up', '-d', '--no-build', '--wait'], runtime);
+        console.log('Compact restarted without rebuilding images or removing persistent volumes.');
         break;
       case 'status':
         requireEnvironment(runtime);
