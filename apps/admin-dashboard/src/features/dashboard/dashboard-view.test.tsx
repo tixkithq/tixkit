@@ -4,23 +4,39 @@ import { render, screen, waitFor } from '@testing-library/react';
 // Mock adminApi before importing DashboardView
 const mockListEvents = vi.fn();
 const mockListOrders = vi.fn();
+const mockGetWorkspaceReadiness = vi.fn().mockResolvedValue({
+  ok: true,
+  data: {
+    tenantId: 'tnt_1',
+    organizationId: 'org_1',
+    brandId: 'brd_1',
+    generatedAt: new Date(0).toISOString(),
+    paymentMode: 'capture',
+    complete: false,
+    steps: [],
+    actionFeed: [
+      {
+        id: 'workspace:payment_path',
+        stepId: 'payment_path',
+        severity: 'critical',
+        owner: 'finance',
+        deadlineAt: null,
+        status: 'blocked',
+        reasonCodes: ['payment_path_missing'],
+        actionId: 'configure_payments',
+        requiredPermission: 'billing.write',
+        updatedAt: null,
+      },
+    ],
+  },
+});
+const mockCan = vi.fn<(permission: string) => boolean>(() => true);
 
 vi.mock('@/lib/api', () => ({
   adminApi: {
     listEvents: (...args: unknown[]) => mockListEvents(...args),
     listOrders: (...args: unknown[]) => mockListOrders(...args),
-    getWorkspaceReadiness: vi.fn().mockResolvedValue({
-      ok: true,
-      data: {
-        tenantId: 'tnt_1',
-        organizationId: 'org_1',
-        brandId: 'brd_1',
-        generatedAt: new Date(0).toISOString(),
-        paymentMode: 'capture',
-        complete: true,
-        steps: [],
-      },
-    }),
+    getWorkspaceReadiness: (...args: unknown[]) => mockGetWorkspaceReadiness(...args),
   },
 }));
 
@@ -57,7 +73,7 @@ vi.mock('@/context/bootstrap-provider', () => ({
 }));
 
 vi.mock('@/context/permission-provider', () => ({
-  usePermissions: () => ({ can: () => true, loading: false, error: null }),
+  usePermissions: () => ({ can: mockCan, loading: false, error: null }),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -153,6 +169,7 @@ function makeEmpty() {
 describe('DashboardView error states', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCan.mockReturnValue(true);
   });
 
   it('renders the optimized recent-event thumbnail with intrinsic dimensions', async () => {
@@ -167,6 +184,89 @@ describe('DashboardView error states', () => {
     expect(thumbnail).toHaveAttribute('src', '/v1/events/evt_1/media/renditions/emr_cover');
     expect(thumbnail).toHaveAttribute('width', '480');
     expect(thumbnail).toHaveAttribute('height', '270');
+  });
+
+  it('renders the server-prioritized action owner, severity, deadline, and remediation', async () => {
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText(/Critical · Owner: Finance · No fixed deadline/)).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Resolve Prepare the payment path' })).toHaveAttribute(
+      'href',
+      '/settings/payments',
+    );
+  });
+
+  it('fails closed with an actionable retry when an incomplete mixed-version response has no feed', async () => {
+    mockGetWorkspaceReadiness.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        generatedAt: new Date(0).toISOString(),
+        paymentMode: 'capture',
+        complete: false,
+        steps: [],
+      },
+    });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/actions are unavailable/i);
+    expect(screen.getByRole('button', { name: /retry workspace actions/i })).toBeEnabled();
+  });
+
+  it('does not request orders without orders.read', async () => {
+    mockCan.mockImplementation((permission) => permission !== 'orders.read');
+    mockListEvents.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    await screen.findByText(/no events yet/i);
+    expect(mockListOrders).not.toHaveBeenCalled();
+    expect(screen.getByText(/orders access is required/i)).toBeVisible();
+    expect(screen.queryByText(/no orders yet/i)).not.toBeInTheDocument();
+  });
+
+  it('renders an owner handoff without a remediation link when permission is denied', async () => {
+    mockGetWorkspaceReadiness.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationId: 'org_1',
+        brandId: 'brd_1',
+        generatedAt: new Date(0).toISOString(),
+        paymentMode: 'capture',
+        complete: false,
+        steps: [],
+        actionFeed: [
+          {
+            id: 'workspace:payment_path',
+            stepId: 'payment_path',
+            severity: 'critical',
+            owner: 'finance',
+            deadlineAt: null,
+            status: 'blocked',
+            reasonCodes: ['payment_path_missing', 'permission_required'],
+            actionId: null,
+            requiredPermission: 'billing.write',
+            updatedAt: null,
+          },
+        ],
+      },
+    });
+    mockListEvents.mockResolvedValue(makeEmpty());
+    mockListOrders.mockResolvedValue(makeEmpty());
+
+    render(<DashboardView />);
+
+    expect(await screen.findByText('Finance action required')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Resolve Prepare the payment path' })).toBeNull();
   });
 
   it('shows error state on 401', async () => {

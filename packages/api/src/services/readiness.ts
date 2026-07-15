@@ -328,6 +328,38 @@ function requiredStepComplete(step: ReadinessStep<string>): boolean {
   );
 }
 
+const workspaceActionPolicy = {
+  workspace_selection: { severity: 'critical', owner: 'organizer', order: 0 },
+  payment_path: { severity: 'critical', owner: 'finance', order: 1 },
+  brand_identity: { severity: 'high', owner: 'marketing', order: 2 },
+  legal_configuration: { severity: 'medium', owner: 'support', order: 3 },
+  sender_identity: { severity: 'medium', owner: 'marketing', order: 4 },
+  team_access: { severity: 'low', owner: 'organizer', order: 5 },
+} as const satisfies Record<
+  WorkspaceReadinessStepId,
+  {
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    owner: 'organizer' | 'finance' | 'marketing' | 'support';
+    order: number;
+  }
+>;
+
+const workspaceActionReasonCodes = [
+  'organization_inactive',
+  'brand_inactive',
+  'brand_identity_incomplete',
+  'payment_path_missing',
+  'team_access_single_member',
+  'legal_configuration_missing',
+  'sender_identity_missing',
+  'permission_required',
+] as const satisfies ReadonlyArray<ReadinessReasonCode>;
+type WorkspaceActionReasonCode = (typeof workspaceActionReasonCodes)[number];
+
+function isWorkspaceActionReasonCode(code: ReadinessReasonCode): code is WorkspaceActionReasonCode {
+  return (workspaceActionReasonCodes as ReadonlyArray<ReadinessReasonCode>).includes(code);
+}
+
 export class ReadinessService {
   constructor(
     private readonly db: Database,
@@ -483,6 +515,34 @@ export class ReadinessService {
       }),
     ];
 
+    const actionFeed = steps
+      .filter(
+        (step): step is typeof step & { status: 'incomplete' | 'blocked' } =>
+          step.status === 'incomplete' || step.status === 'blocked',
+      )
+      .sort(
+        (left, right) =>
+          workspaceActionPolicy[left.id].order - workspaceActionPolicy[right.id].order,
+      )
+      .map((step) => {
+        const reasonCodes = step.reasonCodes.filter(isWorkspaceActionReasonCode);
+        if (reasonCodes.length === 0) {
+          throw new Error(`Workspace action ${step.id} has no actionable reason code`);
+        }
+        return {
+          id: `workspace:${step.id}` as const,
+          stepId: step.id,
+          severity: workspaceActionPolicy[step.id].severity,
+          owner: workspaceActionPolicy[step.id].owner,
+          deadlineAt: null,
+          status: step.status,
+          reasonCodes,
+          actionId: step.actionId,
+          requiredPermission: step.requiredPermission,
+          updatedAt: step.updatedAt,
+        };
+      });
+
     return {
       tenantId: input.tenantId,
       organizationId: input.organizationId,
@@ -491,6 +551,7 @@ export class ReadinessService {
       paymentMode: this.paymentMode,
       complete: steps.every(requiredStepComplete),
       steps,
+      actionFeed,
     };
   }
 

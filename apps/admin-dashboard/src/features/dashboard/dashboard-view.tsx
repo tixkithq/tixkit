@@ -23,6 +23,7 @@ import { AuthenticatedEventImage } from '@/features/events/authenticated-event-i
 export function DashboardView() {
   const { organizationId, brandId } = useBootstrap();
   const { can } = usePermissions();
+  const canReadOrders = can('orders.read');
   const workspaceSelected = Boolean(organizationId && brandId);
   const {
     events,
@@ -47,7 +48,7 @@ export function DashboardView() {
       if (brandId) params.brandId = brandId;
       return adminApi.listOrders(params);
     },
-    { enabled: workspaceSelected },
+    { enabled: workspaceSelected && canReadOrders },
   );
 
   const recentOrders = ordersData?.items ?? [];
@@ -242,7 +243,11 @@ export function DashboardView() {
             <CardTitle>Recent Orders</CardTitle>
           </CardHeader>
           <CardContent>
-            {ordersLoading ? (
+            {!canReadOrders ? (
+              <p className="text-sm text-muted-foreground">
+                Orders access is required to view recent purchases.
+              </p>
+            ) : ordersLoading ? (
               <div className="space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <Skeleton key={i} className="h-16 w-full" />

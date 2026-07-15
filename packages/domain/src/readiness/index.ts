@@ -6,6 +6,18 @@ export type ReadinessStatus = (typeof readinessStatuses)[number];
 export const readinessPriorities = ['required', 'recommended'] as const;
 export type ReadinessPriority = (typeof readinessPriorities)[number];
 
+export const dashboardActionSeverities = ['critical', 'high', 'medium', 'low'] as const;
+export type DashboardActionSeverity = (typeof dashboardActionSeverities)[number];
+
+export const dashboardActionOwners = [
+  'organizer',
+  'finance',
+  'marketing',
+  'support',
+  'door_operations',
+] as const;
+export type DashboardActionOwner = (typeof dashboardActionOwners)[number];
+
 export const workspaceReadinessStepIds = [
   'workspace_selection',
   'brand_identity',
@@ -195,6 +207,32 @@ export interface WorkspaceReadiness {
   paymentMode: 'capture' | 'provider_test' | 'provider';
   complete: boolean;
   steps: ReadonlyArray<ReadinessStep<WorkspaceReadinessStepId>>;
+  actionFeed: ReadonlyArray<WorkspaceDashboardAction>;
+}
+
+export interface WorkspaceDashboardAction {
+  id: `workspace:${WorkspaceReadinessStepId}`;
+  stepId: WorkspaceReadinessStepId;
+  severity: DashboardActionSeverity;
+  owner: DashboardActionOwner;
+  deadlineAt: string | null;
+  status: Extract<ReadinessStatus, 'incomplete' | 'blocked'>;
+  reasonCodes: ReadonlyArray<
+    Extract<
+      ReadinessReasonCode,
+      | 'organization_inactive'
+      | 'brand_inactive'
+      | 'brand_identity_incomplete'
+      | 'payment_path_missing'
+      | 'team_access_single_member'
+      | 'legal_configuration_missing'
+      | 'sender_identity_missing'
+      | 'permission_required'
+    >
+  >;
+  actionId: ReadinessActionId | null;
+  requiredPermission: Permission | null;
+  updatedAt: string | null;
 }
 
 export interface EventLaunchReadiness {

@@ -522,13 +522,14 @@ describe('TixkitClient', () => {
   });
 
   it('gets workspace readiness for the selected brand', async () => {
-    const fetchMock = mockFetch(200, { complete: true, steps: [] });
+    const fetchMock = mockFetch(200, { complete: true, steps: [], actionFeed: [] });
     const client = new TixkitClient({
       apiKey: '***********',
       apiBaseUrl: 'https://api.test',
       maxRetries: 0,
     });
-    await client.organizations.readiness('org_1', 'brd_1');
+    const readiness = await client.organizations.readiness('org_1', 'brd_1');
+    expect(readiness.actionFeed).toEqual([]);
     expect(getCall(fetchMock).url).toBe(
       'https://api.test/v1/organizations/org_1/readiness?brandId=brd_1',
     );

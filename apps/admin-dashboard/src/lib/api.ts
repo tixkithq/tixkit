@@ -300,6 +300,20 @@ export type AdminWorkspaceReadiness = {
   paymentMode: 'capture' | 'provider_test' | 'provider';
   complete: boolean;
   steps: AdminReadinessStep[];
+  actionFeed?: AdminWorkspaceDashboardAction[];
+};
+
+export type AdminWorkspaceDashboardAction = {
+  id: `workspace:${WorkspaceReadinessStepId}`;
+  stepId: WorkspaceReadinessStepId;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  owner: 'organizer' | 'finance' | 'marketing' | 'support' | 'door_operations';
+  deadlineAt: string | null;
+  status: 'incomplete' | 'blocked';
+  reasonCodes: ReadinessReasonCode[];
+  actionId: ReadinessActionId | null;
+  requiredPermission: Permission | null;
+  updatedAt: string | null;
 };
 
 export type AdminEventLaunchReadiness = {
@@ -4615,7 +4629,7 @@ export const adminApi: AdminApi = {
             const senderReady = fixtureBrandSenderIdentities.some(
               (identity) => identity.brandId === brandId && identity.verified,
             );
-            const steps: AdminReadinessStep[] = [
+            const steps: Array<AdminReadinessStep & { id: WorkspaceReadinessStepId }> = [
               {
                 id: 'workspace_selection',
                 status: workspaceSelected ? 'complete' : 'blocked',
@@ -4700,6 +4714,52 @@ export const adminApi: AdminApi = {
                 acknowledgementValid: null,
               },
             ];
+            const policy = {
+              workspace_selection: {
+                severity: 'critical',
+                owner: 'organizer',
+                order: 0,
+              },
+              payment_path: {
+                severity: 'critical',
+                owner: 'finance',
+                order: 1,
+              },
+              brand_identity: {
+                severity: 'high',
+                owner: 'marketing',
+                order: 2,
+              },
+              legal_configuration: {
+                severity: 'medium',
+                owner: 'support',
+                order: 3,
+              },
+              sender_identity: {
+                severity: 'medium',
+                owner: 'marketing',
+                order: 4,
+              },
+              team_access: { severity: 'low', owner: 'organizer', order: 5 },
+            } as const;
+            const actionFeed: AdminWorkspaceDashboardAction[] = steps
+              .filter(
+                (step): step is typeof step & { status: 'incomplete' | 'blocked' } =>
+                  step.status === 'incomplete' || step.status === 'blocked',
+              )
+              .sort((left, right) => policy[left.id].order - policy[right.id].order)
+              .map((step) => ({
+                id: `workspace:${step.id}`,
+                stepId: step.id,
+                severity: policy[step.id].severity,
+                owner: policy[step.id].owner,
+                deadlineAt: null,
+                status: step.status,
+                reasonCodes: step.reasonCodes,
+                actionId: step.actionId,
+                requiredPermission: step.requiredPermission,
+                updatedAt: step.updatedAt,
+              }));
             return {
               tenantId: 'ten_demo',
               organizationId,
@@ -4710,6 +4770,7 @@ export const adminApi: AdminApi = {
                 .filter((step) => step.priority === 'required')
                 .every((step) => step.status === 'complete'),
               steps,
+              actionFeed,
             };
           })(),
         ),

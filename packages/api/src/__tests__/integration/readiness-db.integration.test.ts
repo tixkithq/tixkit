@@ -125,6 +125,23 @@ describeWithIntegrationDatabase('readiness service query and isolation budget', 
     });
     expect(statementCount).toBeLessThanOrEqual(WORKSPACE_READINESS_QUERY_BUDGET);
     expect(workspace.organizationId).toBe(organization.id);
+    expect(workspace.actionFeed).toEqual(
+      [...workspace.actionFeed].sort((left, right) => {
+        const order = { critical: 0, high: 1, medium: 2, low: 3 } as const;
+        return order[left.severity] - order[right.severity];
+      }),
+    );
+    expect(workspace.actionFeed.find((action) => action.stepId === 'brand_identity')).toMatchObject(
+      {
+        id: 'workspace:brand_identity',
+        severity: 'high',
+        owner: 'marketing',
+        deadlineAt: null,
+        actionId: null,
+        requiredPermission: 'settings.write',
+        reasonCodes: ['brand_identity_incomplete', 'permission_required'],
+      },
+    );
     const scope = {
       tenantId: tenant.id,
       organizationId: organization.id,

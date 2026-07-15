@@ -10,12 +10,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useBootstrap } from '@/context/bootstrap-provider';
 import { usePermissions } from '@/context/permission-provider';
 import { useAdminQuery } from '@/hooks/use-admin-table-data';
-import { adminApi, type AdminReadinessStep, type AdminWorkspaceReadiness } from '@/lib/api';
+import {
+  adminApi,
+  type AdminReadinessStep,
+  type AdminWorkspaceDashboardAction,
+  type AdminWorkspaceReadiness,
+} from '@/lib/api';
 import { dashboardDocUrl } from '@/lib/docs';
 import { routes } from '@/lib/routes';
 import type { TixkitPermission } from '@/lib/permissions';
 
-const collapseStorageKey = 'tixkit-workspace-readiness-collapsed';
+export const workspaceReadinessCollapseStorageKey = (organizationId: string, brandId: string) =>
+  `tixkit-workspace-readiness-collapsed:${organizationId}:${brandId}`;
 
 const stepLabels: Readonly<Record<string, string>> = {
   workspace_selection: 'Confirm workspace context',
@@ -56,6 +62,21 @@ const actionRoutes: Readonly<Record<string, string>> = {
   configure_sender: routes.settingsBranding,
 };
 
+const ownerLabels: Readonly<Record<AdminWorkspaceDashboardAction['owner'], string>> = {
+  organizer: 'Organizer',
+  finance: 'Finance',
+  marketing: 'Marketing',
+  support: 'Support',
+  door_operations: 'Door operations',
+};
+
+const severityLabels: Readonly<Record<AdminWorkspaceDashboardAction['severity'], string>> = {
+  critical: 'Critical',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+};
+
 export interface WorkspaceReadinessViewModel {
   completeCount: number;
   totalCount: number;
@@ -88,39 +109,50 @@ export function workspaceReadinessViewModel(
   };
 }
 
-function ReadinessStepRow({ step }: { step: AdminReadinessStep }) {
+function WorkspaceActionRow({ action: item }: { action: AdminWorkspaceDashboardAction }) {
   const { can } = usePermissions();
-  const action = step.actionId ? actionRoutes[step.actionId] : undefined;
-  const permitted = step.requiredPermission
-    ? can(step.requiredPermission as TixkitPermission)
+  const actionRoute = item.actionId ? actionRoutes[item.actionId] : undefined;
+  const permitted = item.requiredPermission
+    ? can(item.requiredPermission as TixkitPermission)
     : true;
-  const Icon =
-    step.status === 'complete' || step.status === 'not_applicable'
-      ? Check
-      : step.status === 'blocked'
-        ? LockKeyhole
-        : Circle;
+  const Icon = item.status === 'blocked' ? LockKeyhole : Circle;
+  const label = stepLabels[item.stepId] ?? 'Workspace readiness step';
   return (
     <li className="flex flex-wrap items-start gap-3 border-t py-3 first:border-t-0">
       <Icon
-        className={`mt-0.5 size-4 shrink-0 ${step.status === 'blocked' ? 'text-destructive' : 'text-muted-foreground'}`}
+        className={`mt-0.5 size-4 shrink-0 ${item.status === 'blocked' ? 'text-destructive' : 'text-muted-foreground'}`}
         aria-hidden="true"
       />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{stepLabels[step.id] ?? 'Workspace readiness step'}</p>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs font-medium text-foreground/80">
+          {severityLabels[item.severity]} · Owner: {ownerLabels[item.owner]} ·{' '}
+          {item.deadlineAt ? (
+            <>
+              Due{' '}
+              <time dateTime={item.deadlineAt}>{new Date(item.deadlineAt).toLocaleString()}</time>
+            </>
+          ) : (
+            'No fixed deadline'
+          )}
+        </p>
         <p className="text-xs text-muted-foreground">
-          {step.reasonCodes
+          {item.reasonCodes
             .map((code) => reasonLabels[code] ?? 'Review this workspace setting before continuing.')
             .join(' ')}
         </p>
       </div>
-      {action && permitted && step.status !== 'complete' && step.status !== 'not_applicable' ? (
+      {actionRoute && permitted ? (
         <Button variant="outline" size="sm" asChild>
-          <Link href={action}>Resolve</Link>
+          <Link href={actionRoute} aria-label={`Resolve ${label}`}>
+            Resolve
+          </Link>
         </Button>
       ) : null}
-      {action && !permitted && step.status !== 'complete' ? (
-        <span className="text-xs text-muted-foreground">Owner action required</span>
+      {!actionRoute || !permitted ? (
+        <span className="text-xs text-muted-foreground">
+          {ownerLabels[item.owner]} action required
+        </span>
       ) : null}
     </li>
   );
@@ -140,14 +172,19 @@ function ScopedWorkspaceReadiness({
   );
 
   React.useEffect(() => {
-    const saved = window.localStorage.getItem(collapseStorageKey);
+    const saved = window.localStorage.getItem(
+      workspaceReadinessCollapseStorageKey(organizationId, brandId),
+    );
     setCollapsed(saved === null ? Boolean(data?.complete) : saved === 'true');
-  }, [data?.complete]);
+  }, [brandId, data?.complete, organizationId]);
 
   function toggleCollapsed() {
     setCollapsed((current) => {
       const next = !current;
-      window.localStorage.setItem(collapseStorageKey, String(next));
+      window.localStorage.setItem(
+        workspaceReadinessCollapseStorageKey(organizationId, brandId),
+        String(next),
+      );
       return next;
     });
   }
@@ -156,6 +193,7 @@ function ScopedWorkspaceReadiness({
   if (error) return <ApiErrorState error={error} onRetry={refetch} />;
   if (!data) return null;
   const view = workspaceReadinessViewModel(data);
+  const actionFeed = Array.isArray(data.actionFeed) ? data.actionFeed : [];
 
   return (
     <Card>
@@ -173,6 +211,7 @@ function ScopedWorkspaceReadiness({
             size="sm"
             onClick={toggleCollapsed}
             aria-expanded={!collapsed}
+            aria-controls="workspace-action-feed"
           >
             {' '}
             {collapsed ? 'Expand' : 'Collapse'}{' '}
@@ -200,16 +239,27 @@ function ScopedWorkspaceReadiness({
         </div>
       </CardHeader>
       {!collapsed ? (
-        <CardContent>
+        <CardContent id="workspace-action-feed">
           {view.nextStep?.status === 'blocked' ? (
             <p className="mb-3 flex items-center gap-2 text-sm text-destructive">
               <AlertTriangle className="size-4" aria-hidden="true" />
               The next required step is blocked. Resolve its permission or provider prerequisite.
             </p>
           ) : null}
-          <ul>
-            {data.steps.map((step) => (
-              <ReadinessStepRow key={step.id} step={step} />
+          <h3 className="sr-only">Prioritized workspace actions</h3>
+          {!data.complete && actionFeed.length === 0 ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-destructive">
+                Workspace actions are unavailable. Retry before treating setup as complete.
+              </p>
+              <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+                Retry workspace actions
+              </Button>
+            </div>
+          ) : null}
+          <ul aria-label="Prioritized workspace actions">
+            {actionFeed.map((action) => (
+              <WorkspaceActionRow key={action.id} action={action} />
             ))}
           </ul>
           <a

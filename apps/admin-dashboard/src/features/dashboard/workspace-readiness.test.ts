@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AdminWorkspaceReadiness } from '@/lib/api';
-import { workspaceReadinessViewModel } from './workspace-readiness';
+import {
+  workspaceReadinessCollapseStorageKey,
+  workspaceReadinessViewModel,
+} from './workspace-readiness';
 
 function readiness(
   statuses: AdminWorkspaceReadiness['steps'][number]['status'][],
@@ -13,6 +16,7 @@ function readiness(
     generatedAt: '2026-07-10T12:00:00.000Z',
     paymentMode: 'capture',
     complete: statuses.every((status) => status === 'complete' || status === 'not_applicable'),
+    actionFeed: [],
     steps: statuses.map((status, index) => ({
       id: stepIds[index]!,
       status,
@@ -28,11 +32,20 @@ function readiness(
 }
 
 describe('workspaceReadinessViewModel', () => {
+  it('scopes collapse preferences to the organization and brand', () => {
+    expect(workspaceReadinessCollapseStorageKey('org_1', 'brd_1')).not.toBe(
+      workspaceReadinessCollapseStorageKey('org_1', 'brd_2'),
+    );
+  });
   it('counts complete and not-applicable steps and selects the next required action', () => {
     const result = workspaceReadinessViewModel(
       readiness(['complete', 'incomplete', 'not_applicable']),
     );
-    expect(result).toMatchObject({ completeCount: 2, totalCount: 3, percent: 67 });
+    expect(result).toMatchObject({
+      completeCount: 2,
+      totalCount: 3,
+      percent: 67,
+    });
     expect(result.nextStep?.status).toBe('incomplete');
   });
 

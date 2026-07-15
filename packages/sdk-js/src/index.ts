@@ -101,6 +101,13 @@ export type DuplicateEventInput = {
 
 export type ReadinessStatus = 'complete' | 'incomplete' | 'blocked' | 'not_applicable';
 export type ReadinessPriority = 'required' | 'recommended';
+export type DashboardActionSeverity = 'critical' | 'high' | 'medium' | 'low';
+export type DashboardActionOwner =
+  | 'organizer'
+  | 'finance'
+  | 'marketing'
+  | 'support'
+  | 'door_operations';
 export type Permission =
   | 'events.read'
   | 'events.write'
@@ -231,6 +238,37 @@ export type WorkspaceReadiness = {
   paymentMode: 'capture' | 'provider_test' | 'provider';
   complete: boolean;
   steps: ReadinessStep[];
+  actionFeed?: WorkspaceDashboardAction[];
+};
+export type WorkspaceDashboardAction = {
+  id: `workspace:${Extract<ReadinessStepId, 'workspace_selection' | 'brand_identity' | 'payment_path' | 'team_access' | 'legal_configuration' | 'sender_identity'>}`;
+  stepId: Extract<
+    ReadinessStepId,
+    | 'workspace_selection'
+    | 'brand_identity'
+    | 'payment_path'
+    | 'team_access'
+    | 'legal_configuration'
+    | 'sender_identity'
+  >;
+  severity: DashboardActionSeverity;
+  owner: DashboardActionOwner;
+  deadlineAt: string | null;
+  status: 'incomplete' | 'blocked';
+  reasonCodes: Extract<
+    ReadinessReasonCode,
+    | 'organization_inactive'
+    | 'brand_inactive'
+    | 'brand_identity_incomplete'
+    | 'payment_path_missing'
+    | 'team_access_single_member'
+    | 'legal_configuration_missing'
+    | 'sender_identity_missing'
+    | 'permission_required'
+  >[];
+  actionId: ReadinessActionId | null;
+  requiredPermission: Permission | null;
+  updatedAt: string | null;
 };
 export type EventLaunchReadiness = {
   tenantId: string;

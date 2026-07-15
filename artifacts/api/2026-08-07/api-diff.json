@@ -1,0 +1,24 @@
+{
+  "from": "2026-08-06",
+  "to": "2026-08-07",
+  "initialRelease": false,
+  "breaking": false,
+  "summary": {
+    "breaking": 0,
+    "compatible": 2
+  },
+  "changes": [
+    {
+      "severity": "compatible",
+      "category": "property-added",
+      "path": "components.schemas.WorkspaceReadiness.properties.actionFeed",
+      "message": "An optional property was added."
+    },
+    {
+      "severity": "compatible",
+      "category": "schema-added",
+      "path": "components.schemas.WorkspaceDashboardAction",
+      "message": "A named schema was added."
+    }
+  ]
+}

@@ -122,7 +122,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-06');
+    expect(openApiSpec.info.version).toBe('2026-08-07');
   });
 
   it('publishes digest-bound agent plan creation, inspection and CAS transitions', () => {
@@ -640,6 +640,10 @@ describe('openApiSpec', () => {
       '/events/{eventId}/readiness-acknowledgements/{stepId}',
     );
     expect(openApiSpec.components.schemas).toHaveProperty('WorkspaceReadiness');
+    expect(openApiSpec.components.schemas).toHaveProperty('WorkspaceDashboardAction');
+    expect(openApiSpec.components.schemas.WorkspaceReadiness.properties).toHaveProperty(
+      'actionFeed',
+    );
     expect(openApiSpec.components.schemas).toHaveProperty('EventLaunchReadiness');
     expect(openApiSpec.components.schemas).toHaveProperty('ReadinessAcknowledgement');
     const readinessOperations = [
