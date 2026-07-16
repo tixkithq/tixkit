@@ -6,10 +6,14 @@ import test from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
 import schema from '../performance-capacity.schema.json' with { type: 'json' };
 import {
-  createCapacityEvidence,
+  assertExpectedRunnerFingerprint,
+  createCapacityEvidence as createCapacityEvidenceWithRunnerIdentity,
   executeCapacitySample,
-  runCapacityCharacterization,
-  validateCapacityEvidence,
+  parseCapacityOptions,
+  probeRunnerFingerprint,
+  RUNNER_FINGERPRINT_VERSION,
+  runCapacityCharacterization as runCapacityCharacterizationWithRunnerIdentity,
+  validateCapacityEvidence as validateCapacityEvidenceWithRunnerIdentity,
   validateCapacityConfig,
 } from '../performance-capacity.mjs';
 import { canonicalJson, sha256 } from '../performance-evidence.mjs';
@@ -17,6 +21,37 @@ import { canonicalJson, sha256 } from '../performance-evidence.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const committed = JSON.parse(readFileSync(resolve(root, 'performance-capacity.trusted.json')));
 const workflow = readFileSync(resolve(root, '.github/workflows/performance-capacity.yml'), 'utf8');
+const runnerFingerprint = probeRunnerFingerprint({
+  platform: 'linux',
+  architecture: 'x64',
+  cpuModels: Array.from({ length: 32 }, () => 'AMD EPYC test fixture'),
+  logicalCpuCount: 32,
+  totalMemoryBytes: 68_719_476_736,
+});
+const expectedRunnerFingerprintSha256 = runnerFingerprint.sha256;
+
+function createCapacityEvidence(input) {
+  return createCapacityEvidenceWithRunnerIdentity({
+    ...input,
+    runnerFingerprint,
+    expectedRunnerFingerprintSha256,
+  });
+}
+
+function validateCapacityEvidence(input) {
+  return validateCapacityEvidenceWithRunnerIdentity({
+    ...input,
+    expectedRunnerFingerprintSha256,
+  });
+}
+
+function runCapacityCharacterization(input) {
+  return runCapacityCharacterizationWithRunnerIdentity({
+    ...input,
+    expectedRunnerFingerprintSha256,
+    probeRunner: () => runnerFingerprint,
+  });
+}
 
 function configFixture() {
   return structuredClone(committed);
@@ -58,6 +93,98 @@ function samplesFor(profile, throughputs, options = {}) {
   );
 }
 
+test('runner fingerprint is stable, privacy-minimized, versioned, and fail-closed', () => {
+  const normalized = probeRunnerFingerprint({
+    platform: 'linux',
+    architecture: 'x64',
+    cpuModels: Array.from({ length: 32 }, (_, index) =>
+      index % 2 === 0 ? '  AMD   EPYC test fixture ' : 'AMD EPYC test fixture',
+    ),
+    logicalCpuCount: 32,
+    totalMemoryBytes: 68_719_476_736,
+  });
+  assert.deepEqual(normalized, runnerFingerprint);
+  assert.deepEqual(Object.keys(normalized).sort(), ['sha256', 'version']);
+  assert.equal(normalized.version, RUNNER_FINGERPRINT_VERSION);
+  assert.match(normalized.sha256, /^[a-f0-9]{64}$/u);
+  assert.equal(JSON.stringify(normalized).includes('AMD'), false);
+  assert.equal(
+    assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, normalized),
+    normalized,
+  );
+
+  const mostlyA = probeRunnerFingerprint({
+    platform: 'linux',
+    architecture: 'x64',
+    cpuModels: [...Array.from({ length: 31 }, () => 'Model A'), 'Model B'],
+    logicalCpuCount: 32,
+    totalMemoryBytes: 68_719_476_736,
+  });
+  const mostlyB = probeRunnerFingerprint({
+    platform: 'linux',
+    architecture: 'x64',
+    cpuModels: ['Model A', ...Array.from({ length: 31 }, () => 'Model B')],
+    logicalCpuCount: 32,
+    totalMemoryBytes: 68_719_476_736,
+  });
+  assert.notEqual(
+    mostlyA.sha256,
+    mostlyB.sha256,
+    '31A+1B and 1A+31B CPU topologies must not collide',
+  );
+
+  const identityDrift = [
+    { architecture: 'arm64' },
+    { cpuModels: Array.from({ length: 32 }, () => 'Different CPU') },
+    { logicalCpuCount: 64 },
+    { totalMemoryBytes: 137_438_953_472 },
+  ];
+  for (const drift of identityDrift) {
+    const candidate = probeRunnerFingerprint({
+      platform: 'linux',
+      architecture: 'x64',
+      cpuModels: Array.from({ length: drift.logicalCpuCount ?? 32 }, () => 'AMD EPYC test fixture'),
+      logicalCpuCount: drift.logicalCpuCount ?? 32,
+      totalMemoryBytes: 68_719_476_736,
+      ...drift,
+    });
+    assert.notEqual(candidate.sha256, runnerFingerprint.sha256);
+    assert.throws(
+      () => assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, candidate),
+      /does not match/u,
+    );
+  }
+
+  for (const expected of [undefined, '', 'A'.repeat(64), '0'.repeat(63)]) {
+    assert.throws(
+      () => assertExpectedRunnerFingerprint(expected, runnerFingerprint),
+      /lowercase SHA-256/u,
+    );
+  }
+  for (const actual of [
+    undefined,
+    { version: 'unknown-runner-fingerprint-v2', sha256: '0'.repeat(64) },
+    { version: RUNNER_FINGERPRINT_VERSION, sha256: '0'.repeat(63) },
+    { ...runnerFingerprint, hostname: 'must-not-be-accepted' },
+  ]) {
+    assert.throws(
+      () => assertExpectedRunnerFingerprint(expectedRunnerFingerprintSha256, actual),
+      /runner fingerprint must contain/u,
+    );
+  }
+  assert.throws(
+    () =>
+      probeRunnerFingerprint({
+        platform: 'linux',
+        architecture: 'x64',
+        cpuModels: [],
+        logicalCpuCount: 0,
+        totalMemoryBytes: 0,
+      }),
+    /incomplete stable hardware identity/u,
+  );
+});
+
 test('committed trusted-host capacity profiles satisfy strict schema and relational invariants', () => {
   assert.equal(validateCapacityConfig(committed), committed);
   assert.deepEqual(
@@ -74,6 +201,7 @@ test('committed trusted-host capacity profiles satisfy strict schema and relatio
 
 test('schema accepts both committed config and produced evidence', () => {
   const validate = new Ajv2020({ strict: true }).compile(schema);
+  assert.equal(schema.$id, 'https://schemas.tixkit.com/performance/capacity-v2.json');
   assert.equal(validate(committed), true, JSON.stringify(validate.errors));
   const profile = committed.profiles[0];
   const evidence = createCapacityEvidence({
@@ -82,7 +210,23 @@ test('schema accepts both committed config and produced evidence', () => {
     gitSha: 'a'.repeat(40),
     rawSamples: samplesFor(profile, [100, 160, 162, 160]),
   });
+  assert.equal(evidence.schemaVersion, 'tixkit-performance-capacity-evidence-v2');
+  assert.equal(
+    schema.$id.match(/capacity-v(\d+)\.json$/u)?.[1],
+    evidence.schemaVersion.match(/evidence-v(\d+)$/u)?.[1],
+    'immutable schema ID and evidence contract versions must advance together',
+  );
   assert.equal(validate(evidence), true, JSON.stringify(validate.errors));
+  const legacyEvidence = structuredClone(evidence);
+  legacyEvidence.schemaVersion = 'tixkit-performance-capacity-evidence-v1';
+  assert.equal(validate(legacyEvidence), false, 'legacy evidence must not satisfy the v2 schema');
+  const missingFingerprint = structuredClone(evidence);
+  delete missingFingerprint.identity.runnerFingerprint;
+  assert.equal(
+    validate(missingFingerprint),
+    false,
+    'capacity evidence without runner identity must fail schema validation',
+  );
 });
 
 test('first throughput-gain breach is saturation and requires one lower publishable point', () => {
@@ -132,7 +276,9 @@ test('p95 and platform failures are fail-closed saturation reasons', () => {
     config: committed,
     profile,
     gitSha: 'd'.repeat(40),
-    rawSamples: samplesFor(profile, [100, 160, 260, 420], { p95: [100, 100, 2100, 100] }),
+    rawSamples: samplesFor(profile, [100, 160, 260, 420], {
+      p95: [100, 100, 2100, 100],
+    }),
   });
   assert.equal(p95Evidence.saturation.reason, 'p95-threshold');
 
@@ -268,6 +414,7 @@ test('evidence binds config, workload, raw hashes, and its complete payload chec
     rawSamples,
   });
   assert.equal(evidence.identity.configSha256, sha256(canonicalJson(committed)));
+  assert.deepEqual(evidence.identity.runnerFingerprint, runnerFingerprint);
   assert.equal(evidence.points[0].samples[0].rawSha256, sha256(rawSamples[0][0]));
   const { evidenceSha256, ...payload } = evidence;
   assert.equal(evidenceSha256, sha256(canonicalJson(payload)));
@@ -276,13 +423,33 @@ test('evidence binds config, workload, raw hashes, and its complete payload chec
   const tampered = structuredClone(evidence);
   tampered.points[0].medianSuccessfulReservationThroughputPerSecond += 1;
   assert.throws(
-    () => validateCapacityEvidence({ config: committed, evidence: tampered, rawSamples }),
+    () =>
+      validateCapacityEvidence({
+        config: committed,
+        evidence: tampered,
+        rawSamples,
+      }),
     /does not match|schema violation/,
   );
   const tamperedRaw = rawSamples.map((point) => [...point]);
   tamperedRaw[0][0] = metrics(profile.concurrencyPoints[0], profile.inventory, 101);
   assert.throws(() =>
-    validateCapacityEvidence({ config: committed, evidence, rawSamples: tamperedRaw }),
+    validateCapacityEvidence({
+      config: committed,
+      evidence,
+      rawSamples: tamperedRaw,
+    }),
+  );
+  const tamperedRunner = structuredClone(evidence);
+  tamperedRunner.identity.runnerFingerprint.sha256 = '0'.repeat(64);
+  assert.throws(
+    () =>
+      validateCapacityEvidence({
+        config: committed,
+        evidence: tamperedRunner,
+        rawSamples,
+      }),
+    /does not match/u,
   );
 });
 
@@ -363,6 +530,73 @@ test('runner creates exclusive 0700 output and never overwrites evidence', async
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('runner rejects missing or mismatched expected identity before creating output', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tixkit-capacity-identity-'));
+  const config = configFixture();
+  const profile = config.profiles[0];
+  const input = {
+    config,
+    profile,
+    outputDirectory: join(directory, 'evidence'),
+    gitSha: '7'.repeat(40),
+    executeSample: async () => {
+      throw new Error('sample execution must not start before identity verification');
+    },
+    probeRunner: () => runnerFingerprint,
+  };
+  try {
+    await assert.rejects(
+      runCapacityCharacterizationWithRunnerIdentity(input),
+      /expected runner fingerprint/u,
+    );
+    await assert.rejects(
+      runCapacityCharacterizationWithRunnerIdentity({
+        ...input,
+        expectedRunnerFingerprintSha256: '0'.repeat(64),
+      }),
+      /does not match/u,
+    );
+    assert.throws(() => statSync(input.outputDirectory), /ENOENT/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('CLI accepts exactly one value for every supported required option', () => {
+  const argv = [
+    '--config',
+    'performance-capacity.trusted.json',
+    '--profile',
+    'postgresql-trusted-host',
+    '--output',
+    '/tmp/capacity-evidence',
+    '--git-sha',
+    'a'.repeat(40),
+    '--expected-runner-fingerprint',
+    'b'.repeat(64),
+  ];
+  assert.deepEqual(parseCapacityOptions(argv), {
+    config: 'performance-capacity.trusted.json',
+    profile: 'postgresql-trusted-host',
+    output: '/tmp/capacity-evidence',
+    gitSha: 'a'.repeat(40),
+    expectedRunnerFingerprint: 'b'.repeat(64),
+  });
+  assert.throws(
+    () => parseCapacityOptions([...argv, '--unknown', 'value']),
+    /unknown capacity option/u,
+  );
+  assert.throws(
+    () => parseCapacityOptions([...argv, '--profile', 'mysql-trusted-host']),
+    /duplicate capacity option/u,
+  );
+  assert.throws(
+    () => parseCapacityOptions(argv.slice(0, -2)),
+    /missing required capacity option --expected-runner-fingerprint/u,
+  );
+  assert.throws(() => parseCapacityOptions(argv.slice(0, -1)), /require a value for every flag/u);
 });
 
 test('child process inherits only allowlisted environment and receives the selected database driver', async () => {
@@ -503,10 +737,24 @@ test('weekly/manual trusted workflow is default-branch-only, serial, pinned, pri
   assert.match(workflow, /if: always\(\)/);
   assert.match(workflow, /if-no-files-found: error/);
   assert.match(workflow, /checksums-not-signatures/);
+  assert.match(
+    workflow,
+    /EXPECTED_RUNNER_FINGERPRINT_SHA256: \$\{\{ vars\.TIXKIT_EPYC_RUNNER_FINGERPRINT_SHA256 \}\}/u,
+  );
+  assert.match(workflow, /probeRunnerFingerprint/u);
+  assert.match(workflow, /assertExpectedRunnerFingerprint/u);
+  assert.match(workflow, /RUNNER_FINGERPRINT_SHA256=\$\{actual\.sha256\}/u);
+  assert.match(workflow, /--expected-runner-fingerprint/u);
   assert.match(workflow, /INVOCATION_OUTCOME: \$\{\{ steps\.invocation\.outcome \}\}/);
+  assert.match(workflow, /IDENTITY_OUTCOME: \$\{\{ steps\.identity\.outcome \}\}/u);
   assert.match(workflow, /CAPACITY_OUTCOME: \$\{\{ steps\.capacity\.outcome \}\}/);
   assert.match(workflow, /const phase=names\.find/);
   assert.match(workflow, /runnerLabel:'tixkit-epyc-trusted'/);
+  assert.match(
+    workflow,
+    /runnerFingerprint=runnerFingerprintSha256\?\{version:'tixkit-runner-fingerprint-v2',sha256:runnerFingerprintSha256\}:null/u,
+  );
+  assert.match(workflow, /schemaVersion:'tixkit-performance-capacity-failure-v2'/u);
   assert.match(workflow, /databaseImage:process\.env\.DATABASE_IMAGE/);
   assert.match(workflow, /configSha256=outcomes\.checkout==='success'&&fs\.existsSync/);
   for (const profile of committed.profiles) {

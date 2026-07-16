@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { arch, cpus, platform, totalmem } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -9,8 +11,10 @@ import { canonicalJson, sha256 } from './performance-evidence.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_VERSION = 'tixkit-performance-capacity-config-v1';
-const EVIDENCE_VERSION = 'tixkit-performance-capacity-evidence-v1';
+const EVIDENCE_VERSION = 'tixkit-performance-capacity-evidence-v2';
 const CLAIM_SCOPE = 'trusted-single-host-capacity-characterization';
+export const RUNNER_FINGERPRINT_VERSION = 'tixkit-runner-fingerprint-v2';
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const METRICS = [
   'attempts',
   'successes',
@@ -89,6 +93,83 @@ export function validateCapacityConfig(config) {
   return config;
 }
 
+function validateRunnerFingerprint(fingerprint) {
+  if (
+    !fingerprint ||
+    typeof fingerprint !== 'object' ||
+    Array.isArray(fingerprint) ||
+    canonicalJson(Object.keys(fingerprint).sort()) !== canonicalJson(['sha256', 'version']) ||
+    fingerprint.version !== RUNNER_FINGERPRINT_VERSION ||
+    !SHA256_PATTERN.test(fingerprint.sha256)
+  ) {
+    throw new Error('runner fingerprint must contain the supported version and a SHA-256 digest');
+  }
+  return fingerprint;
+}
+
+export function probeRunnerFingerprint(system) {
+  const processors = system === undefined ? cpus() : undefined;
+  const detected = system ?? {
+    platform: platform(),
+    architecture: arch(),
+    cpuModels: processors.map(({ model }) => model),
+    logicalCpuCount: processors.length,
+    totalMemoryBytes: totalmem(),
+  };
+  const cpuModels = Array.isArray(detected.cpuModels)
+    ? detected.cpuModels.map((model) =>
+        typeof model === 'string' ? model.trim().replaceAll(/\s+/gu, ' ') : '',
+      )
+    : [];
+  const cpuModelCounts = new Map();
+  for (const model of cpuModels) {
+    cpuModelCounts.set(model, (cpuModelCounts.get(model) ?? 0) + 1);
+  }
+  const cpuModelHistogram = [...cpuModelCounts]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([model, count]) => ({ model, count }));
+  if (
+    typeof detected.platform !== 'string' ||
+    !detected.platform ||
+    typeof detected.architecture !== 'string' ||
+    !detected.architecture ||
+    cpuModels.length === 0 ||
+    cpuModels.some((model) => !model) ||
+    !Number.isSafeInteger(detected.logicalCpuCount) ||
+    detected.logicalCpuCount < 1 ||
+    cpuModels.length !== detected.logicalCpuCount ||
+    !Number.isSafeInteger(detected.totalMemoryBytes) ||
+    detected.totalMemoryBytes < 1
+  ) {
+    throw new Error('runner fingerprint probe returned incomplete stable hardware identity');
+  }
+  const descriptor = {
+    version: RUNNER_FINGERPRINT_VERSION,
+    platform: detected.platform,
+    architecture: detected.architecture,
+    cpuModelHistogram,
+    logicalCpuCount: detected.logicalCpuCount,
+    totalMemoryBytes: detected.totalMemoryBytes,
+  };
+  return Object.freeze({
+    version: RUNNER_FINGERPRINT_VERSION,
+    sha256: sha256(canonicalJson(descriptor)),
+  });
+}
+
+export function assertExpectedRunnerFingerprint(expectedSha256, actualFingerprint) {
+  if (!SHA256_PATTERN.test(expectedSha256 ?? '')) {
+    throw new Error('expected runner fingerprint must be a lowercase SHA-256 digest');
+  }
+  const actual = validateRunnerFingerprint(actualFingerprint);
+  const matches = timingSafeEqual(
+    Buffer.from(expectedSha256, 'hex'),
+    Buffer.from(actual.sha256, 'hex'),
+  );
+  if (!matches) throw new Error('trusted runner fingerprint does not match the expected identity');
+  return actual;
+}
+
 function validateMetrics(metrics, profile, concurrency) {
   if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) {
     throw new Error('capacity metrics must be an object');
@@ -154,8 +235,19 @@ function median(values) {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
-export function createCapacityEvidence({ config, profile, gitSha, rawSamples }) {
+export function createCapacityEvidence({
+  config,
+  profile,
+  gitSha,
+  rawSamples,
+  runnerFingerprint,
+  expectedRunnerFingerprintSha256,
+}) {
   validateCapacityConfig(config);
+  const verifiedRunnerFingerprint = assertExpectedRunnerFingerprint(
+    expectedRunnerFingerprintSha256,
+    runnerFingerprint,
+  );
   const configuredProfile = config.profiles.find(({ id }) => id === profile?.id);
   if (!configuredProfile || canonicalJson(configuredProfile) !== canonicalJson(profile)) {
     throw new Error('capacity profile must exactly match its config entry');
@@ -257,6 +349,7 @@ export function createCapacityEvidence({ config, profile, gitSha, rawSamples }) 
     identity: {
       gitSha,
       runnerLabel: profile.runnerLabel,
+      runnerFingerprint: verifiedRunnerFingerprint,
       profile: profile.id,
       database: profile.database,
       workloadSha256: sha256(canonicalJson(workload)),
@@ -266,12 +359,20 @@ export function createCapacityEvidence({ config, profile, gitSha, rawSamples }) 
     saturation,
     capacityClaim,
   };
-  const evidence = { ...payload, evidenceSha256: sha256(canonicalJson(payload)) };
+  const evidence = {
+    ...payload,
+    evidenceSha256: sha256(canonicalJson(payload)),
+  };
   schemaViolation(evidence, 'capacity evidence');
   return evidence;
 }
 
-export function validateCapacityEvidence({ config, evidence, rawSamples }) {
+export function validateCapacityEvidence({
+  config,
+  evidence,
+  rawSamples,
+  expectedRunnerFingerprintSha256,
+}) {
   schemaViolation(evidence, 'capacity evidence');
   const profile = config?.profiles?.find(({ id }) => id === evidence.identity.profile);
   if (!profile) throw new Error('capacity evidence profile is absent from config');
@@ -280,6 +381,8 @@ export function validateCapacityEvidence({ config, evidence, rawSamples }) {
     profile,
     gitSha: evidence.identity.gitSha,
     rawSamples,
+    runnerFingerprint: evidence.identity.runnerFingerprint,
+    expectedRunnerFingerprintSha256,
   });
   if (canonicalJson(expected) !== canonicalJson(evidence)) {
     throw new Error('capacity evidence does not match config, raw samples, or derived relations');
@@ -385,8 +488,14 @@ export async function runCapacityCharacterization({
   gitSha,
   executeSample = executeCapacitySample,
   signal = new AbortController().signal,
+  expectedRunnerFingerprintSha256,
+  probeRunner = probeRunnerFingerprint,
 }) {
   validateCapacityConfig(config);
+  const runnerFingerprint = assertExpectedRunnerFingerprint(
+    expectedRunnerFingerprintSha256,
+    probeRunner(),
+  );
   const configuredProfile = config.profiles.find(({ id }) => id === profile?.id);
   if (!configuredProfile || canonicalJson(configuredProfile) !== canonicalJson(profile)) {
     throw new Error('capacity profile must exactly match its config entry');
@@ -402,7 +511,12 @@ export async function runCapacityCharacterization({
     for (let sample = 1; sample <= profile.samplesPerPoint; sample += 1) {
       if (signal.aborted) throw new Error('capacity characterization interrupted');
       const metricsPath = path.join(pointDirectory, `sample-${sample}.json`);
-      const bytes = await executeSample({ profile, concurrency, metricsPath, signal });
+      const bytes = await executeSample({
+        profile,
+        concurrency,
+        metricsPath,
+        signal,
+      });
       if (readFileSync(metricsPath).compare(Buffer.from(bytes)) !== 0) {
         throw new Error(`capacity sample ${concurrency}/${sample} bytes differ from output file`);
       }
@@ -410,32 +524,61 @@ export async function runCapacityCharacterization({
     }
     rawSamples.push(samples);
   }
-  const evidence = createCapacityEvidence({ config, profile, gitSha, rawSamples });
+  const evidence = createCapacityEvidence({
+    config,
+    profile,
+    gitSha,
+    rawSamples,
+    runnerFingerprint,
+    expectedRunnerFingerprintSha256,
+  });
   const evidencePath = path.join(outputDirectory, 'evidence.json');
   writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
     flag: 'wx',
     mode: 0o600,
   });
   const serializedEvidence = JSON.parse(readFileSync(evidencePath, 'utf8'));
-  validateCapacityEvidence({ config, evidence: serializedEvidence, rawSamples });
+  validateCapacityEvidence({
+    config,
+    evidence: serializedEvidence,
+    rawSamples,
+    expectedRunnerFingerprintSha256,
+  });
   return serializedEvidence;
 }
 
-function options(argv) {
+const CLI_OPTIONS = new Set([
+  'config',
+  'profile',
+  'output',
+  'git-sha',
+  'expected-runner-fingerprint',
+]);
+
+export function parseCapacityOptions(argv) {
   const result = {};
+  const seen = new Set();
+  if (argv.length % 2 !== 0) throw new Error('capacity options require a value for every flag');
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
     const value = argv[index + 1];
     if (!name?.startsWith('--') || !value || value.startsWith('--')) {
       throw new Error(`invalid option ${name || '<missing>'}`);
     }
-    result[name.slice(2).replaceAll(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+    const flag = name.slice(2);
+    if (!CLI_OPTIONS.has(flag)) throw new Error(`unknown capacity option --${flag}`);
+    if (seen.has(flag)) throw new Error(`duplicate capacity option --${flag}`);
+    seen.add(flag);
+    result[flag.replaceAll(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+  }
+  for (const required of CLI_OPTIONS) {
+    if (!seen.has(required)) throw new Error(`missing required capacity option --${required}`);
   }
   return result;
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const input = options(argv);
+  const input = parseCapacityOptions(argv);
   const config = validateCapacityConfig(
     JSON.parse(readFileSync(path.resolve(input.config || ''), 'utf8')),
   );
@@ -451,6 +594,7 @@ export async function main(argv = process.argv.slice(2)) {
       profile,
       outputDirectory: path.resolve(input.output || ''),
       gitSha: input.gitSha,
+      expectedRunnerFingerprintSha256: input.expectedRunnerFingerprint,
       signal: controller.signal,
     });
   } finally {

@@ -1,10 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.tixkit.com/performance/capacity-v1.json",
+  "$id": "https://schemas.tixkit.com/performance/capacity-v2.json",
   "title": "Tixkit trusted single-host capacity characterization",
   "oneOf": [{ "$ref": "#/$defs/config" }, { "$ref": "#/$defs/evidence" }],
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runnerFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": { "const": "tixkit-runner-fingerprint-v2" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
     "database": {
       "type": "object",
       "additionalProperties": false,
@@ -20,7 +29,11 @@
       "required": ["executable", "args", "env"],
       "properties": {
         "executable": { "type": "string", "minLength": 1 },
-        "args": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "args": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
         "env": {
           "type": "object",
           "required": [
@@ -66,7 +79,11 @@
         "samplesPerPoint": { "type": "integer", "minimum": 3, "maximum": 20 },
         "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
         "saturationP95Ms": { "type": "number", "exclusiveMinimum": 0 },
-        "minThroughputGainPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "minThroughputGainPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
         "command": { "$ref": "#/$defs/command" }
       }
     },
@@ -77,8 +94,14 @@
       "properties": {
         "$schema": { "type": "string" },
         "schemaVersion": { "const": "tixkit-performance-capacity-config-v1" },
-        "claimScope": { "const": "trusted-single-host-capacity-characterization" },
-        "profiles": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/profile" } }
+        "claimScope": {
+          "const": "trusted-single-host-capacity-characterization"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/profile" }
+        }
       }
     },
     "metrics": {
@@ -101,8 +124,14 @@
         "expectedInventoryDeclines": { "type": "integer", "minimum": 0 },
         "platformFailures": { "type": "integer", "minimum": 0 },
         "elapsedMs": { "type": "number", "exclusiveMinimum": 0 },
-        "requestThroughputPerSecond": { "type": "number", "exclusiveMinimum": 0 },
-        "successfulReservationThroughputPerSecond": { "type": "number", "exclusiveMinimum": 0 },
+        "requestThroughputPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "successfulReservationThroughputPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "successfulReservationP50Ms": { "type": "number", "minimum": 0 },
         "successfulReservationP95Ms": { "type": "number", "minimum": 0 }
       }
@@ -131,13 +160,19 @@
       "properties": {
         "concurrency": { "type": "integer", "minimum": 1 },
         "publishable": { "type": "boolean" },
-        "throughputGainPercent": { "oneOf": [{ "type": "number" }, { "type": "null" }] },
+        "throughputGainPercent": {
+          "oneOf": [{ "type": "number" }, { "type": "null" }]
+        },
         "medianSuccessfulReservationThroughputPerSecond": {
           "type": "number",
           "exclusiveMinimum": 0
         },
         "medianSuccessfulReservationP95Ms": { "type": "number", "minimum": 0 },
-        "samples": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/sample" } }
+        "samples": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/sample" }
+        }
       }
     },
     "identity": {
@@ -146,14 +181,19 @@
       "required": [
         "gitSha",
         "runnerLabel",
+        "runnerFingerprint",
         "profile",
         "database",
         "workloadSha256",
         "configSha256"
       ],
       "properties": {
-        "gitSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+        "gitSha": {
+          "type": "string",
+          "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+        },
         "runnerLabel": { "type": "string", "minLength": 1 },
+        "runnerFingerprint": { "$ref": "#/$defs/runnerFingerprint" },
         "profile": { "type": "string", "minLength": 1 },
         "database": { "$ref": "#/$defs/database" },
         "workloadSha256": { "$ref": "#/$defs/sha256" },
@@ -175,14 +215,20 @@
         "evidenceSha256"
       ],
       "properties": {
-        "schemaVersion": { "const": "tixkit-performance-capacity-evidence-v1" },
-        "claimScope": { "const": "trusted-single-host-capacity-characterization" },
+        "schemaVersion": { "const": "tixkit-performance-capacity-evidence-v2" },
+        "claimScope": {
+          "const": "trusted-single-host-capacity-characterization"
+        },
         "denials": {
           "const": ["Production capacity", "Cloud capacity", "Compact capacity", "general capacity"]
         },
         "integrityModel": { "const": "checksums-not-signatures" },
         "identity": { "$ref": "#/$defs/identity" },
-        "points": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/point" } },
+        "points": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/point" }
+        },
         "saturation": {
           "oneOf": [
             { "type": "null" },
@@ -207,8 +253,14 @@
               "additionalProperties": false,
               "required": ["maxPublishableConcurrency", "saturationObservedAtConcurrency"],
               "properties": {
-                "maxPublishableConcurrency": { "type": "integer", "minimum": 1 },
-                "saturationObservedAtConcurrency": { "type": "integer", "minimum": 1 }
+                "maxPublishableConcurrency": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "saturationObservedAtConcurrency": {
+                  "type": "integer",
+                  "minimum": 1
+                }
               }
             }
           ]
