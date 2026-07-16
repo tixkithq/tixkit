@@ -81,6 +81,7 @@ export const docRoutes = {
   capabilitiesAndIntegrations: '/reference/capabilities-and-integrations',
   performance: '/reference/performance',
   privacyAndRetention: '/reference/privacy-and-retention',
+  trust: '/reference/trust',
   sdkJavaScript: '/sdks/javascript',
   sdkNext: '/sdks/nextjs',
   sdkSvelteKit: '/sdks/sveltekit',

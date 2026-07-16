@@ -206,6 +206,7 @@ export const documentationNavigation = [
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },
       { label: 'Privacy and retention', routeId: 'privacyAndRetention' },
+      { label: 'Trust and evidence', routeId: 'trust' },
     ],
   },
   {

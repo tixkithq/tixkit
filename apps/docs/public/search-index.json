@@ -2614,6 +2614,39 @@
     ]
   },
   {
+    "url": "/reference/trust",
+    "title": "Trust and evidence",
+    "description": "Verify Tixkit policies, local proof, managed-service gaps, and claims that still require external evidence.",
+    "headings": [
+      {
+        "id": "how-to-read-the-states",
+        "text": "How to read the states",
+        "level": 2
+      },
+      {
+        "id": "verify-release-material",
+        "text": "Verify release material",
+        "level": 2
+      }
+    ],
+    "body": "This page is generated from the public trust inventory. A published policy is not an SLA. “Locally proven” means the committed workflow or Self Hosted contract has executable repository evidence; it does not mean a hosted production run occurred. Tixkit Cloud and managed Platform API availability remain experimental and are not generally available. | Trust record | Scope | State | Current claim | Public artifacts / blocker | | | | | | | | cloud status | managed cloud | not yet offered | No public Tixkit Cloud status page is offered. | Blocker: Tixkit Cloud is not generally available and no production status surface has been launched. | | data residency | managed cloud | pending policy decision | Managed Cloud residency and transfer commitments are not published. | Blocker: Product, infrastructure, privacy and legal review must approve the managed residency policy. | | dr evidence | self hosted | locally proven | Self Hosted DR contracts and rehearsal tooling are locally validated; no hosted or production DR receipt is published. | docs/public/self hosting/backups and restore.mdx scripts/verify production rehearsal.mjs Blocker: A protected hosted rehearsal with retained RPO and RTO evidence is still required. | | incident history | managed cloud | not yet offered | No public Tixkit Cloud incident history is offered. | Blocker: No generally available managed service or public status history exists. | | independent assessments | public core | pending external proof | No independent security assessment or remediation summary has been published. | Blocker: An independent assessor must complete the work and approve a public summary. | | managed sla | managed cloud | pending policy decision | Managed support plans and SLA commitments are not published. | Blocker: Commercial, operational and legal owners must approve managed support commitments. | | performance evidence | public core | locally proven | Bundle and trusted single host regression evidence are locally validated; no production capacity, soak, fault or RUM proof is published. | docs/public/reference/performance.mdx performance budgets.json Blocker: Supported profile capacity and hosted production evidence remain incomplete. | | privacy roles | managed cloud | pending policy decision | Managed Cloud controller, processor and retention responsibilities are not published. | Blocker: The managed operating model requires product, privacy and legal approval. | | release provenance | public core | locally proven | Public release provenance generation and consumer verification are locally tested workflow contracts; no approved public release receipt exists. | docs/public/reference/api release train.mdx scripts/verify public api release.mjs Blocker: The protected public release workflow has not published an approved release. | | security architecture | public core | published | The public architecture and security boundaries are documented without depending on private Cloud source. | ARCHITECTURE.md SECURITY.md | | signed sbom | public core | locally proven | SBOM generation and attestation consumer checks are locally tested workflow contracts; no approved hosted release verification receipt exists. | .github/workflows/public artifact release.yml scripts/validate staged public release.mjs Blocker: Hosted verification requires an approved immutable public release. | | subprocessors | managed cloud | pending policy decision | A managed Cloud subprocessor list is not published. | Blocker: The managed vendor inventory and legal review are incomplete. | | support boundaries | public core | published | Public repository support is best effort and has no guaranteed response or resolution time. | SUPPORT.md docs/public/support.mdx | | version lifecycle | public core | pending policy decision | A product wide supported version and end of life policy is not published. | Blocker: Release, product and security owners must approve lifecycle windows before the first public release. | | vulnerability response | public core | pending policy decision | Vulnerability acknowledgement, triage and remediation targets are not approved. | Blocker: Security and maintainer owners must approve severity based response targets. | How to read the states published means the named public policy exists now. locally proven means the listed command and repository artifacts prove a bounded local contract. pending policy decision means product, operational, privacy, security or legal owners must approve a commitment; no target is implied. pending external proof means an independent or hosted party must produce evidence. not yet offered means the managed service surface does not exist publicly. Self Hosted operators choose their infrastructure location, incident communication, vendors and support arrangements. That control does not establish a managed Cloud residency promise, subprocessor list, status history or SLA. Do not infer certifications, uptime targets, recovery objectives, regions or assessment results from planned workflows. Verify release material For an approved API release, follow the exact checksum, GitHub attestation, registry integrity and clean consumer install procedure in the API release train /reference/api release train . Public artifact workflows also require SPDX SBOMs and provenance attestations, but those workflow contracts are not a public release receipt until the protected hosted run succeeds.",
+    "audience": [
+      "operator",
+      "developer",
+      "self-hoster",
+      "contributor"
+    ],
+    "productArea": "platform",
+    "contentType": "reference",
+    "status": "beta",
+    "keywords": [],
+    "adoptionPaths": [
+      "sell",
+      "platform",
+      "self-hosted"
+    ]
+  },
+  {
     "url": "/reference/webhook-events",
     "title": "Webhook event catalog",
     "description": "Browse the event names and payload data fields validated against Tixkit runtime definitions.",

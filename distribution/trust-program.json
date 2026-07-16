@@ -1,0 +1,170 @@
+{
+  "$schema": "./trust-program.schema.json",
+  "schemaVersion": 1,
+  "asOf": "2026-07-15",
+  "maxRecordAgeDays": 90,
+  "documentation": "docs/public/reference/trust.mdx",
+  "records": [
+    {
+      "id": "cloud-status",
+      "kind": "service-surface",
+      "scope": "managed-cloud",
+      "state": "not-yet-offered",
+      "claim": "No public Tixkit Cloud status page is offered.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "Tixkit Cloud is not generally available and no production status surface has been launched."
+    },
+    {
+      "id": "data-residency",
+      "kind": "policy",
+      "scope": "managed-cloud",
+      "state": "pending-policy-decision",
+      "claim": "Managed Cloud residency and transfer commitments are not published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "Product, infrastructure, privacy and legal review must approve the managed residency policy."
+    },
+    {
+      "id": "dr-evidence",
+      "kind": "evidence",
+      "scope": "self-hosted",
+      "state": "locally-proven",
+      "claim": "Self-Hosted DR contracts and rehearsal tooling are locally validated; no hosted or production DR receipt is published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [
+        "docs/public/self-hosting/backups-and-restore.mdx",
+        "scripts/verify-production-rehearsal.mjs"
+      ],
+      "validationCommands": ["node --test scripts/__tests__/production-rehearsal.test.mjs"],
+      "blocker": "A protected hosted rehearsal with retained RPO and RTO evidence is still required."
+    },
+    {
+      "id": "incident-history",
+      "kind": "service-surface",
+      "scope": "managed-cloud",
+      "state": "not-yet-offered",
+      "claim": "No public Tixkit Cloud incident history is offered.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "No generally available managed service or public status history exists."
+    },
+    {
+      "id": "independent-assessments",
+      "kind": "evidence",
+      "scope": "public-core",
+      "state": "pending-external-proof",
+      "claim": "No independent security assessment or remediation summary has been published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "An independent assessor must complete the work and approve a public summary."
+    },
+    {
+      "id": "managed-sla",
+      "kind": "policy",
+      "scope": "managed-cloud",
+      "state": "pending-policy-decision",
+      "claim": "Managed support plans and SLA commitments are not published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "Commercial, operational and legal owners must approve managed support commitments."
+    },
+    {
+      "id": "performance-evidence",
+      "kind": "evidence",
+      "scope": "public-core",
+      "state": "locally-proven",
+      "claim": "Bundle and trusted single-host regression evidence are locally validated; no production capacity, soak, fault or RUM proof is published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": ["docs/public/reference/performance.mdx", "performance-budgets.json"],
+      "validationCommands": ["bun run check:performance-budgets"],
+      "blocker": "Supported-profile capacity and hosted production evidence remain incomplete."
+    },
+    {
+      "id": "privacy-roles",
+      "kind": "policy",
+      "scope": "managed-cloud",
+      "state": "pending-policy-decision",
+      "claim": "Managed Cloud controller, processor and retention responsibilities are not published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "The managed operating model requires product, privacy and legal approval."
+    },
+    {
+      "id": "release-provenance",
+      "kind": "evidence",
+      "scope": "public-core",
+      "state": "locally-proven",
+      "claim": "Public release provenance generation and consumer verification are locally tested workflow contracts; no approved public release receipt exists.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [
+        "docs/public/reference/api-release-train.mdx",
+        "scripts/verify-public-api-release.mjs"
+      ],
+      "validationCommands": ["node --test scripts/__tests__/public-release-verifier.test.mjs"],
+      "blocker": "The protected public release workflow has not published an approved release."
+    },
+    {
+      "id": "security-architecture",
+      "kind": "policy",
+      "scope": "public-core",
+      "state": "published",
+      "claim": "The public architecture and security boundaries are documented without depending on private Cloud source.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": ["ARCHITECTURE.md", "SECURITY.md"]
+    },
+    {
+      "id": "signed-sbom",
+      "kind": "evidence",
+      "scope": "public-core",
+      "state": "locally-proven",
+      "claim": "SBOM generation and attestation-consumer checks are locally tested workflow contracts; no approved hosted release verification receipt exists.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [
+        ".github/workflows/public-artifact-release.yml",
+        "scripts/validate-staged-public-release.mjs"
+      ],
+      "validationCommands": ["node --test scripts/__tests__/cloud-core-consumer.test.mjs"],
+      "blocker": "Hosted verification requires an approved immutable public release."
+    },
+    {
+      "id": "subprocessors",
+      "kind": "policy",
+      "scope": "managed-cloud",
+      "state": "pending-policy-decision",
+      "claim": "A managed Cloud subprocessor list is not published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "The managed vendor inventory and legal review are incomplete."
+    },
+    {
+      "id": "support-boundaries",
+      "kind": "policy",
+      "scope": "public-core",
+      "state": "published",
+      "claim": "Public repository support is best effort and has no guaranteed response or resolution time.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": ["SUPPORT.md", "docs/public/support.mdx"]
+    },
+    {
+      "id": "version-lifecycle",
+      "kind": "policy",
+      "scope": "public-core",
+      "state": "pending-policy-decision",
+      "claim": "A product-wide supported-version and end-of-life policy is not published.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "Release, product and security owners must approve lifecycle windows before the first public release."
+    },
+    {
+      "id": "vulnerability-response",
+      "kind": "policy",
+      "scope": "public-core",
+      "state": "pending-policy-decision",
+      "claim": "Vulnerability acknowledgement, triage and remediation targets are not approved.",
+      "lastVerified": "2026-07-15",
+      "publicArtifacts": [],
+      "blocker": "Security and maintainer owners must approve severity-based response targets."
+    }
+  ]
+}

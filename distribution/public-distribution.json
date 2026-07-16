@@ -320,6 +320,8 @@
       "artifacts/api/2026-01-01",
       "distribution/capability-registry.json",
       "distribution/capability-registry.schema.json",
+      "distribution/trust-program.json",
+      "distribution/trust-program.schema.json",
       "distribution/cloud-core-compatibility.schema.json",
       "distribution/public-release-manifest.schema.json",
       "packages/agent-protocol/schemas/agent-protocol-2026-07-22.json",
