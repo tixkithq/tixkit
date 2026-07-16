@@ -25,6 +25,9 @@ const SHARED_REQUIRED_STATUS_CHECKS = [
   'Go SDK Dry Run',
   'Rust SDK Dry Run',
   'Build, Migrate, Render, Smoke',
+  'Dependency Review',
+  'Bun Dependency Audit',
+  'Static Security Analysis (javascript-typescript)',
 ];
 const TOPOLOGY_REQUIRED_STATUS_CHECKS = {
   transitional: [
@@ -72,6 +75,18 @@ function pullRequestParameters() {
     required_review_thread_resolution: true,
     automatic_copilot_code_review_enabled: false,
     allowed_merge_methods: ['squash'],
+  };
+}
+
+function codeScanningParameters() {
+  return {
+    code_scanning_tools: [
+      {
+        tool: 'CodeQL',
+        security_alerts_threshold: 'high_or_higher',
+        alerts_threshold: 'errors',
+      },
+    ],
   };
 }
 
@@ -268,6 +283,10 @@ export function buildPublicRemoteRuleset({
           })),
         },
       },
+      {
+        type: 'code_scanning',
+        parameters: codeScanningParameters(),
+      },
     ],
   };
 }
@@ -347,6 +366,7 @@ export function validatePublicRemoteRuleset(
     ...(topology === 'authoritative' ? ['required_linear_history'] : ['update']),
     'pull_request',
     'required_status_checks',
+    'code_scanning',
   ];
   if (JSON.stringify(rules.map((rule) => rule.type)) !== JSON.stringify(expectedRuleTypes)) {
     errors.push(`Ruleset rules must exactly match ${expectedRuleTypes.join(', ')}`);
@@ -356,6 +376,7 @@ export function validatePublicRemoteRuleset(
     'non_fast_forward',
     'pull_request',
     'required_status_checks',
+    'code_scanning',
   ]) {
     if (!ruleTypes.has(requiredType)) {
       errors.push(`Ruleset must include ${requiredType} rule`);
@@ -417,6 +438,13 @@ export function validatePublicRemoteRuleset(
           `Status check ${check.context ?? '<missing>'} does not match the required CI GitHub App integration`,
         );
       }
+    }
+  }
+
+  const codeScanningRule = rules.find((rule) => rule.type === 'code_scanning');
+  if (codeScanningRule) {
+    if (JSON.stringify(codeScanningRule.parameters) !== JSON.stringify(codeScanningParameters())) {
+      errors.push('Code scanning rule must require CodeQL high-or-higher security alerts');
     }
   }
 

@@ -30,7 +30,14 @@ test('buildPublicRemoteRuleset creates an export-app-only main branch ruleset', 
   ]);
   assert.deepEqual(
     ruleset.rules.map((rule) => rule.type),
-    ['deletion', 'non_fast_forward', 'update', 'pull_request', 'required_status_checks'],
+    [
+      'deletion',
+      'non_fast_forward',
+      'update',
+      'pull_request',
+      'required_status_checks',
+      'code_scanning',
+    ],
   );
   assert.deepEqual(
     ruleset.rules
@@ -59,6 +66,9 @@ test('buildPublicRemoteRuleset creates an export-app-only main branch ruleset', 
       'Go SDK Dry Run',
       'Rust SDK Dry Run',
       'Build, Migrate, Render, Smoke',
+      'Dependency Review',
+      'Bun Dependency Audit',
+      'Static Security Analysis (javascript-typescript)',
     ],
   );
   assert.deepEqual(validatePublicRemoteRuleset(ruleset, { exportAppIntegrationId: 12345 }), []);
@@ -80,6 +90,7 @@ test('buildPublicRemoteRuleset creates an authoritative reviewed-PR ruleset with
       'required_linear_history',
       'pull_request',
       'required_status_checks',
+      'code_scanning',
     ],
   );
   assert.deepEqual(
@@ -115,7 +126,7 @@ test('validatePublicRemoteRuleset rejects human bypass actors and missing update
 
   assert.deepEqual(validatePublicRemoteRuleset(ruleset, { exportAppIntegrationId: 12345 }), [
     'Human bypass actor type is not allowed: RepositoryRole',
-    'Ruleset rules must exactly match deletion, non_fast_forward, update, pull_request, required_status_checks',
+    'Ruleset rules must exactly match deletion, non_fast_forward, update, pull_request, required_status_checks, code_scanning',
     'Transitional ruleset must include update rule',
   ]);
 });
@@ -140,7 +151,7 @@ test('validatePublicRemoteRuleset rejects authoritative bypass and merge deadloc
     }),
     [
       'Authoritative ruleset must not have bypass actors',
-      'Ruleset rules must exactly match deletion, non_fast_forward, required_linear_history, pull_request, required_status_checks',
+      'Ruleset rules must exactly match deletion, non_fast_forward, required_linear_history, pull_request, required_status_checks, code_scanning',
       'Authoritative ruleset must not deadlock pull-request merges with an update rule',
       'Authoritative ruleset must require linear history',
     ],
@@ -186,7 +197,7 @@ test('validatePublicRemoteRuleset requires the expected authoritative CI integra
     topology: 'authoritative',
     statusCheckIntegrationId: 99999,
   });
-  assert.equal(mismatchedIntegrationErrors.length, 22);
+  assert.equal(mismatchedIntegrationErrors.length, 25);
   assert.ok(
     mismatchedIntegrationErrors.every((error) =>
       error.endsWith('does not match the required CI GitHub App integration'),
@@ -216,6 +227,36 @@ test('validatePublicRemoteRuleset rejects weakened review and latest-code policy
       'Required status checks must use strict latest-code policy',
     ],
   );
+});
+
+test('validatePublicRemoteRuleset rejects missing or weakened CodeQL enforcement', () => {
+  const missing = buildPublicRemoteRuleset({ exportAppIntegrationId: 12345 });
+  missing.rules = missing.rules.filter((rule) => rule.type !== 'code_scanning');
+  assert.match(
+    validatePublicRemoteRuleset(missing, { exportAppIntegrationId: 12345 }).join('\n'),
+    /code_scanning/u,
+  );
+
+  for (const mutation of [
+    (tool) => {
+      tool.security_alerts_threshold = 'critical';
+    },
+    (tool) => {
+      tool.tool = 'Other';
+    },
+    (tool) => {
+      tool.alerts_threshold = 'none';
+    },
+  ]) {
+    const weakened = buildPublicRemoteRuleset({ exportAppIntegrationId: 12345 });
+    mutation(
+      weakened.rules.find((rule) => rule.type === 'code_scanning').parameters
+        .code_scanning_tools[0],
+    );
+    assert.deepEqual(validatePublicRemoteRuleset(weakened, { exportAppIntegrationId: 12345 }), [
+      'Code scanning rule must require CodeQL high-or-higher security alerts',
+    ]);
+  }
 });
 
 test('validatePublicRemoteRuleset requires the expected transitional export integration', () => {
