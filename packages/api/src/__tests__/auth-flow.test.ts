@@ -7,6 +7,7 @@ import type { FastifyRequest } from 'fastify';
 import { ALL_PERMISSIONS, type Principal, type Permission } from '@tixkit/domain';
 import type { AuthProvider } from '@tixkit/shared';
 import { ForbiddenError, UnauthorizedError } from '@tixkit/domain';
+import { AGENT_PROTOCOL_VERSION } from '@tixkit/agent-protocol';
 import {
   ClerkAuthService,
   createAuthMiddleware,
@@ -1222,6 +1223,7 @@ describe('ClerkAuthService agent access-token auth', () => {
       agent_principal_id: 'agt_1',
       agent_tenant_id: 'tnt_1',
       agent_state: 'active',
+      agent_protocol_version: AGENT_PROTOCOL_VERSION,
       ...overrides,
     };
   }
@@ -1251,6 +1253,8 @@ describe('ClerkAuthService agent access-token auth', () => {
     ['revoked token', { token_revoked_at: new Date() }],
     ['revoked app', { app_status: 'revoked' }],
     ['revoked principal', { agent_state: 'revoked' }],
+    ['stale protocol', { agent_protocol_version: '2026-07-01' }],
+    ['future protocol', { agent_protocol_version: '2099-01-01' }],
     ['subject substitution', { app_agent_principal_id: 'agt_other' }],
     ['cross-tenant app', { app_tenant_id: 'tnt_other' }],
   ])('rejects an agent token after %s', async (_name, overrides) => {

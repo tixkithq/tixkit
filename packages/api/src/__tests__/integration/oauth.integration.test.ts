@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Database } from '@tixkit/db';
 import type { Principal } from '@tixkit/domain';
+import { AGENT_PROTOCOL_VERSION } from '@tixkit/agent-protocol';
 import type { AppContext } from '../../app.js';
 import { registerErrorHandler } from '../../app.js';
 import { oauthAuthorizeRoutes, oauthTokenRoutes } from '../../routes/modules/oauth.js';
@@ -43,6 +44,9 @@ function createOAuthDb(tables: Tables): Database {
         },
         where(column: string, op: string, value: unknown) {
           wheres.push({ column, op, value });
+          return query;
+        },
+        forUpdate() {
           return query;
         },
         async executeTakeFirst() {
@@ -98,6 +102,16 @@ function createOAuthDb(tables: Tables): Database {
             },
           };
           return query;
+        },
+      };
+    },
+    transaction() {
+      return {
+        setIsolationLevel() {
+          return this;
+        },
+        async execute<T>(operation: (transaction: Database) => Promise<T>) {
+          return operation(db as unknown as Database);
         },
       };
     },
@@ -587,7 +601,7 @@ describe('agent OAuth client credentials', () => {
           id: 'agt_agent_1',
           tenant_id: 'tnt_1',
           state: 'active',
-          protocol_version: '2026-07-01',
+          protocol_version: AGENT_PROTOCOL_VERSION,
         },
       ],
       oauth_access_tokens: [],
@@ -626,6 +640,79 @@ describe('agent OAuth client credentials', () => {
     );
     await app.close();
   });
+
+  it.each([
+    [
+      'stale protocol',
+      agentOAuthApplicationRow(),
+      { state: 'active', protocol_version: '2026-07-01' },
+    ],
+    [
+      'future protocol',
+      agentOAuthApplicationRow(),
+      { state: 'active', protocol_version: '2099-01-01' },
+    ],
+    [
+      'revoked principal',
+      agentOAuthApplicationRow(),
+      { state: 'revoked', protocol_version: AGENT_PROTOCOL_VERSION },
+    ],
+    [
+      'revoked application',
+      agentOAuthApplicationRow({ status: 'revoked' }),
+      { state: 'active', protocol_version: AGENT_PROTOCOL_VERSION },
+    ],
+    [
+      'resource-owner application',
+      agentOAuthApplicationRow({ subject_type: 'resource_owner', agent_principal_id: null }),
+      { state: 'active', protocol_version: AGENT_PROTOCOL_VERSION },
+    ],
+    [
+      'principal binding mismatch',
+      agentOAuthApplicationRow({ agent_principal_id: 'agt_other' }),
+      { state: 'active', protocol_version: AGENT_PROTOCOL_VERSION },
+    ],
+    [
+      'principal tenant mismatch',
+      agentOAuthApplicationRow(),
+      { tenant_id: 'tnt_other', state: 'active', protocol_version: AGENT_PROTOCOL_VERSION },
+    ],
+  ] as const)(
+    'returns the same failure for %s without issuing a token',
+    async (_scenario, application, principalOverrides) => {
+      const tables: Tables = {
+        oauth_applications: [application],
+        agent_principals: [
+          {
+            id: 'agt_agent_1',
+            tenant_id: 'tnt_1',
+            ...principalOverrides,
+          },
+        ],
+        oauth_access_tokens: [],
+      };
+      const app = await setupOAuthApp(tables);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/oauth/token',
+        payload: {
+          grant_type: 'client_credentials',
+          client_id: 'tk_agent_client_1',
+          client_secret: 'tk_agent_secret_1',
+        },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toMatchObject({
+        error: 'Unauthorized',
+        message: 'Invalid agent client credentials',
+      });
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.headers.pragma).toBe('no-cache');
+      expect(tables.oauth_access_tokens).toHaveLength(0);
+      await app.close();
+    },
+  );
 
   it('rejects client credentials for resource-owner apps and inactive agent principals', async () => {
     const resourceTables: Tables = {

@@ -11,6 +11,7 @@ import {
 import type { Database } from '@tixkit/db';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
+import { AGENT_PROTOCOL_VERSION } from '@tixkit/agent-protocol';
 
 export type AuthResult = {
   principal: Principal;
@@ -822,6 +823,7 @@ export class ClerkAuthService {
         'agent_principals.id as agent_principal_id',
         'agent_principals.tenant_id as agent_tenant_id',
         'agent_principals.state as agent_state',
+        'agent_principals.protocol_version as agent_protocol_version',
       ])
       .where('oauth_access_tokens.token_hash', '=', tokenHash)
       .where('oauth_access_tokens.expires_at', '>', sql<Date>`current_timestamp`)
@@ -834,6 +836,7 @@ export class ClerkAuthService {
       accessToken.app_subject_type !== 'agent' ||
       accessToken.app_status !== 'active' ||
       accessToken.agent_state !== 'active' ||
+      accessToken.agent_protocol_version !== AGENT_PROTOCOL_VERSION ||
       !accessToken.token_subject_id ||
       accessToken.token_subject_id !== accessToken.app_agent_principal_id ||
       accessToken.token_subject_id !== accessToken.agent_principal_id ||

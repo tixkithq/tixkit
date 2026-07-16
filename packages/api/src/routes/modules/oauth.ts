@@ -9,6 +9,7 @@ import { parseJsonValue } from '../../http/contracts.js';
 import { oauthRedirectUrlSchema, parseBody } from '../../http/schemas.js';
 import type { Permission, Principal } from '@tixkit/domain';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '@tixkit/domain';
+import { AGENT_PROTOCOL_VERSION } from '@tixkit/agent-protocol';
 
 const authorizeQuerySchema = z
   .object({
@@ -229,18 +230,27 @@ export const oauthTokenRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/oauth/token', async (request, reply) => {
     const body = parseBody(tokenSchema, request.body);
+    if (body.grant_type === 'client_credentials') {
+      reply.header('cache-control', 'no-store').header('pragma', 'no-cache');
+      try {
+        const credentials = resolveClientCredentials(request.headers.authorization, body);
+        return reply.send(
+          await issueAgentAccessToken({
+            db,
+            clientId: credentials.clientId,
+            clientSecret: credentials.clientSecret,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof UnauthorizedError)
+          throw new UnauthorizedError('Invalid agent client credentials');
+        throw error;
+      }
+    }
+
     const credentials = resolveClientCredentials(request.headers.authorization, body);
     const oauthApp = await loadClient(db, credentials.clientId, credentials.clientSecret);
     const now = await oauthDatabaseNow(db, oauthApp.tenant_id);
-
-    if (body.grant_type === 'client_credentials') {
-      if (oauthApp.subject_type !== 'agent' || !oauthApp.agent_principal_id)
-        throw new UnauthorizedError('OAuth client does not support client credentials');
-      return reply
-        .header('cache-control', 'no-store')
-        .header('pragma', 'no-cache')
-        .send(await issueAgentAccessToken({ db, oauthApp, now }));
-    }
 
     if (oauthApp.subject_type !== 'resource_owner')
       throw new UnauthorizedError('OAuth client does not support resource-owner grants');
@@ -407,43 +417,83 @@ async function issueAccessToken(input: {
 
 async function issueAgentAccessToken(input: {
   db: Database;
-  oauthApp: Awaited<ReturnType<typeof loadClient>>;
-  now: Date;
+  clientId: string;
+  clientSecret: string;
 }) {
-  const agentPrincipalId = input.oauthApp.agent_principal_id;
-  if (!agentPrincipalId) throw new UnauthorizedError('Invalid agent OAuth client');
-  const principal = await input.db
-    .selectFrom('agent_principals')
-    .select(['id', 'tenant_id', 'state', 'protocol_version'])
-    .where('tenant_id', '=', input.oauthApp.tenant_id)
-    .where('id', '=', agentPrincipalId)
-    .where('state', '=', 'active')
-    .executeTakeFirst();
-  if (!principal) throw new UnauthorizedError('Invalid or inactive agent OAuth client');
-  const accessToken = newSecret('tk_aat');
-  const expiresIn = 10 * 60;
-  await input.db
-    .insertInto('oauth_access_tokens')
-    .values({
-      id: `oat_${ulid()}`,
-      oauth_application_id: input.oauthApp.id,
-      refresh_token_id: null,
-      tenant_id: input.oauthApp.tenant_id,
-      organization_id: input.oauthApp.organization_id,
-      token_hash: hashSecret(accessToken),
-      scopes: '["agent.invoke"]',
-      subject_type: 'agent',
-      subject_id: principal.id,
-      expires_at: new Date(input.now.getTime() + expiresIn * 1000),
-      revoked_at: null,
-      created_at: input.now,
-      updated_at: input.now,
-    })
-    .execute();
-  return {
-    access_token: accessToken,
-    token_type: 'Bearer',
-    expires_in: expiresIn,
-    scope: 'agent.invoke',
-  };
+  return input.db
+    .transaction()
+    .setIsolationLevel('read committed')
+    .execute(async (transaction) => {
+      const candidate = await transaction
+        .selectFrom('oauth_applications')
+        .select(['id', 'tenant_id', 'agent_principal_id'])
+        .where('client_id', '=', input.clientId)
+        .executeTakeFirst();
+      if (!candidate?.agent_principal_id)
+        throw new UnauthorizedError('Invalid agent client credentials');
+
+      const principal = await transaction
+        .selectFrom('agent_principals')
+        .select(['id', 'tenant_id', 'state', 'protocol_version'])
+        .where('tenant_id', '=', candidate.tenant_id)
+        .where('id', '=', candidate.agent_principal_id)
+        .forUpdate()
+        .executeTakeFirst();
+      const oauthApp = await transaction
+        .selectFrom('oauth_applications')
+        .selectAll()
+        .where('id', '=', candidate.id)
+        .where('tenant_id', '=', candidate.tenant_id)
+        .where('client_id', '=', input.clientId)
+        .forUpdate()
+        .executeTakeFirst();
+      const presented = Buffer.from(hashSecret(input.clientSecret), 'hex');
+      const expected = oauthApp
+        ? Buffer.from(oauthApp.client_secret_hash, 'hex')
+        : Buffer.alloc(presented.length);
+      const secretMatches =
+        presented.length === expected.length && timingSafeEqual(presented, expected);
+      if (
+        !oauthApp ||
+        !secretMatches ||
+        oauthApp.status !== 'active' ||
+        oauthApp.subject_type !== 'agent' ||
+        oauthApp.agent_principal_id !== principal?.id
+      )
+        throw new UnauthorizedError('Invalid agent client credentials');
+      if (
+        !principal ||
+        principal.state !== 'active' ||
+        principal.protocol_version !== AGENT_PROTOCOL_VERSION
+      )
+        throw new UnauthorizedError('Invalid agent client credentials');
+
+      const now = await oauthDatabaseNow(transaction as Database, oauthApp.tenant_id);
+      const accessToken = newSecret('tk_aat');
+      const expiresIn = 10 * 60;
+      await transaction
+        .insertInto('oauth_access_tokens')
+        .values({
+          id: `oat_${ulid()}`,
+          oauth_application_id: oauthApp.id,
+          refresh_token_id: null,
+          tenant_id: oauthApp.tenant_id,
+          organization_id: oauthApp.organization_id,
+          token_hash: hashSecret(accessToken),
+          scopes: '["agent.invoke"]',
+          subject_type: 'agent',
+          subject_id: principal.id,
+          expires_at: new Date(now.getTime() + expiresIn * 1000),
+          revoked_at: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      return {
+        access_token: accessToken,
+        token_type: 'Bearer',
+        expires_in: expiresIn,
+        scope: 'agent.invoke',
+      };
+    });
 }
