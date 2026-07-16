@@ -36,7 +36,9 @@ Confirm endpoint reachability and signature verification, then fix receiver idem
 
 ## Outbound provider failure
 
-Classify the failure before replaying work: transport or deadline, `429` rate limit, selected `5xx`, malformed/non-JSON gateway response, permanent provider `4xx`, or customer/recipient decline. Correlate dependency, operation, status, duration, retry classification, Tixkit request/workflow ID, and a safe provider request ID. Respect `Retry-After` and the owning workflow's retry policy; stop retry multiplication if both layers are repeating the same operation.
+Classify the failure before replaying work: transport or deadline, `429` rate limit, selected `5xx`, malformed/non-JSON gateway response, permanent provider `4xx`, or customer/recipient decline. Correlate dependency, operation, status, content type/response class, duration, retry classification, Tixkit request/workflow ID, and hashed provider correlation. Respect `Retry-After` and the owning workflow's retry policy; stop retry multiplication if both layers are repeating the same operation.
+
+When upstream support requires an exact provider request ID, retrieve it only through the configured privileged incident sink. Confirm authorization, record the access audit, share it through the approved support channel, and allow the short retention period to expire. Never copy it into ordinary tickets, chat, logs, workflow history, or customer-visible errors. If the sink was not enabled when the request occurred, do not weaken redaction retroactively or substitute raw body capture.
 
 For a timeout after a side-effecting payment, refund, or message request, assume the result is ambiguous. Reconcile with the same idempotency key or provider reference before attempting another side effect. Preserve bounded redacted diagnostics, but do not attach authorization headers, client secrets, webhook signatures, full provider bodies, or customer payloads to the incident.
 

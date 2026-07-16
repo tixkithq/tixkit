@@ -29,7 +29,9 @@ The Bun/Turbo workspace contains runtime applications under `apps/` and reusable
 
 Provider operations cross Tixkit-owned adapters. Routes, activities, and feature modules do not instantiate vendor clients or call provider endpoints directly. The internal provider-client boundary owns deadlines, idempotency propagation, explicit API versions, error and retry classification, bounded redacted diagnostics, and dependency telemetry; business policy, persistence, reconciliation, consent, and workflow retries remain with their owning packages.
 
-Vendor SDKs may remain inside an adapter when they implement a meaningful browser, security, signing, protocol, workflow-runtime, or instrumentation boundary. This rule concerns upstream dependencies and does not change the public Tixkit SDKs offered to integrators. The accepted decision and migration scope are recorded in `docs/internal/architecture/outbound-provider-clients.md`.
+Vendor integrations are classified as direct HTTP, a contained SDK, or a runtime/security SDK boundary. Vendor SDKs may remain inside an adapter when they materially reduce browser, security, signing, protocol, workflow-runtime, or instrumentation risk. Stripe's server SDK currently remains contained behind `StripeGateway`; direct REST is not presumed safer and requires complete protocol/provider parity plus a measured operational benefit before migration.
+
+The provider registry and validator must reject unclassified hosts, imports and production dependencies. Test-only vendor SDKs do not belong in production dependency sets. This rule concerns upstream dependencies and does not change the public Tixkit SDKs offered to integrators. The accepted decisions are recorded in `docs/internal/architecture/outbound-provider-clients.md` and `docs/internal/architecture/sdk-consumption-and-wire-evidence.md`.
 
 ## Frontend and integration packages
 

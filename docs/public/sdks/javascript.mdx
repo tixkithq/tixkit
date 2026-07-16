@@ -64,3 +64,5 @@ Use `tixkit.agentActions.prepareEventUpdate` for a consequential update. Review 
 Organizer memory methods are available under `tixkit.agentMemory`. Every create, inspect, export, correct and remove request requires an idempotency key; correction and removal also require the entry's current version. Memory ownership and provenance are server-derived.
 
 Use resource methods for pagination and typed errors. Supply idempotency options for supported writes and preserve the same logical key across a retry.
+
+Tixkit's internal provider-SDK policy does not deprecate this public SDK. A future version-bound agent integration skill may provide coding agents with the same authentication, idempotency, webhook and contract guidance, but it will be additive and must match the immutable API release. Until that artifact is published and validated, use this SDK, the versioned API reference and contract tests as the supported integration surfaces.

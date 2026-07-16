@@ -21,7 +21,9 @@ Collect service-level metrics, traces, structured logs, and health signals for t
 
 Use request, workflow, delivery, export-job, checkout-session, and order identifiers only where policy permits. Redact authorization headers, cookies, API keys, signing secrets, provider credentials, ticket codes, and personal-data payloads.
 
-For an outbound provider incident, correlate the Tixkit request or workflow with dependency, operation, outcome, HTTP status, duration, retry classification, and a provider request ID when one is safely available. Do not use raw URLs containing identifiers as metric labels. Do not export authorization headers, client secrets, webhook signatures, full request/response bodies, or customer payloads. A bounded redacted body preview is diagnostic evidence, not application data, and must follow the same access and retention controls as logs.
+For an outbound provider incident, correlate the Tixkit request or workflow with dependency, operation, outcome, HTTP status, bounded status text, content type, response classification, duration, retry classification, and hashed provider correlation. Do not use raw URLs containing identifiers as metric labels. Do not export authorization headers, client secrets, webhook signatures, full request/response bodies, or customer payloads. A bounded redacted body preview or body digest is diagnostic evidence, not application data, and must follow the same access and retention controls as logs.
+
+If exact upstream request IDs are enabled for support escalation, send them only to the privileged incident sink. That sink is disabled by default and must be encrypted, access-controlled, audited, short-retained, and excluded from normal logs, metrics, traces, API errors, and Temporal workflow history. Enabling it does not authorize raw provider body capture.
 
 ## Separate dependency failures
 
