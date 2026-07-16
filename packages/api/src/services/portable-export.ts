@@ -39,7 +39,7 @@ import {
 import sharp from 'sharp';
 
 const MAX_PORTABLE_ARTIFACT_BYTES = 50 * 1024 * 1024;
-export const PORTABLE_EXPORT_API_VERSION = '2026-08-10';
+export const PORTABLE_EXPORT_API_VERSION = '2026-08-11';
 export const PORTABLE_EXPORT_DATA_SCHEMA_VERSION = '0081';
 export const PORTABLE_EXPORT_MEDIA_SCANNER_ID = 'tixkit_event_media_scanner_v1';
 export const PORTABLE_EXPORT_MEDIA_POLICY_SHA256 = createHash('sha256')
@@ -489,7 +489,7 @@ export function createPortableExportService(input: {
           { apiVersion: '2026-07-16', dataSchemaVersion: '0079' },
           { apiVersion: '2026-07-17', dataSchemaVersion: '0080' },
           { apiVersion: '2026-08-06', dataSchemaVersion: '0081' },
-          { apiVersion: '2026-08-10', dataSchemaVersion: '0081' },
+          { apiVersion: '2026-08-11', dataSchemaVersion: '0081' },
         ],
       });
       if (portableManifestSha256(recoveredParent.envelope.manifest) !== parent.manifest_sha256)

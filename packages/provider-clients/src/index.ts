@@ -5,6 +5,7 @@ const DEFAULT_DEADLINE_MS = 10_000;
 const DEFAULT_BODY_PREVIEW_BYTES = 1_024;
 const DEFAULT_RESPONSE_BYTES = 64 * 1_024;
 const RETRYABLE_SERVER_STATUSES = new Set([500, 502, 503, 504]);
+const MAX_IDEMPOTENCY_KEY_BYTES = 255;
 const SAFE_DIAGNOSTIC_KEYS = new Set(['code', 'type', 'error_code']);
 const SAFE_DIAGNOSTIC_ENVELOPES = new Set(['error', 'errors']);
 const REDACTED = '[REDACTED]';
@@ -141,17 +142,27 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
   const span = startProviderSpan(request.dependency, request.operation, method);
   const controller = new AbortController();
   let timedOut = false;
+  let rejectInterruption: (() => void) | undefined;
+  const interruption = new Promise<never>((_resolve, reject) => {
+    rejectInterruption = () => reject(new Error('Provider operation interrupted'));
+  });
+  void interruption.catch(() => undefined);
   const timeout = setTimeout(() => {
     timedOut = true;
     controller.abort(new DOMException('Provider deadline exceeded', 'TimeoutError'));
+    rejectInterruption?.();
   }, deadlineMs);
-  const onCallerAbort = () => controller.abort(request.signal?.reason);
+  const onCallerAbort = () => {
+    controller.abort(new DOMException('Provider operation cancelled', 'AbortError'));
+    rejectInterruption?.();
+  };
   request.signal?.addEventListener('abort', onCallerAbort, { once: true });
   if (request.signal?.aborted) onCallerAbort();
 
   try {
     const headers = new Headers(request.headers);
     if (request.idempotency) {
+      requireHttpIdempotencyKey(request, request.idempotency.key);
       headers.set(request.idempotency.header ?? 'Idempotency-Key', request.idempotency.key);
     }
     if (request.apiVersion) headers.set(request.apiVersion.header, request.apiVersion.value);
@@ -161,13 +172,16 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
       if (controller.signal.aborted) {
         throw operationError(request, 'cancelled', false, 'not-sent', false, {});
       }
-      response = await (request.fetch ?? globalThis.fetch)(request.url, {
-        method,
-        headers,
-        body: request.body,
-        signal: controller.signal,
-        redirect: 'error',
-      });
+      response = await Promise.race([
+        (request.fetch ?? globalThis.fetch)(request.url, {
+          method,
+          headers,
+          body: request.body,
+          signal: controller.signal,
+          redirect: 'error',
+        }),
+        interruption,
+      ]);
     } catch (cause) {
       if (cause instanceof ProviderOperationError) throw cause;
       const kind: ProviderFailureKind = timedOut
@@ -195,7 +209,7 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
     const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
     let rawBody: string;
     try {
-      rawBody = await readBoundedBody(response, maxResponseBytes);
+      rawBody = await readBoundedBody(response, maxResponseBytes, interruption);
     } catch {
       if (timedOut) {
         throw operationError(request, 'timeout', !sideEffecting, 'unknown', false, {});
@@ -220,7 +234,9 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
 
     if (!response.ok) {
       const kind = classifyStatus(response.status);
-      const retryable = kind === 'rate-limit' || (kind === 'server' && !sideEffecting);
+      const retryable =
+        kind === 'rate-limit' ||
+        (kind === 'server' && RETRYABLE_SERVER_STATUSES.has(response.status) && !sideEffecting);
       const deliveryState = kind === 'validation' || kind === 'rate-limit' ? 'rejected' : 'unknown';
       throw operationError(request, kind, retryable, deliveryState, deliveryState === 'rejected', {
         status: response.status,
@@ -249,7 +265,26 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
     let data: T;
     try {
       data = request.parse ? request.parse(parsed) : ((expectsJson ? parsed : rawBody) as T);
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof ProviderOperationError &&
+        error.dependency === request.dependency &&
+        error.operation === request.operation
+      ) {
+        const providerCode = safeProviderCode(error.details.providerCode);
+        throw operationError(
+          request,
+          error.kind,
+          error.retryable,
+          error.deliveryState,
+          error.safeToFailover,
+          {
+            status: response.status,
+            ...(providerCode === undefined ? {} : { providerCode }),
+            ...(providerRequestId === undefined ? {} : { providerRequestId }),
+          },
+        );
+      }
       throw operationError(request, 'malformed-response', false, 'accepted', false, {
         status: response.status,
         providerRequestId,
@@ -338,8 +373,34 @@ function operationError(
 
 function classifyStatus(status: number): ProviderFailureKind {
   if (status === 429) return 'rate-limit';
-  if (RETRYABLE_SERVER_STATUSES.has(status)) return 'server';
+  if (status >= 500 && status <= 599) return 'server';
   return 'validation';
+}
+
+function safeProviderCode(value: string | undefined): string | undefined {
+  return value && (/^[0-9]{1,3}$/u.test(value) || /^sha256:[a-f0-9]{64}$/u.test(value))
+    ? value
+    : undefined;
+}
+
+function requireHttpIdempotencyKey(
+  request: Pick<ProviderHttpRequest<unknown>, 'dependency' | 'operation'>,
+  value: string,
+): void {
+  const invalid =
+    typeof value !== 'string' ||
+    !value.trim() ||
+    value !== value.trim() ||
+    Buffer.byteLength(value, 'utf8') > MAX_IDEMPOTENCY_KEY_BYTES ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 31 || codePoint === 127;
+    });
+  if (invalid) {
+    throw operationError(request, 'validation', false, 'not-sent', false, {
+      providerCode: 'idempotency_invalid',
+    });
+  }
 }
 
 function parseResponseBody(rawBody: string): unknown | undefined {
@@ -375,15 +436,23 @@ export function parseRetryAfter(value: string | null, now = Date.now()): number 
     : undefined;
 }
 
-async function readBoundedBody(response: Response, maxBytes: number): Promise<string> {
+async function readBoundedBody(
+  response: Response,
+  maxBytes: number,
+  interruption: Promise<never>,
+): Promise<string> {
   if (!response.body) return '';
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let complete = false;
   try {
     while (true) {
-      const result = await reader.read();
-      if (result.done) break;
+      const result = await Promise.race([reader.read(), interruption]);
+      if (result.done) {
+        complete = true;
+        break;
+      }
       total += result.value.byteLength;
       if (total > maxBytes) {
         await reader.cancel('Provider response exceeded the configured byte limit');
@@ -392,7 +461,15 @@ async function readBoundedBody(response: Response, maxBytes: number): Promise<st
       chunks.push(result.value);
     }
   } finally {
-    reader.releaseLock();
+    if (!complete) {
+      void reader.cancel('Provider response read interrupted').catch(() => undefined);
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // The pending read still owns its rejection handler from Promise.race. Cancellation
+      // above remains best-effort for non-conforming injected stream implementations.
+    }
   }
   const body = new Uint8Array(total);
   let offset = 0;
@@ -530,7 +607,7 @@ export class TelnyxMessagingClient {
 
   async sendSms(input: SmsMessageInput): Promise<ProviderMessageResult> {
     requireCredential(this.config.apiKey, 'telnyx', 'send-sms');
-    const result = await executeProviderHttp({
+    const result = await executeProviderHttp<ProviderMessageResult>({
       ...this.runtime,
       dependency: 'telnyx',
       operation: 'send-sms',
@@ -555,16 +632,9 @@ export class TelnyxMessagingClient {
         webhook_url: input.webhookUrl,
         use_profile_webhooks: !input.webhookUrl,
       }),
-      parse: recordBody,
+      parse: telnyxMessageResult,
     });
-    const nested = result.data.data;
-    const providerMessageId =
-      optionalString(result.data, 'id') ??
-      (nested && typeof nested === 'object' && !Array.isArray(nested)
-        ? optionalString(nested as Record<string, unknown>, 'id')
-        : undefined);
-    if (!providerMessageId) throw malformedProviderPayload('telnyx', 'send-sms');
-    return { providerMessageId, accepted: true };
+    return result.data;
   }
 }
 
@@ -585,7 +655,7 @@ export class TwilioMessagingClient {
       'twilio',
       'send-sms',
     );
-    const result = await executeProviderHttp({
+    const result = await executeProviderHttp<ProviderMessageResult>({
       ...this.runtime,
       dependency: 'twilio',
       operation: 'send-sms',
@@ -597,11 +667,9 @@ export class TwilioMessagingClient {
       },
       idempotency: { key: input.idempotencyKey },
       body: form,
-      parse: recordBody,
+      parse: twilioMessageResult,
     });
-    const providerMessageId = optionalString(result.data, 'sid');
-    if (!providerMessageId) throw malformedProviderPayload('twilio', 'send-sms');
-    return { providerMessageId, accepted: true };
+    return result.data;
   }
 }
 
@@ -623,7 +691,7 @@ export class VonageMessagingClient {
       'client-ref': input.idempotencyKey,
     });
     if (input.webhookUrl) form.set('callback', input.webhookUrl);
-    const result = await executeProviderHttp({
+    const result = await executeProviderHttp<ProviderMessageResult>({
       ...this.runtime,
       dependency: 'vonage',
       operation: 'send-sms',
@@ -637,37 +705,9 @@ export class VonageMessagingClient {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       idempotency: { key: input.idempotencyKey, header: 'X-Tixkit-Idempotency-Key' },
       body: form,
-      parse: recordBody,
+      parse: vonageMessageResult,
     });
-    const messages = Array.isArray(result.data.messages) ? result.data.messages : [];
-    const first = messages[0];
-    if (!first || typeof first !== 'object' || Array.isArray(first)) {
-      throw malformedProviderPayload('vonage', 'send-sms');
-    }
-    const message = first as Record<string, unknown>;
-    const providerCode = message.status;
-    if (typeof providerCode !== 'string' || !/^\d{1,3}$/u.test(providerCode)) {
-      throw malformedProviderPayload('vonage', 'send-sms');
-    }
-    if (providerCode !== '0') {
-      const semantic = vonageSemanticFailure(providerCode);
-      throw new ProviderOperationError(
-        `vonage.send-sms failed: ${semantic.kind}`,
-        'vonage',
-        'send-sms',
-        semantic.kind,
-        semantic.retryable,
-        'rejected',
-        true,
-        { providerCode },
-      );
-    }
-    const providerMessageId = optionalString(message, 'message-id');
-    if (!providerMessageId) throw malformedProviderPayload('vonage', 'send-sms');
-    return {
-      providerMessageId,
-      accepted: true,
-    };
+    return result.data;
   }
 }
 
@@ -686,7 +726,7 @@ export class PlivoMessagingClient {
       'plivo',
       'send-sms',
     );
-    const result = await executeProviderHttp({
+    const result = await executeProviderHttp<ProviderMessageResult>({
       ...this.runtime,
       dependency: 'plivo',
       operation: 'send-sms',
@@ -703,18 +743,9 @@ export class PlivoMessagingClient {
         text: input.body,
         url: input.webhookUrl,
       }),
-      parse: recordBody,
+      parse: plivoMessageResult,
     });
-    const ids = result.data.message_uuid;
-    const providerMessageId = Array.isArray(ids)
-      ? typeof ids[0] === 'string'
-        ? ids[0]
-        : undefined
-      : typeof ids === 'string'
-        ? ids
-        : undefined;
-    if (!providerMessageId) throw malformedProviderPayload('plivo', 'send-sms');
-    return { providerMessageId, accepted: true };
+    return result.data;
   }
 }
 
@@ -756,7 +787,7 @@ export class ResendMessagingClient {
         content_type: attachment.contentType,
       }));
     }
-    const result = await executeProviderHttp({
+    const result = await executeProviderHttp<ProviderMessageResult>({
       ...this.runtime,
       dependency: 'resend',
       operation: 'send-email',
@@ -774,17 +805,83 @@ export class ResendMessagingClient {
       idempotency: { key: input.idempotencyKey },
       requestIdHeaders: ['x-resend-request-id'],
       body: JSON.stringify(payload),
-      parse: recordBody,
+      parse: resendMessageResult,
     });
-    const nested = result.data.data;
-    const providerMessageId =
-      optionalString(result.data, 'id') ??
-      (nested && typeof nested === 'object' && !Array.isArray(nested)
-        ? optionalString(nested as Record<string, unknown>, 'id')
-        : undefined);
-    if (!providerMessageId) throw malformedProviderPayload('resend', 'send-email');
-    return { providerMessageId, accepted: true };
+    return result.data;
   }
+}
+
+function telnyxMessageResult(value: unknown): ProviderMessageResult {
+  const body = recordBody(value);
+  const nested = body.data;
+  const providerMessageId =
+    optionalString(body, 'id') ??
+    (nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? optionalString(nested as Record<string, unknown>, 'id')
+      : undefined);
+  if (!providerMessageId) throw malformedProviderPayload('telnyx', 'send-sms');
+  return { providerMessageId, accepted: true };
+}
+
+function twilioMessageResult(value: unknown): ProviderMessageResult {
+  const providerMessageId = optionalString(recordBody(value), 'sid');
+  if (!providerMessageId) throw malformedProviderPayload('twilio', 'send-sms');
+  return { providerMessageId, accepted: true };
+}
+
+function vonageMessageResult(value: unknown): ProviderMessageResult {
+  const body = recordBody(value);
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const first = messages[0];
+  if (!first || typeof first !== 'object' || Array.isArray(first)) {
+    throw malformedProviderPayload('vonage', 'send-sms');
+  }
+  const message = first as Record<string, unknown>;
+  const providerCode = message.status;
+  if (typeof providerCode !== 'string' || !/^\d{1,3}$/u.test(providerCode)) {
+    throw malformedProviderPayload('vonage', 'send-sms');
+  }
+  if (providerCode !== '0') {
+    const semantic = vonageSemanticFailure(providerCode);
+    throw new ProviderOperationError(
+      `vonage.send-sms failed: ${semantic.kind}`,
+      'vonage',
+      'send-sms',
+      semantic.kind,
+      semantic.retryable,
+      'rejected',
+      true,
+      { providerCode },
+    );
+  }
+  const providerMessageId = optionalString(message, 'message-id');
+  if (!providerMessageId) throw malformedProviderPayload('vonage', 'send-sms');
+  return { providerMessageId, accepted: true };
+}
+
+function plivoMessageResult(value: unknown): ProviderMessageResult {
+  const ids = recordBody(value).message_uuid;
+  const providerMessageId = Array.isArray(ids)
+    ? typeof ids[0] === 'string'
+      ? ids[0]
+      : undefined
+    : typeof ids === 'string'
+      ? ids
+      : undefined;
+  if (!providerMessageId) throw malformedProviderPayload('plivo', 'send-sms');
+  return { providerMessageId, accepted: true };
+}
+
+function resendMessageResult(value: unknown): ProviderMessageResult {
+  const body = recordBody(value);
+  const nested = body.data;
+  const providerMessageId =
+    optionalString(body, 'id') ??
+    (nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? optionalString(nested as Record<string, unknown>, 'id')
+      : undefined);
+  if (!providerMessageId) throw malformedProviderPayload('resend', 'send-email');
+  return { providerMessageId, accepted: true };
 }
 
 function recordBody(value: unknown): Record<string, unknown> {

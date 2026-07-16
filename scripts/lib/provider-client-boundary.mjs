@@ -62,10 +62,7 @@ function isRuntimeSource(path) {
 }
 
 function stripeSdkAllowed(path) {
-  return (
-    path.startsWith('packages/provider-clients/') ||
-    path === 'packages/api/src/routes/modules/stripe-webhooks.ts'
-  );
+  return path.startsWith('packages/provider-clients/');
 }
 
 function migratedEndpointAllowed(path) {
@@ -185,6 +182,28 @@ function sourceMayContainProviderBoundary(source) {
   );
 }
 
+function syntaxContainsStripeTaint(node, values = []) {
+  if (!node || typeof node !== 'object') return false;
+  if (
+    (node.type === 'Literal' || node.type === 'StringLiteral') &&
+    typeof node.value === 'string'
+  ) {
+    values.push(node.value);
+  }
+  if (node.type === 'TemplateElement') {
+    values.push(node.value?.cooked ?? node.value?.raw ?? '');
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'parent' || key === 'scope') continue;
+    if (Array.isArray(value)) {
+      for (const entry of value) syntaxContainsStripeTaint(entry, values);
+    } else {
+      syntaxContainsStripeTaint(value, values);
+    }
+  }
+  return values.join('').replace(/[^a-z0-9]/giu, '').toLowerCase().includes('stripe');
+}
+
 function isAllowedCheckoutCspLiteral(path, node, parents) {
   if (path !== 'apps/checkout/src/lib/checkout-security-headers.ts') return false;
   let current = node;
@@ -219,7 +238,11 @@ function isAllowedCheckoutCspLiteral(path, node, parents) {
 
 function sourceBoundaryFindings(path, source) {
   if (!sourceMayContainProviderBoundary(source)) {
-    return { migratedEndpoint: false, stripeEndpoint: false, stripeSdk: false };
+    return {
+      migratedEndpoint: false,
+      stripeEndpoint: false,
+      stripeSdk: false,
+    };
   }
   const parsed = parseSync(path, source, { preserveParens: true });
   if (parsed.errors.length > 0) {
@@ -228,7 +251,11 @@ function sourceBoundaryFindings(path, source) {
   const sourceFile = parsed.program;
   const bindings = new Map();
   const parents = new WeakMap();
-  const findings = { migratedEndpoint: false, stripeEndpoint: false, stripeSdk: false };
+  const findings = {
+    migratedEndpoint: false,
+    stripeEndpoint: false,
+    stripeSdk: false,
+  };
 
   const walk = (node, visitor, parent, seen = new WeakSet()) => {
     if (!node || typeof node !== 'object' || seen.has(node)) return;
@@ -249,6 +276,35 @@ function sourceBoundaryFindings(path, source) {
     values.push(value);
     bindings.set(name, values);
   };
+  const outsideProviderBoundary = !stripeSdkAllowed(path);
+  const createRequireFactories = new Set(['createRequire']);
+  const moduleNamespaces = new Set();
+  const dynamicRequireLoaders = new Set(['require']);
+  walk(sourceFile, (node) => {
+    if (
+      node.type === 'ImportDeclaration' &&
+      staticStrings(node.source, bindings).some(
+        (source) => source === 'node:module' || source === 'module',
+      )
+    ) {
+      for (const specifier of node.specifiers ?? []) {
+        if (
+          specifier.type === 'ImportSpecifier' &&
+          specifier.imported?.name === 'createRequire' &&
+          specifier.local?.name
+        ) {
+          createRequireFactories.add(specifier.local.name);
+        }
+        if (
+          (specifier.type === 'ImportNamespaceSpecifier' ||
+            specifier.type === 'ImportDefaultSpecifier') &&
+          specifier.local?.name
+        ) {
+          moduleNamespaces.add(specifier.local.name);
+        }
+      }
+    }
+  });
   walk(sourceFile, (node) => {
     if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.init) {
       bind(node.id.name, node.init);
@@ -261,6 +317,52 @@ function sourceBoundaryFindings(path, source) {
       bind(node.left.name, node.right);
     }
   });
+  const loaderAssignments = [];
+  walk(sourceFile, (node) => {
+    if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.init) {
+      loaderAssignments.push([node.id.name, node.init]);
+    }
+    if (
+      node.type === 'AssignmentExpression' &&
+      node.operator === '=' &&
+      node.left?.type === 'Identifier'
+    ) {
+      loaderAssignments.push([node.left.name, node.right]);
+    }
+  });
+  const createsRequireLoader = (expression) => {
+    if (expression?.type !== 'CallExpression') return false;
+    if (
+      calleeNames(expression.callee, bindings).some((name) =>
+        createRequireFactories.has(name),
+      )
+    ) {
+      return true;
+    }
+    return (
+      expression.callee?.type === 'MemberExpression' &&
+      expression.callee.object?.type === 'Identifier' &&
+      moduleNamespaces.has(expression.callee.object.name) &&
+      (expression.callee.computed
+        ? staticStrings(expression.callee.property, bindings).includes('createRequire')
+        : expression.callee.property?.name === 'createRequire')
+    );
+  };
+  let loaderAdded = true;
+  while (loaderAdded) {
+    loaderAdded = false;
+    for (const [name, expression] of loaderAssignments) {
+      const aliasesLoader =
+        expression?.type === 'Identifier' && dynamicRequireLoaders.has(expression.name);
+      if (
+        !dynamicRequireLoaders.has(name) &&
+        (aliasesLoader || createsRequireLoader(expression))
+      ) {
+        dynamicRequireLoaders.add(name);
+        loaderAdded = true;
+      }
+    }
+  }
 
   walk(sourceFile, (node) => {
     const values =
@@ -290,13 +392,24 @@ function sourceBoundaryFindings(path, source) {
       (node.type === 'ImportDeclaration' ||
         node.type === 'ExportNamedDeclaration' ||
         node.type === 'ExportAllDeclaration') &&
-      staticStrings(node.source, bindings).includes('stripe')
+      staticStrings(node.source, bindings).some(
+        (source) =>
+          source === 'stripe' ||
+          (source === '@stripe/stripe-js' && !path.startsWith('apps/checkout/')),
+      )
     ) {
       findings.stripeSdk = true;
     }
     if (
       node.type === 'ImportExpression' &&
-      staticStrings(node.source, bindings).includes('stripe')
+      ((outsideProviderBoundary &&
+        syntaxContainsStripeTaint(node.source) &&
+        !(
+          path.startsWith('apps/checkout/') &&
+          staticStrings(node.source, bindings).length > 0 &&
+          staticStrings(node.source, bindings).every((value) => value === '@stripe/stripe-js')
+        )) ||
+        staticStrings(node.source, bindings).includes('stripe'))
     ) {
       findings.stripeSdk = true;
     }
@@ -305,6 +418,14 @@ function sourceBoundaryFindings(path, source) {
       if (
         names.includes('require') &&
         staticStrings(node.arguments[0], bindings).includes('stripe')
+      ) {
+        findings.stripeSdk = true;
+      }
+      if (
+        outsideProviderBoundary &&
+        syntaxContainsStripeTaint({ type: 'Arguments', values: node.arguments }) &&
+        (names.some((name) => name === 'eval' || name === 'Function') ||
+          names.some((name) => dynamicRequireLoaders.has(name)))
       ) {
         findings.stripeSdk = true;
       }
@@ -320,6 +441,14 @@ function sourceBoundaryFindings(path, source) {
       staticStrings(node.moduleReference?.expression, bindings).includes('stripe')
     )
       findings.stripeSdk = true;
+    if (
+      outsideProviderBoundary &&
+      node.type === 'NewExpression' &&
+      calleeNames(node.callee, bindings).some((name) => name === 'Function') &&
+      syntaxContainsStripeTaint({ type: 'Arguments', values: node.arguments })
+    ) {
+      findings.stripeSdk = true;
+    }
     if (
       node.type === 'NewExpression' &&
       node.callee?.type === 'Identifier' &&

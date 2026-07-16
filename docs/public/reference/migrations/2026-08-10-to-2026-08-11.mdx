@@ -1,0 +1,24 @@
+---
+title: API migration from 2026-08-10 to 2026-08-11
+description: Document stable Stripe webhook failure responses.
+audience:
+  - developer
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites:
+  - An integration using API version 2026-08-10
+related:
+  - /reference/api-versions
+  - /developers/webhooks/troubleshooting
+---
+
+API version `2026-08-11` adds explicit `400` and `503` response contracts to `POST /webhooks/stripe`. The webhook request and successful response are unchanged.
+
+Malformed bodies, missing signatures, invalid signatures, and invalid verified envelopes return the standard `ApiError` shape with a stable code, message, and request ID. A checkout workflow signal failure returns the same envelope with `503`, allowing Stripe to retry without treating the provider event as processed.
+
+Clients should use the HTTP status and `error.code` for control flow and retain `error.requestId` for support correlation. Error messages are descriptive but are not a machine-readable contract. Signature material, provider diagnostics, secrets, and buyer data are never returned.
+
+This additive contract change requires no database migration. Immutable `2026-08-10` artifacts remain unchanged.

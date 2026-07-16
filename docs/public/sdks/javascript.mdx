@@ -43,7 +43,7 @@ const page = await tixkit.events.list({ limit: 10 });
 console.log(page.items.map((event) => event.id));
 ```
 
-The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-08-10`; keep SDK and server compatibility aligned.
+The client rejects secret-looking API keys and agent OAuth secrets in a browser runtime. Keep initialization and agent credential exchange in a server process and pass only buyer-safe public data to client components. The package declares API version `2026-08-11`; keep SDK and server compatibility aligned.
 
 Agent-control methods are available under `tixkit.agentControl`. Configure `accessToken` with the authenticated human sponsor's bearer token for those calls; do not pass an API key, and do not give the sponsor token to the agent process. See the [agent Platform API guide](/platform/agent-platform) for the private-beta authorization boundary.
 

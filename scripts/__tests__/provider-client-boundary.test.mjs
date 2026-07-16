@@ -15,19 +15,56 @@ function fixture(files) {
   return root;
 }
 
-test('accepts provider-owned clients and the retained webhook verification boundary', () => {
+test('accepts provider-owned clients with webhook verification behind the boundary', () => {
   const root = fixture({
     'packages/provider-clients/src/stripe.ts':
       "import Stripe from 'stripe';\nnew Stripe('test');\n",
     'packages/provider-clients/src/resend.ts':
       "export const endpoint = 'https://api.resend.com/emails';\n",
     'packages/api/src/routes/modules/stripe-webhooks.ts':
-      "import Stripe from 'stripe';\nnew Stripe('test');\n",
+      "import { verifyStripeWebhookEvent } from '@tixkit/provider-clients';\nverifyStripeWebhookEvent({ rawBody: 'body', signature: 'signature', webhookSecret: 'secret' });\n",
   });
   try {
     assert.deepEqual(providerClientBoundaryViolations(root), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects every direct Stripe SDK execution in the webhook owner', () => {
+  const webhookPath = 'packages/api/src/routes/modules/stripe-webhooks.ts';
+  const violation = `${webhookPath}: server-side Stripe SDK execution must cross @tixkit/provider-clients`;
+  const rejected = [
+    "import Stripe from 'stripe'; const stripe = new Stripe('test'); stripe.paymentIntents.create({});",
+    "import Stripe from 'stripe'; const stripe = new Stripe('test'); stripe.refunds.create({});",
+    "import Stripe from 'stripe'; const stripe = new Stripe('test'); stripe.accounts.retrieve('acct');",
+    "import Stripe from 'stripe'; const stripe = new Stripe('test'); stripe.accountLinks.create({});",
+    "import Stripe from 'stripe'; new Stripe('test');",
+    "import Stripe from 'stripe'; const stripe = new Stripe('test'); const execute = stripe.paymentIntents.create; execute({});",
+    "const vendor = 'stripe'; const Stripe = (await import(vendor)).default; const stripe = new Stripe('test'); stripe.webhooks.constructEvent('body', 'signature', 'secret');",
+    "import Stripe from 'stripe'; class WrappedStripe extends Stripe {} const stripe = new WrappedStripe('test'); stripe.refunds.create({});",
+    "import Stripe from 'stripe'; const namespace = { Stripe }; const stripe = new namespace.Stripe('test'); stripe.paymentIntents.create({});",
+    "import Stripe from 'stripe'; const stripe = Reflect.construct(Stripe, ['test']); stripe.accounts.retrieve('acct');",
+    "import Stripe from 'stripe'; function createStripe() { return Reflect.construct(Stripe, ['test']); } const stripe = createStripe(); stripe.refunds.create({});",
+    "const Vendor = (await import(String('stripe'))).default; const stripe = new Vendor('test'); stripe.refunds.create({});",
+    "const Vendor = (await import(['str', 'ipe'].join(''))).default; const stripe = new Vendor('test'); stripe.accounts.retrieve('acct');",
+    "import { createRequire as makeRequire } from 'node:module'; const load = makeRequire(import.meta.url); const Vendor = load('stripe'); const stripe = new Vendor('test'); stripe.paymentIntents.create({});",
+    "const load = require; const Vendor = load(String('stripe')); new Vendor('test');",
+    "import { createRequire } from 'node:module'; const req = createRequire(import.meta.url); const load = req; const Vendor = load('stripe'); new Vendor('test');",
+    "import * as moduleApi from 'node:module'; const load = moduleApi.createRequire(import.meta.url); const Vendor = load('stripe'); new Vendor('test');",
+    "import { createRequire } from 'node:module'; const factory = createRequire; const load = factory(import.meta.url); const Vendor = load('stripe'); new Vendor('test');",
+    "import moduleApi from 'node:module'; const load = moduleApi.createRequire(import.meta.url); const Vendor = load('stripe'); new Vendor('test');",
+    "import { loadStripe } from '@stripe/stripe-js'; loadStripe('pk_test');",
+    `eval("import('stripe')");`,
+  ];
+
+  for (const source of rejected) {
+    const root = fixture({ [webhookPath]: source });
+    try {
+      assert.deepEqual(providerClientBoundaryViolations(root), [violation], source);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -59,6 +96,18 @@ test('permits the browser Stripe CSP origin without permitting server-side REST 
       'export function checkoutContentSecurityPolicy() { return ["connect-src \'self\' https://api.stripe.com"]; }\n',
     'packages/provider-clients/src/stripe-rest.ts':
       "fetch('https://api.stripe.com/v1/payment_intents');\n",
+  });
+  try {
+    assert.deepEqual(providerClientBoundaryViolations(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('permits the Stripe.js browser SDK only in the checkout application', () => {
+  const root = fixture({
+    'apps/checkout/src/lib/stripe.ts':
+      "import { loadStripe } from '@stripe/stripe-js';\nexport const stripe = loadStripe('pk_test');\n",
   });
   try {
     assert.deepEqual(providerClientBoundaryViolations(root), []);

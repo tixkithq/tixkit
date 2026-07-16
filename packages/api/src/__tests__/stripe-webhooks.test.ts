@@ -7,14 +7,27 @@ const stripeMock = {
   constructEvent: vi.fn((rawBody: string) => JSON.parse(rawBody)),
 };
 
-vi.mock('stripe', () => {
-  class MockStripe {
-    webhooks = {
-      constructEvent: stripeMock.constructEvent,
-    };
-  }
-
-  return { default: MockStripe, Stripe: MockStripe };
+vi.mock('@tixkit/provider-clients', () => {
+  return {
+    verifyStripeWebhookEvent: ({ rawBody }: { rawBody: string }) => {
+      const event = stripeMock.constructEvent(rawBody) as {
+        id?: string;
+        type?: string;
+        account?: string;
+        data?: { object?: Record<string, unknown> | null };
+      };
+      if (!event.id || !event.type || !event.data?.object) {
+        throw new Error('normalized malformed Stripe webhook');
+      }
+      return {
+        id: event.id,
+        type: event.type,
+        ...(event.account ? { account: event.account } : {}),
+        data: { object: event.data.object },
+        payload: event,
+      };
+    },
+  };
 });
 
 const { stripeWebhookRoutes } = await import('../routes/modules/stripe-webhooks.js');
@@ -278,6 +291,99 @@ describe('Stripe webhook route', () => {
     else process.env.STRIPE_SECRET_KEY = originalStripeSecret;
   });
 
+  it('returns ApiError envelopes for unconfigured, missing-body, and missing-signature requests', async () => {
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(),
+      signalPaymentSucceeded: vi.fn(),
+      signalPaymentFailed: vi.fn(),
+    };
+    const createApp = () =>
+      setupStripeWebhookApp(
+        createMockDb({ events: [], operations: [] }) as Database,
+        temporalClient,
+      );
+
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    let app = await createApp();
+    let response = await app.inject({ method: 'POST', url: '/' });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'WEBHOOK_NOT_CONFIGURED',
+        message: expect.any(String),
+        requestId: expect.any(String),
+      },
+    });
+    await app.close();
+
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
+    app = await createApp();
+    response = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'stripe-signature': 'sig_present' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'MISSING_RAW_BODY',
+        message: expect.any(String),
+        requestId: expect.any(String),
+      },
+    });
+    await app.close();
+
+    app = await createApp();
+    response = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json' },
+      payload: createStripePaymentIntentEvent(),
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'WEBHOOK_SIGNATURE_MISSING',
+        message: expect.any(String),
+        requestId: expect.any(String),
+      },
+    });
+    await app.close();
+  });
+
+  it('rejects a verified envelope without a provider object as ApiError', async () => {
+    const temporalClient = {
+      startPaymentReconciliation: vi.fn(),
+      signalPaymentSucceeded: vi.fn(),
+      signalPaymentFailed: vi.fn(),
+    };
+    stripeMock.constructEvent.mockImplementationOnce(() => ({
+      id: 'evt_malformed',
+      type: 'payment_intent.succeeded',
+      data: {},
+    }));
+    const app = await setupStripeWebhookApp(
+      createMockDb({ events: [], operations: [] }) as Database,
+      temporalClient,
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig_present' },
+      payload: createStripePaymentIntentEvent(),
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'WEBHOOK_SIGNATURE_INVALID',
+        message: expect.any(String),
+        requestId: expect.any(String),
+      },
+    });
+    expect(temporalClient.startPaymentReconciliation).not.toHaveBeenCalled();
+    await app.close();
+  });
+
   it('rejects invalid signatures before storing or dispatching provider events', async () => {
     const state: StripeWebhookTestState = {
       events: [],
@@ -304,9 +410,11 @@ describe('Stripe webhook route', () => {
     expect(res.json()).toMatchObject({
       error: {
         code: 'WEBHOOK_SIGNATURE_INVALID',
-        message: 'No signatures found matching the expected signature for payload',
+        message: 'Stripe webhook signature verification failed',
+        requestId: expect.any(String),
       },
     });
+    expect(JSON.stringify(res.json())).not.toContain('No signatures found');
     expect(state.events).toEqual([]);
     expect(state.operations).toEqual([]);
     expect(temporalClient.signalPaymentSucceeded).not.toHaveBeenCalled();

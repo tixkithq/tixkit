@@ -1,6 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
-import Stripe from 'stripe';
 import { PaymentEventRepository, type Database } from '@tixkit/db';
+import {
+  verifyStripeWebhookEvent,
+  type StripeWebhookEvent,
+  type StripeWebhookObject,
+} from '@tixkit/provider-clients';
 
 export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
   const db = app.context.db;
@@ -24,22 +28,38 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
         error: {
           code: 'MISSING_RAW_BODY',
           message: 'Raw body is required for signature verification',
+          requestId: request.id,
         },
       });
     }
     const signature = request.headers['stripe-signature'] as string;
 
     if (!signature) {
-      return reply.status(400).send({ error: 'Missing Stripe signature' });
+      return reply.status(400).send({
+        error: {
+          code: 'WEBHOOK_SIGNATURE_MISSING',
+          message: 'Stripe signature is required',
+          requestId: request.id,
+        },
+      });
     }
 
-    let event: Stripe.Event;
+    let event: StripeWebhookEvent;
     try {
-      const stripe = new Stripe(stripeSecretKey || 'sk_test_tixkit_unconfigured');
-      event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return reply.status(400).send({ error: { code: 'WEBHOOK_SIGNATURE_INVALID', message } });
+      event = await verifyStripeWebhookEvent({
+        rawBody,
+        signature,
+        webhookSecret,
+        secretKey: stripeSecretKey,
+      });
+    } catch {
+      return reply.status(400).send({
+        error: {
+          code: 'WEBHOOK_SIGNATURE_INVALID',
+          message: 'Stripe webhook signature verification failed',
+          requestId: request.id,
+        },
+      });
     }
 
     // Store the event before processing. If a previous attempt stored the
@@ -60,7 +80,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
           provider: 'stripe',
           providerEventId: event.id,
           eventType: event.type,
-          rawPayload: event as unknown as Record<string, unknown>,
+          rawPayload: event.payload as Record<string, unknown>,
           idempotencyKey: event.id,
         });
       } catch (err) {
@@ -81,7 +101,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
       event.type === 'payment_intent.succeeded' ||
       event.type === 'payment_intent.payment_failed'
     ) {
-      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      const paymentIntent = event.data.object;
       const checkoutSessionId = paymentIntent.metadata?.checkoutSessionId;
       if (checkoutSessionId) {
         const isTrustedCheckoutPaymentIntent = await validateStripeCheckoutPaymentIntent(
@@ -90,7 +110,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
           paymentIntent,
           checkoutSessionId,
         );
-        if (isTrustedCheckoutPaymentIntent) {
+        if (isTrustedCheckoutPaymentIntent && paymentIntent.id) {
           trustedCheckoutSessionId = checkoutSessionId;
           try {
             if (event.type === 'payment_intent.succeeded') {
@@ -117,7 +137,7 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (event.type === 'account.updated') {
-      await syncStripeConnectAccount(db, event.data.object as Stripe.Account);
+      await syncStripeConnectAccount(db, event.data.object);
       await eventRepo.markProcessed(storedEvent.id);
     } else {
       // Start the durable reconciliation workflow; never process payment state in
@@ -138,8 +158,8 @@ export const stripeWebhookRoutes: FastifyPluginAsync = async (app) => {
 
 async function validateStripeCheckoutPaymentIntent(
   db: Database,
-  event: Stripe.Event,
-  paymentIntent: Stripe.PaymentIntent,
+  event: StripeWebhookEvent,
+  paymentIntent: StripeWebhookObject,
   checkoutSessionId: string,
 ): Promise<boolean> {
   if (
@@ -181,7 +201,7 @@ async function validateStripeCheckoutPaymentIntent(
     String(storedPaymentIntent.currency).toUpperCase() === paymentIntent.currency.toUpperCase();
   if (!paymentIntentMatchesSession) return false;
 
-  const stripeAccount = (event as unknown as { account?: string }).account;
+  const stripeAccount = event.account;
   if (!stripeAccount) return true;
 
   const paymentAccountId = storedPaymentIntent.payment_account_id;
@@ -198,7 +218,7 @@ async function validateStripeCheckoutPaymentIntent(
 
 async function resolveStripeEventTenantId(
   db: Database,
-  event: Stripe.Event,
+  event: StripeWebhookEvent,
 ): Promise<string | null> {
   const object = event.data?.object as {
     id?: string;
@@ -216,7 +236,7 @@ async function resolveStripeEventTenantId(
   }
 
   // Resolve tenant via the connected account (Stripe Connect).
-  const stripeAccount = (event as unknown as { account?: string }).account;
+  const stripeAccount = event.account;
   const accountObjectId =
     event.type === 'account.updated' && typeof object.id === 'string' ? object.id : undefined;
   const connectedAccountId = stripeAccount ?? accountObjectId;
@@ -246,13 +266,13 @@ async function resolveStripeEventTenantId(
   return paymentIntent?.tenant_id ?? null;
 }
 
-function stripeAccountStatus(account: Stripe.Account): 'active' | 'pending' | 'restricted' {
+function stripeAccountStatus(account: StripeWebhookObject): 'active' | 'pending' | 'restricted' {
   if (account.charges_enabled && account.payouts_enabled) return 'active';
   if ((account.requirements?.disabled_reason ?? null) !== null) return 'restricted';
   return 'pending';
 }
 
-async function syncStripeConnectAccount(db: Database, account: Stripe.Account): Promise<void> {
+async function syncStripeConnectAccount(db: Database, account: StripeWebhookObject): Promise<void> {
   if (!account.id) return;
   await db
     .updateTable('payment_accounts')

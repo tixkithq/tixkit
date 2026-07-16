@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-10');
+    expect(openApiSpec.info.version).toBe('2026-08-11');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {
@@ -2645,6 +2645,18 @@ describe('openApiSpec', () => {
     expect(openApiSpec.paths['/checkout/sessions'].post.security).toEqual([]);
     expect(openApiSpec.paths['/events'].get.security).toEqual([{ BearerAuth: [] }, { ApiKey: [] }]);
     expect(openApiSpec.paths['/webhooks/stripe'].post.security).toEqual([{ StripeSignature: [] }]);
+    expect(openApiSpec.paths['/webhooks/stripe'].post.responses).toMatchObject({
+      '400': {
+        content: {
+          'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+        },
+      },
+      '503': {
+        content: {
+          'application/json': { schema: { $ref: '#/components/schemas/ApiError' } },
+        },
+      },
+    });
     expect(openApiSpec.components.securitySchemes).toHaveProperty('SvixSignature');
     expect(openApiSpec.components.securitySchemes).toHaveProperty('TelnyxSignature');
     expect(openApiSpec.components.securitySchemes).toHaveProperty('EmailProviderSignature');

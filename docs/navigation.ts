@@ -210,6 +210,10 @@ export const documentationNavigation = [
         label: 'Adopt 2026-08-10 privacy-minimized RUM',
         routeId: 'apiMigration20260809To20260810',
       },
+      {
+        label: 'Adopt 2026-08-11 Stripe webhook errors',
+        routeId: 'apiMigration20260810To20260811',
+      },
       { label: 'Accessibility', routeId: 'accessibility' },
       { label: 'Capabilities and integrations', routeId: 'capabilitiesAndIntegrations' },
       { label: 'Performance', routeId: 'performance' },

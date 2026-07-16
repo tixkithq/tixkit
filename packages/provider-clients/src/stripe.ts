@@ -13,7 +13,88 @@ import {
 
 export const STRIPE_API_VERSION = '2026-06-24.dahlia' as const;
 export const STRIPE_REQUEST_TIMEOUT_MS = 20_000;
+const MAX_IDEMPOTENCY_KEY_BYTES = 255;
 const RETRYABLE_STRIPE_SERVER_STATUSES = new Set([500, 502, 503, 504]);
+const STRIPE_WEBHOOK_VERIFIER_KEY = 'sk_test_tixkit_webhook_verifier';
+
+export interface StripeWebhookObject {
+  readonly [key: string]: unknown;
+  readonly id?: string;
+  readonly payment_intent?: string | null;
+  readonly metadata?: Readonly<Record<string, string>>;
+  readonly amount?: number;
+  readonly currency?: string;
+  readonly last_payment_error?: { readonly message?: string } | null;
+  readonly default_currency?: string | null;
+  readonly details_submitted?: boolean;
+  readonly charges_enabled?: boolean;
+  readonly payouts_enabled?: boolean;
+  readonly requirements?: Readonly<Record<string, unknown>> & {
+    readonly disabled_reason?: string | null;
+  };
+}
+
+export interface StripeWebhookEvent {
+  readonly id: string;
+  readonly type: string;
+  readonly account?: string;
+  readonly data: { readonly object: StripeWebhookObject };
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+export interface VerifyStripeWebhookInput {
+  rawBody: string;
+  signature: string;
+  webhookSecret: string;
+  secretKey?: string;
+}
+
+export interface StripeWebhookVerifierOptions {
+  constructEvent?: (
+    rawBody: string,
+    signature: string,
+    webhookSecret: string,
+  ) => unknown | Promise<unknown>;
+}
+
+export async function verifyStripeWebhookEvent(
+  input: Readonly<VerifyStripeWebhookInput>,
+  options: Readonly<StripeWebhookVerifierOptions> = {},
+): Promise<StripeWebhookEvent> {
+  if (!input.rawBody || !input.signature || !input.webhookSecret) {
+    throw stripeWebhookVerificationError();
+  }
+  try {
+    let constructEvent = options.constructEvent;
+    if (!constructEvent) {
+      const stripe = new Stripe(input.secretKey?.trim() || STRIPE_WEBHOOK_VERIFIER_KEY, {
+        apiVersion: STRIPE_API_VERSION,
+        maxNetworkRetries: 0,
+        timeout: STRIPE_REQUEST_TIMEOUT_MS,
+        telemetry: false,
+      });
+      constructEvent = stripe.webhooks.constructEventAsync.bind(stripe.webhooks);
+    }
+    const event = await constructEvent(input.rawBody, input.signature, input.webhookSecret);
+    if (!isRecord(event) || !stringValue(event.id) || !stringValue(event.type)) {
+      throw malformedStripeResponse('webhook.verify');
+    }
+    const data = isRecord(event.data) ? event.data : undefined;
+    const object = data && isRecord(data.object) ? data.object : undefined;
+    if (!object) throw malformedStripeResponse('webhook.verify');
+    const account = stringValue(event.account);
+    return {
+      id: stringValue(event.id) as string,
+      type: stringValue(event.type) as string,
+      ...(account ? { account } : {}),
+      data: { object: object as StripeWebhookObject },
+      payload: event,
+    };
+  } catch (error) {
+    if (error instanceof ProviderOperationError) throw error;
+    throw stripeWebhookVerificationError();
+  }
+}
 
 export interface StripePaymentIntent {
   id: string;
@@ -264,7 +345,7 @@ export class StripeSdkGateway implements StripeGateway {
       'DELETE',
       true,
       () => this.sdk.accounts.del(accountId, {}, { idempotencyKey }),
-      () => undefined,
+      deletedConnectAccount,
     );
   }
 
@@ -294,7 +375,7 @@ export class StripeSdkGateway implements StripeGateway {
     method: 'GET' | 'POST' | 'DELETE',
     sideEffecting: boolean,
     invoke: () => Promise<unknown>,
-    parse: (value: unknown) => T,
+    parse: (value: unknown, operation: string) => T,
   ): Promise<T> {
     const startedAt = performance.now();
     const span = trace
@@ -310,7 +391,7 @@ export class StripeSdkGateway implements StripeGateway {
       });
     try {
       const result = await invoke();
-      const parsed = parse(result);
+      const parsed = parse(result, operation);
       const response = lastResponse(result);
       const durationMs = elapsed(startedAt);
       span.setAttributes({
@@ -431,32 +512,32 @@ function normalizeStripeError(
   );
 }
 
-function paymentIntent(value: unknown): StripePaymentIntent {
-  const record = requiredRecord(value, 'payment-intent');
+function paymentIntent(value: unknown, operation: string): StripePaymentIntent {
+  const record = requiredRecord(value, operation);
   return {
-    id: requiredString(record, 'id', 'payment-intent'),
-    status: requiredString(record, 'status', 'payment-intent'),
+    id: requiredString(record, 'id', operation),
+    status: requiredString(record, 'status', operation),
     ...(stringValue(record.client_secret)
       ? { clientSecret: stringValue(record.client_secret) }
       : {}),
-    amount: requiredInteger(record, 'amount', 'payment-intent'),
-    amountReceived: requiredInteger(record, 'amount_received', 'payment-intent'),
+    amount: requiredInteger(record, 'amount', operation),
+    amountReceived: requiredInteger(record, 'amount_received', operation),
   };
 }
 
-function refund(value: unknown): StripeRefund {
-  const record = requiredRecord(value, 'refund');
+function refund(value: unknown, operation: string): StripeRefund {
+  const record = requiredRecord(value, operation);
   return {
-    id: requiredString(record, 'id', 'refund'),
+    id: requiredString(record, 'id', operation),
     ...(stringValue(record.status) ? { status: stringValue(record.status) } : {}),
   };
 }
 
-function connectAccount(value: unknown): StripeConnectAccount {
-  const record = requiredRecord(value, 'connect-account');
+function connectAccount(value: unknown, operation: string): StripeConnectAccount {
+  const record = requiredRecord(value, operation);
   const requirements = isRecord(record.requirements) ? record.requirements : {};
   return {
-    id: requiredString(record, 'id', 'connect-account'),
+    id: requiredString(record, 'id', operation),
     ...(stringValue(record.default_currency)
       ? { defaultCurrency: stringValue(record.default_currency)?.toUpperCase() }
       : {}),
@@ -468,9 +549,15 @@ function connectAccount(value: unknown): StripeConnectAccount {
   };
 }
 
-function accountLink(value: unknown): StripeAccountLink {
-  const record = requiredRecord(value, 'account-link');
-  return { url: requiredString(record, 'url', 'account-link') };
+function deletedConnectAccount(value: unknown, operation: string): void {
+  const record = requiredRecord(value, operation);
+  requiredString(record, 'id', operation);
+  if (record.deleted !== true) throw malformedStripeResponse(operation);
+}
+
+function accountLink(value: unknown, operation: string): StripeAccountLink {
+  const record = requiredRecord(value, operation);
+  return { url: requiredString(record, 'url', operation) };
 }
 
 function requiredRecord(value: unknown, operation: string): Record<string, unknown> {
@@ -515,9 +602,39 @@ function stripeConfigurationError(operation: string): ProviderOperationError {
   );
 }
 
-function requireIdempotencyKey(value: string, operation: string): void {
-  if (value.trim()) return;
-  throw stripeConfigurationError(operation);
+function stripeWebhookVerificationError(): ProviderOperationError {
+  return new ProviderOperationError(
+    'stripe.webhook.verify failed: validation',
+    'stripe',
+    'webhook.verify',
+    'validation',
+    false,
+    'rejected',
+    false,
+  );
+}
+
+function requireIdempotencyKey(value: unknown, operation: string): void {
+  const invalid =
+    typeof value !== 'string' ||
+    !value.trim() ||
+    value !== value.trim() ||
+    Buffer.byteLength(value, 'utf8') > MAX_IDEMPOTENCY_KEY_BYTES ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 31 || codePoint === 127;
+    });
+  if (!invalid) return;
+  throw new ProviderOperationError(
+    `stripe.${operation} failed: validation`,
+    'stripe',
+    operation,
+    'validation',
+    false,
+    'not-sent',
+    false,
+    { providerCode: 'idempotency_invalid' },
+  );
 }
 
 function requireIdentifier(value: string, operation: string): void {
