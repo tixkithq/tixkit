@@ -19,18 +19,25 @@ function productionConfig() {
 
 describe('admin request-time security headers', () => {
   it('uses only the validated exact runtime origins in production', () => {
-    const policy = adminContentSecurityPolicy(productionConfig());
+    const policy = adminContentSecurityPolicy(productionConfig(), 'request-nonce');
     expect(policy).toContain(
       "connect-src 'self' https://admin.example.test https://checkout.example.test https://media.example.test",
     );
     expect(policy).toContain("frame-src 'self' https://checkout.example.test");
     expect(policy).not.toContain('localhost');
     expect(policy).not.toContain("'unsafe-eval'");
+    expect(policy).not.toMatch(/script-src[^;]*'unsafe-inline'/u);
+    expect(policy).toContain("script-src 'self' 'nonce-request-nonce' 'strict-dynamic'");
+    expect(policy).toContain("script-src-attr 'none'");
+    expect(policy).toContain("style-src 'self' 'nonce-request-nonce'");
+    expect(policy).toContain("style-src-elem 'self' 'nonce-request-nonce'");
+    expect(policy).toContain("style-src-attr 'unsafe-inline'");
   });
 
   it('retains the current explicitly bounded development posture', () => {
     const policy = adminContentSecurityPolicy(
       parseAdminRuntimeConfig({ NODE_ENV: 'development' }),
+      'development-nonce',
       { development: true },
     );
     expect(policy).toContain("'unsafe-inline'");
@@ -39,11 +46,20 @@ describe('admin request-time security headers', () => {
   });
 
   it('sets the complete header set including the camera policy', () => {
-    expect(adminSecurityHeaders(productionConfig())).toMatchObject({
+    expect(adminSecurityHeaders(productionConfig(), 'request-nonce')).toMatchObject({
       'Permissions-Policy': 'camera=(self), microphone=(), geolocation=()',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
     });
   });
+
+  it.each(["quote'nonce", 'semi;nonce', 'space nonce', 'line\nnonce', '', 'a'.repeat(129)])(
+    'rejects an unsafe nonce value %#',
+    (nonce) => {
+      expect(() => adminContentSecurityPolicy(productionConfig(), nonce)).toThrow(
+        'CSP nonce must be a bounded base64 value',
+      );
+    },
+  );
 });

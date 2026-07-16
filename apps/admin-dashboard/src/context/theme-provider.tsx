@@ -12,6 +12,7 @@ const THEME_STORAGE_KEY = 'tixkit-theme';
 type ThemeProviderProps = {
   children: ReactNode;
   defaultTheme?: Theme;
+  nonce?: string;
   storageKey?: string;
 };
 
@@ -30,12 +31,14 @@ const ThemeExtContext = createContext<ThemeExtState | null>(null);
 export function ThemeProvider({
   children,
   defaultTheme = DEFAULT_THEME,
+  nonce,
   storageKey = THEME_STORAGE_KEY,
 }: ThemeProviderProps) {
   return (
     <NextThemesProvider
       attribute="class"
       defaultTheme={defaultTheme}
+      nonce={nonce}
       storageKey={storageKey}
       enableColorScheme
       disableTransitionOnChange

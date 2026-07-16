@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { connection } from 'next/server';
 import { ClerkProvider } from '@clerk/nextjs';
 import { ThemeProvider } from '@/context/theme-provider';
@@ -25,12 +25,13 @@ export const dynamic = 'force-dynamic';
 export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection();
   const runtimeConfig = parseAdminRuntimeConfig();
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   const cookieStore = await cookies();
   const dir = cookieStore.get('dir')?.value === 'rtl' ? 'rtl' : 'ltr';
 
   const content = (
     <RuntimeConfigProvider config={runtimeConfig}>
-      <ThemeProvider>
+      <ThemeProvider nonce={nonce}>
         <DirectionProvider>
           <QueryProvider>
             <AdminUserProvider>
@@ -52,7 +53,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     >
       <body>
         {runtimeConfig.authProvider === 'clerk' && runtimeConfig.clerkPublishableKey ? (
-          <ClerkProvider publishableKey={runtimeConfig.clerkPublishableKey}>
+          <ClerkProvider dynamic publishableKey={runtimeConfig.clerkPublishableKey}>
             {content}
           </ClerkProvider>
         ) : (
@@ -63,6 +64,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             id="transitions-refine-injector"
             type="module"
             src="http://localhost:7331/inject.js"
+            nonce={nonce}
           />
         ) : null}
       </body>

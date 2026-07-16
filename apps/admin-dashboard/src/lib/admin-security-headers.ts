@@ -10,14 +10,21 @@ export const ADMIN_SECURITY_HEADER_NAMES = [
 
 export function adminContentSecurityPolicy(
   config: PublicAdminRuntimeConfig,
+  nonce: string,
   options: { development?: boolean } = {},
 ): string {
+  if (!/^[A-Za-z0-9+/_=-]{1,128}$/u.test(nonce)) {
+    throw new TypeError('CSP nonce must be a bounded base64 value');
+  }
   const development = options.development === true;
   const clerkSources = ['https://*.clerk.accounts.dev', 'https://*.clerk.com'];
   const scriptSources = [
     "'self'",
-    "'unsafe-inline'",
-    ...(development ? ["'unsafe-eval'", 'http://localhost:7331', 'https://esm.sh'] : []),
+    `'nonce-${nonce}'`,
+    "'strict-dynamic'",
+    ...(development
+      ? ["'unsafe-inline'", "'unsafe-eval'", 'http://localhost:7331', 'https://esm.sh']
+      : []),
     ...clerkSources,
   ];
   const connectSources = [
@@ -44,8 +51,11 @@ export function adminContentSecurityPolicy(
     `form-action 'self' ${clerkSources.join(' ')}`,
     `img-src 'self' data: blob: https: ${config.apiBaseUrl} ${config.uploadOrigin}`,
     "font-src 'self' data:",
-    "style-src 'self' 'unsafe-inline'",
+    `style-src 'self' 'nonce-${nonce}'`,
+    `style-src-elem 'self' 'nonce-${nonce}'`,
+    "style-src-attr 'unsafe-inline'",
     `script-src ${scriptSources.join(' ')}`,
+    "script-src-attr 'none'",
     `connect-src ${connectSources.join(' ')}`,
     `frame-src 'self' ${config.checkoutUrl} ${clerkSources.join(' ')}`,
     "worker-src 'self' blob:",
@@ -54,10 +64,11 @@ export function adminContentSecurityPolicy(
 
 export function adminSecurityHeaders(
   config: PublicAdminRuntimeConfig,
+  nonce: string,
 ): Readonly<Record<string, string>> {
   const development = config.deploymentProfile === 'development';
   return Object.freeze({
-    'Content-Security-Policy': adminContentSecurityPolicy(config, { development }),
+    'Content-Security-Policy': adminContentSecurityPolicy(config, nonce, { development }),
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(self), microphone=(), geolocation=()',
     'X-Content-Type-Options': 'nosniff',

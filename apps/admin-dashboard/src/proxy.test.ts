@@ -2,10 +2,28 @@ import type { NextFetchEvent } from 'next/server';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const clerkProxyMock = vi.hoisted(() => vi.fn(() => new Response('clerk')));
-vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: vi.fn(() => clerkProxyMock) }));
+const { clerkHandlerState, clerkProxyMock } = vi.hoisted(() => {
+  const clerkHandlerState: {
+    current?: (auth: unknown, request: unknown, event: unknown) => unknown;
+  } = {};
+  return {
+    clerkHandlerState,
+    clerkProxyMock: vi.fn((request: unknown, event: unknown) => {
+      if (!clerkHandlerState.current) throw new Error('Missing Clerk middleware handler');
+      return clerkHandlerState.current(undefined, request, event);
+    }),
+  };
+});
+vi.mock('@clerk/nextjs/server', () => ({
+  clerkMiddleware: vi.fn(
+    (handler: (auth: unknown, request: unknown, event: unknown) => unknown) => {
+      clerkHandlerState.current = handler;
+      return clerkProxyMock;
+    },
+  ),
+}));
 
-import proxy from './proxy';
+import proxy, { config as proxyConfig } from './proxy';
 
 function configureProduction(authProvider: 'clerk' | 'dev' = 'clerk') {
   vi.stubEnv('NODE_ENV', 'production');
@@ -23,6 +41,12 @@ function request(host = 'dashboard.example.test') {
   return new NextRequest(`https://${host}/events`);
 }
 
+function securedRequestAt(index: number): NextRequest {
+  const call = clerkProxyMock.mock.calls[index];
+  if (!call) throw new Error(`Missing Clerk call ${index}`);
+  return call[0] as NextRequest;
+}
+
 describe('admin dashboard request-time proxy', () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.unstubAllEnvs());
@@ -31,7 +55,20 @@ describe('admin dashboard request-time proxy', () => {
     configureProduction();
     const response = await proxy(request(), {} as NextFetchEvent);
     expect(clerkProxyMock).toHaveBeenCalledTimes(1);
-    expect(response.headers.get('content-security-policy')).toContain('https://admin.example.test');
+    const securedRequest = securedRequestAt(0);
+    const nonce = securedRequest.headers.get('x-nonce');
+    const requestPolicy = securedRequest.headers.get('content-security-policy');
+    expect(nonce).toMatch(/^[A-Za-z0-9+/=]+$/u);
+    expect(requestPolicy).toContain(`'nonce-${nonce}'`);
+    expect(response.headers.get('content-security-policy')).toBe(requestPolicy);
+    expect(response.headers.get('x-middleware-request-x-nonce')).toBe(nonce);
+    expect(response.headers.get('x-middleware-request-content-security-policy')).toBe(
+      requestPolicy,
+    );
+    expect(response.headers.get('x-middleware-override-headers')?.split(',')).toEqual(
+      expect.arrayContaining(['x-nonce', 'content-security-policy']),
+    );
+    expect(requestPolicy).toContain('https://admin.example.test');
     expect(response.headers.get('permissions-policy')).toBe(
       'camera=(self), microphone=(), geolocation=()',
     );
@@ -50,6 +87,11 @@ describe('admin dashboard request-time proxy', () => {
     const response = await proxy(request(), {} as NextFetchEvent);
     expect(clerkProxyMock).not.toHaveBeenCalled();
     expect(response.headers.get('content-security-policy')).toContain('http://localhost:4000');
+    const nonce = response.headers.get('x-middleware-request-x-nonce');
+    const requestPolicy = response.headers.get('x-middleware-request-content-security-policy');
+    expect(nonce).toBeTruthy();
+    expect(requestPolicy).toContain(`'nonce-${nonce}'`);
+    expect(response.headers.get('content-security-policy')).toBe(requestPolicy);
     expect(response.headers.get('permissions-policy')).toBe(
       'camera=(self), microphone=(), geolocation=()',
     );
@@ -84,5 +126,40 @@ describe('admin dashboard request-time proxy', () => {
     expect(response.status).toBe(503);
     expect(response.headers.get('content-security-policy')).toContain("default-src 'none'");
     expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('generates a fresh request nonce for each request', async () => {
+    configureProduction();
+    await proxy(request(), {} as NextFetchEvent);
+    await proxy(request(), {} as NextFetchEvent);
+    const first = securedRequestAt(0).headers.get('x-nonce');
+    const second = securedRequestAt(1).headers.get('x-nonce');
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+
+  it.each(['/health', '/ready'])(
+    'bypasses Clerk for %s and retains the diagnostic header floor',
+    async (path) => {
+      configureProduction();
+      const response = await proxy(
+        new NextRequest(`https://dashboard.example.test${path}`),
+        {} as NextFetchEvent,
+      );
+      expect(clerkProxyMock).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+      expect(response.headers.get('content-security-policy')).toContain("default-src 'none'");
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    },
+  );
+
+  it('keeps the route matcher contract authoritative without prefetch exclusions', () => {
+    expect(proxyConfig.matcher).toEqual([
+      '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+      '/(api|trpc)(.*)',
+      '/__clerk/(.*)',
+    ]);
   });
 });
