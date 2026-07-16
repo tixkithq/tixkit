@@ -631,10 +631,7 @@ test('Compact upgrades an existing environment with a unique dashboard cursor ke
     for (const environmentPath of [first, second]) {
       writeFileSync(
         environmentPath,
-        readFileSync(environmentPath, 'utf8').replace(
-          /^DASHBOARD_CURSOR_SIGNING_KEY=.*\n/mu,
-          '',
-        ),
+        readFileSync(environmentPath, 'utf8').replace(/^DASHBOARD_CURSOR_SIGNING_KEY=.*\n/mu, ''),
         { mode: 0o600 },
       );
     }

@@ -78,25 +78,32 @@ export const DashboardActionRevisionsMigration: Migration = {
 };
 
 async function createPostgresTriggers(db: Parameters<Migration['up']>[0]): Promise<void> {
-  await sql.raw(`create or replace function bump_dashboard_action_revision(p_tenant varchar, p_organization varchar, p_brand varchar)
+  await sql
+    .raw(`create or replace function bump_dashboard_action_revision(p_tenant varchar, p_organization varchar, p_brand varchar)
     returns void language plpgsql as $$
     begin
       insert into dashboard_action_revisions (tenant_id, organization_id, brand_id, revision)
       values (p_tenant, p_organization, p_brand, 1)
       on conflict (tenant_id, organization_id, brand_id)
       do update set revision = dashboard_action_revisions.revision + 1;
-    end $$`).execute(db);
-  await sql.raw(`create or replace function bump_dashboard_revision_for_event() returns trigger language plpgsql as $$
+    end $$`)
+    .execute(db);
+  await sql
+    .raw(`create or replace function bump_dashboard_revision_for_event() returns trigger language plpgsql as $$
     begin
       if TG_OP <> 'DELETE' then perform bump_dashboard_action_revision(NEW.tenant_id, NEW.organization_id, NEW.brand_id); end if;
       if TG_OP = 'DELETE' or (TG_OP = 'UPDATE' and (OLD.tenant_id, OLD.organization_id, OLD.brand_id) is distinct from (NEW.tenant_id, NEW.organization_id, NEW.brand_id)) then
         perform bump_dashboard_action_revision(OLD.tenant_id, OLD.organization_id, OLD.brand_id);
       end if;
       return coalesce(NEW, OLD);
-    end $$`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_events after insert or update or delete on events
-    for each row execute function bump_dashboard_revision_for_event()`).execute(db);
-  await sql.raw(`create or replace function bump_dashboard_revision_for_checkin() returns trigger language plpgsql as $$
+    end $$`)
+    .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_events after insert or update or delete on events
+    for each row execute function bump_dashboard_revision_for_event()`)
+    .execute(db);
+  await sql
+    .raw(`create or replace function bump_dashboard_revision_for_checkin() returns trigger language plpgsql as $$
     declare event_scope record;
     begin
       if TG_OP <> 'DELETE' then
@@ -108,10 +115,14 @@ async function createPostgresTriggers(db: Parameters<Migration['up']>[0]): Promi
         if found then perform bump_dashboard_action_revision(event_scope.tenant_id, event_scope.organization_id, event_scope.brand_id); end if;
       end if;
       return coalesce(NEW, OLD);
-    end $$`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_checkins after insert or update or delete on check_in_lists
-    for each row execute function bump_dashboard_revision_for_checkin()`).execute(db);
-  await sql.raw(`create or replace function bump_dashboard_revision_for_export() returns trigger language plpgsql as $$
+    end $$`)
+    .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_checkins after insert or update or delete on check_in_lists
+    for each row execute function bump_dashboard_revision_for_checkin()`)
+    .execute(db);
+  await sql
+    .raw(`create or replace function bump_dashboard_revision_for_export() returns trigger language plpgsql as $$
     declare event_scope record;
     begin
       if TG_OP <> 'DELETE' and NEW.status = 'failed' then
@@ -123,9 +134,12 @@ async function createPostgresTriggers(db: Parameters<Migration['up']>[0]): Promi
         if found then perform bump_dashboard_action_revision(event_scope.tenant_id, event_scope.organization_id, event_scope.brand_id); end if;
       end if;
       return coalesce(NEW, OLD);
-    end $$`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_exports after insert or update or delete on export_jobs
-    for each row execute function bump_dashboard_revision_for_export()`).execute(db);
+    end $$`)
+    .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_exports after insert or update or delete on export_jobs
+    for each row execute function bump_dashboard_revision_for_export()`)
+    .execute(db);
 }
 
 async function createMysqlTriggers(db: Parameters<Migration['up']>[0]): Promise<void> {
@@ -133,18 +147,34 @@ async function createMysqlTriggers(db: Parameters<Migration['up']>[0]): Promise<
     values (NEW.tenant_id, NEW.organization_id, NEW.brand_id, 1)
     on duplicate key update revision = revision + 1`;
   const bumpOldEvent = bumpNewEvent.replaceAll('NEW.', 'OLD.');
-  await sql.raw(`create trigger dashboard_revision_events_insert after insert on events for each row ${bumpNewEvent}`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_events_update after update on events for each row begin
+  await sql
+    .raw(
+      `create trigger dashboard_revision_events_insert after insert on events for each row ${bumpNewEvent}`,
+    )
+    .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_events_update after update on events for each row begin
     ${bumpNewEvent};
     if OLD.tenant_id <> NEW.tenant_id or OLD.organization_id <> NEW.organization_id or OLD.brand_id <> NEW.brand_id then ${bumpOldEvent}; end if;
-  end`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_events_delete after delete on events for each row ${bumpOldEvent}`).execute(db);
-  for (const [operation, row] of [['insert', 'NEW'], ['delete', 'OLD']] as const)
-    await sql.raw(`create trigger dashboard_revision_checkins_${operation} after ${operation} on check_in_lists for each row
+  end`)
+    .execute(db);
+  await sql
+    .raw(
+      `create trigger dashboard_revision_events_delete after delete on events for each row ${bumpOldEvent}`,
+    )
+    .execute(db);
+  for (const [operation, row] of [
+    ['insert', 'NEW'],
+    ['delete', 'OLD'],
+  ] as const)
+    await sql
+      .raw(`create trigger dashboard_revision_checkins_${operation} after ${operation} on check_in_lists for each row
       insert into dashboard_action_revisions (tenant_id, organization_id, brand_id, revision)
       select tenant_id, organization_id, brand_id, 1 from events where id = ${row}.event_id
-      on duplicate key update revision = revision + 1`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_checkins_update after update on check_in_lists for each row begin
+      on duplicate key update revision = revision + 1`)
+      .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_checkins_update after update on check_in_lists for each row begin
     insert into dashboard_action_revisions (tenant_id, organization_id, brand_id, revision)
       select tenant_id, organization_id, brand_id, 1 from events where id = NEW.event_id
       on duplicate key update revision = revision + 1;
@@ -153,16 +183,23 @@ async function createMysqlTriggers(db: Parameters<Migration['up']>[0]): Promise<
         select tenant_id, organization_id, brand_id, 1 from events where id = OLD.event_id
         on duplicate key update revision = revision + 1;
     end if;
-  end`).execute(db);
-  for (const [operation, row] of [['insert', 'NEW'], ['delete', 'OLD']] as const)
-    await sql.raw(`create trigger dashboard_revision_exports_${operation} after ${operation} on export_jobs for each row begin
+  end`)
+    .execute(db);
+  for (const [operation, row] of [
+    ['insert', 'NEW'],
+    ['delete', 'OLD'],
+  ] as const)
+    await sql
+      .raw(`create trigger dashboard_revision_exports_${operation} after ${operation} on export_jobs for each row begin
       if ${row}.status = 'failed' then
         insert into dashboard_action_revisions (tenant_id, organization_id, brand_id, revision)
           select tenant_id, organization_id, brand_id, 1 from events where id = ${row}.event_id
           on duplicate key update revision = revision + 1;
       end if;
-    end`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_exports_update after update on export_jobs for each row begin
+    end`)
+      .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_exports_update after update on export_jobs for each row begin
     if NEW.status = 'failed' then
       insert into dashboard_action_revisions (tenant_id, organization_id, brand_id, revision)
         select tenant_id, organization_id, brand_id, 1 from events where id = NEW.event_id
@@ -173,26 +210,33 @@ async function createMysqlTriggers(db: Parameters<Migration['up']>[0]): Promise<
         select tenant_id, organization_id, brand_id, 1 from events where id = OLD.event_id
         on duplicate key update revision = revision + 1;
     end if;
-  end`).execute(db);
+  end`)
+    .execute(db);
 }
 
 async function createMssqlTriggers(db: Parameters<Migration['up']>[0]): Promise<void> {
-  await sql.raw(`create trigger dashboard_revision_events on events after insert, update, delete as
+  await sql
+    .raw(`create trigger dashboard_revision_events on events after insert, update, delete as
     merge dashboard_action_revisions with (holdlock) as target
     using (select tenant_id, organization_id, brand_id from inserted union select tenant_id, organization_id, brand_id from deleted) as source
     on target.tenant_id = source.tenant_id and target.organization_id = source.organization_id and target.brand_id = source.brand_id
     when matched then update set revision = target.revision + 1
-    when not matched then insert (tenant_id, organization_id, brand_id, revision) values (source.tenant_id, source.organization_id, source.brand_id, 1);`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_checkins on check_in_lists after insert, update, delete as
+    when not matched then insert (tenant_id, organization_id, brand_id, revision) values (source.tenant_id, source.organization_id, source.brand_id, 1);`)
+    .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_checkins on check_in_lists after insert, update, delete as
     merge dashboard_action_revisions with (holdlock) as target
     using (select distinct e.tenant_id, e.organization_id, e.brand_id from events e join (select event_id from inserted union select event_id from deleted) c on c.event_id = e.id) as source
     on target.tenant_id = source.tenant_id and target.organization_id = source.organization_id and target.brand_id = source.brand_id
     when matched then update set revision = target.revision + 1
-    when not matched then insert (tenant_id, organization_id, brand_id, revision) values (source.tenant_id, source.organization_id, source.brand_id, 1);`).execute(db);
-  await sql.raw(`create trigger dashboard_revision_exports on export_jobs after insert, update, delete as
+    when not matched then insert (tenant_id, organization_id, brand_id, revision) values (source.tenant_id, source.organization_id, source.brand_id, 1);`)
+    .execute(db);
+  await sql
+    .raw(`create trigger dashboard_revision_exports on export_jobs after insert, update, delete as
     merge dashboard_action_revisions with (holdlock) as target
     using (select distinct e.tenant_id, e.organization_id, e.brand_id from events e join (select event_id from inserted where status = 'failed' union select event_id from deleted where status = 'failed') x on x.event_id = e.id) as source
     on target.tenant_id = source.tenant_id and target.organization_id = source.organization_id and target.brand_id = source.brand_id
     when matched then update set revision = target.revision + 1
-    when not matched then insert (tenant_id, organization_id, brand_id, revision) values (source.tenant_id, source.organization_id, source.brand_id, 1);`).execute(db);
+    when not matched then insert (tenant_id, organization_id, brand_id, revision) values (source.tenant_id, source.organization_id, source.brand_id, 1);`)
+    .execute(db);
 }

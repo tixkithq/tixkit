@@ -18,6 +18,14 @@ const url =
       : undefined;
 const enabled = Boolean(url);
 
+function reversed<T>(values: readonly T[]): T[] {
+  const result: T[] = [];
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    result.push(values[index]!);
+  }
+  return result;
+}
+
 (enabled ? describe.sequential : describe.skip)('0057 readiness migration rollback parity', () => {
   let db: Database;
   let migrator: Migrator;
@@ -36,7 +44,7 @@ const enabled = Boolean(url);
   it('backfills existing rows when 0063 and 0064 are rolled down and reapplied', async () => {
     const migrationNames = Object.keys(await new TixkitMigrationProvider().getMigrations());
     const migration64Index = migrationNames.indexOf('0064_organization_event_defaults');
-    const migrationsToRemove = migrationNames.slice(migration64Index).reverse();
+    const migrationsToRemove = reversed(migrationNames.slice(migration64Index));
     const suffix = `${driver}_${Date.now()}`;
     const tenant = await new TenantRepository(db).create({ name: `Migration ${suffix}` });
     const organization = await new OrganizationRepository(db).create({
@@ -87,7 +95,7 @@ const enabled = Boolean(url);
 
       for (const expectedName of [
         '0063_event_checkout_configuration_revision',
-        ...[...migrationsToRemove].reverse(),
+        ...reversed(migrationsToRemove),
       ]) {
         const up = await migrator.migrateUp();
         expect(up.error).toBeUndefined();
