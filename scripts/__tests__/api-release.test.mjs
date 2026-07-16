@@ -77,6 +77,9 @@ test(
     assert.equal(manifest.publication, 'approval-required');
     assert.match(manifest.provenance.sourceTreeHash, /^[a-f0-9]{64}$/u);
     assert.equal(manifest.provenance.reproducible, true);
+    assert.ok(
+      manifest.provenance.excludedGeneratedPaths.includes('apps/admin-dashboard/next-env.d.ts'),
+    );
     if (manifest.provenance.worktreeState === 'modified') {
       assert.equal(manifest.commit, null);
       assert.equal(manifest.timestamp, null);

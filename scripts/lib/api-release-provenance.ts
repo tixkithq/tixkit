@@ -13,6 +13,7 @@ function git(root: string, arguments_: string[], options: Record<string, unknown
 }
 
 export const API_PROVENANCE_EXCLUSIONS = [
+  'apps/admin-dashboard/next-env.d.ts',
   'apps/docs/public/contracts/',
   'apps/docs/public/openapi.json',
   'apps/docs/src/generated/',
