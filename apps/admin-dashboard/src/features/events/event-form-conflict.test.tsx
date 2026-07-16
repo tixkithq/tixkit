@@ -100,7 +100,7 @@ describe('EventForm optimistic merge recovery', () => {
     const heading = await screen.findByRole('heading', {
       name: 'Choose values for 1 conflicting field',
     });
-    expect(heading).toHaveFocus();
+    await waitFor(() => expect(heading).toHaveFocus());
     expect(screen.getByLabelText('Title')).toHaveValue('My title');
     expect(screen.getByRole('group', { name: 'Title' })).toBeInTheDocument();
     expect(screen.getByText('Title: My title')).toBeInTheDocument();
