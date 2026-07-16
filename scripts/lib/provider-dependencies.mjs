@@ -1,5 +1,7 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import Ajv2020 from 'ajv/dist/2020.js';
 import { parseSync } from 'oxc-parser';
 import { providerSourceBoundaryFindings } from './provider-client-boundary.mjs';
 import {
@@ -14,6 +16,46 @@ const sourceExtension = /\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx)$/u;
 const ignoredSegment =
   /(?:^|\/)(?:\.dart_tool|\.expo|\.next|\.output|\.turbo|build|coverage|dist|generated|node_modules|out|test-results)(?:\/|$)/u;
 const testPath = /(?:^|\/)(?:__tests__\/|[^/]+\.(?:integration\.)?(?:spec|test)\.)/u;
+
+export const PROVIDER_DEPENDENCY_INVENTORY_PATH = 'distribution/provider-dependency-inventory.json';
+export const PROVIDER_DEPENDENCY_INVENTORY_SCHEMA_PATH =
+  'distribution/provider-dependency-inventory.schema.json';
+
+function canonicalJson(value) {
+  const serialize = (candidate, depth) => {
+    if (Array.isArray(candidate)) {
+      if (candidate.every((entry) => entry === null || typeof entry !== 'object')) {
+        const inline = `[${candidate.map((entry) => JSON.stringify(entry)).join(', ')}]`;
+        if (inline.length <= 100) return inline;
+        const indentation = '  '.repeat(depth + 1);
+        return `[\n${candidate
+          .map((entry) => `${indentation}${JSON.stringify(entry)}`)
+          .join(',\n')}\n${'  '.repeat(depth)}]`;
+      }
+      if (candidate.length === 0) return '[]';
+      const indentation = '  '.repeat(depth + 1);
+      return `[\n${candidate
+        .map((entry) => `${indentation}${serialize(entry, depth + 1)}`)
+        .join(',\n')}\n${'  '.repeat(depth)}]`;
+    }
+    if (candidate !== null && typeof candidate === 'object') {
+      const entries = Object.entries(candidate);
+      if (entries.length === 0) return '{}';
+      const indentation = '  '.repeat(depth + 1);
+      return `{\n${entries
+        .map(
+          ([key, entry]) => `${indentation}${JSON.stringify(key)}: ${serialize(entry, depth + 1)}`,
+        )
+        .join(',\n')}\n${'  '.repeat(depth)}}`;
+    }
+    return JSON.stringify(candidate);
+  };
+  return `${serialize(value, 0)}\n`;
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 function walk(directory) {
   const files = [];
@@ -156,7 +198,12 @@ export function providerDependencyInventory(
         ...syntaxFindings.sdkPackages,
       ])) {
         if (classifiedDependencies.has(dependency)) {
-          imports.push({ dependency, manifestPath, path, testOnly: testPath.test(path) });
+          imports.push({
+            dependency,
+            manifestPath,
+            path,
+            testOnly: testPath.test(path),
+          });
         }
       }
     }
@@ -282,4 +329,56 @@ export function renderProviderDependencyInventory(root, registry) {
       usage: testOnly ? 'test' : 'runtime',
     };
   });
+}
+
+export function buildProviderDependencyInventoryArtifact(root, registry) {
+  const repositoryRoot = resolve(root);
+  return {
+    $schema: './provider-dependency-inventory.schema.json',
+    schemaVersion: 1,
+    registry: {
+      path: 'distribution/provider-integration-registry.json',
+      sha256: sha256(
+        readFileSync(resolve(repositoryRoot, 'distribution/provider-integration-registry.json')),
+      ),
+    },
+    imports: renderProviderDependencyInventory(repositoryRoot, registry),
+  };
+}
+
+export function validateProviderDependencyInventoryArtifact(root, artifact, registry) {
+  const repositoryRoot = resolve(root);
+  const schema = JSON.parse(
+    readFileSync(resolve(repositoryRoot, PROVIDER_DEPENDENCY_INVENTORY_SCHEMA_PATH), 'utf8'),
+  );
+  const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
+  if (!validate(artifact)) {
+    throw new Error(
+      `Provider dependency inventory schema violations:\n${JSON.stringify(validate.errors, null, 2)}`,
+    );
+  }
+  const expected = buildProviderDependencyInventoryArtifact(repositoryRoot, registry);
+  if (canonicalJson(artifact) !== canonicalJson(expected)) {
+    throw new Error(
+      'Provider dependency inventory is stale or tampered; regenerate it with validate-provider-dependencies.mjs --write.',
+    );
+  }
+  return artifact;
+}
+
+export function loadProviderDependencyInventoryArtifact(
+  root,
+  registry,
+  artifactPath = PROVIDER_DEPENDENCY_INVENTORY_PATH,
+) {
+  const artifact = JSON.parse(readFileSync(resolve(root, artifactPath), 'utf8'));
+  return validateProviderDependencyInventoryArtifact(root, artifact, registry);
+}
+
+export function writeProviderDependencyInventoryArtifact(root, outputPath, registry) {
+  const artifact = buildProviderDependencyInventoryArtifact(root, registry);
+  const absoluteOutputPath = resolve(root, outputPath);
+  mkdirSync(dirname(absoluteOutputPath), { recursive: true });
+  writeFileSync(absoluteOutputPath, canonicalJson(artifact), { mode: 0o644 });
+  return artifact;
 }

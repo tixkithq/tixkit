@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tixkit.com/schemas/provider-dependency-inventory.schema.json",
+  "title": "Tixkit provider dependency inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "registry", "imports"],
+  "properties": {
+    "$schema": { "const": "./provider-dependency-inventory.schema.json" },
+    "schemaVersion": { "const": 1 },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "const": "distribution/provider-integration-registry.json" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "imports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "classifications",
+          "dependency",
+          "dependencyClass",
+          "dependencyOwner",
+          "importPath",
+          "integrationIds",
+          "integrationOwners",
+          "usage"
+        ],
+        "properties": {
+          "classifications": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": ["contained-sdk", "direct-http", "runtime-boundary"]
+            }
+          },
+          "dependency": { "type": "string", "minLength": 1 },
+          "dependencyClass": { "enum": ["dependencies", "devDependencies"] },
+          "dependencyOwner": {
+            "type": "string",
+            "pattern": "^(apps|packages)/[^/]+/package\\.json$"
+          },
+          "importPath": { "type": "string", "pattern": "^(apps|packages)/" },
+          "integrationIds": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "integrationOwners": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^(apps|packages)/[^/]+/package\\.json$"
+            }
+          },
+          "usage": { "enum": ["runtime", "test"] }
+        }
+      }
+    }
+  }
+}

@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import {
+  buildProviderDependencyInventoryArtifact,
   providerDependencyViolations,
   renderProviderDependencyInventory,
+  validateProviderDependencyInventoryArtifact,
 } from '../lib/provider-dependencies.mjs';
 import { loadProviderIntegrationRegistry } from '../lib/provider-integration-registry.mjs';
 
@@ -36,6 +39,8 @@ function fixture({
     integrations: [
       {
         id: 'mystery-contained-sdk',
+        classification: 'contained-sdk',
+        ownerPackages: ['packages/provider-clients/package.json'],
         allowedImports: [
           {
             package: 'mystery-sdk',
@@ -78,6 +83,11 @@ function fixture({
     ...(rogueDependencyClass ? { [rogueDependencyClass]: { 'rogue-sdk': '1.0.0' } } : {}),
   });
   write(root, sourcePath, "import Provider from 'mystery-sdk';\nvoid Provider;\n");
+  write(root, 'distribution/provider-integration-registry.json', registry);
+  writeFileSync(
+    resolve(root, 'distribution/provider-dependency-inventory.schema.json'),
+    readFileSync(resolve(repositoryRoot, 'distribution/provider-dependency-inventory.schema.json')),
+  );
   return { registry, root };
 }
 
@@ -113,6 +123,82 @@ test('checked-in manifests and provider SDK imports match the registry', () => {
       `${a.dependency}\0${a.importPath}`.localeCompare(`${b.dependency}\0${b.importPath}`),
     ),
   );
+});
+
+test('dependency inventory is schema-valid, deterministic, and rejects stale or tampered data', () => {
+  const inventoryFixture = fixture();
+  try {
+    const artifact = buildProviderDependencyInventoryArtifact(
+      inventoryFixture.root,
+      inventoryFixture.registry,
+    );
+    assert.equal(artifact.schemaVersion, 1);
+    assert.equal(artifact.imports.length, 2);
+    assert.deepEqual(
+      validateProviderDependencyInventoryArtifact(
+        inventoryFixture.root,
+        artifact,
+        inventoryFixture.registry,
+      ),
+      artifact,
+    );
+
+    const stale = structuredClone(artifact);
+    stale.imports.pop();
+    assert.throws(
+      () =>
+        validateProviderDependencyInventoryArtifact(
+          inventoryFixture.root,
+          stale,
+          inventoryFixture.registry,
+        ),
+      /inventory is stale or tampered/u,
+    );
+
+    const tampered = structuredClone(artifact);
+    tampered.registry.sha256 = '0'.repeat(64);
+    assert.throws(
+      () =>
+        validateProviderDependencyInventoryArtifact(
+          inventoryFixture.root,
+          tampered,
+          inventoryFixture.registry,
+        ),
+      /inventory is stale or tampered/u,
+    );
+
+    const invalid = structuredClone(artifact);
+    invalid.schemaVersion = 2;
+    assert.throws(
+      () =>
+        validateProviderDependencyInventoryArtifact(
+          inventoryFixture.root,
+          invalid,
+          inventoryFixture.registry,
+        ),
+      /inventory schema violations/u,
+    );
+  } finally {
+    rmSync(inventoryFixture.root, { recursive: true, force: true });
+  }
+});
+
+test('CLI writer is byte-identical to the checked inventory for exact CI cmp', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'tixkit-provider-inventory-cmp-'));
+  const generatedPath = resolve(root, 'inventory.json');
+  try {
+    execFileSync(
+      process.execPath,
+      ['scripts/validate-provider-dependencies.mjs', '--write', generatedPath],
+      { cwd: repositoryRoot, stdio: 'pipe' },
+    );
+    execFileSync('cmp', [
+      resolve(repositoryRoot, 'distribution/provider-dependency-inventory.json'),
+      generatedPath,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('rejects production-only test SDKs and unclassified dependencies in either class', () => {
@@ -155,7 +241,9 @@ test('rejects production-only test SDKs and unclassified dependencies in either 
 });
 
 test('rejects SDK imports outside approved paths and missing direct dependencies', () => {
-  const misplaced = fixture({ sourcePath: 'packages/provider-clients/src/hidden.ts' });
+  const misplaced = fixture({
+    sourcePath: 'packages/provider-clients/src/hidden.ts',
+  });
   try {
     assert.ok(
       providerDependencyViolations(misplaced.root, misplaced.registry).some((violation) =>

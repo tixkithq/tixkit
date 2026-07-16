@@ -53,15 +53,36 @@ test('rejects unclassified provider hosts and registry-owned hosts outside their
       "fetch(String('https://api.mystery-string.invalid/v1/messages'));\n",
     'packages/api/src/services/mystery.ts':
       "fetch('https://api.mystery-provider.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-destructured.ts':
+      "const { fetch: send } = globalThis; send('https://api.mystery-destructured.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-object-alias.ts':
+      "const transport = { send: fetch }; transport.send('https://api.mystery-object-alias.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-reflect.ts':
+      "Reflect.apply(fetch, globalThis, ['https://api.mystery-reflect.invalid/v1/messages']);\n",
+    'packages/api/src/services/mystery-call.ts':
+      "fetch.call(globalThis, 'https://api.mystery-call.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-bind.ts':
+      "const send = fetch.bind(globalThis); send('https://api.mystery-bind.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-wrapper.ts':
+      "const send = (...args) => fetch(...args); send('https://api.mystery-wrapper.invalid/v1/messages');\n",
+    'packages/api/src/services/mystery-destructured-assignment.ts':
+      "let send; ({ fetch: send } = globalThis); send('https://api.mystery-destructured-assignment.invalid/v1/messages');\n",
     'packages/api/src/services/resend.ts': "fetch('https://api.resend.com/emails');\n",
   });
   try {
     assert.deepEqual(providerClientBoundaryViolations(root), [
       'packages/api/src/services/mystery-alias-join.ts: outbound host is not classified in the provider registry: api.mystery-alias-join.invalid',
       'packages/api/src/services/mystery-alias-object.ts: outbound host is not classified in the provider registry: api.mystery-alias-object.invalid',
+      'packages/api/src/services/mystery-bind.ts: outbound host is not classified in the provider registry: api.mystery-bind.invalid',
+      'packages/api/src/services/mystery-call.ts: outbound host is not classified in the provider registry: api.mystery-call.invalid',
+      'packages/api/src/services/mystery-destructured-assignment.ts: outbound host is not classified in the provider registry: api.mystery-destructured-assignment.invalid',
+      'packages/api/src/services/mystery-destructured.ts: outbound host is not classified in the provider registry: api.mystery-destructured.invalid',
       'packages/api/src/services/mystery-join.ts: outbound host is not classified in the provider registry: api.mystery-join.invalid',
+      'packages/api/src/services/mystery-object-alias.ts: outbound host is not classified in the provider registry: api.mystery-object-alias.invalid',
       'packages/api/src/services/mystery-object.ts: outbound host is not classified in the provider registry: api.mystery-object.invalid',
+      'packages/api/src/services/mystery-reflect.ts: outbound host is not classified in the provider registry: api.mystery-reflect.invalid',
       'packages/api/src/services/mystery-string.ts: outbound host is not classified in the provider registry: api.mystery-string.invalid',
+      'packages/api/src/services/mystery-wrapper.ts: outbound host is not classified in the provider registry: api.mystery-wrapper.invalid',
       'packages/api/src/services/mystery.ts: outbound host is not classified in the provider registry: api.mystery-provider.invalid',
       'packages/api/src/services/resend.ts: migrated messaging provider endpoints must be owned by @tixkit/provider-clients',
     ]);

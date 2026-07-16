@@ -41,8 +41,22 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: ./.github/actions/setup-js
       - run: bun install --frozen-lockfile
+      - name: Check and generate provider dependency inventory
+        run: |
+          node scripts/validate-provider-dependencies.mjs --check
+          mkdir -p "${RUNNER_TEMP}/provider-dependencies"
+          node scripts/validate-provider-dependencies.mjs --write "${RUNNER_TEMP}/provider-dependencies/provider-dependency-inventory.json"
+          cmp distribution/provider-dependency-inventory.json "${RUNNER_TEMP}/provider-dependencies/provider-dependency-inventory.json"
       - run: bun run validate:trust-program
       - run: bun run validate:trust-evidence
+      - name: Upload provider dependency inventory
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: provider-dependency-inventory
+          path: ${{ runner.temp }}/provider-dependencies/provider-dependency-inventory.json
+          if-no-files-found: error
+          retention-days: 14
 
   oss-export:
     name: OSS Export

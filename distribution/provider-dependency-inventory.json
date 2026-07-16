@@ -1,0 +1,990 @@
+{
+  "$schema": "./provider-dependency-inventory.schema.json",
+  "schemaVersion": 1,
+  "registry": {
+    "path": "distribution/provider-integration-registry.json",
+    "sha256": "165e21f35b1471a3b64b136162d1fdab2ef16073d8dc60c29fae7a90db8d6312"
+  },
+  "imports": [
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/integration/portable-import-control.integration.test.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/portable-export.test.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/compact-storage-init.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/routes/modules/reporting.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/services/portable-export.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/services/s3-encryption.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/services/uploads.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/activities/export.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/activities/migration-domain-committers.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/client-s3",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/activities/migration-preparation.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/s3-request-presigner",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/routes/modules/reporting.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@aws-sdk/s3-request-presigner",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/services/uploads.ts",
+      "integrationIds": ["s3-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/backend",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/auth-flow.test.ts",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/backend",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/auth/clerk.ts",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/app/(auth)/sign-in/[[...sign-in]]/page.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/app/(auth)/sign-up/[[...sign-up]]/page.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/app/(dashboard)/layout.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/app/(editor)/layout.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/app/(kiosk)/layout.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/app/layout.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/app/user/page.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/components/sign-out-dialog.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/context/admin-user-provider.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/context/permission-provider.tsx",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@clerk/nextjs",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/admin-dashboard/package.json",
+      "importPath": "apps/admin-dashboard/src/proxy.ts",
+      "integrationIds": ["clerk-identity-runtime"],
+      "integrationOwners": ["apps/admin-dashboard/package.json", "packages/api/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/observability.test.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/observability.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/provider-clients/package.json",
+      "importPath": "packages/provider-clients/src/index.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/provider-clients/package.json",
+      "importPath": "packages/provider-clients/src/stripe.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "importPath": "packages/shared/src/observability.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/observability.test.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/api",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/otel-workflow-exporter.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/core",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/otel-workflow-exporter.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/exporter-trace-otlp-http",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "importPath": "packages/shared/src/observability.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/resources",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "importPath": "packages/shared/src/observability.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/resources",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/observability.test.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/resources",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/otel-workflow-exporter.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/sdk-node",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "importPath": "packages/shared/src/observability.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/sdk-trace-base",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/shared/package.json",
+      "importPath": "packages/shared/src/observability.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/sdk-trace-base",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/observability.test.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@opentelemetry/sdk-trace-base",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/otel-workflow-exporter.ts",
+      "integrationIds": ["opentelemetry-runtime"],
+      "integrationOwners": [
+        "packages/api/package.json",
+        "packages/provider-clients/package.json",
+        "packages/shared/package.json",
+        "packages/workflows/package.json"
+      ],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@stripe/stripe-js",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/checkout/package.json",
+      "importPath": "apps/checkout/src/__tests__/payment-handoff.test.tsx",
+      "integrationIds": ["stripe-browser-runtime"],
+      "integrationOwners": ["apps/checkout/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@stripe/stripe-js",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "apps/checkout/package.json",
+      "importPath": "apps/checkout/src/components/checkout/payment-handoff.tsx",
+      "integrationIds": ["stripe-browser-runtime"],
+      "integrationOwners": ["apps/checkout/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/activity",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/agent-memory-retention-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/activity",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/migration-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/activity",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/observability.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/activity",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/temporal-dependency-fault.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/activity",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/activities/migration-preparation.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/activity",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/observability.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/integration/portable-import-control.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/services/temporal.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/agent-memory-retention-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/migration-temporal-database.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/migration-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/activities/activity-clients.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/client",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/worker.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/interceptors-opentelemetry",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/services/temporal.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/interceptors-opentelemetry",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/observability.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/interceptors-opentelemetry",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/worker.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/interceptors-opentelemetry",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/otel-interceptors.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/testing",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/agent-memory-retention-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/testing",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/migration-temporal-database.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/testing",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/migration-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/testing",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/temporal-dependency-fault.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/agent-memory-retention-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/fixtures/migration-process-worker.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/migration-temporal-database.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/migration-temporal.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/temporal-dependency-fault.integration.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/healthcheck.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/observability.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/otel-workflow-exporter.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/worker",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/worker.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/workflows.test.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/otel-workflow-exporter.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/checkout.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/clerk-identity-sync.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/export.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/hold-expiration.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/migration-preparation.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/migration.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/notification.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/payment-reconciliation.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/privacy.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/provider-event-recovery.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/refund.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["runtime-boundary"],
+      "dependency": "@temporalio/workflow",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/workflows/webhook-delivery.ts",
+      "integrationIds": ["temporal-runtime"],
+      "integrationOwners": ["packages/api/package.json", "packages/workflows/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["contained-sdk"],
+      "dependency": "stripe",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/api/package.json",
+      "importPath": "packages/api/src/__tests__/integration/stripe-connect-provider.integration.test.ts",
+      "integrationIds": ["stripe-server-gateway"],
+      "integrationOwners": ["packages/provider-clients/package.json"],
+      "usage": "test"
+    },
+    {
+      "classifications": ["contained-sdk", "runtime-boundary"],
+      "dependency": "stripe",
+      "dependencyClass": "dependencies",
+      "dependencyOwner": "packages/provider-clients/package.json",
+      "importPath": "packages/provider-clients/src/stripe.ts",
+      "integrationIds": ["stripe-server-gateway", "stripe-webhook-verification"],
+      "integrationOwners": ["packages/provider-clients/package.json"],
+      "usage": "runtime"
+    },
+    {
+      "classifications": ["contained-sdk"],
+      "dependency": "stripe",
+      "dependencyClass": "devDependencies",
+      "dependencyOwner": "packages/workflows/package.json",
+      "importPath": "packages/workflows/src/__tests__/stripe-provider.integration.test.ts",
+      "integrationIds": ["stripe-server-gateway"],
+      "integrationOwners": ["packages/provider-clients/package.json"],
+      "usage": "test"
+    }
+  ]
+}

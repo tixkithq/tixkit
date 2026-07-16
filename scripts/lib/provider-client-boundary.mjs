@@ -215,6 +215,98 @@ function calleeNames(expression, bindings, seen = new Set()) {
   return [];
 }
 
+function memberPropertyNames(expression, bindings) {
+  if (expression?.type !== 'MemberExpression') return [];
+  return expression.computed
+    ? staticStrings(expression.property, bindings)
+    : [expression.property?.name].filter(Boolean);
+}
+
+function isNetworkCallable(expression, bindings, seen = new Set()) {
+  if (!expression || seen.has(expression)) return false;
+  const nextSeen = new Set(seen).add(expression);
+  if (expression.type === 'Identifier') {
+    if (networkMethodNames.has(expression.name)) return true;
+    return (bindings.get(expression.name) ?? []).some((initializer) =>
+      isNetworkCallable(initializer, bindings, nextSeen),
+    );
+  }
+  if (
+    expression.type === 'ParenthesizedExpression' ||
+    expression.type === 'TSAsExpression' ||
+    expression.type === 'TSSatisfiesExpression' ||
+    expression.type === 'TSNonNullExpression' ||
+    expression.type === 'TypeCastExpression'
+  ) {
+    return isNetworkCallable(expression.expression, bindings, nextSeen);
+  }
+  if (
+    expression.type === 'ArrowFunctionExpression' ||
+    expression.type === 'FunctionExpression' ||
+    expression.type === 'FunctionDeclaration'
+  ) {
+    return containsNetworkInvocation(expression.body, bindings, nextSeen);
+  }
+  if (
+    expression.type === 'CallExpression' &&
+    expression.callee?.type === 'MemberExpression' &&
+    memberPropertyNames(expression.callee, bindings).includes('bind')
+  ) {
+    return isNetworkCallable(expression.callee.object, bindings, nextSeen);
+  }
+  if (expression.type !== 'MemberExpression') return false;
+  const propertyNames = memberPropertyNames(expression, bindings);
+  if (
+    propertyNames.some((name) => name === 'apply' || name === 'call' || name === 'bind') &&
+    isNetworkCallable(expression.object, bindings, nextSeen)
+  ) {
+    return true;
+  }
+  if (propertyNames.some((name) => networkMethodNames.has(name))) return true;
+  for (const object of staticBoundNodes(expression.object, bindings)) {
+    if (object.type !== 'ObjectExpression') continue;
+    for (const property of object.properties) {
+      if (property.type !== 'Property') continue;
+      const keys = property.computed
+        ? staticStrings(property.key, bindings)
+        : [property.key?.name ?? property.key?.value].filter(Boolean);
+      if (
+        keys.some((key) => propertyNames.includes(key)) &&
+        isNetworkCallable(property.value, bindings, nextSeen)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function containsNetworkInvocation(node, bindings, seen = new Set()) {
+  if (!node || typeof node !== 'object' || seen.has(node)) return false;
+  const nextSeen = new Set(seen).add(node);
+  if (node.type === 'CallExpression' && isNetworkCallable(node.callee, bindings, nextSeen)) {
+    return true;
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'parent' || key === 'scope') continue;
+    if (Array.isArray(value)) {
+      if (value.some((entry) => containsNetworkInvocation(entry, bindings, nextSeen))) return true;
+    } else if (containsNetworkInvocation(value, bindings, nextSeen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isReflectApply(expression, bindings) {
+  return (
+    expression?.type === 'MemberExpression' &&
+    expression.object?.type === 'Identifier' &&
+    expression.object.name === 'Reflect' &&
+    memberPropertyNames(expression, bindings).includes('apply')
+  );
+}
+
 function providerHosts(value) {
   const hosts = [];
   for (const match of value.matchAll(/https?:\/\/[A-Za-z0-9.-]+/giu)) {
@@ -378,6 +470,32 @@ export function providerSourceBoundaryFindings(
     if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.init) {
       bind(node.id.name, node.init);
     }
+    if (node.type === 'VariableDeclarator' && node.id?.type === 'ObjectPattern' && node.init) {
+      for (const property of node.id.properties ?? []) {
+        if (property.type !== 'Property' || property.value?.type !== 'Identifier') continue;
+        const keys = property.computed
+          ? staticStrings(property.key, bindings)
+          : [property.key?.name ?? property.key?.value].filter(Boolean);
+        if (keys.some((key) => networkMethodNames.has(key))) {
+          bind(property.value.name, property.key);
+        }
+      }
+    }
+    if (
+      node.type === 'AssignmentExpression' &&
+      node.operator === '=' &&
+      node.left?.type === 'ObjectPattern'
+    ) {
+      for (const property of node.left.properties ?? []) {
+        if (property.type !== 'Property' || property.value?.type !== 'Identifier') continue;
+        const keys = property.computed
+          ? staticStrings(property.key, bindings)
+          : [property.key?.name ?? property.key?.value].filter(Boolean);
+        if (keys.some((key) => networkMethodNames.has(key))) {
+          bind(property.value.name, property.key);
+        }
+      }
+    }
     if (
       node.type === 'AssignmentExpression' &&
       node.operator === '=' &&
@@ -491,7 +609,19 @@ export function providerSourceBoundaryFindings(
     }
     if (node.type === 'CallExpression') {
       const names = calleeNames(node.callee, bindings);
-      const isNetworkExecution = names.some((name) => networkMethodNames.has(name));
+      const reflectApply = isReflectApply(node.callee, bindings);
+      const callableMethodNames = memberPropertyNames(node.callee, bindings);
+      const functionApply =
+        node.callee?.type === 'MemberExpression' &&
+        callableMethodNames.includes('apply') &&
+        isNetworkCallable(node.callee.object, bindings);
+      const functionCall =
+        node.callee?.type === 'MemberExpression' &&
+        callableMethodNames.includes('call') &&
+        isNetworkCallable(node.callee.object, bindings);
+      const isNetworkExecution = reflectApply
+        ? isNetworkCallable(node.arguments?.[0], bindings)
+        : isNetworkCallable(node.callee, bindings);
       const isDynamicLoaderExecution = names.some(
         (name) => name === 'eval' || name === 'Function' || dynamicRequireLoaders.has(name),
       );
@@ -513,7 +643,15 @@ export function providerSourceBoundaryFindings(
         }
       }
       if (isNetworkExecution) {
-        for (const argument of node.arguments ?? []) {
+        const networkArguments =
+          reflectApply && node.arguments?.[2]?.type === 'ArrayExpression'
+            ? node.arguments[2].elements
+            : functionApply && node.arguments?.[1]?.type === 'ArrayExpression'
+              ? node.arguments[1].elements
+              : functionCall
+                ? node.arguments.slice(1)
+                : (node.arguments ?? []);
+        for (const argument of networkArguments) {
           for (const value of staticNetworkArgumentStrings(argument, bindings)) {
             for (const host of providerHosts(value)) {
               if (
