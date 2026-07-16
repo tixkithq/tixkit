@@ -1,22 +1,28 @@
-export type AuthorizationBoundary = 'brand' | 'event' | 'organization' | 'tenant';
+export type AuthorizationBoundary = 'brand' | 'event' | 'organization' | 'permission' | 'tenant';
 
 export type AuthorizationSideEffectKind = 'persistence' | 'workflow';
 
 export type RouteAuthorizationDenialContract = Readonly<{
   authorizedControl: Readonly<{
     required: true;
-    status: 200 | 201 | 202;
+    status: 200 | 201 | 202 | 204;
   }>;
   denialResponse: Readonly<{
     code: 'NOT_FOUND';
     status: 404;
   }>;
   deniedBoundaries: readonly AuthorizationBoundary[];
-  method: 'GET' | 'POST';
+  method: 'DELETE' | 'GET' | 'POST';
   operationId: string;
   path: string;
+  permissionDenialResponse?: Readonly<{
+    code: 'FORBIDDEN';
+    status: 403;
+  }>;
+  persistenceSource?: string;
   resourceParameters: readonly string[];
   sideEffectAssertions: readonly AuthorizationSideEffectKind[];
+  source: string;
 }>;
 
 function denialContract(
@@ -27,6 +33,9 @@ function denialContract(
     authorizedControl: Object.freeze({ ...contract.authorizedControl }),
     denialResponse: Object.freeze({ ...contract.denialResponse }),
     deniedBoundaries: Object.freeze([...contract.deniedBoundaries]),
+    ...(contract.permissionDenialResponse
+      ? { permissionDenialResponse: Object.freeze({ ...contract.permissionDenialResponse }) }
+      : {}),
     resourceParameters: Object.freeze([...contract.resourceParameters]),
     sideEffectAssertions: Object.freeze([...contract.sideEffectAssertions]),
   });
@@ -56,6 +65,7 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
       path,
       resourceParameters: ['eventId'],
       sideEffectAssertions: [],
+      source: 'event-route-authorization-db.integration.test.ts',
     }),
   ),
   ...(
@@ -72,8 +82,10 @@ export const EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
       method: 'POST',
       operationId,
       path,
+      persistenceSource: 'event-route-authorization-db.integration.test.ts',
       resourceParameters: ['eventId'],
       sideEffectAssertions: ['persistence'],
+      source: 'event-route-authorization-db.integration.test.ts',
     }),
   ),
 ]);
@@ -95,6 +107,7 @@ export const ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
       path,
       resourceParameters: ['orderId'],
       sideEffectAssertions: [],
+      source: 'order-route-authorization-db.integration.test.ts',
     }),
   ),
   denialContract({
@@ -104,8 +117,10 @@ export const ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     method: 'POST',
     operationId: 'postOrdersByOrderIdCancel',
     path: '/orders/{orderId}/cancel',
+    persistenceSource: 'order-route-authorization-db.integration.test.ts',
     resourceParameters: ['orderId'],
     sideEffectAssertions: ['persistence'],
+    source: 'order-route-authorization-db.integration.test.ts',
   }),
   denialContract({
     authorizedControl: { required: true, status: 202 },
@@ -114,8 +129,10 @@ export const ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
     method: 'POST',
     operationId: 'postOrdersByOrderIdRefunds',
     path: '/orders/{orderId}/refunds',
+    persistenceSource: 'order-route-authorization-db.integration.test.ts',
     resourceParameters: ['orderId'],
     sideEffectAssertions: ['persistence', 'workflow'],
+    source: 'order-route-authorization-db.integration.test.ts',
   }),
 ]);
 
@@ -129,6 +146,7 @@ export const PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     path: '/provider-incidents',
     resourceParameters: [],
     sideEffectAssertions: [],
+    source: 'provider-incident-route-authorization-db.integration.test.ts',
   }),
   denialContract({
     authorizedControl: { required: true, status: 200 },
@@ -137,8 +155,39 @@ export const PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.fre
     method: 'POST',
     operationId: 'postProviderIncidentsByEvidenceIdReveal',
     path: '/provider-incidents/{evidenceId}/reveal',
+    persistenceSource: 'provider-incident-route-authorization-db.integration.test.ts',
     resourceParameters: ['evidenceId'],
     sideEffectAssertions: ['persistence'],
+    source: 'provider-incident-route-authorization-db.integration.test.ts',
+  }),
+]);
+
+export const MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 201 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['organization'],
+    method: 'POST',
+    operationId: 'createMigrationCredential',
+    path: '/migration-credentials',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'import-platform.integration.test.ts',
+    resourceParameters: [],
+    sideEffectAssertions: ['persistence'],
+    source: 'migration-credential-route-authorization.test.ts',
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 204 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'DELETE',
+    operationId: 'revokeMigrationCredential',
+    path: '/migration-credentials/{credentialId}',
+    permissionDenialResponse: { code: 'FORBIDDEN', status: 403 },
+    persistenceSource: 'import-platform.integration.test.ts',
+    resourceParameters: ['credentialId'],
+    sideEffectAssertions: ['persistence'],
+    source: 'migration-credential-route-authorization.test.ts',
   }),
 ]);
 
@@ -146,4 +195,5 @@ export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

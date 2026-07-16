@@ -1,5 +1,7 @@
 import { ALL_PERMISSIONS, type Permission } from '@tixkit/domain';
 import { openApiSpec } from '@tixkit/openapi';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { parseSync } from 'oxc-parser';
 import { buildRouteManifest, type RouteAccess } from './route-manifest.js';
 import {
@@ -54,18 +56,106 @@ export type RouteAccessInventoryEntry = {
 };
 
 export type RouteAccessInventory = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   routes: RouteAccessInventoryEntry[];
 };
 
 export type NegativeAuthorizationEvidence = {
-  authorizedControlStatus: 200 | 201 | 202;
+  authorizedControlStatus: 200 | 201 | 202 | 204;
   boundary: AuthorizationBoundary;
-  deniedCode: 'NOT_FOUND';
-  deniedStatus: 404;
+  denialKind: 'permission' | 'resource-boundary';
+  deniedCode: 'FORBIDDEN' | 'NOT_FOUND';
+  deniedStatus: 403 | 404;
+  persistenceSource: string | null;
   sideEffectAssertions: AuthorizationSideEffectKind[];
   source: string;
 };
+
+const EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES = new Map([
+  [
+    'event-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'event-route-authorization-db.integration.test.ts'),
+  ],
+  [
+    'order-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'order-route-authorization-db.integration.test.ts'),
+  ],
+  [
+    'provider-incident-route-authorization-db.integration.test.ts',
+    resolve(import.meta.dirname, 'provider-incident-route-authorization-db.integration.test.ts'),
+  ],
+  [
+    'migration-credential-route-authorization.test.ts',
+    resolve(import.meta.dirname, '../migration-credential-route-authorization.test.ts'),
+  ],
+  [
+    'import-platform.integration.test.ts',
+    resolve(
+      import.meta.dirname,
+      '../../../../db/src/__tests__/integration/import-platform.integration.test.ts',
+    ),
+  ],
+]);
+
+type AuthorizationEvidenceBinding = Readonly<{
+  persistenceSource?: string;
+  source: string;
+}>;
+
+function evidenceBindings(
+  operationIds: readonly string[],
+  binding: AuthorizationEvidenceBinding,
+): Array<readonly [string, AuthorizationEvidenceBinding]> {
+  return operationIds.map((operationId) => [operationId, Object.freeze({ ...binding })] as const);
+}
+
+const AUTHORIZATION_EVIDENCE_BINDINGS = new Map([
+  ...evidenceBindings(
+    [
+      'getEventsByEventId',
+      'getEventsByEventIdAttendees',
+      'getEventsByEventIdAvailability',
+      'getEventsByEventIdCheckInLists',
+      'getEventsByEventIdLaunchReadiness',
+      'getEventsByEventIdMedia',
+      'getEventsByEventIdMessages',
+      'getEventsByEventIdQuestions',
+      'getEventsByEventIdReportsSales',
+      'getEventsByEventIdWaitlist',
+    ],
+    { source: 'event-route-authorization-db.integration.test.ts' },
+  ),
+  ...evidenceBindings(
+    [
+      'postEventsByEventIdCheckInLists',
+      'postEventsByEventIdProductCategories',
+      'postEventsByEventIdQuestions',
+    ],
+    {
+      source: 'event-route-authorization-db.integration.test.ts',
+      persistenceSource: 'event-route-authorization-db.integration.test.ts',
+    },
+  ),
+  ...evidenceBindings(
+    ['getOrdersByOrderId', 'getOrdersByOrderIdInvoice', 'getOrdersByOrderIdInvoiceDownload'],
+    { source: 'order-route-authorization-db.integration.test.ts' },
+  ),
+  ...evidenceBindings(['postOrdersByOrderIdCancel', 'postOrdersByOrderIdRefunds'], {
+    source: 'order-route-authorization-db.integration.test.ts',
+    persistenceSource: 'order-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['getProviderIncidents'], {
+    source: 'provider-incident-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['postProviderIncidentsByEvidenceIdReveal'], {
+    source: 'provider-incident-route-authorization-db.integration.test.ts',
+    persistenceSource: 'provider-incident-route-authorization-db.integration.test.ts',
+  }),
+  ...evidenceBindings(['createMigrationCredential', 'revokeMigrationCredential'], {
+    source: 'migration-credential-route-authorization.test.ts',
+    persistenceSource: 'import-platform.integration.test.ts',
+  }),
+]);
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
 const credentialOnlyOperations = new Set(['getAgentSession', 'getMe']);
@@ -457,6 +547,9 @@ export function negativeAuthorizationEvidenceForRoutes(
     }
     const actualParameters = pathParameters(contract.path).sort();
     const declaredParameters = [...contract.resourceParameters].sort();
+    if (contract.deniedBoundaries.includes('permission')) {
+      throw contractError(contract, 'permission denial must use permissionDenialResponse');
+    }
     if (JSON.stringify(actualParameters) !== JSON.stringify(declaredParameters)) {
       throw contractError(
         contract,
@@ -474,6 +567,22 @@ export function negativeAuthorizationEvidenceForRoutes(
     if (contract.authorizedControl.required !== true) {
       throw contractError(contract, 'authorized control is not required');
     }
+    if (contract.method === 'DELETE' && contract.authorizedControl.status !== 204) {
+      throw contractError(contract, 'DELETE authorized control must be 204');
+    }
+    const evidenceBinding = AUTHORIZATION_EVIDENCE_BINDINGS.get(contract.operationId);
+    if (!evidenceBinding || evidenceBinding.source !== contract.source)
+      throw contractError(contract, 'source is not bound to this operationId');
+    const sourcePath = EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES.get(contract.source);
+    if (!sourcePath || !existsSync(sourcePath))
+      throw contractError(contract, 'source must name a registered existing executable test file');
+    if (
+      contract.permissionDenialResponse &&
+      (contract.permissionDenialResponse.status !== 403 ||
+        contract.permissionDenialResponse.code !== 'FORBIDDEN')
+    ) {
+      throw contractError(contract, 'permission denial must be 403 FORBIDDEN');
+    }
     if (
       contract.method !== 'GET' &&
       (contract.sideEffectAssertions.length === 0 ||
@@ -481,6 +590,23 @@ export function negativeAuthorizationEvidenceForRoutes(
     ) {
       throw contractError(contract, 'mutation omits persistence or workflow side-effect proof');
     }
+    const requiresPersistence = contract.sideEffectAssertions.includes('persistence');
+    if (evidenceBinding.persistenceSource !== contract.persistenceSource)
+      throw contractError(contract, 'persistence source is not bound to this operationId');
+    const persistenceSourcePath = contract.persistenceSource
+      ? EXECUTABLE_AUTHORIZATION_EVIDENCE_SOURCES.get(contract.persistenceSource)
+      : undefined;
+    if (requiresPersistence && (!persistenceSourcePath || !existsSync(persistenceSourcePath))) {
+      throw contractError(
+        contract,
+        'persistence assertion must name a registered existing executable database test file',
+      );
+    }
+    if (!requiresPersistence && contract.persistenceSource !== undefined)
+      throw contractError(
+        contract,
+        'non-persistence contract must not declare persistence evidence',
+      );
 
     const evidence = evidenceByRoute.get(routeKey) ?? [];
     for (const boundary of contract.deniedBoundaries) {
@@ -495,14 +621,29 @@ export function negativeAuthorizationEvidenceForRoutes(
       evidence.push({
         authorizedControlStatus: contract.authorizedControl.status,
         boundary,
+        denialKind: 'resource-boundary',
         deniedCode: contract.denialResponse.code,
         deniedStatus: contract.denialResponse.status,
+        persistenceSource: contract.persistenceSource ?? null,
         sideEffectAssertions: [...contract.sideEffectAssertions],
-        source: contract.path.startsWith('/events/')
-          ? 'event-route-authorization-db.integration.test.ts'
-          : contract.path.startsWith('/orders/')
-            ? 'order-route-authorization-db.integration.test.ts'
-            : 'provider-incident-route-authorization-db.integration.test.ts',
+        source: contract.source,
+      });
+    }
+    if (contract.permissionDenialResponse) {
+      const pair = `${routeKey} permission`;
+      if (routeBoundaryPairs.has(pair)) {
+        throw contractError(contract, 'duplicate route/boundary pair permission');
+      }
+      routeBoundaryPairs.add(pair);
+      evidence.push({
+        authorizedControlStatus: contract.authorizedControl.status,
+        boundary: 'permission',
+        denialKind: 'permission',
+        deniedCode: contract.permissionDenialResponse.code,
+        deniedStatus: contract.permissionDenialResponse.status,
+        persistenceSource: contract.persistenceSource ?? null,
+        sideEffectAssertions: [...contract.sideEffectAssertions],
+        source: contract.source,
       });
     }
     evidenceByRoute.set(routeKey, evidence);
@@ -596,5 +737,5 @@ export async function buildRouteAccessInventory(): Promise<RouteAccessInventory>
     route.negativeAuthorizationEvidence =
       evidenceByRoute.get(`${route.method} ${route.path}`) ?? [];
   }
-  return { schemaVersion: 3, routes };
+  return { schemaVersion: 4, routes };
 }

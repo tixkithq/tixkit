@@ -9,6 +9,7 @@ import {
 import { buildAuthenticatedRouteTestApp, buildRouteManifest } from './route-manifest.js';
 import {
   EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -74,29 +75,32 @@ function invalidCredentialHeaders(scheme: string): Record<string, string> {
 }
 
 describe('API route access inventory (C-123)', () => {
-  it('binds the immutable event and order denial matrices into schema v3 evidence', async () => {
+  it('binds the immutable denial matrices into schema v4 evidence', async () => {
     const inventory = await buildRouteAccessInventory();
     const coveredRoutes = inventory.routes.filter(
       (route) => route.negativeAuthorizationEvidence.length > 0,
     );
 
-    expect(inventory.schemaVersion).toBe(3);
+    expect(inventory.schemaVersion).toBe(4);
     expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(13);
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
     expect(PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(20);
+    expect(MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(22);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
         (contract) =>
           Object.isFrozen(contract) &&
           Object.isFrozen(contract.deniedBoundaries) &&
+          (!contract.permissionDenialResponse ||
+            Object.isFrozen(contract.permissionDenialResponse)) &&
           Object.isFrozen(contract.resourceParameters) &&
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(20);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(50);
+    expect(coveredRoutes).toHaveLength(22);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(55);
     expect(
       inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,
     ).toEqual([]);
@@ -252,6 +256,13 @@ describe('API route access inventory (C-123)', () => {
     const mutationRoute = inventory.routes.find(
       (candidate) => candidate.method === mutation.method && candidate.path === mutation.path,
     )!;
+    const deleteMutation = MIGRATION_CREDENTIAL_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+      (contract) => contract.method === 'DELETE',
+    )!;
+    const deleteMutationRoute = inventory.routes.find(
+      (candidate) =>
+        candidate.method === deleteMutation.method && candidate.path === deleteMutation.path,
+    )!;
     const invalidFixtures: Array<{
       contracts: readonly RouteAuthorizationDenialContract[];
       message: RegExp;
@@ -291,6 +302,41 @@ describe('API route access inventory (C-123)', () => {
       {
         contracts: [{ ...mutation, sideEffectAssertions: [] }],
         message: /omits persistence or workflow side-effect proof/,
+        routes: [mutationRoute],
+      },
+      {
+        contracts: [{ ...deleteMutation, authorizedControl: { required: true, status: 201 } }],
+        message: /DELETE authorized control must be 204/,
+        routes: [deleteMutationRoute],
+      },
+      {
+        contracts: [
+          {
+            ...deleteMutation,
+            permissionDenialResponse: { code: 'FORBIDDEN', status: 404 },
+          } as unknown as RouteAuthorizationDenialContract,
+        ],
+        message: /403 FORBIDDEN/,
+        routes: [deleteMutationRoute],
+      },
+      {
+        contracts: [{ ...base, source: 'fabricated.test.ts' }],
+        message: /source is not bound to this operationId/,
+        routes: [route],
+      },
+      {
+        contracts: [{ ...mutation, persistenceSource: 'fabricated.test.ts' }],
+        message: /persistence source is not bound to this operationId/,
+        routes: [mutationRoute],
+      },
+      {
+        contracts: [{ ...base, source: 'order-route-authorization-db.integration.test.ts' }],
+        message: /source is not bound to this operationId/,
+        routes: [route],
+      },
+      {
+        contracts: [{ ...mutation, persistenceSource: 'import-platform.integration.test.ts' }],
+        message: /persistence source is not bound to this operationId/,
         routes: [mutationRoute],
       },
       {

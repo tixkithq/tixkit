@@ -433,6 +433,7 @@ describe.sequential.each(driverCases)('import platform: $driver', ({ driver, url
       name: 'Other credential organization',
       slug: 'other-credential-organization',
     });
+    const otherTenant = await new TenantRepository(db).create({ name: 'Other credential tenant' });
     const imports = new ImportRepository(db);
     const active = await imports.createCredential({
       tenantId: tenant.id,
@@ -458,6 +459,28 @@ describe.sequential.each(driverCases)('import platform: $driver', ({ driver, url
         sourceSystem: 'generic-csv',
       }),
     ).toBeUndefined();
+    expect(
+      await imports.revokeCredential({
+        tenantId: tenant.id,
+        organizationId: otherOrganization.id,
+        credentialId: active.id,
+      }),
+    ).toBe(false);
+    expect(
+      await imports.revokeCredential({
+        tenantId: otherTenant.id,
+        organizationId: organization.id,
+        credentialId: active.id,
+      }),
+    ).toBe(false);
+    expect(
+      await imports.findActiveCredential({
+        tenantId: tenant.id,
+        organizationId: organization.id,
+        credentialId: active.id,
+        sourceSystem: 'generic-csv',
+      }),
+    ).toBeDefined();
     expect(
       await imports.revokeCredential({
         tenantId: tenant.id,
