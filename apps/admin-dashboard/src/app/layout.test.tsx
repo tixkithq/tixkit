@@ -65,8 +65,7 @@ describe('admin RootLayout CSP nonce integration', () => {
     const tree = await RootLayout({ children: <main>content</main> });
     const injector = findElement(
       tree,
-      (element) =>
-        element.type === 'script' && element.props.id === 'transitions-refine-injector',
+      (element) => element.type === 'script' && element.props.id === 'transitions-refine-injector',
     );
     expect(injector?.props).toMatchObject({ nonce: 'request-nonce' });
   });

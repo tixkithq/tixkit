@@ -1224,9 +1224,7 @@ async function scanWithClamAv(buffer: Buffer): Promise<{ clean: boolean; result:
           unavailable();
           return;
         }
-        response = new TextDecoder('utf-8', { fatal: true }).decode(
-          responseBuffer.subarray(0, -1),
-        );
+        response = new TextDecoder('utf-8', { fatal: true }).decode(responseBuffer.subarray(0, -1));
       } catch {
         unavailable();
         return;

@@ -2,7 +2,9 @@ import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-const nextThemesProviderMock = vi.hoisted(() => vi.fn(({ children }: { children: ReactNode }) => children));
+const nextThemesProviderMock = vi.hoisted(() =>
+  vi.fn(({ children }: { children: ReactNode }) => children),
+);
 
 vi.mock('next-themes', () => ({
   ThemeProvider: nextThemesProviderMock,

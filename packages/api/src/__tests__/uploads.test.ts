@@ -186,7 +186,8 @@ async function startClamAvTestServer(
     server.listen(0, '127.0.0.1', resolve);
   });
   const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Test ClamAV server has no TCP port');
+  if (!address || typeof address === 'string')
+    throw new Error('Test ClamAV server has no TCP port');
   return {
     port: address.port,
     close: async () => {
@@ -2411,7 +2412,10 @@ describe('upload artifact service', () => {
 
     for (const [response, expected] of [
       ['stream: OK\0', { clean: true, result: 'stream: OK' }],
-      ['stream: Eicar-Signature FOUND\0', { clean: false, result: 'stream: Eicar-Signature FOUND' }],
+      [
+        'stream: Eicar-Signature FOUND\0',
+        { clean: false, result: 'stream: Eicar-Signature FOUND' },
+      ],
     ] as const) {
       const scanner = await startClamAvTestServer({ response });
       process.env.CLAMAV_PORT = String(scanner.port);
@@ -2554,7 +2558,7 @@ describe('upload artifact service', () => {
       .mockResolvedValueOnce({ ContentLength: 5, ContentType: 'text/plain' })
       .mockResolvedValueOnce({
         Body: { transformToByteArray: async () => new TextEncoder().encode('clean') },
-    });
+      });
 
     const completion = completeUploadArtifact(db, artifact.artifactId);
     const completionResult = completion.then(
