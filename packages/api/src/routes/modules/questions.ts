@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { ulid } from 'ulid';
 import { ClerkAuthService } from '../../auth/clerk.js';
-import { EventRepository, bumpEventPublicRevision, type Database } from '@tixkit/db';
+import { EventRepository, bumpEventPublicRevision, getDriver, type Database } from '@tixkit/db';
 import {
   ConflictError,
   NotFoundError,
@@ -137,32 +137,36 @@ export const questionRoutes: FastifyPluginAsync = async (app) => {
 
     const id = `q_${ulid()}`;
     const now = new Date();
-    const question = await db
-      .insertInto('questions')
-      .values({
-        id,
-        event_id: eventId,
-        ticket_type_id: body.ticketTypeId ?? null,
-        type: body.type,
-        label: body.label,
-        description: body.description ?? null,
-        required: body.required ?? false,
-        applies_to: body.appliesTo ?? 'attendee',
-        options: options ? JSON.stringify(options) : null,
-        placeholder: body.placeholder ?? null,
-        validation_pattern: body.validationPattern ?? null,
-        conditional_visibility: body.conditionalVisibility
-          ? JSON.stringify(body.conditionalVisibility)
-          : null,
-        sort_order: body.sortOrder ?? 0,
-        is_consent_field: isConsentField,
-        consent_text: body.consentText ?? null,
-        consent_version: consentVersion,
-        created_at: now,
-        updated_at: now,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
+    const insertQuestion = db.insertInto('questions').values({
+      id,
+      event_id: eventId,
+      ticket_type_id: body.ticketTypeId ?? null,
+      type: body.type,
+      label: body.label,
+      description: body.description ?? null,
+      required: body.required ?? false,
+      applies_to: body.appliesTo ?? 'attendee',
+      options: options ? JSON.stringify(options) : null,
+      placeholder: body.placeholder ?? null,
+      validation_pattern: body.validationPattern ?? null,
+      conditional_visibility: body.conditionalVisibility
+        ? JSON.stringify(body.conditionalVisibility)
+        : null,
+      sort_order: body.sortOrder ?? 0,
+      is_consent_field: isConsentField,
+      consent_text: body.consentText ?? null,
+      consent_version: consentVersion,
+      created_at: now,
+      updated_at: now,
+    });
+    const question =
+      getDriver() === 'postgres'
+        ? await insertQuestion.returningAll().executeTakeFirstOrThrow()
+        : await insertQuestion
+            .execute()
+            .then(() =>
+              db.selectFrom('questions').selectAll().where('id', '=', id).executeTakeFirstOrThrow(),
+            );
     await bumpEventPublicRevision(db, eventId, now);
 
     return reply.status(201).send(serializeQuestion(question));

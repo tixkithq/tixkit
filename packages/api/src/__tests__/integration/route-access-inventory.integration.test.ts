@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { buildRouteAccessInventory } from './route-access-inventory.js';
+import {
+  buildRouteAccessInventory,
+  negativeAuthorizationEvidenceForRoutes,
+} from './route-access-inventory.js';
 import { buildAuthenticatedRouteTestApp } from './route-manifest.js';
+import {
+  EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  type RouteAuthorizationDenialContract,
+} from './route-authorization-contracts.js';
 
 const operationalPaths = new Set(['/health', '/metrics', '/ready']);
 const signedWebhookSchemes = new Set([
@@ -61,6 +70,108 @@ function invalidCredentialHeaders(scheme: string): Record<string, string> {
 }
 
 describe('API route access inventory (C-123)', () => {
+  it('binds the immutable event and order denial matrices into schema v2 evidence', async () => {
+    const inventory = await buildRouteAccessInventory();
+    const coveredRoutes = inventory.routes.filter(
+      (route) => route.negativeAuthorizationEvidence.length > 0,
+    );
+
+    expect(inventory.schemaVersion).toBe(2);
+    expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(13);
+    expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(18);
+    expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
+    expect(
+      ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
+        (contract) =>
+          Object.isFrozen(contract) &&
+          Object.isFrozen(contract.deniedBoundaries) &&
+          Object.isFrozen(contract.resourceParameters) &&
+          Object.isFrozen(contract.sideEffectAssertions),
+      ),
+    ).toBe(true);
+    expect(coveredRoutes).toHaveLength(18);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(46);
+    expect(
+      inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,
+    ).toEqual([]);
+    expect(coveredRoutes.map((route) => route.operationId).sort()).toEqual(
+      ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.map((contract) => contract.operationId).sort(),
+    );
+  });
+
+  it('fails closed for invalid denial-contract fixtures', async () => {
+    const inventory = await buildRouteAccessInventory();
+    const base = ROUTE_AUTHORIZATION_DENIAL_CONTRACTS[0]!;
+    const mutation = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+      (contract) => contract.method === 'POST',
+    )!;
+    const route = inventory.routes.find(
+      (candidate) => candidate.method === base.method && candidate.path === base.path,
+    )!;
+    const mutationRoute = inventory.routes.find(
+      (candidate) => candidate.method === mutation.method && candidate.path === mutation.path,
+    )!;
+    const invalidFixtures: Array<{
+      contracts: readonly RouteAuthorizationDenialContract[];
+      message: RegExp;
+      routes: typeof inventory.routes;
+    }> = [
+      { contracts: [base], message: /runtime route is missing/, routes: [] },
+      {
+        contracts: [base],
+        message: /not authenticated/,
+        routes: [{ ...route, access: 'public' }],
+      },
+      {
+        contracts: [{ ...base, operationId: `${base.operationId}Renamed` }],
+        message: /operationId/,
+        routes: [route],
+      },
+      {
+        contracts: [{ ...base, resourceParameters: [] }],
+        message: /do not match path parameters/,
+        routes: [route],
+      },
+      {
+        contracts: [base, base],
+        message: /duplicate route\/boundary pair/,
+        routes: [route],
+      },
+      {
+        contracts: [
+          {
+            ...base,
+            denialResponse: { code: 'NOT_FOUND', status: 403 },
+          } as unknown as RouteAuthorizationDenialContract,
+        ],
+        message: /404 NOT_FOUND/,
+        routes: [route],
+      },
+      {
+        contracts: [{ ...mutation, sideEffectAssertions: [] }],
+        message: /omits persistence or workflow side-effect proof/,
+        routes: [mutationRoute],
+      },
+      {
+        contracts: [
+          {
+            ...mutation,
+            sideEffectAssertions: ['telemetry'],
+          } as unknown as RouteAuthorizationDenialContract,
+        ],
+        message: /omits persistence or workflow side-effect proof/,
+        routes: [mutationRoute],
+      },
+    ];
+
+    for (const fixture of invalidFixtures) {
+      expect(() =>
+        negativeAuthorizationEvidenceForRoutes(fixture.routes, fixture.contracts),
+      ).toThrow(fixture.message);
+    }
+  });
+
   it('classifies every runtime operation and its credential boundary', async () => {
     const inventory = await buildRouteAccessInventory();
     const failures: string[] = [];

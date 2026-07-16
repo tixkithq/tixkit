@@ -17,12 +17,17 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
+import { ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
 
-const orderReadRoutes = [
-  '/orders/:orderId',
-  '/orders/:orderId/invoice',
-  '/orders/:orderId/invoice/download',
-] as const;
+const orderReadContracts = ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
+  (contract) => contract.method === 'GET',
+);
+const cancelContract = ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+  (contract) => contract.operationId === 'postOrdersByOrderIdCancel',
+)!;
+const refundContract = ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.find(
+  (contract) => contract.operationId === 'postOrdersByOrderIdRefunds',
+)!;
 
 type OrderPair = {
   draftId: string;
@@ -440,30 +445,36 @@ describeWithIntegrationDatabase('order route authorization matrix', () => {
 
   describe('read denial', () => {
     it('returns each order and invoice to its matching authorized principal', async () => {
-      for (const route of orderReadRoutes) {
+      for (const contract of orderReadContracts) {
         for (const scenario of scenarios()) {
           principal = scenario.authorizedPrincipal;
           const response = await app.inject({
-            method: 'GET',
-            url: route.replace(':orderId', scenario.orders.paidId),
+            method: contract.method,
+            url: contract.path.replace('{orderId}', scenario.orders.paidId),
           });
-          expect(response.statusCode, `${scenario.name}: ${route}: ${response.body}`).toBe(200);
+          expect(response.statusCode, `${scenario.name}: ${contract.path}: ${response.body}`).toBe(
+            contract.authorizedControl.status,
+          );
           const body = response.json() as { id?: string; order?: { id?: string } };
           expect(body.id ?? body.order?.id).toBe(scenario.orders.paidId);
         }
       }
     });
 
-    for (const route of orderReadRoutes) {
-      it(`${route} hides orders outside every resource boundary`, async () => {
+    for (const contract of orderReadContracts) {
+      it(`${contract.path} hides orders outside every resource boundary`, async () => {
         for (const scenario of scenarios()) {
           principal = scenario.principal;
           const response = await app.inject({
-            method: 'GET',
-            url: route.replace(':orderId', scenario.orders.paidId),
+            method: contract.method,
+            url: contract.path.replace('{orderId}', scenario.orders.paidId),
           });
-          expect(response.statusCode, `${scenario.name}: ${response.body}`).toBe(404);
-          expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+          expect(response.statusCode, `${scenario.name}: ${response.body}`).toBe(
+            contract.denialResponse.status,
+          );
+          expect(response.json()).toMatchObject({
+            error: { code: contract.denialResponse.code },
+          });
         }
       });
     }
@@ -498,20 +509,23 @@ describeWithIntegrationDatabase('order route authorization matrix', () => {
       idempotencyKeys.push(cancelKey, refundKey);
       const [cancelResponse, refundResponse] = await Promise.all([
         app.inject({
-          method: 'POST',
-          url: `/orders/${scenario.orders.draftId}/cancel`,
+          method: cancelContract.method,
+          url: cancelContract.path.replace('{orderId}', scenario.orders.draftId),
           headers: { 'idempotency-key': cancelKey },
         }),
         app.inject({
-          method: 'POST',
-          url: `/orders/${scenario.orders.paidId}/refunds`,
+          method: refundContract.method,
+          url: refundContract.path.replace('{orderId}', scenario.orders.paidId),
           headers: { 'idempotency-key': refundKey },
           payload: { amountCents: 500, reason: `Forbidden refund ${suffix}` },
         }),
       ]);
       for (const response of [cancelResponse, refundResponse]) {
-        expect(response.statusCode, `${scenario.name}: ${response.body}`).toBe(404);
-        expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+        const contract = response === cancelResponse ? cancelContract : refundContract;
+        expect(response.statusCode, `${scenario.name}: ${response.body}`).toBe(
+          contract.denialResponse.status,
+        );
+        expect(response.json()).toMatchObject({ error: { code: contract.denialResponse.code } });
       }
     }
 
@@ -559,19 +573,23 @@ describeWithIntegrationDatabase('order route authorization matrix', () => {
       idempotencyKeys.push(cancelKey, refundKey);
       const [cancelResponse, refundResponse] = await Promise.all([
         app.inject({
-          method: 'POST',
-          url: `/orders/${scenario.orders.draftId}/cancel`,
+          method: cancelContract.method,
+          url: cancelContract.path.replace('{orderId}', scenario.orders.draftId),
           headers: { 'idempotency-key': cancelKey },
         }),
         app.inject({
-          method: 'POST',
-          url: `/orders/${scenario.orders.paidId}/refunds`,
+          method: refundContract.method,
+          url: refundContract.path.replace('{orderId}', scenario.orders.paidId),
           headers: { 'idempotency-key': refundKey },
           payload: { amountCents: 500, reason: `Authorized refund ${suffix}` },
         }),
       ]);
-      expect(cancelResponse.statusCode, `${scenario.name}: ${cancelResponse.body}`).toBe(200);
-      expect(refundResponse.statusCode, `${scenario.name}: ${refundResponse.body}`).toBe(202);
+      expect(cancelResponse.statusCode, `${scenario.name}: ${cancelResponse.body}`).toBe(
+        cancelContract.authorizedControl.status,
+      );
+      expect(refundResponse.statusCode, `${scenario.name}: ${refundResponse.body}`).toBe(
+        refundContract.authorizedControl.status,
+      );
     }
 
     const draftOrderIds = scenarios().map((scenario) => scenario.orders.draftId);

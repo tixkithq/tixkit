@@ -20,19 +20,14 @@ import {
   restoreDatabaseDriver,
   setIntegrationDatabaseDriver,
 } from './integration-database.js';
+import { EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS } from './route-authorization-contracts.js';
 
-const eventReadRoutes = [
-  '/events/:eventId',
-  '/events/:eventId/attendees',
-  '/events/:eventId/availability',
-  '/events/:eventId/check-in-lists',
-  '/events/:eventId/launch-readiness',
-  '/events/:eventId/media',
-  '/events/:eventId/messages',
-  '/events/:eventId/questions',
-  '/events/:eventId/reports/sales',
-  '/events/:eventId/waitlist',
-] as const;
+const eventReadContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
+  (contract) => contract.method === 'GET',
+);
+const eventMutationContracts = EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.filter(
+  (contract) => contract.method === 'POST',
+);
 
 type AuthorizationScenario = {
   name: string;
@@ -48,6 +43,9 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
   let principal: Principal;
 
   const suffix = ulid().slice(-10).toLowerCase();
+  const authorizedCheckInListName = `Authorized list ${suffix}`;
+  const authorizedProductCategoryName = `Authorized category ${suffix}`;
+  const authorizedQuestionLabel = `Authorized question ${suffix}`;
   const forbiddenCheckInListName = `Forbidden list ${suffix}`;
   const forbiddenProductCategoryName = `Forbidden category ${suffix}`;
   const forbiddenQuestionLabel = `Forbidden question ${suffix}`;
@@ -168,8 +166,11 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       inventoryService: new InventoryService(db),
       readinessServiceFactory: () =>
         ({
-          getEventLaunchReadiness: async () => {
-            throw new Error('readiness service must not run for a denied event');
+          getEventLaunchReadiness: async (input: { eventId: string }) => {
+            if (input.eventId !== eventA) {
+              throw new Error('readiness service must not run for a denied event');
+            }
+            return { launchable: false, requiredBlockers: [], steps: [] };
           },
         }) as never,
     } as unknown as AppContext);
@@ -205,16 +206,22 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
       try {
         if (db) {
           await attemptCleanup(() =>
-            db.deleteFrom('check_in_lists').where('name', '=', forbiddenCheckInListName).execute(),
+            db
+              .deleteFrom('check_in_lists')
+              .where('name', 'in', [authorizedCheckInListName, forbiddenCheckInListName])
+              .execute(),
           );
           await attemptCleanup(() =>
             db
               .deleteFrom('product_categories')
-              .where('name', '=', forbiddenProductCategoryName)
+              .where('name', 'in', [authorizedProductCategoryName, forbiddenProductCategoryName])
               .execute(),
           );
           await attemptCleanup(() =>
-            db.deleteFrom('questions').where('label', '=', forbiddenQuestionLabel).execute(),
+            db
+              .deleteFrom('questions')
+              .where('label', 'in', [authorizedQuestionLabel, forbiddenQuestionLabel])
+              .execute(),
           );
           for (const id of createdEventIds) {
             await attemptCleanup(() => db.deleteFrom('events').where('id', '=', id).execute());
@@ -273,19 +280,84 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
   }
 
   describe('read denial', () => {
-    for (const route of eventReadRoutes) {
-      it(`${route} hides cross-tenant and out-of-scope events`, async () => {
+    it('returns every covered event read to its matching authorized principal', async () => {
+      principal = basePrincipal;
+      for (const contract of eventReadContracts) {
+        const response = await app.inject({
+          method: contract.method,
+          url: contract.path.replace('{eventId}', eventA),
+        });
+        expect(response.statusCode, `${contract.path}: ${response.body}`).toBe(
+          contract.authorizedControl.status,
+        );
+      }
+    });
+
+    for (const contract of eventReadContracts) {
+      it(`${contract.path} hides cross-tenant and out-of-scope events`, async () => {
         for (const scenario of scenarios()) {
           principal = scenario.principal;
           const response = await app.inject({
-            method: 'GET',
-            url: route.replace(':eventId', scenario.targetEventId),
+            method: contract.method,
+            url: contract.path.replace('{eventId}', scenario.targetEventId),
           });
-          expect(response.statusCode, `${scenario.name}: ${response.body}`).toBe(404);
-          expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+          expect(response.statusCode, `${scenario.name}: ${response.body}`).toBe(
+            contract.denialResponse.status,
+          );
+          expect(response.json()).toMatchObject({
+            error: { code: contract.denialResponse.code },
+          });
         }
       });
     }
+  });
+
+  it('allows matching principals to create covered resources with persistent evidence', async () => {
+    principal = basePrincipal;
+    const payloads: Readonly<Record<string, object>> = {
+      postEventsByEventIdCheckInLists: { name: authorizedCheckInListName },
+      postEventsByEventIdProductCategories: {
+        name: authorizedProductCategoryName,
+        sortOrder: 0,
+      },
+      postEventsByEventIdQuestions: {
+        label: authorizedQuestionLabel,
+        required: false,
+        sortOrder: 0,
+        type: 'text',
+      },
+    };
+
+    for (const contract of eventMutationContracts) {
+      const response = await app.inject({
+        method: contract.method,
+        url: contract.path.replace('{eventId}', eventA),
+        payload: payloads[contract.operationId],
+      });
+      expect(response.statusCode, `${contract.path}: ${response.body}`).toBe(
+        contract.authorizedControl.status,
+      );
+      expect(contract.sideEffectAssertions).toContain('persistence');
+    }
+
+    const evidence = await Promise.all([
+      db
+        .selectFrom('check_in_lists')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('name', '=', authorizedCheckInListName)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('product_categories')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('name', '=', authorizedProductCategoryName)
+        .executeTakeFirstOrThrow(),
+      db
+        .selectFrom('questions')
+        .select(({ fn }) => fn.countAll<number>().as('count'))
+        .where('label', '=', authorizedQuestionLabel)
+        .executeTakeFirstOrThrow(),
+    ]);
+    expect(evidence.map((result) => Number(result.count))).toEqual([1, 1, 1]);
   });
 
   it('denies cross-tenant and out-of-event-scope mutations without persistence', async () => {
@@ -321,32 +393,37 @@ describeWithIntegrationDatabase('event route authorization matrix', () => {
 
     for (const scenario of scenarios()) {
       principal = scenario.principal;
-      const attempts = await Promise.all([
-        app.inject({
-          method: 'POST',
-          url: `/events/${scenario.targetEventId}/check-in-lists`,
-          payload: { name: forbiddenCheckInListName },
-        }),
-        app.inject({
-          method: 'POST',
-          url: `/events/${scenario.targetEventId}/product-categories`,
-          payload: { name: forbiddenProductCategoryName, sortOrder: 0 },
-        }),
-        app.inject({
-          method: 'POST',
-          url: `/events/${scenario.targetEventId}/questions`,
-          payload: {
-            label: forbiddenQuestionLabel,
-            required: false,
-            sortOrder: 0,
-            type: 'text',
-          },
-        }),
-      ]);
+      const payloads: Readonly<Record<string, object>> = {
+        postEventsByEventIdCheckInLists: { name: forbiddenCheckInListName },
+        postEventsByEventIdProductCategories: {
+          name: forbiddenProductCategoryName,
+          sortOrder: 0,
+        },
+        postEventsByEventIdQuestions: {
+          label: forbiddenQuestionLabel,
+          required: false,
+          sortOrder: 0,
+          type: 'text',
+        },
+      };
+      const attempts = await Promise.all(
+        eventMutationContracts.map((contract) =>
+          app.inject({
+            method: contract.method,
+            url: contract.path.replace('{eventId}', scenario.targetEventId),
+            payload: payloads[contract.operationId],
+          }),
+        ),
+      );
       expect(
         attempts.map((response) => response.statusCode),
         scenario.name,
-      ).toEqual([404, 404, 404]);
+      ).toEqual(eventMutationContracts.map((contract) => contract.denialResponse.status));
+      for (const [index, response] of attempts.entries()) {
+        expect(response.json()).toMatchObject({
+          error: { code: eventMutationContracts[index]!.denialResponse.code },
+        });
+      }
     }
 
     const after = {

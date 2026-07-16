@@ -1,6 +1,12 @@
 import { ALL_PERMISSIONS, type Permission } from '@tixkit/domain';
 import { openApiSpec } from '@tixkit/openapi';
 import { buildRouteManifest, type RouteAccess } from './route-manifest.js';
+import {
+  ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  type AuthorizationBoundary,
+  type AuthorizationSideEffectKind,
+  type RouteAuthorizationDenialContract,
+} from './route-authorization-contracts.js';
 
 type OpenApiOperation = {
   operationId?: string;
@@ -17,6 +23,7 @@ export type RouteAccessInventoryEntry = {
   documentedPermissions: Permission[];
   guardEvidence: string[];
   method: string;
+  negativeAuthorizationEvidence: NegativeAuthorizationEvidence[];
   operationId: string | null;
   path: string;
   permissions: Permission[];
@@ -24,8 +31,17 @@ export type RouteAccessInventoryEntry = {
 };
 
 export type RouteAccessInventory = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   routes: RouteAccessInventoryEntry[];
+};
+
+export type NegativeAuthorizationEvidence = {
+  authorizedControlStatus: 200 | 201 | 202;
+  boundary: AuthorizationBoundary;
+  deniedCode: 'NOT_FOUND';
+  deniedStatus: 404;
+  sideEffectAssertions: AuthorizationSideEffectKind[];
+  source: string;
 };
 
 const knownPermissions = new Set<string>(ALL_PERMISSIONS);
@@ -128,6 +144,94 @@ function boundariesFor(
   return sortedUnique(boundaries);
 }
 
+function pathParameters(path: string): string[] {
+  return [...path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]!);
+}
+
+function contractError(contract: RouteAuthorizationDenialContract, message: string): Error {
+  return new Error(
+    `Invalid negative authorization contract ${contract.method} ${contract.path}: ${message}`,
+  );
+}
+
+export function negativeAuthorizationEvidenceForRoutes(
+  routes: readonly Pick<
+    RouteAccessInventoryEntry,
+    'access' | 'boundaries' | 'method' | 'operationId' | 'path'
+  >[],
+  contracts: readonly RouteAuthorizationDenialContract[] = ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+): Map<string, NegativeAuthorizationEvidence[]> {
+  const routesByKey = new Map(routes.map((route) => [`${route.method} ${route.path}`, route]));
+  const evidenceByRoute = new Map<string, NegativeAuthorizationEvidence[]>();
+  const routeBoundaryPairs = new Set<string>();
+
+  for (const contract of contracts) {
+    const routeKey = `${contract.method} ${contract.path}`;
+    const route = routesByKey.get(routeKey);
+    if (!route) throw contractError(contract, 'runtime route is missing');
+    if (route.access !== 'authenticated') {
+      throw contractError(contract, `runtime route is ${route.access}, not authenticated`);
+    }
+    if (route.operationId !== contract.operationId) {
+      throw contractError(
+        contract,
+        `operationId is ${route.operationId ?? 'missing'}, expected ${contract.operationId}`,
+      );
+    }
+    const actualParameters = pathParameters(contract.path).sort();
+    const declaredParameters = [...contract.resourceParameters].sort();
+    if (JSON.stringify(actualParameters) !== JSON.stringify(declaredParameters)) {
+      throw contractError(
+        contract,
+        `resourceParameters ${JSON.stringify(declaredParameters)} do not match path parameters ${JSON.stringify(actualParameters)}`,
+      );
+    }
+    for (const parameter of declaredParameters) {
+      if (!route.boundaries.includes(`resource-parameter:${parameter}`)) {
+        throw contractError(contract, `inventory omits resource parameter ${parameter}`);
+      }
+    }
+    if (contract.denialResponse.status !== 404 || contract.denialResponse.code !== 'NOT_FOUND') {
+      throw contractError(contract, 'denial must be indistinguishable 404 NOT_FOUND');
+    }
+    if (contract.authorizedControl.required !== true) {
+      throw contractError(contract, 'authorized control is not required');
+    }
+    if (
+      contract.method !== 'GET' &&
+      (contract.sideEffectAssertions.length === 0 ||
+        contract.sideEffectAssertions.some((kind) => kind !== 'persistence' && kind !== 'workflow'))
+    ) {
+      throw contractError(contract, 'mutation omits persistence or workflow side-effect proof');
+    }
+
+    const evidence = evidenceByRoute.get(routeKey) ?? [];
+    for (const boundary of contract.deniedBoundaries) {
+      const pair = `${routeKey} ${boundary}`;
+      if (routeBoundaryPairs.has(pair)) {
+        throw contractError(contract, `duplicate route/boundary pair ${boundary}`);
+      }
+      if (!route.boundaries.includes(boundary)) {
+        throw contractError(contract, `inventory omits denied boundary ${boundary}`);
+      }
+      routeBoundaryPairs.add(pair);
+      evidence.push({
+        authorizedControlStatus: contract.authorizedControl.status,
+        boundary,
+        deniedCode: contract.denialResponse.code,
+        deniedStatus: contract.denialResponse.status,
+        sideEffectAssertions: [...contract.sideEffectAssertions],
+        source: contract.path.startsWith('/events/')
+          ? 'event-route-authorization-db.integration.test.ts'
+          : 'order-route-authorization-db.integration.test.ts',
+      });
+    }
+    evidenceByRoute.set(routeKey, evidence);
+  }
+
+  return evidenceByRoute;
+}
+
 export async function buildRouteAccessInventory(): Promise<RouteAccessInventory> {
   const manifest = await buildRouteManifest();
   const routes: RouteAccessInventoryEntry[] = [];
@@ -163,6 +267,7 @@ export async function buildRouteAccessInventory(): Promise<RouteAccessInventory>
       documentedPermissions,
       guardEvidence,
       method: route.method,
+      negativeAuthorizationEvidence: [],
       operationId,
       path,
       permissions,
@@ -173,5 +278,10 @@ export async function buildRouteAccessInventory(): Promise<RouteAccessInventory>
   routes.sort(
     (left, right) => left.path.localeCompare(right.path) || left.method.localeCompare(right.method),
   );
-  return { schemaVersion: 1, routes };
+  const evidenceByRoute = negativeAuthorizationEvidenceForRoutes(routes);
+  for (const route of routes) {
+    route.negativeAuthorizationEvidence =
+      evidenceByRoute.get(`${route.method} ${route.path}`) ?? [];
+  }
+  return { schemaVersion: 2, routes };
 }
