@@ -759,3 +759,5 @@ function requireCredential(value: string, dependency: string, operation: string)
     { providerCode: 'configuration_missing' },
   );
 }
+
+export * from './stripe.js';

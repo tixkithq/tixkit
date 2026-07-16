@@ -586,6 +586,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@opentelemetry/api": "1.9.1",
+        "stripe": "^22.2.0",
       },
       "devDependencies": {
         "typescript": "7.0.2",
