@@ -10,8 +10,11 @@ import { ulid } from 'ulid';
 import { QrService } from '@tixkit/domain/tickets';
 import type { BoxOfficeTenderType, SalesChannel } from '@tixkit/domain';
 import { isConsentAccepted, isConsentAnswerSnapshot } from '@tixkit/domain';
-import { withSpan } from '@tixkit/shared';
-import Stripe from 'stripe';
+import {
+  ProviderOperationError,
+  StripeSdkGateway,
+  type CreateStripeRefundInput,
+} from '@tixkit/provider-clients';
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
 import QRCode from 'qrcode';
 import type { WorkflowActivityResult } from '../shared/types.js';
@@ -252,14 +255,14 @@ function stripeOrphanRefundParams(input: {
   provider: string;
   providerIntentId: string;
   amount: number;
-}): Stripe.RefundCreateParams {
-  const params: Stripe.RefundCreateParams = {
-    payment_intent: input.providerIntentId,
+}): Omit<CreateStripeRefundInput, 'idempotencyKey' | 'reason'> {
+  const params: Omit<CreateStripeRefundInput, 'idempotencyKey' | 'reason'> = {
+    paymentIntentId: input.providerIntentId,
     amount: input.amount,
   };
   if (input.provider === 'stripe_connect') {
-    params.reverse_transfer = true;
-    params.refund_application_fee = true;
+    params.reverseTransfer = true;
+    params.refundApplicationFee = true;
   }
   return params;
 }
@@ -806,7 +809,7 @@ export async function createPaymentIntentActivity(input: {
       return okResult({ providerIntentId, clientSecret, provider });
     }
 
-    const stripe = new Stripe(stripeSecretKey);
+    const stripe = new StripeSdkGateway(stripeSecretKey);
 
     // Resolve the brand's connected payment account for Stripe Connect direct payouts.
     const brand = await db
@@ -839,48 +842,23 @@ export async function createPaymentIntentActivity(input: {
     // platform account and route funds to the connected account via
     // transfer_data. Do not also pass stripeAccount, which would create a
     // direct charge and conflict with transfer_data/application_fee_amount.
-    const createParams: Stripe.PaymentIntentCreateParams = {
+    const paymentIntent = await stripe.createPaymentIntent({
       amount: input.amountCents,
-      currency: input.currency.toLowerCase(),
+      currency: input.currency,
       description: input.description,
-      automatic_payment_methods: { enabled: true },
       metadata: {
         checkoutSessionId: input.checkoutSessionId,
         tenantId: input.tenantId,
         brandId: input.brandId,
       },
-    };
-
-    if (connectedAccountId) {
-      createParams.transfer_data = { destination: connectedAccountId };
-      if (input.feeCents && input.feeCents > 0) {
-        createParams.application_fee_amount = input.feeCents;
-      }
-    }
-
-    const paymentIntent = await withSpan(
-      'provider.stripe.payment_intent.create',
-      {
-        'tixkit.provider': 'stripe',
-        'tixkit.provider.operation': 'payment_intent.create',
-        'tixkit.tenant_id': input.tenantId,
-        'tixkit.brand_id': input.brandId,
-        'tixkit.checkout_session_id': input.checkoutSessionId,
-        'tixkit.payment_account_id': paymentAccountId ?? undefined,
-      },
-      async (span) => {
-        const created = await stripe.paymentIntents.create(createParams, {
-          idempotencyKey: input.checkoutSessionId,
-        });
-        span.setAttribute('tixkit.provider.intent_id', created.id);
-        span.setAttribute('tixkit.provider.intent_status', created.status);
-        return created;
-      },
-    );
+      connectedAccountId,
+      applicationFeeAmount: input.feeCents,
+      idempotencyKey: input.checkoutSessionId,
+    });
 
     const piRepo = new PaymentIntentRepository(db);
     const provider = connectedAccountId ? 'stripe_connect' : 'stripe';
-    const clientSecret = paymentIntent.client_secret ?? undefined;
+    const clientSecret = paymentIntent.clientSecret;
     let createdPaymentIntent = await findReusablePaymentIntent({
       db,
       checkoutSessionId: input.checkoutSessionId,
@@ -959,6 +937,10 @@ export async function createPaymentIntentActivity(input: {
       provider,
     });
   } catch (err) {
+    if (err instanceof ProviderOperationError) {
+      if (err.retryable) throw err.forRetry();
+      return errResult('PAYMENT_INTENT_PROVIDER_REJECTED', err.message, false);
+    }
     return errResult(
       'PAYMENT_INTENT_FAILED',
       err instanceof Error ? err.message : 'Unknown error',
@@ -1167,22 +1149,8 @@ export async function compensateOrphanPaymentActivity(input: {
       });
     }
 
-    const stripe = new Stripe(stripeSecretKey);
-    const stripePaymentIntent = await withSpan(
-      'provider.stripe.payment_intent.retrieve',
-      {
-        'tixkit.provider': 'stripe',
-        'tixkit.provider.operation': 'payment_intent.retrieve',
-        'tixkit.tenant_id': tenantId,
-        'tixkit.checkout_session_id': input.checkoutSessionId,
-      },
-      async (span) => {
-        const retrieved = await stripe.paymentIntents.retrieve(providerIntentId);
-        span.setAttribute('tixkit.provider.intent_id', retrieved.id);
-        span.setAttribute('tixkit.provider.intent_status', retrieved.status);
-        return retrieved;
-      },
-    );
+    const stripe = new StripeSdkGateway(stripeSecretKey);
+    const stripePaymentIntent = await stripe.retrievePaymentIntent(providerIntentId);
 
     if (paymentIntent) {
       await piRepo.update(paymentIntent.id, {
@@ -1195,36 +1163,21 @@ export async function compensateOrphanPaymentActivity(input: {
       const refundAmount =
         amountCents > 0
           ? amountCents
-          : stripePaymentIntent.amount_received || stripePaymentIntent.amount;
+          : stripePaymentIntent.amountReceived || stripePaymentIntent.amount;
       const idempotencyKey = stripeCompensationIdempotencyKey({
         action: 'refund',
         provider,
         providerIntentId,
         checkoutSessionId: input.checkoutSessionId,
       });
-      const refund = await withSpan(
-        'provider.stripe.refund.create',
-        {
-          'tixkit.provider': 'stripe',
-          'tixkit.provider.operation': 'refund.create',
-          'tixkit.tenant_id': tenantId,
-          'tixkit.checkout_session_id': input.checkoutSessionId,
-          'tixkit.payment_intent_id': paymentIntent?.id ?? providerIntentId,
-        },
-        async (span) => {
-          const created = await stripe.refunds.create(
-            stripeOrphanRefundParams({
-              provider,
-              providerIntentId,
-              amount: refundAmount,
-            }),
-            { idempotencyKey },
-          );
-          span.setAttribute('tixkit.provider.refund_id', created.id);
-          span.setAttribute('tixkit.provider.refund_status', created.status ?? 'unknown');
-          return created;
-        },
-      );
+      const refund = await stripe.createRefund({
+        ...stripeOrphanRefundParams({
+          provider,
+          providerIntentId,
+          amount: refundAmount,
+        }),
+        idempotencyKey,
+      });
       const updated = await completePaymentCompensation({
         repo: compensationRepo,
         compensation,
@@ -1280,26 +1233,7 @@ export async function compensateOrphanPaymentActivity(input: {
         providerIntentId,
         checkoutSessionId: input.checkoutSessionId,
       });
-      const cancelled = await withSpan(
-        'provider.stripe.payment_intent.cancel',
-        {
-          'tixkit.provider': 'stripe',
-          'tixkit.provider.operation': 'payment_intent.cancel',
-          'tixkit.tenant_id': tenantId,
-          'tixkit.checkout_session_id': input.checkoutSessionId,
-          'tixkit.payment_intent_id': paymentIntent?.id ?? providerIntentId,
-        },
-        async (span) => {
-          const cancelledIntent = await stripe.paymentIntents.cancel(
-            providerIntentId,
-            {},
-            { idempotencyKey },
-          );
-          span.setAttribute('tixkit.provider.intent_id', cancelledIntent.id);
-          span.setAttribute('tixkit.provider.intent_status', cancelledIntent.status);
-          return cancelledIntent;
-        },
-      );
+      const cancelled = await stripe.cancelPaymentIntent(providerIntentId, idempotencyKey);
       const updated = await completePaymentCompensation({
         repo: compensationRepo,
         compensation,
@@ -1355,6 +1289,10 @@ export async function compensateOrphanPaymentActivity(input: {
       } catch {
         // Preserve the provider error as the activity failure; a retry can repair the compensation row.
       }
+    }
+    if (err instanceof ProviderOperationError) {
+      if (err.retryable) throw err.forRetry();
+      return errResult('PAYMENT_COMPENSATION_PROVIDER_REJECTED', err.message, false);
     }
     return errResult('PAYMENT_COMPENSATION_FAILED', message, true);
   }

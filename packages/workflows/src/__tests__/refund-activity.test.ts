@@ -335,7 +335,6 @@ vi.mock('@tixkit/db', () => {
   };
 });
 
-// Mock stripe with a class-based mock that supports `new Stripe()`.
 const stripeMock = vi.hoisted(() => ({
   refundsCreate: vi.fn(async (opts: Record<string, unknown>, opts2: Record<string, unknown>) => {
     dbState.stripeRefunds.push({ opts, opts2 });
@@ -343,14 +342,23 @@ const stripeMock = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock('stripe', () => {
-  class MockStripe {
-    refunds = { create: stripeMock.refundsCreate };
-    paymentIntents = { create: vi.fn() };
-    accounts = { create: vi.fn() };
-    accountLinks = { create: vi.fn() };
+vi.mock('@tixkit/provider-clients', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tixkit/provider-clients')>();
+  class MockStripeSdkGateway {
+    async createRefund(input: Record<string, any>) {
+      return stripeMock.refundsCreate(
+        {
+          payment_intent: input.paymentIntentId,
+          amount: input.amount,
+          reason: input.reason,
+          reverse_transfer: input.reverseTransfer,
+          refund_application_fee: input.refundApplicationFee,
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
+    }
   }
-  return { default: MockStripe, Stripe: MockStripe };
+  return { ...actual, StripeSdkGateway: MockStripeSdkGateway };
 });
 
 const {
@@ -360,6 +368,7 @@ const {
   voidTicketsActivity,
   notifyRefundActivity,
 } = await import('../activities/refund.js');
+const { ProviderOperationError } = await import('@tixkit/provider-clients');
 
 function expectedLedgerAllocation(input: {
   total: number;
@@ -755,6 +764,67 @@ describe('processRefundActivity - idempotency / dedup', () => {
     expect(dbState.createdRefunds[0]?.status).toBe('pending');
     expect(dbState.order.refunded_cents).toBe(0);
     expect(dbState.order.status).toBe('paid');
+  });
+
+  it('throws sanitized ambiguous provider failures for Temporal activity retry', async () => {
+    stripeMock.refundsCreate.mockRejectedValueOnce(
+      new ProviderOperationError(
+        'stripe.refund.create failed: transport',
+        'stripe',
+        'refund.create',
+        'transport',
+        true,
+        'unknown',
+        false,
+        { bodyPreview: 'buyer@example.com sk_live_secret' },
+      ),
+    );
+
+    const result = processRefundActivity({
+      orderId: 'ord_1',
+      amountCents: 5000,
+      reason: 'test',
+      nonce: 'refund_retryable',
+    });
+
+    await expect(result).rejects.toMatchObject({
+      kind: 'transport',
+      retryable: true,
+      deliveryState: 'unknown',
+      details: {},
+    });
+    await expect(result).rejects.not.toHaveProperty('cause');
+    expect(dbState.createdRefunds[0]?.status).toBe('pending');
+    expect(dbState.order.refunded_cents).toBe(0);
+  });
+
+  it('returns permanent provider rejections without retrying', async () => {
+    stripeMock.refundsCreate.mockRejectedValueOnce(
+      new ProviderOperationError(
+        'stripe.refund.create failed: validation (HTTP 400)',
+        'stripe',
+        'refund.create',
+        'validation',
+        false,
+        'rejected',
+        false,
+        { status: 400, providerCode: 'invalid_request' },
+      ),
+    );
+
+    await expect(
+      processRefundActivity({
+        orderId: 'ord_1',
+        amountCents: 5000,
+        reason: 'test',
+        nonce: 'refund_rejected',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'REFUND_PROVIDER_REJECTED',
+      retryable: false,
+    });
+    expect(dbState.createdRefunds[0]?.status).toBe('pending');
   });
 
   it('fails closed when a Stripe refund has no provider payment reference', async () => {

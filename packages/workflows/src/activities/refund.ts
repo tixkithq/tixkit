@@ -6,8 +6,7 @@ import {
   RefundRepository,
   ContentRepository,
 } from '@tixkit/db';
-import { withSpan } from '@tixkit/shared';
-import Stripe from 'stripe';
+import { ProviderOperationError, StripeSdkGateway } from '@tixkit/provider-clients';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
 import { buildTransactionalMergeTagContext } from './messaging-context.js';
@@ -336,35 +335,15 @@ export async function processRefundActivity(input: {
     }
 
     if (requiresStripeRefund && stripeSecretKey && reservation.paymentIntent.providerIntentId) {
-      const stripe = new Stripe(stripeSecretKey);
-      const refundOpts: Stripe.RefundCreateParams = {
-        payment_intent: reservation.paymentIntent.providerIntentId,
+      const stripe = new StripeSdkGateway(stripeSecretKey);
+      const stripeRefund = await stripe.createRefund({
+        paymentIntentId: reservation.paymentIntent.providerIntentId,
         amount: input.amountCents,
         reason: 'requested_by_customer',
-      };
-      if (reservation.paymentAccountProvider === 'stripe_connect') {
-        refundOpts.reverse_transfer = true;
-        refundOpts.refund_application_fee = true;
-      }
-
-      const stripeRefund = await withSpan(
-        'provider.stripe.refund.create',
-        {
-          'tixkit.provider': 'stripe',
-          'tixkit.provider.operation': 'refund.create',
-          'tixkit.tenant_id': reservation.order.tenantId,
-          'tixkit.order_id': input.orderId,
-          'tixkit.payment_intent_id': reservation.paymentIntent.id,
-        },
-        async (span) => {
-          const created = await stripe.refunds.create(refundOpts, {
-            idempotencyKey: stripeIdempotencyKey,
-          });
-          span.setAttribute('tixkit.provider.refund_id', created.id);
-          span.setAttribute('tixkit.provider.refund_status', created.status ?? 'unknown');
-          return created;
-        },
-      );
+        reverseTransfer: reservation.paymentAccountProvider === 'stripe_connect',
+        refundApplicationFee: reservation.paymentAccountProvider === 'stripe_connect',
+        idempotencyKey: stripeIdempotencyKey,
+      });
       providerRefundId = stripeRefund.id;
     } else if (isSandboxCapture) {
       providerRefundId = `local-refund:${input.orderId}:${input.nonce}`;
@@ -518,6 +497,10 @@ export async function processRefundActivity(input: {
       return okResult({ providerRefundId, status: 'succeeded' });
     });
   } catch (err) {
+    if (err instanceof ProviderOperationError) {
+      if (err.retryable) throw err.forRetry();
+      return errResult('REFUND_PROVIDER_REJECTED', err.message, false);
+    }
     return errResult('REFUND_FAILED', err instanceof Error ? err.message : 'Unknown error', true);
   }
 }

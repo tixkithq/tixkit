@@ -13,37 +13,99 @@ const dbState = {
 };
 
 const stripeMock = {
-  paymentIntentsCreate: vi.fn(async () => ({
-    id: 'pi_provider_1',
-    status: 'requires_payment_method',
-    client_secret: 'pi_provider_1_secret',
-  })),
-  paymentIntentsRetrieve: vi.fn(async () => ({
+  paymentIntentsCreate: vi.fn(
+    async (_params: Record<string, unknown>, _options: Record<string, unknown>) => ({
+      id: 'pi_provider_1',
+      status: 'requires_payment_method',
+      client_secret: 'pi_provider_1_secret',
+      amount: 2500,
+      amount_received: 0,
+    }),
+  ),
+  paymentIntentsRetrieve: vi.fn(async (_id: string) => ({
     id: 'pi_provider_1',
     status: 'requires_payment_method',
     amount: 2500,
     amount_received: 0,
   })),
-  paymentIntentsCancel: vi.fn(async () => ({
-    id: 'pi_provider_1',
-    status: 'canceled',
-  })),
-  refundsCreate: vi.fn(async () => ({
-    id: 're_1',
-    status: 'succeeded',
-  })),
+  paymentIntentsCancel: vi.fn(
+    async (_id: string, _params: Record<string, never>, _options: Record<string, unknown>) => ({
+      id: 'pi_provider_1',
+      status: 'canceled',
+      amount: 2500,
+      amount_received: 0,
+    }),
+  ),
+  refundsCreate: vi.fn(
+    async (_params: Record<string, unknown>, _options: Record<string, unknown>) => ({
+      id: 're_1',
+      status: 'succeeded',
+    }),
+  ),
 };
 
-vi.mock('stripe', () => {
-  class MockStripe {
-    paymentIntents = {
-      create: stripeMock.paymentIntentsCreate,
-      retrieve: stripeMock.paymentIntentsRetrieve,
-      cancel: stripeMock.paymentIntentsCancel,
-    };
-    refunds = { create: stripeMock.refundsCreate };
+vi.mock('@tixkit/provider-clients', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tixkit/provider-clients')>();
+  class MockStripeSdkGateway {
+    async createPaymentIntent(input: Record<string, any>) {
+      const created = await stripeMock.paymentIntentsCreate(
+        {
+          amount: input.amount,
+          currency: String(input.currency).toLowerCase(),
+          description: input.description,
+          automatic_payment_methods: { enabled: true },
+          metadata: input.metadata,
+          ...(input.connectedAccountId
+            ? { transfer_data: { destination: input.connectedAccountId } }
+            : {}),
+          ...(input.connectedAccountId && input.applicationFeeAmount > 0
+            ? { application_fee_amount: input.applicationFeeAmount }
+            : {}),
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
+      return {
+        id: created.id,
+        status: created.status,
+        clientSecret: created.client_secret,
+        amount: created.amount,
+        amountReceived: created.amount_received,
+      };
+    }
+
+    async retrievePaymentIntent(id: string) {
+      const intent = await stripeMock.paymentIntentsRetrieve(id);
+      return {
+        id: intent.id,
+        status: intent.status,
+        amount: intent.amount,
+        amountReceived: intent.amount_received,
+      };
+    }
+
+    async cancelPaymentIntent(id: string, idempotencyKey: string) {
+      const intent = await stripeMock.paymentIntentsCancel(id, {}, { idempotencyKey });
+      return {
+        id: intent.id,
+        status: intent.status,
+        amount: intent.amount,
+        amountReceived: intent.amount_received,
+      };
+    }
+
+    async createRefund(input: Record<string, any>) {
+      return stripeMock.refundsCreate(
+        {
+          payment_intent: input.paymentIntentId,
+          amount: input.amount,
+          ...(input.reverseTransfer ? { reverse_transfer: true } : {}),
+          ...(input.refundApplicationFee ? { refund_application_fee: true } : {}),
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
+    }
   }
-  return { default: MockStripe, Stripe: MockStripe };
+  return { ...actual, StripeSdkGateway: MockStripeSdkGateway };
 });
 
 type RowPredicate = (row: Record<string, any>) => boolean;
@@ -337,6 +399,7 @@ vi.mock('@tixkit/db', () => {
 });
 
 const checkoutActivities = await import('../activities/checkout.js');
+const { ProviderOperationError } = await import('@tixkit/provider-clients');
 const { finalizeOrderActivity, releaseHoldActivity } = checkoutActivities;
 
 describe('createPaymentIntentActivity capture mode', () => {
@@ -413,6 +476,69 @@ describe('createPaymentIntentActivity capture mode', () => {
     });
     expect(result).toMatchObject({ ok: true, value: { provider: 'stripe_capture' } });
     expect(stripeMock.paymentIntentsCreate).not.toHaveBeenCalled();
+  });
+
+  it('throws a sanitized retryable provider failure for Temporal to retry', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    stripeMock.paymentIntentsCreate.mockRejectedValueOnce(
+      new ProviderOperationError(
+        'stripe.payment-intent.create failed: server (HTTP 503)',
+        'stripe',
+        'payment-intent.create',
+        'server',
+        true,
+        'unknown',
+        false,
+        { status: 503, providerRequestId: 'req_secret_1' },
+      ),
+    );
+
+    const result = checkoutActivities.createPaymentIntentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      brandId: 'brd_1',
+      amountCents: 2500,
+      currency: 'USD',
+    });
+
+    await expect(result).rejects.toMatchObject({
+      kind: 'server',
+      retryable: true,
+      deliveryState: 'unknown',
+      details: {},
+    });
+    await expect(result).rejects.not.toHaveProperty('cause');
+  });
+
+  it('returns permanent payment provider rejection without requesting a retry', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    stripeMock.paymentIntentsCreate.mockRejectedValueOnce(
+      new ProviderOperationError(
+        'stripe.payment-intent.create failed: validation (HTTP 400)',
+        'stripe',
+        'payment-intent.create',
+        'validation',
+        false,
+        'rejected',
+        false,
+        { status: 400, providerCode: 'invalid_request' },
+      ),
+    );
+
+    await expect(
+      checkoutActivities.createPaymentIntentActivity({
+        checkoutSessionId: 'cs_1',
+        tenantId: 'tnt_1',
+        brandId: 'brd_1',
+        amountCents: 2500,
+        currency: 'USD',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'PAYMENT_INTENT_PROVIDER_REJECTED',
+      retryable: false,
+    });
+    expect(dbState.tables.checkout_sessions.cs_1.payment_intent_id).toBeUndefined();
   });
 
   it('reuses an existing local payment intent row after a partial commit replay', async () => {

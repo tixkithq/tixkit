@@ -30,17 +30,42 @@ vi.mock('@tixkit/shared', () => ({
   ) => fn({ setAttribute: () => undefined }),
 }));
 
-vi.mock('stripe', () => {
-  class MockStripe {
-    paymentIntents = {
-      retrieve: mockState.stripeRetrieve,
-      cancel: mockState.stripeCancel,
-    };
-    refunds = {
-      create: mockState.stripeRefundCreate,
-    };
+vi.mock('@tixkit/provider-clients', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tixkit/provider-clients')>();
+  class MockStripeSdkGateway {
+    async retrievePaymentIntent(id: string) {
+      const intent = await mockState.stripeRetrieve(id);
+      return {
+        id: intent.id,
+        status: intent.status,
+        amount: intent.amount,
+        amountReceived: intent.amount_received,
+      };
+    }
+
+    async cancelPaymentIntent(id: string, idempotencyKey: string) {
+      const intent = await mockState.stripeCancel(id, {}, { idempotencyKey });
+      return {
+        id: intent.id,
+        status: intent.status,
+        amount: intent.amount ?? 0,
+        amountReceived: intent.amount_received ?? 0,
+      };
+    }
+
+    async createRefund(input: Record<string, any>) {
+      return mockState.stripeRefundCreate(
+        {
+          payment_intent: input.paymentIntentId,
+          amount: input.amount,
+          ...(input.reverseTransfer ? { reverse_transfer: true } : {}),
+          ...(input.refundApplicationFee ? { refund_application_fee: true } : {}),
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
+    }
   }
-  return { default: MockStripe, Stripe: MockStripe };
+  return { ...actual, StripeSdkGateway: MockStripeSdkGateway };
 });
 
 function updateQuery(table: string) {
@@ -183,6 +208,7 @@ vi.mock('@tixkit/db', () => {
 });
 
 const { compensateOrphanPaymentActivity } = await import('../activities/checkout.js');
+const { ProviderOperationError } = await import('@tixkit/provider-clients');
 
 describe('compensateOrphanPaymentActivity', () => {
   const originalStripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -391,6 +417,102 @@ describe('compensateOrphanPaymentActivity', () => {
       { payment_intent: 'pi_provider_1', amount: 2500 },
       { idempotencyKey: 'orphan-payment:refund:stripe:pi_provider_1:cs_1' },
     );
+  });
+
+  it('persists failure state and throws sanitized retryable compensation failures', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    mockState.paymentIntent = {
+      ...mockState.paymentIntent,
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+    };
+    mockState.stripeRetrieve.mockRejectedValue(
+      new ProviderOperationError(
+        'stripe.payment-intent.retrieve failed: server (HTTP 503)',
+        'stripe',
+        'payment-intent.retrieve',
+        'server',
+        true,
+        'not-sent',
+        false,
+        { status: 503, providerRequestId: 'req_private_1' },
+      ),
+    );
+
+    const result = compensateOrphanPaymentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_provider_1',
+      amountCents: 2500,
+      currency: 'USD',
+      reason: 'test retry',
+    });
+
+    await expect(result).rejects.toMatchObject({
+      kind: 'server',
+      retryable: true,
+      deliveryState: 'not-sent',
+      details: {},
+    });
+    expect(mockState.updatedCompensations).toEqual([
+      expect.objectContaining({ status: 'failed', action: 'refund' }),
+    ]);
+  });
+
+  it('keeps resources reserved after an ambiguous orphan refund failure', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_1';
+    mockState.paymentIntent = {
+      ...mockState.paymentIntent,
+      provider: 'stripe',
+      provider_intent_id: 'pi_provider_1',
+    };
+    mockState.stripeRetrieve.mockResolvedValue({
+      id: 'pi_provider_1',
+      status: 'succeeded',
+      amount: 2500,
+      amount_received: 2500,
+    });
+    mockState.stripeRefundCreate.mockRejectedValue(
+      new ProviderOperationError(
+        'stripe.refund.create failed: transport',
+        'stripe',
+        'refund.create',
+        'transport',
+        true,
+        'unknown',
+        false,
+        { providerRequestId: 'req_private_1', bodyPreview: 'buyer@example.com' },
+      ),
+    );
+
+    const result = compensateOrphanPaymentActivity({
+      checkoutSessionId: 'cs_1',
+      tenantId: 'tnt_1',
+      provider: 'stripe',
+      providerIntentId: 'pi_provider_1',
+      amountCents: 2500,
+      currency: 'USD',
+      reason: 'test ambiguous refund',
+    });
+
+    await expect(result).rejects.toMatchObject({
+      kind: 'transport',
+      retryable: true,
+      deliveryState: 'unknown',
+      details: {},
+    });
+    await expect(result).rejects.not.toHaveProperty('cause');
+    expect(mockState.stripeRefundCreate).toHaveBeenCalledWith(
+      { payment_intent: 'pi_provider_1', amount: 2500 },
+      { idempotencyKey: 'orphan-payment:refund:stripe:pi_provider_1:cs_1' },
+    );
+    expect(mockState.updatedCompensations).toEqual([
+      expect.objectContaining({ status: 'failed', action: 'refund' }),
+    ]);
+    expect(mockState.checkoutHoldUpdates).toHaveLength(0);
+    expect(mockState.checkoutSessionUpdates).toHaveLength(0);
+    expect(mockState.ticketListingUpdates).toHaveLength(0);
   });
 
   it('releases resale listing reservations after a captured Stripe refund succeeds', async () => {
