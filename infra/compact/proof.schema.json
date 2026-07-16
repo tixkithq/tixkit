@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://tixkit.com/schemas/compact-clean-host-proof-v1.json",
+  "$id": "https://tixkit.com/schemas/compact-clean-host-proof-v2.json",
   "title": "Tixkit Compact clean-host proof",
   "type": "object",
   "additionalProperties": false,
@@ -20,6 +20,7 @@
     "negativeRestoreProof",
     "backup",
     "upgradeBackup",
+    "malwareScannerProof",
     "workerDependencyFailureObserved",
     "seedPersistenceChecks",
     "commands",
@@ -28,8 +29,8 @@
     "limitations"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "schema": { "const": "https://tixkit.com/schemas/compact-clean-host-proof-v1.json" },
+    "schemaVersion": { "const": 2 },
+    "schema": { "const": "https://tixkit.com/schemas/compact-clean-host-proof-v2.json" },
     "kind": { "const": "tixkit-compact-clean-host-proof" },
     "result": { "const": "passed" },
     "startedFromFreshEnvironment": { "const": true },
@@ -67,6 +68,32 @@
     },
     "backup": { "$ref": "#/$defs/backupEvidence" },
     "upgradeBackup": { "$ref": "#/$defs/backupEvidence" },
+    "malwareScannerProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanAccepted",
+        "eicarRejected",
+        "maximumUploadAccepted",
+        "dependencyFailureObserved",
+        "recovered",
+        "classificationCommandIndex",
+        "maximumUploadCommandIndex",
+        "dependencyFailureCommandIndex",
+        "recoveryCommandIndex"
+      ],
+      "properties": {
+        "cleanAccepted": { "const": true },
+        "eicarRejected": { "const": true },
+        "maximumUploadAccepted": { "const": true },
+        "dependencyFailureObserved": { "const": true },
+        "recovered": { "const": true },
+        "classificationCommandIndex": { "type": "integer", "minimum": 0 },
+        "maximumUploadCommandIndex": { "type": "integer", "minimum": 0 },
+        "dependencyFailureCommandIndex": { "type": "integer", "minimum": 0 },
+        "recoveryCommandIndex": { "type": "integer", "minimum": 0 }
+      }
+    },
     "workerDependencyFailureObserved": { "const": true },
     "seedPersistenceChecks": { "const": 5 },
     "commands": {
@@ -125,7 +152,7 @@
       ],
       "properties": {
         "cpuCores": { "type": "integer", "minimum": 4 },
-        "memoryBytes": { "type": "integer", "minimum": 8589934592 },
+        "memoryBytes": { "type": "integer", "minimum": 12884901888 },
         "diskBytes": { "type": "integer", "minimum": 32212254720 },
         "architecture": { "enum": ["arm64", "x64"] },
         "platform": { "type": "string", "minLength": 1 },
@@ -149,7 +176,7 @@
       ],
       "properties": {
         "cpuCores": { "type": "integer", "minimum": 4 },
-        "memoryBytes": { "type": "integer", "minimum": 8589934592 },
+        "memoryBytes": { "type": "integer", "minimum": 12884901888 },
         "architecture": { "enum": ["arm64", "x64", "x86_64"] },
         "operatingSystem": { "type": "string", "minLength": 1 },
         "serverVersion": { "type": "string", "minLength": 1 },
@@ -166,7 +193,7 @@
       "required": ["cpuCores", "memoryBytes", "diskBytes"],
       "properties": {
         "cpuCores": { "const": 4 },
-        "memoryBytes": { "const": 8589934592 },
+        "memoryBytes": { "const": 12884901888 },
         "diskBytes": { "const": 32212254720 }
       }
     },
@@ -180,6 +207,7 @@
             "admin",
             "api",
             "checkout",
+            "clamav",
             "migrate",
             "minio",
             "postgres",
@@ -199,8 +227,8 @@
     },
     "serviceState": {
       "type": "array",
-      "minItems": 13,
-      "maxItems": 13,
+      "minItems": 14,
+      "maxItems": 14,
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/service" },
       "allOf": [
@@ -226,6 +254,15 @@
           "contains": {
             "type": "object",
             "properties": { "service": { "const": "checkout" } },
+            "required": ["service"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "service": { "const": "clamav" } },
             "required": ["service"]
           },
           "minContains": 1,

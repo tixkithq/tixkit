@@ -7,7 +7,7 @@ product_area: self-hosting
 content_type: how-to
 status: beta
 owner: platform-operations
-last_verified: 2026-07-13
+last_verified: 2026-07-16
 prerequisites:
   - Docker Desktop or Docker Engine with Compose v2
   - A clean checkout of the authoritative public repository
@@ -17,11 +17,11 @@ related:
   - /self-hosting/architecture
 ---
 
-Compact is the supported single-host profile for evaluation and smaller installations. It runs the API, worker, admin dashboard, checkout, migrations, seeded evaluation data, PostgreSQL, Redis, Temporal, Temporal UI, and S3-compatible object storage. It is not highly available and does not run MySQL alongside its default PostgreSQL database.
+Compact is the supported single-host profile for evaluation and smaller installations. It runs the API, worker, admin dashboard, checkout, migrations, seeded evaluation data, PostgreSQL, Redis, Temporal, Temporal UI, S3-compatible object storage, and an internal ClamAV malware scanner. It is not highly available and does not run MySQL alongside its default PostgreSQL database.
 
 ## Host envelope
 
-Use a 64-bit Linux host or Docker Desktop with at least 4 CPU cores, 8 GiB of memory, and 30 GiB of free disk. Building all application images is resource-intensive; 8 cores, 16 GiB of memory, and 60 GiB of free disk is the recommended starting envelope. Measure your own event, checkout, workflow, media, and retention load before production use. Move to the Production profile when you need multiple hosts, independent scaling, managed backing services, availability guarantees, or formal disaster-recovery objectives.
+Use a 64-bit Linux host or Docker Desktop with at least 4 CPU cores, 12 GiB of memory, and 30 GiB of free disk. ClamAV needs several GiB to load its signature engine and can briefly use more memory while reloading updated signatures. Building all application images is also resource-intensive; 8 cores, 16 GiB of memory, and 60 GiB of free disk is the recommended starting envelope. Measure your own event, checkout, workflow, media, and retention load before production use. Move to the Production profile when you need multiple hosts, independent scaling, managed backing services, availability guarantees, or formal disaster-recovery objectives.
 
 ## First start
 
@@ -33,6 +33,8 @@ bun run compact:up
 ```
 
 `compact:init` writes `infra/compact/.env` with mode `0600`, a deployment identity, project-scoped source-build image names, and unique persistent-service and Ed25519 portability signing keys. Only the API receives the bundle, payload and dry-run private keys plus cutover public trust needed by its current runtime routes; migration, seed, storage-init and worker containers do not receive those private keys. The generated cutover private key remains host-local for future source-side exchange tooling and is not injected into a container. Back up this file separately; it contains private keys and must not be committed or shared. External source-key registration and destination worker import trust are not configured by this bootstrap step. In the default source mode, `compact:up` builds the application images. It then applies idempotent migrations, creates the object bucket, seeds an evaluation organization and event, and waits for every service health condition.
+
+The pinned ClamAV image includes a signature database for first start and keeps subsequent FreshClam updates in the `clamav-data` volume. ClamAV is reachable only on the internal Compose network; only the API receives its host, port, scanner-mode and bounded 30-second scan-deadline configuration. The first health transition can take six minutes or longer while the engine loads. FreshClam requires outbound HTTPS and DNS for current signatures and may be delayed by upstream availability or rate limits. A healthy service proves that the loaded database can scan; it does not prove that signatures are current when update access is unavailable. Upload completion fails closed while the scanner is unavailable or exceeds its deadline.
 
 The source-build names are deliberately separate from the public release contract. To consume a published version instead of building the checkout, initialize with `--image-mode release --version <version>`:
 
@@ -77,7 +79,7 @@ bun run compact:logs
 bun run compact:logs -- api worker
 ```
 
-`compact:restart` removes and recreates the profile containers without rebuilding images or deleting the four named data volumes. This reruns migrations, storage initialization and the idempotent seed before waiting for every long-running service to become healthy. Restarting the host or Docker also preserves the named volumes; use `compact:restart` afterward for the supported full-profile restart check.
+`compact:restart` removes and recreates the profile containers without rebuilding images or deleting the five named data volumes. This reruns migrations, storage initialization and the idempotent seed before waiting for every long-running service to become healthy. Restarting the host or Docker also preserves the named volumes, including downloaded ClamAV signatures; use `compact:restart` afterward for the supported full-profile restart check.
 
 From a fresh authoritative public clone on a host that meets the minimum envelope, retain a machine-readable lifecycle proof with:
 
@@ -87,7 +89,7 @@ bun run compact:prove -- \
   --out /private/tmp/tixkit-compact-proof-$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
-The output directory must be new, outside the repository and beneath a real non-symlink parent. The proof command refuses a dirty, shallow, non-public or already initialized clone, and requires `HEAD` to equal the object currently advertised by the named authoritative public branch or version tag. It records the remote ref/object, exact commit/tree, host and Docker envelope, all 13 service states, seed persistence, restart, backup/restore, live database/object fingerprints for every negative restore case, Temporal dependency failure/recovery, upgrade, validation commands and a mode-`0600` transcript. Raw daemon metadata is omitted and the transcript fails closed if it contains generated credentials. A passing local artifact is still not hosted publication, high-availability, legal or Production-profile proof.
+The output directory must be new, outside the repository and beneath a real non-symlink parent. The proof command refuses a dirty, shallow, non-public or already initialized clone, and requires `HEAD` to equal the object currently advertised by the named authoritative public branch or version tag. Its v2 evidence records the remote ref/object, exact commit/tree, host and Docker envelope, all 14 service states, seed persistence, restart, backup/restore, live database/object fingerprints for every negative restore case, clean-file acceptance at the 50 MiB upload limit, EICAR rejection, scanner outage and recovery through the actual API scanner transport, Temporal dependency failure/recovery, upgrade, validation commands and a mode-`0600` transcript. Scanner probe output and daemon metadata are omitted; their bounded command records and checksummed boolean outcomes remain in the proof. The transcript fails closed if it contains generated credentials. A passing local artifact is still not hosted publication, high-availability, legal or Production-profile proof.
 
 ## Trust a portability source
 
@@ -127,7 +129,7 @@ bun run compact:backup -- ./backups/compact-$(date -u +%Y%m%dT%H%M%SZ)
 bun run compact:restore -- ./backups/compact-20260711T120000Z
 ```
 
-The backup quiesces the application and workflow tier, then captures the application database, both Temporal databases, and owned object storage as one logical snapshot. Its manifest records the Tixkit version, source commit, byte counts, and SHA-256 checksums. Restore verifies the exact artifact set, checksums, version, and archive entry safety, restores into temporary databases and a temporary bucket, and validates their required schemas before cutover. It retains rollback databases and objects until the complete profile is healthy. Keep backup directories and `infra/compact/.env` encrypted outside the host's failure domain. Compact Redis state is reconstructible and is not backed up.
+The backup quiesces the application and workflow tier, then captures the application database, both Temporal databases, and owned object storage as one logical snapshot. Its manifest records the Tixkit version, source commit, byte counts, and SHA-256 checksums. Restore verifies the exact artifact set, checksums, version, and archive entry safety, restores into temporary databases and a temporary bucket, and validates their required schemas before cutover. It retains rollback databases and objects until the complete profile is healthy. Keep backup directories and `infra/compact/.env` encrypted outside the host's failure domain. Compact Redis state and ClamAV signatures are reconstructible operational data and are not included in the logical backup; after loss of `clamav-data`, the pinned image provides its bundled database and FreshClam must regain update access before signature freshness can be claimed.
 
 ## Upgrade and uninstall
 

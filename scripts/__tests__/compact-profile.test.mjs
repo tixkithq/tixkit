@@ -52,17 +52,40 @@ test('Compact topology contains the complete single-database application stack',
     'api',
     'worker',
     'checkout',
+    'clamav',
     'admin',
   ])
     assert.ok(services.has(required), `missing Compact service ${required}`);
   assert.equal(services.has('mysql'), false);
   assert.equal(compose.services.api.depends_on.migrate.condition, 'service_completed_successfully');
   assert.equal(compose.services.api.depends_on.seed.condition, 'service_completed_successfully');
+  assert.equal(compose.services.api.depends_on.clamav.condition, 'service_healthy');
   assert.equal(
     compose.services.api.depends_on['storage-init'].condition,
     'service_completed_successfully',
   );
   assert.equal(compose.services.worker.depends_on.api.condition, 'service_healthy');
+  assert.equal(compose.services.api.environment.UPLOAD_MALWARE_SCANNER, 'clamav');
+  assert.equal(compose.services.api.environment.CLAMAV_HOST, 'clamav');
+  assert.equal(compose.services.api.environment.CLAMAV_PORT, '3310');
+  assert.equal(compose.services.api.environment.CLAMAV_TIMEOUT_MS, '30000');
+  assert.equal(compose.services.clamav.environment.CLAMD_CONF_StreamMaxLength, '50M');
+  assert.deepEqual(compose.services.clamav.volumes, ['clamav-data:/var/lib/clamav']);
+  assert.equal(compose.services.clamav.ports, undefined);
+  assert.equal(
+    compose.services.clamav.image,
+    'clamav/clamav:1.4.5-debian@sha256:0542880c8abebb7430be5366657aec561f03693ed7be4e64a45fd2ee60b08d02',
+  );
+  for (const service of ['storage-init', 'migrate', 'seed', 'worker', 'checkout', 'admin']) {
+    assert.equal(compose.services[service].environment.UPLOAD_MALWARE_SCANNER, undefined);
+    assert.equal(compose.services[service].environment.CLAMAV_HOST, undefined);
+    assert.equal(compose.services[service].environment.CLAMAV_PORT, undefined);
+    assert.equal(compose.services[service].environment.CLAMAV_TIMEOUT_MS, undefined);
+  }
+  assert.equal(compose['x-app-environment'].UPLOAD_MALWARE_SCANNER, undefined);
+  assert.equal(compose['x-app-environment'].CLAMAV_HOST, undefined);
+  assert.equal(compose['x-app-environment'].CLAMAV_PORT, undefined);
+  assert.equal(compose['x-app-environment'].CLAMAV_TIMEOUT_MS, undefined);
   assert.deepEqual(compose.services.worker.healthcheck.test, [
     'CMD',
     'node',
@@ -113,19 +136,19 @@ test('Compact topology contains the complete single-database application stack',
   assert.match(compose.services.minio.image, /@sha256:[a-f0-9]{64}$/u);
 });
 
-test('Compact proof validates the minimum host envelope and exact 13-service state', () => {
+test('Compact proof validates the minimum host envelope and exact 14-service state', () => {
   assert.doesNotThrow(() =>
     validateHostEnvelope({
       cpuCores: 4,
-      memoryBytes: 8 * 1024 ** 3,
+      memoryBytes: 12 * 1024 ** 3,
       diskBytes: 30 * 1024 ** 3,
       architecture: 'x64',
     }),
   );
   for (const invalid of [
-    { cpuCores: 3, memoryBytes: 8 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 },
-    { cpuCores: 4, memoryBytes: 8 * 1024 ** 3 - 1, diskBytes: 30 * 1024 ** 3 },
-    { cpuCores: 4, memoryBytes: 8 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 - 1 },
+    { cpuCores: 3, memoryBytes: 12 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 },
+    { cpuCores: 4, memoryBytes: 12 * 1024 ** 3 - 1, diskBytes: 30 * 1024 ** 3 },
+    { cpuCores: 4, memoryBytes: 12 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 - 1 },
   ])
     assert.throws(
       () => validateHostEnvelope({ ...invalid, architecture: 'x64' }),
@@ -135,7 +158,7 @@ test('Compact proof validates the minimum host envelope and exact 13-service sta
     () =>
       validateHostEnvelope({
         cpuCores: 4,
-        memoryBytes: 8 * 1024 ** 3,
+        memoryBytes: 12 * 1024 ** 3,
         diskBytes: 30 * 1024 ** 3,
         architecture: 'ia32',
       }),
@@ -144,7 +167,7 @@ test('Compact proof validates the minimum host envelope and exact 13-service sta
   assert.deepEqual(
     validateDockerEnvelope({
       NCPU: 4,
-      MemTotal: 8 * 1024 ** 3,
+      MemTotal: 12 * 1024 ** 3,
       Architecture: 'aarch64',
       OperatingSystem: 'Docker Desktop',
       ServerVersion: '1.2.3',
@@ -155,7 +178,7 @@ test('Compact proof validates the minimum host envelope and exact 13-service sta
     }),
     {
       cpuCores: 4,
-      memoryBytes: 8 * 1024 ** 3,
+      memoryBytes: 12 * 1024 ** 3,
       architecture: 'arm64',
       operatingSystem: 'Docker Desktop',
       serverVersion: '1.2.3',
@@ -170,7 +193,7 @@ test('Compact proof validates the minimum host envelope and exact 13-service sta
     () =>
       validateDockerEnvelope({
         NCPU: 2,
-        MemTotal: 8 * 1024 ** 3,
+        MemTotal: 12 * 1024 ** 3,
         Architecture: 'x86_64',
         diskBytes: 30 * 1024 ** 3,
         contextName: 'default',
@@ -193,6 +216,7 @@ test('Compact proof validates the minimum host envelope and exact 13-service sta
       'admin',
       'api',
       'checkout',
+      'clamav',
       'minio',
       'postgres',
       'redis',
@@ -214,10 +238,10 @@ test('Compact proof validates the minimum host envelope and exact 13-service sta
     })),
   ];
   const services = parseComposeServices(rows.map((row) => JSON.stringify(row)).join('\n'));
-  assert.equal(validateCompleteServiceState(services).length, 13);
+  assert.equal(validateCompleteServiceState(services).length, 14);
   assert.throws(
     () => validateCompleteServiceState(services.filter((service) => service.service !== 'seed')),
-    /exact 13-service profile/u,
+    /exact 14-service profile/u,
   );
   assert.throws(
     () =>
@@ -270,6 +294,7 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
       'negativeRestoreProof',
       'backup',
       'upgradeBackup',
+      'malwareScannerProof',
       'workerDependencyFailureObserved',
       'seedPersistenceChecks',
       'commands',
@@ -280,8 +305,8 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
   );
   assert.equal(schema.$defs.command.additionalProperties, false);
   assert.equal(schema.$defs.backupManifest.additionalProperties, false);
-  assert.equal(schema.$defs.serviceState.minItems, 13);
-  assert.equal(schema.$defs.serviceState.maxItems, 13);
+  assert.equal(schema.$defs.serviceState.minItems, 14);
+  assert.equal(schema.$defs.serviceState.maxItems, 14);
   assert.deepEqual(
     schema.properties.negativeRestoreProof.prefixItems.map((item) => item.$ref),
     [
@@ -309,6 +334,7 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
       'admin',
       'api',
       'checkout',
+      'clamav',
       'minio',
       'postgres',
       'redis',
@@ -354,9 +380,21 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
     stderrSha256: digest,
     stderrBytes: 0,
   };
+  const scannerCommandIndexes = {
+    classificationCommandIndex: 6,
+    maximumUploadCommandIndex: 7,
+    dependencyFailureCommandIndex: 8,
+    recoveryCommandIndex: 9,
+  };
+  const scannerAssertions = new Map([
+    [6, 'malware-scanner-clean-and-eicar-classification'],
+    [7, 'malware-scanner-maximum-upload-classification'],
+    [8, 'malware-scanner-dependency-fails-closed'],
+    [9, 'malware-scanner-recovered-after-dependency-restart'],
+  ]);
   const evidence = {
-    schemaVersion: 1,
-    schema: 'https://tixkit.com/schemas/compact-clean-host-proof-v1.json',
+    schemaVersion: 2,
+    schema: 'https://tixkit.com/schemas/compact-clean-host-proof-v2.json',
     kind: 'tixkit-compact-clean-host-proof',
     result: 'passed',
     startedFromFreshEnvironment: true,
@@ -370,7 +408,7 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
     },
     host: {
       cpuCores: 4,
-      memoryBytes: 8 * 1024 ** 3,
+      memoryBytes: 12 * 1024 ** 3,
       diskBytes: 30 * 1024 ** 3,
       architecture: 'x64',
       platform: 'linux',
@@ -378,7 +416,7 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
     },
     docker: {
       cpuCores: 4,
-      memoryBytes: 8 * 1024 ** 3,
+      memoryBytes: 12 * 1024 ** 3,
       architecture: 'x86_64',
       operatingSystem: 'Linux',
       serverVersion: 'fixture',
@@ -388,7 +426,7 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
       endpointKind: 'local-unix',
       endpointSha256: digest,
     },
-    minimum: { cpuCores: 4, memoryBytes: 8 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 },
+    minimum: { cpuCores: 4, memoryBytes: 12 * 1024 ** 3, diskBytes: 30 * 1024 ** 3 },
     phases: Object.fromEntries(
       ['initial', 'restarted', 'restored', 'recovered', 'upgraded'].map((phase) => [
         phase,
@@ -415,6 +453,14 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
     })),
     backup: { manifest, manifestSha256 },
     upgradeBackup: { manifest, manifestSha256 },
+    malwareScannerProof: {
+      cleanAccepted: true,
+      eicarRejected: true,
+      maximumUploadAccepted: true,
+      dependencyFailureObserved: true,
+      recovered: true,
+      ...scannerCommandIndexes,
+    },
     workerDependencyFailureObserved: true,
     seedPersistenceChecks: 5,
     commands: Array.from({ length: 25 }, (_, index) =>
@@ -427,7 +473,9 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
             failureMatched: true,
             exitCode: 1,
           }
-        : command,
+        : scannerAssertions.has(index)
+          ? { ...command, assertion: scannerAssertions.get(index) }
+          : command,
     ),
     transcript: { path: 'command-transcript.log', bytes: 1, sha256: digest },
     finishedAt: date,
@@ -438,7 +486,66 @@ test('Compact proof schema is strict and covers every lifecycle assertion', () =
   };
   assert.doesNotThrow(() => assertCompactProofSchema(evidence));
   assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        schemaVersion: 1,
+        schema: 'https://tixkit.com/schemas/compact-clean-host-proof-v1.json',
+      }),
+    /violates its schema/u,
+  );
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        malwareScannerProof: {
+          ...evidence.malwareScannerProof,
+          maximumUploadCommandIndex: evidence.malwareScannerProof.classificationCommandIndex,
+        },
+      }),
+    /reuse one command outcome/u,
+  );
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        malwareScannerProof: {
+          ...evidence.malwareScannerProof,
+          dependencyFailureCommandIndex: 100,
+        },
+      }),
+    /not bound/u,
+  );
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        commands: evidence.commands.map((item, index) =>
+          index === evidence.malwareScannerProof.recoveryCommandIndex
+            ? { ...item, assertion: 'substituted-scanner-proof' }
+            : item,
+        ),
+      }),
+    /not bound/u,
+  );
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        schema: 'https://tixkit.com/schemas/compact-clean-host-proof-v1.json',
+      }),
+    /violates its schema/u,
+  );
+  assert.throws(
     () => assertCompactProofSchema({ ...evidence, unexpected: true }),
+    /violates its schema/u,
+  );
+  assert.throws(
+    () =>
+      assertCompactProofSchema({
+        ...evidence,
+        malwareScannerProof: { ...evidence.malwareScannerProof, recovered: false },
+      }),
     /violates its schema/u,
   );
   assert.throws(
@@ -776,6 +883,7 @@ portableCutoverTrustFromEnvironment(environment);`,
     assert.deepEqual(
       Object.values(rendered.volumes).map(({ name }) => name),
       [
+        'tixkit-compact-isolated-test_clamav-data',
         'tixkit-compact-isolated-test_minio-data',
         'tixkit-compact-isolated-test_postgres-data',
         'tixkit-compact-isolated-test_redis-data',
@@ -1142,6 +1250,19 @@ test('Compact lifecycle builds application images sequentially before startup', 
   assert.match(content, /prepareApplications\(runtime\);/u);
   assert.match(content, /prepareApplications\(\{ \.\.\.runtime, pull: true \}\);/u);
   assert.doesNotMatch(content, /compose\(\['build', '--pull'\]\)/u);
+});
+
+test('Compact clean-host proof exercises the API malware scanner transport and dependency recovery', () => {
+  const content = readFileSync(resolve(root, 'scripts/prove-compact-profile.mjs'), 'utf8');
+  assert.match(content, /scanUploadBuffer/u);
+  assert.match(content, /malware-scanner-clean-and-eicar-classification/u);
+  assert.match(content, /malware-scanner-maximum-upload-classification/u);
+  assert.match(content, /malware-scanner-dependency-fails-closed/u);
+  assert.match(content, /malware-scanner-recovered-after-dependency-restart/u);
+  assert.match(content, /malware-scanner-best-effort-failure-recovery/u);
+  assert.match(content, /malware-scanner-best-effort-profile-recovery/u);
+  assert.match(content, /composeArguments\('stop', 'clamav'\)/u);
+  assert.match(content, /compact-clean-host-proof-v2\.json/u);
 });
 
 test('Compact recovery stages and validates complete snapshots before cutover', () => {

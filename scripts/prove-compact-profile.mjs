@@ -33,13 +33,14 @@ import { assertAuthoritativePublicRepository } from './lib/authoritative-public-
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const minimum = Object.freeze({
   cpuCores: 4,
-  memoryBytes: 8 * 1024 ** 3,
+  memoryBytes: 12 * 1024 ** 3,
   diskBytes: 30 * 1024 ** 3,
 });
 const runningServices = Object.freeze([
   'admin',
   'api',
   'checkout',
+  'clamav',
   'minio',
   'postgres',
   'redis',
@@ -54,6 +55,11 @@ const minioClientImage =
   'minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727';
 const dockerDiskProbeImage =
   'postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb';
+const compactEicarSignature =
+  'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
+const scannerHealthyProbe = `const {scanUploadBuffer}=await import('./packages/api/dist/services/uploads.js');const clean=await scanUploadBuffer(Buffer.from('tixkit compact clean scanner probe'));const infected=await scanUploadBuffer(Buffer.from(${JSON.stringify(compactEicarSignature)}));if(!clean.clean||clean.result!=='stream: OK'||infected.clean||!infected.result.endsWith(' FOUND'))throw new Error('Compact malware scanner did not classify the bounded probes correctly.');`;
+const scannerMaximumUploadProbe = `const {scanUploadBuffer}=await import('./packages/api/dist/services/uploads.js');const result=await scanUploadBuffer(Buffer.alloc(50*1024*1024,0x61));if(!result.clean||result.result!=='stream: OK')throw new Error('Compact malware scanner did not accept the maximum upload size.');`;
+const scannerUnavailableProbe = `const {scanUploadBuffer}=await import('./packages/api/dist/services/uploads.js');try{await scanUploadBuffer(Buffer.from('tixkit compact unavailable scanner probe'));throw new Error('Compact malware scanner unexpectedly accepted a probe while stopped.');}catch(error){if(error?.message!=='Upload malware scanner is unavailable')throw error;}`;
 const proofSchema = JSON.parse(readFileSync(join(root, 'infra/compact/proof.schema.json'), 'utf8'));
 const ajv = new Ajv({ allErrors: true, strict: true });
 addFormats(ajv);
@@ -182,7 +188,7 @@ export function validateCompleteServiceState(services) {
   const byName = new Map(services.map((service) => [service.service, service]));
   const expected = [...runningServices, ...completedServices].sort();
   if (services.length !== expected.length || expected.some((name) => !byName.has(name)))
-    throw new Error('Compact proof requires the exact 13-service profile.');
+    throw new Error('Compact proof requires the exact 14-service profile.');
   for (const name of runningServices) {
     const service = byName.get(name);
     const expectedHealth = servicesWithoutHealthcheck.includes(name) ? '' : 'healthy';
@@ -298,6 +304,28 @@ export function assertCompactProofSchema(value) {
     if (negativeCommandIndexes.has(proof.commandIndex))
       throw new Error('Compact negative restore proofs reuse one command outcome.');
     negativeCommandIndexes.add(proof.commandIndex);
+  }
+  const scannerCommandBindings = [
+    ['classificationCommandIndex', 'malware-scanner-clean-and-eicar-classification'],
+    ['maximumUploadCommandIndex', 'malware-scanner-maximum-upload-classification'],
+    ['dependencyFailureCommandIndex', 'malware-scanner-dependency-fails-closed'],
+    ['recoveryCommandIndex', 'malware-scanner-recovered-after-dependency-restart'],
+  ];
+  const scannerCommandIndexes = new Set();
+  for (const [indexField, assertion] of scannerCommandBindings) {
+    const commandIndex = value.malwareScannerProof[indexField];
+    if (scannerCommandIndexes.has(commandIndex))
+      throw new Error('Compact malware scanner proofs reuse one command outcome.');
+    scannerCommandIndexes.add(commandIndex);
+    const command = value.commands[commandIndex];
+    if (
+      !command ||
+      command.expectedOutcome !== 'success' ||
+      command.exitCode !== 0 ||
+      command.signal !== null ||
+      command.assertion !== assertion
+    )
+      throw new Error(`Compact malware scanner proof is not bound to ${assertion}.`);
   }
   if (
     value.backup.manifest.sourceCommit !== value.source.commit ||
@@ -498,6 +526,7 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
   const backup = join(workspace, 'backup');
   const upgradeBackup = join(workspace, 'pre-upgrade');
   let phases;
+  let scannerStopped = false;
   try {
     const preexistingContainers = await run(
       'docker',
@@ -592,6 +621,40 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
     const initial = await inspectState();
     await assertSeed();
     await run('curl', ['-fsS', 'http://127.0.0.1:4000/ready']);
+    const scannerClassification = await run(
+      'docker',
+      composeArguments(
+        'exec',
+        '-T',
+        'api',
+        'node',
+        '--input-type=module',
+        '-e',
+        scannerHealthyProbe,
+      ),
+      {
+        display: false,
+        retainOutput: false,
+        assertion: 'malware-scanner-clean-and-eicar-classification',
+      },
+    );
+    const scannerMaximumUpload = await run(
+      'docker',
+      composeArguments(
+        'exec',
+        '-T',
+        'api',
+        'node',
+        '--input-type=module',
+        '-e',
+        scannerMaximumUploadProbe,
+      ),
+      {
+        display: false,
+        retainOutput: false,
+        assertion: 'malware-scanner-maximum-upload-classification',
+      },
+    );
 
     await run('bun', ['run', 'compact:restart']);
     const restarted = await inspectState();
@@ -790,6 +853,46 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
     const restored = await inspectState();
     await assertSeed();
 
+    await run('docker', composeArguments('stop', 'clamav'));
+    scannerStopped = true;
+    const scannerDependencyFailure = await run(
+      'docker',
+      composeArguments(
+        'exec',
+        '-T',
+        'api',
+        'node',
+        '--input-type=module',
+        '-e',
+        scannerUnavailableProbe,
+      ),
+      {
+        display: false,
+        retainOutput: false,
+        assertion: 'malware-scanner-dependency-fails-closed',
+      },
+    );
+    await run('docker', composeArguments('start', 'clamav'));
+    await run('docker', composeArguments('up', '-d', '--no-build', '--wait'));
+    scannerStopped = false;
+    const scannerRecovery = await run(
+      'docker',
+      composeArguments(
+        'exec',
+        '-T',
+        'api',
+        'node',
+        '--input-type=module',
+        '-e',
+        scannerHealthyProbe,
+      ),
+      {
+        display: false,
+        retainOutput: false,
+        assertion: 'malware-scanner-recovered-after-dependency-restart',
+      },
+    );
+
     await run('docker', composeArguments('stop', 'temporal'));
     const workerId = (
       await run('docker', composeArguments('ps', '-q', 'worker'), { capture: true })
@@ -843,8 +946,8 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
     assertTranscriptSafe(readFileSync(transcriptPath), compactEnvironment);
     closeSync(transcriptDescriptor);
     const evidence = {
-      schemaVersion: 1,
-      schema: 'https://tixkit.com/schemas/compact-clean-host-proof-v1.json',
+      schemaVersion: 2,
+      schema: 'https://tixkit.com/schemas/compact-clean-host-proof-v2.json',
       kind: 'tixkit-compact-clean-host-proof',
       result: 'passed',
       startedFromFreshEnvironment: true,
@@ -858,6 +961,17 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
       negativeRestoreProof,
       backup: { manifest: backupManifest, manifestSha256: backupManifestSha256 },
       upgradeBackup: { manifest: upgradeManifest, manifestSha256: upgradeManifestSha256 },
+      malwareScannerProof: {
+        cleanAccepted: true,
+        eicarRejected: true,
+        maximumUploadAccepted: true,
+        dependencyFailureObserved: true,
+        recovered: true,
+        classificationCommandIndex: commands.indexOf(scannerClassification.record),
+        maximumUploadCommandIndex: commands.indexOf(scannerMaximumUpload.record),
+        dependencyFailureCommandIndex: commands.indexOf(scannerDependencyFailure.record),
+        recoveryCommandIndex: commands.indexOf(scannerRecovery.record),
+      },
       workerDependencyFailureObserved: true,
       seedPersistenceChecks: 5,
       commands,
@@ -881,13 +995,28 @@ export async function proveCompactProfile({ outputPath, publicRef, commandRunner
     );
     return evidence;
   } catch (error) {
+    if (scannerStopped) {
+      try {
+        await run('docker', composeArguments('start', 'clamav'), {
+          display: false,
+          retainOutput: false,
+          assertion: 'malware-scanner-best-effort-failure-recovery',
+        });
+        await run('docker', composeArguments('up', '-d', '--no-build', '--wait'), {
+          display: false,
+          retainOutput: false,
+          assertion: 'malware-scanner-best-effort-profile-recovery',
+        });
+        scannerStopped = false;
+      } catch {}
+    }
     try {
       fchmodSync(transcriptDescriptor, 0o600);
       fsyncSync(transcriptDescriptor);
       closeSync(transcriptDescriptor);
     } catch {}
     writeCompactProofArtifact(join(output, 'compact-proof-failure.json'), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: 'tixkit-compact-clean-host-proof',
       result: 'failed',
       source: { commit, tree: sourceTree },

@@ -137,6 +137,14 @@ services:
       timeout: 5s
       retries: 20
 
+  clamav:
+    image: clamav/clamav:1.4.5-debian@sha256:0542880c8abebb7430be5366657aec561f03693ed7be4e64a45fd2ee60b08d02
+    restart: unless-stopped
+    environment:
+      CLAMD_CONF_StreamMaxLength: 50M
+    volumes:
+      - clamav-data:/var/lib/clamav
+
   storage-init:
     <<: *api-image
     restart: 'no'
@@ -173,6 +181,10 @@ services:
     environment:
       <<: *app-environment
       PORT: 4000
+      UPLOAD_MALWARE_SCANNER: clamav
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: '3310'
+      CLAMAV_TIMEOUT_MS: '30000'
       TIXKIT_DEPLOYMENT_ID: ${TIXKIT_DEPLOYMENT_ID:?run bun run compact:init}
       TIXKIT_OPERATING_MODEL: ${TIXKIT_OPERATING_MODEL:?run bun run compact:init}
       PORTABILITY_BUNDLE_SIGNING_KEY_ID: ${PORTABILITY_BUNDLE_SIGNING_KEY_ID:?run bun run compact:init}
@@ -195,6 +207,8 @@ services:
       redis:
         condition: service_healthy
       temporal:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     healthcheck:
       test:
@@ -295,6 +309,7 @@ services:
       retries: 30
 
 volumes:
+  clamav-data:
   postgres-data:
   redis-data:
   temporal-data:
