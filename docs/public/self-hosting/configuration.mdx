@@ -38,6 +38,23 @@ All replicas in one environment must share the same value so organizer action cu
 verifiable across requests. Rotating it intentionally invalidates every outstanding dashboard
 cursor; clients then refresh the first page.
 
+## Enable provider incident evidence only for an active incident
+
+Exact outbound provider request IDs are excluded from normal logs, traces, API errors, and Temporal history. For a support escalation that requires the provider's exact correlation value, operators may temporarily enable the encrypted incident sink with:
+
+- `PROVIDER_INCIDENT_SINK_ENABLED=true`
+- `PROVIDER_INCIDENT_CAPTURE_UNTIL` set no more than 24 hours ahead
+- `PROVIDER_INCIDENT_RETENTION_MINUTES` from 1 through 1440
+- `PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT` from 1 through 1000
+- `PROVIDER_INCIDENT_ACTIVE_KEY_ID` naming the active encryption key
+- secret-only `PROVIDER_INCIDENT_KEYRING_JSON`, an object mapping key IDs to canonical base64-encoded 32-byte AES keys
+
+The API and worker fail startup on an invalid enabled configuration. An elapsed capture window is valid in reveal-only mode so a restart does not strand unexpired evidence. Rotate by adding the new key, changing the active key ID, and retaining old keys only until their evidence expires. Disable capture after the incident and remove retired keys after the maximum retention window.
+
+Authorized human owners and administrators first locate evidence by the hash-only provider correlation, then use the audited reveal operation. Both operations require an exact organization-scoped `provider_incidents.read` grant. API keys, agents, devices, ordinary members, stale role grants, and cross-organization grants are denied. Exact reveal responses are rate-limited and marked `Cache-Control: no-store`.
+
+Compact passes these variables to API and worker from the host environment. Production Helm configuration uses the non-secret `providerIncidentEvidence` values and supplies `PROVIDER_INCIDENT_KEYRING_JSON` through the configured Secret or ExternalSecret; never place the keyring in a ConfigMap or values file committed to source.
+
 ## Configuration drift
 
 Record non-secret environment contracts in deployment configuration, validate them before release, and compare API/worker settings that must agree, including database, Temporal namespace/task queue, storage, and provider mode.

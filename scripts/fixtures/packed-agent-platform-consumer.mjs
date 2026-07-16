@@ -787,7 +787,7 @@ const execute = async (request) => {
 };
 
 const contractInput = {
-  apiVersion: '2026-08-11',
+  apiVersion: '2026-08-12',
   sponsorAccessToken: 'sponsor_token',
   agentClientId: `tk_agent_${'e'.repeat(48)}`,
   agentClientSecret: 'secret_value',

@@ -117,10 +117,27 @@ describe('runWorker', () => {
     delete process.env.TEMPORAL_TASK_QUEUE;
     delete process.env.TIXKIT_RUNTIME_MODE;
     delete process.env.TIXKIT_SANDBOX_EPOCH;
+    delete process.env.PROVIDER_INCIDENT_SINK_ENABLED;
+    delete process.env.PROVIDER_INCIDENT_CAPTURE_UNTIL;
+    delete process.env.PROVIDER_INCIDENT_RETENTION_MINUTES;
+    delete process.env.PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT;
+    delete process.env.PROVIDER_INCIDENT_ACTIVE_KEY_ID;
+    delete process.env.PROVIDER_INCIDENT_KEYRING_JSON;
     process.env.TIXKIT_MIGRATION_CURSOR_ACTIVE_KEY_ID = 'test';
     process.env.TIXKIT_MIGRATION_CURSOR_KEYS = JSON.stringify({
       test: Buffer.alloc(32, 1).toString('base64'),
     });
+  });
+
+  it('rejects invalid enabled incident evidence configuration before creating workers', async () => {
+    process.env.PROVIDER_INCIDENT_SINK_ENABLED = 'true';
+    const { runWorker } = await import('../worker.js');
+
+    await expect(runWorker({ workflowsPath: 'test-workflows.js' })).rejects.toThrow(
+      'PROVIDER_INCIDENT_CAPTURE_UNTIL',
+    );
+    expect(workerCreate).not.toHaveBeenCalled();
+    expect(startWorkerObservability).not.toHaveBeenCalled();
   });
 
   it('emits readiness only after all recovery schedulers are ensured', async () => {

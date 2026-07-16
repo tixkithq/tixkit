@@ -1,9 +1,11 @@
 import { Client, Connection } from '@temporalio/client';
 import { createDb, EmailJobRepository, type Database } from '@tixkit/db';
+import type { ProviderClientRuntime } from '@tixkit/provider-clients';
 import { notificationWorkflowId, NOTIFICATION_WORKFLOW_VERSION } from '../shared/types.js';
 import { notificationDeliveryWorkflow } from '../workflows/notification.js';
 import type { NotificationDeliveryWorkflowInput } from '../workflows/notification.js';
 import { temporalConnectionOptions } from '../temporal-connection.js';
+import { createProviderIncidentEvidenceRuntime } from '../services/provider-incident-evidence.js';
 
 type TemporalConnection = Awaited<ReturnType<typeof Connection.connect>>;
 
@@ -11,6 +13,7 @@ let cachedNotificationConnection: TemporalConnection | null = null;
 let cachedNotificationClient: Client | null = null;
 let notificationClientPromise: Promise<Client> | null = null;
 let cachedDb: Database | null = null;
+let cachedProviderClientRuntime: ProviderClientRuntime | null = null;
 
 export type EmailJobNotificationHandoffRow = {
   id: string;
@@ -69,6 +72,12 @@ async function getNotificationTemporalClient(): Promise<Client> {
 export function getActivityDb(): Database {
   cachedDb ??= createDb();
   return cachedDb;
+}
+
+export function getActivityProviderClientRuntime(): ProviderClientRuntime {
+  cachedProviderClientRuntime ??=
+    createProviderIncidentEvidenceRuntime(getActivityDb()).providerClientRuntime;
+  return cachedProviderClientRuntime;
 }
 
 export async function startNotificationDeliveryWorkflow(
@@ -149,5 +158,6 @@ export async function closeActivityClients(): Promise<void> {
   cachedNotificationClient = null;
   notificationClientPromise = null;
   cachedDb = null;
+  cachedProviderClientRuntime = null;
   await Promise.all([connection?.close(), db?.destroy()]);
 }

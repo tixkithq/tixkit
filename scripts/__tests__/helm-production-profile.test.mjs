@@ -359,9 +359,7 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
     ['192.0.2.0/24', '2001:db8::/32'],
   );
   assert.equal(
-    serviceEgress.spec.egress.some((rule) =>
-      rule.ports?.some((port) => port.port === 3310),
-    ),
+    serviceEgress.spec.egress.some((rule) => rule.ports?.some((port) => port.port === 3310)),
     false,
   );
   const scannerEgress = rendered.find(
@@ -380,10 +378,7 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   );
   assert.deepEqual(
     scannerEgress.spec.egress.map((rule) => rule.ports),
-    [
-      [{ protocol: 'TCP', port: 3310 }],
-      [{ protocol: 'TCP', port: 3310 }],
-    ],
+    [[{ protocol: 'TCP', port: 3310 }], [{ protocol: 'TCP', port: 3310 }]],
   );
 });
 
@@ -580,7 +575,10 @@ test('Evaluation networking keeps core policies while its scanner remains disabl
     .map((resource) => resource.metadata.name);
   assert.ok(policyNames.some((name) => name.endsWith('public-ingress')));
   assert.ok(policyNames.some((name) => name.endsWith('service-egress')));
-  assert.equal(policyNames.some((name) => name.endsWith('malware-scanner-egress')), false);
+  assert.equal(
+    policyNames.some((name) => name.endsWith('malware-scanner-egress')),
+    false,
+  );
 });
 
 test('Production-like Helm profiles reject missing or placeholder build revisions', () => {
@@ -727,6 +725,54 @@ test('External Secrets mode rejects an incomplete required-key inventory', () =>
         ...externalSecretDataOverrides(externalSecretKeys.slice(0, -1)),
       ]),
     /ExternalSecret data must map required key PROMETHEUS_PUSHGATEWAY_URL/,
+  );
+});
+
+test('Provider incident evidence stays disabled by default and validates secret-only key material', () => {
+  const disabled = resources(render(evaluation));
+  const disabledConfig = disabled.find((resource) => resource.kind === 'ConfigMap');
+  assert.equal(disabledConfig.data.PROVIDER_INCIDENT_SINK_ENABLED, 'false');
+
+  assert.throws(
+    () =>
+      render(evaluation, [
+        'providerIncidentEvidence.enabled=true',
+        'providerIncidentEvidence.captureUntil=2026-07-17T00:00:00.000Z',
+        'providerIncidentEvidence.activeKeyId=incident-v1',
+      ]),
+    /provider incident evidence requires secrets\.providerIncidentKeyringJson/,
+  );
+  const enabled = resources(
+    render(evaluation, [
+      'providerIncidentEvidence.enabled=true',
+      'providerIncidentEvidence.captureUntil=2026-07-17T00:00:00.000Z',
+      'providerIncidentEvidence.activeKeyId=incident-v1',
+      'secrets.providerIncidentKeyringJson=encrypted-keyring-reference',
+    ]),
+  );
+  const config = enabled.find((resource) => resource.kind === 'ConfigMap');
+  const secret = enabled.find((resource) => resource.kind === 'Secret');
+  assert.equal(config.data.PROVIDER_INCIDENT_SINK_ENABLED, 'true');
+  assert.equal(config.data.PROVIDER_INCIDENT_ACTIVE_KEY_ID, 'incident-v1');
+  assert.equal(secret.stringData.PROVIDER_INCIDENT_KEYRING_JSON, 'encrypted-keyring-reference');
+  assert.equal(config.data.PROVIDER_INCIDENT_KEYRING_JSON, undefined);
+});
+
+test('External Secrets requires the provider incident keyring only when capture is enabled', () => {
+  assert.throws(
+    () =>
+      render(production, [
+        'global.imageRegistry=ghcr.io/tixkit/tixkit',
+        'secrets.mode=external',
+        'migrations.strategy=manual',
+        'secrets.name=tixkit-production-secrets',
+        'secrets.externalSecret.secretStoreName=production-store',
+        'providerIncidentEvidence.enabled=true',
+        'providerIncidentEvidence.captureUntil=2026-07-17T00:00:00.000Z',
+        'providerIncidentEvidence.activeKeyId=incident-v1',
+        ...externalSecretDataOverrides(),
+      ]),
+    /ExternalSecret data must map required key PROVIDER_INCIDENT_KEYRING_JSON/,
   );
 });
 

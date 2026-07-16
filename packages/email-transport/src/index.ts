@@ -18,6 +18,7 @@ import {
   TelnyxMessagingClient,
   TwilioMessagingClient,
   VonageMessagingClient,
+  type ProviderClientRuntime,
 } from '@tixkit/provider-clients';
 import { ulid } from 'ulid';
 
@@ -261,15 +262,25 @@ export class TelnyxSmsTransport implements SmsTransport {
   providerName = 'telnyx';
   private client: TelnyxMessagingClient;
 
-  constructor(credentialsRef = 'TELNYX_API_KEY', baseUrl?: string) {
-    this.client = new TelnyxMessagingClient({
-      apiKey: credentialValue(credentialsRef, 'TELNYX_API_KEY'),
-      baseUrl,
-    });
+  constructor(
+    credentialsRef = 'TELNYX_API_KEY',
+    baseUrl?: string,
+    runtime: ProviderClientRuntime = {},
+  ) {
+    this.client = new TelnyxMessagingClient(
+      {
+        apiKey: credentialValue(credentialsRef, 'TELNYX_API_KEY'),
+        baseUrl,
+      },
+      runtime,
+    );
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const result = await this.client.sendSms(input);
+    const result = await this.client.sendSms({
+      ...input,
+      incidentScope: { tenantId: input.tenantId, organizationId: input.organizationId },
+    });
     return {
       deliveryId: input.deliveryId,
       provider: 'telnyx',
@@ -289,16 +300,23 @@ export class TwilioSmsTransport implements SmsTransport {
     accountSidRef = 'TWILIO_ACCOUNT_SID',
     authTokenRef = 'TWILIO_AUTH_TOKEN',
     baseUrl?: string,
+    runtime: ProviderClientRuntime = {},
   ) {
-    this.client = new TwilioMessagingClient({
-      accountSid: credentialValue(accountSidRef, 'TWILIO_ACCOUNT_SID'),
-      authToken: credentialValue(authTokenRef, 'TWILIO_AUTH_TOKEN'),
-      baseUrl,
-    });
+    this.client = new TwilioMessagingClient(
+      {
+        accountSid: credentialValue(accountSidRef, 'TWILIO_ACCOUNT_SID'),
+        authToken: credentialValue(authTokenRef, 'TWILIO_AUTH_TOKEN'),
+        baseUrl,
+      },
+      runtime,
+    );
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const result = await this.client.sendSms(input);
+    const result = await this.client.sendSms({
+      ...input,
+      incidentScope: { tenantId: input.tenantId, organizationId: input.organizationId },
+    });
     return {
       deliveryId: input.deliveryId,
       provider: 'twilio',
@@ -314,16 +332,27 @@ export class VonageSmsTransport implements SmsTransport {
   providerName = 'vonage';
   private client: VonageMessagingClient;
 
-  constructor(apiKeyRef = 'VONAGE_API_KEY', apiSecretRef = 'VONAGE_API_SECRET', baseUrl?: string) {
-    this.client = new VonageMessagingClient({
-      apiKey: credentialValue(apiKeyRef, 'VONAGE_API_KEY'),
-      apiSecret: credentialValue(apiSecretRef, 'VONAGE_API_SECRET'),
-      baseUrl,
-    });
+  constructor(
+    apiKeyRef = 'VONAGE_API_KEY',
+    apiSecretRef = 'VONAGE_API_SECRET',
+    baseUrl?: string,
+    runtime: ProviderClientRuntime = {},
+  ) {
+    this.client = new VonageMessagingClient(
+      {
+        apiKey: credentialValue(apiKeyRef, 'VONAGE_API_KEY'),
+        apiSecret: credentialValue(apiSecretRef, 'VONAGE_API_SECRET'),
+        baseUrl,
+      },
+      runtime,
+    );
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const result = await this.client.sendSms(input);
+    const result = await this.client.sendSms({
+      ...input,
+      incidentScope: { tenantId: input.tenantId, organizationId: input.organizationId },
+    });
     return {
       deliveryId: input.deliveryId,
       provider: 'vonage',
@@ -339,16 +368,27 @@ export class PlivoSmsTransport implements SmsTransport {
   providerName = 'plivo';
   private client: PlivoMessagingClient;
 
-  constructor(authIdRef = 'PLIVO_AUTH_ID', authTokenRef = 'PLIVO_AUTH_TOKEN', baseUrl?: string) {
-    this.client = new PlivoMessagingClient({
-      authId: credentialValue(authIdRef, 'PLIVO_AUTH_ID'),
-      authToken: credentialValue(authTokenRef, 'PLIVO_AUTH_TOKEN'),
-      baseUrl,
-    });
+  constructor(
+    authIdRef = 'PLIVO_AUTH_ID',
+    authTokenRef = 'PLIVO_AUTH_TOKEN',
+    baseUrl?: string,
+    runtime: ProviderClientRuntime = {},
+  ) {
+    this.client = new PlivoMessagingClient(
+      {
+        authId: credentialValue(authIdRef, 'PLIVO_AUTH_ID'),
+        authToken: credentialValue(authTokenRef, 'PLIVO_AUTH_TOKEN'),
+        baseUrl,
+      },
+      runtime,
+    );
   }
 
   async send(input: SendSmsInput): Promise<SendSmsResult> {
-    const result = await this.client.sendSms(input);
+    const result = await this.client.sendSms({
+      ...input,
+      incidentScope: { tenantId: input.tenantId, organizationId: input.organizationId },
+    });
     return {
       deliveryId: input.deliveryId,
       provider: 'plivo',
@@ -404,11 +444,18 @@ export class ResendEmailTransport implements EmailTransport {
   providerName = 'resend';
   private client: ResendMessagingClient;
 
-  constructor(credentialsRef = 'RESEND_API_KEY', baseUrl?: string) {
-    this.client = new ResendMessagingClient({
-      apiKey: credentialValue(credentialsRef, 'RESEND_API_KEY'),
-      baseUrl,
-    });
+  constructor(
+    credentialsRef = 'RESEND_API_KEY',
+    baseUrl?: string,
+    runtime: ProviderClientRuntime = {},
+  ) {
+    this.client = new ResendMessagingClient(
+      {
+        apiKey: credentialValue(credentialsRef, 'RESEND_API_KEY'),
+        baseUrl,
+      },
+      runtime,
+    );
   }
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
@@ -436,6 +483,7 @@ export class ResendEmailTransport implements EmailTransport {
         content: attachmentContentBase64(attachment.content, attachment.contentEncoding),
         contentType: attachment.contentType,
       })),
+      incidentScope: { tenantId: input.tenantId, organizationId: input.organizationId },
     });
 
     return {
@@ -506,8 +554,11 @@ export function buildEmailTransport(
   providerType: string,
   credentialsRef: string,
   senderDomain?: string,
+  runtime: ProviderClientRuntime = {},
 ): EmailTransport & { providerName?: string } {
   if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
+  if (providerType === 'resend')
+    return new ResendEmailTransport(credentialsRef, undefined, runtime);
   const transport = createEmailProviderTransport(providerType, {
     credentialsRef,
     senderDomain,
@@ -519,8 +570,16 @@ export function buildEmailTransport(
 export function buildSmsTransport(
   providerType: string,
   credentialsRef: string,
+  runtime: ProviderClientRuntime = {},
 ): SmsTransport & { providerName?: string } {
   if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureSmsTransport();
+  if (providerType === 'telnyx') return new TelnyxSmsTransport(credentialsRef, undefined, runtime);
+  if (providerType === 'twilio')
+    return new TwilioSmsTransport(undefined, undefined, undefined, runtime);
+  if (providerType === 'vonage')
+    return new VonageSmsTransport(undefined, undefined, undefined, runtime);
+  if (providerType === 'plivo')
+    return new PlivoSmsTransport(undefined, undefined, undefined, runtime);
   const transport = createSmsProviderTransport(providerType, { credentialsRef });
   if (!transport) throw new UnsupportedProviderRouteError('sms', providerType);
   return transport;
@@ -530,10 +589,12 @@ export function buildSmsTransport(
  * Default API/worker transport: Resend when configured, capture only for
  * sandbox/development, and fail closed in production.
  */
-export function createDefaultEmailTransport(): EmailTransport & { providerName?: string } {
+export function createDefaultEmailTransport(
+  runtime: ProviderClientRuntime = {},
+): EmailTransport & { providerName?: string } {
   if (process.env.TIXKIT_RUNTIME_MODE === 'sandbox') return new CaptureEmailTransport();
   if (process.env.RESEND_API_KEY) {
-    return new ResendEmailTransport('RESEND_API_KEY');
+    return new ResendEmailTransport('RESEND_API_KEY', undefined, runtime);
   }
   if (process.env.TIXKIT_RUNTIME_MODE === 'production') {
     return new UnconfiguredEmailTransport();

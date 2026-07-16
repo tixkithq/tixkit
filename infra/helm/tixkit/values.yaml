@@ -27,6 +27,13 @@ uploads:
     host: ''
     port: 3310
 
+providerIncidentEvidence:
+  enabled: false
+  captureUntil: ''
+  retentionMinutes: 60
+  maxActivePerTenant: 100
+  activeKeyId: ''
+
 temporalConnection:
   mode: self-hosted-ha
 
@@ -77,6 +84,7 @@ secrets:
   prometheusPushgatewayUrl: ''
   metricsBearerToken: ''
   dashboardCursorSigningKey: ''
+  providerIncidentKeyringJson: ''
 
 api:
   replicas: 2

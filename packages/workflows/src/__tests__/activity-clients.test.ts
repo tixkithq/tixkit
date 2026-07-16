@@ -21,6 +21,7 @@ vi.mock('@temporalio/client', () => ({
 
 vi.mock('@tixkit/db', () => ({
   createDb: dbMock.createDb,
+  ProviderIncidentEvidenceRepository: class ProviderIncidentEvidenceRepository {},
 }));
 
 vi.mock('../workflows/notification.js', () => ({
@@ -52,6 +53,7 @@ describe('activity Temporal clients', () => {
     delete process.env.TEMPORAL_ADDRESS;
     delete process.env.TEMPORAL_NAMESPACE;
     delete process.env.TEMPORAL_TASK_QUEUE;
+    delete process.env.PROVIDER_INCIDENT_SINK_ENABLED;
   });
 
   it('reuses one Temporal client for repeated notification workflow starts', async () => {
@@ -150,6 +152,19 @@ describe('activity Temporal clients', () => {
     expect(dbMock.createDb).toHaveBeenCalledTimes(2);
     expect(dbMock.destroy).toHaveBeenCalledTimes(1);
 
+    await closeActivityClients();
+  });
+
+  it('caches one provider runtime and recreates it after activity clients close', async () => {
+    const { getActivityProviderClientRuntime, closeActivityClients } =
+      await import('../activities/activity-clients.js');
+
+    const first = getActivityProviderClientRuntime();
+    expect(getActivityProviderClientRuntime()).toBe(first);
+    await closeActivityClients();
+    const second = getActivityProviderClientRuntime();
+
+    expect(second).not.toBe(first);
     await closeActivityClients();
   });
 });

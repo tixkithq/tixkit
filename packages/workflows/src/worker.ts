@@ -34,6 +34,7 @@ import {
   portableImportTrustFromEnvironment,
   registerMigrationPreparationService,
 } from './activities/migration-preparation.js';
+import { loadProviderIncidentEvidenceConfiguration } from './services/provider-incident-evidence.js';
 
 const require = createRequire(import.meta.url);
 
@@ -152,6 +153,7 @@ async function ensureScheduledWorkflow(
 }
 
 export async function runWorker(options: RunWorkerOptions = {}): Promise<void> {
+  loadProviderIncidentEvidenceConfiguration(process.env);
   const migrationCursorKeyring = migrationCursorKeyringFromEnvironment();
   const startupDb = createDb(config.databaseUrl);
   try {

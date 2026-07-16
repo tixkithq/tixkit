@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyToken } from '@clerk/backend';
 import { jwtVerify } from 'jose';
 import type { FastifyRequest } from 'fastify';
-import type { Principal, Permission } from '@tixkit/domain';
+import { ALL_PERMISSIONS, type Principal, type Permission } from '@tixkit/domain';
 import type { AuthProvider } from '@tixkit/shared';
 import { ForbiddenError, UnauthorizedError } from '@tixkit/domain';
 import {
@@ -500,7 +500,7 @@ describe('ClerkAuthService signed-in user auth', () => {
     expect(tables.brands).toHaveLength(1);
     expect(tables.user_profiles).toHaveLength(1);
     expect(tables.organization_members).toHaveLength(1);
-    expect(tables.permission_grants).toHaveLength(20);
+    expect(tables.permission_grants).toHaveLength(ALL_PERMISSIONS.length);
     expect(result.principal).toMatchObject({
       type: 'user',
       clerkUserId: 'clerk_dev_user_1',

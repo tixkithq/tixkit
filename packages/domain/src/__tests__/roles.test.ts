@@ -49,6 +49,9 @@ describe('ROLE_PERMISSIONS', () => {
   it('includes box_office.write in the global permission list', () => {
     expect(ALL_PERMISSIONS).toContain('box_office.write');
     expect(ROLE_PERMISSIONS.admin).toContain('box_office.write');
+    expect(ROLE_PERMISSIONS.owner).toContain('provider_incidents.read');
+    expect(ROLE_PERMISSIONS.admin).toContain('provider_incidents.read');
+    expect(ROLE_PERMISSIONS.organizer).not.toContain('provider_incidents.read');
   });
 
   it('accepts invitable roles and rejects owner for invitations', () => {

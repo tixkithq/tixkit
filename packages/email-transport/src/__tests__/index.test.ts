@@ -8,10 +8,11 @@ import {
   ResendEmailTransport,
   SmtpEmailTransport,
   buildEmailTransport,
+  buildSmsTransport,
   createDefaultEmailTransport,
   validateProviderFields,
 } from '../index.js';
-import type { SendEmailInput } from '@tixkit/domain';
+import type { SendEmailInput, SendSmsInput } from '@tixkit/domain';
 
 const baseInput = (overrides: Partial<SendEmailInput> = {}): SendEmailInput => ({
   tenantId: 'tnt_1',
@@ -256,6 +257,38 @@ describe('ResendEmailTransport', () => {
     });
   });
 
+  it('keeps incident scope immutable across concurrent sends', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_key');
+    let requestNumber = 0;
+    globalThis.fetch = vi.fn(async () => {
+      requestNumber += 1;
+      const current = requestNumber;
+      await new Promise((resolve) => setTimeout(resolve, current === 1 ? 5 : 0));
+      return Response.json(
+        { id: `email_${current}` },
+        { status: 200, headers: { 'request-id': `req_support_${current}` } },
+      );
+    }) as unknown as typeof fetch;
+    const incidents: Array<{ exactRequestId: string; tenantId: string; organizationId: string }> =
+      [];
+    const transport = new ResendEmailTransport('RESEND_API_KEY', undefined, {
+      onExactRequestId: async (event) => {
+        incidents.push({ exactRequestId: event.exactRequestId, ...event.scope });
+      },
+    });
+
+    await Promise.all([
+      transport.send(baseInput({ tenantId: 'tenant_a', organizationId: 'org_a' })),
+      transport.send(baseInput({ tenantId: 'tenant_b', organizationId: 'org_b' })),
+    ]);
+    expect(
+      incidents.sort((left, right) => left.exactRequestId.localeCompare(right.exactRequestId)),
+    ).toEqual([
+      { exactRequestId: 'req_support_1', tenantId: 'tenant_a', organizationId: 'org_a' },
+      { exactRequestId: 'req_support_2', tenantId: 'tenant_b', organizationId: 'org_b' },
+    ]);
+  });
+
   it('throws when Resend rejects the message', async () => {
     vi.stubEnv('RESEND_API_KEY', 're_test_key');
     globalThis.fetch = vi.fn(async () =>
@@ -311,6 +344,71 @@ describe('ResendEmailTransport', () => {
   });
 });
 
+describe('built-in SMS incident evidence wiring', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it.each(['telnyx', 'twilio', 'vonage', 'plivo'] as const)(
+    'forwards immutable tenant scope through the %s route adapter',
+    async (provider) => {
+      vi.stubEnv('TELNYX_API_KEY', 'telnyx_key');
+      vi.stubEnv('TWILIO_ACCOUNT_SID', 'AC123');
+      vi.stubEnv('TWILIO_AUTH_TOKEN', 'twilio_secret');
+      vi.stubEnv('VONAGE_API_KEY', 'vonage_key');
+      vi.stubEnv('VONAGE_API_SECRET', 'vonage_secret');
+      vi.stubEnv('PLIVO_AUTH_ID', 'MA123');
+      vi.stubEnv('PLIVO_AUTH_TOKEN', 'plivo_secret');
+      globalThis.fetch = vi.fn(async (url) => {
+        const value = String(url);
+        const body = value.includes('telnyx')
+          ? { data: { id: 'provider_message_1' } }
+          : value.includes('twilio')
+            ? { sid: 'provider_message_1' }
+            : value.includes('vonage') || value.includes('nexmo')
+              ? { messages: [{ status: '0', 'message-id': 'provider_message_1' }] }
+              : { message_uuid: ['provider_message_1'] };
+        return Response.json(body, {
+          status: 200,
+          headers: { 'request-id': `req_${provider}_support_01` },
+        });
+      }) as unknown as typeof fetch;
+      const incidents: unknown[] = [];
+      const transport = buildSmsTransport(provider, 'provider-credential', {
+        onExactRequestId: (event) => {
+          incidents.push(event);
+        },
+      });
+      const input: SendSmsInput = {
+        tenantId: 'tenant_01',
+        organizationId: 'org_01',
+        brandId: 'brand_01',
+        jobId: 'job_01',
+        deliveryId: 'delivery_01',
+        from: '+15550000001',
+        to: '+15550000002',
+        body: 'Tixkit update',
+        providerRouteId: 'route_01',
+        idempotencyKey: 'sms_idempotency_01',
+        notificationType: 'transactional',
+      };
+
+      await expect(transport.send(input)).resolves.toMatchObject({ provider });
+      expect(incidents).toEqual([
+        expect.objectContaining({
+          dependency: provider,
+          exactRequestId: `req_${provider}_support_01`,
+          scope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+        }),
+      ]);
+      expect(Object.isFrozen((incidents[0] as { scope: object }).scope)).toBe(true);
+    },
+  );
+});
+
 describe('buildEmailTransport', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -336,13 +434,35 @@ describe('buildEmailTransport', () => {
 });
 
 describe('createDefaultEmailTransport', () => {
+  const originalFetch = globalThis.fetch;
   afterEach(() => {
     vi.unstubAllEnvs();
+    globalThis.fetch = originalFetch;
   });
 
   it('prefers Resend when RESEND_API_KEY is set', () => {
     vi.stubEnv('RESEND_API_KEY', 're_test_key');
     expect(createDefaultEmailTransport()).toBeInstanceOf(ResendEmailTransport);
+  });
+
+  it('forwards the exact-ID callback through default Resend construction', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_test_key');
+    globalThis.fetch = vi.fn(async () =>
+      Response.json(
+        { id: 'email_default_1' },
+        { headers: { 'x-resend-request-id': 'req_default_resend_01' } },
+      ),
+    ) as unknown as typeof fetch;
+    const incident = vi.fn();
+
+    await createDefaultEmailTransport({ onExactRequestId: incident }).send(baseInput());
+
+    expect(incident).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exactRequestId: 'req_default_resend_01',
+        scope: { tenantId: 'tnt_1', organizationId: 'org_1' },
+      }),
+    );
   });
 
   it('falls back to capture without RESEND_API_KEY', () => {

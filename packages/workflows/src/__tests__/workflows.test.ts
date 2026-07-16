@@ -255,6 +255,7 @@ const defaultActivities = {
   enforcePrivacyRetentionActivity: async () =>
     okResult({ inspectedCount: 0, repairedCount: 0, skippedCount: 0 }),
   eraseExpiredAgentMemoryActivity: async () => ({ erasedCount: 0 }),
+  eraseExpiredProviderIncidentEvidenceActivity: async () => ({ erasedCount: 0 }),
   reconcilePaymentActivity: async () => okResult({ orderId: 'ord_1', status: 'paid' }),
   reconcileRefundActivity: async () => okResult({ orderId: 'ord_1', status: 'refunded' }),
   reconcileDisputeActivity: async () => okResult({ orderId: 'ord_1', status: 'disputed' }),
@@ -2073,6 +2074,10 @@ describe('holdExpirationWorkflow', () => {
       calls.push('memory');
       return { erasedCount: 1 };
     });
+    setActivity('eraseExpiredProviderIncidentEvidenceActivity', async () => {
+      calls.push('provider-incidents');
+      return { erasedCount: 1 };
+    });
 
     await holdExpirationWorkflow({ maxIterations: 2, tickIntervalSeconds: 15 });
 
@@ -2082,11 +2087,13 @@ describe('holdExpirationWorkflow', () => {
       'waitlist',
       'privacy',
       'memory',
+      'provider-incidents',
       'holds',
       'sessions',
       'waitlist',
       'privacy',
       'memory',
+      'provider-incidents',
     ]);
     expect(mockState.sleeps).toEqual(['15 seconds']);
     expect(mockState.continueAsNewInputs).toEqual([]);
@@ -2285,6 +2292,42 @@ describe('holdExpirationWorkflow', () => {
 
     await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
       'unexpected workflow boundary failure',
+    );
+  });
+
+  it('survives exhausted provider evidence retention retries and invokes deletion next tick', async () => {
+    let attempts = 0;
+    setActivity('eraseExpiredProviderIncidentEvidenceActivity', async () => {
+      attempts += 1;
+      if (attempts === 1) throw exhaustedActivityFailure('database unavailable');
+      return { erasedCount: 1 };
+    });
+
+    await expect(
+      holdExpirationWorkflow({ maxIterations: 2, tickIntervalSeconds: 15 }),
+    ).resolves.toBeUndefined();
+    expect(attempts).toBe(2);
+  });
+
+  it('propagates workflow cancellation during provider evidence retention', async () => {
+    setActivity('eraseExpiredProviderIncidentEvidenceActivity', async () => {
+      const error = new Error('cancelled');
+      error.name = 'CancelledFailure';
+      throw error;
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toMatchObject({
+      name: 'CancelledFailure',
+    });
+  });
+
+  it('propagates unexpected provider evidence retention failures', async () => {
+    setActivity('eraseExpiredProviderIncidentEvidenceActivity', async () => {
+      throw new TypeError('unexpected provider retention boundary failure');
+    });
+
+    await expect(holdExpirationWorkflow({ maxIterations: 1 })).rejects.toThrow(
+      'unexpected provider retention boundary failure',
     );
   });
 });

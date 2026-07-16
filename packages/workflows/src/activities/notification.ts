@@ -21,7 +21,7 @@ import {
   UnsupportedProviderRouteError,
   validateProviderFields,
 } from '@tixkit/email-transport';
-import { ProviderOperationError } from '@tixkit/provider-clients';
+import { ProviderOperationError, type ProviderClientRuntime } from '@tixkit/provider-clients';
 import {
   createDefaultEmailTemplateForKey,
   normalizeEmailTemplateDocument,
@@ -36,7 +36,7 @@ import {
 import { ulid } from 'ulid';
 import type { WorkflowActivityResult } from '../shared/types.js';
 import { okResult, errResult } from '../shared/types.js';
-import { getActivityDb } from './activity-clients.js';
+import { getActivityDb, getActivityProviderClientRuntime } from './activity-clients.js';
 
 type SendRenderOutput = {
   subject?: string;
@@ -382,8 +382,23 @@ function buildTransport(
   providerType: string,
   credentialsRef: string,
   senderDomain: string,
+  runtime: ProviderClientRuntime,
 ): EmailTransport & { providerName?: string } {
-  return buildEmailTransport(providerType, credentialsRef, senderDomain);
+  return buildEmailTransport(providerType, credentialsRef, senderDomain, runtime);
+}
+
+async function organizationIdForBrand(
+  db: Database,
+  tenantId: string,
+  brandId: string,
+): Promise<string | undefined> {
+  const brand = await db
+    .selectFrom('brands')
+    .select('organization_id')
+    .where('tenant_id', '=', tenantId)
+    .where('id', '=', brandId)
+    .executeTakeFirst();
+  return brand?.organization_id;
 }
 
 export async function sendEmailActivity(input: {
@@ -400,6 +415,10 @@ export async function sendEmailActivity(input: {
     if (!job) {
       return errResult('EMAIL_JOB_NOT_FOUND', 'Email job not found', false);
     }
+    const organizationId = await organizationIdForBrand(db, job.tenant_id, job.brand_id);
+    if (!organizationId)
+      return errResult('EMAIL_BRAND_SCOPE_INVALID', 'Email job brand scope is invalid', false);
+    const providerClientRuntime = getActivityProviderClientRuntime();
 
     const variables = JSON.parse(job.variables as string) as Record<string, unknown>;
     const notificationType =
@@ -435,11 +454,11 @@ export async function sendEmailActivity(input: {
       const fromEmail =
         process.env.RESEND_FROM_EMAIL ?? process.env.EMAIL_FROM_EMAIL ?? `noreply@${senderDomain}`;
       const fromName = process.env.RESEND_FROM_NAME ?? process.env.EMAIL_FROM_NAME ?? 'Tixkit';
-      const transport = createDefaultEmailTransport();
+      const transport = createDefaultEmailTransport(providerClientRuntime);
       const deliveryId = `emd_${ulid()}`;
       const result = await transport.send({
         tenantId: job.tenant_id,
-        organizationId: job.tenant_id,
+        organizationId,
         brandId: job.brand_id,
         templateKey: job.template_key,
         templateVersionId: job.template_version_id,
@@ -517,7 +536,12 @@ export async function sendEmailActivity(input: {
 
     const selectorRoutes = eligibleRoutePairs.map(({ route, senderIdentity }) => ({
       id: route.id,
-      transport: buildTransport(route.provider_type, route.credentials_ref, route.sender_domain),
+      transport: buildTransport(
+        route.provider_type,
+        route.credentials_ref,
+        route.sender_domain,
+        providerClientRuntime,
+      ),
       providerType: route.provider_type,
       senderIdentity,
       priority: route.priority,
@@ -560,7 +584,7 @@ export async function sendEmailActivity(input: {
     const deliveryId = `emd_${ulid()}`;
     const sendInput = {
       tenantId: job.tenant_id,
-      organizationId: job.tenant_id,
+      organizationId,
       brandId: job.brand_id,
       templateKey: job.template_key,
       templateVersionId: job.template_version_id,
@@ -648,6 +672,10 @@ export async function sendSmsActivity(input: {
     if (!job) {
       return errResult('SMS_JOB_NOT_FOUND', 'SMS job not found', false);
     }
+    const organizationId = await organizationIdForBrand(db, job.tenant_id, job.brand_id);
+    if (!organizationId)
+      return errResult('SMS_BRAND_SCOPE_INVALID', 'SMS job brand scope is invalid', false);
+    const providerClientRuntime = getActivityProviderClientRuntime();
 
     const variables = parseJobVariables(job.variables);
     const contentVersionId =
@@ -701,7 +729,11 @@ export async function sendSmsActivity(input: {
         }
         return {
           id: route.id,
-          transport: buildSmsTransport(route.provider_type, route.credentials_ref),
+          transport: buildSmsTransport(
+            route.provider_type,
+            route.credentials_ref,
+            providerClientRuntime,
+          ),
           priority: route.priority,
           isFallback: route.is_fallback,
           allowedCategories,
@@ -746,7 +778,7 @@ export async function sendSmsActivity(input: {
     const deliveryId = `smd_${ulid()}`;
     const result = await transport.send({
       tenantId: job.tenant_id,
-      organizationId: job.tenant_id,
+      organizationId,
       brandId: job.brand_id,
       jobId: input.jobId,
       deliveryId,

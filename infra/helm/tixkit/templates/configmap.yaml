@@ -24,6 +24,11 @@ data:
   CORS_ALLOWED_ORIGINS: {{ join "," .Values.global.corsAllowedOrigins | quote }}
   CUSTOM_DOMAIN_CORS_ENABLED: {{ .Values.global.customDomainCorsEnabled | quote }}
   TRUST_PROXY: {{ .Values.api.trustProxy | quote }}
+  PROVIDER_INCIDENT_SINK_ENABLED: {{ .Values.providerIncidentEvidence.enabled | quote }}
+  PROVIDER_INCIDENT_CAPTURE_UNTIL: {{ .Values.providerIncidentEvidence.captureUntil | quote }}
+  PROVIDER_INCIDENT_RETENTION_MINUTES: {{ .Values.providerIncidentEvidence.retentionMinutes | quote }}
+  PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT: {{ .Values.providerIncidentEvidence.maxActivePerTenant | quote }}
+  PROVIDER_INCIDENT_ACTIVE_KEY_ID: {{ .Values.providerIncidentEvidence.activeKeyId | quote }}
   TEMPORAL_NAMESPACE: {{ .Values.secrets.temporalNamespace | quote }}
   TEMPORAL_TASK_QUEUE: {{ .Values.secrets.temporalTaskQueue | quote }}
   TEMPORAL_TLS_ENABLED: {{ .Values.secrets.temporalTlsEnabled | default false | quote }}

@@ -306,6 +306,104 @@ export async function validateEnvFile(
     }
   }
 
+  const incidentEnabled = parsed.entries.get('PROVIDER_INCIDENT_SINK_ENABLED')?.toLowerCase();
+  if (incidentEnabled !== undefined && !['true', 'false'].includes(incidentEnabled)) {
+    issues.push({
+      variable: 'PROVIDER_INCIDENT_SINK_ENABLED',
+      severity: 'error',
+      mode: detectedMode,
+      message: 'Provider incident evidence must be explicitly true or false.',
+      guide: GUIDES.deploy,
+    });
+  }
+  if (incidentEnabled === 'true') {
+    const requiredIncidentValues = [
+      'PROVIDER_INCIDENT_CAPTURE_UNTIL',
+      'PROVIDER_INCIDENT_RETENTION_MINUTES',
+      'PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT',
+      'PROVIDER_INCIDENT_ACTIVE_KEY_ID',
+      'PROVIDER_INCIDENT_KEYRING_JSON',
+    ];
+    for (const variable of requiredIncidentValues) {
+      if (isPlaceholderValue(parsed.entries.get(variable) ?? '')) {
+        issues.push({
+          variable,
+          severity: 'error',
+          mode: detectedMode,
+          message: `${variable} is required when provider incident evidence is enabled.`,
+          guide: GUIDES.deploy,
+        });
+      }
+    }
+    const retention = Number(parsed.entries.get('PROVIDER_INCIDENT_RETENTION_MINUTES'));
+    if (!Number.isSafeInteger(retention) || retention < 1 || retention > 1440) {
+      issues.push({
+        variable: 'PROVIDER_INCIDENT_RETENTION_MINUTES',
+        severity: 'error',
+        mode: detectedMode,
+        message: 'Provider incident retention must be an integer from 1 through 1440 minutes.',
+        guide: GUIDES.deploy,
+      });
+    }
+    const maximum = Number(parsed.entries.get('PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT'));
+    if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 1000) {
+      issues.push({
+        variable: 'PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT',
+        severity: 'error',
+        mode: detectedMode,
+        message: 'Provider incident active evidence cap must be an integer from 1 through 1000.',
+        guide: GUIDES.deploy,
+      });
+    }
+    const captureUntil = Date.parse(parsed.entries.get('PROVIDER_INCIDENT_CAPTURE_UNTIL') ?? '');
+    if (!Number.isFinite(captureUntil) || captureUntil > Date.now() + 24 * 60 * 60 * 1_000) {
+      issues.push({
+        variable: 'PROVIDER_INCIDENT_CAPTURE_UNTIL',
+        severity: 'error',
+        mode: detectedMode,
+        message: 'Provider incident capture window must be valid and at most 24 hours ahead.',
+        guide: GUIDES.deploy,
+      });
+    }
+    try {
+      const keyring = JSON.parse(parsed.entries.get('PROVIDER_INCIDENT_KEYRING_JSON') ?? '');
+      const activeKeyId = parsed.entries.get('PROVIDER_INCIDENT_ACTIVE_KEY_ID') ?? '';
+      const keyIdPattern = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/u;
+      if (
+        !keyring ||
+        typeof keyring !== 'object' ||
+        Array.isArray(keyring) ||
+        Object.keys(keyring).length === 0 ||
+        !keyIdPattern.test(activeKeyId) ||
+        Buffer.byteLength(activeKeyId, 'utf8') > 64 ||
+        !Object.hasOwn(keyring, activeKeyId)
+      ) {
+        throw new Error('invalid keyring');
+      }
+      for (const [keyId, encoded] of Object.entries(keyring)) {
+        if (
+          !keyIdPattern.test(keyId) ||
+          Buffer.byteLength(keyId, 'utf8') > 64 ||
+          typeof encoded !== 'string'
+        ) {
+          throw new Error('invalid keyring entry');
+        }
+        const key = Buffer.from(encoded, 'base64');
+        if (key.byteLength !== 32 || key.toString('base64') !== encoded)
+          throw new Error('invalid key');
+      }
+    } catch {
+      issues.push({
+        variable: 'PROVIDER_INCIDENT_KEYRING_JSON',
+        severity: 'error',
+        mode: detectedMode,
+        message:
+          'Provider incident keyring must contain only valid key IDs and canonical base64 32-byte keys, including the active key.',
+        guide: GUIDES.deploy,
+      });
+    }
+  }
+
   // Warn when signing secrets are present but look like placeholders in non-production modes.
   for (const secretVar of ['QR_SIGNING_SECRET', 'OFFLINE_MANIFEST_SIGNING_KEY']) {
     const value = parsed.entries.get(secretVar);

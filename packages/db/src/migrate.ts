@@ -88,6 +88,7 @@ import { AgentPlansMigration } from './migrations/0084_agent_plans.js';
 import { AgentExecutionPlanBindingMigration } from './migrations/0085_agent_execution_plan_binding.js';
 import { AgentActionResultsMigration } from './migrations/0086_agent_action_results.js';
 import { DashboardActionRevisionsMigration } from './migrations/0087_dashboard_action_revisions.js';
+import { ProviderIncidentEvidenceMigration } from './migrations/0088_provider_incident_evidence.js';
 
 const INITIAL_MIGRATION_NAME = '0001_initial';
 const MIGRATION_TABLE = 'kysely_migration';
@@ -190,6 +191,7 @@ const ALL_SCHEMA_TABLES = [
   'access_rule_redemptions',
   'event_readiness_acknowledgements',
   'dashboard_action_revisions',
+  'provider_incident_evidence',
   'sandbox_environments',
   'historical_check_ins',
   'historical_financial_snapshots',
@@ -352,6 +354,7 @@ export class TixkitMigrationProvider implements MigrationProvider {
       '0085_agent_execution_plan_binding': AgentExecutionPlanBindingMigration,
       '0086_agent_action_results': AgentActionResultsMigration,
       '0087_dashboard_action_revisions': DashboardActionRevisionsMigration,
+      '0088_provider_incident_evidence': ProviderIncidentEvidenceMigration,
     };
   }
 }

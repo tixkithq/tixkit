@@ -500,7 +500,9 @@ export function negativeAuthorizationEvidenceForRoutes(
         sideEffectAssertions: [...contract.sideEffectAssertions],
         source: contract.path.startsWith('/events/')
           ? 'event-route-authorization-db.integration.test.ts'
-          : 'order-route-authorization-db.integration.test.ts',
+          : contract.path.startsWith('/orders/')
+            ? 'order-route-authorization-db.integration.test.ts'
+            : 'provider-incident-route-authorization-db.integration.test.ts',
       });
     }
     evidenceByRoute.set(routeKey, evidence);

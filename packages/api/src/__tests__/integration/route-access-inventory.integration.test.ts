@@ -10,6 +10,7 @@ import { buildAuthenticatedRouteTestApp, buildRouteManifest } from './route-mani
 import {
   EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   type RouteAuthorizationDenialContract,
 } from './route-authorization-contracts.js';
@@ -82,7 +83,8 @@ describe('API route access inventory (C-123)', () => {
     expect(inventory.schemaVersion).toBe(3);
     expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(13);
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
-    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(18);
+    expect(PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(2);
+    expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(20);
     expect(Object.isFrozen(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS)).toBe(true);
     expect(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.every(
@@ -93,8 +95,8 @@ describe('API route access inventory (C-123)', () => {
           Object.isFrozen(contract.sideEffectAssertions),
       ),
     ).toBe(true);
-    expect(coveredRoutes).toHaveLength(18);
-    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(46);
+    expect(coveredRoutes).toHaveLength(20);
+    expect(coveredRoutes.flatMap((route) => route.negativeAuthorizationEvidence)).toHaveLength(50);
     expect(
       inventory.routes.find((route) => route.path === '/health')?.negativeAuthorizationEvidence,
     ).toEqual([]);

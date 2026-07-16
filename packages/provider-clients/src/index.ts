@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { STATUS_CODES } from 'node:http';
 import { SpanKind, SpanStatusCode, trace, type Span } from '@opentelemetry/api';
+import { validateExactProviderRequestId } from './incident-diagnostics.js';
 
 const DEFAULT_DEADLINE_MS = 10_000;
 const DEFAULT_BODY_PREVIEW_BYTES = 1_024;
@@ -70,11 +71,25 @@ export interface ProviderDiagnosticEvent {
   envelope: ProviderDiagnosticEnvelope;
 }
 
+export interface ProviderIncidentScope {
+  tenantId: string;
+  organizationId: string;
+}
+
+export interface ProviderExactRequestIdEvent {
+  dependency: string;
+  operation: string;
+  exactRequestId: string;
+  requestIdHash: string;
+  scope: ProviderIncidentScope;
+}
+
 export interface ProviderClientRuntime {
   deadlineMs?: number;
   fetch?: typeof globalThis.fetch;
   onTelemetry?: (event: Readonly<ProviderTelemetryEvent>) => void;
   onDiagnostic?: (event: Readonly<ProviderDiagnosticEvent>) => void | Promise<void>;
+  onExactRequestId?: (event: Readonly<ProviderExactRequestIdEvent>) => void | Promise<void>;
 }
 
 export class ProviderOperationError extends Error {
@@ -156,6 +171,7 @@ export interface ProviderHttpRequest<T> extends ProviderClientRuntime {
   maxResponseBytes?: number;
   parse?: (body: unknown) => T;
   requestIdHeaders?: readonly string[];
+  incidentScope?: ProviderIncidentScope;
 }
 
 export interface ProviderHttpResult<T> {
@@ -234,7 +250,16 @@ export async function executeProviderHttp<T = Record<string, unknown>>(
       );
     }
 
-    const providerRequestId = extractProviderRequestId(response.headers, request.requestIdHeaders);
+    const rawProviderRequestId = extractProviderRequestIdValue(
+      response.headers,
+      request.requestIdHeaders,
+    );
+    const providerRequestId =
+      rawProviderRequestId === undefined
+        ? undefined
+        : `sha256:${createHash('sha256').update(rawProviderRequestId).digest('hex')}`;
+    const exactProviderRequestId = safeExactProviderRequestId(rawProviderRequestId);
+    emitExactRequestId(request, exactProviderRequestId, providerRequestId);
     const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
     let responseBody: BoundedResponseBody;
     try {
@@ -662,6 +687,14 @@ export function extractProviderRequestId(
   headers: Headers,
   preferred: readonly string[] = [],
 ): string | undefined {
+  const raw = extractProviderRequestIdValue(headers, preferred);
+  return raw === undefined ? undefined : `sha256:${createHash('sha256').update(raw).digest('hex')}`;
+}
+
+function extractProviderRequestIdValue(
+  headers: Headers,
+  preferred: readonly string[] = [],
+): string | undefined {
   const candidates = [
     ...preferred,
     'request-id',
@@ -673,9 +706,19 @@ export function extractProviderRequestId(
   ];
   for (const name of new Set(candidates.map((candidate) => candidate.toLowerCase()))) {
     const value = headers.get(name)?.trim();
-    if (value) return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+    if (!value) continue;
+    return value;
   }
   return undefined;
+}
+
+function safeExactProviderRequestId(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return validateExactProviderRequestId(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export function sanitizeBodyPreview(rawBody: string, limit = DEFAULT_BODY_PREVIEW_BYTES): string {
@@ -769,6 +812,34 @@ function emitDiagnostic(request: ProviderClientRuntime, event: ProviderDiagnosti
   }
 }
 
+function emitExactRequestId(
+  request: ProviderHttpRequest<unknown>,
+  exactRequestId: string | undefined,
+  requestIdHash: string | undefined,
+): void {
+  if (
+    exactRequestId === undefined ||
+    requestIdHash === undefined ||
+    request.incidentScope === undefined ||
+    request.onExactRequestId === undefined
+  )
+    return;
+  try {
+    const callback = request.onExactRequestId(
+      Object.freeze({
+        dependency: request.dependency,
+        operation: request.operation,
+        exactRequestId,
+        requestIdHash,
+        scope: Object.freeze({ ...request.incidentScope }),
+      }),
+    );
+    if (callback) void Promise.resolve(callback).catch(() => undefined);
+  } catch {
+    // Privileged incident capture is best-effort and must not alter provider semantics.
+  }
+}
+
 function elapsed(startedAt: number): number {
   return Math.max(0, Math.round((performance.now() - startedAt) * 1_000) / 1_000);
 }
@@ -779,6 +850,7 @@ export interface SmsMessageInput {
   body: string;
   idempotencyKey: string;
   webhookUrl?: string;
+  incidentScope?: ProviderIncidentScope;
 }
 
 export interface ProviderMessageResult {
@@ -811,6 +883,7 @@ export class TelnyxMessagingClient {
       },
       idempotency: { key: input.idempotencyKey },
       requestIdHeaders: ['x-telnyx-request-id'],
+      incidentScope: input.incidentScope,
       body: JSON.stringify({
         from: input.from,
         to: input.to,
@@ -861,6 +934,7 @@ export class TwilioMessagingClient {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       idempotency: { key: input.idempotencyKey },
+      incidentScope: input.incidentScope,
       body: form,
       parse: twilioMessageResult,
     });
@@ -906,6 +980,7 @@ export class VonageMessagingClient {
         key: input.idempotencyKey,
         header: 'X-Tixkit-Idempotency-Key',
       },
+      incidentScope: input.incidentScope,
       body: form,
       parse: vonageMessageResult,
     });
@@ -946,6 +1021,7 @@ export class PlivoMessagingClient {
         key: input.idempotencyKey,
         header: 'X-Tixkit-Idempotency-Key',
       },
+      incidentScope: input.incidentScope,
       body: JSON.stringify({
         src: input.from,
         dst: input.to,
@@ -973,6 +1049,7 @@ export interface ResendEmailInput {
     content: string;
     contentType: string;
   }>;
+  incidentScope?: ProviderIncidentScope;
 }
 
 export class ResendMessagingClient {
@@ -1017,6 +1094,7 @@ export class ResendMessagingClient {
       },
       idempotency: { key: input.idempotencyKey },
       requestIdHeaders: ['x-resend-request-id'],
+      incidentScope: input.incidentScope,
       body: JSON.stringify(payload),
       parse: resendMessageResult,
     });
@@ -1197,3 +1275,4 @@ function requireCredential(value: string, dependency: string, operation: string)
 }
 
 export * from './stripe.js';
+export * from './incident-diagnostics.js';

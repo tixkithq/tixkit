@@ -50,6 +50,17 @@ const { eraseExpiredAgentMemoryActivity } = proxyActivities<{
   },
 });
 
+const { eraseExpiredProviderIncidentEvidenceActivity } = proxyActivities<{
+  eraseExpiredProviderIncidentEvidenceActivity(): Promise<{ erasedCount: number }>;
+}>({
+  startToCloseTimeout: '60 seconds',
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: '5 seconds',
+    backoffCoefficient: 2,
+  },
+});
+
 export type HoldExpirationWorkflowInput = {
   version?: number;
   tickIntervalSeconds?: number;
@@ -112,6 +123,15 @@ export async function holdExpirationWorkflow(input?: HoldExpirationWorkflowInput
         if (isCancellation(error) || !(error instanceof ActivityFailure)) throw error;
         // Exhausted activity retries must not terminate the only recurring maintenance workflow.
         // The next deterministic tick invokes a fresh activity run and preserves eventual erasure.
+      }
+    }
+    if (patched('provider-incident-retention-v1')) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- encrypted provider evidence expires on every deterministic maintenance tick.
+        await eraseExpiredProviderIncidentEvidenceActivity();
+      } catch (error) {
+        if (isCancellation(error) || !(error instanceof ActivityFailure)) throw error;
+        // The next tick invokes a fresh activity run and preserves eventual deletion.
       }
     }
     iterations += 1;

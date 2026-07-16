@@ -95,3 +95,11 @@ export {
   type PersistedAgentPlan,
 } from './agent-plan.js';
 export { AgentMemoryRepository, type AgentMemoryAuditInput } from './agent-memory.js';
+export {
+  ProviderIncidentEvidenceRepository,
+  ProviderIncidentCapacityError,
+  PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT,
+  PROVIDER_INCIDENT_SWEEP_MAX_BATCH,
+  type EncryptedProviderIncidentEvidence,
+  type ProviderIncidentRevealAudit,
+} from './provider-incident-evidence.js';

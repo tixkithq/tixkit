@@ -135,6 +135,55 @@ describe('validateEnvFile', () => {
     expect(variables).toContain('DATABASE_URL_MYSQL');
   });
 
+  it('fails closed for incomplete provider incident evidence and accepts a bounded keyring', async () => {
+    const incompletePath = await writeEnvFile(
+      makeCompleteEnv({ PROVIDER_INCIDENT_SINK_ENABLED: 'true' }),
+    );
+    const incomplete = await validateEnvFile(incompletePath, 'local');
+    expect(incomplete.ok).toBe(false);
+    expect(incomplete.issues.map((issue) => issue.variable)).toContain(
+      'PROVIDER_INCIDENT_KEYRING_JSON',
+    );
+
+    const completePath = await writeEnvFile(
+      makeCompleteEnv({
+        PROVIDER_INCIDENT_SINK_ENABLED: 'true',
+        PROVIDER_INCIDENT_CAPTURE_UNTIL: new Date(Date.now() + 60_000).toISOString(),
+        PROVIDER_INCIDENT_RETENTION_MINUTES: '60',
+        PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT: '100',
+        PROVIDER_INCIDENT_ACTIVE_KEY_ID: 'incident-test',
+        PROVIDER_INCIDENT_KEYRING_JSON: JSON.stringify({
+          'incident-test': Buffer.alloc(32, 3).toString('base64'),
+        }),
+      }),
+    );
+    await expect(validateEnvFile(completePath, 'local')).resolves.toMatchObject({ ok: true });
+  });
+
+  it('rejects a malformed retained provider incident key even when the active key is valid', async () => {
+    const path = await writeEnvFile(
+      makeCompleteEnv({
+        PROVIDER_INCIDENT_SINK_ENABLED: 'true',
+        PROVIDER_INCIDENT_CAPTURE_UNTIL: new Date(Date.now() + 60_000).toISOString(),
+        PROVIDER_INCIDENT_RETENTION_MINUTES: '60',
+        PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT: '100',
+        PROVIDER_INCIDENT_ACTIVE_KEY_ID: 'incident-current',
+        PROVIDER_INCIDENT_KEYRING_JSON: JSON.stringify({
+          'incident-current': Buffer.alloc(32, 3).toString('base64'),
+          'incident-retained': Buffer.alloc(31, 4).toString('base64'),
+        }),
+      }),
+    );
+
+    const result = await validateEnvFile(path, 'local');
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variable: 'PROVIDER_INCIDENT_KEYRING_JSON', severity: 'error' }),
+      ]),
+    );
+  });
+
   it('every rule has a message and a known required-for list', () => {
     for (const rule of ENV_RULES) {
       expect(rule.variable).toBeTruthy();

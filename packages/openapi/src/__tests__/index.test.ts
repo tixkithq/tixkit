@@ -128,7 +128,7 @@ describe('openApiSpec', () => {
     );
   });
   it('publishes the documented API lifecycle version', () => {
-    expect(openApiSpec.info.version).toBe('2026-08-11');
+    expect(openApiSpec.info.version).toBe('2026-08-12');
   });
 
   it('keeps the privacy-minimized RUM operation bound to the shared domain contract', () => {

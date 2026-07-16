@@ -43,6 +43,23 @@
 {{- if not (has .Values.secrets.s3ServerSideEncryption (list "none" "AES256")) -}}
 {{- fail "secrets.s3ServerSideEncryption must be none or AES256" -}}
 {{- end -}}
+{{- if .Values.providerIncidentEvidence.enabled -}}
+{{- if empty .Values.providerIncidentEvidence.captureUntil -}}
+{{- fail "provider incident evidence requires providerIncidentEvidence.captureUntil" -}}
+{{- end -}}
+{{- if empty .Values.providerIncidentEvidence.activeKeyId -}}
+{{- fail "provider incident evidence requires providerIncidentEvidence.activeKeyId" -}}
+{{- end -}}
+{{- if or (lt (int .Values.providerIncidentEvidence.retentionMinutes) 1) (gt (int .Values.providerIncidentEvidence.retentionMinutes) 1440) -}}
+{{- fail "providerIncidentEvidence.retentionMinutes must be between 1 and 1440" -}}
+{{- end -}}
+{{- if or (lt (int .Values.providerIncidentEvidence.maxActivePerTenant) 1) (gt (int .Values.providerIncidentEvidence.maxActivePerTenant) 1000) -}}
+{{- fail "providerIncidentEvidence.maxActivePerTenant must be between 1 and 1000" -}}
+{{- end -}}
+{{- if and (eq .Values.secrets.mode "create") (empty .Values.secrets.providerIncidentKeyringJson) -}}
+{{- fail "provider incident evidence requires secrets.providerIncidentKeyringJson in create mode" -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .Values.deploymentProfile "production" -}}
 {{- if ne .Values.uploads.malwareScanner.mode "clamav" -}}
 {{- fail "production profile requires uploads.malwareScanner.mode=clamav" -}}
@@ -248,6 +265,9 @@
 {{- $required := list $databaseKey "REDIS_URL" "TEMPORAL_ADDRESS" "STRIPE_SECRET_KEY" "STRIPE_WEBHOOK_SECRET" "STRIPE_PUBLISHABLE_KEY" "METRICS_BEARER_TOKEN" "DASHBOARD_CURSOR_SIGNING_KEY" -}}
 {{- if .Values.observability.enabled -}}
 {{- $required = concat $required (list "OTEL_EXPORTER_OTLP_ENDPOINT" "PROMETHEUS_PUSHGATEWAY_URL") -}}
+{{- end -}}
+{{- if .Values.providerIncidentEvidence.enabled -}}
+{{- $required = concat $required (list "PROVIDER_INCIDENT_KEYRING_JSON") -}}
 {{- end -}}
 {{- if eq .Values.auth.provider "clerk" -}}
 {{- $required = concat $required (list "CLERK_SECRET_KEY" "CLERK_PUBLISHABLE_KEY" "CLERK_WEBHOOK_SECRET") -}}

@@ -5,6 +5,7 @@ import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { okResult } from '../shared/types.js';
+import { executeProviderHttp } from '@tixkit/provider-clients';
 import { holdExpirationWorkflow } from '../workflows/hold-expiration.js';
 
 const temporalAddress = process.env.TEMPORAL_ADDRESS;
@@ -29,6 +30,8 @@ describeWithTemporal('agent memory retention on Temporal', () => {
     const taskQueue = `agent-memory-retention-proof-${suffix}`;
     const workflowId = `agent-memory-retention-proof:${suffix}`;
     const attempts: number[] = [];
+    const exactProviderRequestId = `req_temporal_local_${suffix}`;
+    const capturedRequestIds: string[] = [];
     const workflowsPath = fileURLToPath(new URL('../workflows/index.ts', import.meta.url));
     const worker = await Worker.create({
       connection: environment.nativeConnection,
@@ -57,6 +60,22 @@ describeWithTemporal('agent memory retention on Temporal', () => {
           if (attempt === 1) throw new Error('TRANSIENT_AGENT_MEMORY_RETENTION_FAILURE');
           return { erasedCount: 1 };
         },
+        async eraseExpiredProviderIncidentEvidenceActivity() {
+          await executeProviderHttp({
+            dependency: 'temporal-provider-proof',
+            operation: 'read-safe-proof',
+            method: 'GET',
+            url: 'https://provider.test/proof',
+            incidentScope: { tenantId: 'tenant_01', organizationId: 'org_01' },
+            onExactRequestId: (event) => {
+              capturedRequestIds.push(event.exactRequestId);
+            },
+            fetch: async () =>
+              Response.json({ ok: true }, { headers: { 'request-id': exactProviderRequestId } }),
+            parse: (value) => value as { ok: boolean },
+          });
+          return { erasedCount: 0 };
+        },
       },
     });
     let handle: WorkflowHandleWithStartDetails<typeof holdExpirationWorkflow> | undefined;
@@ -70,6 +89,8 @@ describeWithTemporal('agent memory retention on Temporal', () => {
       await worker.runUntil(() => handle!.result(), { promiseCompletionTimeout: '30 seconds' });
       expect(attempts).toEqual([1, 2]);
       const history = await handle.fetchHistory();
+      expect(capturedRequestIds).toEqual([exactProviderRequestId]);
+      expect(JSON.stringify(history)).not.toContain(exactProviderRequestId);
       await expect(
         Worker.runReplayHistory({ workflowsPath }, history, workflowId),
       ).resolves.toBeUndefined();

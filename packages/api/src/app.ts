@@ -37,6 +37,10 @@ import type { EmailTransport, SendSmsInput, SendSmsResult, SmsTransport } from '
 import type { ReadinessService } from './services/readiness.js';
 import type { DashboardActionService } from './services/dashboard-actions.js';
 import { createDefaultEmailTransport } from '@tixkit/email-transport';
+import {
+  createProviderIncidentEvidenceRuntime,
+  ProviderIncidentEvidenceService,
+} from './services/provider-incident-evidence.js';
 
 type CorsOriginCallback = (error: Error | null, allow: boolean) => void;
 type CorsOriginValidatorOptions = {
@@ -56,6 +60,7 @@ export type AppContext = {
   stripeGateway?: StripeGateway;
   readinessServiceFactory?: (db: Database) => ReadinessService;
   dashboardActionServiceFactory?: (db: Database) => DashboardActionService;
+  providerIncidentEvidenceService?: ProviderIncidentEvidenceService;
   portableDryRunAttestation?: PortableDryRunAttestationConfiguration;
   portableCutoverTrust?: PortableCutoverTrustConfiguration;
   eventDuplicationCheckpoint?: (input: {
@@ -429,7 +434,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   const pricingEngine = new PricingEngine();
   const inventoryService = new InventoryService(db);
   const qrService = new QrService();
-  const emailTransport = createDefaultEmailTransport();
+  const providerIncidentEvidenceRuntime = createProviderIncidentEvidenceRuntime(db);
+  const providerIncidentEvidenceService = providerIncidentEvidenceRuntime.service;
+  const emailTransport = createDefaultEmailTransport(
+    providerIncidentEvidenceRuntime.providerClientRuntime,
+  );
   const smsTransport = new ApiCaptureSmsTransport();
   const authService = createAuthProvider(
     {
@@ -456,6 +465,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     temporalClient,
     emailTransport,
     smsTransport,
+    providerIncidentEvidenceService,
   };
   app.decorate('context', ctx);
   registerErrorHandler(app);

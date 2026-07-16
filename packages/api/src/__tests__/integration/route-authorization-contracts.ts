@@ -119,7 +119,31 @@ export const ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   }),
 ]);
 
+export const PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'GET',
+    operationId: 'getProviderIncidents',
+    path: '/provider-incidents',
+    resourceParameters: [],
+    sideEffectAssertions: [],
+  }),
+  denialContract({
+    authorizedControl: { required: true, status: 200 },
+    denialResponse: { code: 'NOT_FOUND', status: 404 },
+    deniedBoundaries: ['tenant', 'organization'],
+    method: 'POST',
+    operationId: 'postProviderIncidentsByEvidenceIdReveal',
+    path: '/provider-incidents/{evidenceId}/reveal',
+    resourceParameters: ['evidenceId'],
+    sideEffectAssertions: ['persistence'],
+  }),
+]);
+
 export const ROUTE_AUTHORIZATION_DENIAL_CONTRACTS = Object.freeze([
   ...EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ...ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
+  ...PROVIDER_INCIDENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
 ]);

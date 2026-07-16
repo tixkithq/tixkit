@@ -640,7 +640,7 @@ const rawOpenApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'Tixkit API',
-    version: '2026-08-11',
+    version: '2026-08-12',
     description: 'Headless white-label event commerce platform API',
     license: { name: 'MIT' },
   },
@@ -5721,7 +5721,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260802: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-11, including bounded content, campaign preparation and event sales report reads.',
+          'Explicit agent identity for API 2026-08-12, including bounded content, campaign preparation and event sales report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5768,7 +5768,7 @@ const rawOpenApiSpec = {
       AgentPrincipal20260803: {
         type: 'object',
         description:
-          'Explicit agent identity for API 2026-08-11, including consent-aware campaign preparation and aggregate report reads.',
+          'Explicit agent identity for API 2026-08-12, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^agt_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -5875,7 +5875,7 @@ const rawOpenApiSpec = {
       AgentSession20260802: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-11 agent identity, including bounded content, campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-12 agent identity, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -5912,7 +5912,7 @@ const rawOpenApiSpec = {
       AgentSession20260803: {
         type: 'object',
         description:
-          'Live explicit API 2026-08-11 agent identity, including consent-aware campaign preparation and aggregate report reads.',
+          'Live explicit API 2026-08-12 agent identity, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           principal: {
             allOf: [
@@ -8198,7 +8198,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260802: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-11 authority grant, including bounded content, campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-12 authority grant, including bounded content, campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -8255,7 +8255,7 @@ const rawOpenApiSpec = {
       AgentDelegation20260803: {
         type: 'object',
         description:
-          'Time-bounded API 2026-08-11 authority grant, including consent-aware campaign preparation and aggregate report reads.',
+          'Time-bounded API 2026-08-12 authority grant, including consent-aware campaign preparation and aggregate report reads.',
         properties: {
           id: { type: 'string', pattern: '^dlg_[a-f0-9]{48}$' },
           tenantId: { type: 'string' },
@@ -21404,6 +21404,160 @@ const rawOpenApiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/provider-incidents/{evidenceId}/reveal': {
+      post: {
+        summary: 'Reveal an exact provider request ID for an authorized incident',
+        description:
+          'Short-retained support operation for a human owner or administrator. The reveal is tenant- and organization-scoped, audited transactionally before plaintext is returned, and unavailable unless the optional encrypted incident sink is active.',
+        'x-required-permissions': ['provider_incidents.read'],
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'evidenceId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', pattern: '^pie_[A-Z0-9]{26}$' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  organizationId: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 32,
+                    pattern: '^[A-Za-z0-9_-]+$',
+                  },
+                  reason: { type: 'string', minLength: 1, maxLength: 256 },
+                },
+                required: ['organizationId', 'reason'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Exact provider request ID revealed after the audit transaction commits',
+            headers: {
+              'Cache-Control': { schema: { type: 'string', const: 'no-store' } },
+            },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: { requestId: { type: 'string', minLength: 1, maxLength: 255 } },
+                  required: ['requestId'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid evidence ID, organization, or audit reason' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human owner or administrator permission required' },
+          '404': { description: 'Evidence unavailable in this tenant and organization scope' },
+          '429': { description: 'Reveal rate limit exceeded' },
+          '503': { description: 'Incident evidence disabled or secure reveal failed closed' },
+        },
+      },
+    },
+    '/provider-incidents': {
+      get: {
+        summary: 'Find active provider incident evidence by hash-only correlation',
+        description:
+          'Returns bounded non-plaintext metadata so an authorized human owner or administrator can locate short-retained incident evidence before an audited reveal.',
+        'x-required-permissions': ['provider_incidents.read'],
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            name: 'organizationId',
+            in: 'query',
+            required: true,
+            schema: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 32,
+              pattern: '^[A-Za-z0-9_-]+$',
+            },
+          },
+          {
+            name: 'correlationSha256',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Active evidence metadata in the exact tenant and organization scope',
+            headers: {
+              'Cache-Control': { schema: { type: 'string', const: 'no-store' } },
+            },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    evidence: {
+                      type: 'array',
+                      maxItems: 20,
+                      items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                          evidenceId: { type: 'string', pattern: '^pie_[A-Z0-9]{26}$' },
+                          provider: { type: 'string', maxLength: 64 },
+                          operation: { type: 'string', maxLength: 96 },
+                          correlationSha256: {
+                            type: 'string',
+                            pattern: '^sha256:[a-f0-9]{64}$',
+                          },
+                          capturedAt: { type: 'string', format: 'date-time' },
+                          expiresAt: { type: 'string', format: 'date-time' },
+                        },
+                        required: [
+                          'evidenceId',
+                          'provider',
+                          'operation',
+                          'correlationSha256',
+                          'capturedAt',
+                          'expiresAt',
+                        ],
+                      },
+                    },
+                  },
+                  required: ['evidence'],
+                },
+                example: {
+                  evidence: [
+                    {
+                      evidenceId: 'pie_01HZZZZZZZZZZZZZZZZZZZZZZZ',
+                      provider: 'resend',
+                      operation: 'send-email',
+                      correlationSha256:
+                        'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                      capturedAt: '2026-07-16T12:00:00.000Z',
+                      expiresAt: '2026-07-16T13:00:00.000Z',
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid organization or correlation hash' },
+          '401': { description: 'Authentication required' },
+          '403': { description: 'Human owner or administrator permission required' },
+          '429': { description: 'Evidence lookup rate limit exceeded' },
+          '503': { description: 'Incident evidence disabled or secure lookup failed closed' },
         },
       },
     },

@@ -1,0 +1,22 @@
+---
+title: API migration from 2026-08-11 to 2026-08-12
+description: Adopt the optional encrypted provider incident evidence contract.
+audience: [developer, operator]
+product_area: api
+content_type: reference
+status: beta
+owner: developer-platform
+last_verified: 2026-07-16
+prerequisites: [An integration using API version 2026-08-11]
+related: [/reference/api-versions, /self-hosting/configuration, /self-hosting/observability]
+---
+
+API version `2026-08-12` adds `GET /provider-incidents` and `POST /provider-incidents/{evidenceId}/reveal`. Existing operations and schemas are unchanged.
+
+The lookup accepts an `organizationId` and a `sha256:` provider correlation hash. It returns only active evidence metadata: the evidence ID, provider, operation, correlation hash, capture time, and expiry time. It never returns the exact provider request ID. Lookup is limited to 30 requests per minute and returns `Cache-Control: no-store`.
+
+Both operations are unavailable unless the optional encrypted provider incident sink is configured. They accept only a human user who is a current accepted owner or administrator of the exact organization and has an organization-scoped `provider_incidents.read` grant. API keys, agents, mobile devices, cross-organization grants, and stale role grants are denied.
+
+Exact provider request IDs are never included in normal logs, traces, API errors, or Temporal history. The reveal response is rate-limited, marked `Cache-Control: no-store`, and returned only after a tenant- and organization-scoped audit transaction commits. Evidence is encrypted with a dedicated rotatable keyring and expires within 24 hours.
+
+No client change is required unless you are building authorized incident-support tooling. Ordinary integrations should continue using the hash-only provider correlation value.

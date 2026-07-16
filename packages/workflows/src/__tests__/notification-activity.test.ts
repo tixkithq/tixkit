@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REACT_EMAIL_EDITOR_PACKAGE, createDefaultEmailTemplate } from '@tixkit/content-email';
 import { createDefaultSmsTemplate } from '@tixkit/content-message';
+import { hashExactProviderRequestId } from '@tixkit/provider-clients';
 import {
   MESSAGING_PROVIDER_EXTENSION_CONTRACT_VERSION,
   registerMessagingProviderExtension,
@@ -38,11 +39,17 @@ const dbState = vi.hoisted(() => ({
     sms_opt_in: true,
     revoked_at: null,
   } as Record<string, unknown> | undefined,
+  brand: {
+    id: 'brd_1',
+    tenant_id: 'tnt_1',
+    organization_id: 'org_1',
+  } as Record<string, unknown> | undefined,
   emailDeliveries: [] as Record<string, unknown>[],
   smsDeliveries: [] as Record<string, unknown>[],
   renderArtifacts: [] as Record<string, unknown>[],
   emailJobUpdates: [] as Record<string, unknown>[],
   smsJobUpdates: [] as Record<string, unknown>[],
+  providerIncidentCaptures: [] as Record<string, unknown>[],
   contentDocument: {
     id: 'cdoc_1',
     tenantId: 'tnt_1',
@@ -81,10 +88,12 @@ vi.mock('@tixkit/db', () => {
     destroy: dbState.destroy,
     selectFrom: (table: string) => {
       const query = {
+        select: () => query,
         selectAll: () => query,
         where: () => query,
         orderBy: () => query,
         executeTakeFirst: async () => {
+          if (table === 'brands') return dbState.brand;
           if (table === 'message_consents') return dbState.smsConsent;
           return undefined;
         },
@@ -191,6 +200,17 @@ vi.mock('@tixkit/db', () => {
     }
   }
 
+  class ProviderIncidentEvidenceRepository {
+    async capture(input: Record<string, unknown>) {
+      dbState.providerIncidentCaptures.push(input);
+      return input;
+    }
+
+    async revealWithAudit() {
+      return undefined;
+    }
+  }
+
   return {
     createDb: () => db,
     ContentRepository,
@@ -202,6 +222,7 @@ vi.mock('@tixkit/db', () => {
     SmsSenderIdentityRepository,
     SmsJobRepository,
     SmsDeliveryRepository,
+    ProviderIncidentEvidenceRepository,
   };
 });
 
@@ -263,11 +284,17 @@ describe('notification activity deliverability gating', () => {
       sms_opt_in: true,
       revoked_at: null,
     };
+    dbState.brand = {
+      id: 'brd_1',
+      tenant_id: 'tnt_1',
+      organization_id: 'org_1',
+    };
     dbState.emailDeliveries = [];
     dbState.smsDeliveries = [];
     dbState.renderArtifacts = [];
     dbState.emailJobUpdates = [];
     dbState.smsJobUpdates = [];
+    dbState.providerIncidentCaptures = [];
     dbState.contentDocument = {
       id: 'cdoc_1',
       tenantId: 'tnt_1',
@@ -689,6 +716,60 @@ describe('notification activity deliverability gating', () => {
     });
     expect(JSON.stringify(result)).not.toContain('buyer@example.com is invalid');
     expect(dbState.emailDeliveries).toHaveLength(0);
+  });
+
+  it('captures encrypted tenant-scoped provider request evidence outside workflow history', async () => {
+    const exactRequestId = 'req_resend_support_01';
+    vi.stubEnv('RESEND_API_KEY', 're_test_secret');
+    vi.stubEnv('PROVIDER_INCIDENT_SINK_ENABLED', 'true');
+    vi.stubEnv(
+      'PROVIDER_INCIDENT_CAPTURE_UNTIL',
+      new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+    );
+    vi.stubEnv('PROVIDER_INCIDENT_RETENTION_MINUTES', '30');
+    vi.stubEnv('PROVIDER_INCIDENT_MAX_ACTIVE_PER_TENANT', '100');
+    vi.stubEnv('PROVIDER_INCIDENT_ACTIVE_KEY_ID', 'incident-test');
+    vi.stubEnv(
+      'PROVIDER_INCIDENT_KEYRING_JSON',
+      JSON.stringify({ 'incident-test': Buffer.alloc(32, 7).toString('base64') }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          { id: 'resend_message_1' },
+          { status: 200, headers: { 'x-resend-request-id': exactRequestId } },
+        ),
+      ),
+    );
+    dbState.emailRoutes = [activeEmailRoute({ provider_type: 'resend' })];
+    dbState.emailSender = {
+      id: 'bsi_1',
+      brand_id: 'brd_1',
+      email: 'tickets@example.com',
+      name: 'Tixkit',
+      verified: true,
+    };
+
+    const result = await sendEmailActivity({
+      jobId: 'emj_1',
+      providerRouteId: 'epr_1',
+      subject: 'Update',
+      html: '<p>Update</p>',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dbState.providerIncidentCaptures).toHaveLength(1);
+    expect(dbState.providerIncidentCaptures[0]).toMatchObject({
+      tenantId: 'tnt_1',
+      organizationId: 'org_1',
+      provider: 'resend',
+      operation: 'send-email',
+      correlationSha256: hashExactProviderRequestId(exactRequestId),
+      encrypted: { keyId: 'incident-test' },
+    });
+    expect(JSON.stringify(dbState.providerIncidentCaptures)).not.toContain(exactRequestId);
+    expect(JSON.stringify(result)).not.toContain(exactRequestId);
   });
 
   it('fails terminally when a side-effecting provider response is ambiguous', async () => {

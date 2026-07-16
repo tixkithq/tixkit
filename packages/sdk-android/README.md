@@ -10,7 +10,7 @@ Android applications integrating Tixkit attendee or scanner experiences.
 
 ## Status
 
-Supported source package with Maven coordinates `com.tixkit:tixkit-android`; API version is `2026-08-11`.
+Supported source package with Maven coordinates `com.tixkit:tixkit-android`; API version is `2026-08-12`.
 
 ## Installation
 
@@ -42,7 +42,7 @@ Scanner device secrets belong in Keystore-backed storage and must never enter in
 
 ## Compatibility
 
-Android SDK API version `2026-08-11`; Maven coordinates and public Kotlin signatures define compatibility.
+Android SDK API version `2026-08-12`; Maven coordinates and public Kotlin signatures define compatibility.
 
 ## Related guides
 

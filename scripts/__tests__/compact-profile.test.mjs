@@ -36,6 +36,16 @@ import {
 const root = resolve(import.meta.dirname, '../..');
 const composePath = resolve(root, 'infra/compact/compose.yml');
 
+test('Compact forwards provider incident evidence settings with capture disabled by default', () => {
+  const composeSource = readFileSync(composePath, 'utf8');
+  assert.match(
+    composeSource,
+    /PROVIDER_INCIDENT_SINK_ENABLED: \$\{PROVIDER_INCIDENT_SINK_ENABLED:-false\}/u,
+  );
+  assert.match(composeSource, /PROVIDER_INCIDENT_KEYRING_JSON:/u);
+  assert.doesNotMatch(composeSource, /PROVIDER_INCIDENT_KEYRING_JSON: ['"]?\{/u);
+});
+
 test('Compact topology contains the complete single-database application stack', () => {
   const compose = parse(readFileSync(composePath, 'utf8'));
   const services = new Set(Object.keys(compose.services));

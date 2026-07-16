@@ -18,6 +18,7 @@ import { oauthAuthorizeRoutes, oauthTokenRoutes } from './modules/oauth.js';
 import { orderRoutes } from './modules/orders.js';
 import { portabilityRoutes } from './modules/portability.js';
 import { privacyRoutes } from './modules/privacy.js';
+import { providerIncidentRoutes } from './modules/provider-incidents.js';
 import { publicRoutes } from './modules/public.js';
 import { questionRoutes } from './modules/questions.js';
 import { readinessRoutes } from './modules/readiness.js';
@@ -79,6 +80,7 @@ export const authenticatedRouteModules: readonly RouteModuleRegistration[] = [
   { plugin: shortLinkRoutes, prefix: '/v1' },
   { plugin: reportingRoutes, prefix: '/v1' },
   { plugin: privacyRoutes, prefix: '/v1' },
+  { plugin: providerIncidentRoutes, prefix: '/v1' },
   { plugin: questionRoutes, prefix: '/v1' },
   { plugin: authRoutes, prefix: '/v1' },
   { plugin: uploadRoutes, prefix: '/v1' },

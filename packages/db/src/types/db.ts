@@ -2191,7 +2191,23 @@ export interface PortableImportCutoverProofTable {
   validated_at: Timestamp;
 }
 
+export interface ProviderIncidentEvidenceTable {
+  id: string;
+  tenant_id: string;
+  organization_id: string;
+  provider: string;
+  operation: string;
+  correlation_sha256: string;
+  key_id: string;
+  iv_b64: string;
+  tag_b64: string;
+  ciphertext_b64: string;
+  captured_at: Timestamp;
+  expires_at: Timestamp;
+}
+
 export interface DB {
+  provider_incident_evidence: ProviderIncidentEvidenceTable;
   agent_plans: AgentPlanTable;
   agent_plan_actions: AgentPlanActionTable;
   agent_plan_states: AgentPlanStateTable;
