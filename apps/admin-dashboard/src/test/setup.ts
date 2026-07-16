@@ -1,6 +1,17 @@
 import '@testing-library/jest-dom/vitest';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import { installTestRuntimeConfig } from './runtime-config';
+import {
+  initializeBrowserRuntimeConfig,
+  resetBrowserRuntimeConfigForTests,
+} from '@/lib/runtime-config-browser';
+
+beforeEach(() => {
+  const config = installTestRuntimeConfig();
+  resetBrowserRuntimeConfigForTests();
+  initializeBrowserRuntimeConfig(config);
+});
 
 afterEach(() => {
   cleanup();

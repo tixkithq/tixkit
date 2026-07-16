@@ -1,25 +1,24 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { installTestRuntimeConfig } from '@/test/runtime-config';
 import { dashboardDocUrl } from './docs';
 
-const originalOrigin = process.env.NEXT_PUBLIC_TIXKIT_DOCS_URL;
-
-afterEach(() => {
-  if (originalOrigin === undefined) delete process.env.NEXT_PUBLIC_TIXKIT_DOCS_URL;
-  else process.env.NEXT_PUBLIC_TIXKIT_DOCS_URL = originalOrigin;
-});
-
 describe('dashboardDocUrl', () => {
-  it('uses the local docs app by default', () => {
-    delete process.env.NEXT_PUBLIC_TIXKIT_DOCS_URL;
-    expect(dashboardDocUrl('apiReference')).toBe('http://localhost:3002/reference/api');
-  });
-
-  it('resolves configured production origins and rejects malformed configuration', () => {
-    process.env.NEXT_PUBLIC_TIXKIT_DOCS_URL = 'https://docs.example.test';
-    expect(dashboardDocUrl('webhookEvents')).toBe(
+  it('resolves the URL from the current document snapshot at call time', () => {
+    expect(dashboardDocUrl('apiReference', installTestRuntimeConfig())).toBe(
+      'http://localhost:3002/reference/api',
+    );
+    const config = installTestRuntimeConfig({ docsUrl: 'https://docs.example.test' });
+    expect(dashboardDocUrl('webhookEvents', config)).toBe(
       'https://docs.example.test/reference/webhook-events',
     );
-    process.env.NEXT_PUBLIC_TIXKIT_DOCS_URL = 'not a URL';
-    expect(() => dashboardDocUrl('apiReference')).toThrow('Invalid documentation origin');
+  });
+
+  it('uses a same-origin path when the optional docs origin is omitted', () => {
+    const config = installTestRuntimeConfig();
+    document.documentElement.removeAttribute('data-tixkit-docs-url');
+    expect(config.docsUrl).toBeDefined();
+    expect(dashboardDocUrl('apiReference', { ...config, docsUrl: undefined })).toBe(
+      '/reference/api',
+    );
   });
 });

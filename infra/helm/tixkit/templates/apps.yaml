@@ -114,11 +114,38 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.admin.port }}
-          envFrom:
-            - configMapRef:
-                name: {{ include "tixkit.fullname" . }}-config
-            - secretRef:
-                name: {{ .Values.secrets.name }}
+          env:
+            {{- range $key := list "NODE_ENV" "TIXKIT_DEPLOYMENT_PROFILE" "API_BASE_URL" "TIXKIT_CHECKOUT_URL" "S3_PUBLIC_ENDPOINT" "AUTH_PROVIDER" "ALLOW_INSECURE_LOCAL_ORIGINS" }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "tixkit.fullname" $ }}-config
+                  key: {{ $key }}
+            {{- end }}
+            {{- with .Values.global.docsUrl }}
+            - name: TIXKIT_DOCS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "tixkit.fullname" $ }}-config
+                  key: TIXKIT_DOCS_URL
+            {{- end }}
+            {{- with .Values.global.buildRevision }}
+            - name: TIXKIT_BUILD_REVISION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "tixkit.fullname" $ }}-config
+                  key: TIXKIT_BUILD_REVISION
+            {{- end }}
+            - name: CLERK_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: CLERK_PUBLISHABLE_KEY
+            - name: CLERK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: CLERK_SECRET_KEY
           readinessProbe:
             httpGet:
               path: {{ .Values.admin.probes.readiness.path | quote }}

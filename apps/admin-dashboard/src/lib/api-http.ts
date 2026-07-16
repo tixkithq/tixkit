@@ -1,4 +1,5 @@
 import { hasClerkKey } from '@/lib/auth';
+import { getBrowserRuntimeConfig } from '@/lib/runtime-config-browser';
 import type { AdminApiError, ApiResult } from './api';
 
 declare global {
@@ -13,11 +14,6 @@ declare global {
   }
 }
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_ADMIN_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'http://localhost:4000'
-).replace(/\/$/, '');
 const DEFAULT_TIMEOUT_MS = 15_000;
 const CLERK_TOKEN_WAIT_MS = 5_000;
 const TRANSIENT_RETRY_DELAY_MS = 250;
@@ -46,7 +42,7 @@ async function getClerkToken(): Promise<string | null> {
 
   // When no Clerk publishable key is configured, skip polling entirely.
   // This prevents the 5-second wait on every request in local dev mode.
-  if (!hasClerkKey()) return null;
+  if (!hasClerkKey(getBrowserRuntimeConfig())) return null;
 
   // Clerk is configured. Wait briefly for it to load if it hasn't yet.
   const startedAt = Date.now();
@@ -70,7 +66,7 @@ async function getClerkToken(): Promise<string | null> {
 }
 
 export function getAdminApiBaseUrl(): string {
-  return API_BASE_URL;
+  return getBrowserRuntimeConfig().apiBaseUrl;
 }
 
 function requestMethod(options: RequestInit): string {
@@ -119,8 +115,9 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
 function authenticatedEventMediaUrl(path: string): string | undefined {
   try {
-    const base = new URL(API_BASE_URL);
-    const resolved = new URL(path, `${API_BASE_URL}/`);
+    const apiBaseUrl = getAdminApiBaseUrl();
+    const base = new URL(apiBaseUrl);
+    const resolved = new URL(path, `${apiBaseUrl}/`);
     if (
       resolved.origin !== base.origin ||
       resolved.username ||
@@ -189,11 +186,11 @@ export async function requestBlob(
 }
 
 async function requestOnce<T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> {
-  const url = `${API_BASE_URL}${path}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
+    const url = `${getAdminApiBaseUrl()}${path}`;
     const headers = new Headers(options.headers);
     if (!headers.has('Content-Type') && typeof options.body === 'string') {
       headers.set('Content-Type', 'application/json');

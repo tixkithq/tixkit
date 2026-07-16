@@ -1,5 +1,8 @@
 deploymentProfile: evaluation
 
+global:
+  buildRevision: 0.1.0
+
 secrets:
   mode: create
   create: true

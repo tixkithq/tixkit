@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
-import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
+import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth-server';
 import { PermissionProvider } from '@/context/permission-provider';
 
 type PrincipalError = {
@@ -68,15 +68,16 @@ export default async function EditorLayout({ children }: { children: ReactNode }
     if (!userId) redirect('/sign-in');
 
     const token = await getToken();
-    const { adminApi, getAdminApiBaseUrl } = await import('@/lib/api');
-    const principalRes = await adminApi.getPrincipal(token ?? undefined);
+    if (!token) redirect('/sign-in?error=unauthorized');
+    const { getServerPrincipal, getServerAdminApiBaseUrl } = await import('@/lib/api-server');
+    const principalRes = await getServerPrincipal(token);
 
     if (!principalRes.ok) {
       console.error('Failed to fetch Tixkit principal:', principalRes.error);
       if (isApiUnavailable(principalRes.error)) {
         return (
           <ApiUnavailableState
-            apiBaseUrl={getAdminApiBaseUrl()}
+            apiBaseUrl={getServerAdminApiBaseUrl()}
             message={principalRes.error.message}
           />
         );

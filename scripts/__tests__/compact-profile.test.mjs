@@ -1064,40 +1064,47 @@ printf 'fixture\n'
   }
 });
 
-test('Compact-only insecure frontend build escape stays limited to loopback URLs', () => {
-  for (const dockerfile of ['Dockerfile.admin', 'Dockerfile.checkout']) {
-    const content = readFileSync(resolve(root, dockerfile), 'utf8');
-    assert.match(content, /ARG ALLOW_INSECURE_LOCAL_ORIGINS=0/u);
-    assert.match(content, /http:\/\/localhost:\*\|http:\/\/127\.0\.0\.1:\*/u);
-    assert.doesNotMatch(content, /http:\/\/0\.0\.0\.0/u);
-    assert.match(content, /node_modules/u);
-  }
-
+test('Compact injects admin deployment settings at runtime into a generic image', () => {
   const adminDockerfile = readFileSync(resolve(root, 'Dockerfile.admin'), 'utf8');
   const compactCompose = readFileSync(resolve(root, 'infra/compact/compose.yml'), 'utf8');
-  const adminNextConfig = readFileSync(
-    resolve(root, 'apps/admin-dashboard/next.config.mjs'),
+  const compose = parse(compactCompose);
+  const admin = compose.services.admin;
+
+  assert.equal(admin.build.args, undefined);
+  assert.equal(admin.environment.TIXKIT_DEPLOYMENT_PROFILE, 'compact');
+  assert.match(admin.environment.TIXKIT_BUILD_REVISION, /TIXKIT_VERSION.*local/u);
+  assert.match(admin.environment.API_BASE_URL, /localhost.*API_PORT/u);
+  assert.match(admin.environment.TIXKIT_CHECKOUT_URL, /localhost.*CHECKOUT_PORT/u);
+  assert.match(admin.environment.S3_PUBLIC_ENDPOINT, /S3_PUBLIC_ENDPOINT/u);
+  assert.equal(admin.environment.AUTH_PROVIDER, 'dev');
+  assert.equal(admin.environment.ALLOW_INSECURE_LOCAL_ORIGINS, '1');
+  assert.equal(
+    Object.keys(admin.environment).some((key) => key.startsWith('NEXT_PUBLIC_')),
+    false,
+  );
+  assert.match(admin.healthcheck.test.at(-1), /localhost:3001\/ready/u);
+  assert.doesNotMatch(adminDockerfile, /^(?:ARG|ENV) NEXT_PUBLIC_/mu);
+  assert.doesNotMatch(adminDockerfile, /ALLOW_INSECURE_LOCAL_ORIGINS/u);
+  assert.doesNotMatch(adminDockerfile, /^(?:ARG|ENV) TIXKIT_BUILD_REVISION/mu);
+  assert.doesNotMatch(adminDockerfile, /https?:\/\//u);
+  assert.match(adminDockerfile, /node_modules/u);
+
+  const releaseWorkflow = readFileSync(
+    resolve(root, '.github/workflows/public-artifact-release.yml'),
     'utf8',
   );
-  const adminEventLinks = readFileSync(
-    resolve(root, 'apps/admin-dashboard/src/lib/event-links.ts'),
-    'utf8',
-  );
-  assert.match(adminDockerfile, /ARG NEXT_PUBLIC_CHECKOUT_URL/u);
-  assert.match(adminDockerfile, /ENV NEXT_PUBLIC_CHECKOUT_URL=\$\{NEXT_PUBLIC_CHECKOUT_URL\}/u);
   assert.match(
-    adminDockerfile,
-    /if \[ -n "\$\{NEXT_PUBLIC_CHECKOUT_URL\}" \]; then case "\$\{NEXT_PUBLIC_CHECKOUT_URL\}" in http:\/\/localhost:\*\|http:\/\/127\.0\.0\.1:\*/u,
+    releaseWorkflow,
+    /docker build --file "\$DOCKERFILE" --tag "\$\{repository\}:\$\{candidate\}" \./u,
   );
-  assert.match(
-    compactCompose,
-    /NEXT_PUBLIC_CHECKOUT_URL: http:\/\/localhost:\$\{CHECKOUT_PORT:-3000\}/u,
-  );
-  assert.match(
-    adminNextConfig,
-    /process\.env\.NEXT_PUBLIC_CHECKOUT_URL \?\?\s+process\.env\.PUBLIC_CHECKOUT_URL/u,
-  );
-  assert.match(adminEventLinks, /process\.env\.NEXT_PUBLIC_CHECKOUT_URL/u);
+  assert.doesNotMatch(releaseWorkflow, /docker build[^\n]*--build-arg/u);
+});
+
+test('Checkout-only insecure build escape stays limited to loopback URLs', () => {
+  const content = readFileSync(resolve(root, 'Dockerfile.checkout'), 'utf8');
+  assert.match(content, /ARG ALLOW_INSECURE_LOCAL_ORIGINS=0/u);
+  assert.match(content, /http:\/\/localhost:\*\|http:\/\/127\.0\.0\.1:\*/u);
+  assert.doesNotMatch(content, /http:\/\/0\.0\.0\.0/u);
 });
 
 test('Compact application images install only their build dependency closures', () => {

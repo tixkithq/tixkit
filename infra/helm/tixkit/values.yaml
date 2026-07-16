@@ -6,6 +6,9 @@ global:
   environment: production
   apiBaseUrl: https://api.tixkit.com
   checkoutUrl: https://checkout.tixkit.com
+  docsUrl: https://docs.tixkit.com
+  s3PublicEndpoint: https://uploads.tixkit.com
+  buildRevision: 0.1.0
   adminUrl: https://admin.tixkit.com
   corsAllowedOrigins:
     - https://checkout.tixkit.com
@@ -143,7 +146,7 @@ admin:
   port: 3001
   probes:
     readiness:
-      path: /health
+      path: /ready
       initialDelaySeconds: 5
       periodSeconds: 10
       timeoutSeconds: 2

@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
+import { connection } from 'next/server';
 import { ClerkProvider } from '@clerk/nextjs';
 import { ThemeProvider } from '@/context/theme-provider';
 import { DirectionProvider } from '@/context/direction-provider';
 import { AdminUserProvider } from '@/context/admin-user-provider';
 import { QueryProvider } from '@/context/query-provider';
 import { Toaster } from '@/components/ui/sonner';
-import { clerkPublishableKey, hasClerkKey } from '@/lib/auth';
+import { runtimeConfigDataAttributes } from '@/lib/runtime-config-contract';
+import { parseAdminRuntimeConfig } from '@/lib/runtime-config-server';
+import { RuntimeConfigProvider } from '@/context/runtime-config-provider';
 import './globals.css';
 
 export const metadata = {
@@ -17,38 +20,50 @@ export const metadata = {
   description: 'Event ticketing and management platform',
 };
 
-const refineInjectorSrc =
-  process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_DISABLE_REACT_DEVTOOLS === '1'
-    ? null
-    : 'http://localhost:7331/inject.js';
+export const dynamic = 'force-dynamic';
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
+  await connection();
+  const runtimeConfig = parseAdminRuntimeConfig();
   const cookieStore = await cookies();
   const dir = cookieStore.get('dir')?.value === 'rtl' ? 'rtl' : 'ltr';
 
   const content = (
-    <ThemeProvider>
-      <DirectionProvider>
-        <QueryProvider>
-          <AdminUserProvider>
-            {children}
-            <Toaster />
-          </AdminUserProvider>
-        </QueryProvider>
-      </DirectionProvider>
-    </ThemeProvider>
+    <RuntimeConfigProvider config={runtimeConfig}>
+      <ThemeProvider>
+        <DirectionProvider>
+          <QueryProvider>
+            <AdminUserProvider>
+              {children}
+              <Toaster />
+            </AdminUserProvider>
+          </QueryProvider>
+        </DirectionProvider>
+      </ThemeProvider>
+    </RuntimeConfigProvider>
   );
 
   return (
-    <html lang="en" dir={dir} suppressHydrationWarning>
+    <html
+      lang="en"
+      dir={dir}
+      suppressHydrationWarning
+      {...runtimeConfigDataAttributes(runtimeConfig)}
+    >
       <body>
-        {hasClerkKey() ? (
-          <ClerkProvider publishableKey={clerkPublishableKey()}>{content}</ClerkProvider>
+        {runtimeConfig.authProvider === 'clerk' && runtimeConfig.clerkPublishableKey ? (
+          <ClerkProvider publishableKey={runtimeConfig.clerkPublishableKey}>
+            {content}
+          </ClerkProvider>
         ) : (
           content
         )}
-        {refineInjectorSrc ? (
-          <script id="transitions-refine-injector" type="module" src={refineInjectorSrc} />
+        {runtimeConfig.deploymentProfile === 'development' ? (
+          <script
+            id="transitions-refine-injector"
+            type="module"
+            src="http://localhost:7331/inject.js"
+          />
         ) : null}
       </body>
     </html>

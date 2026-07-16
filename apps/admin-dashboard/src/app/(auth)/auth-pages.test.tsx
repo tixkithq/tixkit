@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   signUpProps: vi.fn(),
 }));
 
-vi.mock('@/lib/auth', () => ({
+vi.mock('@/lib/auth-server', () => ({
   hasClerkKey: mocks.hasClerkKey,
   usesLocalDevAuth: mocks.usesLocalDevAuth,
 }));

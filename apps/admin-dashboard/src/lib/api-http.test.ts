@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render } from '@testing-library/react';
+import { createElement } from 'react';
 import { request, requestBlob } from './api-http';
+import { installTestRuntimeConfig } from '@/test/runtime-config';
+import {
+  initializeBrowserRuntimeConfig,
+  resetBrowserRuntimeConfigForTests,
+} from './runtime-config-browser';
+import { RuntimeConfigProvider } from '@/context/runtime-config-provider';
 
 describe('request', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.useRealTimers();
+    delete window.Clerk;
   });
 
   it('does not send a JSON content type for empty-body requests', async () => {
@@ -110,6 +120,75 @@ describe('request', () => {
 
     expect(result.ok).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves two runtime snapshots at call time without a stale deployment origin', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    resetBrowserRuntimeConfigForTests();
+    initializeBrowserRuntimeConfig(
+      installTestRuntimeConfig({
+        apiBaseUrl: 'https://one.example.test',
+        platformApiBaseUrl: 'https://one.example.test/v1',
+        checkoutUrl: 'https://checkout.example.test',
+        uploadOrigin: 'https://media.example.test',
+      }),
+    );
+    await request('/v1/events', { method: 'POST' });
+    resetBrowserRuntimeConfigForTests();
+    initializeBrowserRuntimeConfig(
+      installTestRuntimeConfig({
+        apiBaseUrl: 'https://two.example.test',
+        platformApiBaseUrl: 'https://two.example.test/v1',
+        checkoutUrl: 'https://checkout.example.test',
+        uploadOrigin: 'https://media.example.test',
+      }),
+    );
+    await request('/v1/events', { method: 'POST' });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://one.example.test/v1/events',
+      'https://two.example.test/v1/events',
+    ]);
+  });
+
+  it('ignores mutated or removed diagnostic attributes when routing a Clerk bearer token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    resetBrowserRuntimeConfigForTests();
+    const config = installTestRuntimeConfig({
+      apiBaseUrl: 'https://admin.example.test',
+      platformApiBaseUrl: 'https://admin.example.test/v1',
+      checkoutUrl: 'https://checkout.example.test',
+      uploadOrigin: 'https://media.example.test',
+      authProvider: 'clerk',
+      clerkPublishableKey: 'pk_test_example',
+    });
+    vi.stubEnv('NODE_ENV', 'production');
+    render(createElement(RuntimeConfigProvider, { config }, 'ready'));
+    window.Clerk = {
+      loaded: true,
+      session: { getToken: vi.fn().mockResolvedValue('clerk_jwt') },
+    };
+    document.documentElement.setAttribute(
+      'data-tixkit-api-base-url',
+      'https://checkout.example.test',
+    );
+    document.documentElement.removeAttribute('data-tixkit-runtime-schema');
+    const result = await request('/v1/events', { method: 'POST' });
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://admin.example.test/v1/events');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer clerk_jwt');
   });
 });
 

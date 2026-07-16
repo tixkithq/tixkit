@@ -3,7 +3,7 @@ import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import { PermissionProvider } from '@/context/permission-provider';
 import { BootstrapProvider } from '@/context/bootstrap-provider';
-import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
+import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth-server';
 import { routes } from '@/lib/routes';
 
 export default async function KioskLayout({ children }: { children: ReactNode }) {
@@ -17,8 +17,9 @@ export default async function KioskLayout({ children }: { children: ReactNode })
     if (!userId) redirect(routes.signIn);
 
     const token = await getToken();
-    const { adminApi } = await import('@/lib/api');
-    const principalRes = await adminApi.getPrincipal(token ?? undefined);
+    if (!token) redirect(routes.signIn);
+    const { getServerPrincipal } = await import('@/lib/api-server');
+    const principalRes = await getServerPrincipal(token);
     if (!principalRes.ok) {
       redirect(routes.signIn);
     }

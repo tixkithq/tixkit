@@ -1,6 +1,6 @@
 import { SignIn } from '@clerk/nextjs';
 import { redirect } from 'next/navigation';
-import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
+import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth-server';
 import { routes } from '@/lib/routes';
 
 export default function SignInPage() {

@@ -6,6 +6,10 @@ import {
   resetPrincipalCache,
 } from '@/context/permission-provider';
 import { adminApi } from '@/lib/api';
+import { installTestRuntimeConfig } from '@/test/runtime-config';
+import { RuntimeConfigProvider } from '@/context/runtime-config-provider';
+import { readAdminRuntimeConfig } from '@/lib/runtime-config-contract';
+import { resetBrowserRuntimeConfigForTests } from '@/lib/runtime-config-browser';
 
 type MockAuthState = {
   isLoaded: boolean;
@@ -38,7 +42,11 @@ vi.mock('@clerk/nextjs', () => ({
 }));
 
 function wrapper({ children }: { children: React.ReactNode }) {
-  return <PermissionProvider>{children}</PermissionProvider>;
+  return (
+    <RuntimeConfigProvider config={readAdminRuntimeConfig()}>
+      <PermissionProvider>{children}</PermissionProvider>
+    </RuntimeConfigProvider>
+  );
 }
 
 function usePermissionsHook() {
@@ -82,6 +90,7 @@ describe('PermissionProvider (local dev, no Clerk key)', () => {
 
 describe('PermissionProvider (production, no Clerk key)', () => {
   beforeEach(() => {
+    resetBrowserRuntimeConfigForTests();
     Reflect.set(process.env, 'NODE_ENV', 'production');
     process.env.AUTH_PROVIDER = 'dev';
     process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
@@ -90,22 +99,38 @@ describe('PermissionProvider (production, no Clerk key)', () => {
   });
 
   it('fails closed instead of granting local-dev permissions', () => {
-    const { result } = renderHook(usePermissionsHook, { wrapper });
-
-    expect(result.current.loading).toBe(false);
-    expect(result.current.permissions).toEqual([]);
-    expect(result.current.can('billing.write')).toBe(false);
-    expect(result.current.can('developers.write')).toBe(false);
-    expect(result.current.error).toBe('Dashboard authentication is not configured.');
+    installTestRuntimeConfig({
+      deploymentProfile: 'production',
+      apiBaseUrl: 'https://admin.example.test',
+      platformApiBaseUrl: 'https://admin.example.test/v1',
+      checkoutUrl: 'https://checkout.example.test',
+      docsUrl: 'https://docs.example.test',
+      uploadOrigin: 'https://media.example.test',
+      authProvider: 'dev',
+    });
+    expect(() => renderHook(usePermissionsHook, { wrapper })).toThrow(
+      'production requires Clerk authentication',
+    );
   });
 });
 
 describe('PermissionProvider (production, Clerk key present)', () => {
   beforeEach(() => {
+    resetBrowserRuntimeConfigForTests();
     Reflect.set(process.env, 'NODE_ENV', 'production');
     process.env.AUTH_PROVIDER = 'clerk';
     process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'clerk';
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_123';
+    installTestRuntimeConfig({
+      deploymentProfile: 'production',
+      apiBaseUrl: 'https://admin.example.test',
+      platformApiBaseUrl: 'https://admin.example.test/v1',
+      checkoutUrl: 'https://checkout.example.test',
+      docsUrl: 'https://docs.example.test',
+      uploadOrigin: 'https://media.example.test',
+      authProvider: 'clerk',
+      clerkPublishableKey: 'pk_test_123',
+    });
     authState.current = {
       isLoaded: true,
       isSignedIn: true,

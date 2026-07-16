@@ -1,5 +1,8 @@
 deploymentProfile: production
 
+global:
+  buildRevision: ''
+
 api:
   imageDigest: ''
   autoscaling:

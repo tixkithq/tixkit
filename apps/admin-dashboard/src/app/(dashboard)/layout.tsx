@@ -8,7 +8,7 @@ import { ThemeSwitch } from '@/components/theme-switch';
 import { ConfigDrawer } from '@/components/config-drawer';
 import { ProfileDropdown } from '@/components/profile-dropdown';
 import { NavigationProgress } from '@/components/navigation-progress';
-import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
+import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth-server';
 
 type PrincipalError = {
   code: string;
@@ -72,15 +72,16 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     if (!userId) redirect('/sign-in');
 
     const token = await getToken();
-    const { adminApi, getAdminApiBaseUrl } = await import('@/lib/api');
-    const principalRes = await adminApi.getPrincipal(token ?? undefined);
+    if (!token) redirect('/sign-in?error=unauthorized');
+    const { getServerPrincipal, getServerAdminApiBaseUrl } = await import('@/lib/api-server');
+    const principalRes = await getServerPrincipal(token);
 
     if (!principalRes.ok) {
       console.error('Failed to fetch Tixkit principal:', principalRes.error);
       if (isApiUnavailable(principalRes.error)) {
         return (
           <ApiUnavailableState
-            apiBaseUrl={getAdminApiBaseUrl()}
+            apiBaseUrl={getServerAdminApiBaseUrl()}
             message={principalRes.error.message}
           />
         );

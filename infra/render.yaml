@@ -49,6 +49,7 @@ services:
         sync: false
       - key: S3_REGION
         sync: false
+      - fromGroup: tixkit-public-storage
       - key: CLERK_SECRET_KEY
         sync: false
       - key: CLERK_PUBLISHABLE_KEY
@@ -107,15 +108,39 @@ services:
     name: tixkit-admin
     env: docker
     dockerfilePath: ./Dockerfile.admin
-    healthCheckPath: /health
+    healthCheckPath: /ready
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3001
-      - key: NEXT_PUBLIC_ADMIN_API_BASE_URL
+      - key: TIXKIT_DEPLOYMENT_PROFILE
+        value: production
+      - key: API_BASE_URL
         value: https://tixkit-api.onrender.com
+      - key: TIXKIT_CHECKOUT_URL
+        value: https://tixkit-checkout.onrender.com
+      - key: TIXKIT_DOCS_URL
+        value: https://docs.tixkit.com
+      - key: AUTH_PROVIDER
+        value: clerk
+      - key: ALLOW_INSECURE_LOCAL_ORIGINS
+        value: 0
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - fromGroup: tixkit-public-storage
+      # Set to the exact deployed Git commit or immutable release tag.
+      - key: TIXKIT_BUILD_REVISION
+        sync: false
     plan: starter
+
+envVarGroups:
+  # Before deployment, add one exact HTTPS S3_PUBLIC_ENDPOINT value to this
+  # group in the Render Dashboard. Blueprint groups cannot use sync: false.
+  - name: tixkit-public-storage
+    envVars: []
 
 databases:
   - name: postgres

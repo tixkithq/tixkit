@@ -14,9 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { dashboardDocUrl } from '@/lib/docs';
 import { routes } from '@/lib/routes';
-
-const configuredApiBaseUrl =
-  process.env.NEXT_PUBLIC_TIXKIT_API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:4000/v1';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 const apiVersion = '2026-01-01';
 
 function CopyButton({ value, label }: { value: string; label: string }) {
@@ -45,6 +43,8 @@ export function DeveloperConsoleGuide({
   activeWebhooks: number | null;
   totalWebhooks: number | null;
 }) {
+  const runtimeConfig = useRuntimeConfig();
+  const configuredApiBaseUrl = runtimeConfig.platformApiBaseUrl;
   const [sdkId, setSdkId] = React.useState<(typeof sdkSnippetRegistry)[number]['id']>(
     sdkSnippetRegistry[0].id,
   );
@@ -78,7 +78,7 @@ export function DeveloperConsoleGuide({
           <CardContent className="space-y-2 text-sm">
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
               <dt className="text-muted-foreground">Mode</dt>
-              <dd>{process.env.NODE_ENV === 'production' ? 'production build' : 'development'}</dd>
+              <dd>{runtimeConfig.deploymentProfile}</dd>
               <dt className="text-muted-foreground">API version</dt>
               <dd>
                 <code>{apiVersion}</code>
@@ -171,7 +171,7 @@ export function DeveloperConsoleGuide({
               </a>
               <a
                 className="font-medium text-primary"
-                href={dashboardDocUrl('webhookTroubleshooting')}
+                href={dashboardDocUrl('webhookTroubleshooting', runtimeConfig)}
               >
                 Troubleshoot
               </a>
@@ -198,7 +198,7 @@ export function DeveloperConsoleGuide({
             <CopyButton value={curl} label="Copy request without secret" />
             <a
               className="inline-flex items-center gap-1 text-sm font-medium text-primary"
-              href={dashboardDocUrl('firstApiCall')}
+              href={dashboardDocUrl('firstApiCall', runtimeConfig)}
             >
               Expected response and failures <ExternalLink className="size-3" aria-hidden="true" />
             </a>
@@ -254,7 +254,10 @@ export function DeveloperConsoleGuide({
             <span className="text-muted-foreground">
               Package: <code>{sdk.packageName}</code> · API {sdk.apiVersion} · {sdk.supportStatus}
             </span>
-            <a className="font-medium text-primary" href={dashboardDocUrl(sdk.docRouteId)}>
+            <a
+              className="font-medium text-primary"
+              href={dashboardDocUrl(sdk.docRouteId, runtimeConfig)}
+            >
               Open {sdk.label} guide
             </a>
             <span className="text-muted-foreground">

@@ -5,7 +5,7 @@ const source = readFileSync('src/features/developer/developer-console-guide.tsx'
 
 describe('DeveloperConsoleGuide source', () => {
   it('presents environment, health, safe first-call, and SDK registry data', () => {
-    expect(source).toContain('NEXT_PUBLIC_TIXKIT_API_BASE_URL');
+    expect(source).toContain('runtimeConfig.platformApiBaseUrl');
     expect(source).toContain('Check API health');
     expect(source).toContain('sdkSnippetRegistry');
     expect(source).toContain('Authorization: Bearer $TIXKIT_API_KEY');

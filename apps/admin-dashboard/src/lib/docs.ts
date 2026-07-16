@@ -1,8 +1,12 @@
 import { resolveDocUrl, type DocRouteId } from '@tixkit/docs-core';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
+import type { PublicAdminRuntimeConfig } from './runtime-config-contract';
 
-const localDocsOrigin = 'http://localhost:3002';
+export function dashboardDocUrl(routeId: DocRouteId, config: PublicAdminRuntimeConfig): string {
+  return resolveDocUrl(routeId, config.docsUrl);
+}
 
-export function dashboardDocUrl(routeId: DocRouteId): string {
-  const configuredOrigin = process.env.NEXT_PUBLIC_TIXKIT_DOCS_URL?.trim();
-  return resolveDocUrl(routeId, configuredOrigin || localDocsOrigin);
+export function useDashboardDocUrl(): (routeId: DocRouteId) => string {
+  const config = useRuntimeConfig();
+  return (routeId) => dashboardDocUrl(routeId, config);
 }

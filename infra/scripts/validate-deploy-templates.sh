@@ -20,6 +20,7 @@ require_file infra/scripts/run-helm-migration.sh
 require_file infra/docker-compose.yml
 require_file .github/workflows/release-dry-run.yml
 require_file .github/workflows/trusted-release-dry-run.yml
+require_file .github/workflows/public-artifact-release.yml
 require_file Dockerfile.api
 require_file Dockerfile.worker
 require_file Dockerfile.checkout
@@ -185,20 +186,20 @@ validate_frontend_public_api_build_config() {
   grep -Fq 'https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*' Dockerfile.checkout ||
     fail 'Dockerfile.checkout must reject example.com placeholder public API origins before build'
 
-  for variable in NEXT_PUBLIC_ADMIN_API_BASE_URL NEXT_PUBLIC_API_BASE_URL; do
-    grep -Eq "^ARG ${variable}$" Dockerfile.admin ||
-      fail "Dockerfile.admin must declare ${variable} as a build arg"
-    grep -Eq "^ENV ${variable}=\\$\\{${variable}\\}$" Dockerfile.admin ||
-      fail "Dockerfile.admin must export ${variable} before build"
-    grep -Fq "test -n \"\${${variable}}\"" Dockerfile.admin ||
-      fail "Dockerfile.admin must reject missing ${variable} before build"
-  done
-  grep -Fq 'https://*) ;;' Dockerfile.admin ||
-    fail 'Dockerfile.admin must require HTTPS public API origins before build'
-  grep -Fq 'http://localhost:*|http://127.0.0.1:*' Dockerfile.admin ||
-    fail 'Dockerfile.admin must constrain explicitly enabled local public API origins before build'
-  grep -Fq 'https://example.com|https://example.com/*|https://*.example.com|https://*.example.com/*' Dockerfile.admin ||
-    fail 'Dockerfile.admin must reject example.com placeholder public API origins before build'
+  if grep -Eq '^(ARG|ENV)[[:space:]]+NEXT_PUBLIC_' Dockerfile.admin; then
+    fail 'Dockerfile.admin must remain deployment-neutral and must not bake NEXT_PUBLIC_* configuration'
+  fi
+  if grep -Fq 'ALLOW_INSECURE_LOCAL_ORIGINS' Dockerfile.admin; then
+    fail 'Dockerfile.admin must not accept a deployment-origin build escape'
+  fi
+  if grep -Eq '^(ARG|ENV)[[:space:]]+TIXKIT_BUILD_REVISION' Dockerfile.admin; then
+    fail 'Dockerfile.admin revision identity must be supplied at runtime from immutable release metadata'
+  fi
+  grep -Fq 'docker build --file "$DOCKERFILE" --tag "${repository}:${candidate}" .' .github/workflows/public-artifact-release.yml ||
+    fail 'public artifact release must build the generic admin image without deployment-specific build arguments'
+  if grep -Eq 'docker build[^[:space:]]*.*--build-arg' .github/workflows/public-artifact-release.yml; then
+    fail 'public artifact release must not pass deployment-specific Docker build arguments'
+  fi
 
   awk -v expected_api_base_url="${expected_fly_api_base_url}" '
     /^\[build\.args\]$/ {
@@ -227,39 +228,36 @@ validate_frontend_public_api_build_config() {
   ' infra/fly/checkout.toml ||
     fail 'infra/fly/checkout.toml must pass NEXT_PUBLIC_TIXKIT_API_BASE_URL as both a build arg and runtime env'
 
-  awk -v expected_api_origin="${expected_fly_api_origin}" \
-    -v expected_api_base_url="${expected_fly_api_base_url}" '
-    /^\[build\.args\]$/ {
-      in_build_args = 1
-      in_env = 0
-      next
-    }
-    /^\[env\]$/ {
-      in_build_args = 0
-      in_env = 1
-      next
-    }
-    /^\[/ {
-      in_build_args = 0
-      in_env = 0
-    }
-    in_build_args && $0 == "NEXT_PUBLIC_ADMIN_API_BASE_URL = \"" expected_api_origin "\"" {
-      admin_build_arg = 1
-    }
-    in_build_args && $0 == "NEXT_PUBLIC_API_BASE_URL = \"" expected_api_base_url "\"" {
-      api_build_arg = 1
-    }
-    in_env && $0 == "NEXT_PUBLIC_ADMIN_API_BASE_URL = \"" expected_api_origin "\"" {
-      admin_runtime_env = 1
-    }
-    in_env && $0 == "NEXT_PUBLIC_API_BASE_URL = \"" expected_api_base_url "\"" {
-      api_runtime_env = 1
-    }
-    END {
-      exit admin_build_arg && api_build_arg && admin_runtime_env && api_runtime_env ? 0 : 1
-    }
+  if grep -Eq '^\[build\.args\]$|NEXT_PUBLIC_' infra/fly/admin.toml; then
+    fail 'infra/fly/admin.toml must use the generic admin image without legacy build or NEXT_PUBLIC configuration'
+  fi
+  for assignment in \
+    'TIXKIT_DEPLOYMENT_PROFILE = "production"' \
+    "API_BASE_URL = \"${expected_fly_api_origin}\"" \
+    'TIXKIT_CHECKOUT_URL = "https://tixkit-checkout.fly.dev"' \
+    'TIXKIT_DOCS_URL = "https://docs.tixkit.com"' \
+    'AUTH_PROVIDER = "clerk"' \
+    'ALLOW_INSECURE_LOCAL_ORIGINS = "0"'; do
+    grep -Fqx "${assignment}" infra/fly/admin.toml ||
+      fail "infra/fly/admin.toml must set ${assignment}"
+  done
+  grep -Fq 'TIXKIT_BUILD_REVISION must be the selected admin image'"'"'s source commit or release tag.' infra/fly/admin.toml ||
+    fail 'infra/fly/admin.toml must bind TIXKIT_BUILD_REVISION to the selected immutable admin artifact'
+  grep -Fq 'fly secrets set CLERK_PUBLISHABLE_KEY="$CLERK_PUBLISHABLE_KEY" CLERK_SECRET_KEY="$CLERK_SECRET_KEY" S3_PUBLIC_ENDPOINT="$S3_PUBLIC_ENDPOINT" TIXKIT_BUILD_REVISION="$TIXKIT_BUILD_REVISION"' infra/fly/admin.toml ||
+    fail 'infra/fly/admin.toml must explicitly require operator-supplied Clerk, upload-origin, and build-revision runtime values'
+  if grep -Eq '^(CLERK_PUBLISHABLE_KEY|CLERK_SECRET_KEY|S3_PUBLIC_ENDPOINT|TIXKIT_BUILD_REVISION)[[:space:]]*=' infra/fly/admin.toml; then
+    fail 'infra/fly/admin.toml must not commit operator-specific Clerk, upload-origin, or build-revision values'
+  fi
+  grep -Fq 'fly secrets set S3_PUBLIC_ENDPOINT="$S3_PUBLIC_ENDPOINT"' infra/fly/api.toml ||
+    fail 'infra/fly/api.toml and infra/fly/admin.toml must consume the same operator S3_PUBLIC_ENDPOINT value'
+  awk '
+    /^\[\[http_service\.checks\]\]$/ { in_check = 1; next }
+    /^\[/ { in_check = 0 }
+    in_check && $0 == "method = \"GET\"" { method = 1 }
+    in_check && $0 == "path = \"/ready\"" { path = 1 }
+    END { exit method && path ? 0 : 1 }
   ' infra/fly/admin.toml ||
-    fail 'infra/fly/admin.toml must pass admin public API origins as build args and runtime env'
+    fail 'infra/fly/admin.toml must gate traffic on GET /ready runtime configuration readiness'
 }
 
 validate_frontend_public_api_build_config
@@ -355,6 +353,69 @@ require_render_service_env_value() {
     fail "infra/render.yaml service ${service_name} must set ${env_key}=${expected_value}"
 }
 
+require_render_service_env_sync_false() {
+  local service_name="$1"
+  local env_key="$2"
+
+  awk -v service_name="${service_name}" -v env_key="${env_key}" '
+    /^  - type: / {
+      in_service = 0
+      pending_key = 0
+    }
+    $0 == "    name: " service_name {
+      in_service = 1
+      found_service = 1
+      next
+    }
+    in_service && $0 == "      - key: " env_key {
+      key_count += 1
+      pending_key = 1
+      next
+    }
+    in_service && pending_key && /^[[:space:]]*sync:[[:space:]]*false[[:space:]]*$/ {
+      sync_false_count += 1
+      pending_key = 0
+      next
+    }
+    in_service && pending_key && /^[[:space:]]*(value:|- key:)/ {
+      bad_value = 1
+      pending_key = 0
+      next
+    }
+    END {
+      exit found_service && key_count == 1 && sync_false_count == 1 && !bad_value && !pending_key ? 0 : 1
+    }
+  ' infra/render.yaml ||
+    fail "infra/render.yaml service ${service_name} must declare operator-supplied ${env_key} with sync: false"
+}
+
+require_render_service_env_group() {
+  local service_name="$1"
+  local group_name="$2"
+
+  awk -v service_name="${service_name}" -v group_name="${group_name}" '
+    /^  - type: / { in_service = 0 }
+    $0 == "    name: " service_name { in_service = 1; found_service = 1; next }
+    in_service && $0 == "      - fromGroup: " group_name { group_count += 1 }
+    END { exit found_service && group_count == 1 ? 0 : 1 }
+  ' infra/render.yaml ||
+    fail "infra/render.yaml service ${service_name} must consume shared env group ${group_name} exactly once"
+}
+
+validate_render_public_storage_group() {
+  awk '
+    /^envVarGroups:$/ { in_groups = 1; next }
+    in_groups && /^  - name: tixkit-public-storage$/ { in_target = 1; group_count += 1; next }
+    in_groups && /^  - name:/ { in_target = 0 }
+    in_target && /^    envVars: \[\]$/ { empty_inventory = 1; next }
+    in_target && /^[[:space:]]+- key:/ { embedded_key = 1 }
+    END { exit group_count == 1 && empty_inventory && !embedded_key ? 0 : 1 }
+  ' infra/render.yaml ||
+    fail 'infra/render.yaml must preserve an operator-managed, shared tixkit-public-storage env group without embedded values'
+  grep -Fq '# group in the Render Dashboard. Blueprint groups cannot use sync: false.' infra/render.yaml ||
+    fail 'infra/render.yaml must explain how to supply the shared S3_PUBLIC_ENDPOINT without an invalid Blueprint sync:false group key'
+}
+
 next_app_route_file_for_path() {
   local app_root="$1"
   local route_path="$2"
@@ -378,9 +439,10 @@ next_app_route_file_for_path() {
 
 require_helm_frontend_probe_values() {
   local component="$1"
-  local expected_path="$2"
+  local expected_readiness_path="$2"
+  local expected_liveness_path="${3:-$2}"
 
-  awk -v component="${component}" -v expected_path="${expected_path}" '
+  awk -v component="${component}" -v expected_readiness_path="${expected_readiness_path}" -v expected_liveness_path="${expected_liveness_path}" '
     $0 == component ":" {
       in_component = 1
       next
@@ -406,10 +468,10 @@ require_helm_frontend_probe_values() {
       sub(/[[:space:]]*$/, "", value)
       gsub(/^'\''|'\''$/, "", value)
       gsub(/^"|"$/, "", value)
-      if (in_readiness && value == expected_path) {
+      if (in_readiness && value == expected_readiness_path) {
         readiness_path = 1
       }
-      if (in_liveness && value == expected_path) {
+      if (in_liveness && value == expected_liveness_path) {
         liveness_path = 1
       }
       next
@@ -435,15 +497,16 @@ require_helm_frontend_probe_values() {
         initial_delay_count == 2 && period_count == 2 && timeout_count == 2 && failure_count == 2 ? 0 : 1
     }
   ' infra/helm/tixkit/values.yaml ||
-    fail "infra/helm/tixkit/values.yaml must configure ${component} readiness/liveness probes for ${expected_path}"
+    fail "infra/helm/tixkit/values.yaml must configure ${component} readiness=${expected_readiness_path} and liveness=${expected_liveness_path}"
 }
 
 require_rendered_frontend_probes() {
   local rendered_chart="$1"
   local component="$2"
-  local expected_path="$3"
+  local expected_readiness_path="$3"
+  local expected_liveness_path="${4:-$3}"
 
-  printf '%s\n' "${rendered_chart}" | awk -v component="${component}" -v expected_path="${expected_path}" '
+  printf '%s\n' "${rendered_chart}" | awk -v component="${component}" -v expected_readiness_path="${expected_readiness_path}" -v expected_liveness_path="${expected_liveness_path}" '
     /^---$/ {
       seen_component = 0
       in_target = 0
@@ -476,10 +539,10 @@ require_rendered_frontend_probes() {
       value = $0
       sub(/^[[:space:]]*path:[[:space:]]*/, "", value)
       gsub(/^"|"$/, "", value)
-      if (in_readiness && value == expected_path) {
+      if (in_readiness && value == expected_readiness_path) {
         readiness_path = 1
       }
-      if (in_liveness && value == expected_path) {
+      if (in_liveness && value == expected_liveness_path) {
         liveness_path = 1
       }
       next
@@ -500,7 +563,7 @@ require_rendered_frontend_probes() {
       exit readiness && liveness && readiness_path && liveness_path && readiness_port && liveness_port ? 0 : 1
     }
   ' ||
-    fail "rendered Helm ${component} deployment must include readinessProbe and livenessProbe on ${expected_path}"
+    fail "rendered Helm ${component} deployment must include readinessProbe=${expected_readiness_path} and livenessProbe=${expected_liveness_path}"
 }
 
 require_rendered_component_image_digest() {
@@ -538,6 +601,8 @@ expected_render_checkout_api_base_url="${expected_render_api_origin}/v1"
 expected_helm_api_origin='https://api.tixkit.com'
 expected_helm_checkout_origin='https://checkout.tixkit.com'
 expected_helm_admin_origin='https://admin.tixkit.com'
+expected_helm_docs_origin='https://docs.tixkit.com'
+expected_helm_upload_origin='https://uploads.tixkit.com'
 expected_helm_cors_origins="${expected_helm_checkout_origin},${expected_helm_admin_origin}"
 
 for render_api_required_env in \
@@ -828,80 +893,30 @@ awk '
 ' infra/render.yaml ||
   fail 'infra/render.yaml must use object-form Render datastore refs and declare tixkit-redis as a keyvalue service with ipAllowList'
 
-awk -v checkout_api_base_url="${expected_render_checkout_api_base_url}" \
-  -v admin_api_base_url="${expected_render_api_origin}" '
-  function reset_service_state() {
-    checkout_api_count = 0
-    admin_api_count = 0
-    pending_checkout_api = 0
-    pending_admin_api = 0
-    bad_checkout_api = 0
-    bad_admin_api = 0
-  }
-  function finish_service() {
-    if (in_checkout && (checkout_api_count != 1 || bad_checkout_api || pending_checkout_api)) {
-      exit 1
-    }
-    if (in_admin && (admin_api_count != 1 || bad_admin_api || pending_admin_api)) {
-      exit 1
-    }
-  }
-  /^  - type: / {
-    finish_service()
-    in_checkout = 0
-    in_admin = 0
-    reset_service_state()
-  }
-  /^    name: tixkit-checkout$/ {
-    in_checkout = 1
-    found_checkout = 1
-    reset_service_state()
-  }
-  /^    name: tixkit-admin$/ {
-    in_admin = 1
-    found_admin = 1
-    reset_service_state()
-  }
-  in_checkout && /^[[:space:]]*- key: NEXT_PUBLIC_TIXKIT_API_BASE_URL$/ {
-    checkout_api_count += 1
-    pending_checkout_api = 1
-    next
-  }
-  in_checkout && pending_checkout_api && /^[[:space:]]*value:/ {
-    expected = "^[[:space:]]*value:[[:space:]]*" checkout_api_base_url "[[:space:]]*$"
-    if ($0 !~ expected) {
-      bad_checkout_api = 1
-    }
-    pending_checkout_api = 0
-    next
-  }
-  in_checkout && pending_checkout_api && /^[[:space:]]*- key:/ {
-    bad_checkout_api = 1
-    pending_checkout_api = 0
-  }
-  in_admin && /^[[:space:]]*- key: NEXT_PUBLIC_ADMIN_API_BASE_URL$/ {
-    admin_api_count += 1
-    pending_admin_api = 1
-    next
-  }
-  in_admin && pending_admin_api && /^[[:space:]]*value:/ {
-    expected = "^[[:space:]]*value:[[:space:]]*" admin_api_base_url "[[:space:]]*$"
-    if ($0 !~ expected) {
-      bad_admin_api = 1
-    }
-    pending_admin_api = 0
-    next
-  }
-  in_admin && pending_admin_api && /^[[:space:]]*- key:/ {
-    bad_admin_api = 1
-    pending_admin_api = 0
-  }
-  END {
-    finish_service()
-    exit found_checkout && found_admin ? 0 : 1
-  }
-' infra/render.yaml ||
-  fail "infra/render.yaml must set tixkit-checkout NEXT_PUBLIC_TIXKIT_API_BASE_URL=${expected_render_checkout_api_base_url} and tixkit-admin NEXT_PUBLIC_ADMIN_API_BASE_URL=${expected_render_api_origin}"
+require_render_service_env_value tixkit-checkout NEXT_PUBLIC_TIXKIT_API_BASE_URL "${expected_render_checkout_api_base_url}"
+require_render_service_env_value tixkit-admin TIXKIT_DEPLOYMENT_PROFILE production
+require_render_service_env_value tixkit-admin API_BASE_URL "${expected_render_api_origin}"
+require_render_service_env_value tixkit-admin TIXKIT_CHECKOUT_URL "${expected_render_checkout_origin}"
+require_render_service_env_value tixkit-admin TIXKIT_DOCS_URL https://docs.tixkit.com
+require_render_service_env_value tixkit-admin AUTH_PROVIDER clerk
+require_render_service_env_value tixkit-admin ALLOW_INSECURE_LOCAL_ORIGINS 0
+for operator_value in CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY TIXKIT_BUILD_REVISION; do
+  require_render_service_env_sync_false tixkit-admin "${operator_value}"
+done
+validate_render_public_storage_group
+require_render_service_env_group tixkit-api tixkit-public-storage
+require_render_service_env_group tixkit-admin tixkit-public-storage
+grep -Fq '# Set to the exact deployed Git commit or immutable release tag.' infra/render.yaml ||
+  fail 'infra/render.yaml must bind TIXKIT_BUILD_REVISION to the selected immutable source or release'
+
+if awk '
+  /^  - type: / { in_admin = 0 }
+  /^    name: tixkit-admin$/ { in_admin = 1; next }
+  in_admin && /NEXT_PUBLIC_/ { found = 1 }
+  END { exit found ? 0 : 1 }
+' infra/render.yaml; then
+  fail 'infra/render.yaml tixkit-admin must not declare legacy NEXT_PUBLIC_* runtime values'
+fi
 
 checkout_health_path="$(render_service_health_check_path tixkit-checkout)" ||
   fail 'infra/render.yaml must set tixkit-checkout healthCheckPath'
@@ -913,12 +928,12 @@ require_file "${checkout_health_route}"
 
 admin_health_path="$(render_service_health_check_path tixkit-admin)" ||
   fail 'infra/render.yaml must set tixkit-admin healthCheckPath'
-test "${admin_health_path}" = '/health' ||
-  fail 'infra/render.yaml must set tixkit-admin healthCheckPath to /health'
+test "${admin_health_path}" = '/ready' ||
+  fail 'infra/render.yaml must set tixkit-admin healthCheckPath to /ready'
 admin_health_route="$(next_app_route_file_for_path apps/admin-dashboard/src/app "${admin_health_path}")" ||
   fail "infra/render.yaml tixkit-admin healthCheckPath ${admin_health_path} must map to a static Next app route"
-test "${admin_health_route}" = 'apps/admin-dashboard/src/app/health/route.ts' ||
-  fail 'infra/render.yaml tixkit-admin healthCheckPath must map to apps/admin-dashboard/src/app/health/route.ts'
+test "${admin_health_route}" = 'apps/admin-dashboard/src/app/ready/route.ts' ||
+  fail 'infra/render.yaml tixkit-admin healthCheckPath must map to apps/admin-dashboard/src/app/ready/route.ts'
 require_file "${admin_health_route}"
 
 grep -Eq "^[[:space:]]*trustProxy:[[:space:]]*'1'[[:space:]]*$" infra/helm/tixkit/values.yaml ||
@@ -929,7 +944,7 @@ grep -Eq '^[[:space:]]*TEMPORAL_TASK_QUEUE:[[:space:]]*\{\{[[:space:]]*\.Values\
   fail 'infra/helm/tixkit/templates/configmap.yaml must render TEMPORAL_TASK_QUEUE from secrets.temporalTaskQueue'
 
 require_helm_frontend_probe_values checkout /health
-require_helm_frontend_probe_values admin /health
+require_helm_frontend_probe_values admin /ready /health
 
 awk -v api_origin="${expected_helm_api_origin}" \
   -v checkout_origin="${expected_helm_checkout_origin}" \
@@ -1035,6 +1050,11 @@ awk -v api_origin="${expected_helm_api_origin}" \
 ' infra/helm/tixkit/values.yaml ||
   fail "infra/helm/tixkit/values.yaml must set production API/admin/checkout origins, CORS origins to ${expected_helm_cors_origins}, and customDomainCorsEnabled=true"
 
+grep -Fq "docsUrl: ${expected_helm_docs_origin}" infra/helm/tixkit/values.yaml ||
+  fail "infra/helm/tixkit/values.yaml must set the public docs origin to ${expected_helm_docs_origin}"
+grep -Fq "s3PublicEndpoint: ${expected_helm_upload_origin}" infra/helm/tixkit/values.yaml ||
+  fail "infra/helm/tixkit/values.yaml must set the public upload origin to ${expected_helm_upload_origin}"
+
 command -v helm >/dev/null 2>&1 || fail 'helm is required for deployment template validation'
 helm lint infra/helm/tixkit -f infra/helm/tixkit/values-evaluation.yaml >/dev/null
 helm template tixkit infra/helm/tixkit \
@@ -1045,6 +1065,7 @@ helm template tixkit infra/helm/tixkit \
   --set worker.imageDigest=sha256:123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0 \
   --set checkout.imageDigest=sha256:23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01 \
   --set admin.imageDigest=sha256:3456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012 \
+  --set global.buildRevision=release-2026.08.10 \
   --set migrations.imageDigest=sha256:456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123 \
   --set 'networkPolicy.externalEgressCidrs[0]=192.0.2.0/24' \
   --set 'networkPolicy.externalEgressCidrs[1]=2001:db8::/32' \
@@ -1078,13 +1099,21 @@ if command -v helm >/dev/null 2>&1; then
   require_rendered_component_image_digest "${rendered_chart}" temporal-postgres '^postgres:16-alpine@sha256:[0-9a-f]{64}$'
   require_rendered_component_image_digest "${rendered_chart}" temporal '^temporalio/auto-setup:1\.24@sha256:[0-9a-f]{64}$'
   require_rendered_frontend_probes "${rendered_chart}" checkout /health
-  require_rendered_frontend_probes "${rendered_chart}" admin /health
+  require_rendered_frontend_probes "${rendered_chart}" admin /ready /health
 
   rendered_config="$(helm template tixkit infra/helm/tixkit --namespace tixkit --show-only templates/configmap.yaml)"
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TRUST_PROXY:[[:space:]]*"1"[[:space:]]*$' ||
     fail 'rendered Helm ConfigMap must set API TRUST_PROXY to bounded hop count 1'
   printf '%s\n' "${rendered_config}" | grep -Fq "API_BASE_URL: \"${expected_helm_api_origin}\"" ||
     fail "rendered Helm ConfigMap must set API_BASE_URL to ${expected_helm_api_origin}"
+  printf '%s\n' "${rendered_config}" | grep -Fq "TIXKIT_CHECKOUT_URL: \"${expected_helm_checkout_origin}\"" ||
+    fail "rendered Helm ConfigMap must set TIXKIT_CHECKOUT_URL to ${expected_helm_checkout_origin}"
+  printf '%s\n' "${rendered_config}" | grep -Fq "TIXKIT_DOCS_URL: \"${expected_helm_docs_origin}\"" ||
+    fail "rendered Helm ConfigMap must set TIXKIT_DOCS_URL to ${expected_helm_docs_origin}"
+  printf '%s\n' "${rendered_config}" | grep -Fq "S3_PUBLIC_ENDPOINT: \"${expected_helm_upload_origin}\"" ||
+    fail "rendered Helm ConfigMap must set S3_PUBLIC_ENDPOINT to ${expected_helm_upload_origin}"
+  printf '%s\n' "${rendered_config}" | grep -Fq 'ALLOW_INSECURE_LOCAL_ORIGINS: "0"' ||
+    fail 'rendered Helm ConfigMap must disable insecure local origins'
   printf '%s\n' "${rendered_config}" | grep -Fq "CORS_ALLOWED_ORIGINS: \"${expected_helm_cors_origins}\"" ||
     fail "rendered Helm ConfigMap must set API CORS_ALLOWED_ORIGINS to ${expected_helm_cors_origins}"
   printf '%s\n' "${rendered_config}" | grep -Fq 'CUSTOM_DOMAIN_CORS_ENABLED: "true"' ||

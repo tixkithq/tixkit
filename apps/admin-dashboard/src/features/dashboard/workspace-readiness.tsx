@@ -16,7 +16,7 @@ import {
   type AdminWorkspaceDashboardAction,
   type AdminWorkspaceReadiness,
 } from '@/lib/api';
-import { dashboardDocUrl } from '@/lib/docs';
+import { useDashboardDocUrl } from '@/lib/docs';
 import { routes } from '@/lib/routes';
 import type { TixkitPermission } from '@/lib/permissions';
 
@@ -165,6 +165,7 @@ function ScopedWorkspaceReadiness({
   organizationId: string;
   brandId: string;
 }) {
+  const docUrl = useDashboardDocUrl();
   const [collapsed, setCollapsed] = React.useState(false);
   const { data, loading, error, refetch } = useAdminQuery(
     ['getWorkspaceReadiness', organizationId, brandId],
@@ -264,7 +265,7 @@ function ScopedWorkspaceReadiness({
           </ul>
           <a
             className="mt-3 inline-block text-sm font-medium text-primary"
-            href={dashboardDocUrl('localQuickstart')}
+            href={docUrl('localQuickstart')}
           >
             Open setup guide
           </a>

@@ -101,6 +101,8 @@ import {
 } from '@/lib/api';
 import { requestBlob } from '@/lib/api-http';
 import { publicEventUrl } from '@/lib/event-links';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
+import type { PublicAdminRuntimeConfig } from '@/lib/runtime-config-contract';
 import { usePermissions } from '@/context/permission-provider';
 
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -1220,9 +1222,13 @@ function saveBodyForDocument(document: EventPageDocument, event: AdminEventDetai
   };
 }
 
-function publicPageUrl(_document: EventPageDocument, event: AdminEventDetail): string {
+function publicPageUrl(
+  _document: EventPageDocument,
+  event: AdminEventDetail,
+  runtimeConfig: PublicAdminRuntimeConfig,
+): string {
   // Always open the checkout-hosted public event page, not the admin origin.
-  return publicEventUrl(event);
+  return publicEventUrl(event, [], runtimeConfig);
 }
 
 function PuckIframeOverride({
@@ -2910,6 +2916,7 @@ export function EventPagePersistedEditorView({
   onPreviewReady?: () => void;
   onPreviewError?: (message: string) => void;
 }) {
+  const runtimeConfig = useRuntimeConfig();
   const [event, setEvent] = React.useState<AdminEventDetail>();
   const [document, setDocument] = React.useState<AdminContentDocument>();
   const [draft, setDraft] = React.useState<AdminContentDocumentVersion>();
@@ -3512,7 +3519,7 @@ export function EventPagePersistedEditorView({
 
   function viewPublicPage() {
     if (!event || !eventPageDocument || isArchived) return;
-    const url = publicPageUrl(eventPageDocument, event);
+    const url = publicPageUrl(eventPageDocument, event, runtimeConfig);
     window.open(url, '_blank', 'noopener,noreferrer');
     setActionError(undefined);
     setNotice('Opened public page');
@@ -4118,7 +4125,7 @@ export function EventPagePersistedEditorView({
           onEditIssue={editValidationIssue}
           onPublish={(snapshot) => void publishDraft(snapshot)}
           preview={preview}
-          publicUrl={publicPageUrl(eventPageDocument, event)}
+          publicUrl={publicPageUrl(eventPageDocument, event, runtimeConfig)}
           publishing={isPublishing}
           runtime={pageRuntime}
           status={document.status}

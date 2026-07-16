@@ -7,8 +7,9 @@ describe('DeveloperOverview source', () => {
   it('links developer resources to distinct canonical documentation routes', () => {
     expect(overviewSource).toContain('API Reference');
     expect(overviewSource).toContain('Webhook Guide');
-    expect(overviewSource).toContain("dashboardDocUrl('apiReference')");
-    expect(overviewSource).toContain("dashboardDocUrl('webhookEvents')");
+    expect(overviewSource).toContain('useDashboardDocUrl()');
+    expect(overviewSource).toContain("docUrl('apiReference')");
+    expect(overviewSource).toContain("docUrl('webhookEvents')");
     expect(overviewSource).not.toContain('#developer-api');
     expect(overviewSource).not.toContain('Coming soon');
   });

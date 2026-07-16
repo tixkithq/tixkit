@@ -6,9 +6,10 @@ const source = readFileSync('src/components/command-menu.tsx', 'utf8');
 describe('CommandMenu documentation actions', () => {
   it('offers exact Help, API, operator, and webhook destinations', () => {
     expect(source).toContain('heading="Documentation"');
-    expect(source).toContain("dashboardDocUrl('events')");
-    expect(source).toContain("dashboardDocUrl('apiReference')");
-    expect(source).toContain("dashboardDocUrl('webhookTroubleshooting')");
+    expect(source).toContain('useDashboardDocUrl()');
+    expect(source).toContain("docUrl('events')");
+    expect(source).toContain("docUrl('apiReference')");
+    expect(source).toContain("docUrl('webhookTroubleshooting')");
     expect(source).toContain('href: routes.help');
   });
 

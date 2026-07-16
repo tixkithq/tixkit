@@ -2,11 +2,13 @@
 
 import { UserProfile, useClerk } from '@clerk/nextjs';
 import { hasClerkKey } from '@/lib/auth';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 export default function UserProfilePage() {
   const clerk = useClerk();
+  const runtimeConfig = useRuntimeConfig();
 
-  if (!hasClerkKey()) {
+  if (!hasClerkKey(runtimeConfig)) {
     return (
       <div className="flex min-h-svh items-center justify-center p-8">
         <div className="text-center space-y-2">

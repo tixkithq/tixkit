@@ -11,8 +11,9 @@ describe('ContextualHelp source', () => {
   });
 
   it('links summaries, tasks, and symptoms through canonical documentation routes', () => {
-    expect(source).toContain('dashboardDocUrl(entry.docRouteId)');
-    expect(source).toContain('dashboardDocUrl(task.docRouteId)');
-    expect(source).toContain('dashboardDocUrl(item.docRouteId)');
+    expect(source).toContain('useDashboardDocUrl()');
+    expect(source).toContain('docUrl(entry.docRouteId)');
+    expect(source).toContain('docUrl(task.docRouteId)');
+    expect(source).toContain('docUrl(item.docRouteId)');
   });
 });

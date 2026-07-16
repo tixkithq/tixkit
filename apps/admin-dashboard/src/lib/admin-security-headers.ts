@@ -1,0 +1,77 @@
+import type { PublicAdminRuntimeConfig } from './runtime-config-contract';
+
+export const ADMIN_SECURITY_HEADER_NAMES = [
+  'Content-Security-Policy',
+  'Referrer-Policy',
+  'Permissions-Policy',
+  'X-Content-Type-Options',
+  'X-Frame-Options',
+] as const;
+
+export function adminContentSecurityPolicy(
+  config: PublicAdminRuntimeConfig,
+  options: { development?: boolean } = {},
+): string {
+  const development = options.development === true;
+  const clerkSources = ['https://*.clerk.accounts.dev', 'https://*.clerk.com'];
+  const scriptSources = [
+    "'self'",
+    "'unsafe-inline'",
+    ...(development ? ["'unsafe-eval'", 'http://localhost:7331', 'https://esm.sh'] : []),
+    ...clerkSources,
+  ];
+  const connectSources = [
+    "'self'",
+    config.apiBaseUrl,
+    config.checkoutUrl,
+    config.uploadOrigin,
+    ...clerkSources,
+    ...(development
+      ? [
+          'http://localhost:*',
+          'http://127.0.0.1:*',
+          'ws://localhost:*',
+          'ws://127.0.0.1:*',
+          'https://esm.sh',
+        ]
+      : []),
+  ];
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    `form-action 'self' ${clerkSources.join(' ')}`,
+    `img-src 'self' data: blob: https: ${config.apiBaseUrl} ${config.uploadOrigin}`,
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    `script-src ${scriptSources.join(' ')}`,
+    `connect-src ${connectSources.join(' ')}`,
+    `frame-src 'self' ${config.checkoutUrl} ${clerkSources.join(' ')}`,
+    "worker-src 'self' blob:",
+  ].join('; ');
+}
+
+export function adminSecurityHeaders(
+  config: PublicAdminRuntimeConfig,
+): Readonly<Record<string, string>> {
+  const development = config.deploymentProfile === 'development';
+  return Object.freeze({
+    'Content-Security-Policy': adminContentSecurityPolicy(config, { development }),
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(self), microphone=(), geolocation=()',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Cache-Control': 'no-store',
+  });
+}
+
+export const INVALID_RUNTIME_SECURITY_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  'Content-Security-Policy':
+    "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'",
+  'Referrer-Policy': 'no-referrer',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Cache-Control': 'no-store',
+});

@@ -12,6 +12,25 @@
 {{- if not (has .Values.auth.provider (list "clerk" "oidc")) -}}
 {{- fail "auth.provider must be clerk or oidc" -}}
 {{- end -}}
+{{- if eq .Values.auth.provider "oidc" -}}
+{{- fail "auth.provider=oidc is not supported by the admin dashboard until an OIDC browser client is implemented; use auth.provider=clerk" -}}
+{{- end -}}
+{{- range $setting := list
+  (dict "name" "global.apiBaseUrl" "value" .Values.global.apiBaseUrl)
+  (dict "name" "global.checkoutUrl" "value" .Values.global.checkoutUrl)
+  (dict "name" "global.s3PublicEndpoint" "value" .Values.global.s3PublicEndpoint) -}}
+{{- if not (regexMatch "^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$" $setting.value) -}}
+{{- fail (printf "%s must be an exact HTTPS origin" $setting.name) -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.global.docsUrl (not (regexMatch "^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$" .Values.global.docsUrl)) -}}
+{{- fail "global.docsUrl must be empty or an exact HTTPS origin" -}}
+{{- end -}}
+{{- if or
+  (not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" .Values.global.buildRevision))
+  (has (lower .Values.global.buildRevision) (list "development" "local" "latest" "unknown" "unset" "placeholder" "example")) -}}
+{{- fail "production-like profiles require global.buildRevision to be an immutable source commit or release tag, not a placeholder" -}}
+{{- end -}}
 {{- if not (has .Values.temporalConnection.mode (list "self-hosted-ha" "cloud")) -}}
 {{- fail "temporalConnection.mode must be self-hosted-ha or cloud" -}}
 {{- end -}}

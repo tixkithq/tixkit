@@ -5,6 +5,7 @@ import { useAuth } from '@clerk/nextjs';
 import { LOCAL_DEV_PERMISSIONS, type TixkitPermission, hasPermission } from '@/lib/permissions';
 import { hasClerkKey, usesLocalDevAuth } from '@/lib/auth';
 import { adminApi } from '@/lib/api';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 type PermissionContextValue = {
   permissions: TixkitPermission[];
@@ -42,10 +43,6 @@ function cacheKeyForPrincipal(input: {
 }
 
 async function resolvePermissions(cacheKey: PrincipalCacheKey): Promise<TixkitPermission[]> {
-  if (usesLocalDevAuth()) {
-    return LOCAL_DEV_PERMISSIONS;
-  }
-
   if (principalCacheKey !== cacheKey) {
     principalCache = null;
   }
@@ -205,8 +202,11 @@ function ClerkPermissionProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function PermissionProvider({ children }: { children: React.ReactNode }) {
-  if (hasClerkKey()) return <ClerkPermissionProvider>{children}</ClerkPermissionProvider>;
-  if (usesLocalDevAuth()) return <LocalPermissionProvider>{children}</LocalPermissionProvider>;
+  const runtimeConfig = useRuntimeConfig();
+  if (hasClerkKey(runtimeConfig))
+    return <ClerkPermissionProvider>{children}</ClerkPermissionProvider>;
+  if (usesLocalDevAuth(runtimeConfig))
+    return <LocalPermissionProvider>{children}</LocalPermissionProvider>;
   return <UnavailablePermissionProvider>{children}</UnavailablePermissionProvider>;
 }
 

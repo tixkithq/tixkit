@@ -22,6 +22,7 @@ import { useAdminQuery } from '@/hooks/use-admin-table-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiErrorState } from '@/components/api-error-state';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 const WIDGET_URL = 'https://cdn.tixkit.com/widget/v0.1.0/tixkit-widget-0.1.0.js';
 const WIDGET_INTEGRITY = 'sha384-dekV7a3DQg8bDdculs4uy24zS9CiyMfb4QpROp1Pb878LK63cHRC212CsRjzESAB';
@@ -59,8 +60,7 @@ export function EmbedStudio({ eventId }: { eventId: string }) {
     buttonVariant: 'solid',
   });
   const previewRef = React.useRef<HTMLIFrameElement>(null);
-  const checkoutBaseUrl =
-    process.env.NEXT_PUBLIC_CHECKOUT_BASE_URL ?? 'https://checkout.tixkit.com';
+  const checkoutBaseUrl = useRuntimeConfig().checkoutUrl;
 
   React.useEffect(() => setPreviewId(createEmbedNonce()), []);
 

@@ -8,6 +8,7 @@ vi.mock('@/context/permission-provider', () => ({
 }));
 vi.mock('@/lib/docs', () => ({
   dashboardDocUrl: (routeId: string) => `https://docs.example.test/${routeId}`,
+  useDashboardDocUrl: () => (routeId: string) => `https://docs.example.test/${routeId}`,
 }));
 vi.mock('@tixkit/docs-core', () => ({
   helpForPath: () => ({

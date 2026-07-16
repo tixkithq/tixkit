@@ -4,6 +4,10 @@ primary_region = "iad"
 [build]
 dockerfile = "Dockerfile.api"
 
+# Use the same shell value as infra/fly/admin.toml so presigned upload URLs and
+# the browser upload origin cannot drift between the API and admin services.
+# fly secrets set S3_PUBLIC_ENDPOINT="$S3_PUBLIC_ENDPOINT"
+
 [http_service]
 internal_port = 4000
 force_https = true

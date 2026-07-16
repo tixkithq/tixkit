@@ -6,7 +6,7 @@ import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { usePermissions } from '@/context/permission-provider';
-import { dashboardDocUrl } from '@/lib/docs';
+import { useDashboardDocUrl } from '@/lib/docs';
 
 const audiencePaths: ReadonlyArray<{
   title: string;
@@ -29,10 +29,11 @@ const audiencePaths: ReadonlyArray<{
 ];
 
 function DocLink({ routeId, children }: { routeId: DocRouteId; children: React.ReactNode }) {
+  const docUrl = useDashboardDocUrl();
   return (
     <a
       className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-      href={dashboardDocUrl(routeId)}
+      href={docUrl(routeId)}
     >
       {children}
     </a>

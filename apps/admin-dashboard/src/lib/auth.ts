@@ -1,8 +1,4 @@
-/**
- * Clerk is required for authenticated admin API calls. When a usable Clerk
- * publishable key is absent, the shell can render for layout work, but data
- * pages fail closed instead of using runtime fixtures.
- */
+import type { PublicAdminRuntimeConfig } from './runtime-config-contract';
 
 export type AdminUser = {
   name: string;
@@ -16,34 +12,18 @@ export const LOCAL_DEV_USER: AdminUser = {
   imageUrl: null,
 };
 
-function isUsableClerkPublishableKey(key: string | undefined): boolean {
-  return Boolean(
-    key &&
-    key !== 'pk_test_' &&
-    key !== 'pk_live_' &&
-    (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
-  );
+export function authProvider(config: PublicAdminRuntimeConfig): 'clerk' | 'dev' {
+  return config.authProvider;
 }
 
-export function authProvider(): string {
-  return (
-    process.env.NEXT_PUBLIC_AUTH_PROVIDER ??
-    process.env.AUTH_PROVIDER ??
-    (isUsableClerkPublishableKey(clerkPublishableKey()) ? 'clerk' : undefined) ??
-    (process.env.NODE_ENV === 'development' ? 'dev' : 'clerk')
-  ).toLowerCase();
+export function usesLocalDevAuth(config: PublicAdminRuntimeConfig): boolean {
+  return authProvider(config) === 'dev';
 }
 
-export function usesLocalDevAuth(): boolean {
-  return authProvider() === 'dev' && process.env.NODE_ENV === 'development';
+export function hasClerkKey(config: PublicAdminRuntimeConfig): boolean {
+  return config.authProvider === 'clerk' && Boolean(config.clerkPublishableKey);
 }
 
-export function hasClerkKey(): boolean {
-  if (usesLocalDevAuth()) return false;
-
-  return isUsableClerkPublishableKey(clerkPublishableKey());
-}
-
-export function clerkPublishableKey(): string | undefined {
-  return process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY;
+export function clerkPublishableKey(config: PublicAdminRuntimeConfig): string | undefined {
+  return config.clerkPublishableKey;
 }

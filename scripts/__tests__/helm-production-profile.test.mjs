@@ -20,7 +20,8 @@ const productionNetwork = [
   'networkPolicy.externalEgressCidrs[1]=2001:db8::/32',
   'networkPolicy.databaseEgressCidrs[0]=198.51.100.0/24',
 ];
-const productionRuntime = [...productionImages, ...productionNetwork];
+const productionBuildRevision = 'global.buildRevision=release-2026.08.10';
+const productionRuntime = [...productionImages, ...productionNetwork, productionBuildRevision];
 const externalSecretKeys = [
   'DATABASE_URL',
   'REDIS_URL',
@@ -122,6 +123,60 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
       /^[a-f0-9]{64}$/u,
     );
   }
+  const config = rendered.find((resource) => resource.kind === 'ConfigMap');
+  assert.equal(config.data.TIXKIT_DEPLOYMENT_PROFILE, 'production');
+  assert.equal(config.data.API_BASE_URL, 'https://api.tixkit.com');
+  assert.equal(config.data.TIXKIT_CHECKOUT_URL, 'https://checkout.tixkit.com');
+  assert.equal(config.data.TIXKIT_DOCS_URL, 'https://docs.tixkit.com');
+  assert.equal(config.data.S3_PUBLIC_ENDPOINT, 'https://uploads.tixkit.com');
+  assert.equal(config.data.AUTH_PROVIDER, 'clerk');
+  assert.equal(config.data.ALLOW_INSECURE_LOCAL_ORIGINS, '0');
+  assert.equal(config.data.TIXKIT_BUILD_REVISION, 'release-2026.08.10');
+  const admin = deployments.find(
+    (deployment) => deployment.metadata.labels['app.kubernetes.io/component'] === 'admin',
+  );
+  assert.equal(admin.spec.template.spec.containers[0].readinessProbe.httpGet.path, '/ready');
+  assert.equal(admin.spec.template.spec.containers[0].livenessProbe.httpGet.path, '/health');
+  const adminEnvironment = admin.spec.template.spec.containers[0].env;
+  assert.deepEqual(
+    adminEnvironment.slice(0, -2).map((entry) => entry.name),
+    [
+      'NODE_ENV',
+      'TIXKIT_DEPLOYMENT_PROFILE',
+      'API_BASE_URL',
+      'TIXKIT_CHECKOUT_URL',
+      'S3_PUBLIC_ENDPOINT',
+      'AUTH_PROVIDER',
+      'ALLOW_INSECURE_LOCAL_ORIGINS',
+      'TIXKIT_DOCS_URL',
+      'TIXKIT_BUILD_REVISION',
+    ],
+  );
+  assert.deepEqual(adminEnvironment.slice(-2), [
+    {
+      name: 'CLERK_PUBLISHABLE_KEY',
+      valueFrom: {
+        secretKeyRef: {
+          name: 'tixkit-production-secrets',
+          key: 'CLERK_PUBLISHABLE_KEY',
+        },
+      },
+    },
+    {
+      name: 'CLERK_SECRET_KEY',
+      valueFrom: {
+        secretKeyRef: {
+          name: 'tixkit-production-secrets',
+          key: 'CLERK_SECRET_KEY',
+        },
+      },
+    },
+  ]);
+  assert.equal(admin.spec.template.spec.containers[0].envFrom, undefined);
+  assert.equal(
+    adminEnvironment.some((entry) => entry.name.startsWith('NEXT_PUBLIC_')),
+    false,
+  );
   const serviceMonitor = rendered.find((resource) => resource.kind === 'ServiceMonitor');
   assert.equal(serviceMonitor.spec.endpoints[0].path, '/metrics');
   assert.deepEqual(serviceMonitor.spec.endpoints[0].bearerTokenSecret, {
@@ -274,6 +329,16 @@ test('Production config changes deterministically roll every workload', () => {
   assert.deepEqual(Object.keys(baseChecksums).sort(), ['admin', 'api', 'checkout', 'worker']);
   for (const component of Object.keys(baseChecksums))
     assert.notEqual(baseChecksums[component], changedChecksums[component]);
+  const adminDeployment = (rendered) =>
+    rendered.find(
+      (resource) =>
+        resource.kind === 'Deployment' &&
+        resource.metadata.labels['app.kubernetes.io/component'] === 'admin',
+    );
+  assert.equal(
+    adminDeployment(base).spec.template.spec.containers[0].image,
+    adminDeployment(changed).spec.template.spec.containers[0].image,
+  );
 });
 
 test('Production rejects availability settings that permit a single-instance outage', () => {
@@ -323,6 +388,20 @@ test('Evaluation render declares its runtime profile and MinIO-compatible encryp
   assert.equal(config.data.NODE_ENV, 'production');
   assert.equal(config.data.TIXKIT_DEPLOYMENT_PROFILE, 'evaluation');
   assert.equal(config.data.S3_SERVER_SIDE_ENCRYPTION, 'none');
+  assert.equal(config.data.TIXKIT_BUILD_REVISION, '0.1.0');
+});
+
+test('Production-like Helm profiles reject missing or placeholder build revisions', () => {
+  for (const revision of ['', 'local', 'development', 'latest', 'unknown', 'placeholder']) {
+    assert.throws(
+      () => render(production, [`global.buildRevision=${revision}`]),
+      /global\.buildRevision to be an immutable source commit or release tag/u,
+    );
+  }
+  assert.throws(
+    () => render(evaluation, ['global.buildRevision=']),
+    /global\.buildRevision to be an immutable source commit or release tag/u,
+  );
 });
 
 test('Production Helm render rejects bundled services and chart-created secrets', () => {
@@ -383,6 +462,8 @@ test('Production Helm render requires release-provided image digests', () => {
       '--set',
       'secrets.name=tixkit-production-secrets',
       ...productionNetwork.flatMap((value) => ['--set', value]),
+      '--set',
+      productionBuildRevision,
     ],
     { cwd: root, encoding: 'utf8' },
   );
@@ -405,6 +486,8 @@ test('Production Helm render requires bounded operator-selected egress CIDRs', (
         '--set',
         'secrets.name=tixkit-production-secrets',
         ...productionImages.flatMap((value) => ['--set', value]),
+        '--set',
+        productionBuildRevision,
         '--set',
         'networkPolicy.databaseEgressCidrs[0]=198.51.100.0/24',
         ...(cidr ? ['--set', `networkPolicy.externalEgressCidrs[0]=${cidr}`] : []),
@@ -451,7 +534,7 @@ test('External Secrets mode rejects an incomplete required-key inventory', () =>
   );
 });
 
-test('External Secret inventory follows MySQL, OIDC, workload identity, and Temporal Cloud modes', () => {
+test('External Secret inventory follows MySQL, workload identity, and Temporal Cloud modes', () => {
   const keys = [
     'DATABASE_URL_MYSQL',
     'REDIS_URL',
@@ -461,8 +544,9 @@ test('External Secret inventory follows MySQL, OIDC, workload identity, and Temp
     'STRIPE_WEBHOOK_SECRET',
     'METRICS_BEARER_TOKEN',
     'DASHBOARD_CURSOR_SIGNING_KEY',
-    'OIDC_ISSUER_URL',
-    'OIDC_AUDIENCE',
+    'CLERK_SECRET_KEY',
+    'CLERK_PUBLISHABLE_KEY',
+    'CLERK_WEBHOOK_SECRET',
     'OTEL_EXPORTER_OTLP_ENDPOINT',
     'PROMETHEUS_PUSHGATEWAY_URL',
   ];
@@ -470,7 +554,6 @@ test('External Secret inventory follows MySQL, OIDC, workload identity, and Temp
     render(production, [
       'global.imageRegistry=ghcr.io/tixkit/tixkit',
       'database.driver=mysql',
-      'auth.provider=oidc',
       'temporalConnection.mode=cloud',
       'secrets.temporalTlsEnabled=true',
       'secrets.s3AuthMode=workload-identity',
@@ -485,6 +568,44 @@ test('External Secret inventory follows MySQL, OIDC, workload identity, and Temp
     .find((resource) => resource.kind === 'ExternalSecret')
     .spec.data.map((entry) => entry.secretKey);
   assert.deepEqual(mappedKeys, keys);
+});
+
+test('Helm rejects OIDC until the admin dashboard has an OIDC browser client', () => {
+  assert.throws(
+    () => render(evaluation, ['auth.provider=oidc']),
+    /auth\.provider=oidc is not supported by the admin dashboard until an OIDC browser client is implemented/u,
+  );
+});
+
+test('Helm rejects insecure, missing, or inexact public admin runtime origins', () => {
+  for (const [setting, value] of [
+    ['global.apiBaseUrl', 'http://api.example.test'],
+    ['global.checkoutUrl', ''],
+    ['global.apiBaseUrl', 'https://api.example.test/v1'],
+    ['global.s3PublicEndpoint', 'http://uploads.example.test'],
+    ['global.s3PublicEndpoint', 'https://uploads.example.test/bucket'],
+  ]) {
+    assert.throws(
+      () => render(evaluation, [`${setting}=${value}`]),
+      new RegExp(`${setting} must be an exact HTTPS origin`, 'u'),
+    );
+  }
+  assert.throws(
+    () => render(evaluation, ['global.docsUrl=docs.example.test']),
+    /global\.docsUrl must be empty or an exact HTTPS origin/u,
+  );
+  const withoutDocs = resources(render(evaluation, ['global.docsUrl=']));
+  const config = withoutDocs.find((resource) => resource.kind === 'ConfigMap');
+  const admin = withoutDocs.find(
+    (resource) =>
+      resource.kind === 'Deployment' &&
+      resource.metadata.labels['app.kubernetes.io/component'] === 'admin',
+  );
+  assert.equal(config.data.TIXKIT_DOCS_URL, undefined);
+  assert.equal(
+    admin.spec.template.spec.containers[0].env.some((entry) => entry.name === 'TIXKIT_DOCS_URL'),
+    false,
+  );
 });
 
 test('Temporal Cloud mode fails closed without TLS', () => {

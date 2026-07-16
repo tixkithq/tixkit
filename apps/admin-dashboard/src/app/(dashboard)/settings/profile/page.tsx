@@ -4,6 +4,7 @@ import * as React from 'react';
 import { ExternalLink } from 'lucide-react';
 import { useAdminUser } from '@/context/admin-user-provider';
 import { hasClerkKey } from '@/lib/auth';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 import { Button } from '@/components/ui/button';
 import { GatedControl } from '@/components/gated-control';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,7 +18,7 @@ function openProfile() {
 
 export default function ProfilePage() {
   const user = useAdminUser();
-  const clerkEnabled = hasClerkKey();
+  const clerkEnabled = hasClerkKey(useRuntimeConfig());
 
   return (
     <div className="space-y-6">

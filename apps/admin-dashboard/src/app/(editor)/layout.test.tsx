@@ -16,11 +16,9 @@ vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
 }));
 
-vi.mock('@/lib/api', () => ({
-  adminApi: {
-    getPrincipal: mocks.getPrincipal,
-  },
-  getAdminApiBaseUrl: () => 'http://localhost:4100',
+vi.mock('@/lib/api-server', () => ({
+  getServerPrincipal: mocks.getPrincipal,
+  getServerAdminApiBaseUrl: () => 'http://localhost:4100',
 }));
 
 vi.mock('@/context/permission-provider', () => ({

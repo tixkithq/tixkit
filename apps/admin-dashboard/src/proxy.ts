@@ -1,32 +1,51 @@
 import { clerkMiddleware } from '@clerk/nextjs/server';
 import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server';
-
-function hasUsableClerkPublishableKey(): boolean {
-  const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY;
-  const hasKey = Boolean(
-    key &&
-    key !== 'pk_test_' &&
-    key !== 'pk_live_' &&
-    (key.startsWith('pk_test_') || key.startsWith('pk_live_')),
-  );
-  const provider = (
-    process.env.NEXT_PUBLIC_AUTH_PROVIDER ??
-    process.env.AUTH_PROVIDER ??
-    (hasKey ? 'clerk' : undefined) ??
-    (process.env.NODE_ENV === 'development' ? 'dev' : 'clerk')
-  ).toLowerCase();
-  if (process.env.NODE_ENV === 'development' && provider === 'dev') return false;
-
-  return hasKey;
-}
+import {
+  adminSecurityHeaders,
+  INVALID_RUNTIME_SECURITY_HEADERS,
+} from '@/lib/admin-security-headers';
+import { parseAdminRuntimeConfig } from '@/lib/runtime-config-server';
 
 const clerkProxy = clerkMiddleware();
 
-export default function proxy(request: NextRequest, event: NextFetchEvent) {
-  if (!hasUsableClerkPublishableKey()) {
-    return NextResponse.next();
+function applySecurityHeaders(response: Response, headers: Readonly<Record<string, string>>) {
+  for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+  return response;
+}
+
+function requestPathname(request: NextRequest): string {
+  return request.nextUrl?.pathname ?? '/';
+}
+
+function unavailableResponse(): NextResponse {
+  return new NextResponse('Service unavailable', {
+    status: 503,
+    headers: INVALID_RUNTIME_SECURITY_HEADERS,
+  });
+}
+
+export default async function proxy(request: NextRequest, event: NextFetchEvent) {
+  let runtimeConfig;
+  try {
+    runtimeConfig = parseAdminRuntimeConfig();
+  } catch {
+    const pathname = requestPathname(request);
+    if (pathname === '/health' || pathname === '/ready') {
+      return applySecurityHeaders(NextResponse.next(), INVALID_RUNTIME_SECURITY_HEADERS);
+    }
+    return unavailableResponse();
   }
-  return clerkProxy(request, event);
+
+  let response;
+  try {
+    response =
+      runtimeConfig.authProvider === 'clerk'
+        ? await clerkProxy(request, event)
+        : NextResponse.next();
+  } catch {
+    return unavailableResponse();
+  }
+  return applySecurityHeaders(response ?? NextResponse.next(), adminSecurityHeaders(runtimeConfig));
 }
 
 export const config = {

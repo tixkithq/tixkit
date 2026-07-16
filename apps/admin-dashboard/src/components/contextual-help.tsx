@@ -5,9 +5,10 @@ import { CircleHelp } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
 import { usePermissions } from '@/context/permission-provider';
-import { dashboardDocUrl } from '@/lib/docs';
+import { useDashboardDocUrl } from '@/lib/docs';
 
 export function ContextualHelp() {
+  const docUrl = useDashboardDocUrl();
   const pathname = usePathname();
   const { permissions, loading } = usePermissions();
   const match = helpForPath(pathname);
@@ -72,7 +73,7 @@ export function ContextualHelp() {
           </div>
           <a
             className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-            href={dashboardDocUrl(entry.docRouteId)}
+            href={docUrl(entry.docRouteId)}
           >
             Open full guide
           </a>
@@ -86,7 +87,7 @@ export function ContextualHelp() {
                   <li key={task.label}>
                     <a
                       className="text-sm text-primary underline-offset-4 hover:underline"
-                      href={dashboardDocUrl(task.docRouteId)}
+                      href={docUrl(task.docRouteId)}
                     >
                       {task.label}
                     </a>
@@ -105,7 +106,7 @@ export function ContextualHelp() {
                   <li key={item.symptom}>
                     <a
                       className="text-sm text-primary underline-offset-4 hover:underline"
-                      href={dashboardDocUrl(item.docRouteId)}
+                      href={docUrl(item.docRouteId)}
                     >
                       {item.symptom}
                     </a>

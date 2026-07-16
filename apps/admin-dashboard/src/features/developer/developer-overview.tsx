@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { KeyRound, Webhook, BookOpen, Code2 } from 'lucide-react';
 import { adminApi } from '@/lib/api';
 import { routes } from '@/lib/routes';
-import { dashboardDocUrl } from '@/lib/docs';
+import { useDashboardDocUrl } from '@/lib/docs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -15,6 +15,7 @@ import { ApiErrorState } from '@/components/api-error-state';
 import { DeveloperConsoleGuide } from './developer-console-guide';
 
 export function DeveloperOverview() {
+  const docUrl = useDashboardDocUrl();
   const { organizationId } = useBootstrap();
   const {
     data: apiKeys,
@@ -136,7 +137,7 @@ export function DeveloperOverview() {
               </div>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link href={dashboardDocUrl('apiReference')}>Open reference</Link>
+              <Link href={docUrl('apiReference')}>Open reference</Link>
             </Button>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
@@ -150,7 +151,7 @@ export function DeveloperOverview() {
               </div>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link href={dashboardDocUrl('webhookEvents')}>Open event catalog</Link>
+              <Link href={docUrl('webhookEvents')}>Open event catalog</Link>
             </Button>
           </div>
         </CardContent>

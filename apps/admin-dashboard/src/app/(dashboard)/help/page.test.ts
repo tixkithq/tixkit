@@ -15,7 +15,8 @@ describe('HelpPage source', () => {
     expect(helpSource).toContain('Start by role');
     expect(helpSource).toContain('Tasks by product area');
     expect(helpSource).toContain('Troubleshoot by symptom');
-    expect(helpSource).toContain('dashboardDocUrl(routeId)');
+    expect(helpSource).toContain('useDashboardDocUrl()');
+    expect(helpSource).toContain('docUrl(routeId)');
     expect(helpSource).toContain('routeId="support"');
   });
 });

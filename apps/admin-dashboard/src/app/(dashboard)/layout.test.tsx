@@ -15,11 +15,9 @@ vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
 }));
 
-vi.mock('@/lib/api', () => ({
-  adminApi: {
-    getPrincipal: mocks.getPrincipal,
-  },
-  getAdminApiBaseUrl: () => 'http://localhost:4100',
+vi.mock('@/lib/api-server', () => ({
+  getServerPrincipal: mocks.getPrincipal,
+  getServerAdminApiBaseUrl: () => 'http://localhost:4100',
 }));
 
 vi.mock('@/components/layout/authenticated-layout', () => ({
@@ -70,10 +68,12 @@ const originalNextPublicAuthProvider = process.env.NEXT_PUBLIC_AUTH_PROVIDER;
 const originalE2eLocalAdminAuth = process.env.E2E_LOCAL_ADMIN_AUTH;
 
 function enableClerk() {
-  process.env.AUTH_PROVIDER = 'clerk';
-  process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'clerk';
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
-  delete process.env.CLERK_PUBLISHABLE_KEY;
+  vi.stubEnv('AUTH_PROVIDER', 'clerk');
+  vi.stubEnv('CLERK_PUBLISHABLE_KEY', 'pk_test_valid');
+  vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_valid');
+  vi.stubEnv('API_BASE_URL', 'https://admin.example.test');
+  vi.stubEnv('TIXKIT_CHECKOUT_URL', 'https://checkout.example.test');
+  vi.stubEnv('S3_PUBLIC_ENDPOINT', 'https://media.example.test');
 }
 
 function disableClerk() {
@@ -127,6 +127,7 @@ describe('DashboardLayout auth handoff', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     restoreClerkEnv();
   });
 
@@ -231,6 +232,25 @@ describe('DashboardLayout auth handoff', () => {
     expect(mocks.getPrincipal).toHaveBeenCalledWith('clerk_session_jwt');
     expect(mocks.redirect).not.toHaveBeenCalled();
     expect(screen.getByTestId('dashboard-child')).toBeInTheDocument();
+  });
+
+  it('resolves the server principal without a document global', async () => {
+    enableClerk();
+    vi.stubGlobal('document', undefined);
+    mocks.auth.mockResolvedValue({
+      userId: 'clerk_user_1',
+      getToken: vi.fn().mockResolvedValue('server_token'),
+    });
+    mocks.getPrincipal.mockResolvedValue({
+      ok: true,
+      data: {
+        tenantId: 'tnt_1',
+        organizationIds: ['org_1'],
+        permissions: ['events.read'],
+      },
+    });
+    await DashboardLayout({ children: <div /> });
+    expect(mocks.getPrincipal).toHaveBeenCalledWith('server_token');
   });
 
   it('redirects door-only staff to the kiosk surface', async () => {
@@ -366,6 +386,6 @@ describe('DashboardLayout auth handoff', () => {
       }),
     ).rejects.toThrow('redirect:/sign-in?error=unauthorized');
 
-    expect(mocks.getPrincipal).toHaveBeenCalledWith(undefined);
+    expect(mocks.getPrincipal).not.toHaveBeenCalled();
   });
 });

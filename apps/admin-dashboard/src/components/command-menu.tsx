@@ -26,7 +26,7 @@ import { useTheme } from '@/context/theme-provider';
 import { usePermissions } from '@/context/permission-provider';
 import { type TixkitPermission } from '@/lib/permissions';
 import { routes } from '@/lib/routes';
-import { dashboardDocUrl } from '@/lib/docs';
+import { useDashboardDocUrl } from '@/lib/docs';
 import {
   CommandDialog,
   CommandEmpty,
@@ -51,6 +51,7 @@ type CommandMenuItem = {
 };
 
 export function CommandMenu() {
+  const docUrl = useDashboardDocUrl();
   const router = useRouter();
   const { setTheme } = useTheme();
   const { open, setOpen } = useSearch();
@@ -174,7 +175,7 @@ export function CommandMenu() {
       id: 'docs-operator-events',
       title: 'Event operations guide',
       subtitle: 'Create, publish, and operate events',
-      href: dashboardDocUrl('events'),
+      href: docUrl('events'),
       icon: BookOpen,
       keywords: ['documentation', 'event', 'publish', 'operator'],
       requiredPermission: 'events.read',
@@ -183,7 +184,7 @@ export function CommandMenu() {
       id: 'docs-api-reference',
       title: 'API reference',
       subtitle: 'Endpoints, schemas, and authentication',
-      href: dashboardDocUrl('apiReference'),
+      href: docUrl('apiReference'),
       icon: BookOpen,
       keywords: ['documentation', 'developer', 'api', 'schema'],
       requiredPermission: 'developers.write',
@@ -192,7 +193,7 @@ export function CommandMenu() {
       id: 'docs-webhook-troubleshooting',
       title: 'Webhook troubleshooting',
       subtitle: 'Signatures, delivery, and replay',
-      href: dashboardDocUrl('webhookTroubleshooting'),
+      href: docUrl('webhookTroubleshooting'),
       icon: BookOpen,
       keywords: ['documentation', 'developer', 'webhook', 'delivery', 'signature'],
       requiredPermission: 'developers.write',

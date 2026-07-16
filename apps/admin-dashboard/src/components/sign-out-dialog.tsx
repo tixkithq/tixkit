@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { resetPrincipalCache } from '@/context/permission-provider';
 import { hasClerkKey } from '@/lib/auth';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 interface SignOutDialogProps {
   open: boolean;
@@ -12,7 +13,12 @@ interface SignOutDialogProps {
 }
 
 export function SignOutDialog(props: SignOutDialogProps) {
-  return hasClerkKey() ? <ClerkSignOutDialog {...props} /> : <LocalSignOutDialog {...props} />;
+  const runtimeConfig = useRuntimeConfig();
+  return hasClerkKey(runtimeConfig) ? (
+    <ClerkSignOutDialog {...props} />
+  ) : (
+    <LocalSignOutDialog {...props} />
+  );
 }
 
 function ClerkSignOutDialog({ open, onOpenChange }: SignOutDialogProps) {

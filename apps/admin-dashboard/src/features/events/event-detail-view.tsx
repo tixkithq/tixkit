@@ -35,8 +35,10 @@ import { EventLaunchPanel } from './event-launch-panel';
 import { PublishPreflightDialog } from './publish-preflight-dialog';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { PublishedEventNextActions } from './published-event-next-actions';
+import { useRuntimeConfig } from '@/context/runtime-config-provider';
 
 export function EventDetailView({ eventId }: { eventId: string }) {
+  const runtimeConfig = useRuntimeConfig();
   const {
     data: event,
     loading,
@@ -130,7 +132,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
 
   const recentOrders = ordersData?.items ?? [];
   const tickets = ticketTypes ?? [];
-  const shareUrl = publicEventUrl(event, brands);
+  const shareUrl = publicEventUrl(event, brands, runtimeConfig);
   const eventDescription =
     typeof event.description === 'string' && event.description.trim().length > 0
       ? event.description.trim()

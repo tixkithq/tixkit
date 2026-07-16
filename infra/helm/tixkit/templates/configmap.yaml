@@ -11,6 +11,15 @@ data:
   DB_DRIVER: {{ .Values.database.driver | quote }}
   AUTH_PROVIDER: {{ .Values.auth.provider | quote }}
   API_BASE_URL: {{ .Values.global.apiBaseUrl | quote }}
+  TIXKIT_CHECKOUT_URL: {{ .Values.global.checkoutUrl | quote }}
+  {{- with .Values.global.docsUrl }}
+  TIXKIT_DOCS_URL: {{ . | quote }}
+  {{- end }}
+  S3_PUBLIC_ENDPOINT: {{ .Values.global.s3PublicEndpoint | quote }}
+  ALLOW_INSECURE_LOCAL_ORIGINS: "0"
+  {{- with .Values.global.buildRevision }}
+  TIXKIT_BUILD_REVISION: {{ . | quote }}
+  {{- end }}
   CORS_ALLOWED_ORIGINS: {{ join "," .Values.global.corsAllowedOrigins | quote }}
   CUSTOM_DOMAIN_CORS_ENABLED: {{ .Values.global.customDomainCorsEnabled | quote }}
   TRUST_PROXY: {{ .Values.api.trustProxy | quote }}

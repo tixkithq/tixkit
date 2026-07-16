@@ -1,179 +1,66 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { installTestRuntimeConfig } from '@/test/runtime-config';
+import { readAdminRuntimeConfig } from './runtime-config-contract';
 import { getAdminApiAuthHeaders } from './api';
 import { authProvider, usesLocalDevAuth } from './auth';
+import {
+  initializeBrowserRuntimeConfig,
+  resetBrowserRuntimeConfigForTests,
+} from './runtime-config-browser';
 
-const originalClerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY;
-const originalNextPublicClerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const originalAuthProvider = process.env.AUTH_PROVIDER;
-const originalNextPublicAuthProvider = process.env.NEXT_PUBLIC_AUTH_PROVIDER;
-const originalE2eLocalAdminAuth = process.env.E2E_LOCAL_ADMIN_AUTH;
-
-function enableClerk() {
-  process.env.AUTH_PROVIDER = 'clerk';
-  process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'clerk';
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
-  delete process.env.CLERK_PUBLISHABLE_KEY;
-}
-
-function disableClerk() {
-  delete process.env.AUTH_PROVIDER;
-  delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
-  delete process.env.CLERK_PUBLISHABLE_KEY;
-  delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-  delete process.env.E2E_LOCAL_ADMIN_AUTH;
-}
-
-function restoreClerkEnv() {
-  if (originalClerkPublishableKey === undefined) {
-    delete process.env.CLERK_PUBLISHABLE_KEY;
-  } else {
-    process.env.CLERK_PUBLISHABLE_KEY = originalClerkPublishableKey;
-  }
-
-  if (originalNextPublicClerkPublishableKey === undefined) {
-    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-  } else {
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = originalNextPublicClerkPublishableKey;
-  }
-
-  if (originalAuthProvider === undefined) {
-    delete process.env.AUTH_PROVIDER;
-  } else {
-    process.env.AUTH_PROVIDER = originalAuthProvider;
-  }
-
-  if (originalNextPublicAuthProvider === undefined) {
-    delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
-  } else {
-    process.env.NEXT_PUBLIC_AUTH_PROVIDER = originalNextPublicAuthProvider;
-  }
-
-  if (originalE2eLocalAdminAuth === undefined) {
-    delete process.env.E2E_LOCAL_ADMIN_AUTH;
-  } else {
-    process.env.E2E_LOCAL_ADMIN_AUTH = originalE2eLocalAdminAuth;
-  }
-}
-
-describe('getAdminApiAuthHeaders', () => {
+describe('provider-owned admin authentication', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    disableClerk();
     delete window.Clerk;
   });
-
   afterEach(() => {
-    vi.unstubAllEnvs();
-    restoreClerkEnv();
     delete window.Clerk;
   });
 
-  it('does not wait on Clerk or attach authorization in no-Clerk local dev mode', async () => {
-    vi.stubEnv('NODE_ENV', 'development');
-    const headers = await getAdminApiAuthHeaders({ 'X-Test': '1' });
-
-    expect(headers).toEqual({ 'X-Test': '1' });
+  it('does not poll Clerk in bounded dev authentication', async () => {
+    installTestRuntimeConfig({ authProvider: 'dev', clerkPublishableKey: undefined });
+    const config = readAdminRuntimeConfig();
+    expect(authProvider(config)).toBe('dev');
+    expect(usesLocalDevAuth(config)).toBe(true);
+    await expect(getAdminApiAuthHeaders({ 'X-Test': '1' })).resolves.toEqual({ 'X-Test': '1' });
   });
 
-  it.each(['test', 'staging', 'preview', 'production'])(
-    'does not use local-dev auth when AUTH_PROVIDER=dev and NODE_ENV=%s',
-    (nodeEnv) => {
-      vi.stubEnv('NODE_ENV', nodeEnv);
-      process.env.AUTH_PROVIDER = 'dev';
-      process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
-
-      expect(authProvider()).toBe('dev');
-      expect(usesLocalDevAuth()).toBe(false);
-    },
-  );
-
-  it('ignores explicit e2e local admin auth outside development', () => {
-    vi.stubEnv('NODE_ENV', 'production');
-    process.env.AUTH_PROVIDER = 'dev';
-    process.env.NEXT_PUBLIC_AUTH_PROVIDER = 'dev';
-    process.env.E2E_LOCAL_ADMIN_AUTH = '1';
-
-    expect(authProvider()).toBe('dev');
-    expect(usesLocalDevAuth()).toBe(false);
-  });
-
-  it('attaches the active Clerk session token when Clerk is configured', async () => {
-    enableClerk();
+  it('attaches the active Clerk token when the snapshot enables Clerk', async () => {
+    resetBrowserRuntimeConfigForTests();
+    initializeBrowserRuntimeConfig(
+      installTestRuntimeConfig({
+        authProvider: 'clerk',
+        clerkPublishableKey: 'pk_test_example',
+      }),
+    );
     const getToken = vi.fn().mockResolvedValue('clerk_session_jwt');
-    window.Clerk = {
-      loaded: true,
-      session: { getToken },
-    };
-
-    const headers = await getAdminApiAuthHeaders();
-
-    expect(getToken).toHaveBeenCalledTimes(1);
-    expect(headers.Authorization).toBe('Bearer clerk_session_jwt');
-  });
-
-  it('uses Clerk when development has a public Clerk key but no public auth provider flag', async () => {
-    vi.stubEnv('NODE_ENV', 'development');
-    delete process.env.AUTH_PROVIDER;
-    delete process.env.NEXT_PUBLIC_AUTH_PROVIDER;
-    delete process.env.CLERK_PUBLISHABLE_KEY;
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
-    const getToken = vi.fn().mockResolvedValue('public_key_clerk_session_jwt');
-    window.Clerk = {
-      loaded: true,
-      session: { getToken },
-    };
-
-    const headers = await getAdminApiAuthHeaders();
-
-    expect(authProvider()).toBe('clerk');
-    expect(getToken).toHaveBeenCalledTimes(1);
-    expect(headers.Authorization).toBe('Bearer public_key_clerk_session_jwt');
-  });
-
-  it('loads Clerk before reading a token when the browser SDK is present but not loaded', async () => {
-    enableClerk();
-    const load = vi.fn().mockResolvedValue(undefined);
-    const getToken = vi.fn().mockResolvedValue('loaded_clerk_session_jwt');
-    window.Clerk = {
-      loaded: false,
-      load,
-      session: { getToken },
-    };
-
-    const headers = await getAdminApiAuthHeaders();
-
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(getToken).toHaveBeenCalledTimes(1);
-    expect(headers.Authorization).toBe('Bearer loaded_clerk_session_jwt');
-  });
-
-  it('preserves an explicit Authorization header without calling Clerk', async () => {
-    enableClerk();
-    const getToken = vi.fn().mockResolvedValue('clerk_session_jwt');
-    window.Clerk = {
-      loaded: true,
-      session: { getToken },
-    };
-
-    const headers = await getAdminApiAuthHeaders({
-      Authorization: 'Bearer supplied_token',
+    window.Clerk = { loaded: true, session: { getToken } };
+    await expect(getAdminApiAuthHeaders()).resolves.toMatchObject({
+      Authorization: 'Bearer clerk_session_jwt',
     });
-
-    expect(getToken).not.toHaveBeenCalled();
-    expect(headers.Authorization).toBe('Bearer supplied_token');
+    expect(getToken).toHaveBeenCalledTimes(1);
   });
 
-  it('does not attach an Authorization header when Clerk has no active session token', async () => {
-    enableClerk();
-    window.Clerk = {
-      loaded: true,
-      session: {
-        getToken: vi.fn().mockResolvedValue(null),
-      },
-    };
+  it('preserves an explicit authorization header without asking Clerk', async () => {
+    resetBrowserRuntimeConfigForTests();
+    initializeBrowserRuntimeConfig(
+      installTestRuntimeConfig({
+        authProvider: 'clerk',
+        clerkPublishableKey: 'pk_test_example',
+      }),
+    );
+    const getToken = vi.fn().mockResolvedValue('unused');
+    window.Clerk = { loaded: true, session: { getToken } };
+    await expect(
+      getAdminApiAuthHeaders({ Authorization: 'Bearer supplied_token' }),
+    ).resolves.toMatchObject({ Authorization: 'Bearer supplied_token' });
+    expect(getToken).not.toHaveBeenCalled();
+  });
 
-    const headers = await getAdminApiAuthHeaders();
-
-    expect(headers.Authorization).toBeUndefined();
+  it('ignores a substituted incomplete diagnostic auth snapshot', async () => {
+    installTestRuntimeConfig({ authProvider: 'clerk', clerkPublishableKey: undefined });
+    expect(() => authProvider(readAdminRuntimeConfig())).toThrow(
+      'Clerk configuration is incomplete',
+    );
+    await expect(getAdminApiAuthHeaders()).resolves.toEqual({});
   });
 });
