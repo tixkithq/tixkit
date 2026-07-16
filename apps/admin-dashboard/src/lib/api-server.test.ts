@@ -28,16 +28,23 @@ describe('server admin API transport', () => {
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    configure('https://one.example.test');
+    configure('https://public-one.example.test');
+    vi.stubEnv('INTERNAL_API_BASE_URL', 'http://api-one:4000');
     await getServerPrincipal('token-one');
-    configure('https://two.example.test');
+    configure('https://public-two.example.test');
+    vi.stubEnv('INTERNAL_API_BASE_URL', 'http://api-two:4000');
     await getServerPrincipal('token-two');
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'https://one.example.test/v1/me',
-      'https://two.example.test/v1/me',
+      'http://api-one:4000/v1/me',
+      'http://api-two:4000/v1/me',
     ]);
     expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('Authorization')).toBe(
       'Bearer token-two',
     );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      credentials: 'omit',
+      redirect: 'error',
+      cache: 'no-store',
+    });
   });
 });

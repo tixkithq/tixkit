@@ -9,6 +9,10 @@ import {
 } from './runtime-config-contract';
 
 export type AdminRuntimeEnvironment = Readonly<Record<string, string | undefined>>;
+export type AdminServerRuntimeConfig = Readonly<{
+  publicConfig: PublicAdminRuntimeConfig;
+  internalApiBaseUrl: string;
+}>;
 
 const PROFILES = new Set<AdminDeploymentProfile>([
   'development',
@@ -52,9 +56,38 @@ function requiredOrLocalDefault(
   throw new Error(`${key} is required`);
 }
 
-export function parseAdminRuntimeConfig(
+function parseExactInternalOrigin(value: string): string {
+  if (!value || value.length > 512 || value !== value.trim() || value.includes('*')) {
+    throw new Error('INTERNAL_API_BASE_URL must be an exact HTTP(S) origin');
+  }
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint <= 32 || codePoint === 127 || ';,"\'\\{}<>'.includes(character)) {
+      throw new Error('INTERNAL_API_BASE_URL must be an exact HTTP(S) origin');
+    }
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('INTERNAL_API_BASE_URL must be an exact HTTP(S) origin');
+  }
+  if (
+    (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.pathname !== '/'
+  ) {
+    throw new Error('INTERNAL_API_BASE_URL must be an exact HTTP(S) origin');
+  }
+  return parsed.origin;
+}
+
+export function parseAdminServerRuntimeConfig(
   environment: AdminRuntimeEnvironment = process.env,
-): PublicAdminRuntimeConfig {
+): AdminServerRuntimeConfig {
   const deploymentProfile = profileFromEnvironment(environment);
   const allowInsecureLocalOrigins = environment.ALLOW_INSECURE_LOCAL_ORIGINS === '1';
   const allowLoopbackHttp =
@@ -66,6 +99,9 @@ export function parseAdminRuntimeConfig(
     'API_BASE_URL',
     { allowLoopbackHttp },
   );
+  const internalApiBaseUrl = environment.INTERNAL_API_BASE_URL
+    ? parseExactInternalOrigin(environment.INTERNAL_API_BASE_URL)
+    : apiBaseUrl;
   const checkoutUrl = parseExactOrigin(
     requiredOrLocalDefault(
       environment,
@@ -144,7 +180,7 @@ export function parseAdminRuntimeConfig(
     buildRevision,
   });
   const configFingerprint = `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
-  return Object.freeze({
+  const publicConfig = Object.freeze({
     schemaVersion: ADMIN_RUNTIME_CONFIG_SCHEMA_VERSION,
     deploymentProfile,
     apiBaseUrl,
@@ -157,6 +193,13 @@ export function parseAdminRuntimeConfig(
     buildRevision,
     configFingerprint,
   });
+  return Object.freeze({ publicConfig, internalApiBaseUrl });
+}
+
+export function parseAdminRuntimeConfig(
+  environment: AdminRuntimeEnvironment = process.env,
+): PublicAdminRuntimeConfig {
+  return parseAdminServerRuntimeConfig(environment).publicConfig;
 }
 
 export function adminRuntimeReadiness(config: PublicAdminRuntimeConfig) {

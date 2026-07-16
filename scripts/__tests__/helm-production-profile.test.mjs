@@ -127,6 +127,7 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
   const config = rendered.find((resource) => resource.kind === 'ConfigMap');
   assert.equal(config.data.TIXKIT_DEPLOYMENT_PROFILE, 'production');
   assert.equal(config.data.API_BASE_URL, 'https://api.tixkit.com');
+  assert.equal(config.data.INTERNAL_API_BASE_URL, 'http://tixkit-tixkit-api:4000');
   assert.equal(config.data.TIXKIT_CHECKOUT_URL, 'https://checkout.tixkit.com');
   assert.equal(config.data.TIXKIT_DOCS_URL, 'https://docs.tixkit.com');
   assert.equal(config.data.S3_PUBLIC_ENDPOINT, 'https://uploads.tixkit.com');
@@ -178,6 +179,7 @@ test('Production Helm render excludes evaluation services and plaintext secrets'
       'NODE_ENV',
       'TIXKIT_DEPLOYMENT_PROFILE',
       'API_BASE_URL',
+      'INTERNAL_API_BASE_URL',
       'TIXKIT_CHECKOUT_URL',
       'S3_PUBLIC_ENDPOINT',
       'AUTH_PROVIDER',

@@ -1,8 +1,8 @@
 import {
   type AdminExportJob,
   getAdminApiAuthHeaders,
-  getAdminApiBaseUrl,
   normalizeExportJob,
+  resolveAdminApiUrl,
 } from '@/lib/api';
 
 type ExportJobSubscription = {
@@ -27,21 +27,25 @@ export function subscribeToExportJob(
     while (!closed) {
       controller = new AbortController();
       try {
+        const url = resolveAdminApiUrl(`/v1/exports/${encodeURIComponent(exportId)}/events`);
+        if (!url) {
+          handlers.onError(new Error('The authenticated export stream URL is invalid'));
+          closed = true;
+          break;
+        }
         // eslint-disable-next-line no-await-in-loop -- reconnect attempts must preserve the latest SSE cursor.
         const headers = await getAdminApiAuthHeaders({
           Accept: 'text/event-stream',
           ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
         });
         // eslint-disable-next-line no-await-in-loop -- each SSE connection is opened only after the previous stream ends.
-        const response = await fetch(
-          `${getAdminApiBaseUrl()}/v1/exports/${encodeURIComponent(exportId)}/events`,
-          {
-            method: 'GET',
-            headers,
-            credentials: 'include',
-            signal: controller.signal,
-          },
-        );
+        const response = await fetch(url, {
+          method: 'GET',
+          headers,
+          credentials: 'omit',
+          redirect: 'error',
+          signal: controller.signal,
+        });
 
         if (!response.ok) {
           // eslint-disable-next-line no-await-in-loop -- failed stream responses are handled before retrying or surfacing the error.

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useInsertionEffect } from 'react';
 import type { PublicAdminRuntimeConfig } from '@/lib/runtime-config-contract';
 import { initializeBrowserRuntimeConfig } from '@/lib/runtime-config-browser';
 
@@ -29,7 +29,9 @@ export function RuntimeConfigProvider({
   config: PublicAdminRuntimeConfig;
   children?: React.ReactNode;
 }) {
-  if (process.env.NODE_ENV !== 'test') initializeBrowserRuntimeConfig(config);
+  useInsertionEffect(() => {
+    initializeBrowserRuntimeConfig(config);
+  }, [config]);
   return <RuntimeConfigContext value={config}>{children}</RuntimeConfigContext>;
 }
 

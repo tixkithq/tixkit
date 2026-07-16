@@ -189,6 +189,42 @@ describe('request', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://admin.example.test/v1/events');
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer clerk_jwt');
+    expect(init).toMatchObject({ credentials: 'omit', redirect: 'error' });
+  });
+
+  it.each([
+    'https://attacker.example/v1/events',
+    '//attacker.example/v1/events',
+    '/v1/@attacker.example/events',
+    '/v1/events#https://attacker.example',
+    '/v1/events\nhttps://attacker.example',
+    '/events',
+  ])('rejects hostile bearer target %s before token acquisition or fetch', async (path) => {
+    const getToken = vi.fn().mockResolvedValue('clerk_jwt');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    resetBrowserRuntimeConfigForTests();
+    initializeBrowserRuntimeConfig(
+      installTestRuntimeConfig({
+        apiBaseUrl: 'https://admin.example.test',
+        platformApiBaseUrl: 'https://admin.example.test/v1',
+        authProvider: 'clerk',
+        clerkPublishableKey: 'pk_test_example',
+      }),
+    );
+    window.Clerk = { loaded: true, session: { getToken } };
+
+    const result = await request(path, { method: 'POST' });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_api_path',
+        message: 'The authenticated API path is invalid',
+      },
+    });
+    expect(getToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -197,7 +233,7 @@ describe('requestBlob', () => {
     vi.unstubAllGlobals();
   });
 
-  it('loads binary media with credentials and does not parse it as JSON', async () => {
+  it('loads binary media without ambient credentials or redirects and does not parse JSON', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('event-thumbnail', {
         status: 200,
@@ -212,7 +248,8 @@ describe('requestBlob', () => {
     if (result.ok) expect(await result.data.text()).toBe('event-thumbnail');
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://localhost:4000/v1/events/evt_1/media/renditions/emr_1');
-    expect(init.credentials).toBe('include');
+    expect(init.credentials).toBe('omit');
+    expect(init.redirect).toBe('error');
   });
 
   it('fails closed when a private rendition is denied', async () => {

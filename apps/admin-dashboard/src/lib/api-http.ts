@@ -69,6 +69,40 @@ export function getAdminApiBaseUrl(): string {
   return getBrowserRuntimeConfig().apiBaseUrl;
 }
 
+export function resolveAdminApiUrl(path: string): string | undefined {
+  const config = getBrowserRuntimeConfig();
+  const hasUnsafeCharacter = [...path].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 32 || codePoint === 127;
+  });
+  if (
+    !Object.isFrozen(config) ||
+    !path.startsWith('/v1/') ||
+    path.startsWith('//') ||
+    path.includes('\\') ||
+    path.includes('@') ||
+    path.includes('#') ||
+    hasUnsafeCharacter
+  ) {
+    return undefined;
+  }
+  try {
+    const base = new URL(config.apiBaseUrl);
+    const resolved = new URL(path, `${base.origin}/`);
+    if (
+      resolved.origin !== base.origin ||
+      resolved.username ||
+      resolved.password ||
+      !resolved.pathname.startsWith('/v1/')
+    ) {
+      return undefined;
+    }
+    return resolved.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function requestMethod(options: RequestInit): string {
   return (options.method ?? 'GET').toUpperCase();
 }
@@ -115,13 +149,10 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
 function authenticatedEventMediaUrl(path: string): string | undefined {
   try {
-    const apiBaseUrl = getAdminApiBaseUrl();
-    const base = new URL(apiBaseUrl);
-    const resolved = new URL(path, `${apiBaseUrl}/`);
+    const url = resolveAdminApiUrl(path);
+    if (!url) return undefined;
+    const resolved = new URL(url);
     if (
-      resolved.origin !== base.origin ||
-      resolved.username ||
-      resolved.password ||
       resolved.search ||
       resolved.hash ||
       !/^\/v1\/events\/[^/]+\/media\/renditions\/[^/]+$/u.test(resolved.pathname)
@@ -152,7 +183,8 @@ export async function requestBlob(
       method: 'GET',
       headers,
       signal: controller.signal,
-      credentials: 'include',
+      credentials: 'omit',
+      redirect: 'error',
     });
     clearTimeout(timeout);
     options.signal?.removeEventListener('abort', abortFromCaller);
@@ -186,11 +218,14 @@ export async function requestBlob(
 }
 
 async function requestOnce<T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> {
+  const url = resolveAdminApiUrl(path);
+  if (!url) {
+    return err<T>(apiError('invalid_api_path', 'The authenticated API path is invalid'));
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
-    const url = `${getAdminApiBaseUrl()}${path}`;
     const headers = new Headers(options.headers);
     if (!headers.has('Content-Type') && typeof options.body === 'string') {
       headers.set('Content-Type', 'application/json');
@@ -207,7 +242,8 @@ async function requestOnce<T>(path: string, options: RequestInit = {}): Promise<
       ...options,
       headers,
       signal: controller.signal,
-      credentials: 'include',
+      credentials: 'omit',
+      redirect: 'error',
     });
 
     clearTimeout(timeout);

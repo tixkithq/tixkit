@@ -39,4 +39,12 @@ describe('admin readiness route', () => {
       reason: 'invalid_runtime_configuration',
     });
   });
+
+  it('fails readiness when the server-only API origin is malformed', async () => {
+    configureProduction();
+    vi.stubEnv('INTERNAL_API_BASE_URL', 'http://user:secret@api:4000');
+    const response = GET();
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain('secret');
+  });
 });

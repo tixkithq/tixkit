@@ -12,7 +12,7 @@
  */
 
 import { getAdminApiBaseUrl, request, withFixture } from './api-http';
-export { getAdminApiAuthHeaders, getAdminApiBaseUrl } from './api-http';
+export { getAdminApiAuthHeaders, getAdminApiBaseUrl, resolveAdminApiUrl } from './api-http';
 export { hasClerkKey } from '@/lib/auth';
 import type { AdminTableQuery, AdminTablePage } from '@tixkit/admin-table-core';
 import type {

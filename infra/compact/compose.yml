@@ -272,6 +272,7 @@ services:
       TIXKIT_DEPLOYMENT_PROFILE: compact
       TIXKIT_BUILD_REVISION: ${TIXKIT_VERSION:-local}
       API_BASE_URL: http://localhost:${API_PORT:-4000}
+      INTERNAL_API_BASE_URL: http://api:4000
       TIXKIT_CHECKOUT_URL: http://localhost:${CHECKOUT_PORT:-3000}
       S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       AUTH_PROVIDER: dev

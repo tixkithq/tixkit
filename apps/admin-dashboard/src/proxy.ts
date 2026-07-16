@@ -4,7 +4,7 @@ import {
   adminSecurityHeaders,
   INVALID_RUNTIME_SECURITY_HEADERS,
 } from '@/lib/admin-security-headers';
-import { parseAdminRuntimeConfig } from '@/lib/runtime-config-server';
+import { parseAdminServerRuntimeConfig } from '@/lib/runtime-config-server';
 
 const clerkProxy = clerkMiddleware();
 
@@ -27,7 +27,7 @@ function unavailableResponse(): NextResponse {
 export default async function proxy(request: NextRequest, event: NextFetchEvent) {
   let runtimeConfig;
   try {
-    runtimeConfig = parseAdminRuntimeConfig();
+    runtimeConfig = parseAdminServerRuntimeConfig().publicConfig;
   } catch {
     const pathname = requestPathname(request);
     if (pathname === '/health' || pathname === '/ready') {

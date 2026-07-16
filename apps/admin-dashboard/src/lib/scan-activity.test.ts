@@ -3,7 +3,7 @@ import { subscribeToCheckInActivity } from './scan-activity';
 
 vi.mock('@/lib/api', () => ({
   getAdminApiAuthHeaders: vi.fn(async (headers: Record<string, string>) => headers),
-  getAdminApiBaseUrl: () => 'http://localhost:4000',
+  resolveAdminApiUrl: (path: string) => `http://localhost:4000${path}`,
 }));
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -40,6 +40,10 @@ describe('subscribeToCheckInActivity', () => {
     });
 
     await vi.waitFor(() => expect(onReady).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      credentials: 'omit',
+      redirect: 'error',
+    });
     unsubscribe();
   });
 

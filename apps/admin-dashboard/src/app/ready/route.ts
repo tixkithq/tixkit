@@ -1,9 +1,9 @@
-import { adminRuntimeReadiness, parseAdminRuntimeConfig } from '@/lib/runtime-config-server';
+import { adminRuntimeReadiness, parseAdminServerRuntimeConfig } from '@/lib/runtime-config-server';
 
 export function GET() {
   try {
-    const config = parseAdminRuntimeConfig();
-    return Response.json(adminRuntimeReadiness(config), {
+    const config = parseAdminServerRuntimeConfig();
+    return Response.json(adminRuntimeReadiness(config.publicConfig), {
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch {

@@ -589,6 +589,16 @@ expected_helm_docs_origin='https://docs.tixkit.com'
 expected_helm_upload_origin='https://uploads.tixkit.com'
 expected_helm_cors_origins="${expected_helm_checkout_origin},${expected_helm_admin_origin}"
 
+compact_internal_api_count="$(grep -Fc 'INTERNAL_API_BASE_URL: http://api:4000' infra/compact/compose.yml)"
+test "${compact_internal_api_count}" = '2' ||
+  fail 'Compact checkout and admin must each use the in-network API origin'
+if grep -Fq 'INTERNAL_API_BASE_URL' infra/fly/admin.toml; then
+  fail 'Fly admin must fall back to its validated public HTTPS API origin'
+fi
+if grep -Fq 'INTERNAL_API_BASE_URL' infra/render.yaml; then
+  fail 'Render frontends must fall back to their validated public HTTPS API origin'
+fi
+
 for render_api_required_env in \
   AUTH_PROVIDER \
   API_BASE_URL \
@@ -1101,6 +1111,13 @@ if command -v helm >/dev/null 2>&1; then
   require_rendered_frontend_probes "${rendered_chart}" checkout /ready /health
   require_rendered_frontend_probes "${rendered_chart}" admin /ready /health
 
+  rendered_frontend_internal_api_count="$(
+    helm template tixkit infra/helm/tixkit --namespace tixkit --show-only templates/apps.yaml |
+      grep -c 'name: INTERNAL_API_BASE_URL'
+  )"
+  test "${rendered_frontend_internal_api_count}" = '2' ||
+    fail 'rendered Helm checkout and admin must each receive INTERNAL_API_BASE_URL'
+
   rendered_config="$(helm template tixkit infra/helm/tixkit --namespace tixkit --show-only templates/configmap.yaml)"
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*TRUST_PROXY:[[:space:]]*"1"[[:space:]]*$' ||
     fail 'rendered Helm ConfigMap must set API TRUST_PROXY to bounded hop count 1'
@@ -1119,7 +1136,7 @@ if command -v helm >/dev/null 2>&1; then
   printf '%s\n' "${rendered_config}" | grep -Fq 'CUSTOM_DOMAIN_CORS_ENABLED: "true"' ||
     fail 'rendered Helm ConfigMap must enable CUSTOM_DOMAIN_CORS_ENABLED'
   printf '%s\n' "${rendered_config}" | grep -Eq '^[[:space:]]*INTERNAL_API_BASE_URL:[[:space:]]*"http://tixkit-tixkit-api:4000"[[:space:]]*$' ||
-    fail 'rendered Helm ConfigMap must provide the in-cluster checkout API transport origin'
+    fail 'rendered Helm ConfigMap must provide the in-cluster frontend API transport origin'
   if printf '%s\n' "${rendered_config}" | grep -Fq 'NEXT_PUBLIC_'; then
     fail 'rendered Helm ConfigMap must not carry legacy frontend build-time configuration'
   fi

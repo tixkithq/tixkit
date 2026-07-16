@@ -7,7 +7,7 @@ vi.mock('@/lib/api', () => ({
     ...headers,
     Authorization: 'Bearer test-token',
   })),
-  getAdminApiBaseUrl: vi.fn(() => 'https://api.test'),
+  resolveAdminApiUrl: vi.fn((path: string) => `https://api.test${path}`),
   normalizeExportJob: vi.fn((value: Record<string, unknown>) => ({
     exportId: String(value.exportId ?? value.export_id ?? value.id),
     eventId: value.eventId ?? value.event_id,
@@ -65,6 +65,10 @@ describe('subscribeToExportJob', () => {
     );
     expect(onError).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      credentials: 'omit',
+      redirect: 'error',
+    });
 
     unsubscribe();
   });

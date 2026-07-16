@@ -4,7 +4,7 @@ import {
   readAdminRuntimeConfig,
   runtimeConfigDataAttributes,
 } from './runtime-config-contract';
-import { parseAdminRuntimeConfig } from './runtime-config-server';
+import { parseAdminRuntimeConfig, parseAdminServerRuntimeConfig } from './runtime-config-server';
 
 const productionEnvironment = {
   NODE_ENV: 'production',
@@ -33,6 +33,46 @@ describe('admin runtime configuration', () => {
     expect(Object.keys(runtimeConfigDataAttributes(config)).sort()).toEqual(
       Object.values(ADMIN_RUNTIME_CONFIG_ATTRIBUTES).sort(),
     );
+  });
+
+  it('validates a server-only API origin without exposing or fingerprinting it', () => {
+    const first = parseAdminServerRuntimeConfig({
+      ...productionEnvironment,
+      INTERNAL_API_BASE_URL: 'http://tixkit-api:4000',
+    });
+    const second = parseAdminServerRuntimeConfig({
+      ...productionEnvironment,
+      INTERNAL_API_BASE_URL: 'https://private-api.example.test',
+    });
+    expect(first.internalApiBaseUrl).toBe('http://tixkit-api:4000');
+    expect(first.publicConfig).toEqual(second.publicConfig);
+    expect(JSON.stringify(first.publicConfig)).not.toContain('tixkit-api');
+    expect(JSON.stringify(runtimeConfigDataAttributes(first.publicConfig))).not.toContain(
+      'http://tixkit-api:4000',
+    );
+  });
+
+  it('falls back to the public HTTPS API origin when no internal origin is configured', () => {
+    expect(parseAdminServerRuntimeConfig(productionEnvironment).internalApiBaseUrl).toBe(
+      productionEnvironment.API_BASE_URL,
+    );
+  });
+
+  it.each([
+    'http://user:secret@api:4000',
+    'http://api:4000/v1',
+    'http://api:4000?target=evil',
+    'http://api:4000#evil',
+    'http://api:4000\nhttps://evil.example',
+    'ftp://api:4000',
+    'http://*.internal:4000',
+  ])('rejects non-exact internal API origin %s', (origin) => {
+    expect(() =>
+      parseAdminServerRuntimeConfig({
+        ...productionEnvironment,
+        INTERNAL_API_BASE_URL: origin,
+      }),
+    ).toThrow('INTERNAL_API_BASE_URL must be an exact HTTP(S) origin');
   });
 
   it('round-trips through explicit document attributes', () => {

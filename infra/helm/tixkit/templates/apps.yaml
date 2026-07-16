@@ -123,7 +123,7 @@ spec:
             - name: http
               containerPort: {{ .Values.admin.port }}
           env:
-            {{- range $key := list "NODE_ENV" "TIXKIT_DEPLOYMENT_PROFILE" "API_BASE_URL" "TIXKIT_CHECKOUT_URL" "S3_PUBLIC_ENDPOINT" "AUTH_PROVIDER" "ALLOW_INSECURE_LOCAL_ORIGINS" }}
+            {{- range $key := list "NODE_ENV" "TIXKIT_DEPLOYMENT_PROFILE" "API_BASE_URL" "INTERNAL_API_BASE_URL" "TIXKIT_CHECKOUT_URL" "S3_PUBLIC_ENDPOINT" "AUTH_PROVIDER" "ALLOW_INSECURE_LOCAL_ORIGINS" }}
             - name: {{ $key }}
               valueFrom:
                 configMapKeyRef:

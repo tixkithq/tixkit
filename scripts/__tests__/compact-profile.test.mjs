@@ -1074,6 +1074,7 @@ test('Compact injects admin deployment settings at runtime into a generic image'
   assert.equal(admin.environment.TIXKIT_DEPLOYMENT_PROFILE, 'compact');
   assert.match(admin.environment.TIXKIT_BUILD_REVISION, /TIXKIT_VERSION.*local/u);
   assert.match(admin.environment.API_BASE_URL, /localhost.*API_PORT/u);
+  assert.equal(admin.environment.INTERNAL_API_BASE_URL, 'http://api:4000');
   assert.match(admin.environment.TIXKIT_CHECKOUT_URL, /localhost.*CHECKOUT_PORT/u);
   assert.match(admin.environment.S3_PUBLIC_ENDPOINT, /S3_PUBLIC_ENDPOINT/u);
   assert.equal(admin.environment.AUTH_PROVIDER, 'dev');

@@ -1,13 +1,15 @@
 import type { ApiResult, TixkitPrincipal } from './api';
-import { parseAdminRuntimeConfig } from './runtime-config-server';
+import { parseAdminServerRuntimeConfig } from './runtime-config-server';
 
 export async function getServerPrincipal(token: string): Promise<ApiResult<TixkitPrincipal>> {
-  const config = parseAdminRuntimeConfig();
+  const config = parseAdminServerRuntimeConfig();
   try {
-    const response = await fetch(`${config.apiBaseUrl}/v1/me`, {
+    const response = await fetch(`${config.internalApiBaseUrl}/v1/me`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error',
       signal: AbortSignal.timeout(15_000),
     });
     const body = (await response.json().catch(() => null)) as
@@ -57,5 +59,5 @@ export async function getServerPrincipal(token: string): Promise<ApiResult<Tixki
 }
 
 export function getServerAdminApiBaseUrl(): string {
-  return parseAdminRuntimeConfig().apiBaseUrl;
+  return parseAdminServerRuntimeConfig().publicConfig.apiBaseUrl;
 }
