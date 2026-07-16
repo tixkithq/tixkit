@@ -70,7 +70,12 @@ function WorkspacePageContent() {
     NonNullable<AdminOrganization['eventDefaults']>
   >({});
   const [savedVenues, setSavedVenues] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [savedVenuesLoading, setSavedVenuesLoading] = React.useState(false);
+  const [savedVenuesError, setSavedVenuesError] = React.useState<string | null>(null);
+  const [savedVenuesLoadVersion, setSavedVenuesLoadVersion] = React.useState(0);
   const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -95,11 +100,40 @@ function WorkspacePageContent() {
   }, [bootstrapError, bootstrapLoading, organizationId, organizations]);
 
   React.useEffect(() => {
-    if (!organizationId) return;
-    void adminApi.listSavedVenues(organizationId).then((result) => {
-      if (result.ok) setSavedVenues(result.data);
-    });
-  }, [organizationId]);
+    if (!organizationId) {
+      setSavedVenues([]);
+      setSavedVenuesError(null);
+      setSavedVenuesLoading(false);
+      return;
+    }
+
+    let active = true;
+    setSavedVenues([]);
+    setSavedVenuesError(null);
+    setSavedVenuesLoading(true);
+
+    void (async () => {
+      try {
+        const result = await adminApi.listSavedVenues(organizationId);
+        if (!active) return;
+        if (!result.ok) {
+          setSavedVenuesError(result.error.message);
+          return;
+        }
+        setSavedVenues(result.data);
+      } catch {
+        if (active) {
+          setSavedVenuesError('Saved venues could not be loaded. Try again.');
+        }
+      } finally {
+        if (active) setSavedVenuesLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [organizationId, savedVenuesLoadVersion]);
 
   const updateBoxOfficeSettings = (changes: Partial<AdminBoxOfficeSettings>) => {
     setBoxOfficeSettings((current) => ({
@@ -126,36 +160,56 @@ function WorkspacePageContent() {
   };
 
   const handleSave = async () => {
+    setSaveError(null);
+    setSaveNotice(null);
     if (!organization) {
-      toast.error('No workspace is available to update');
+      const message = 'No workspace is available to update';
+      setSaveError(message);
+      toast.error(message);
       return;
     }
     if (name.trim().length === 0) {
-      toast.error('Workspace name is required');
+      const message = 'Workspace name is required';
+      setSaveError(message);
+      toast.error(message);
       return;
     }
     if (slug.trim().length === 0) {
-      toast.error('Workspace slug is required');
+      const message = 'Workspace slug is required';
+      setSaveError(message);
+      toast.error(message);
       return;
     }
 
     setSaving(true);
-    const result = await adminApi.updateOrganization(organization.id, {
-      name: name.trim(),
-      slug: slug.trim(),
-      boxOfficeSettings,
-      eventDefaults,
-    });
-    setSaving(false);
+    try {
+      const result = await adminApi.updateOrganization(organization.id, {
+        name: name.trim(),
+        slug: slug.trim(),
+        boxOfficeSettings,
+        eventDefaults,
+      });
 
-    if (!result.ok) {
-      toast.error(result.error.message);
-      return;
+      if (!result.ok) {
+        setSaveError(result.error.message);
+        toast.error(result.error.message);
+        return;
+      }
+
+      setOrganization(result.data);
+      setName(result.data.name);
+      setSlug(result.data.slug);
+      setBoxOfficeSettings(cloneBoxOfficeSettings(result.data.boxOfficeSettings));
+      setEventDefaults(result.data.eventDefaults ?? {});
+      setSaveNotice('Workspace settings saved.');
+      toast.success('Workspace settings saved');
+    } catch {
+      const message = 'Workspace settings could not be saved. Try again.';
+      setSaveError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
     }
-
-    setOrganization(result.data);
-    setBoxOfficeSettings(cloneBoxOfficeSettings(result.data.boxOfficeSettings));
-    toast.success('Workspace settings saved');
   };
 
   return (
@@ -330,6 +384,14 @@ function WorkspacePageContent() {
                   id="event-default-venue"
                   className="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
                   value={eventDefaults.defaultVenueId ?? ''}
+                  disabled={savedVenuesLoading || savedVenuesError !== null}
+                  aria-describedby={
+                    savedVenuesError
+                      ? 'event-default-venue-error'
+                      : savedVenuesLoading
+                        ? 'event-default-venue-status'
+                        : undefined
+                  }
                   onChange={(change) =>
                     setEventDefaults((current) => ({
                       ...current,
@@ -338,12 +400,43 @@ function WorkspacePageContent() {
                   }
                 >
                   <option value="">No default venue</option>
+                  {eventDefaults.defaultVenueId &&
+                  !savedVenues.some((venue) => venue.id === eventDefaults.defaultVenueId) ? (
+                    <option value={eventDefaults.defaultVenueId}>
+                      Configured venue ({eventDefaults.defaultVenueId}) — unavailable
+                    </option>
+                  ) : null}
                   {savedVenues.map((venue) => (
                     <option key={venue.id} value={venue.id}>
                       {venue.name}
                     </option>
                   ))}
                 </select>
+                {savedVenuesLoading ? (
+                  <output
+                    id="event-default-venue-status"
+                    className="text-sm text-muted-foreground"
+                  >
+                    Loading saved venues…
+                  </output>
+                ) : null}
+                {savedVenuesError ? (
+                  <div
+                    id="event-default-venue-error"
+                    role="alert"
+                    className="flex flex-wrap items-center gap-2 text-sm text-destructive"
+                  >
+                    <span>{savedVenuesError}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSavedVenuesLoadVersion((version) => version + 1)}
+                    >
+                      Retry saved venues
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="event-default-description">Default event description</Label>
@@ -361,7 +454,24 @@ function WorkspacePageContent() {
               </div>
             </div>
 
-            <Button onClick={handleSave} disabled={saving}>
+            {saving ? (
+              <output id="workspace-save-status" className="text-sm text-muted-foreground">
+                Saving workspace settings…
+              </output>
+            ) : saveError ? (
+              <p id="workspace-save-error" role="alert" className="text-sm text-destructive">
+                {saveError}
+              </p>
+            ) : saveNotice ? (
+              <output id="workspace-save-status" className="text-sm text-success">
+                {saveNotice}
+              </output>
+            ) : null}
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              aria-describedby={saveError ? 'workspace-save-error' : undefined}
+            >
               {saving ? 'Saving...' : 'Save Changes'}
             </Button>
           </CardContent>

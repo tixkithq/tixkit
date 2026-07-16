@@ -9,6 +9,13 @@ const testState = vi.hoisted(() => {
     name: 'Tixkit',
     slug: 'tixkit',
     status: 'active' as const,
+    eventDefaults: {} as {
+      timezone?: string;
+      currency?: string;
+      country?: string;
+      defaultVenueId?: string | null;
+      eventDescription?: string;
+    },
     boxOfficeSettings: {
       enabled: true,
       allowedTenderTypes: ['cash', 'manual_card', 'comp'] as Array<'cash' | 'manual_card' | 'comp'>,
@@ -66,6 +73,16 @@ describe('WorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     guardMock.allowed = true;
+    testState.organizationFixture.name = 'Tixkit';
+    testState.organizationFixture.slug = 'tixkit';
+    testState.organizationFixture.eventDefaults = {};
+    testState.bootstrapState.value = {
+      organizations: [testState.organizationFixture],
+      organizationId: 'org_1',
+      loading: false,
+      error: null,
+    };
+    apiMock.listSavedVenues.mockResolvedValue({ ok: true, data: [] });
   });
 
   it('does not mount workspace settings when settings permission is denied', () => {
@@ -127,5 +144,138 @@ describe('WorkspacePage', () => {
 
     expect(apiMock.updateOrganization).not.toHaveBeenCalled();
     expect(toastMock.error).toHaveBeenCalledWith('Workspace name is required');
+    expect(screen.getByRole('alert')).toHaveTextContent('Workspace name is required');
+  });
+
+  it('retains a configured default venue and retries an explicit venue-load failure', async () => {
+    testState.organizationFixture.eventDefaults = {
+      timezone: 'America/Chicago',
+      defaultVenueId: 'ven_configured',
+    };
+    apiMock.listSavedVenues
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'venues_unavailable', message: 'Saved venues are unavailable' },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: [{ id: 'ven_configured', name: 'Civic Hall' }],
+      });
+
+    render(<WorkspacePage />);
+
+    const venue = await screen.findByLabelText('Default saved venue');
+    expect(venue).toBeDisabled();
+    expect(venue).toHaveValue('ven_configured');
+    expect(
+      screen.getByRole('option', { name: 'Configured venue (ven_configured) — unavailable' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Saved venues are unavailable');
+
+    fireEvent.change(screen.getByLabelText('Timezone'), {
+      target: { value: 'America/Denver' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry saved venues' }));
+
+    await waitFor(() => expect(venue).toBeEnabled());
+    expect(venue).toHaveValue('ven_configured');
+    expect(screen.getByRole('option', { name: 'Civic Hall' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Timezone')).toHaveValue('America/Denver');
+    expect(apiMock.listSavedVenues).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves edited defaults and re-enables saving after an API failure result', async () => {
+    apiMock.updateOrganization.mockResolvedValue({
+      ok: false,
+      error: { code: 'workspace_conflict', message: 'Workspace changed elsewhere' },
+    });
+
+    render(<WorkspacePage />);
+
+    fireEvent.change(await screen.findByLabelText('Timezone'), {
+      target: { value: 'Europe/London' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Workspace changed elsewhere');
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+    expect(screen.getByLabelText('Timezone')).toHaveValue('Europe/London');
+  });
+
+  it('recovers from an unexpected save rejection without losing edits', async () => {
+    apiMock.updateOrganization.mockRejectedValue(new Error('transport exploded'));
+
+    render(<WorkspacePage />);
+
+    fireEvent.change(await screen.findByLabelText('Default event description'), {
+      target: { value: 'Doors open at six.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Workspace settings could not be saved. Try again.',
+    );
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+    expect(screen.getByLabelText('Default event description')).toHaveValue('Doors open at six.');
+  });
+
+  it('saves defaults atomically and reconciles server-normalized values', async () => {
+    apiMock.listSavedVenues.mockResolvedValue({
+      ok: true,
+      data: [{ id: 'ven_a', name: 'Civic Hall' }],
+    });
+    apiMock.updateOrganization.mockResolvedValue({
+      ok: true,
+      data: {
+        ...testState.organizationFixture,
+        name: 'Festival Ops',
+        slug: 'festival-ops',
+        eventDefaults: {
+          timezone: 'America/New_York',
+          currency: 'USD',
+          country: 'US',
+          defaultVenueId: 'ven_a',
+          eventDescription: 'Server-normalized description',
+        },
+      },
+    });
+
+    render(<WorkspacePage />);
+
+    fireEvent.change(await screen.findByLabelText('Workspace Name'), {
+      target: { value: 'Festival Ops' },
+    });
+    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'festival-ops' } });
+    fireEvent.change(screen.getByLabelText('Timezone'), {
+      target: { value: 'america/new_york' },
+    });
+    fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'usd' } });
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'us' } });
+    fireEvent.change(screen.getByLabelText('Default saved venue'), {
+      target: { value: 'ven_a' },
+    });
+    fireEvent.change(screen.getByLabelText('Default event description'), {
+      target: { value: ' Local description ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(apiMock.updateOrganization).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateOrganization).toHaveBeenCalledWith('org_1', {
+      name: 'Festival Ops',
+      slug: 'festival-ops',
+      boxOfficeSettings: testState.organizationFixture.boxOfficeSettings,
+      eventDefaults: {
+        timezone: 'america/new_york',
+        currency: 'USD',
+        country: 'US',
+        defaultVenueId: 'ven_a',
+        eventDescription: ' Local description ',
+      },
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('Workspace settings saved.');
+    expect(screen.getByLabelText('Timezone')).toHaveValue('America/New_York');
+    expect(screen.getByLabelText('Default event description')).toHaveValue(
+      'Server-normalized description',
+    );
   });
 });
