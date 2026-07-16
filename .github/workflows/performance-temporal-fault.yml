@@ -1,0 +1,150 @@
+name: Trusted Host Temporal Dependency Fault
+
+on:
+  schedule:
+    - cron: '17 8 * * 3'
+  workflow_dispatch:
+
+concurrency:
+  group: performance-temporal-fault
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  temporal-service-loss:
+    runs-on: tixkit-epyc-trusted
+    timeout-minutes: 30
+    services:
+      temporal-postgresql:
+        image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
+        env:
+          POSTGRES_USER: temporal
+          POSTGRES_PASSWORD: temporal
+        options: >-
+          --health-cmd "pg_isready -U temporal"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      temporal:
+        image: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
+        ports:
+          - 7233:7233
+        env:
+          DB: postgres12
+          DB_PORT: 5432
+          POSTGRES_SEEDS: temporal-postgresql
+          POSTGRES_USER: temporal
+          POSTGRES_PWD: temporal
+        options: >-
+          --health-cmd "tctl --address 127.0.0.1:7233 cluster health"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      TEMPORAL_ADDRESS: localhost:7233
+      TEMPORAL_NAMESPACE: default
+    steps:
+      - name: Create private evidence root
+        run: |
+          set -euo pipefail
+          evidence_root="${RUNNER_TEMP}/tixkit-temporal-fault-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -m 700 "${evidence_root}"
+          echo "EVIDENCE_ROOT=${evidence_root}" >> "${GITHUB_ENV}"
+      - name: Reject untrusted invocation
+        id: invocation
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in schedule|workflow_dispatch) ;; *) exit 1 ;; esac
+          test "${GITHUB_REF_TYPE}" = branch
+          test "${GITHUB_REF_NAME}" = "${DEFAULT_BRANCH}"
+      - id: checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - id: setup
+        uses: ./.github/actions/setup-js
+      - id: install
+        run: bun install --frozen-lockfile
+      - name: Validate Temporal fault contracts
+        id: contracts
+        run: node --test scripts/__tests__/performance-temporal-fault.test.mjs
+      - name: Build workflow dependencies
+        id: build
+        run: bunx turbo run build --filter=@tixkit/domain --filter=@tixkit/shared --filter=@tixkit/workflows
+      - name: Execute controlled Temporal service interruption
+        id: fault
+        env:
+          TEMPORAL_SERVICE_CONTAINER_ID: ${{ job.services.temporal.id }}
+        run: |
+          node scripts/performance-temporal-fault.mjs \
+            --config performance-temporal-fault.trusted.json \
+            --profile temporal-1-24-trusted-host-loss \
+            --output "${EVIDENCE_ROOT}/temporal-service-loss" \
+            --git-sha "${GITHUB_SHA}" \
+            --container-id "${TEMPORAL_SERVICE_CONTAINER_ID}" \
+            --authorization "I authorize controlled Temporal service interruption on the dedicated trusted runner"
+      - name: Restore Temporal after any failure
+        id: restore
+        if: always()
+        env:
+          TEMPORAL_SERVICE_CONTAINER_ID: ${{ job.services.temporal.id }}
+        run: |
+          set -euo pipefail
+          process_marker="${EVIDENCE_ROOT}/temporal-service-loss/processGroup.json"
+          cleanup_status=0
+          restore_status=0
+          set +e
+          if [ -f scripts/performance-temporal-fault.mjs ] && [ -e "${process_marker}" ]; then
+            node scripts/performance-temporal-fault.mjs --cleanup-marker "${process_marker}"
+            cleanup_status=$?
+          fi
+          restore_temporal() {
+            expected='temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88'
+            test "$(docker inspect --format '{{.Config.Image}}' "${TEMPORAL_SERVICE_CONTAINER_ID}")" = "${expected}" || return 1
+            if [ "$(docker inspect --format '{{.State.Status}}' "${TEMPORAL_SERVICE_CONTAINER_ID}")" != running ]; then
+              docker start "${TEMPORAL_SERVICE_CONTAINER_ID}" >/dev/null || return 1
+            fi
+            restored=false
+            for attempt in $(seq 1 36); do
+              if [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${TEMPORAL_SERVICE_CONTAINER_ID}")" = healthy ]; then
+                restored=true
+                break
+              fi
+              sleep 5
+            done
+            [ "${restored}" = true ] || return 1
+            for attempt in $(seq 1 36); do
+              node --input-type=module -e "import {createRequire} from 'node:module'; const require=createRequire(new URL('./packages/workflows/package.json',import.meta.url)); const {Connection}=require('@temporalio/client'); const connection=await Connection.connect({address:process.env.TEMPORAL_ADDRESS,connectTimeout:'3 seconds'}); try { await connection.workflowService.describeNamespace({namespace:process.env.TEMPORAL_NAMESPACE}); } finally { await connection.close(); }" && return 0
+              sleep 5
+            done
+            return 1
+          }
+          restore_temporal
+          restore_status=$?
+          set -e
+          if [ "${cleanup_status}" -ne 0 ] || [ "${restore_status}" -ne 0 ]; then
+            echo "Temporal recovery attempts completed with cleanup_status=${cleanup_status} restore_status=${restore_status}." >&2
+            exit 1
+          fi
+      - name: Record bounded workflow failure
+        if: ${{ always() && job.status != 'success' }}
+        env:
+          PROFILE: temporal-1-24-trusted-host-loss
+          TEMPORAL_IMAGE: temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88
+          INVOCATION_OUTCOME: ${{ steps.invocation.outcome }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          CONTRACTS_OUTCOME: ${{ steps.contracts.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          FAULT_OUTCOME: ${{ steps.fault.outcome }}
+          RESTORE_OUTCOME: ${{ steps.restore.outcome }}
+        run: |
+          test -e "${EVIDENCE_ROOT}/workflow-failure.json" || \
+            node -e "const fs=require('node:fs'),crypto=require('node:crypto'); const names=['invocation','checkout','setup','install','contracts','build','fault','restore']; const outcomes=Object.fromEntries(names.map(n=>[n,process.env[n.toUpperCase()+'_OUTCOME']||'skipped'])); const phase=names.find(n=>['failure','cancelled'].includes(outcomes[n]))||'workflow'; const config=fs.existsSync('performance-temporal-fault.trusted.json')?crypto.createHash('sha256').update(fs.readFileSync('performance-temporal-fault.trusted.json')).digest('hex'):null; const payload={schemaVersion:'tixkit-temporal-fault-workflow-failure-v1',status:'failed',phase,outcomes,profile:process.env.PROFILE,temporalImage:process.env.TEMPORAL_IMAGE,configSha256:config,gitSha:process.env.GITHUB_SHA}; const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v; const artifact={...payload,failureSha256:crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')}; fs.writeFileSync(process.env.EVIDENCE_ROOT+'/workflow-failure.json',JSON.stringify(artifact,null,2)+'\n',{flag:'wx',mode:0o600})"
+      - name: Upload complete or failure evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: temporal-dependency-fault
+          path: ${{ env.EVIDENCE_ROOT }}
+          if-no-files-found: error
+          retention-days: 90

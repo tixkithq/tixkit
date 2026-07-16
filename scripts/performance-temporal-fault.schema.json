@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tixkit.com/performance/temporal-fault-v1.json",
+  "type": "object",
+  "oneOf": [{ "$ref": "#/$defs/config" }, { "$ref": "#/$defs/evidence" }],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$schema", "schemaVersion", "claimScope", "authorization", "profiles"],
+      "properties": {
+        "$schema": { "const": "./scripts/performance-temporal-fault.schema.json" },
+        "schemaVersion": { "const": "tixkit-performance-temporal-fault-config-v1" },
+        "claimScope": { "const": "trusted-single-host-temporal-service-dependency-fault" },
+        "authorization": {
+          "const": "I authorize controlled Temporal service interruption on the dedicated trusted runner"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/$defs/profile" }
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "runnerLabel",
+        "temporalImage",
+        "persistenceImage",
+        "workflowCount",
+        "outageSeconds",
+        "markerTimeoutSeconds",
+        "recoveryTimeoutSeconds",
+        "workloadTimeoutSeconds",
+        "command"
+      ],
+      "properties": {
+        "id": { "const": "temporal-1-24-trusted-host-loss" },
+        "runnerLabel": { "const": "tixkit-epyc-trusted" },
+        "temporalImage": {
+          "const": "temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88"
+        },
+        "persistenceImage": {
+          "const": "postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb"
+        },
+        "workflowCount": { "const": 16 },
+        "outageSeconds": { "const": 5 },
+        "markerTimeoutSeconds": { "const": 90 },
+        "recoveryTimeoutSeconds": { "const": 90 },
+        "workloadTimeoutSeconds": { "const": 240 },
+        "command": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["executable", "args"],
+          "properties": {
+            "executable": { "const": "bun" },
+            "args": {
+              "const": [
+                "vitest",
+                "run",
+                "src/__tests__/temporal-dependency-fault.integration.test.ts",
+                "--no-file-parallelism",
+                "--maxWorkers=1"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workflowIdSha256",
+        "runIdSha256",
+        "status",
+        "stageOrderSha256",
+        "activityAttempts",
+        "logicalEffects",
+        "reconciliationEffects",
+        "completionEffects",
+        "failureEffects",
+        "historySha256",
+        "replayVerified"
+      ],
+      "properties": {
+        "workflowIdSha256": { "$ref": "#/$defs/sha256" },
+        "runIdSha256": { "$ref": "#/$defs/sha256" },
+        "status": { "const": "completed" },
+        "stageOrderSha256": { "$ref": "#/$defs/sha256" },
+        "activityAttempts": { "type": "integer", "minimum": 1 },
+        "logicalEffects": { "type": "integer", "minimum": 1 },
+        "reconciliationEffects": { "const": 1 },
+        "completionEffects": { "const": 1 },
+        "failureEffects": { "const": 0 },
+        "historySha256": { "$ref": "#/$defs/sha256" },
+        "replayVerified": { "const": true }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "claimScope",
+        "denials",
+        "integrityModel",
+        "identity",
+        "measurements",
+        "outcomes",
+        "protocol",
+        "ordering",
+        "workflows",
+        "rawSha256",
+        "configSha256",
+        "workloadSha256",
+        "processGroupSha256",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "tixkit-performance-temporal-fault-evidence-v1" },
+        "status": { "const": "passed" },
+        "claimScope": { "const": "trusted-single-host-temporal-service-dependency-fault" },
+        "denials": {
+          "const": [
+            "Production Temporal availability",
+            "Cloud Temporal availability",
+            "Compact or Production profile resilience",
+            "multi-node failover",
+            "managed Temporal behavior",
+            "database or migration-data correctness",
+            "provider, webhook, or scanner resilience",
+            "exactly-once external side effects",
+            "capacity or soak",
+            "SLA, RTO, or RPO",
+            "immutable or publicly published evidence"
+          ]
+        },
+        "integrityModel": { "const": "checksums-not-signatures" },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gitSha",
+            "runnerLabel",
+            "profile",
+            "namespace",
+            "taskQueueSha256",
+            "temporalImage",
+            "persistenceImage",
+            "containerIdentitySha256",
+            "workflowIdentitySetSha256"
+          ],
+          "properties": {
+            "gitSha": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+            "runnerLabel": { "const": "tixkit-epyc-trusted" },
+            "profile": { "type": "string" },
+            "namespace": { "type": "string", "minLength": 1, "maxLength": 255 },
+            "taskQueueSha256": { "$ref": "#/$defs/sha256" },
+            "temporalImage": { "type": "string" },
+            "persistenceImage": { "type": "string" },
+            "containerIdentitySha256": { "$ref": "#/$defs/sha256" },
+            "workflowIdentitySetSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "measurements": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workflowCount",
+            "stoppedBeforeRelease",
+            "sameContainerRestored",
+            "dockerHealthy",
+            "grpcReachable",
+            "outageMilliseconds",
+            "recoveryMilliseconds",
+            "recoveryThresholdMilliseconds"
+          ],
+          "properties": {
+            "workflowCount": { "const": 16 },
+            "stoppedBeforeRelease": { "const": true },
+            "sameContainerRestored": { "const": true },
+            "dockerHealthy": { "const": true },
+            "grpcReachable": { "const": true },
+            "outageMilliseconds": { "type": "integer", "minimum": 1 },
+            "recoveryMilliseconds": { "type": "integer", "minimum": 0 },
+            "recoveryThresholdMilliseconds": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "outcomes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["completed", "failed", "open", "timedOut", "cancelled", "terminated"],
+          "properties": {
+            "completed": { "const": 16 },
+            "failed": { "const": 0 },
+            "open": { "const": 0 },
+            "timedOut": { "const": 0 },
+            "cancelled": { "const": 0 },
+            "terminated": { "const": 0 }
+          }
+        },
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nonceSha256",
+            "readyMarkerSha256",
+            "startMarkerSha256",
+            "recoveryMarkerSha256",
+            "readyObservedAt",
+            "startObservedAt",
+            "recoveryObservedAt",
+            "sequence"
+          ],
+          "properties": {
+            "nonceSha256": { "$ref": "#/$defs/sha256" },
+            "readyMarkerSha256": { "$ref": "#/$defs/sha256" },
+            "startMarkerSha256": { "$ref": "#/$defs/sha256" },
+            "recoveryMarkerSha256": { "$ref": "#/$defs/sha256" },
+            "readyObservedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T" },
+            "startObservedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T" },
+            "recoveryObservedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T" },
+            "sequence": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "prefixItems": [
+                { "const": "workload-ready" },
+                { "const": "fault-start" },
+                { "const": "recovery-ready" },
+                { "const": "workload-complete" }
+              ],
+              "items": false
+            }
+          }
+        },
+        "ordering": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "prefixItems": [
+            { "const": "workload-ready" },
+            { "const": "stop-confirmed" },
+            { "const": "activities-released" },
+            { "const": "restart-requested" },
+            { "const": "docker-healthy" },
+            { "const": "grpc-reachable" },
+            { "const": "recovery-released" },
+            { "const": "workload-complete" }
+          ],
+          "items": false
+        },
+        "workflows": {
+          "type": "array",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/workflow" }
+        },
+        "rawSha256": { "$ref": "#/$defs/sha256" },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "workloadSha256": { "$ref": "#/$defs/sha256" },
+        "processGroupSha256": { "$ref": "#/$defs/sha256" },
+        "evidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

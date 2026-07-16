@@ -1,0 +1,29 @@
+{
+  "$schema": "./scripts/performance-temporal-fault.schema.json",
+  "schemaVersion": "tixkit-performance-temporal-fault-config-v1",
+  "claimScope": "trusted-single-host-temporal-service-dependency-fault",
+  "authorization": "I authorize controlled Temporal service interruption on the dedicated trusted runner",
+  "profiles": [
+    {
+      "id": "temporal-1-24-trusted-host-loss",
+      "runnerLabel": "tixkit-epyc-trusted",
+      "temporalImage": "temporalio/auto-setup:1.24@sha256:98cdb6b5e02d64cb933864a9ba91cb66065eb320623a0dafdf44beba535bca88",
+      "persistenceImage": "postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb",
+      "workflowCount": 16,
+      "outageSeconds": 5,
+      "markerTimeoutSeconds": 90,
+      "recoveryTimeoutSeconds": 90,
+      "workloadTimeoutSeconds": 240,
+      "command": {
+        "executable": "bun",
+        "args": [
+          "vitest",
+          "run",
+          "src/__tests__/temporal-dependency-fault.integration.test.ts",
+          "--no-file-parallelism",
+          "--maxWorkers=1"
+        ]
+      }
+    }
+  ]
+}
