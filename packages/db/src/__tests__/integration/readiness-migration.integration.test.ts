@@ -36,7 +36,7 @@ const enabled = Boolean(url);
   it('backfills existing rows when 0063 and 0064 are rolled down and reapplied', async () => {
     const migrationNames = Object.keys(await new TixkitMigrationProvider().getMigrations());
     const migration64Index = migrationNames.indexOf('0064_organization_event_defaults');
-    const migrationsToRemove = migrationNames.slice(migration64Index).toReversed();
+    const migrationsToRemove = migrationNames.slice(migration64Index).reverse();
     const suffix = `${driver}_${Date.now()}`;
     const tenant = await new TenantRepository(db).create({ name: `Migration ${suffix}` });
     const organization = await new OrganizationRepository(db).create({
@@ -87,7 +87,7 @@ const enabled = Boolean(url);
 
       for (const expectedName of [
         '0063_event_checkout_configuration_revision',
-        ...migrationsToRemove.toReversed(),
+        ...[...migrationsToRemove].reverse(),
       ]) {
         const up = await migrator.migrateUp();
         expect(up.error).toBeUndefined();
