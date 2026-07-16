@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertDocumentedPermissionsAccountedFor,
   buildRouteAccessInventory,
+  guardEvidenceFromSource,
   negativeAuthorizationEvidenceForRoutes,
+  permissionsFromSource,
 } from './route-access-inventory.js';
-import { buildAuthenticatedRouteTestApp } from './route-manifest.js';
+import { buildAuthenticatedRouteTestApp, buildRouteManifest } from './route-manifest.js';
 import {
   EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
   ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -70,13 +73,13 @@ function invalidCredentialHeaders(scheme: string): Record<string, string> {
 }
 
 describe('API route access inventory (C-123)', () => {
-  it('binds the immutable event and order denial matrices into schema v2 evidence', async () => {
+  it('binds the immutable event and order denial matrices into schema v3 evidence', async () => {
     const inventory = await buildRouteAccessInventory();
     const coveredRoutes = inventory.routes.filter(
       (route) => route.negativeAuthorizationEvidence.length > 0,
     );
 
-    expect(inventory.schemaVersion).toBe(2);
+    expect(inventory.schemaVersion).toBe(3);
     expect(EVENT_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(13);
     expect(ORDER_ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(5);
     expect(ROUTE_AUTHORIZATION_DENIAL_CONTRACTS).toHaveLength(18);
@@ -98,6 +101,141 @@ describe('API route access inventory (C-123)', () => {
     expect(coveredRoutes.map((route) => route.operationId).sort()).toEqual(
       ROUTE_AUTHORIZATION_DENIAL_CONTRACTS.map((contract) => contract.operationId).sort(),
     );
+  });
+
+  it('fails closed when OpenAPI claims permission absent from runtime or declared delegated evidence', async () => {
+    const inventory = await buildRouteAccessInventory();
+    const route = inventory.routes.find((candidate) => candidate.operationId === 'getEvents')!;
+
+    expect(() =>
+      assertDocumentedPermissionsAccountedFor({
+        ...route,
+        documentedPermissions: ['billing.write'],
+      }),
+    ).toThrow(/billing\.write lacks runtime or declared delegated evidence/);
+  });
+
+  it('extracts only reachable calls to exact enforcing permission guards', async () => {
+    expect(
+      permissionsFromSource(`async function handler(principal) {
+        const optional = hasPermission(principal, 'settings.write');
+        const text = "ClerkAuthService.requirePermission(principal, 'billing.write')";
+        // ClerkAuthService.requirePermission(principal, 'orders.write');
+        if (false) ClerkAuthService.requirePermission(principal, 'messages.write');
+        FakeClerkAuthService.requirePermission(principal, 'attendees.write');
+        attacker.ClerkAuthService.requirePermission(principal, 'tickets.write');
+        requireAnyPermission(principal, [() => 'reports.read']);
+        ClerkAuthService.requireAnyPermission(principal, ['events.read', 'events.write']);
+        requireMigrationPermission(principal, 'migrations.read');
+        return optional || text;
+      }`),
+    ).toEqual(['events.read', 'events.write', 'migrations.read']);
+    const brands = (await buildRouteManifest()).find(
+      (route) => route.method === 'GET' && route.url === '/v1/brands',
+    )!;
+    expect(permissionsFromSource(brands.handlerSource)).toEqual(['settings.write']);
+    expect(
+      guardEvidenceFromSource(`async function handler() {
+        const text = 'requireHumanApprover()';
+        // requireHistoricalAuthorizationPrincipal();
+        if (false) report();
+        requireExportTypePermission();
+      }`),
+    ).toEqual(['requireExportTypePermission']);
+  });
+
+  it('binds documented delegated permissions to audited runtime guard contracts', async () => {
+    const inventory = await buildRouteAccessInventory();
+    const expected = new Map([
+      ['postAgentDelegations', ['developers.write', 'requireHumanAgentAdministrator']],
+      ['postAgentActionsByActionIdApprovals', ['events.write', 'requireHumanApprover']],
+      ['getMigrationReport', ['migrations.read', 'report']],
+      [
+        'grantPortableHistoricalExportAuthorization',
+        ['migrations.write', 'requireHistoricalAuthorizationPrincipal'],
+      ],
+    ]);
+
+    for (const [operationId, [permission, guard]] of expected) {
+      const route = inventory.routes.find((candidate) => candidate.operationId === operationId)!;
+      expect(route.permissions).toContain(permission);
+      expect(route.documentedPermissions).toContain(permission);
+      expect(route.permissionEvidence).toContain(
+        `declared-delegated-contract:${operationId}:${guard}:${permission}`,
+      );
+      expect(route.permissionDocumentationStatus).toBe('delegated-contract');
+    }
+  });
+
+  it('preserves conditional OpenAPI clauses and makes undocumented runtime requirements explicit', async () => {
+    const inventory = await buildRouteAccessInventory();
+    const exportsRoute = inventory.routes.find((route) => route.operationId === 'postExports')!;
+    const undocumented = inventory.routes.filter(
+      (route) => route.permissionDocumentationStatus === 'runtime-undocumented',
+    );
+
+    expect(exportsRoute.documentedPermissionClauses).toEqual([
+      { kind: 'base', permissions: ['reports.read'] },
+      {
+        discriminator: 'type',
+        kind: 'conditional',
+        permissions: ['attendees.read'],
+        value: 'attendees',
+      },
+      {
+        discriminator: 'type',
+        kind: 'conditional',
+        permissions: ['orders.read'],
+        value: 'orders',
+      },
+      {
+        discriminator: 'type',
+        kind: 'conditional',
+        permissions: ['orders.read'],
+        value: 'sales',
+      },
+      {
+        discriminator: 'type',
+        kind: 'conditional',
+        permissions: ['orders.read'],
+        value: 'tax',
+      },
+      {
+        discriminator: 'type',
+        kind: 'conditional',
+        permissions: ['checkins.read'],
+        value: 'tickets',
+      },
+      {
+        discriminator: 'type',
+        kind: 'conditional',
+        permissions: ['checkins.read'],
+        value: 'scan_logs',
+      },
+    ]);
+    expect(exportsRoute.permissionDocumentationStatus).toBe('delegated-contract');
+    expect(undocumented.length).toBeGreaterThan(0);
+    expect(
+      inventory.routes.find((route) => route.operationId === 'getBootstrapContext')
+        ?.permissionEvidence,
+    ).not.toContain('literal:settings.write');
+    expect(
+      inventory.routes
+        .filter((route) =>
+          [
+            'cancelMigrationJob',
+            'pauseMigrationJob',
+            'resumeMigrationJob',
+            'rollbackMigrationJob',
+          ].includes(route.operationId ?? ''),
+        )
+        .map((route) => [route.operationId, route.permissionDocumentationStatus]),
+    ).toEqual([
+      ['cancelMigrationJob', 'conditional-unverified'],
+      ['pauseMigrationJob', 'conditional-unverified'],
+      ['resumeMigrationJob', 'conditional-unverified'],
+      ['rollbackMigrationJob', 'conditional-unverified'],
+    ]);
   });
 
   it('fails closed for invalid denial-contract fixtures', async () => {

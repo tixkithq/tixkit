@@ -1,5 +1,6 @@
 import { ALL_PERMISSIONS, type Permission } from '@tixkit/domain';
 import { openApiSpec } from '@tixkit/openapi';
+import { parseSync } from 'oxc-parser';
 import { buildRouteManifest, type RouteAccess } from './route-manifest.js';
 import {
   ROUTE_AUTHORIZATION_DENIAL_CONTRACTS,
@@ -13,7 +14,19 @@ type OpenApiOperation = {
   security?: readonly Record<string, readonly string[]>[];
   'x-required-permissions'?:
     | readonly Permission[]
-    | { allOf?: readonly Permission[]; anyOf?: readonly Permission[] };
+    | {
+        allOf?: readonly Permission[];
+        anyOf?: readonly Permission[];
+        base?: readonly Permission[];
+        byType?: Readonly<Record<string, readonly Permission[]>>;
+      };
+};
+
+export type DocumentedPermissionClause = {
+  discriminator?: string;
+  kind: 'all-of' | 'any-of' | 'base' | 'conditional';
+  permissions: Permission[];
+  value?: string;
 };
 
 export type RouteAccessInventoryEntry = {
@@ -21,17 +34,27 @@ export type RouteAccessInventoryEntry = {
   boundaries: string[];
   credentialSchemes: string[];
   documentedPermissions: Permission[];
+  documentedPermissionClauses: DocumentedPermissionClause[];
   guardEvidence: string[];
   method: string;
   negativeAuthorizationEvidence: NegativeAuthorizationEvidence[];
   operationId: string | null;
   path: string;
+  permissionEvidence: string[];
+  permissionDocumentationStatus:
+    | 'credential-only'
+    | 'conditional-unverified'
+    | 'delegated-contract'
+    | 'delegated-undocumented'
+    | 'not-applicable'
+    | 'runtime-undocumented'
+    | 'verified';
   permissions: Permission[];
   permissionPolicy: 'explicit' | 'delegated' | 'credential-only' | 'not-applicable';
 };
 
 export type RouteAccessInventory = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   routes: RouteAccessInventoryEntry[];
 };
 
@@ -66,6 +89,7 @@ const delegatedAuthorizationGuards = new Set([
   'requireContentListPermission',
   'requireContentPermission',
   'requireEventAccess',
+  'requireExportTypePermission',
   'requireHistoricalAuthorizationPrincipal',
   'requireMigrationPermission',
   'requireOrganizationScopedPermission',
@@ -82,7 +106,60 @@ const eventScopeGuards = new Set([
   'requireReportEventAccess',
   'scopedEvent',
 ]);
-const callPattern = /\b((?:ClerkAuthService\.)?[A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+const delegatedPermissionContracts = new Map<
+  string,
+  Readonly<{ guard: string; permissions: readonly Permission[] }>
+>([
+  ...[
+    'getAgentPrincipalsById',
+    'postAgentDelegations',
+    'postAgentDelegationsByIdRevoke',
+    'postAgentPrincipals',
+    'postAgentPrincipalsByIdOauthClients',
+    'postAgentPrincipalsByIdOauthClientsByClientIdRevoke',
+    'postAgentPrincipalsByIdRevoke',
+  ].map(
+    (operationId) =>
+      [
+        operationId,
+        { guard: 'requireHumanAgentAdministrator', permissions: ['developers.write'] },
+      ] as const,
+  ),
+  [
+    'postAgentActionsByActionIdApprovals',
+    { guard: 'requireHumanApprover', permissions: ['events.write'] },
+  ],
+  [
+    'postAgentEventUpdatesByActionIdApprovals',
+    { guard: 'requireHumanApprover', permissions: ['events.write'] },
+  ],
+  ['getMigrationReport', { guard: 'report', permissions: ['migrations.read'] }],
+  ['downloadMigrationReport', { guard: 'report', permissions: ['migrations.read'] }],
+  [
+    'grantPortableHistoricalExportAuthorization',
+    { guard: 'requireHistoricalAuthorizationPrincipal', permissions: ['migrations.write'] },
+  ],
+  [
+    'revokePortableHistoricalExportAuthorization',
+    { guard: 'requireHistoricalAuthorizationPrincipal', permissions: ['migrations.write'] },
+  ],
+  [
+    'postExports',
+    {
+      guard: 'requireExportTypePermission',
+      permissions: ['attendees.read', 'checkins.read', 'orders.read'],
+    },
+  ],
+]);
+const enforcingPermissionCalls = new Set([
+  'ClerkAuthService.requireAnyPermission',
+  'ClerkAuthService.requirePermission',
+  'requireAnyPermission',
+  'requireContentListPermission',
+  'requireContentPermission',
+  'requireMigrationPermission',
+  'requireOrganizationScopedPermission',
+]);
 
 function normalizePath(url: string): string {
   const withoutPrefix = url.startsWith('/v1/') ? url.slice(3) : url === '/v1' ? '/' : url;
@@ -93,32 +170,232 @@ function sortedUnique(values: Iterable<string>): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
-function permissionsFromExtension(value: OpenApiOperation['x-required-permissions']): Permission[] {
-  if (Array.isArray(value)) return [...value] as Permission[];
+function permissionClausesFromExtension(
+  value: OpenApiOperation['x-required-permissions'],
+): DocumentedPermissionClause[] {
+  if (Array.isArray(value)) return [{ kind: 'all-of', permissions: [...value] as Permission[] }];
   if (!value) return [];
   const compound = value as {
     allOf?: readonly Permission[];
     anyOf?: readonly Permission[];
+    base?: readonly Permission[];
+    byType?: Readonly<Record<string, readonly Permission[]>>;
   };
-  return [...(compound.allOf ?? []), ...(compound.anyOf ?? [])];
+  return [
+    ...(compound.allOf ? [{ kind: 'all-of' as const, permissions: [...compound.allOf] }] : []),
+    ...(compound.anyOf ? [{ kind: 'any-of' as const, permissions: [...compound.anyOf] }] : []),
+    ...(compound.base ? [{ kind: 'base' as const, permissions: [...compound.base] }] : []),
+    ...Object.entries(compound.byType ?? {}).map(([value, permissions]) => ({
+      discriminator: 'type',
+      kind: 'conditional' as const,
+      permissions: [...permissions],
+      value,
+    })),
+  ];
 }
 
-function permissionsFromSource(source: string): Permission[] {
-  const literals = [...source.matchAll(/['"]([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)['"]/g)].map(
-    (match) => match[1],
-  );
-  return sortedUnique(literals.filter((value) => knownPermissions.has(value))) as Permission[];
+type SyntaxNode = { type: string } & Record<string, unknown>;
+
+function syntaxNode(value: unknown): SyntaxNode | undefined {
+  if (!value || typeof value !== 'object' || !('type' in value)) return undefined;
+  return value as SyntaxNode;
 }
 
-function guardEvidenceFromSource(source: string): string[] {
-  return sortedUnique(
-    [...source.matchAll(callPattern)]
-      .map((match) => match[1])
-      .filter(
-        (name) =>
-          name.startsWith('ClerkAuthService.require') || delegatedAuthorizationGuards.has(name),
-      ),
+function identifierName(node: SyntaxNode | undefined): string | undefined {
+  return node?.type === 'Identifier' && typeof node.name === 'string' ? node.name : undefined;
+}
+
+function staticMemberName(node: SyntaxNode): string | undefined {
+  if (node.type !== 'MemberExpression') return undefined;
+  const object = calleeName(node.object);
+  const property = syntaxNode(node.property);
+  const propertyName =
+    identifierName(property) ??
+    (property?.type === 'Literal' && typeof property.value === 'string'
+      ? property.value
+      : undefined);
+  return object && propertyName ? `${object}.${propertyName}` : undefined;
+}
+
+function calleeName(expression: unknown): string | undefined {
+  const node = syntaxNode(expression);
+  return identifierName(node) ?? (node ? staticMemberName(node) : undefined);
+}
+
+function isEnforcingPermissionCall(name: string): boolean {
+  for (const enforcingCall of enforcingPermissionCalls) {
+    if (name === enforcingCall) return true;
+    if (
+      enforcingCall.startsWith('ClerkAuthService.') &&
+      new RegExp(`^__vite_ssr_import_[0-9]+__\\.${enforcingCall.replace('.', '\\.')}$$`, 'u').test(
+        name,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function staticallyUnreachable(node: SyntaxNode, parents: WeakMap<object, SyntaxNode>): boolean {
+  let current: SyntaxNode | undefined = node;
+  while (current) {
+    const parent = parents.get(current);
+    if (!parent) break;
+    const expression = syntaxNode(parent.test);
+    if (
+      parent.type === 'IfStatement' &&
+      expression?.type === 'Literal' &&
+      expression.value === false &&
+      current === parent.consequent
+    ) {
+      return true;
+    }
+    current = parent;
+  }
+  return false;
+}
+
+function normalizedCallName(name: string): string {
+  return name.replace(/^__vite_ssr_import_[0-9]+__\./u, '');
+}
+
+function analyzeHandlerSource(source: string): { callNames: string[]; permissions: Permission[] } {
+  const callNames: string[] = [];
+  const permissions: string[] = [];
+  const parsed = parseSync('route-handler.ts', `const __routeHandler = (${source});`);
+  if (parsed.errors.length > 0) throw new Error('Unable to parse captured route handler');
+  const parents = new WeakMap<object, SyntaxNode>();
+  let routeHandler: SyntaxNode | undefined;
+  const walk = (
+    value: unknown,
+    visitor: (node: SyntaxNode) => boolean | void,
+    parent?: SyntaxNode,
+    seen = new WeakSet<object>(),
+  ): void => {
+    const node = syntaxNode(value);
+    if (!node || seen.has(node)) return;
+    seen.add(node);
+    if (parent) parents.set(node, parent);
+    if (visitor(node) === false) return;
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'parent' || key === 'scope') continue;
+      if (Array.isArray(child)) {
+        for (const entry of child) walk(entry, visitor, node, seen);
+      } else {
+        walk(child, visitor, node, seen);
+      }
+    }
+  };
+  walk(parsed.program, (node) => {
+    if (
+      node.type === 'VariableDeclarator' &&
+      identifierName(syntaxNode(node.id)) === '__routeHandler'
+    ) {
+      routeHandler = syntaxNode(node.init);
+      while (
+        routeHandler &&
+        (routeHandler.type === 'ParenthesizedExpression' ||
+          routeHandler.type === 'TSAsExpression' ||
+          routeHandler.type === 'TSSatisfiesExpression')
+      ) {
+        routeHandler = syntaxNode(routeHandler.expression);
+      }
+      return false;
+    }
+    return true;
+  });
+  if (!routeHandler) return { callNames: [], permissions: [] };
+  walk(routeHandler, (node) => {
+    if (
+      node !== routeHandler &&
+      (node.type === 'FunctionDeclaration' ||
+        node.type === 'FunctionExpression' ||
+        node.type === 'ArrowFunctionExpression')
+    ) {
+      return false;
+    }
+    if (node.type === 'CallExpression' && !staticallyUnreachable(node, parents)) {
+      const name = calleeName(node.callee);
+      if (name) callNames.push(normalizedCallName(name));
+      if (name && isEnforcingPermissionCall(name)) {
+        const collect = (value: unknown): void => {
+          const argument = syntaxNode(value);
+          if (!argument) return;
+          if (
+            argument.type === 'FunctionDeclaration' ||
+            argument.type === 'FunctionExpression' ||
+            argument.type === 'ArrowFunctionExpression'
+          ) {
+            return;
+          }
+          if (
+            argument.type === 'Literal' &&
+            typeof argument.value === 'string' &&
+            knownPermissions.has(argument.value)
+          ) {
+            permissions.push(argument.value);
+          }
+          for (const child of Object.values(argument)) {
+            if (Array.isArray(child)) for (const entry of child) collect(entry);
+            else collect(child);
+          }
+        };
+        if (Array.isArray(node.arguments)) for (const argument of node.arguments) collect(argument);
+      }
+    }
+    return true;
+  });
+  return {
+    callNames: sortedUnique(callNames),
+    permissions: sortedUnique(permissions) as Permission[],
+  };
+}
+
+export function permissionsFromSource(source: string): Permission[] {
+  return analyzeHandlerSource(source).permissions;
+}
+
+export function guardEvidenceFromSource(source: string): string[] {
+  return analyzeHandlerSource(source).callNames.filter(
+    (name) => name.startsWith('ClerkAuthService.require') || delegatedAuthorizationGuards.has(name),
   );
+}
+
+function effectivePermissionEvidence(
+  sourcePermissions: readonly Permission[],
+  guardEvidence: readonly string[],
+  operationId: string | null,
+): { evidence: string[]; permissions: Permission[] } {
+  const evidence = sourcePermissions.map((permission) => `literal:${permission}`);
+  const permissions = new Set<Permission>(sourcePermissions);
+  const delegated = operationId ? delegatedPermissionContracts.get(operationId) : undefined;
+  if (delegated && guardEvidence.includes(delegated.guard)) {
+    for (const permission of delegated.permissions) {
+      permissions.add(permission);
+      evidence.push(`declared-delegated-contract:${operationId}:${delegated.guard}:${permission}`);
+    }
+  }
+  return {
+    evidence: sortedUnique(evidence),
+    permissions: sortedUnique(permissions) as Permission[],
+  };
+}
+
+export function assertDocumentedPermissionsAccountedFor(
+  route: Pick<
+    RouteAccessInventoryEntry,
+    'documentedPermissions' | 'method' | 'operationId' | 'path' | 'permissions'
+  >,
+): void {
+  const unsupported = route.documentedPermissions.filter(
+    (permission) => !route.permissions.includes(permission),
+  );
+  if (unsupported.length > 0) {
+    throw new Error(
+      `OpenAPI permission drift ${route.method} ${route.path} (${route.operationId ?? 'missing operationId'}): ${unsupported.join(', ')} lacks runtime or declared delegated evidence`,
+    );
+  }
 }
 
 function boundariesFor(
@@ -243,18 +520,48 @@ export async function buildRouteAccessInventory(): Promise<RouteAccessInventory>
       openApiSpec.paths as unknown as Record<string, Record<string, OpenApiOperation>>
     )[path]?.[route.method.toLowerCase()];
     const operationId = operation?.operationId ?? null;
-    const documentedPermissions = permissionsFromExtension(operation?.['x-required-permissions']);
+    const documentedPermissionClauses = permissionClausesFromExtension(
+      operation?.['x-required-permissions'],
+    );
+    const documentedPermissions = sortedUnique(
+      documentedPermissionClauses.flatMap((clause) => clause.permissions),
+    ) as Permission[];
     const sourcePermissions = permissionsFromSource(route.handlerSource);
-    const permissions = sortedUnique(sourcePermissions) as Permission[];
     const guardEvidence = guardEvidenceFromSource(route.handlerSource);
+    const effectivePermission = effectivePermissionEvidence(
+      sourcePermissions,
+      guardEvidence,
+      operationId,
+    );
+    const permissions = effectivePermission.permissions;
+    const delegatedContract = operationId
+      ? delegatedPermissionContracts.get(operationId)
+      : undefined;
+    const hasDelegatedContract = Boolean(
+      delegatedContract && guardEvidence.includes(delegatedContract.guard),
+    );
     const permissionPolicy =
       route.access !== 'authenticated'
         ? 'not-applicable'
         : operationId !== null && credentialOnlyOperations.has(operationId)
           ? 'credential-only'
-          : permissions.length > 0
+          : sourcePermissions.length > 0
             ? 'explicit'
             : 'delegated';
+    const permissionDocumentationStatus =
+      route.access !== 'authenticated'
+        ? 'not-applicable'
+        : permissionPolicy === 'credential-only'
+          ? 'credential-only'
+          : documentedPermissions.length > 0
+            ? hasDelegatedContract
+              ? 'delegated-contract'
+              : sourcePermissions.some((permission) => !documentedPermissions.includes(permission))
+                ? 'conditional-unverified'
+                : 'verified'
+            : permissionPolicy === 'delegated'
+              ? 'delegated-undocumented'
+              : 'runtime-undocumented';
 
     routes.push({
       access: route.access,
@@ -265,11 +572,14 @@ export async function buildRouteAccessInventory(): Promise<RouteAccessInventory>
           : (operation?.security ?? []).flatMap((requirement) => Object.keys(requirement)),
       ),
       documentedPermissions,
+      documentedPermissionClauses,
       guardEvidence,
       method: route.method,
       negativeAuthorizationEvidence: [],
       operationId,
       path,
+      permissionEvidence: effectivePermission.evidence,
+      permissionDocumentationStatus,
       permissions,
       permissionPolicy,
     });
@@ -280,8 +590,9 @@ export async function buildRouteAccessInventory(): Promise<RouteAccessInventory>
   );
   const evidenceByRoute = negativeAuthorizationEvidenceForRoutes(routes);
   for (const route of routes) {
+    assertDocumentedPermissionsAccountedFor(route);
     route.negativeAuthorizationEvidence =
       evidenceByRoute.get(`${route.method} ${route.path}`) ?? [];
   }
-  return { schemaVersion: 2, routes };
+  return { schemaVersion: 3, routes };
 }
