@@ -69,6 +69,16 @@ vi.mock('sonner', () => ({
 
 import WorkspacePage from './page';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 describe('WorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -277,5 +287,109 @@ describe('WorkspacePage', () => {
     expect(screen.getByLabelText('Default event description')).toHaveValue(
       'Server-normalized description',
     );
+
+    fireEvent.change(screen.getByLabelText('Timezone'), { target: { value: 'America/Chicago' } });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('makes every editable setting inert while a save is in flight', async () => {
+    const pending = deferred<Awaited<ReturnType<typeof apiMock.updateOrganization>>>();
+    apiMock.updateOrganization.mockReturnValue(pending.promise);
+
+    render(<WorkspacePage />);
+
+    const timezone = await screen.findByLabelText('Timezone');
+    fireEvent.change(timezone, { target: { value: 'Europe/Paris' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Saving workspace settings…');
+    expect(timezone).toBeDisabled();
+    expect(screen.getByLabelText('Workspace Name')).toBeDisabled();
+    expect(screen.getByLabelText('Enable box-office sales')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+    expect(timezone).toHaveValue('Europe/Paris');
+
+    pending.resolve({
+      ok: false,
+      error: { code: 'workspace_unavailable', message: 'Save failed safely' },
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Save failed safely');
+    expect(timezone).toBeEnabled();
+    expect(timezone).toHaveValue('Europe/Paris');
+  });
+
+  it('does not announce a late save completion after navigation', async () => {
+    const pending = deferred<Awaited<ReturnType<typeof apiMock.updateOrganization>>>();
+    apiMock.updateOrganization.mockReturnValue(pending.promise);
+
+    const { unmount } = render(<WorkspacePage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(apiMock.updateOrganization).toHaveBeenCalledTimes(1));
+    unmount();
+
+    pending.resolve({ ok: true, data: testState.organizationFixture });
+    await Promise.resolve();
+    expect(toastMock.success).not.toHaveBeenCalled();
+    expect(toastMock.error).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale save completion after a workspace switch and during the newer save', async () => {
+    const oldSave = deferred<Awaited<ReturnType<typeof apiMock.updateOrganization>>>();
+    const newSave = deferred<Awaited<ReturnType<typeof apiMock.updateOrganization>>>();
+    apiMock.updateOrganization
+      .mockReturnValueOnce(oldSave.promise)
+      .mockReturnValueOnce(newSave.promise);
+    const secondOrganization = {
+      ...testState.organizationFixture,
+      id: 'org_2',
+      name: 'Second workspace',
+      slug: 'second-workspace',
+      eventDefaults: { timezone: 'America/Denver' },
+    };
+
+    const { rerender } = render(<WorkspacePage />);
+    fireEvent.change(await screen.findByLabelText('Workspace Name'), {
+      target: { value: 'Old pending edit' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+
+    testState.bootstrapState.value = {
+      organizations: [testState.organizationFixture, secondOrganization],
+      organizationId: 'org_2',
+      loading: false,
+      error: null,
+    };
+    rerender(<WorkspacePage />);
+    expect(await screen.findByLabelText('Workspace Name')).toHaveValue('Second workspace');
+
+    fireEvent.change(screen.getByLabelText('Workspace Name'), {
+      target: { value: 'Second pending edit' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(apiMock.updateOrganization).toHaveBeenCalledTimes(2));
+
+    oldSave.resolve({
+      ok: true,
+      data: {
+        ...testState.organizationFixture,
+        name: 'Stale server result',
+      },
+    });
+    await Promise.resolve();
+    expect(screen.getByLabelText('Workspace Name')).toHaveValue('Second pending edit');
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+    expect(toastMock.success).not.toHaveBeenCalled();
+
+    newSave.resolve({
+      ok: true,
+      data: {
+        ...secondOrganization,
+        name: 'Second authoritative result',
+      },
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('Workspace settings saved.');
+    expect(screen.getByLabelText('Workspace Name')).toHaveValue('Second authoritative result');
+    expect(toastMock.success).toHaveBeenCalledTimes(1);
   });
 });
